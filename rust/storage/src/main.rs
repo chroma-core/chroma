@@ -59,59 +59,89 @@ async fn main() {
         }
     }
 
-    // Download the file 64 times concurrently
+    // Download the file times concurrently
     let start_time = std::time::Instant::now();
     let mut handles = vec![];
     let latencies = Arc::new(tokio::sync::Mutex::new(vec![]));
-    for i in 0..num_files {
-        let latencies = latencies.clone();
-        let client = client.clone();
-        let bucket_name = bucket_name.to_string();
-        let object_key = format!("{}/{:02}.bin", object_prefix, i);
-        handles.push(tokio::spawn(async move {
-            let req_start_time = std::time::Instant::now();
-            let result = client
-                .get_object()
-                .bucket(&bucket_name)
-                .key(&object_key)
-                .send()
-                .await;
-            match result {
-                Ok(res) => {
-                    let body = res.body.collect().await.unwrap();
-                    println!(
-                        "Downloaded file {}: {} bytes in {} ms",
-                        i,
-                        body.into_bytes().len(),
-                        req_start_time.elapsed().as_millis()
-                    );
-                    // Store the latency
-                    let mut latencies = latencies.lock().await;
-                    latencies.push(req_start_time.elapsed().as_millis());
+    let throughputs = Arc::new(tokio::sync::Mutex::new(vec![]));
+
+    // run the experiment N times, warming the connections
+    let runs = 10;
+    for _ in 0..runs {
+        for i in 0..num_files {
+            let latencies = latencies.clone();
+            let client = client.clone();
+            let bucket_name = bucket_name.to_string();
+            let object_key = format!("{}/{:02}.bin", object_prefix, i);
+            handles.push(tokio::spawn(async move {
+                let req_start_time = std::time::Instant::now();
+                let result = client
+                    .get_object()
+                    .bucket(&bucket_name)
+                    .key(&object_key)
+                    .send()
+                    .await;
+                match result {
+                    Ok(res) => {
+                        let body = res.body.collect().await.unwrap();
+                        println!(
+                            "Downloaded file {}: {} bytes in {} ms",
+                            i,
+                            body.into_bytes().len(),
+                            req_start_time.elapsed().as_millis()
+                        );
+                        // Store the latency
+                        let mut latencies = latencies.lock().await;
+                        latencies.push(req_start_time.elapsed().as_millis());
+                    }
+                    Err(e) => eprintln!("Error downloading file: {}", e),
                 }
-                Err(e) => eprintln!("Error downloading file: {}", e),
-            }
-        }));
+            }));
+        }
+        println!(
+            "Took {} ms to download {} files of size {} MB each. Total throughput: {} MB/s",
+            start_time.elapsed().as_millis(),
+            num_files,
+            mb_size,
+            (mb_size * num_files) as f64 / (start_time.elapsed().as_secs_f64())
+        );
+        throughputs
+            .lock()
+            .await
+            .push((mb_size * num_files) as f64 / (start_time.elapsed().as_secs_f64()));
     }
+
+    // print the throughput
+    let throughput_guard = throughputs.lock().await;
+    let mut sorted_throughputs = throughput_guard.clone();
+    sorted_throughputs.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    let p50 = sorted_throughputs[sorted_throughputs.len() / 2];
+    let p90 = sorted_throughputs[(sorted_throughputs.len() * 9) / 10];
+    let p95 = sorted_throughputs[(sorted_throughputs.len() * 95) / 100];
+    let p99 = sorted_throughputs[(sorted_throughputs.len() * 99) / 100];
+    println!("========== Throughput =========");
+    println!("P50: {} MB/s", p50);
+    println!("P90: {} MB/s", p90);
+    println!("P95: {} MB/s", p95);
+    println!("P99: {} MB/s", p99);
+    println!(
+        "Average: {} MB/s",
+        sorted_throughputs.iter().sum::<f64>() / sorted_throughputs.len() as f64
+    );
+
     // await for all the handles to finish
     for handle in handles {
         if let Err(e) = handle.await {
             eprintln!("Error joining thread: {}", e);
         }
     }
-    println!(
-        "Took {} ms to download {} files of size {} MB each. Total throughput: {} MB/s",
-        start_time.elapsed().as_millis(),
-        num_files,
-        mb_size,
-        (mb_size * num_files) as f64 / (start_time.elapsed().as_secs_f64())
-    );
     let sorted_latencies = {
         let latency_guard = latencies.lock().await;
         let mut sorted_latencies = latency_guard.clone();
         sorted_latencies.sort();
         sorted_latencies
     };
+    println!("========== Latency =========");
     let p50 = sorted_latencies[sorted_latencies.len() / 2];
     let p90 = sorted_latencies[(sorted_latencies.len() * 9) / 10];
     let p95 = sorted_latencies[(sorted_latencies.len() * 95) / 100];
