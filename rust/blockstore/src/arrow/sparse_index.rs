@@ -415,9 +415,9 @@ impl SparseIndexReader {
                             | Bound::Excluded(given_end_prefix)
                                 if &end_prefix < given_end_prefix =>
                             {
-                                Bound::Excluded(end_prefix)
+                                Bound::Included(end_prefix)
                             }
-                            Bound::Unbounded => Bound::Excluded(end_prefix),
+                            Bound::Unbounded => Bound::Included(end_prefix),
                             given_bound => given_bound.cloned(),
                         }
                     }
