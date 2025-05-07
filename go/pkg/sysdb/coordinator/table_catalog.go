@@ -1001,6 +1001,9 @@ func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.Uniq
 	if err != nil {
 		return 0, err
 	}
+	if sourceCollectionDb == nil {
+		return 0, common.ErrCollectionNotFound
+	}
 
 	if len(sourceCollectionDb.RootCollectionId) > 0 {
 		rootCollectionID, err = types.Parse(sourceCollectionDb.RootCollectionId)

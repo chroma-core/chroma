@@ -405,6 +405,9 @@ func (s *Server) CountForks(ctx context.Context, req *coordinatorpb.CountForksRe
 
 	count, err := s.coordinator.CountForks(ctx, parsedSourceCollectionID)
 	if err != nil {
+		if err == common.ErrCollectionNotFound {
+			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Count = count
