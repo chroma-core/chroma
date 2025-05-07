@@ -109,6 +109,7 @@ pub struct InternalSpannConfiguration {
     #[serde(default = "default_initial_lambda")]
     pub initial_lambda: f32,
     #[serde(default = "default_reassign_neighbor_count")]
+    #[validate(range(max = 64))]
     pub reassign_neighbor_count: u32,
     #[serde(default = "default_merge_threshold")]
     #[validate(range(min = 50, max = 100))]
@@ -125,7 +126,7 @@ pub struct InternalSpannConfiguration {
     #[validate(range(max = 200))]
     pub ef_search: usize,
     #[serde(default = "default_m_spann")]
-    #[validate(range(max = 100))]
+    #[validate(range(max = 64))]
     pub max_neighbors: usize,
 }
 
