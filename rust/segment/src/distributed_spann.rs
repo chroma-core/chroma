@@ -945,7 +945,7 @@ mod test {
             .get_range(.., ..)
             .await
             .expect("Error getting all data from reader");
-        pl.sort_by(|a, b| a.0.cmp(&b.0));
+        pl.sort_by(|a, b| a.0.cmp(b.0));
         assert_eq!(pl.len(), 1);
         assert_eq!(pl[0].2.doc_offset_ids, &[1, 2]);
         assert_eq!(pl[0].2.doc_versions, &[1, 1]);

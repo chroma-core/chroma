@@ -44,7 +44,7 @@ fn bench_regex(criterion: &mut Criterion) {
             .map(|pattern_str| {
                 (
                     *pattern_str,
-                    Regex::new(*pattern_str).expect("Regex pattern should be valid"),
+                    Regex::new(pattern_str).expect("Regex pattern should be valid"),
                 )
             })
             .collect::<Vec<_>>();
@@ -120,7 +120,7 @@ fn bench_regex(criterion: &mut Criterion) {
                 results.compact_offset_ids,
                 SignedRoaringBitmap::Include(
                     expected
-                        .get(&(pattern.to_string()))
+                        .get(*pattern)
                         .cloned()
                         .unwrap_or((0..doc_count as u32).collect())
                 )
