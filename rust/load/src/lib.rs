@@ -1026,8 +1026,16 @@ pub struct LoadHarness {
 
 impl LoadHarness {
     /// The status of the load harness.
+    /// This returns the list of running workloads with secrets redacted.
     pub fn status(&self) -> Vec<RunningWorkload> {
-        self.running.clone()
+        self.running
+            .iter()
+            .map(|w| {
+                let mut w = w.clone();
+                w.connection.api_key = "REDACTED".to_string();
+                w
+            })
+            .collect()
     }
 
     /// Start a workload on the load harness.
