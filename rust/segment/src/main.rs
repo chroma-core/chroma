@@ -138,27 +138,34 @@ async fn main() {
         .rng_query(&random_vector)
         .await
         .expect("Query to succeed");
-
-    let mut fetch_pl_futures = Vec::new();
     let (ids, distances, _) = center_result;
 
-    for id in ids {
-        let fetch_pl_future = reader.fetch_posting_list(id as u32);
-        fetch_pl_futures.push(fetch_pl_future);
-    }
+    let runs = 10;
+    for i in 0..runs {
+        let mut fetch_pl_futures = Vec::new();
 
-    // Execute all futures in parallel
-    println!("Fetching posting lists in parallel");
-    let time_start = std::time::Instant::now();
-    let fetch_pl_results = futures::future::join_all(fetch_pl_futures).await;
-    println!(
-        "Time taken to fetch posting lists: {:?}",
-        time_start.elapsed()
-    );
-    // ensure there are no errors
-    for result in fetch_pl_results {
-        if let Err(err) = result {
-            println!("Error fetching posting list: {:?}", err);
+        for id in ids.clone() {
+            let fetch_pl_future = reader.fetch_posting_list(id as u32);
+            fetch_pl_futures.push(fetch_pl_future);
+        }
+
+        // Execute all futures in parallel
+        println!(
+            "Fetching {} posting lists in parallel, run {}",
+            ids.len(),
+            i
+        );
+        let time_start = std::time::Instant::now();
+        let fetch_pl_results = futures::future::join_all(fetch_pl_futures).await;
+        println!(
+            "Time taken to fetch posting lists: {:?}",
+            time_start.elapsed()
+        );
+        // ensure there are no errors
+        for result in fetch_pl_results {
+            if let Err(err) = result {
+                println!("Error fetching posting list: {:?}", err);
+            }
         }
     }
 }
