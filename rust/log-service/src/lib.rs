@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
+use chroma_cache::CacheConfig;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_storage::config::StorageConfig;
@@ -221,6 +222,19 @@ async fn get_log_from_handle<'a>(
         log: opened,
         _phantom: std::marker::PhantomData,
     })
+}
+
+////////////////////////////////////////// CachedFragment //////////////////////////////////////////
+
+#[derive(Clone, Debug, Default)]
+pub struct CachedParquetFragment {
+    bytes: Vec<u8>,
+}
+
+impl chroma_cache::Weighted for CachedParquetFragment {
+    fn weight(&self) -> usize {
+        self.bytes.len()
+    }
 }
 
 ////////////////////////////////////////////// Rollup //////////////////////////////////////////////
@@ -593,6 +607,7 @@ pub struct LogServer {
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Arc<LogWriter>,
     compacting: tokio::sync::Mutex<()>,
+    cache: Option<Box<dyn chroma_cache::Cache<String, CachedParquetFragment>>>,
 }
 
 #[async_trait::async_trait]
@@ -736,7 +751,22 @@ impl LogService for LogServer {
             };
             let futures = fragments
                 .iter()
-                .map(|fragment| async { log_reader.fetch(fragment).await })
+                .map(|fragment| async {
+                    let cache_key = format!("{collection_id}::{}", fragment.path);
+                    if let Some(cache) = self.cache.as_ref() {
+                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
+                            return Ok(Arc::new(answer.bytes));
+                        }
+                        let answer = log_reader.fetch(fragment).await?;
+                        let cache_value = CachedParquetFragment {
+                            bytes: Clone::clone(&*answer),
+                        };
+                        cache.insert(cache_key, cache_value).await;
+                        Ok(answer)
+                    } else {
+                        log_reader.fetch(fragment).await
+                    }
+                })
                 .collect::<Vec<_>>();
             let parquets = futures::future::try_join_all(futures)
                 .await
@@ -1349,6 +1379,8 @@ pub struct LogServerConfig {
     pub writer: LogWriterOptions,
     #[serde(default)]
     pub reader: LogReaderOptions,
+    #[serde(default)]
+    pub cache: Option<CacheConfig>,
     #[serde(default = "LogServerConfig::default_record_count_threshold")]
     pub record_count_threshold: u64,
     #[serde(default = "LogServerConfig::default_reinsert_threshold")]
@@ -1382,6 +1414,7 @@ impl Default for LogServerConfig {
             storage: StorageConfig::default(),
             writer: LogWriterOptions::default(),
             reader: LogReaderOptions::default(),
+            cache: None,
             record_count_threshold: Self::default_record_count_threshold(),
             reinsert_threshold: Self::default_reinsert_threshold(),
             timeout_us: Self::default_timeout_us(),
@@ -1395,6 +1428,17 @@ impl Configurable<LogServerConfig> for LogServer {
         config: &LogServerConfig,
         registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let cache = if let Some(cache_config) = &config.cache {
+            match chroma_cache::from_config::<String, CachedParquetFragment>(cache_config).await {
+                Ok(cache) => Some(cache),
+                Err(err) => {
+                    tracing::error!("cache not configured: {err}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let storage = Arc::new(storage);
         let dirty_log = LogWriter::open_or_initialize(
@@ -1414,6 +1458,7 @@ impl Configurable<LogServerConfig> for LogServer {
             storage,
             dirty_log,
             compacting,
+            cache,
         })
     }
 }

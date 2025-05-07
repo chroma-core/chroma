@@ -33,6 +33,7 @@ serde_json = { workspace = true }
 bytemuck = { workspace = true }
 futures = { workspace = true }
 
+chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-error = { workspace = true, features = ["sqlx"] }
 chroma-log = { workspace = true }

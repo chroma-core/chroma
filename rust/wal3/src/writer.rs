@@ -152,29 +152,36 @@ impl LogWriter {
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
         let inner = { self.inner.lock().unwrap().clone() };
-        if let Some(ref epoch_writer) = inner {
+        if let Some(epoch_writer) = inner {
             let res = epoch_writer.writer.append(messages.clone()).await;
             if matches!(res, Err(Error::LogContention)) {
-                let writer = OnceLogWriter::open(
-                    epoch_writer.writer.options.clone(),
-                    epoch_writer.writer.storage.clone(),
-                    epoch_writer.writer.prefix.clone(),
-                    self.writer.clone(),
-                    Arc::clone(&self.mark_dirty),
-                )
-                .await?;
-                // SAFETY(rescrv):  Mutex poisoning.
-                let mut inner = self.inner.lock().unwrap();
-                if let Some(second) = inner.as_mut() {
-                    if second.epoch == epoch_writer.epoch {
-                        second.epoch += 1;
-                        second.writer.shutdown();
-                        second.writer = writer;
+                loop {
+                    let writer = OnceLogWriter::open(
+                        epoch_writer.writer.options.clone(),
+                        epoch_writer.writer.storage.clone(),
+                        epoch_writer.writer.prefix.clone(),
+                        self.writer.clone(),
+                        Arc::clone(&self.mark_dirty),
+                    )
+                    .await;
+                    let writer = match writer {
+                        Ok(writer) => writer,
+                        Err(Error::LogContention) => continue,
+                        Err(err) => return Err(err),
+                    };
+                    // SAFETY(rescrv):  Mutex poisoning.
+                    let mut inner = self.inner.lock().unwrap();
+                    if let Some(second) = inner.as_mut() {
+                        if second.epoch == epoch_writer.epoch {
+                            second.epoch += 1;
+                            second.writer.shutdown();
+                            second.writer = writer;
+                        }
+                        return Err(Error::LogContention);
+                    } else {
+                        // This should never happen, so just be polite with an error.
+                        return Err(Error::LogClosed);
                     }
-                    Err(Error::LogContention)
-                } else {
-                    // This should never happen, so just be polite with an error.
-                    Err(Error::LogClosed)
                 }
             } else {
                 res
@@ -257,7 +264,7 @@ impl OnceLogWriter {
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         let batch_manager = BatchManager::new(options.throttle_fragment).ok_or(Error::Internal)?;
-        let mut manifest_manager = ManifestManager::new(
+        let manifest_manager = ManifestManager::new(
             options.throttle_manifest,
             options.snapshot_manifest,
             Arc::clone(&storage),

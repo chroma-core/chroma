@@ -1677,6 +1677,7 @@ dependencies = [
  "async-trait",
  "bytemuck",
  "bytes",
+ "chroma-cache",
  "chroma-config",
  "chroma-error",
  "chroma-log",
