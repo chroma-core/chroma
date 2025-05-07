@@ -21,7 +21,6 @@ spec:
     - name: server-port
       port: 50051
       targetPort: 50051
-  clusterIP: None
   selector:
     app: rust-log-service
   type: ClusterIP
