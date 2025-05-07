@@ -994,7 +994,6 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 }
 
 func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.UniqueID) (uint64, error) {
-	var rootCollection *model.Collection
 	var rootCollectionID types.UniqueID
 
 	sourceCollectionIDStr := sourceCollectionID.String()
@@ -1020,7 +1019,7 @@ func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.Uniq
 	if len(collections) == 0 {
 		return 0, common.ErrCollectionNotFound
 	}
-	rootCollection = collections[0]
+	rootCollection := collections[0]
 
 	lineageFile, err := tc.getLineageFile(ctx, rootCollection)
 	if err != nil {
