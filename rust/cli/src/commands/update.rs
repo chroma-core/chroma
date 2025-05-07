@@ -2,8 +2,8 @@ use crate::utils::CliError;
 use colored::Colorize;
 use regex::Regex;
 use semver::Version;
-use std::error::Error;
 use serde::Deserialize;
+use std::error::Error;
 use thiserror::Error;
 
 const GITHUB_RELEASES_URL: &str = "https://api.github.com/repos/chroma-core/chroma/releases";
@@ -34,7 +34,7 @@ async fn version_check(current_version: Version) -> Result<(), Box<dyn Error>> {
         .await?
         .json::<Vec<Release>>()
         .await?;
-    
+
     let cli_version_pattern = Regex::new(r"^cli-(\d+\.\d+\.\d+)$")?;
     let mut cli_versions = Vec::new();
 
