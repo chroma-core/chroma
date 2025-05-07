@@ -1,4 +1,3 @@
-use super::types::ArrowReadableKey;
 use crate::key::CompositeKey;
 use chroma_error::ChromaError;
 use parking_lot::Mutex;
