@@ -28,11 +28,16 @@ async fn main() {
         .await
         .expect("Failed to create sysdb client");
 
-    let collection_uuid = uuid::uuid!("ca3dc43f-24d7-4e22-a2bf-0cc052611519");
+    let collection_uuid = uuid::uuid!("ce640ae9-5f25-4cde-b0db-c1ea362b1fc9");
     let collection_with_segment = sysdb_client
         .get_collection_with_segments(CollectionUuid(collection_uuid))
         .await
         .unwrap();
+
+    println!(
+        "Collection: {:?}, Segment: {:?}",
+        collection_with_segment.collection, collection_with_segment.vector_segment
+    );
 
     // Storage
     let storage_config = StorageConfig::AdmissionControlledS3(AdmissionControlledS3StorageConfig {
