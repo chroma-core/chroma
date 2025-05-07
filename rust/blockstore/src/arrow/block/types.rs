@@ -344,7 +344,8 @@ impl Block {
             if !prefix_range.contains(&cursor_prefix) {
                 break;
             }
-            let next_cursor_index = self.find_smallest_index_of_next_prefix::<K>(cursor_prefix);
+            let next_cursor_prefix_index =
+                self.find_smallest_index_of_next_prefix::<K>(cursor_prefix);
 
             let cursor_prefix_range_start_index = match key_range.start_bound() {
                 Bound::Included(start_key) => {
@@ -365,7 +366,7 @@ impl Block {
                 Bound::Excluded(end_key) => {
                     self.binary_search_prefix_key::<K>(cursor_prefix, end_key)
                 }
-                Bound::Unbounded => next_cursor_index,
+                Bound::Unbounded => next_cursor_prefix_index,
             };
 
             let cursor_prefix_range =
@@ -374,7 +375,7 @@ impl Block {
                 index_ranges.push(cursor_prefix_range);
             }
 
-            cursor_prefix_index = next_cursor_index;
+            cursor_prefix_index = next_cursor_prefix_index;
         }
 
         index_ranges.into_iter().flatten().map(|index| {

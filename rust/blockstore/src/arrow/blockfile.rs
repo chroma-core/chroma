@@ -1,6 +1,7 @@
 use super::migrations::{apply_migrations_to_blockfile, MigrationError};
 use super::provider::{GetError, RootManager};
 use super::root::{RootReader, RootWriter, Version};
+use super::sparse_index::SparseIndexDelimiter;
 use super::{block::delta::UnorderedBlockDelta, provider::BlockManager};
 use super::{
     block::Block,
@@ -643,8 +644,22 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<usize, Box<dyn ChromaError>> {
         let mut rank = 0;
 
-        // This should be sorted by offset id ranges
-        let block_ids = self.root.sparse_index.get_block_ids_range(..=prefix);
+        let mut block_ids = Vec::new();
+
+        for (delim, meta) in &self.root.sparse_index.data.forward {
+            if let SparseIndexDelimiter::Key(CompositeKey {
+                prefix: delim_prefix,
+                key: delim_key,
+            }) = delim
+            {
+                if delim_prefix.as_str() > prefix
+                    || (delim_prefix == prefix && delim_key > &key.clone().into())
+                {
+                    break;
+                }
+            }
+            block_ids.push(meta.id);
+        }
 
         // The block that may contain the prefix-key pair
         if let Some(last_id) = block_ids.last() {
