@@ -350,7 +350,7 @@ impl fmt::Display for QuotaExceededError {
             "'{}' exceeded quota limit for action '{}': current usage of {} exceeds limit of {}",
             self.usage_type, self.action, self.usage, self.limit
         )?;
-        if let Some(url) = &self.remediation_url {
+        if let Some(url) = self.remediation_url.as_ref().filter(|s| !s.is_empty()) {
             write!(f, ". Request a quota increase: {}", url)?;
         }
         Ok(())
