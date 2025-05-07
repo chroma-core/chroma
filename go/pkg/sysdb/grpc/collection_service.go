@@ -399,7 +399,7 @@ func (s *Server) CountForks(ctx context.Context, req *coordinatorpb.CountForksRe
 	sourceCollectionID := req.SourceCollectionId
 	parsedSourceCollectionID, err := types.ToUniqueID(&sourceCollectionID)
 	if err != nil {
-		log.Error("ForkCollection failed. Failed to parse source collection id", zap.Error(err), zap.String("collection_id", sourceCollectionID))
+		log.Error("CountForks failed. Failed to parse source collection id", zap.Error(err), zap.String("collection_id", sourceCollectionID))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 

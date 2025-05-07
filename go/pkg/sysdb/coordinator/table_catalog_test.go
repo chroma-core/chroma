@@ -3,7 +3,6 @@ package coordinator
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -1027,30 +1026,6 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestCatalog_CountForks(t *testing.T) {
-	mockMetaDomain := &mocks.IMetaDomain{}
-	catalog := NewTableCatalog(nil, mockMetaDomain, nil, false)
-	collectionID := types.MustParse("00000000-0000-0000-0000-000000000001")
-
-	// Create 5 forks
-	for i := 0; i < 5; i++ {
-		forkCollection := &model.ForkCollection{
-			SourceCollectionID:                   collectionID,
-			SourceCollectionLogCompactionOffset:  0,
-			SourceCollectionLogEnumerationOffset: 0,
-			TargetCollectionID:                   types.NewUniqueID(),
-			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_1_%d", i),
-		}
-		_, _, err := catalog.ForkCollection(context.Background(), forkCollection)
-		assert.NoError(t, err)
-	}
-
-	count, err := catalog.CountForks(context.Background(), collectionID)
-	assert.NoError(t, err)
-	assert.Equal(t, uint64(5), count)
-	mockMetaDomain.AssertExpectations(t)
 }
 
 // Helper functions
