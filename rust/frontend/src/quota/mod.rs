@@ -340,6 +340,7 @@ pub struct QuotaExceededError {
     pub action: Action,
     pub usage: usize,
     pub limit: usize,
+    pub remediation_url: Option<String>,
 }
 
 impl fmt::Display for QuotaExceededError {
@@ -348,7 +349,11 @@ impl fmt::Display for QuotaExceededError {
             f,
             "'{}' exceeded quota limit for action '{}': current usage of {} exceeds limit of {}",
             self.usage_type, self.action, self.usage, self.limit
-        )
+        )?;
+        if let Some(url) = &self.remediation_url {
+            write!(f, ". Request a quota increase: {}", url)?;
+        }
+        Ok(())
     }
 }
 
