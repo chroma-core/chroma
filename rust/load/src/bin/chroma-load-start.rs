@@ -24,8 +24,6 @@ struct Args {
     #[arg(long)]
     database: String,
     #[arg(long)]
-    api_key: String,
-    #[arg(long)]
     constant_throughput: Option<f64>,
     #[arg(long)]
     sinusoid_throughput: Option<String>,
@@ -90,6 +88,10 @@ impl Args {
 #[tokio::main]
 async fn main() {
     let args = Args::parse();
+
+    // Read API key from environment variable.
+    let api_key = std::env::var("CHROMA_API_KEY").expect("CHROMA_API_KEY is not set");
+
     let client = reqwest::Client::new();
     let throughput = args.throughput();
     let mut workload = Workload::ByName(args.workload);
@@ -108,7 +110,7 @@ async fn main() {
         data_set: args.data_set,
         connection: Connection {
             url: args.url,
-            api_key: args.api_key,
+            api_key,
             database: args.database,
         },
         throughput,
