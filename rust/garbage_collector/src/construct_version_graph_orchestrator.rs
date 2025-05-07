@@ -177,7 +177,7 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        tracing::info!(
+        tracing::debug!(
             path = %self.version_file_path,
             "Creating initial fetch version file task"
         );

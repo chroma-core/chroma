@@ -3341,6 +3341,7 @@ dependencies = [
  "tokio-test",
  "tonic",
  "tracing",
+ "tracing-subscriber",
  "tracing-test",
  "uuid",
 ]
