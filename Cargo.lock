@@ -1588,6 +1588,7 @@ dependencies = [
  "hnswlib",
  "indicatif",
  "itertools 0.13.0",
+ "opentelemetry",
  "parking_lot",
  "proptest",
  "rand 0.8.5",

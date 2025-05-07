@@ -12,6 +12,7 @@ use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SpannPostingList;
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
+use opentelemetry::{global, KeyValue};
 use rand::seq::SliceRandom;
 use thiserror::Error;
 use uuid::Uuid;
@@ -167,6 +168,12 @@ impl Configurable<RandomSamplePolicyConfig> for RandomSamplePolicy {
     }
 }
 
+#[derive(Clone, Debug)]
+struct SpannIndexWriterMetrics {
+    num_pl_modified: opentelemetry::metrics::Counter<u64>,
+    num_reassigns: opentelemetry::metrics::Histogram<>
+}
+
 #[derive(Clone)]
 // Note: Fields of this struct are public for testing.
 pub struct SpannIndexWriter {
@@ -187,6 +194,7 @@ pub struct SpannIndexWriter {
     pub params: InternalSpannConfiguration,
     pub gc_context: GarbageCollectionContext,
     pub collection_id: CollectionUuid,
+    metrics: SpannIndexWriterMetrics,
 }
 
 #[derive(Error, Debug)]
@@ -303,6 +311,8 @@ impl SpannIndexWriter {
         gc_context: GarbageCollectionContext,
         collection_id: CollectionUuid,
     ) -> Self {
+        let meter = global::meter("chroma");
+        let num_pl_modified = meter.u64_counter("num_pl_modified").build();
         SpannIndexWriter {
             hnsw_index,
             cleaned_up_hnsw_index: None,
@@ -315,6 +325,7 @@ impl SpannIndexWriter {
             params,
             gc_context,
             collection_id,
+            metrics: SpannIndexWriterMetrics { num_pl_modified },
         }
     }
 
@@ -979,6 +990,10 @@ impl SpannIndexWriter {
                         tracing::error!("Error setting posting list for head {}: {}", head_id, e);
                         SpannIndexWriterError::PostingListSetError(e)
                     })?;
+                self.metrics.num_pl_modified.add(
+                    1,
+                    &[KeyValue::new("blockfile_id", write_guard.id().to_string())],
+                );
 
                 return Ok(());
             }
@@ -1043,6 +1058,10 @@ impl SpannIndexWriter {
                         tracing::error!("Error setting posting list for head {}: {}", head_id, e);
                         SpannIndexWriterError::PostingListSetError(e)
                     })?;
+                self.metrics.num_pl_modified.add(
+                    1,
+                    &[KeyValue::new("blockfile_id", write_guard.id().to_string())],
+                );
 
                 return Ok(());
             } else {
@@ -1102,6 +1121,10 @@ impl SpannIndexWriter {
                                 );
                                 SpannIndexWriterError::PostingListSetError(e)
                             })?;
+                        self.metrics.num_pl_modified.add(
+                            1,
+                            &[KeyValue::new("blockfile_id", write_guard.id().to_string())],
+                        );
                         new_head_ids[k] = head_id as i32;
                         new_head_embeddings[k] = Some(&head_embedding);
                     } else {
@@ -1130,6 +1153,10 @@ impl SpannIndexWriter {
                                 );
                                 SpannIndexWriterError::PostingListSetError(e)
                             })?;
+                        self.metrics.num_pl_modified.add(
+                            1,
+                            &[KeyValue::new("blockfile_id", write_guard.id().to_string())],
+                        );
                         new_head_ids[k] = next_id as i32;
                         new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
@@ -1234,6 +1261,10 @@ impl SpannIndexWriter {
                         tracing::error!("Error setting posting list for head {}: {}", next_id, e);
                         SpannIndexWriterError::PostingListSetError(e)
                     })?;
+                self.metrics.num_pl_modified.add(
+                    1,
+                    &[KeyValue::new("blockfile_id", write_guard.id().to_string())],
+                );
             }
             // Next add to hnsw.
             {
@@ -1471,6 +1502,10 @@ impl SpannIndexWriter {
                         tracing::error!("Error setting posting list for head {}: {}", head_id, e);
                         SpannIndexWriterError::PostingListSetError(e)
                     })?;
+                self.metrics.num_pl_modified.add(
+                    1,
+                    &[KeyValue::new("blockfile_id", pl_guard.id().to_string())],
+                );
 
                 return Ok(());
             }
@@ -1553,6 +1588,10 @@ impl SpannIndexWriter {
                             );
                             SpannIndexWriterError::PostingListSetError(e)
                         })?;
+                    self.metrics.num_pl_modified.add(
+                        1,
+                        &[KeyValue::new("blockfile_id", pl_guard.id().to_string())],
+                    );
                     // Delete from hnsw.
                     let hnsw_write_guard = self.hnsw_index.inner.write();
                     hnsw_write_guard.delete(head_id).map_err(|e| {
@@ -1571,6 +1610,10 @@ impl SpannIndexWriter {
                             );
                             SpannIndexWriterError::PostingListSetError(e)
                         })?;
+                    self.metrics.num_pl_modified.add(
+                        1,
+                        &[KeyValue::new("blockfile_id", pl_guard.id().to_string())],
+                    );
                     // Delete from hnsw.
                     let hnsw_write_guard = self.hnsw_index.inner.write();
                     hnsw_write_guard.delete(nearest_head_id).map_err(|e| {
