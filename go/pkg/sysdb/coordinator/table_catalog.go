@@ -1027,6 +1027,9 @@ func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.Uniq
 		return 0, err
 	}
 
+	if lineageFile == nil || lineageFile.Dependencies == nil {
+		return 0, nil
+	}
 	return uint64(len(lineageFile.Dependencies)), nil
 }
 

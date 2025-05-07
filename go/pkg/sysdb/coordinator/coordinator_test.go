@@ -1574,7 +1574,8 @@ func (suite *APIsTestSuite) TestCountForks() {
 			TargetCollectionID:                   types.NewUniqueID(),
 			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_source%d", i),
 		}
-		forkedCollection, _, _ := suite.coordinator.ForkCollection(ctx, forkCollection)
+		forkedCollection, _, err := suite.coordinator.ForkCollection(ctx, forkCollection)
+		suite.NoError(err)
 		forkedCollectionId = forkedCollection.ID
 	}
 
@@ -1587,7 +1588,8 @@ func (suite *APIsTestSuite) TestCountForks() {
 			TargetCollectionID:                   types.NewUniqueID(),
 			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_forked%d", i),
 		}
-		_, _, _ = suite.coordinator.ForkCollection(ctx, forkCollection)
+		_, _, err = suite.coordinator.ForkCollection(ctx, forkCollection)
+		suite.NoError(err)
 	}
 
 	count, err := suite.coordinator.CountForks(ctx, sourceCreateCollection.ID)
