@@ -1212,13 +1212,6 @@ impl DataSet for VerifyingDataSet {
             }
         };
 
-        event!(
-            Level::INFO,
-            "Upserting {} keys, new cardinality: {}",
-            uq.batch_size,
-            key_start_index + uq.batch_size
-        );
-
         for offset in 0..uq.batch_size {
             let key = uq.key.select_from_reference(self, offset);
             if !keys.contains(&key) {
