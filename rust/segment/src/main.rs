@@ -112,7 +112,7 @@ async fn main() {
     .expect("Failed to create Spann provider");
 
     // Read
-    spann_provider
+    let reader = spann_provider
         .read(
             &collection_with_segment.collection,
             &collection_with_segment.vector_segment,
@@ -120,4 +120,42 @@ async fn main() {
         )
         .await
         .expect("Failed to read segment");
+
+    // TODO: use real data for a realistic query endpoint
+    let dimension = collection_with_segment
+        .collection
+        .dimension
+        .expect("Dimension should exist");
+    let mut random_vector = vec![0.0; dimension as usize];
+    for i in 0..dimension {
+        random_vector[i as usize] = rand::random::<f32>();
+    }
+
+    // Search
+    let center_result = reader
+        .rng_query(&random_vector)
+        .await
+        .expect("Query to succeed");
+
+    let fetch_pl_futures = Vec::new();
+    let (ids, distances, _) = center_result;
+
+    for id in ids {
+        let fetch_pl_future = reader.fetch_posting_list(id);
+        fetch_pl_futures.push(fetch_pl_future);
+    }
+
+    // Execute all futures in parallel
+    let time_start = std::time::Instant::now();
+    let fetch_pl_results = futures::future::join_all(fetch_pl_futures).await;
+    println!(
+        "Time taken to fetch posting lists: {:?}",
+        time_start.elapsed()
+    );
+    // ensure there are no errors
+    for result in fetch_pl_results {
+        if let Err(err) = result {
+            println!("Error fetching posting list: {:?}", err);
+        }
+    }
 }
