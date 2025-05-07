@@ -137,11 +137,11 @@ async fn main() {
         .await
         .expect("Query to succeed");
 
-    let fetch_pl_futures = Vec::new();
+    let mut fetch_pl_futures = Vec::new();
     let (ids, distances, _) = center_result;
 
     for id in ids {
-        let fetch_pl_future = reader.fetch_posting_list(id);
+        let fetch_pl_future = reader.fetch_posting_list(id as u32);
         fetch_pl_futures.push(fetch_pl_future);
     }
 
