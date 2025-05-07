@@ -1261,6 +1261,12 @@ impl DataSet for VerifyingDataSet {
                 return Err(Box::new(Error::InvalidRequest("No documents".into())));
             }
 
+            let max_retries = 10;
+            let base_delay = std::time::Duration::from_millis(10);
+            let max_delay = std::time::Duration::from_secs(10);
+            let mut retry_count = 0;
+            let mut delay = base_delay;
+
             loop {
                 let entries = CollectionEntries {
                     ids: keys.clone(),
@@ -1271,12 +1277,23 @@ impl DataSet for VerifyingDataSet {
                 let result = collection.upsert(entries, None).await;
                 if let Err(err) = result {
                     if format!("{err:?}").contains("429") {
+                        if retry_count >= max_retries {
+                            return Err(Box::new(Error::InvalidRequest(format!(
+                                "UPSERT for {} failed after {} retries: RATE LIMITED {err:?}",
+                                key_start_index, max_retries
+                            ))));
+                        }
+
                         tracing::warn!(
-                            "UPSERT for {} failed: RATE LIMITED {err:?}",
-                            key_start_index
+                            "UPSERT for {} failed: RATE LIMITED {err:?}, retry {}/{}, sleeping for {:?}",
+                            key_start_index, retry_count + 1, max_retries, delay
                         );
-                        // sleep for 0.01 seconds, retry
-                        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+                        tokio::time::sleep(delay).await;
+
+                        // Exponential backoff with max delay
+                        delay = std::cmp::min(delay * 2, max_delay);
+                        retry_count += 1;
                         continue;
                     } else {
                         return Err(Box::new(Error::InvalidRequest(format!(
