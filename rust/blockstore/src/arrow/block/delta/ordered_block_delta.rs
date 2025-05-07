@@ -202,7 +202,7 @@ impl OrderedBlockDelta {
     /// # Arguments
     /// - max_block_size_bytes: the maximum size of a block in bytes.
     /// # Returns
-    /// A tuple containing the the key of the split point and the new block delta.
+    /// A tuple containing the key of the split point and the new block delta.
     /// The new block deltas contains all the key value pairs after, but not including the
     /// split point.
     pub(crate) fn split<K: ArrowWriteableKey, V: ArrowWriteableValue>(
