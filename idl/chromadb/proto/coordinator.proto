@@ -229,6 +229,14 @@ message ForkCollectionResponse {
   repeated Segment segments = 2;
 }
 
+message CountForksRequest {
+  string source_collection_id = 1;
+}
+
+message CountForksResponse {
+  uint64 count = 1;
+}
+
 message ResetStateResponse {
   reserved 1;
   reserved "status";
@@ -476,6 +484,7 @@ service SysDB {
   rpc CheckCollections(CheckCollectionsRequest) returns (CheckCollectionsResponse) {}
   rpc UpdateCollection(UpdateCollectionRequest) returns (UpdateCollectionResponse) {}
   rpc ForkCollection(ForkCollectionRequest) returns (ForkCollectionResponse) {}
+  rpc CountForks(CountForksRequest) returns (CountForksResponse) {}
   rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
   rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
   rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}

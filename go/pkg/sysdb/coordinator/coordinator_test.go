@@ -1484,6 +1484,117 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	suite.Empty(collections)
 }
 
+func (suite *APIsTestSuite) TestCountForks() {
+	ctx := context.Background()
+
+	sourceCreateCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_fork_collection_source",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	sourceCreateMetadataSegment := &model.CreateSegment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_blockfile",
+		Scope:        "METADATA",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	sourceCreateRecordSegment := &model.CreateSegment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_blockfile",
+		Scope:        "RECORD",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	sourceCreateVectorSegment := &model.CreateSegment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_hnsw",
+		Scope:        "VECTOR",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	segments := []*model.CreateSegment{
+		sourceCreateMetadataSegment,
+		sourceCreateRecordSegment,
+		sourceCreateVectorSegment,
+	}
+
+	_, _, err := suite.coordinator.CreateCollectionAndSegments(ctx, sourceCreateCollection, segments)
+	suite.NoError(err)
+
+	sourceFlushMetadataSegment := &model.FlushSegmentCompaction{
+		ID: sourceCreateMetadataSegment.ID,
+		FilePaths: map[string][]string{
+			"fts_index": {"metadata_sparse_index_file"},
+		},
+	}
+
+	sourceFlushRecordSegment := &model.FlushSegmentCompaction{
+		ID: sourceCreateRecordSegment.ID,
+		FilePaths: map[string][]string{
+			"data_record": {"record_sparse_index_file"},
+		},
+	}
+
+	sourceFlushVectorSegment := &model.FlushSegmentCompaction{
+		ID: sourceCreateVectorSegment.ID,
+		FilePaths: map[string][]string{
+			"hnsw_index": {"hnsw_source_layer_file"},
+		},
+	}
+
+	sourceFlushCollectionCompaction := &model.FlushCollectionCompaction{
+		ID:                       sourceCreateCollection.ID,
+		TenantID:                 sourceCreateCollection.TenantID,
+		LogPosition:              1000,
+		CurrentCollectionVersion: 0,
+		FlushSegmentCompactions: []*model.FlushSegmentCompaction{
+			sourceFlushMetadataSegment,
+			sourceFlushRecordSegment,
+			sourceFlushVectorSegment,
+		},
+		TotalRecordsPostCompaction: 1000,
+		SizeBytesPostCompaction:    65536,
+	}
+
+	// Flush some data to sourceo collection
+	_, err = suite.coordinator.FlushCollectionCompaction(ctx, sourceFlushCollectionCompaction)
+	suite.NoError(err)
+
+	var forkedCollectionId types.UniqueID
+
+	// Create 5 forks from the source collection
+	for i := 0; i < 5; i++ {
+		forkCollection := &model.ForkCollection{
+			SourceCollectionID:                   sourceCreateCollection.ID,
+			SourceCollectionLogCompactionOffset:  800,
+			SourceCollectionLogEnumerationOffset: 1200,
+			TargetCollectionID:                   types.NewUniqueID(),
+			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_source%d", i),
+		}
+		forkedCollection, _, _ := suite.coordinator.ForkCollection(ctx, forkCollection)
+		forkedCollectionId = forkedCollection.ID
+	}
+
+	// Create 5 forks from one of the forked collections
+	for i := 0; i < 5; i++ {
+		forkCollection := &model.ForkCollection{
+			SourceCollectionID:                   forkedCollectionId,
+			SourceCollectionLogCompactionOffset:  800,
+			SourceCollectionLogEnumerationOffset: 1200,
+			TargetCollectionID:                   types.NewUniqueID(),
+			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_forked%d", i),
+		}
+		_, _, _ = suite.coordinator.ForkCollection(ctx, forkCollection)
+	}
+
+	count, err := suite.coordinator.CountForks(ctx, sourceCreateCollection.ID)
+	suite.NoError(err)
+	suite.Equal(uint64(10), count)
+}
+
 func TestAPIsTestSuite(t *testing.T) {
 	testSuite := new(APIsTestSuite)
 	suite.Run(t, testSuite)

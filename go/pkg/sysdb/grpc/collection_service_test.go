@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -567,6 +568,39 @@ func (suite *CollectionServiceTestSuite) TestGetCollectionSize() {
 	res, err := suite.s.GetCollectionSize(context.Background(), &req)
 	suite.NoError(err)
 	suite.Equal(uint64(100), res.TotalRecordsPostCompaction)
+
+	err = dao.CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
+func (suite *CollectionServiceTestSuite) TestCountForks() {
+	collectionName := "collection_service_test_count_forks"
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	suite.NoError(err)
+
+	req := coordinatorpb.CountForksRequest{
+		SourceCollectionId: collectionID,
+	}
+	res, err := suite.s.CountForks(context.Background(), &req)
+	suite.NoError(err)
+	suite.Equal(uint64(0), res.Count)
+
+	// Create 5 forks
+	for i := 0; i < 5; i++ {
+		forkCollectionReq := &coordinatorpb.ForkCollectionRequest{
+			SourceCollectionId:                   collectionID,
+			SourceCollectionLogCompactionOffset:  0,
+			SourceCollectionLogEnumerationOffset: 0,
+			TargetCollectionId:                   types.NewUniqueID().String(),
+			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_%d", i),
+		}
+		_, err = suite.s.ForkCollection(context.Background(), forkCollectionReq)
+		suite.NoError(err)
+	}
+
+	res, err = suite.s.CountForks(context.Background(), &req)
+	suite.NoError(err)
+	suite.Equal(uint64(5), res.Count)
 
 	err = dao.CleanUpTestCollection(suite.db, collectionID)
 	suite.NoError(err)

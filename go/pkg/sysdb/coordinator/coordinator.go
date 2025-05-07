@@ -161,6 +161,10 @@ func (s *Coordinator) ForkCollection(ctx context.Context, forkCollection *model.
 	return s.catalog.ForkCollection(ctx, forkCollection)
 }
 
+func (s *Coordinator) CountForks(ctx context.Context, sourceCollectionID types.UniqueID) (uint64, error) {
+	return s.catalog.CountForks(ctx, sourceCollectionID)
+}
+
 func (s *Coordinator) CreateSegment(ctx context.Context, segment *model.CreateSegment) error {
 	if err := verifyCreateSegment(segment); err != nil {
 		return err
