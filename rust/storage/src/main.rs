@@ -54,11 +54,7 @@ async fn main() {
             .send()
             .await;
         match result {
-            Ok(_) => {
-                print!("\r");
-                let progress = (i + 1) as f64 / num_files as f64 * 100.0;
-                print!("Uploaded file {}/{}: {:.2}%", i + 1, num_files, progress);
-            }
+            Ok(_) => {}
             Err(e) => eprintln!("Error uploading file: {}", e),
         }
     }
@@ -72,6 +68,7 @@ async fn main() {
     for run_num in 0..runs {
         let run_start_time = std::time::Instant::now();
         let mut handles = vec![];
+        println!("\n ========== Run {} ==========", run_num);
         for i in 0..num_files {
             let latencies = latencies.clone();
             let client = client.clone();
@@ -88,13 +85,12 @@ async fn main() {
                 match result {
                     Ok(res) => {
                         let body = res.body.collect().await.unwrap();
-                        print!("\r");
-                        println!(
-                            "Downloaded file {}: {} bytes in {} ms",
-                            i,
-                            body.into_bytes().len(),
-                            req_start_time.elapsed().as_millis()
-                        );
+                        // println!(
+                        //     "Downloaded file {}: {} bytes in {} ms",
+                        //     i,
+                        //     body.into_bytes().len(),
+                        //     req_start_time.elapsed().as_millis()
+                        // );
                         // Store the latency
                         let mut latencies = latencies.lock().await;
                         latencies.push(req_start_time.elapsed().as_millis());
@@ -110,7 +106,6 @@ async fn main() {
                 eprintln!("Error joining task: {}", e);
             }
         }
-        println!("========== Run {} Complete ==========", run_num);
         println!(
             "Took {} ms to download {} files of size {} MB each. Total throughput: {} MB/s",
             run_start_time.elapsed().as_millis(),
@@ -141,6 +136,8 @@ async fn main() {
             sorted_latencies.iter().sum::<u128>() / sorted_latencies.len() as u128
         );
     }
+
+    println!("========== Experiment Complete ========== \n");
 
     // print the throughput
     let throughput_guard = throughputs.lock().await;
