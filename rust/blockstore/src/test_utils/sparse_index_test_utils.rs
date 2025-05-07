@@ -21,6 +21,7 @@ use uuid::Uuid;
 /// * `Result<Uuid, Box<dyn ChromaError>>` - The UUID of the created sparse index file
 pub async fn create_test_sparse_index(
     storage: &Storage,
+    root_id: Uuid,
     block_ids: Vec<Uuid>,
     prefix: Option<String>,
 ) -> Result<Uuid, Box<dyn ChromaError>> {
@@ -43,7 +44,6 @@ pub async fn create_test_sparse_index(
     sparse_index.set_count(block_ids[0], 1)?;
 
     // Create and save the sparse index file
-    let root_id = Uuid::new_v4();
     let root_writer = RootWriter::new(Version::V1_1, root_id, sparse_index);
     let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
     root_manager.flush::<&str>(&root_writer).await?;
@@ -87,7 +87,8 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
 
         let block_ids = vec![Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
-        let result = create_test_sparse_index(&storage, block_ids.clone(), None).await;
+        let result =
+            create_test_sparse_index(&storage, Uuid::new_v4(), block_ids.clone(), None).await;
         assert!(result.is_ok());
 
         // Verify the sparse index was created by trying to read it
@@ -107,7 +108,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
 
-        let result = create_test_sparse_index(&storage, vec![], None).await;
+        let result = create_test_sparse_index(&storage, Uuid::new_v4(), vec![], None).await;
         assert!(matches!(
             result,
             Err(e) if e.to_string().contains("Cannot create sparse index with empty block IDs")
@@ -121,7 +122,7 @@ mod tests {
 
         let block_ids = vec![Uuid::new_v4(), Uuid::new_v4()];
         let prefix = Some("custom".to_string());
-        let result = create_test_sparse_index(&storage, block_ids, prefix).await;
+        let result = create_test_sparse_index(&storage, Uuid::new_v4(), block_ids, prefix).await;
         assert!(result.is_ok());
     }
 }
