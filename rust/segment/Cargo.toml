@@ -30,6 +30,7 @@ chroma-error = { workspace = true }
 chroma-index = { workspace = true }
 chroma-sqlite = { workspace = true }
 chroma-types = { workspace = true }
+chroma-sysdb = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

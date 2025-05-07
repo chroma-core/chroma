@@ -1746,6 +1746,7 @@ dependencies = [
  "chroma-log",
  "chroma-sqlite",
  "chroma-storage",
+ "chroma-sysdb",
  "chroma-types",
  "futures",
  "parking_lot",
