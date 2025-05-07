@@ -67,13 +67,14 @@ fn bench_regex(criterion: &mut Criterion) {
             .map(|(offset, record)| {
                 for (pattern_str, pattern) in &regexes {
                     let now = Instant::now();
-                    if pattern.is_match(&record.document) {
-                        let elapsed = now.elapsed();
+                    let is_match = pattern.is_match(&record.document);
+                    let elapsed = now.elapsed();
+                    *bruteforce_time.entry(pattern_str.to_string()).or_default() += elapsed;
+                    if is_match {
                         expected_results
                             .entry(pattern_str.to_string())
                             .or_insert(RoaringBitmap::new())
                             .insert(offset as u32);
-                        *bruteforce_time.entry(pattern_str.to_string()).or_default() += elapsed;
                     }
                 }
                 LogRecord {
