@@ -996,10 +996,8 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.UniqueID) (uint64, error) {
 	var rootCollection *model.Collection
 	var rootCollectionID types.UniqueID
-	var sourceCollection *model.Collection
 
 	sourceCollectionIDStr := sourceCollectionID.String()
-
 	sourceCollectionDb, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(&sourceCollectionIDStr, nil)
 	if err != nil {
 		return 0, err
@@ -1014,23 +1012,15 @@ func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.Uniq
 		rootCollectionID = sourceCollectionID
 	}
 
-	sourceCollection, _, err = tc.GetCollectionWithSegments(ctx, sourceCollectionID)
+	limit := int32(1)
+	collections, err := tc.GetCollections(ctx, rootCollectionID, nil, "", "", &limit, nil)
 	if err != nil {
 		return 0, err
 	}
-	if rootCollectionID != sourceCollectionID {
-		limit := int32(1)
-		collections, err := tc.GetCollections(ctx, rootCollectionID, nil, "", "", &limit, nil)
-		if err != nil {
-			return 0, err
-		}
-		if len(collections) == 0 {
-			return 0, common.ErrCollectionNotFound
-		}
-		rootCollection = collections[0]
-	} else {
-		rootCollection = sourceCollection
+	if len(collections) == 0 {
+		return 0, common.ErrCollectionNotFound
 	}
+	rootCollection = collections[0]
 
 	lineageFile, err := tc.getLineageFile(ctx, rootCollection)
 	if err != nil {
