@@ -90,7 +90,7 @@ async fn main() {
     let args = Args::parse();
 
     // Read API key from environment variable.
-    let api_key = std::env::var("CHROMA_API_KEY").expect("CHROMA_API_KEY is not set");
+    let api_key = std::env::var("CHROMA_API_KEY").ok();
 
     let client = reqwest::Client::new();
     let throughput = args.throughput();
