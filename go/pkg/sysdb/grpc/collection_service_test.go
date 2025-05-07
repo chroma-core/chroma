@@ -585,6 +585,8 @@ func (suite *CollectionServiceTestSuite) TestCountForks() {
 	suite.NoError(err)
 	suite.Equal(uint64(0), res.Count)
 
+	var forkedCollectionIDs []string
+
 	// Create 5 forks
 	for i := 0; i < 5; i++ {
 		forkCollectionReq := &coordinatorpb.ForkCollectionRequest{
@@ -594,13 +596,23 @@ func (suite *CollectionServiceTestSuite) TestCountForks() {
 			TargetCollectionId:                   types.NewUniqueID().String(),
 			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_%d", i),
 		}
-		_, err = suite.s.ForkCollection(context.Background(), forkCollectionReq)
+		forkedCollection, err := suite.s.ForkCollection(context.Background(), forkCollectionReq)
 		suite.NoError(err)
+		forkedCollectionIDs = append(forkedCollectionIDs, forkedCollection.Collection.Id)
 	}
 
 	res, err = suite.s.CountForks(context.Background(), &req)
 	suite.NoError(err)
 	suite.Equal(uint64(5), res.Count)
+
+	// Check that each forked collection has 5 forks as well
+	for _, forkedCollectionID := range forkedCollectionIDs {
+		res, err = suite.s.CountForks(context.Background(), &coordinatorpb.CountForksRequest{
+			SourceCollectionId: forkedCollectionID,
+		})
+		suite.NoError(err)
+		suite.Equal(uint64(5), res.Count)
+	}
 
 	err = dao.CleanUpTestCollection(suite.db, collectionID)
 	suite.NoError(err)

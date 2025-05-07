@@ -1563,7 +1563,7 @@ func (suite *APIsTestSuite) TestCountForks() {
 	_, err = suite.coordinator.FlushCollectionCompaction(ctx, sourceFlushCollectionCompaction)
 	suite.NoError(err)
 
-	var forkedCollectionId types.UniqueID
+	var forkedCollectionIDs []types.UniqueID
 
 	// Create 5 forks from the source collection
 	for i := 0; i < 5; i++ {
@@ -1576,25 +1576,33 @@ func (suite *APIsTestSuite) TestCountForks() {
 		}
 		forkedCollection, _, err := suite.coordinator.ForkCollection(ctx, forkCollection)
 		suite.NoError(err)
-		forkedCollectionId = forkedCollection.ID
+		forkedCollectionIDs = append(forkedCollectionIDs, forkedCollection.ID)
 	}
 
 	// Create 5 forks from one of the forked collections
 	for i := 0; i < 5; i++ {
 		forkCollection := &model.ForkCollection{
-			SourceCollectionID:                   forkedCollectionId,
+			SourceCollectionID:                   forkedCollectionIDs[0],
 			SourceCollectionLogCompactionOffset:  800,
 			SourceCollectionLogEnumerationOffset: 1200,
 			TargetCollectionID:                   types.NewUniqueID(),
 			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_forked%d", i),
 		}
-		_, _, err = suite.coordinator.ForkCollection(ctx, forkCollection)
+		forkedCollection, _, err := suite.coordinator.ForkCollection(ctx, forkCollection)
 		suite.NoError(err)
+		forkedCollectionIDs = append(forkedCollectionIDs, forkedCollection.ID)
 	}
 
 	count, err := suite.coordinator.CountForks(ctx, sourceCreateCollection.ID)
 	suite.NoError(err)
 	suite.Equal(uint64(10), count)
+
+	// Check that each forked collection has 10 forks as well
+	for _, forkedCollectionID := range forkedCollectionIDs {
+		count, err := suite.coordinator.CountForks(ctx, forkedCollectionID)
+		suite.NoError(err)
+		suite.Equal(uint64(10), count)
+	}
 }
 
 func TestAPIsTestSuite(t *testing.T) {
