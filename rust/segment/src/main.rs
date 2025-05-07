@@ -3,29 +3,34 @@ use chroma_blockstore::{
     config::BlockfileProviderConfig,
     provider::BlockfileProvider,
 };
-use chroma_config::Configurable;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_index::{
-    config::{
-        HnswGarbageCollectionConfig, HnswGarbageCollectionPolicyConfig, HnswProviderConfig,
-        PlGarbageCollectionConfig, PlGarbageCollectionPolicyConfig,
-    },
-    hnsw_provider::{self, HnswIndexProvider},
+    config::{HnswGarbageCollectionConfig, HnswProviderConfig, PlGarbageCollectionConfig},
+    hnsw_provider::HnswIndexProvider,
 };
-use chroma_segment::spann_provider::{self, SpannProvider};
+use chroma_segment::spann_provider::SpannProvider;
+use chroma_storage::{
+    admissioncontrolleds3::AdmissionControlledS3Storage,
+    config::{
+        AdmissionControlledS3StorageConfig, CountBasedPolicyConfig, RateLimitingConfig,
+        S3CredentialsConfig, S3StorageConfig, StorageConfig,
+    },
+};
 use chroma_sysdb::{self, SysDb};
+use chroma_types::CollectionUuid;
 
 #[tokio::main]
 async fn main() {
     let registry = Registry::new();
 
     // Sysdb
-    let sysdb_client = SysDb::try_from_config(&chroma_sysdb::SysDbConfig::default(), &registry)
+    let mut sysdb_client = SysDb::try_from_config(&chroma_sysdb::SysDbConfig::default(), &registry)
         .await
         .expect("Failed to create sysdb client");
 
     let collection_uuid = uuid::uuid!("ca3dc43f-24d7-4e22-a2bf-0cc052611519");
     let collection_with_segment = sysdb_client
-        .get_collection_with_segments(collection_uuid)
+        .get_collection_with_segments(CollectionUuid(collection_uuid))
         .await
         .unwrap();
 
@@ -47,28 +52,35 @@ async fn main() {
     let storage = AdmissionControlledS3Storage::try_from_config(&storage_config, &registry)
         .await
         .expect("Failed to create storage client");
+    let storage = chroma_storage::Storage::AdmissionControlledS3(storage);
 
     let hnsw_provider = HnswIndexProvider::try_from_config(
-        (HnswProviderConfig {
-            hnsw_temporary_path: "/tmp_test".to_string(),
-            hnsw_cache_config: chroma_cache::CacheConfig::Nop,
-            permitted_parallelism: 128,
-        },),
+        &(
+            HnswProviderConfig {
+                hnsw_temporary_path: "/tmp_test".to_string(),
+                hnsw_cache_config: chroma_cache::CacheConfig::Nop,
+                permitted_parallelism: 128,
+            },
+            storage.clone(),
+        ),
         &registry,
     )
     .await
     .expect("Failed to create HNSW provider");
 
     let blockfile_provider = BlockfileProvider::try_from_config(
-        (BlockfileProviderConfig::Arrow(Box::new(ArrowBlockfileProviderConfig {
-            block_manager_config: BlockManagerConfig {
-                max_block_size_bytes: 8 * 1024 * 1024,
-                block_cache_config: chroma_cache::CacheConfig::Nop,
-            },
-            root_manager_config: RootManagerConfig {
-                root_cache_config: chroma_cache::CacheConfig::Nop,
-            },
-        }))),
+        &(
+            BlockfileProviderConfig::Arrow(Box::new(ArrowBlockfileProviderConfig {
+                block_manager_config: BlockManagerConfig {
+                    max_block_size_bytes: 8 * 1024 * 1024,
+                    block_cache_config: chroma_cache::CacheConfig::Nop,
+                },
+                root_manager_config: RootManagerConfig {
+                    root_cache_config: chroma_cache::CacheConfig::Nop,
+                },
+            })),
+            storage.clone(),
+        ),
         &registry,
     )
     .await
@@ -78,7 +90,7 @@ async fn main() {
         &(
             hnsw_provider.clone(),
             blockfile_provider.clone(),
-            spann_provider::SpannProviderConfig {
+            chroma_index::config::SpannProviderConfig {
                 pl_garbage_collection: PlGarbageCollectionConfig {
                     enabled: false,
                     ..Default::default()
