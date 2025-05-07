@@ -211,6 +211,9 @@ impl InternalCollectionConfiguration {
         match (value.hnsw, value.spann) {
             (Some(_), Some(_)) => Err(CollectionConfigurationToInternalConfigurationError::MultipleVectorIndexConfigurations),
             (Some(hnsw), None) => {
+                if let KnnIndex::Spann = default_knn_index{
+                    return Err(CollectionConfigurationToInternalConfigurationError::HnswIndexNotSupported);   
+                }
                 let hnsw: InternalHnswConfiguration = hnsw.into();
                 Ok(InternalCollectionConfiguration {
                     vector_index: hnsw.into(),
@@ -219,6 +222,9 @@ impl InternalCollectionConfiguration {
             }
             (None, Some(spann)) => {
                 let spann: InternalSpannConfiguration = spann.into();
+                if let KnnIndex::Hnsw = default_knn_index {
+                    return Err(CollectionConfigurationToInternalConfigurationError::SpannIndexNotSupported);
+                }
                 Ok(InternalCollectionConfiguration {
                     vector_index: spann.into(),
                     embedding_function: value.embedding_function,
@@ -270,12 +276,18 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
 pub enum CollectionConfigurationToInternalConfigurationError {
     #[error("Multiple vector index configurations provided")]
     MultipleVectorIndexConfigurations,
+    #[error("HNSW indexes are deprecated. We moved to SPANN which is a better algorithm for both accuracy and performance")]
+    HnswIndexNotSupported,
+    #[error("Spann index is not supported")]
+    SpannIndexNotSupported,
 }
 
 impl ChromaError for CollectionConfigurationToInternalConfigurationError {
     fn code(&self) -> ErrorCodes {
         match self {
             Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+            Self::HnswIndexNotSupported => ErrorCodes::InvalidArgument,
+            Self::SpannIndexNotSupported => ErrorCodes::InvalidArgument,
         }
     }
 }

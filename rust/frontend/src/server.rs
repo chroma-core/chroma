@@ -921,22 +921,15 @@ async fn create_collection(
 
             if let Some(hnsw) = &hnsw_config {
                 let space = hnsw.space.clone();
-                if hnsw.ef_construction.is_some()
-                    || hnsw.ef_search.is_some()
-                    || hnsw.max_neighbors.is_some()
-                    || hnsw.num_threads.is_some()
-                    || hnsw.resize_factor.is_some()
-                    || hnsw.sync_threshold.is_some()
-                    || hnsw.batch_size.is_some()
-                {
-                    return Err(ValidationError::SpaceConfigurationForVectorIndexType(
-                        "HNSW".to_string(),
-                    )
-                    .into());
-                }
                 let new_hnsw = HnswConfiguration {
                     space,
-                    ..Default::default()
+                    ef_construction: hnsw.ef_construction,
+                    ef_search: hnsw.ef_search,
+                    max_neighbors: hnsw.max_neighbors,
+                    num_threads: hnsw.num_threads,
+                    resize_factor: hnsw.resize_factor,
+                    sync_threshold: hnsw.sync_threshold,
+                    batch_size: hnsw.batch_size,
                 };
                 new_configuration.hnsw = Some(new_hnsw);
             } else if let Some(spann) = &spann_config {
