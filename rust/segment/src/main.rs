@@ -142,6 +142,15 @@ async fn main() {
 
     let runs = 10;
     for i in 0..runs {
+        let reader = spann_provider
+            .read(
+                &collection_with_segment.collection,
+                &collection_with_segment.vector_segment,
+                dimension as usize,
+            )
+            .await
+            .expect("Failed to read segment");
+
         let mut fetch_pl_futures = Vec::new();
 
         for id in ids.clone() {
