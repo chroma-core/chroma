@@ -68,7 +68,7 @@ async fn main() {
     for run_num in 0..runs {
         let run_start_time = std::time::Instant::now();
         let mut handles = vec![];
-        println!("\n ========== Run {} ==========", run_num);
+        println!("\n========== Run {} ==========", run_num);
         for i in 0..num_files {
             let latencies = latencies.clone();
             let client = client.clone();
@@ -135,9 +135,23 @@ async fn main() {
             "Average: {} ms",
             sorted_latencies.iter().sum::<u128>() / sorted_latencies.len() as u128
         );
+
+        // compute std dev
+        let mean = sorted_latencies.iter().sum::<u128>() / sorted_latencies.len() as u128;
+        let variance = sorted_latencies
+            .iter()
+            .map(|x| {
+                let diff = *x as f64 - mean as f64;
+                diff * diff
+            })
+            .sum::<f64>()
+            / sorted_latencies.len() as f64;
+
+        let std_dev = variance.sqrt();
+        println!("Standard Deviation: {} ms", std_dev);
     }
 
-    println!("========== Experiment Complete ========== \n");
+    println!("\n========== Experiment Complete ==========\n");
 
     // print the throughput
     let throughput_guard = throughputs.lock().await;
