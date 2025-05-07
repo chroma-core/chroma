@@ -54,7 +54,11 @@ async fn main() {
             .send()
             .await;
         match result {
-            Ok(_) => println!("Uploaded file {}: ", i),
+            Ok(_) => {
+                print!("\r");
+                let progress = (i + 1) as f64 / num_files as f64 * 100.0;
+                print!("Uploaded file {}/{}: {:.2}%", i + 1, num_files, progress);
+            }
             Err(e) => eprintln!("Error uploading file: {}", e),
         }
     }
@@ -65,7 +69,7 @@ async fn main() {
 
     // run the experiment N times, warming the connections
     let runs = 10;
-    for _ in 0..runs {
+    for run_num in 0..runs {
         let run_start_time = std::time::Instant::now();
         let mut handles = vec![];
         for i in 0..num_files {
@@ -84,6 +88,7 @@ async fn main() {
                 match result {
                     Ok(res) => {
                         let body = res.body.collect().await.unwrap();
+                        print!("\r");
                         println!(
                             "Downloaded file {}: {} bytes in {} ms",
                             i,
@@ -105,7 +110,7 @@ async fn main() {
                 eprintln!("Error joining task: {}", e);
             }
         }
-
+        println!("========== Run {} Complete ==========", run_num);
         println!(
             "Took {} ms to download {} files of size {} MB each. Total throughput: {} MB/s",
             run_start_time.elapsed().as_millis(),
@@ -117,6 +122,24 @@ async fn main() {
             .lock()
             .await
             .push((mb_size * num_files) as f64 / (run_start_time.elapsed().as_secs_f64()));
+
+        // latencies
+        let latencies_guard = latencies.lock().await;
+        let mut sorted_latencies = latencies_guard.clone();
+        sorted_latencies.sort();
+        let p50 = sorted_latencies[sorted_latencies.len() / 2];
+        let p90 = sorted_latencies[(sorted_latencies.len() * 9) / 10];
+        let p95 = sorted_latencies[(sorted_latencies.len() * 95) / 100];
+        let p99 = sorted_latencies[(sorted_latencies.len() * 99) / 100];
+        println!("========== Latency =========");
+        println!("P50: {} ms", p50);
+        println!("P90: {} ms", p90);
+        println!("P95: {} ms", p95);
+        println!("P99: {} ms", p99);
+        println!(
+            "Average: {} ms",
+            sorted_latencies.iter().sum::<u128>() / sorted_latencies.len() as u128
+        );
     }
 
     // print the throughput
