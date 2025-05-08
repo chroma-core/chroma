@@ -9,6 +9,8 @@ from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
+    validate_embedding_function_conflict_on_create,
+    validate_embedding_function_conflict_on_get,
 )
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.shared_system_client import SharedSystemClient
@@ -184,11 +186,18 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     ) -> AsyncCollection:
         if configuration is None:
             configuration = {}
-        if (
-            embedding_function is not None
-            and configuration.get("embedding_function") is None
-        ):
+
+        configuration_ef = configuration.get("embedding_function")
+
+        validate_embedding_function_conflict_on_create(
+            embedding_function, configuration_ef
+        )
+
+        # If ef provided in function params and collection config ef is None,
+        # set the collection config ef to the function params
+        if embedding_function is not None and configuration_ef is None:
             configuration["embedding_function"] = embedding_function
+
         model = await self._server.create_collection(
             name=name,
             configuration=configuration,
@@ -218,6 +227,12 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
+        persisted_ef_config = model.configuration_json.get("embedding_function")
+
+        validate_embedding_function_conflict_on_get(
+            embedding_function, persisted_ef_config
+        )
+
         return AsyncCollection(
             client=self._server,
             model=model,
@@ -238,10 +253,14 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     ) -> AsyncCollection:
         if configuration is None:
             configuration = {}
-        if (
-            embedding_function is not None
-            and configuration.get("embedding_function") is None
-        ):
+
+        configuration_ef = configuration.get("embedding_function")
+
+        validate_embedding_function_conflict_on_create(
+            embedding_function, configuration_ef
+        )
+
+        if embedding_function is not None and configuration_ef is None:
             configuration["embedding_function"] = embedding_function
         model = await self._server.get_or_create_collection(
             name=name,
@@ -250,6 +269,13 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
+
+        persisted_ef_config = model.configuration_json.get("embedding_function")
+
+        validate_embedding_function_conflict_on_get(
+            embedding_function, persisted_ef_config
+        )
+
         return AsyncCollection(
             client=self._server,
             model=model,
