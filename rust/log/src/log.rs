@@ -30,7 +30,7 @@ pub enum Log {
 }
 
 impl Log {
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn read(
         &mut self,
         tenant: &str,
@@ -55,7 +55,7 @@ impl Log {
     }
 
     // ScoutLogs returns the offset of the next record to be inserted into the log.
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn scout_logs(
         &mut self,
         tenant: &str,
@@ -78,7 +78,7 @@ impl Log {
         }
     }
 
-    #[tracing::instrument(skip(self, records))]
+    #[tracing::instrument(skip(self, records), err(Display))]
     pub async fn push_logs(
         &mut self,
         tenant: &str,
@@ -98,7 +98,7 @@ impl Log {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn fork_logs(
         &mut self,
         tenant: &str,
@@ -115,7 +115,7 @@ impl Log {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
@@ -133,7 +133,7 @@ impl Log {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn update_collection_log_offset(
         &mut self,
         tenant: &str,
@@ -158,7 +158,7 @@ impl Log {
     }
 
     /// Only supported in distributed. Sqlite has a different workflow.
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn purge_dirty_for_collection(
         &mut self,
         collection_id: CollectionUuid,
