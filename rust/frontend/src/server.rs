@@ -1166,10 +1166,19 @@ async fn fork_collection(
             },
         )
         .await?;
-    let _guard =
-        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
+
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let mut quota_payload = QuotaPayload::new(Action::ForkCollection, tenant.clone(), api_token);
+    quota_payload = quota_payload.with_collection_uuid(collection_id);
+    server.quota_enforcer.enforce(&quota_payload).await?;
+
+    let _guard =
+        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
 
     let request = chroma_types::ForkCollectionRequest::try_new(
         tenant,
