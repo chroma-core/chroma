@@ -232,32 +232,42 @@ impl<'me> MetadataProvider<'me> {
                     record_segment_reader,
                 ) {
                     let literal_expr = LiteralExpr::from(chroma_regex.hir().clone());
-                    let approximate_matching_offset_ids = match fti_reader
+                    let approximate_matching_offset_ids = fti_reader
                         .match_literal_expression(&literal_expr)
                         .await
-                        .map_err(MetadataIndexError::from)?
-                    {
-                        Some(ids) => ids,
-                        None => rec_reader
-                            .get_offset_stream(..)
-                            .try_collect::<Vec<_>>()
-                            .await
-                            .map(|ids| ids.into_iter().collect())?,
-                    };
+                        .map_err(MetadataIndexError::from)?;
                     let is_exact_match = chroma_regex.properties().look_set().is_empty()
                         && fti_reader.can_match_exactly(&literal_expr);
                     if is_exact_match {
-                        Ok(approximate_matching_offset_ids)
+                        Ok(approximate_matching_offset_ids
+                            .unwrap_or(rec_reader.get_offset_stream(..).try_collect().await?))
                     } else {
                         let regex = chroma_regex.regex()?;
                         let mut exact_matching_offset_ids = RoaringBitmap::new();
-                        for id in approximate_matching_offset_ids {
-                            if let Some(rec) = rec_reader.get_data_for_offset_id(id).await? {
-                                if rec.document.is_some_and(|doc| regex.is_match(doc)) {
-                                    exact_matching_offset_ids.insert(id);
+                        match approximate_matching_offset_ids {
+                            Some(offset_ids) => {
+                                for id in offset_ids {
+                                    if rec_reader.get_data_for_offset_id(id).await?.is_some_and(
+                                        |rec| rec.document.is_some_and(|doc| regex.is_match(doc)),
+                                    ) {
+                                        exact_matching_offset_ids.insert(id);
+                                    }
+                                }
+                            }
+                            None => {
+                                for (offset, record) in rec_reader
+                                    .get_data_stream(..)
+                                    .await
+                                    .try_collect::<Vec<_>>()
+                                    .await?
+                                {
+                                    if record.document.is_some_and(|doc| regex.is_match(doc)) {
+                                        exact_matching_offset_ids.insert(offset);
+                                    }
                                 }
                             }
                         }
+
                         Ok(exact_matching_offset_ids)
                     }
                 } else {
