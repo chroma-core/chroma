@@ -429,8 +429,8 @@ impl<'me> FullTextIndexReader<'me> {
 
 #[async_trait::async_trait]
 impl<'me> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'me> {
-    fn initial_beam_width(&self) -> usize {
-        64
+    fn maximum_branching_factor(&self) -> usize {
+        6
     }
 
     async fn lookup_ngram_range<'fts, NgramRange>(

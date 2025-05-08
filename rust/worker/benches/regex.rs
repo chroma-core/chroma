@@ -24,7 +24,9 @@ const LOG_CHUNK_SIZE: usize = 1000;
 const DOCUMENT_SIZE: usize = 10000;
 const REGEX_PATTERNS: &[&str] = &[
     r"wikipedia",
+    r"wikipedia.*",
     r"(?i)wikipedia",
+    r"(?i)wikipedia.*",
     r"20\d\d",
     r".*wiki.*",
     r"May|June",
@@ -34,7 +36,7 @@ const REGEX_PATTERNS: &[&str] = &[
 fn bench_regex(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
 
-    let (test_segment, expected_results, bruteforce_time, doc_count) = runtime.block_on(async {
+    let (test_segment, expected_results, bruteforce_time) = runtime.block_on(async {
         let wikipedia = WikipediaDataset::init()
             .await
             .expect("Wikipedia dataset should exist");
@@ -47,7 +49,7 @@ fn bench_regex(criterion: &mut Criterion) {
             .await
             .expect("Wikipedia dataset should have valid records");
 
-        let mut expected_results = HashMap::new();
+        let mut expected_results = HashMap::<String, RoaringBitmap>::new();
         let mut bruteforce_time = HashMap::<_, Duration>::new();
         let regexes = REGEX_PATTERNS
             .iter()
@@ -73,7 +75,7 @@ fn bench_regex(criterion: &mut Criterion) {
                     if is_match {
                         expected_results
                             .entry(pattern_str.to_string())
-                            .or_insert(RoaringBitmap::new())
+                            .or_default()
                             .insert(offset as u32);
                     }
                 }
@@ -90,14 +92,13 @@ fn bench_regex(criterion: &mut Criterion) {
                 }
             })
             .collect::<Vec<_>>();
-        let log_count = logs.len();
         let mut segment = TestDistributedSegment::default();
         for (idx, batch) in logs.chunks(LOG_CHUNK_SIZE).enumerate() {
             segment
                 .compact_log(Chunk::new(batch.into()), idx * LOG_CHUNK_SIZE)
                 .await;
         }
-        (segment, expected_results, bruteforce_time, log_count)
+        (segment, expected_results, bruteforce_time)
     });
 
     let filter_input = FilterInput {
@@ -127,12 +128,7 @@ fn bench_regex(criterion: &mut Criterion) {
                 .expect("FilterOperator should not fail");
             assert_eq!(
                 results.compact_offset_ids,
-                SignedRoaringBitmap::Include(
-                    expected
-                        .get(*pattern)
-                        .cloned()
-                        .unwrap_or((0..doc_count as u32).collect())
-                )
+                SignedRoaringBitmap::Include(expected.get(*pattern).cloned().unwrap_or_default())
             )
         };
 
@@ -146,11 +142,15 @@ fn bench_regex(criterion: &mut Criterion) {
 
         bench_run(
             format!(
-                "Pattern: [{pattern}], Reference duration: [{}µs]",
+                "Pattern: [{pattern}], Result size: [{}/{DOCUMENT_SIZE}], Reference duration: [{}µs]",
+                expected_results
+                    .get(*pattern)
+                    .map(|res| res.len())
+                    .unwrap_or_default(),
                 bruteforce_time
                     .get(*pattern)
                     .expect("Reference bruteforce time should be present")
-                    .as_micros()
+                    .as_micros(),
             )
             .as_str(),
             criterion,
