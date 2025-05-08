@@ -151,8 +151,11 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> Collection:
         if configuration is None:
             configuration = {}
-            if embedding_function is not None:
-                configuration["embedding_function"] = embedding_function
+        if (
+            embedding_function is not None
+            and configuration.get("embedding_function") is None
+        ):
+            configuration["embedding_function"] = embedding_function
         model = self._server.create_collection(
             name=name,
             metadata=metadata,
@@ -202,8 +205,11 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> Collection:
         if configuration is None:
             configuration = {}
-            if embedding_function is not None:
-                configuration["embedding_function"] = embedding_function
+        if (
+            embedding_function is not None
+            and configuration.get("embedding_function") is None
+        ):
+            configuration["embedding_function"] = embedding_function
         model = self._server.get_or_create_collection(
             name=name,
             metadata=metadata,
