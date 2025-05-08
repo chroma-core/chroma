@@ -18,28 +18,6 @@ impl Literal {
             Literal::Class(class_unicode) => class_unicode.iter().map(|range| range.len()).sum(),
         }
     }
-
-    pub fn range_start(&self) -> char {
-        match self {
-            Literal::Char(literal_char) => *literal_char,
-            Literal::Class(class_unicode) => class_unicode
-                .ranges()
-                .first()
-                .map(|r| r.start())
-                .unwrap_or(char::MIN),
-        }
-    }
-
-    pub fn range_end(&self) -> char {
-        match self {
-            Literal::Char(literal_char) => *literal_char,
-            Literal::Class(class_unicode) => class_unicode
-                .ranges()
-                .last()
-                .map(|r| r.end())
-                .unwrap_or(char::MAX),
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -90,8 +68,8 @@ impl From<ChromaHir> for LiteralExpr {
 
 #[async_trait::async_trait]
 pub trait NgramLiteralProvider<E, const N: usize = 3> {
-    // Return the maximum number of ngram to search on start
-    fn initial_beam_width(&self) -> usize;
+    // Return the max branching factor during the search
+    fn maximum_branching_factor(&self) -> usize;
 
     // Return the (ngram, doc_id, positions) for a range of ngrams
     async fn lookup_ngram_range<'me, NgramRange>(
@@ -105,28 +83,18 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
     // If all documents could contain the literals, Ok(None) is returned
     async fn match_literal_with_mask(
         &self,
-        mut literals: &[Literal],
+        literals: &[Literal],
         mask: Option<&RoaringBitmap>,
     ) -> Result<Option<RoaringBitmap>, E> {
         if mask.is_some_and(|m| m.is_empty()) {
             return Ok(mask.cloned());
         }
 
-        let mut initial_ngrams = Vec::new();
-        let mut initial_position = None;
-        for (index, initial_literals) in literals.windows(N).enumerate() {
-            let volume = initial_literals
+        let (initial_literals, remaining_literals) = literals.split_at(N);
+        let initial_ngrams =
+            initial_literals
                 .iter()
-                .fold(1, |acc, lit| acc * lit.width());
-
-            // We would like to find a starting position where the space of ngrams to explore is small enough
-            if volume > self.initial_beam_width() {
-                continue;
-            }
-
-            initial_ngrams = initial_literals.iter().fold(
-                vec![Vec::with_capacity(N)],
-                |mut acc, lit| match lit {
+                .fold(vec![Vec::with_capacity(N)], |mut acc, lit| match lit {
                     Literal::Char(c) => {
                         acc.iter_mut().for_each(|s| s.push(*c));
                         acc
@@ -144,20 +112,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                             })
                             .collect()
                     }
-                },
-            );
-            initial_position = Some(index);
-            break;
-        }
-
-        match initial_position {
-            // Skip the initial literals
-            Some(pos) => {
-                literals = &literals[pos + N..];
-            }
-            // There is no initial ngrams to explore, by default we assume the all documents could contain these literals
-            None => return Ok(mask.cloned()),
-        }
+                });
 
         // ngram suffix -> doc_id -> position
         let mut suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> = HashMap::new();
@@ -183,46 +138,59 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             }
         }
 
-        for literal in literals {
+        for literal in remaining_literals {
             if suffix_doc_pos.is_empty() {
                 break;
             }
             let mut new_suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> =
                 HashMap::new();
-            for (suffix, doc_pos) in suffix_doc_pos {
-                let mut min_ngram = suffix.clone();
-                min_ngram.push(literal.range_start());
-                let mut max_ngram = suffix;
-                max_ngram.push(literal.range_end());
-                let min_ngram_string = min_ngram.iter().collect::<String>();
-                let max_ngram_string = max_ngram.iter().collect::<String>();
+            for (mut suffix, doc_pos) in suffix_doc_pos {
+                let ngram_ranges = match literal {
+                    Literal::Char(literal_char) => {
+                        suffix.push(*literal_char);
+                        vec![(suffix.clone(), suffix)]
+                    }
+                    Literal::Class(class_unicode) => class_unicode
+                        .iter()
+                        .map(|r| {
+                            let mut min_ngram = suffix.clone();
+                            min_ngram.push(r.start());
+                            let mut max_ngram = suffix.clone();
+                            max_ngram.push(r.end());
+                            (min_ngram, max_ngram)
+                        })
+                        .collect(),
+                };
 
-                let ngram_doc_pos = self
-                    .lookup_ngram_range(min_ngram_string.as_str()..=max_ngram_string.as_str())
-                    .await?;
+                for (min_ngram, max_ngram) in ngram_ranges {
+                    let min_ngram_string = min_ngram.iter().collect::<String>();
+                    let max_ngram_string = max_ngram.iter().collect::<String>();
+                    let ngram_doc_pos = self
+                        .lookup_ngram_range(min_ngram_string.as_str()..=max_ngram_string.as_str())
+                        .await?;
+                    for (ngram, doc_id, next_pos) in ngram_doc_pos {
+                        if let Some(pos) = doc_pos.get(&doc_id) {
+                            if ngram.chars().last().is_some_and(|c| match literal {
+                                Literal::Char(literal_char) => c == *literal_char,
+                                Literal::Class(class_unicode) => {
+                                    class_unicode.iter().any(|r| r.start() <= c && c <= r.end())
+                                }
+                            }) {
+                                // SAFETY(Sicheng): The RoaringBitmap iterator should be sorted
+                                let valid_next_pos = RoaringBitmap::from_sorted_iter(
+                                    pos.iter()
+                                        .filter_map(|p| next_pos.contains(p + 1).then_some(p + 1)),
+                                )
+                                .expect("RoaringBitmap iterator should be sorted");
 
-                for (ngram, doc_id, next_pos) in ngram_doc_pos {
-                    if let Some(pos) = doc_pos.get(&doc_id) {
-                        if ngram.chars().last().is_some_and(|c| match literal {
-                            Literal::Char(literal_char) => c == *literal_char,
-                            Literal::Class(class_unicode) => {
-                                class_unicode.iter().any(|r| r.start() <= c && c <= r.end())
-                            }
-                        }) {
-                            // SAFETY(Sicheng): The RoaringBitmap iterator should be sorted
-                            let valid_next_pos = RoaringBitmap::from_sorted_iter(
-                                pos.iter()
-                                    .filter_map(|p| next_pos.contains(p + 1).then_some(p + 1)),
-                            )
-                            .expect("RoaringBitmap iterator should be sorted");
-
-                            if !valid_next_pos.is_empty() {
-                                let new_suffix = ngram.chars().skip(1).collect();
-                                *new_suffix_doc_pos
-                                    .entry(new_suffix)
-                                    .or_default()
-                                    .entry(doc_id)
-                                    .or_default() |= valid_next_pos;
+                                if !valid_next_pos.is_empty() {
+                                    let new_suffix = ngram.chars().skip(1).collect();
+                                    *new_suffix_doc_pos
+                                        .entry(new_suffix)
+                                        .or_default()
+                                        .entry(doc_id)
+                                        .or_default() |= valid_next_pos;
+                                }
                             }
                         }
                     }
@@ -246,10 +214,24 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         mask: Option<&RoaringBitmap>,
     ) -> Result<Option<RoaringBitmap>, E> {
         match literal_expression {
-            LiteralExpr::Literal(literals) => self.match_literal_with_mask(literals, mask).await,
+            LiteralExpr::Literal(literals) => {
+                let mut result = mask.cloned();
+                for query in literals.split(|lit| lit.width() > self.maximum_branching_factor()) {
+                    if result.as_ref().is_some_and(|m| m.is_empty()) {
+                        break;
+                    }
+                    if query.len() >= N {
+                        result = self.match_literal_with_mask(query, result.as_ref()).await?;
+                    }
+                }
+                Ok(result)
+            }
             LiteralExpr::Concat(literal_exprs) => {
                 let mut result = mask.cloned();
                 for expr in literal_exprs {
+                    if result.as_ref().is_some_and(|m| m.is_empty()) {
+                        break;
+                    }
                     result = self
                         .match_literal_expression_with_mask(expr, result.as_ref())
                         .await?;
@@ -284,9 +266,9 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
 
     fn can_match_exactly(&self, literal_expression: &LiteralExpr) -> bool {
         match literal_expression {
-            LiteralExpr::Literal(literals) => literals.windows(N).next().is_some_and(|head| {
-                head.iter().fold(1, |acc, lit| acc * lit.width()) <= self.initial_beam_width()
-            }),
+            LiteralExpr::Literal(literals) => literals
+                .iter()
+                .all(|c| c.width() <= self.maximum_branching_factor()),
             LiteralExpr::Concat(_) | LiteralExpr::Alternation(_) => false,
         }
     }
