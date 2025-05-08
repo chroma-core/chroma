@@ -18,6 +18,28 @@ impl Literal {
             Literal::Class(class_unicode) => class_unicode.iter().map(|range| range.len()).sum(),
         }
     }
+
+    pub fn range_start(&self) -> char {
+        match self {
+            Literal::Char(literal_char) => *literal_char,
+            Literal::Class(class_unicode) => class_unicode
+                .ranges()
+                .first()
+                .map(|r| r.start())
+                .unwrap_or(char::MIN),
+        }
+    }
+
+    pub fn range_end(&self) -> char {
+        match self {
+            Literal::Char(literal_char) => *literal_char,
+            Literal::Class(class_unicode) => class_unicode
+                .ranges()
+                .last()
+                .map(|r| r.end())
+                .unwrap_or(char::MAX),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -42,7 +64,7 @@ impl From<ChromaHir> for LiteralExpr {
                 ChromaHir::Concat(repeat).into()
             }
             ChromaHir::Concat(hirs) => {
-                let exprs = hirs.into_iter().fold(Vec::new(), |mut exprs, expr| {
+                let mut exprs = hirs.into_iter().fold(Vec::new(), |mut exprs, expr| {
                     match (exprs.last_mut(), expr.into()) {
                         (Some(Self::Literal(literal)), Self::Literal(extra_literal)) => {
                             literal.extend(extra_literal)
@@ -51,7 +73,13 @@ impl From<ChromaHir> for LiteralExpr {
                     }
                     exprs
                 });
-                Self::Concat(exprs)
+                if exprs.len() > 1 {
+                    Self::Concat(exprs)
+                } else if let Some(expr) = exprs.pop() {
+                    expr
+                } else {
+                    Self::Literal(Vec::new())
+                }
             }
             ChromaHir::Alternation(hirs) => {
                 Self::Alternation(hirs.into_iter().map(Into::into).collect())
@@ -65,14 +93,10 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
     // Return the maximum number of ngram to search on start
     fn initial_beam_width(&self) -> usize;
 
-    // Return the documents containing the ngram and the positions of occurences
-    async fn lookup_ngram(&self, ngram: &str) -> Result<HashMap<u32, RoaringBitmap>, E>;
-
-    // Return the (ngram, doc_id, positions) for a range of ngrams and documents
-    async fn lookup_ngram_range_for_document<'me, NgramRange>(
+    // Return the (ngram, doc_id, positions) for a range of ngrams
+    async fn lookup_ngram_range<'me, NgramRange>(
         &'me self,
         ngram_range: NgramRange,
-        document_id: u32,
     ) -> Result<Vec<(&'me str, u32, RoaringBitmap)>, E>
     where
         NgramRange: Clone + RangeBounds<&'me str> + Send + Sync;
@@ -139,25 +163,24 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         let mut suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> = HashMap::new();
         for ngram in initial_ngrams {
             let ngram_string = ngram.iter().collect::<String>();
-            let mut doc_pos = self.lookup_ngram(&ngram_string).await?;
+            let ngram_doc_pos = self
+                .lookup_ngram_range(ngram_string.as_str()..=ngram_string.as_str())
+                .await?;
 
-            if let Some(whitelist) = mask {
-                doc_pos.retain(|doc, _| whitelist.contains(*doc));
-            }
-
-            if doc_pos.is_empty() {
+            if ngram_doc_pos.is_empty() {
                 continue;
             }
 
             let suffix = ngram[1..].to_vec();
-            suffix_doc_pos
-                .entry(suffix)
-                .and_modify(|dp| {
-                    doc_pos
-                        .iter()
-                        .for_each(|(doc, pos)| *dp.entry(*doc).or_default() |= pos);
-                })
-                .or_insert(doc_pos);
+            for (_, doc_id, pos) in ngram_doc_pos {
+                if mask.is_none_or(|m| m.contains(doc_id)) {
+                    *suffix_doc_pos
+                        .entry(suffix.clone())
+                        .or_default()
+                        .entry(doc_id)
+                        .or_default() |= pos;
+                }
+            }
         }
 
         for literal in literals {
@@ -166,47 +189,40 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             }
             let mut new_suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> =
                 HashMap::new();
-            for (mut suffix, doc_pos) in suffix_doc_pos {
-                let ngram_ranges = match literal {
-                    Literal::Char(c) => {
-                        suffix.push(*c);
-                        vec![(suffix.clone(), suffix)]
-                    }
-                    Literal::Class(class_unicode) => class_unicode
-                        .iter()
-                        .map(|r| {
-                            let mut start = suffix.clone();
-                            start.push(r.start());
-                            let mut end = suffix.clone();
-                            end.push(r.end());
-                            (start, end)
-                        })
-                        .collect(),
-                };
-                for (min_ngram, max_ngram) in ngram_ranges {
-                    let min_ngram_string = min_ngram.iter().collect::<String>();
-                    let max_ngram_string = max_ngram.iter().collect::<String>();
-                    for (doc_id, pos) in &doc_pos {
-                        let ngram_pos = self
-                            .lookup_ngram_range_for_document(
-                                min_ngram_string.as_str()..=max_ngram_string.as_str(),
-                                *doc_id,
-                            )
-                            .await?;
-                        for (ngram, _, new_pos) in ngram_pos {
+            for (suffix, doc_pos) in suffix_doc_pos {
+                let mut min_ngram = suffix.clone();
+                min_ngram.push(literal.range_start());
+                let mut max_ngram = suffix;
+                max_ngram.push(literal.range_end());
+                let min_ngram_string = min_ngram.iter().collect::<String>();
+                let max_ngram_string = max_ngram.iter().collect::<String>();
+
+                let ngram_doc_pos = self
+                    .lookup_ngram_range(min_ngram_string.as_str()..=max_ngram_string.as_str())
+                    .await?;
+
+                for (ngram, doc_id, next_pos) in ngram_doc_pos {
+                    if let Some(pos) = doc_pos.get(&doc_id) {
+                        if ngram.chars().last().is_some_and(|c| match literal {
+                            Literal::Char(literal_char) => c == *literal_char,
+                            Literal::Class(class_unicode) => {
+                                class_unicode.iter().any(|r| r.start() <= c && c <= r.end())
+                            }
+                        }) {
                             // SAFETY(Sicheng): The RoaringBitmap iterator should be sorted
-                            let valid_pos = RoaringBitmap::from_sorted_iter(
+                            let valid_next_pos = RoaringBitmap::from_sorted_iter(
                                 pos.iter()
-                                    .filter_map(|p| new_pos.contains(p + 1).then_some(p + 1)),
+                                    .filter_map(|p| next_pos.contains(p + 1).then_some(p + 1)),
                             )
                             .expect("RoaringBitmap iterator should be sorted");
-                            if !valid_pos.is_empty() {
+
+                            if !valid_next_pos.is_empty() {
                                 let new_suffix = ngram.chars().skip(1).collect();
                                 *new_suffix_doc_pos
                                     .entry(new_suffix)
                                     .or_default()
-                                    .entry(*doc_id)
-                                    .or_default() |= valid_pos;
+                                    .entry(doc_id)
+                                    .or_default() |= valid_next_pos;
                             }
                         }
                     }
