@@ -20,6 +20,7 @@ pub enum Action {
     Update,
     Upsert,
     Query,
+    ForkCollection,
 }
 
 impl fmt::Display for Action {
@@ -35,6 +36,7 @@ impl fmt::Display for Action {
             Action::Update => write!(f, "Update"),
             Action::Upsert => write!(f, "Upsert"),
             Action::Query => write!(f, "Query"),
+            Action::ForkCollection => write!(f, "Fork Collection"),
         }
     }
 }
@@ -54,6 +56,7 @@ impl TryFrom<&str> for Action {
             "update" => Ok(Action::Update),
             "upsert" => Ok(Action::Upsert),
             "query" => Ok(Action::Query),
+            "fork_collection" => Ok(Action::ForkCollection),
             _ => Err(format!("Invalid Action: {}", value)),
         }
     }
@@ -241,6 +244,7 @@ pub enum UsageType {
     NumDatabases,          // Total number of databases for a tenant
     NumQueryIDs,           // Number of IDs to filter by in a query
     NumRegexPredicates,    // Number of regex predicates in the where_document
+    NumForks,              // Number of forks a root collection may have
 }
 
 impl fmt::Display for UsageType {
@@ -271,6 +275,7 @@ impl fmt::Display for UsageType {
             UsageType::NumDatabases => write!(f, "Number of databases"),
             UsageType::NumQueryIDs => write!(f, "Number of IDs to filter by in a query"),
             UsageType::NumRegexPredicates => write!(f, "Number of regex predicates"),
+            UsageType::NumForks => write!(f, "Number of forks"),
         }
     }
 }
@@ -301,6 +306,7 @@ impl TryFrom<&str> for UsageType {
             "num_databases" => Ok(UsageType::NumDatabases),
             "num_query_ids" => Ok(UsageType::NumQueryIDs),
             "num_regex_predicates" => Ok(UsageType::NumRegexPredicates),
+            "num_forks" => Ok(UsageType::NumForks),
             _ => Err(format!("Invalid UsageType: {}", value)),
         }
     }
@@ -330,6 +336,7 @@ lazy_static::lazy_static! {
         m.insert(UsageType::NumDatabases, 10);
         m.insert(UsageType::NumQueryIDs, 1000);
         m.insert(UsageType::NumRegexPredicates, 0);
+        m.insert(UsageType::NumForks, 1000);
         m
     };
 }
