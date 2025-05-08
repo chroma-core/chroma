@@ -456,6 +456,6 @@ mod tests {
         };
         assert!(error.validate().is_ok());
         let error_string = format!("{}", error);
-        assert_eq!(error_string, "'NumRecords' exceeded quota limit for action 'Add': current usage of 100 exceeds limit of 50");
+        assert_eq!(error_string, "'Number of records' exceeded quota limit for action 'Add': current usage of 100 exceeds limit of 50");
     }
 }
