@@ -128,7 +128,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
 
             let suffix = ngram[1..].to_vec();
             for (_, doc_id, pos) in ngram_doc_pos {
-                if let Some(true) = mask.map(|m| m.contains(doc_id)) {
+                if mask.map(|m| m.contains(doc_id)).unwrap_or(mask.is_none()) {
                     *suffix_doc_pos
                         .entry(suffix.clone())
                         .or_default()
