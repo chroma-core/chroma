@@ -36,7 +36,7 @@ pub struct ListFilesAtVersionOutput {
 }
 
 #[derive(Debug, Error)]
-pub enum ListFilesAtVersionsError {
+pub enum ListFilesAtVersionError {
     #[error("Version history field missing")]
     VersionHistoryMissing,
     #[error("Version {0} not found")]
@@ -56,7 +56,7 @@ pub struct ListFilesAtVersionsOperator {}
 
 #[async_trait]
 impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAtVersionsOperator {
-    type Error = ListFilesAtVersionsError;
+    type Error = ListFilesAtVersionError;
 
     fn get_type(&self) -> OperatorType {
         OperatorType::IO
@@ -70,7 +70,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
             .version_file
             .version_history
             .as_ref()
-            .ok_or_else(|| ListFilesAtVersionsError::VersionHistoryMissing)?;
+            .ok_or_else(|| ListFilesAtVersionError::VersionHistoryMissing)?;
 
         let mut file_paths = HashSet::new();
         let mut sparse_index_ids = HashSet::new();
@@ -79,7 +79,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
             .versions
             .iter()
             .find(|v| v.version == input.version)
-            .ok_or_else(|| ListFilesAtVersionsError::VersionNotFound(input.version))?;
+            .ok_or_else(|| ListFilesAtVersionError::VersionNotFound(input.version))?;
 
         if let Some(segment_info) = &version.segment_info {
             for segment in &segment_info.segment_compaction_info {
@@ -101,7 +101,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                             file_paths.insert(format!("sparse_index/{}", path));
 
                             let sparse_index_id = Uuid::parse_str(path)
-                                .map_err(ListFilesAtVersionsError::InvalidUuid)?;
+                                .map_err(ListFilesAtVersionError::InvalidUuid)?;
 
                             sparse_index_ids.insert(sparse_index_id);
                         }
@@ -119,8 +119,8 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
 
         while let Some(res) = block_id_tasks.join_next().await {
             let block_ids = res
-                .map_err(ListFilesAtVersionsError::SparseIndexTaskFailed)?
-                .map_err(ListFilesAtVersionsError::FetchBlockIdsError)?;
+                .map_err(ListFilesAtVersionError::SparseIndexTaskFailed)?
+                .map_err(ListFilesAtVersionError::FetchBlockIdsError)?;
 
             for block_id in block_ids {
                 file_paths.insert(format!("block/{}", block_id));
@@ -133,10 +133,10 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                     .version_file
                     .collection_info_immutable
                     .as_ref()
-                    .ok_or_else(|| ListFilesAtVersionsError::VersionFileMissingCollectionId)?
+                    .ok_or_else(|| ListFilesAtVersionError::VersionFileMissingCollectionId)?
                     .collection_id,
             )
-            .map_err(ListFilesAtVersionsError::InvalidUuid)?,
+            .map_err(ListFilesAtVersionError::InvalidUuid)?,
             version: input.version,
             file_paths,
         })

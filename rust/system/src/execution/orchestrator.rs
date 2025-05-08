@@ -1,12 +1,44 @@
+use super::Operator;
 use crate::{ChannelError, Component, ComponentContext, ComponentHandle, PanicError, System};
+use crate::{Dispatcher, TaskMessage};
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use core::fmt::Debug;
+use parking_lot::Mutex;
 use std::any::type_name;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
 use tracing::Span;
 
-use crate::{Dispatcher, TaskMessage};
+#[derive(Debug)]
+struct WrappedOrchestratorOperator<O: Orchestrator>(Mutex<Option<O>>, System);
+
+#[async_trait]
+impl<O: Orchestrator> Operator<(), O::Output> for WrappedOrchestratorOperator<O>
+where
+    O: Sync,
+    O::Output: Sync,
+{
+    type Error = O::Error;
+
+    fn get_type(&self) -> crate::OperatorType {
+        crate::OperatorType::IO
+    }
+
+    fn get_name(&self) -> &'static str {
+        O::name()
+    }
+
+    async fn run(&self, _: &()) -> Result<O::Output, Self::Error> {
+        let orchestrator = {
+            let mut orchestrator = self.0.lock();
+            orchestrator
+                .take()
+                .expect("Orchestrator should not be None") // todo
+        };
+
+        orchestrator.run(self.1.clone()).await
+    }
+}
 
 #[async_trait]
 pub trait Orchestrator: Debug + Send + Sized + 'static {
@@ -114,6 +146,14 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
                 None
             }
         }
+    }
+
+    fn to_operator(self, system: System) -> Box<dyn Operator<(), Self::Output, Error = Self::Error>>
+    where
+        Self: Sync,
+        <Self as Orchestrator>::Output: Sync,
+    {
+        Box::new(WrappedOrchestratorOperator(Mutex::new(Some(self)), system))
     }
 }
 

@@ -21,7 +21,10 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{chroma_proto::CollectionVersionInfo, CollectionUuid};
+use chroma_types::{
+    chroma_proto::{CollectionVersionFile, CollectionVersionInfo},
+    CollectionUuid,
+};
 use chrono::DateTime;
 use itertools::Itertools;
 use petgraph::{dot::Dot, graph::DiGraph, prelude::DiGraphMap};
@@ -58,6 +61,7 @@ pub struct ConstructVersionGraphOrchestrator {
 
     graph: DiGraphMap<InternalVersionGraphNode, ()>,
     graph_data: HashMap<InternalVersionGraphNode, VersionGraphNodeData>,
+    version_files: HashMap<CollectionUuid, CollectionVersionFile>,
     num_pending_tasks: usize,
 }
 
@@ -82,13 +86,13 @@ impl ConstructVersionGraphOrchestrator {
 
             graph: DiGraphMap::new(),
             graph_data: HashMap::new(),
+            version_files: HashMap::new(),
             num_pending_tasks: 0,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct VersionGraphNode {
     pub collection_id: CollectionUuid,
     pub version: i64,
@@ -98,8 +102,8 @@ pub struct VersionGraphNode {
 pub type VersionGraph = DiGraph<VersionGraphNode, ()>;
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct ConstructVersionGraphResponse {
+    pub version_files: HashMap<CollectionUuid, CollectionVersionFile>,
     pub graph: VersionGraph,
 }
 
@@ -259,8 +263,14 @@ impl ConstructVersionGraphOrchestrator {
                 None => return,
             };
 
-            self.terminate_with_result(Ok(ConstructVersionGraphResponse { graph }), ctx)
-                .await;
+            self.terminate_with_result(
+                Ok(ConstructVersionGraphResponse {
+                    graph,
+                    version_files: self.version_files.clone(),
+                }),
+                ctx,
+            )
+            .await;
         }
     }
 
@@ -368,6 +378,8 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
             }
         };
         let collection_id = output.collection_id;
+        self.version_files
+            .insert(collection_id, output.file.clone());
 
         let versions = match output.file.version_history {
             Some(versions) => versions.versions,

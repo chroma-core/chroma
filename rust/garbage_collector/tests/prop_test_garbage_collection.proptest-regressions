@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 7b9a62bb45fde3edf2c8b5f414ef886374d684b96561ccc7ae731cbcb345e7f6 # shrinks to (initial_state, transitions, seen_counter) = (Graph { Ty: "Directed", node_count: 1, edge_count: 1, edges: (0, 0), node weights: {0: IncrementParentVersion} }, [], None)

@@ -26,7 +26,7 @@ pub enum CollectionVersionAction {
 
 #[derive(Debug)]
 pub struct ComputeVersionsToDeleteOutput {
-    pub versions: HashMap<CollectionUuid, Vec<(i64, CollectionVersionAction)>>,
+    pub versions: HashMap<CollectionUuid, HashMap<i64, CollectionVersionAction>>,
 }
 
 #[derive(Error, Debug)]
@@ -106,7 +106,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                         .any(|(_, _, mode)| *mode == CollectionVersionAction::Delete)
                 })
                 .map(|(collection_id, versions)| {
-                    let versions: Vec<_> = versions
+                    let versions: HashMap<_, _> = versions
                         .into_iter()
                         .map(|(version, _, mode)| (version, mode))
                         .collect();
@@ -175,16 +175,16 @@ mod tests {
             min_versions_to_keep: 1,
         };
 
-        let result = ComputeVersionsToDeleteOperator {}
+        let mut result = ComputeVersionsToDeleteOperator {}
             .run(&input)
             .await
             .unwrap();
 
         // v0 is always kept, and the most recent version (v4) is kept. v3 is not eligible for deletion because it is after the cutoff time. So v1 and v2 are marked for deletion.
         assert_eq!(result.versions.len(), 1);
-        let versions = result.versions.get(&collection_id).unwrap();
+        let versions = result.versions.remove(&collection_id).unwrap();
         assert_eq!(
-            *versions,
+            versions.into_iter().collect::<Vec<_>>(),
             vec![
                 (0, CollectionVersionAction::Keep),
                 (1, CollectionVersionAction::Delete),
@@ -269,7 +269,7 @@ mod tests {
             min_versions_to_keep: 1,
         };
 
-        let result = ComputeVersionsToDeleteOperator {}
+        let mut result = ComputeVersionsToDeleteOperator {}
             .run(&input)
             .await
             .unwrap();
@@ -278,9 +278,9 @@ mod tests {
         assert_eq!(result.versions.len(), 2);
 
         // For collection A: v0 is always kept, and the most recent version (v4) is kept. v3 is not eligible for deletion because it is after the cutoff time. So v1 and v2 are marked for deletion.
-        let a_versions = result.versions.get(&a_collection_id).unwrap();
+        let a_versions = result.versions.remove(&a_collection_id).unwrap();
         assert_eq!(
-            *a_versions,
+            a_versions.into_iter().collect::<Vec<_>>(),
             vec![
                 (0, CollectionVersionAction::Keep),
                 (1, CollectionVersionAction::Delete),
@@ -291,9 +291,9 @@ mod tests {
         );
 
         // For collection B: v0 is always kept, and the most recent version (v2) is kept. So v1 is marked for deletion.
-        let b_versions = result.versions.get(&b_collection_id).unwrap();
+        let b_versions = result.versions.remove(&b_collection_id).unwrap();
         assert_eq!(
-            *b_versions,
+            b_versions.into_iter().collect::<Vec<_>>(),
             vec![
                 (0, CollectionVersionAction::Keep),
                 (1, CollectionVersionAction::Delete),
