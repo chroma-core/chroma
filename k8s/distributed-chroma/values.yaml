@@ -51,7 +51,6 @@ rustLogService:
   image:
     repository: 'rust-log-service'
     tag: 'latest'
-  env:
   cache:
     hostPath: '/local/cache/chroma-log-service'
     mountPath: '/cache/'
