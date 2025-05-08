@@ -347,7 +347,7 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.count_forks(source_collection_id).await,
             SysDb::Sqlite(_) => Err(CountForksError::Local),
-            SysDb::Test(_) => Err(CountForksError::Local),
+            SysDb::Test(test) => test.count_forks(source_collection_id).await,
         }
     }
 
