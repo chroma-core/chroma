@@ -220,7 +220,7 @@ impl<'me> MetadataProvider<'me> {
         }
     }
 
-    pub(crate) async fn filter_by_document_matches(
+    pub(crate) async fn filter_by_document_regex(
         &self,
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
@@ -455,14 +455,14 @@ impl<'me> RoaringMetadataFilter<'me> for DocumentExpression {
                     .filter_by_document_contains(self.pattern.as_str())
                     .await?,
             )),
-            DocumentOperator::Matches => Ok(SignedRoaringBitmap::Include(
+            DocumentOperator::Regex => Ok(SignedRoaringBitmap::Include(
                 metadata_provider
-                    .filter_by_document_matches(self.pattern.as_str())
+                    .filter_by_document_regex(self.pattern.as_str())
                     .await?,
             )),
-            DocumentOperator::NotMatches => Ok(SignedRoaringBitmap::Exclude(
+            DocumentOperator::NotRegex => Ok(SignedRoaringBitmap::Exclude(
                 metadata_provider
-                    .filter_by_document_matches(self.pattern.as_str())
+                    .filter_by_document_regex(self.pattern.as_str())
                     .await?,
             )),
         }

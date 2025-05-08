@@ -112,7 +112,7 @@ fn bench_regex(criterion: &mut Criterion) {
         let filter_operator = FilterOperator {
             query_ids: None,
             where_clause: Some(Where::Document(DocumentExpression {
-                operator: DocumentOperator::Matches,
+                operator: DocumentOperator::Regex,
                 pattern: pattern.to_string(),
             })),
         };

@@ -140,8 +140,8 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidati
     let operator_type = match key.as_str() {
         "$contains" => DocumentOperator::Contains,
         "$not_contains" => DocumentOperator::NotContains,
-        "$matches" => DocumentOperator::Matches,
-        "$not_matches" => DocumentOperator::NotMatches,
+        "$regex" => DocumentOperator::Regex,
+        "$not_regex" => DocumentOperator::NotRegex,
         _ => return Err(WhereValidationError::WhereDocumentClause),
     };
     if matches!(
