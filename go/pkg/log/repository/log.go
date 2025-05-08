@@ -51,6 +51,14 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 				RecordCompactionOffsetPosition:  0,
 			})
 			if err != nil {
+				var pgErr *pgconn.PgError
+				// This is a retryable error and should be retried by upstream. It happens
+				// when two concurrent adds to the same collection happen.
+				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+					trace_log.Error("Duplicate key error while inserting into collection table", zap.String("collectionId", collectionId), zap.String("detail", pgErr.Detail))
+					err = status.Error(codes.AlreadyExists, fmt.Sprintf("Duplicate key error while inserting into collection table: %s", pgErr.Detail))
+					return
+				}
 				trace_log.Error("Error in creating a new entry in collection table", zap.Error(err), zap.String("collectionId", collectionId))
 				return
 			}
