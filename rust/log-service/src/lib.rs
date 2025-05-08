@@ -226,7 +226,7 @@ async fn get_log_from_handle<'a>(
 
 ////////////////////////////////////////// CachedFragment //////////////////////////////////////////
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct CachedParquetFragment {
     bytes: Vec<u8>,
 }
@@ -607,7 +607,7 @@ pub struct LogServer {
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Arc<LogWriter>,
     compacting: tokio::sync::Mutex<()>,
-    cache: Option<Box<dyn chroma_cache::Cache<String, CachedParquetFragment>>>,
+    cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedParquetFragment>>>,
 }
 
 #[async_trait::async_trait]
@@ -1429,10 +1429,14 @@ impl Configurable<LogServerConfig> for LogServer {
         registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let cache = if let Some(cache_config) = &config.cache {
-            match chroma_cache::from_config::<String, CachedParquetFragment>(cache_config).await {
+            match chroma_cache::from_config_persistent::<String, CachedParquetFragment>(
+                cache_config,
+            )
+            .await
+            {
                 Ok(cache) => Some(cache),
                 Err(err) => {
-                    tracing::error!("cache not configured: {err}");
+                    tracing::error!("cache not configured: {err:?}");
                     None
                 }
             }
