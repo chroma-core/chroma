@@ -32,7 +32,6 @@ macro_rules! cli_writeln {
     }
 }
 
-
 pub enum ColorLevel {
     Ansi256,
     TrueColor,

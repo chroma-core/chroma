@@ -53,7 +53,7 @@ pub fn chroma_cli(args: Vec<String>) -> Result<(), CliError> {
     let cli = Cli::parse_from(args);
 
     println!();
-    
+
     let mut result = match cli.command.clone() {
         Command::Browse(args) => browse(args),
         Command::Copy(args) => copy(args),
@@ -65,27 +65,25 @@ pub fn chroma_cli(args: Vec<String>) -> Result<(), CliError> {
         Command::Support => open_browser(WebPageCommand::Discord),
         Command::Update => update(),
         Command::Vacuum(args) => vacuum(args),
-        _ => Ok(())
+        _ => Ok(()),
     };
-    
+
     let handler: Option<Box<dyn CommandHandler>> = match cli.command {
         Command::Run(args) => Some(Box::new(RunCommand::default(args))),
-        _ => None
+        _ => None,
     };
-    
+
     if let Some(mut handler) = handler {
         let runtime = tokio::runtime::Runtime::new().map_err(|_| UtilsError::Runtime)?;
-        result = runtime.block_on(async {
-            handler.run().await
-        });
+        result = runtime.block_on(async { handler.run().await });
     }
-    
+
     if result.is_err() {
         let error_message = result.err().unwrap().to_string();
         eprintln!("{}", error_message.red());
     }
 
     println!();
-    
+
     Ok(())
 }

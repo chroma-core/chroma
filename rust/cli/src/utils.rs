@@ -110,7 +110,7 @@ pub enum UtilsError {
     #[error("Failed to write to console")]
     ConsoleWriteFailed,
     #[error("Failed to start the Chroma CLI")]
-    Runtime
+    Runtime,
 }
 
 #[derive(Parser, Debug, Clone)]

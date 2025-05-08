@@ -1,15 +1,15 @@
-use crate::utils::UtilsError;
-use std::io::{stdout, Stdout, Write};
 use crate::ui_utils::LOGO;
 use crate::utils::CliError;
+use crate::utils::UtilsError;
+use crate::{cli_writeln, CommandHandler};
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;
 use colored::Colorize;
+use std::io::{stdout, Stdout, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
 use thiserror::Error;
-use crate::{cli_writeln, CommandHandler};
 
 #[derive(Debug, Error)]
 pub enum RunError {
@@ -61,7 +61,11 @@ pub struct RunCommand<W: Write> {
 
 impl<W: Write> RunCommand<W> {
     pub fn new(args: RunArgs, writer: W) -> Self {
-        Self { args, writer, config: FrontendServerConfig::single_node_default() }
+        Self {
+            args,
+            writer,
+            config: FrontendServerConfig::single_node_default(),
+        }
     }
 
     fn validate_host(address: &String, port: u16) -> bool {
@@ -83,9 +87,13 @@ impl<W: Write> RunCommand<W> {
         }
 
         if !Self::validate_host(&self.config.listen_address, self.config.port) {
-            return Err(RunError::AddressUnavailable(self.config.listen_address.to_owned(), self.config.port).into());
+            return Err(RunError::AddressUnavailable(
+                self.config.listen_address.to_owned(),
+                self.config.port,
+            )
+            .into());
         }
-        
+
         Ok(())
     }
 
@@ -93,11 +101,11 @@ impl<W: Write> RunCommand<W> {
         let host = format!("http://localhost:{}", self.config.port)
             .underline()
             .blue();
-        
+
         let docs = "https://docs.trychroma.com/docs/overview/getting-started\n"
             .underline()
             .blue();
-        
+
         format!(
             "{}\nSaving data to: {}\nConnect to Chroma at: {}\nGetting started guide: {}",
             LOGO,
@@ -129,20 +137,20 @@ impl<W: Write + Send> CommandHandler for RunCommand<W> {
         };
 
         cli_writeln!(self.writer, "{}", self.run_message())?;
-        
+
         frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &self.config).await;
-        
+
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use tokio::sync::Mutex;
     use crate::client::chroma_client::ChromaClient;
     use crate::commands::run::{RunArgs, RunCommand};
     use crate::CommandHandler;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     #[tokio::test]
     async fn test_run() {
@@ -171,7 +179,7 @@ mod tests {
         let url = format!("http://localhost:{}", port);
         let chroma_client = ChromaClient::local_default();
         let response = chroma_client.healthcheck().await.unwrap();
-        
+
         server_handle.abort();
 
         let run_command = run_command_arc.lock().await;
