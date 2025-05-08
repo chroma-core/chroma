@@ -426,10 +426,10 @@ impl SparseIndexReader {
 
                 // Check whether max_start_prefix <= min_end_prefix
                 match (max_start_prefix, min_end_prefix) {
-                    (Bound::Included(start), Bound::Included(end))
-                    | (Bound::Excluded(start), Bound::Excluded(end)) => start <= end,
+                    (Bound::Included(start), Bound::Included(end)) => start <= end,
                     (Bound::Included(start), Bound::Excluded(end))
-                    | (Bound::Excluded(start), Bound::Included(end)) => start < end,
+                    | (Bound::Excluded(start), Bound::Included(end))
+                    | (Bound::Excluded(start), Bound::Excluded(end)) => start < end,
                     // At least one of these is unbounded.
                     _ => true,
                 }
