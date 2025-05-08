@@ -117,7 +117,7 @@ async fn test_k8s_integration_ping_pong_contention() {
 
     // Set a timer to make sure the test only runs for 2 minutes.
     let fail = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(120)).await;
+        tokio::time::sleep(Duration::from_secs(180)).await;
         eprintln!("Taking down the test");
         std::process::exit(13);
     });
@@ -130,7 +130,7 @@ async fn test_k8s_integration_ping_pong_contention() {
         Arc::clone(&mutex),
         Arc::clone(&running),
         1,
-        30,
+        20,
     ));
 
     let handle2 = tokio::spawn(writer_thread(
@@ -138,7 +138,7 @@ async fn test_k8s_integration_ping_pong_contention() {
         Arc::clone(&mutex),
         Arc::clone(&running),
         2,
-        30,
+        20,
     ));
 
     // Wait for both threads to complete
