@@ -179,9 +179,11 @@ jobs:
       #     languages: python
       #     api_key: ${{ secrets.DD_API_KEY }}
       #     site: ${{ vars.DD_SITE }}
-      - uses: useblacksmith/build-push-action@v1.1
+      - name: Set up Docker
+        uses: ./.github/actions/docker
         with:
-          setup-only: true
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: ./.github/actions/tilt
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"' --durations 10
