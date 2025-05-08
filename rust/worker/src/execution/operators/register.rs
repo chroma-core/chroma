@@ -133,7 +133,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
         };
 
         let result = log
-            .update_collection_log_offset(input.collection_id, input.log_position)
+            .update_collection_log_offset(&input.tenant, input.collection_id, input.log_position)
             .await;
 
         match result {

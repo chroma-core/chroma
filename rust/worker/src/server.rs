@@ -142,6 +142,7 @@ impl WorkerServer {
                 .unwrap_or_default(),
             maximum_fetch_count: None,
             collection_uuid: collection_and_segments.collection.collection_id,
+            tenant: collection_and_segments.collection.tenant.clone(),
         }
     }
 

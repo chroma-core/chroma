@@ -592,7 +592,9 @@ mod tests {
                 },
             },
         );
-        let _ = log.update_collection_log_offset(collection_uuid_1, 2).await;
+        let _ = log
+            .update_collection_log_offset(&tenant_1, collection_uuid_1, 2)
+            .await;
 
         let mut sysdb = SysDb::Test(TestSysDb::new());
 

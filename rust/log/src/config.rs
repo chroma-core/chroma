@@ -24,6 +24,8 @@ pub struct GrpcLogConfig {
     #[serde(default)]
     pub use_alt_host_for_everything: bool,
     #[serde(default)]
+    pub use_alt_for_tenants: Vec<String>,
+    #[serde(default)]
     pub use_alt_for_collections: Vec<String>,
 }
 
@@ -64,6 +66,7 @@ impl Default for GrpcLogConfig {
             max_decoding_message_size: GrpcLogConfig::default_max_decoding_message_size(),
             alt_host: None,
             use_alt_host_for_everything: false,
+            use_alt_for_tenants: vec![],
             use_alt_for_collections: vec![],
         }
     }

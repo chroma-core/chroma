@@ -582,7 +582,7 @@ impl ServiceBasedFrontend {
         let target_collection_id = CollectionUuid::new();
         let log_offsets = self
             .log_client
-            .fork_logs(source_collection_id, target_collection_id)
+            .fork_logs(&tenant_id, source_collection_id, target_collection_id)
             .await?;
         let collection_and_segments = self
             .sysdb_client
@@ -655,10 +655,13 @@ impl ServiceBasedFrontend {
 
     pub async fn retryable_push_logs(
         &mut self,
+        tenant_id: &str,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
     ) -> Result<(), Box<dyn ChromaError>> {
-        self.log_client.push_logs(collection_id, records).await
+        self.log_client
+            .push_logs(tenant_id, collection_id, records)
+            .await
     }
 
     pub async fn add(
@@ -691,9 +694,10 @@ impl ServiceBasedFrontend {
         let add_to_retry = || {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
+            let tenant_id_clone = tenant_id.clone();
             async move {
                 self_clone
-                    .retryable_push_logs(collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
                     .await
             }
         };
@@ -768,9 +772,10 @@ impl ServiceBasedFrontend {
         let add_to_retry = || {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
+            let tenant_id_clone = tenant_id.clone();
             async move {
                 self_clone
-                    .retryable_push_logs(collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
                     .await
             }
         };
@@ -847,9 +852,10 @@ impl ServiceBasedFrontend {
         let add_to_retry = || {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
+            let tenant_id_clone = tenant_id.clone();
             async move {
                 self_clone
-                    .retryable_push_logs(collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
                     .await
             }
         };
@@ -986,7 +992,7 @@ impl ServiceBasedFrontend {
         let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
         self.log_client
-            .push_logs(collection_id, records)
+            .push_logs(&tenant_id, collection_id, records)
             .await
             .map_err(|err| {
                 if err.code() == ErrorCodes::Unavailable {
