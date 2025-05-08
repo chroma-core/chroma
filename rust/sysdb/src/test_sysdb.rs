@@ -546,7 +546,7 @@ impl TestSysDb {
     pub(crate) async fn count_forks(
         &mut self,
         _source_collection_id: CollectionUuid,
-    ) -> Result<u64, CountForksError> {
+    ) -> Result<usize, CountForksError> {
         Ok(10)
     }
 }

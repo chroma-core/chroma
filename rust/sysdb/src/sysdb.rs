@@ -343,7 +343,7 @@ impl SysDb {
     pub async fn count_forks(
         &mut self,
         source_collection_id: CollectionUuid,
-    ) -> Result<u64, CountForksError> {
+    ) -> Result<usize, CountForksError> {
         match self {
             SysDb::Grpc(grpc) => grpc.count_forks(source_collection_id).await,
             SysDb::Sqlite(_) => Err(CountForksError::Local),
@@ -989,7 +989,7 @@ impl GrpcSysDb {
     pub async fn count_forks(
         &mut self,
         source_collection_id: CollectionUuid,
-    ) -> Result<u64, CountForksError> {
+    ) -> Result<usize, CountForksError> {
         let res = self
             .client
             .count_forks(chroma_proto::CountForksRequest {
@@ -1002,7 +1002,7 @@ impl GrpcSysDb {
             })?
             .into_inner();
 
-        Ok(res.count)
+        Ok(res.count as usize)
     }
 
     pub async fn get_collections_to_gc(
