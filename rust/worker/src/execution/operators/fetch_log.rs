@@ -113,7 +113,13 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                     async move {
                         let _permit = sema.acquire().await.unwrap();
                         log_client
-                            .read(&self.tenant, collection_uuid, start, num_records, Some(timestamp))
+                            .read(
+                                &self.tenant,
+                                collection_uuid,
+                                start,
+                                num_records,
+                                Some(timestamp),
+                            )
                             .await
                     }
                 })

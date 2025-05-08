@@ -659,7 +659,9 @@ impl ServiceBasedFrontend {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
     ) -> Result<(), Box<dyn ChromaError>> {
-        self.log_client.push_logs(tenant_id, collection_id, records).await
+        self.log_client
+            .push_logs(tenant_id, collection_id, records)
+            .await
     }
 
     pub async fn add(
