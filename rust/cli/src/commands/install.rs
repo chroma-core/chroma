@@ -40,7 +40,7 @@ pub enum InstallError {
     EnvFileWriteFailed,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 pub struct InstallArgs {
     #[clap(index = 1, help = "The name of the sample app to install")]
     name: Option<String>,

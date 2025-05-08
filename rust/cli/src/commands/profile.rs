@@ -18,7 +18,7 @@ pub enum ProfileError {
     ProfileAlreadyExists(String),
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct DeleteArgs {
     #[clap(index = 1, help = "The name of the profile to delete")]
     name: String,
@@ -30,7 +30,7 @@ pub struct DeleteArgs {
     force: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct RenameArgs {
     #[clap(index = 1, help = "The name of the profile to rename")]
     name: String,
@@ -38,13 +38,13 @@ pub struct RenameArgs {
     new_name: String,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct UseArgs {
     #[clap(help = "The name of the profile to use as the active profile")]
     name: String,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum ProfileCommand {
     #[command(about = "Delete profiles")]
     Delete(DeleteArgs),
