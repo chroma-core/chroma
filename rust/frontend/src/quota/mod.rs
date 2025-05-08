@@ -442,11 +442,7 @@ mod tests {
         };
         assert!(error.validate().is_ok());
         let error_string = format!("{}", error);
-        let expected_base_message = format!(
-            "'{}' exceeded quota limit for action '{}': current usage of {} exceeds limit of {}",
-            error.usage_type, error.action, error.usage, error.limit
-        );
-        let expected_error_string = format!("{}. {}", expected_base_message, custom_message);
+        let expected_error_string = "'Number of records' exceeded quota limit for action 'Add': current usage of 100 exceeds limit of 50. This is a valid message.";
         assert_eq!(error_string, expected_error_string);
     }
 
