@@ -7,6 +7,7 @@ use std::{
 use chroma_error::ChromaError;
 use chroma_types::{CollectionUuid, Metadata, UpdateMetadata, Where};
 use thiserror::Error;
+use validator::Validate;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Action {
@@ -334,13 +335,14 @@ lazy_static::lazy_static! {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Validate)]
 pub struct QuotaExceededError {
     pub usage_type: UsageType,
     pub action: Action,
     pub usage: usize,
     pub limit: usize,
-    pub remediation_url: Option<String>,
+    #[validate(length(min = 1))]
+    pub message: Option<String>,
 }
 
 impl fmt::Display for QuotaExceededError {
@@ -350,8 +352,8 @@ impl fmt::Display for QuotaExceededError {
             "'{}' exceeded quota limit for action '{}': current usage of {} exceeds limit of {}",
             self.usage_type, self.action, self.usage, self.limit
         )?;
-        if let Some(url) = self.remediation_url.as_ref().filter(|s| !s.is_empty()) {
-            write!(f, ". Request a quota increase: {}", url)?;
+        if let Some(msg) = self.message.as_ref() {
+            write!(f, ". {}", msg)?;
         }
         Ok(())
     }
@@ -396,5 +398,64 @@ impl QuotaEnforcer for () {
         _: &QuotaPayload<'_>,
     ) -> Pin<Box<dyn Future<Output = Result<(), QuotaEnforcerError>> + Send>> {
         Box::pin(ready(Ok(())))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Action, QuotaExceededError, UsageType};
+    use validator::Validate;
+
+    #[test]
+    fn test_quota_exceeded_error_message_none() {
+        let error = QuotaExceededError {
+            usage_type: UsageType::NumRecords,
+            action: Action::Add,
+            usage: 100,
+            limit: 50,
+            message: None,
+        };
+        assert!(error.validate().is_ok());
+    }
+
+    #[test]
+    fn test_quota_exceeded_error_message_empty() {
+        let error = QuotaExceededError {
+            usage_type: UsageType::NumRecords,
+            action: Action::Add,
+            usage: 100,
+            limit: 50,
+            message: Some("".to_string()),
+        };
+        assert!(error.validate().is_err());
+    }
+
+    #[test]
+    fn test_quota_exceeded_error_message_valid() {
+        let custom_message = "This is a valid message.";
+        let error = QuotaExceededError {
+            usage_type: UsageType::NumRecords,
+            action: Action::Add,
+            usage: 100,
+            limit: 50,
+            message: Some(custom_message.to_string()),
+        };
+        assert!(error.validate().is_ok());
+        let error_string = format!("{}", error);
+        assert!(error_string.contains(custom_message));
+    }
+
+    #[test]
+    fn test_quota_exceeded_error_display_no_message() {
+        let error = QuotaExceededError {
+            usage_type: UsageType::NumRecords,
+            action: Action::Add,
+            usage: 100,
+            limit: 50,
+            message: None,
+        };
+        assert!(error.validate().is_ok());
+        let error_string = format!("{}", error);
+        assert_eq!(error_string, "'NumRecords' exceeded quota limit for action 'Add': current usage of 100 exceeds limit of 50");
     }
 }
