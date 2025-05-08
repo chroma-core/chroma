@@ -54,6 +54,7 @@ impl TestDistributedSegment {
                 hnsw_provider,
                 blockfile_provider,
                 garbage_collection_context: None,
+                metrics: Default::default(),
             },
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),

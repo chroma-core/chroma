@@ -298,6 +298,7 @@ impl WorkerServer {
                 hnsw_provider: self.hnsw_index_provider.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 garbage_collection_context: None,
+                metrics: Default::default(),
             };
             let knn_orchestrator_futures = from_proto_knn(knn)?
                 .into_iter()
