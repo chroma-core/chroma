@@ -993,6 +993,48 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 	return tc.GetCollectionWithSegments(ctx, forkCollection.TargetCollectionID)
 }
 
+func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.UniqueID) (uint64, error) {
+	var rootCollectionID types.UniqueID
+
+	sourceCollectionIDStr := sourceCollectionID.String()
+	sourceCollectionDb, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(&sourceCollectionIDStr, nil)
+	if err != nil {
+		return 0, err
+	}
+	if sourceCollectionDb == nil {
+		return 0, common.ErrCollectionNotFound
+	}
+
+	if len(sourceCollectionDb.RootCollectionId) > 0 {
+		rootCollectionID, err = types.Parse(sourceCollectionDb.RootCollectionId)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		rootCollectionID = sourceCollectionID
+	}
+
+	limit := int32(1)
+	collections, err := tc.GetCollections(ctx, rootCollectionID, nil, "", "", &limit, nil)
+	if err != nil {
+		return 0, err
+	}
+	if len(collections) == 0 {
+		return 0, common.ErrCollectionNotFound
+	}
+	rootCollection := collections[0]
+
+	lineageFile, err := tc.getLineageFile(ctx, rootCollection)
+	if err != nil {
+		return 0, err
+	}
+
+	if lineageFile == nil || lineageFile.Dependencies == nil {
+		return 0, nil
+	}
+	return uint64(len(lineageFile.Dependencies)), nil
+}
+
 func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.CreateSegment, ts types.Timestamp) (*model.Segment, error) {
 	var result *model.Segment
 

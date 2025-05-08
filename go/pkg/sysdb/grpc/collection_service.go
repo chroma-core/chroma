@@ -393,6 +393,27 @@ func (s *Server) ForkCollection(ctx context.Context, req *coordinatorpb.ForkColl
 	return res, nil
 }
 
+func (s *Server) CountForks(ctx context.Context, req *coordinatorpb.CountForksRequest) (*coordinatorpb.CountForksResponse, error) {
+	res := &coordinatorpb.CountForksResponse{}
+
+	sourceCollectionID := req.SourceCollectionId
+	parsedSourceCollectionID, err := types.ToUniqueID(&sourceCollectionID)
+	if err != nil {
+		log.Error("CountForks failed. Failed to parse source collection id", zap.Error(err), zap.String("collection_id", sourceCollectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	count, err := s.coordinator.CountForks(ctx, parsedSourceCollectionID)
+	if err != nil {
+		if err == common.ErrCollectionNotFound {
+			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	res.Count = count
+	return res, nil
+}
+
 func (s *Server) ListCollectionVersions(ctx context.Context, req *coordinatorpb.ListCollectionVersionsRequest) (*coordinatorpb.ListCollectionVersionsResponse, error) {
 	collectionID, err := types.ToUniqueID(&req.CollectionId)
 	if err != nil {

@@ -19,9 +19,9 @@ use chroma_types::{
     UpdateCollectionConfiguration, UpdateCollectionError, VectorIndexConfiguration,
 };
 use chroma_types::{
-    Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
-    FlushCompactionResponseConversionError, ForkCollectionError, Segment, SegmentConversionError,
-    SegmentScope, Tenant,
+    Collection, CollectionConversionError, CollectionUuid, CountForksError,
+    FlushCompactionResponse, FlushCompactionResponseConversionError, ForkCollectionError, Segment,
+    SegmentConversionError, SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -337,6 +337,17 @@ impl SysDb {
             }
             SysDb::Sqlite(_) => Err(ForkCollectionError::Local),
             SysDb::Test(_) => Err(ForkCollectionError::Local),
+        }
+    }
+
+    pub async fn count_forks(
+        &mut self,
+        source_collection_id: CollectionUuid,
+    ) -> Result<u64, CountForksError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.count_forks(source_collection_id).await,
+            SysDb::Sqlite(_) => Err(CountForksError::Local),
+            SysDb::Test(_) => Err(CountForksError::Local),
         }
     }
 
@@ -973,6 +984,25 @@ impl GrpcSysDb {
                 .ok_or(ForkCollectionError::Field("vector".to_string()))?
                 .try_into()?,
         })
+    }
+
+    pub async fn count_forks(
+        &mut self,
+        source_collection_id: CollectionUuid,
+    ) -> Result<u64, CountForksError> {
+        let res = self
+            .client
+            .count_forks(chroma_proto::CountForksRequest {
+                source_collection_id: source_collection_id.0.to_string(),
+            })
+            .await
+            .map_err(|err| match err.code() {
+                Code::NotFound => CountForksError::NotFound(source_collection_id.0.to_string()),
+                _ => CountForksError::Internal(err.into()),
+            })?
+            .into_inner();
+
+        Ok(res.count)
     }
 
     pub async fn get_collections_to_gc(
