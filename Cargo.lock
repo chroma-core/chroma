@@ -1430,6 +1430,7 @@ dependencies = [
  "chroma-types",
  "clap",
  "foyer",
+ "futures",
  "mixtrics",
  "opentelemetry",
  "parking_lot",

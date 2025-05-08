@@ -494,11 +494,16 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<K, V> super::PersistentCache<K, V> for FoyerHybridCache<K, V>
 where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
+    async fn insert_to_disk(&self, key: K, value: V) {
+        println!("insert_to_disk");
+        self.cache.storage_writer(key).insert(value);
+    }
 }
 
 #[derive(Clone)]

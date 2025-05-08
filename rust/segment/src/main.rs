@@ -142,6 +142,8 @@ async fn main() {
 
     let runs = 10;
     for i in 0..runs {
+        println!("\n============ Run {} ============", i);
+        let reader_create_start = std::time::Instant::now();
         let reader = spann_provider
             .read(
                 &collection_with_segment.collection,
@@ -150,6 +152,10 @@ async fn main() {
             )
             .await
             .expect("Failed to read segment");
+        println!(
+            "Time taken to create reader: {:?}",
+            reader_create_start.elapsed()
+        );
 
         let mut fetch_pl_futures = Vec::new();
 

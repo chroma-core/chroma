@@ -75,11 +75,15 @@ where
 }
 
 /// A persistent cache extends the traits of a cache to require StorageKey and StorageValue.
+#[async_trait::async_trait]
 pub trait PersistentCache<K, V>: Cache<K, V>
 where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
+    async fn insert_to_disk(&self, key: K, value: V) {
+        unimplemented!("NO DISK INSERTION IMPLEMENTED");
+    }
 }
 
 /// A trait to capture the weight of objects in the system.
