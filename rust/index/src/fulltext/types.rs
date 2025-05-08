@@ -7,7 +7,6 @@ use futures::StreamExt;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use roaring::RoaringBitmap;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -431,33 +430,19 @@ impl<'me> FullTextIndexReader<'me> {
 #[async_trait::async_trait]
 impl<'me> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'me> {
     fn initial_beam_width(&self) -> usize {
-        512
+        64
     }
 
-    async fn lookup_ngram(
-        &self,
-        ngram: &str,
-    ) -> Result<HashMap<u32, RoaringBitmap>, FullTextIndexError> {
-        Ok(self
-            .posting_lists_blockfile_reader
-            .get_range(ngram..=ngram, ..)
-            .await?
-            .into_iter()
-            .map(|(_, doc, pos)| (doc, pos.iter().collect()))
-            .collect())
-    }
-
-    async fn lookup_ngram_range_for_document<'fts, NgramRange>(
+    async fn lookup_ngram_range<'fts, NgramRange>(
         &'fts self,
         ngram_range: NgramRange,
-        document_id: u32,
     ) -> Result<Vec<(&'fts str, u32, RoaringBitmap)>, FullTextIndexError>
     where
         NgramRange: Clone + RangeBounds<&'fts str> + Send + Sync,
     {
         Ok(self
             .posting_lists_blockfile_reader
-            .get_range(ngram_range, document_id..=document_id)
+            .get_range(ngram_range, ..)
             .await?
             .into_iter()
             .map(|(ngram, doc, pos)| (ngram, doc, pos.iter().collect()))
