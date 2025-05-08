@@ -482,8 +482,9 @@ impl IntoSqliteExpr for DocumentExpression {
             EmbeddingFulltextSearch::StringValue,
         ));
         let doc_contains = doc_col
+            .clone()
             .like(format!("%{}%", self.pattern.replace("%", "")))
-            .is(true);
+            .and(doc_col.is_not_null());
         match self.operator {
             DocumentOperator::Contains => doc_contains,
             DocumentOperator::NotContains => doc_contains.not(),
@@ -495,9 +496,11 @@ impl IntoSqliteExpr for DocumentExpression {
 
 impl IntoSqliteExpr for MetadataExpression {
     fn eval(&self) -> SimpleExpr {
-        let key_cond = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key))
+        let key_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key));
+        let key_cond = key_col
+            .clone()
             .eq(self.key.to_string())
-            .is(true);
+            .and(key_col.is_not_null());
         match &self.comparison {
             MetadataComparison::Primitive(op, val) => {
                 let (col, sval) = match val {
