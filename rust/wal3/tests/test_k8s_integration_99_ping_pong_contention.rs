@@ -115,7 +115,7 @@ async fn test_k8s_integration_ping_pong_contention() {
         .unwrap(),
     );
 
-    // Set a timer to make sure the test only runs for 2 minutes.
+    // Set a timer to make sure the test only runs for 3 minutes.
     let fail = tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(180)).await;
         eprintln!("Taking down the test");
