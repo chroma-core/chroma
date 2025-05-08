@@ -1,7 +1,8 @@
 use chroma_types::{
-    Collection, CollectionAndSegments, CollectionUuid, Database, FlushCompactionResponse,
-    GetCollectionSizeError, GetCollectionWithSegmentsError, GetSegmentsError, ListDatabasesError,
-    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant,
+    Collection, CollectionAndSegments, CollectionUuid, CountForksError, Database,
+    FlushCompactionResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
+    GetSegmentsError, ListDatabasesError, ListDatabasesResponse, Segment, SegmentFlushInfo,
+    SegmentScope, SegmentType, Tenant,
 };
 use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
@@ -540,5 +541,12 @@ impl TestSysDb {
             record_segment,
             vector_segment,
         })
+    }
+
+    pub(crate) async fn count_forks(
+        &mut self,
+        _source_collection_id: CollectionUuid,
+    ) -> Result<usize, CountForksError> {
+        Ok(10)
     }
 }
