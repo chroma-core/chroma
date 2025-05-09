@@ -1175,6 +1175,7 @@ async fn fork_collection(
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
     let mut quota_payload = QuotaPayload::new(Action::ForkCollection, tenant.clone(), api_token);
     quota_payload = quota_payload.with_collection_uuid(collection_id);
+    quota_payload = quota_payload.with_collection_name(&payload.new_name);
     server.quota_enforcer.enforce(&quota_payload).await?;
 
     let _guard =

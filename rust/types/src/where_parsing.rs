@@ -1,5 +1,7 @@
+use crate::regex::literal_expr::LiteralExpr;
+use crate::regex::{ChromaRegex, ChromaRegexError};
 use crate::{CompositeExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where};
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -50,6 +52,8 @@ impl RawWhereFields {
 
 #[derive(Error, Debug)]
 pub enum WhereValidationError {
+    #[error(transparent)]
+    Regex(#[from] ChromaRegexError),
     #[error("Invalid where clause")]
     WhereClause,
     #[error("Invalid where document clause")]
@@ -58,10 +62,7 @@ pub enum WhereValidationError {
 
 impl ChromaError for WhereValidationError {
     fn code(&self) -> chroma_error::ErrorCodes {
-        match self {
-            WhereValidationError::WhereClause => chroma_error::ErrorCodes::InvalidArgument,
-            WhereValidationError::WhereDocumentClause => chroma_error::ErrorCodes::InvalidArgument,
-        }
+        ErrorCodes::InvalidArgument
     }
 }
 
@@ -140,10 +141,19 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidati
     let operator_type = match key.as_str() {
         "$contains" => DocumentOperator::Contains,
         "$not_contains" => DocumentOperator::NotContains,
-        "$matches" => DocumentOperator::Matches,
-        "$not_matches" => DocumentOperator::NotMatches,
+        "$regex" => DocumentOperator::Regex,
+        "$not_regex" => DocumentOperator::NotRegex,
         _ => return Err(WhereValidationError::WhereDocumentClause),
     };
+    if matches!(
+        operator_type,
+        DocumentOperator::Regex | DocumentOperator::NotRegex
+    ) {
+        let regex = ChromaRegex::try_from(value_str.to_string())?;
+        if !LiteralExpr::from(regex.hir().clone()).contains_ngram_literal(3, 6) {
+            return Err(ChromaRegexError::PermissivePattern.into());
+        }
+    }
     Ok(Where::Document(crate::DocumentExpression {
         operator: operator_type,
         pattern: value_str.to_string(),
