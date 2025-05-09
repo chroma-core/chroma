@@ -104,7 +104,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             fname: The path to save the model to.
             chunk_size: The chunk size to use when downloading.
         """
-        with httpx.stream("GET", url) as resp:
+        with httpx.stream("GET", url, timeout=None) as resp:
             total = int(resp.headers.get("content-length", 0))
             with open(fname, "wb") as file, self.tqdm(
                 desc=str(fname),
