@@ -80,6 +80,29 @@ class CustomEmbeddingFunction(EmbeddingFunction[Embeddable]):
         return "cosine"
 
 
+@register_embedding_function
+class CustomEmbeddingFunction2(EmbeddingFunction[Embeddable]):
+    def __init__(self, dim: int = 4):
+        self._dim = dim
+
+    def __call__(self, input: Embeddable) -> Embeddings:
+        return cast(Embeddings, np.array([[2.0] * self._dim], dtype=np.float32))
+
+    @staticmethod
+    def name() -> str:
+        return "custom_ef2"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {"dim": self._dim}
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "CustomEmbeddingFunction2":
+        return CustomEmbeddingFunction2(dim=config["dim"])
+
+    def default_space(self) -> Space:
+        return "l2"
+
+
 def test_legacy_embedding_function(client: ClientAPI) -> None:
     """Test creating and getting collections with legacy embedding functions"""
     client.reset()
@@ -830,3 +853,148 @@ def test_default_collection_creation(client: ClientAPI) -> None:
     ef = config.get("embedding_function")
     assert ef is not None
     assert ef.name() == "default"
+
+
+def test_ef_no_config(client: ClientAPI) -> None:
+    """Test creating a collection with no EF in config."""
+    client.reset()
+    coll = client.create_collection(
+        name="test_no_config", embedding_function=CustomEmbeddingFunction(dim=3)
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+    assert ef.get_config() == {"dim": 3}
+
+    coll = client.get_or_create_collection(
+        name="test_no_config", embedding_function=CustomEmbeddingFunction(dim=3)
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+    assert ef.get_config() == {"dim": 3}
+
+    coll = client.get_collection(name="test_no_config")
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+    assert ef.get_config() == {"dim": 3}
+
+
+def test_ef_with_config_exists_no_ef(client: ClientAPI) -> None:
+    """Test creating a collection with EF in parameter, no EF in config."""
+    client.reset()
+    coll = client.create_collection(
+        name="test_ef_with_config_exists_no_ef",
+        embedding_function=CustomEmbeddingFunction(dim=3),
+        configuration={"hnsw": {"space": "cosine"}},
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+    assert ef.get_config() == {"dim": 3}
+
+    coll = client.get_or_create_collection(
+        name="test_ef_with_config_exists_no_ef",
+        embedding_function=CustomEmbeddingFunction(dim=3),
+        configuration={"hnsw": {"space": "cosine"}},
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+    assert ef.get_config() == {"dim": 3}
+
+    coll = client.get_collection(name="test_ef_with_config_exists_no_ef")
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+    assert ef.get_config() == {"dim": 3}
+
+
+def test_ef_with_config_exists_with_ef_valid(client: ClientAPI) -> None:
+    """Test creating a collection with EF in parameter, EF in config. They are the same."""
+    client.reset()
+    coll = client.create_collection(
+        name="test_ef_with_config_exists_with_ef",
+        embedding_function=CustomEmbeddingFunction(dim=3),
+        configuration={
+            "hnsw": {"space": "cosine"},
+            "embedding_function": CustomEmbeddingFunction(dim=3),
+        },
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+    assert ef.get_config() == {"dim": 3}
+
+    coll = client.get_or_create_collection(
+        name="test_ef_with_config_exists_with_ef",
+        embedding_function=CustomEmbeddingFunction(dim=3),
+        configuration={
+            "hnsw": {"space": "cosine"},
+            "embedding_function": CustomEmbeddingFunction(dim=3),
+        },
+    )
+    assert coll is not None
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+    assert ef.get_config() == {"dim": 3}
+
+    coll = client.get_collection(name="test_ef_with_config_exists_with_ef")
+    ef = coll.configuration.get("embedding_function")
+    assert ef is not None
+    assert ef.name() == "custom_ef"
+    assert ef.get_config() == {"dim": 3}
+
+
+def test_create_ef_with_config_exists_with_ef_invalid(client: ClientAPI) -> None:
+    """Test creating a collection with EF in parameter, EF in config. They are different."""
+    client.reset()
+    with pytest.raises(ValueError):
+        client.create_collection(
+            name="test_ef_with_config_exists_with_ef",
+            embedding_function=CustomEmbeddingFunction(dim=3),
+            configuration={
+                "hnsw": {"space": "cosine"},
+                "embedding_function": CustomEmbeddingFunction2(dim=3),
+            },
+        )
+
+
+def test_get_or_create_ef_with_config_exists_with_ef_invalid(client: ClientAPI) -> None:
+    """Test get_or_create with EF in parameter, EF in config. They are different."""
+    client.reset()
+    with pytest.raises(ValueError):
+        client.get_or_create_collection(
+            name="test_ef_with_config_exists_with_ef",
+            embedding_function=CustomEmbeddingFunction(dim=3),
+            configuration={
+                "hnsw": {"space": "cosine"},
+                "embedding_function": CustomEmbeddingFunction2(dim=3),
+            },
+        )
+
+
+def test_get_collection_ef_with_config_exists_with_ef_invalid(
+    client: ClientAPI,
+) -> None:
+    """Test get_collection with EF in parameter, EF in config. They are different."""
+    client.reset()
+    client.create_collection(
+        name="test_ef_with_config_exists_with_ef",
+        configuration={
+            "hnsw": {"space": "cosine"},
+            "embedding_function": CustomEmbeddingFunction2(dim=3),
+        },
+    )
+    with pytest.raises(ValueError):
+        client.get_collection(
+            name="test_ef_with_config_exists_with_ef",
+            embedding_function=CustomEmbeddingFunction(dim=3),
+        )
