@@ -1271,13 +1271,11 @@ impl LoadService {
             for declared in declared {
                 if let Entry::Vacant(entry) = running.entry(declared.uuid) {
                     tracing::info!("spawning workload {}", declared.uuid);
-                    let root = tracing::info_span!(parent: None, "workload");
                     let this = Arc::clone(self);
                     let done = Arc::new(AtomicBool::new(false));
                     let done_p = Arc::clone(&done);
                     let inhibit = Arc::clone(&self.inhibit);
                     let task = tokio::task::spawn(async move {
-                        let _enter = root.enter();
                         this.run_one_workload(done, inhibit, declared).await
                     });
                     entry.insert((done_p, task));
@@ -1295,36 +1293,6 @@ impl LoadService {
         let client = Arc::new(client(spec.connection.clone()).await);
         let mut guac = Guacamole::new(spec.expires.timestamp_millis() as u64);
         let mut next_op = Instant::now();
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1000);
-        let _ = tx
-            .send(tokio::spawn(async move { Ok::<(), Error>(()) }))
-            .await;
-        let this = Arc::clone(&self);
-        let data_set = Arc::clone(&spec.data_set);
-        let reaper = tokio::spawn(async move {
-            while let Some(task) = rx.recv().await {
-                if let Err(err) = task.await.unwrap() {
-                    if !format!("{err:?}").contains("429") {
-                        this.metrics.failed.add(
-                            1,
-                            &[KeyValue::new(
-                                Key::from_static_str("data_set"),
-                                Value::from(data_set.name()),
-                            )],
-                        );
-                        tracing::error!("workload task failed: {err:?}");
-                    } else {
-                        this.metrics.limited.add(
-                            1,
-                            &[KeyValue::new(
-                                Key::from_static_str("data_set"),
-                                Value::from(data_set.name()),
-                            )],
-                        );
-                    }
-                }
-            }
-        });
 
         // Initialize the data set.
         let data_set = Arc::clone(&spec.data_set);
@@ -1408,9 +1376,9 @@ impl LoadService {
                         .await
                         .map_err(|err| Error::FailWorkload(err.to_string()))
                     {
-                        Ok(()) => Ok(()),
+                        Ok(()) => (),
                         Err(err) => {
-                            if err.to_string().contains("invalid request: No results") {
+                            if format!("{err:?}").contains("invalid request: No results") {
                                 this.metrics.no_results.add(
                                     1,
                                     &[KeyValue::new(
@@ -1418,20 +1386,34 @@ impl LoadService {
                                         Value::from(data_set.name()),
                                     )],
                                 );
-                                Ok(())
+                                tracing::warn!("workload step no results: {err:?}");
+                            } else if !format!("{err:?}").contains("429") {
+                                this.metrics.failed.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                tracing::error!("workload step failed: {err:?}");
                             } else {
-                                Err(err)
+                                this.metrics.limited.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                tracing::warn!("workload step rate limited: {err:?}");
                             }
                         }
-                    }
+                    };
                 };
-                tx.send(tokio::spawn(fut)).await.unwrap();
+                let span = tracing::info_span!(parent: None, "step", workload_uuid = %spec.uuid);
+                tokio::spawn(fut.instrument(span));
             }
         }
-        // Not an error, just needs to show up in stdout.
-        tracing::error!("workload done: {}/{}", spec.name, spec.description());
-        drop(tx);
-        reaper.await.unwrap();
+        tracing::info!("workload done: {}/{}", spec.name, spec.description());
     }
 
     fn load_persistent(&self) -> Result<(), Error> {
