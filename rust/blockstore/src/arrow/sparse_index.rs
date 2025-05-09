@@ -718,6 +718,89 @@ mod tests {
     }
 
     #[test]
+    fn test_get_block_ids_range() {
+        let block_id_0 = uuid::Uuid::new_v4();
+        let writer = SparseIndexWriter::new(block_id_0);
+        writer
+            .set_count(block_id_0, 5)
+            .expect("Set count should succeed");
+        let mut blockfile_key = CompositeKey::new("a".to_string(), "a");
+        let block_id_1 = uuid::Uuid::new_v4();
+        writer
+            .add_block(blockfile_key.clone(), block_id_1)
+            .expect("No error");
+        writer
+            .set_count(block_id_1, 10)
+            .expect("Set count should succeed");
+
+        let block_id_2 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("a".to_string(), "c");
+        writer
+            .add_block(blockfile_key.clone(), block_id_2)
+            .expect("No error");
+        writer
+            .set_count(block_id_2, 10)
+            .expect("Set count should succeed");
+
+        let block_id_3 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("b".to_string(), "a");
+        writer
+            .add_block(blockfile_key.clone(), block_id_3)
+            .expect("No error");
+        writer
+            .set_count(block_id_3, 10)
+            .expect("Set count should succeed");
+
+        let block_id_4 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("b".to_string(), "f");
+        writer
+            .add_block(blockfile_key.clone(), block_id_4)
+            .expect("No error");
+        writer
+            .set_count(block_id_4, 10)
+            .expect("Set count should succeed");
+
+        let block_id_5 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("c".to_string(), "n");
+        writer
+            .add_block(blockfile_key.clone(), block_id_5)
+            .expect("No error");
+        writer
+            .set_count(block_id_5, 10)
+            .expect("Set count should succeed");
+
+        let block_id_6 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("d".to_string(), "x");
+        writer
+            .add_block(blockfile_key.clone(), block_id_6)
+            .expect("No error");
+        writer
+            .set_count(block_id_6, 10)
+            .expect("Set count should succeed");
+
+        let reader = writer.to_reader().expect("Conversion should succeed");
+        let blocks = reader.get_block_ids_range(..);
+        assert_eq!(
+            blocks,
+            vec![
+                block_id_0, block_id_1, block_id_2, block_id_3, block_id_4, block_id_5, block_id_6
+            ]
+        );
+
+        let blocks = reader.get_block_ids_range(.."a");
+        assert_eq!(blocks, vec![block_id_0]);
+
+        let blocks = reader.get_block_ids_range(..="a");
+        assert_eq!(blocks, vec![block_id_0, block_id_1, block_id_2]);
+
+        let blocks = reader.get_block_ids_range("b"..="c");
+        assert_eq!(blocks, vec![block_id_2, block_id_3, block_id_4, block_id_5]);
+
+        let blocks = reader.get_block_ids_range("c"..);
+        assert_eq!(blocks, vec![block_id_4, block_id_5, block_id_6]);
+    }
+
+    #[test]
     fn test_serde() {
         let ids = [uuid::Uuid::new_v4(), uuid::Uuid::new_v4()];
         let counts = [10, 20];

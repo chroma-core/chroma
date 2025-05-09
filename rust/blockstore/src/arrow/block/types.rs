@@ -305,9 +305,12 @@ impl Block {
     }
 
     /// Get all the values for a given prefix & key range in the block
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    /// - If at least one end of the prefix range is excluded (currently unsupported)
+    ///
+    /// The prefix and key of the returning value must be contained by the prefix range and key range respectively
+    ///
+    /// ### Example
+    /// If we have block: [(p0, k0, v0), (p0, k1, v1), (p1, k0, v2), (p1, k1, v3), (p2, k1, v4)]
+    /// Then block.get_range(p0..p2, k1..) will return [(p0, k1, v1), (p1, k1, v3)]
     pub fn get_range<
         'prefix,
         'me,
