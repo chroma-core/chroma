@@ -391,6 +391,21 @@ impl IntoSqliteExpr for Where {
             Where::Metadata(expr) => {
                 // Local chroma is mixing the usage of int and float
                 match &expr.comparison {
+                    // new logic for int and float will create the union subquery in MetadataExpression::eval()
+                    // now for range expressions, we just eval the subquery and exit the match
+                    MetadataComparison::Primitive(op, val)
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_))
+                            && matches!(
+                                op,
+                                PrimitiveOperator::GreaterThan
+                                    | PrimitiveOperator::GreaterThanOrEqual
+                                    | PrimitiveOperator::LessThan
+                                    | PrimitiveOperator::LessThanOrEqual
+                            ) =>
+                    {
+                        // Just pass through to MetadataExpression which will use the UNION approach
+                        expr.eval()
+                    }
                     MetadataComparison::Primitive(op, MetadataValue::Int(i)) => {
                         let alt = MetadataExpression {
                             key: expr.key.clone(),
@@ -452,6 +467,87 @@ impl IntoSqliteExpr for Where {
             }
         }
     }
+}
+
+// this function creates a union subquery for int and float range queries
+// this utilizes index on int and float columns separately and combines results after
+// for better performance
+
+// then on Where::eval(), directly eval the subquery instead of using the OR logic
+fn create_union_subquery_for_int_float_range_ops(
+    key: String,
+    op: PrimitiveOperator,
+    val: MetadataValue,
+) -> sea_query::SelectStatement {
+    let key_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key));
+    let key_cond = key_col.clone().eq(key).and(key_col.is_not_null());
+
+    let mut subq1 = Query::select()
+        .column(EmbeddingMetadata::Id)
+        .from(EmbeddingMetadata::Table)
+        .and_where(key_cond.clone())
+        .to_owned();
+
+    let mut subq2 = Query::select()
+        .column(EmbeddingMetadata::Id)
+        .from(EmbeddingMetadata::Table)
+        .and_where(key_cond)
+        .to_owned();
+
+    match val {
+        MetadataValue::Int(i) => {
+            let int_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::IntValue));
+            let float_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::FloatValue));
+
+            match op {
+                PrimitiveOperator::GreaterThan => {
+                    subq1.and_where(int_col.gt(i));
+                    subq2.and_where(float_col.gt(i as f64));
+                }
+                PrimitiveOperator::GreaterThanOrEqual => {
+                    subq1.and_where(int_col.gte(i));
+                    subq2.and_where(float_col.gte(i as f64));
+                }
+                PrimitiveOperator::LessThan => {
+                    subq1.and_where(int_col.lt(i));
+                    subq2.and_where(float_col.lt(i as f64));
+                }
+                PrimitiveOperator::LessThanOrEqual => {
+                    subq1.and_where(int_col.lte(i));
+                    subq2.and_where(float_col.lte(i as f64));
+                }
+                _ => unreachable!(),
+            }
+        }
+        MetadataValue::Float(f) => {
+            let int_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::IntValue));
+            let float_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::FloatValue));
+
+            match op {
+                PrimitiveOperator::GreaterThan => {
+                    subq1.and_where(float_col.gt(f));
+                    subq2.and_where(int_col.gt(f as i64));
+                }
+                PrimitiveOperator::GreaterThanOrEqual => {
+                    subq1.and_where(float_col.gte(f));
+                    subq2.and_where(int_col.gte(f as i64));
+                }
+                PrimitiveOperator::LessThan => {
+                    subq1.and_where(float_col.lt(f));
+                    subq2.and_where(int_col.lt(f as i64));
+                }
+                PrimitiveOperator::LessThanOrEqual => {
+                    subq1.and_where(float_col.lte(f));
+                    subq2.and_where(int_col.lte(f as i64));
+                }
+                _ => unreachable!(),
+            }
+        }
+        _ => return subq1,
+    }
+
+    subq1.union(sea_query::UnionType::Distinct, subq2);
+    subq1
 }
 
 impl IntoSqliteExpr for CompositeExpression {
@@ -526,19 +622,51 @@ impl IntoSqliteExpr for MetadataExpression {
                         Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
                     }
                     PrimitiveOperator::GreaterThan => {
-                        subq.and_where(scol.gt(sval));
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_)) {
+                            subq = create_union_subquery_for_int_float_range_ops(
+                                self.key.clone(),
+                                op.clone(),
+                                val.clone(),
+                            );
+                        } else {
+                            subq.and_where(scol.gt(sval));
+                        }
                         Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::GreaterThanOrEqual => {
-                        subq.and_where(scol.gte(sval));
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_)) {
+                            subq = create_union_subquery_for_int_float_range_ops(
+                                self.key.clone(),
+                                op.clone(),
+                                val.clone(),
+                            );
+                        } else {
+                            subq.and_where(scol.gte(sval));
+                        }
                         Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::LessThan => {
-                        subq.and_where(scol.lt(sval));
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_)) {
+                            subq = create_union_subquery_for_int_float_range_ops(
+                                self.key.clone(),
+                                op.clone(),
+                                val.clone(),
+                            );
+                        } else {
+                            subq.and_where(scol.lt(sval));
+                        }
                         Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::LessThanOrEqual => {
-                        subq.and_where(scol.lte(sval));
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_)) {
+                            subq = create_union_subquery_for_int_float_range_ops(
+                                self.key.clone(),
+                                op.clone(),
+                                val.clone(),
+                            );
+                        } else {
+                            subq.and_where(scol.lte(sval));
+                        }
                         Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                 }
