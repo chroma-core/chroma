@@ -97,5 +97,9 @@ name = "query"
 harness = false
 
 [[bench]]
+name = "regex"
+harness = false
+
+[[bench]]
 name = "spann"
 harness = false
