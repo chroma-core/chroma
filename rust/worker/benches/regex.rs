@@ -20,8 +20,8 @@ use roaring::RoaringBitmap;
 use tokio::time::Instant;
 use worker::execution::operators::filter::{FilterInput, FilterOperator};
 
-const LOG_CHUNK_SIZE: usize = 1000;
-const DOCUMENT_SIZE: usize = 10000;
+const LOG_CHUNK_SIZE: usize = 10000;
+const DOCUMENT_SIZE: usize = 100000;
 const REGEX_PATTERNS: &[&str] = &[
     r"wikipedia",
     r"wikipedia.*",
@@ -31,6 +31,7 @@ const REGEX_PATTERNS: &[&str] = &[
     r".*wiki.*",
     r"May|June",
     r"(March|April) 19\d\d",
+    r"\w{6}",
 ];
 
 fn bench_regex(criterion: &mut Criterion) {
@@ -112,7 +113,7 @@ fn bench_regex(criterion: &mut Criterion) {
         let filter_operator = FilterOperator {
             query_ids: None,
             where_clause: Some(Where::Document(DocumentExpression {
-                operator: DocumentOperator::Matches,
+                operator: DocumentOperator::Regex,
                 pattern: pattern.to_string(),
             })),
         };

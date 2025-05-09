@@ -827,13 +827,13 @@ def validate_where_document(where_document: WhereDocument) -> None:
         if operator not in [
             "$contains",
             "$not_contains",
-            "$matches",
-            "$not_matches",
+            "$regex",
+            "$not_regex",
             "$and",
             "$or",
         ]:
             raise ValueError(
-                f"Expected where document operator to be one of $contains, $and, $or, got {operator}"
+                f"Expected where document operator to be one of $contains, $not_contains, $regex, $not_regex, $and, $or, got {operator}"
             )
         if operator == "$and" or operator == "$or":
             if not isinstance(operand, list):
@@ -846,14 +846,14 @@ def validate_where_document(where_document: WhereDocument) -> None:
                 )
             for where_document_expression in operand:
                 validate_where_document(where_document_expression)
-        # Value is a $contains operator
+        # Value is $contains/$not_contains/$regex/$not_regex operator
         elif not isinstance(operand, str):
             raise ValueError(
-                f"Expected where document operand value for operator $contains to be a str, got {operand}"
+                f"Expected where document operand value for operator {operator} to be a str, got {operand}"
             )
         elif len(operand) == 0:
             raise ValueError(
-                "Expected where document operand value for operator $contains to be a non-empty str"
+                f"Expected where document operand value for operator {operator} to be a non-empty str"
             )
 
 
