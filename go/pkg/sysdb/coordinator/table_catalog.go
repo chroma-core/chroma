@@ -967,7 +967,10 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		if err != nil {
 			return err
 		}
-
+		// Defensive backstop to prevent too many forks
+		if len(lineageFile.Dependencies) > 1000000 {
+			return common.ErrCollectionTooManyFork
+		}
 		lineageFile.Dependencies = append(lineageFile.Dependencies, &coordinatorpb.CollectionVersionDependency{
 			SourceCollectionId:      sourceCollectionIDStr,
 			SourceCollectionVersion: uint64(sourceCollection.Version),
