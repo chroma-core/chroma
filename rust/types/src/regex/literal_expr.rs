@@ -170,27 +170,20 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                         .await?;
                     for (ngram, doc_id, next_pos) in ngram_doc_pos {
                         if let Some(pos) = doc_pos.get(&doc_id) {
-                            if ngram.chars().last().is_some_and(|c| match literal {
-                                Literal::Char(literal_char) => c == *literal_char,
-                                Literal::Class(class_unicode) => {
-                                    class_unicode.iter().any(|r| r.start() <= c && c <= r.end())
-                                }
-                            }) {
-                                // SAFETY(Sicheng): The RoaringBitmap iterator should be sorted
-                                let valid_next_pos = RoaringBitmap::from_sorted_iter(
-                                    pos.iter()
-                                        .filter_map(|p| next_pos.contains(p + 1).then_some(p + 1)),
-                                )
-                                .expect("RoaringBitmap iterator should be sorted");
+                            // SAFETY(Sicheng): The RoaringBitmap iterator should be sorted
+                            let valid_next_pos = RoaringBitmap::from_sorted_iter(
+                                pos.iter()
+                                    .filter_map(|p| next_pos.contains(p + 1).then_some(p + 1)),
+                            )
+                            .expect("RoaringBitmap iterator should be sorted");
 
-                                if !valid_next_pos.is_empty() {
-                                    let new_suffix = ngram.chars().skip(1).collect();
-                                    *new_suffix_doc_pos
-                                        .entry(new_suffix)
-                                        .or_default()
-                                        .entry(doc_id)
-                                        .or_default() |= valid_next_pos;
-                                }
+                            if !valid_next_pos.is_empty() {
+                                let new_suffix = ngram.chars().skip(1).collect();
+                                *new_suffix_doc_pos
+                                    .entry(new_suffix)
+                                    .or_default()
+                                    .entry(doc_id)
+                                    .or_default() |= valid_next_pos;
                             }
                         }
                     }

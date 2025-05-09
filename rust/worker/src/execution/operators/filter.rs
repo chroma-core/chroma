@@ -246,7 +246,9 @@ impl<'me> MetadataProvider<'me> {
                         let mut exact_matching_offset_ids = RoaringBitmap::new();
                         match approximate_matching_offset_ids {
                             // Perform point lookup for potential matching documents is there is not too many of them
-                            Some(offset_ids) if offset_ids.len() < 10000 => {
+                            Some(offset_ids)
+                                if offset_ids.len() < rec_reader.count().await? as u64 / 10 =>
+                            {
                                 for id in offset_ids {
                                     if rec_reader.get_data_for_offset_id(id).await?.is_some_and(
                                         |rec| rec.document.is_some_and(|doc| regex.is_match(doc)),
