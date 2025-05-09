@@ -245,7 +245,8 @@ impl<'me> MetadataProvider<'me> {
                         let regex = chroma_regex.regex()?;
                         let mut exact_matching_offset_ids = RoaringBitmap::new();
                         match approximate_matching_offset_ids {
-                            Some(offset_ids) => {
+                            // Perform point lookup for potential matching documents is there is not too many of them
+                            Some(offset_ids) if offset_ids.len() < 10000 => {
                                 for id in offset_ids {
                                     if rec_reader.get_data_for_offset_id(id).await?.is_some_and(
                                         |rec| rec.document.is_some_and(|doc| regex.is_match(doc)),
@@ -254,14 +255,20 @@ impl<'me> MetadataProvider<'me> {
                                     }
                                 }
                             }
-                            None => {
+                            // Perform range scan of all documents
+                            candidate_offsets => {
                                 for (offset, record) in rec_reader
                                     .get_data_stream(..)
                                     .await
                                     .try_collect::<Vec<_>>()
                                     .await?
                                 {
-                                    if record.document.is_some_and(|doc| regex.is_match(doc)) {
+                                    if candidate_offsets
+                                        .as_ref()
+                                        .map(|offsets| offsets.contains(offset))
+                                        .unwrap_or(candidate_offsets.is_none())
+                                        && record.document.is_some_and(|doc| regex.is_match(doc))
+                                    {
                                         exact_matching_offset_ids.insert(offset);
                                     }
                                 }
