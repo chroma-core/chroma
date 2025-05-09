@@ -967,11 +967,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		if err != nil {
 			return err
 		}
-		// NOTE: This is a temporary hardcoded limit for the size of the lineage file
-		// TODO: Load the limit value from quota / scorecard, and/or improve the lineage file design to avoid large lineage file
-		if len(lineageFile.Dependencies) > 1000000 {
-			return common.ErrCollectionTooManyFork
-		}
+
 		lineageFile.Dependencies = append(lineageFile.Dependencies, &coordinatorpb.CollectionVersionDependency{
 			SourceCollectionId:      sourceCollectionIDStr,
 			SourceCollectionVersion: uint64(sourceCollection.Version),
