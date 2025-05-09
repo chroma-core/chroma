@@ -1,3 +1,4 @@
+use crate::regex::literal_expr::LiteralExpr;
 use crate::regex::{ChromaRegex, ChromaRegexError};
 use crate::{CompositeExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -149,7 +150,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidati
         DocumentOperator::Regex | DocumentOperator::NotRegex
     ) {
         let regex = ChromaRegex::try_from(value_str.to_string())?;
-        if !regex.hir().contains_ngram_literal(3) {
+        if !LiteralExpr::from(regex.hir().clone()).contains_ngram_literal(3, 6) {
             return Err(ChromaRegexError::PermissivePattern.into());
         }
     }
