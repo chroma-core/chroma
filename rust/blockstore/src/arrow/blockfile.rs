@@ -496,7 +496,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> impl Stream<Item = Result<(K, V), Box<dyn ChromaError>>> + Send + 'me
+    ) -> impl Stream<Item = Result<(&'me str, K, V), Box<dyn ChromaError>>> + Send + 'me
     where
         PrefixRange: RangeBounds<&'prefix str> + Clone + Send + 'me,
         KeyRange: RangeBounds<K> + Clone + Send + 'me,
@@ -533,7 +533,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
+    ) -> Result<Vec<(&'me str, K, V)>, Box<dyn ChromaError>>
     where
         PrefixRange: RangeBounds<&'prefix str> + Clone,
         KeyRange: RangeBounds<K> + Clone,
@@ -543,7 +543,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .sparse_index
             .get_block_ids_range(prefix_range.clone(), key_range.clone());
 
-        let mut result: Vec<(K, V)> = vec![];
+        let mut result: Vec<(&str, K, V)> = vec![];
         for block_id in block_ids {
             let block_opt = match self.get_block(block_id, StorageRequestPriority::P0).await {
                 Ok(Some(block)) => Some(block),
@@ -894,7 +894,7 @@ mod tests {
                 Ok(c) => {
                     let mut kv_map = HashMap::new();
                     for entry in c {
-                        kv_map.insert(format!("{}/{}", prefix_query, entry.0), entry.1);
+                        kv_map.insert(format!("{}/{}", prefix_query, entry.1), entry.2);
                     }
                     for j in 1..=5 {
                         let prefix = format!("{}/{}", "prefix", j);
@@ -1016,7 +1016,7 @@ mod tests {
 
             let mut kv_map = HashMap::new();
             for entry in materialized_range {
-                kv_map.insert(entry.0, entry.1);
+                kv_map.insert(entry.1, entry.2);
             }
             for i in 1..num_keys {
                 let key = format!("{}/{}", "key", i);
