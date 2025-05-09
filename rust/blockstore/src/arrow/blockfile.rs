@@ -506,7 +506,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         futures::stream::iter(
             self.root
                 .sparse_index
-                .get_block_ids_range(prefix_range.clone(), key_range.clone())
+                .get_block_ids_range(prefix_range.clone())
                 .into_iter()
                 .map(Ok),
         )
@@ -541,7 +541,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(prefix_range.clone(), key_range.clone());
+            .get_block_ids_range(prefix_range.clone());
 
         let mut result: Vec<(&str, K, V)> = vec![];
         for block_id in block_ids {
@@ -643,43 +643,47 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
     ) -> Result<usize, Box<dyn ChromaError>> {
         let mut rank = 0;
 
-        // This should be sorted by offset id ranges
+        let last_block_id = self.root.sparse_index.get_target_block_id(&CompositeKey {
+            prefix: prefix.to_string(),
+            key: key.clone().into(),
+        });
         let block_ids = self
             .root
             .sparse_index
-            .get_block_ids_range(..=prefix, ..=key.clone());
+            .get_block_ids_range(..=prefix)
+            .into_iter()
+            .take_while(|id| id != &last_block_id)
+            .collect::<Vec<_>>();
+
+        if self.root.version >= Version::V1_1 {
+            rank += self
+                .root
+                .sparse_index
+                .data
+                .forward
+                .values()
+                .take(block_ids.len())
+                .map(|meta| meta.count)
+                .sum::<u32>() as usize;
+        } else {
+            self.load_blocks(&block_ids).await;
+            for block_id in block_ids.iter().take(block_ids.len() - 1) {
+                let block = self
+                    .get_block(*block_id, StorageRequestPriority::P0)
+                    .await
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+                    .ok_or(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
+                rank += block.len();
+            }
+        }
 
         // The block that may contain the prefix-key pair
-        if let Some(last_id) = block_ids.last() {
-            if self.root.version >= Version::V1_1 {
-                rank += self
-                    .root
-                    .sparse_index
-                    .data
-                    .forward
-                    .values()
-                    .take(block_ids.len() - 1)
-                    .map(|meta| meta.count)
-                    .sum::<u32>() as usize;
-            } else {
-                self.load_blocks(&block_ids).await;
-                for block_id in block_ids.iter().take(block_ids.len() - 1) {
-                    let block =
-                        self.get_block(*block_id, StorageRequestPriority::P0)
-                            .await
-                            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
-                            .ok_or(Box::new(ArrowBlockfileError::BlockNotFound)
-                                as Box<dyn ChromaError>)?;
-                    rank += block.len();
-                }
-            }
-            let last_block = self
-                .get_block(*last_id, StorageRequestPriority::P0)
-                .await
-                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
-                .ok_or(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
-            rank += last_block.binary_search_prefix_key(prefix, &key);
-        }
+        let last_block = self
+            .get_block(last_block_id, StorageRequestPriority::P0)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?
+            .ok_or(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)?;
+        rank += last_block.binary_search_prefix_key(prefix, &key);
 
         Ok(rank)
     }
