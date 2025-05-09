@@ -1413,8 +1413,7 @@ impl LoadService {
                 tokio::spawn(fut.instrument(span));
             }
         }
-        // Not an error, just needs to show up in stdout.
-        tracing::error!("workload done: {}/{}", spec.name, spec.description());
+        tracing::info!("workload done: {}/{}", spec.name, spec.description());
     }
 
     fn load_persistent(&self) -> Result<(), Error> {
