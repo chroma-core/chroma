@@ -61,6 +61,7 @@ jobs:
   go-tests:
     name: Go tests
     uses: ./.github/workflows/_go-tests.yml
+    secrets: inherit
 
   release-docker:
     name: Publish to DockerHub and GHCR
