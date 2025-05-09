@@ -2,11 +2,13 @@ use super::util::TokenInstance;
 use super::util::TokenInstanceEncodeError;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::regex::literal_expr::NgramLiteralProvider;
 use futures::StreamExt;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 use std::collections::HashSet;
+use std::ops::RangeBounds;
 use std::sync::Arc;
 use tantivy::tokenizer::NgramTokenizer;
 use tantivy::tokenizer::TokenStream;
@@ -20,8 +22,8 @@ pub enum FullTextIndexError {
     EmptyValueInPositionalPostingList,
     #[error("Invariant violation")]
     InvariantViolation,
-    #[error("Blockfile write error: {0}")]
-    BlockfileWriteError(#[from] Box<dyn ChromaError>),
+    #[error("Blockfile error: {0}")]
+    BlockfileError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for FullTextIndexError {
@@ -268,7 +270,7 @@ impl FullTextIndexFlusher {
         {
             Ok(_) => {}
             Err(e) => {
-                return Err(FullTextIndexError::BlockfileWriteError(e));
+                return Err(FullTextIndexError::BlockfileError(e));
             }
         };
 
@@ -335,7 +337,7 @@ impl<'me> FullTextIndexReader<'me> {
                 .enumerate()
                 .map(|(i, posting_list)| {
                     if pointers[i] < posting_list.len() {
-                        Some(posting_list[pointers[i]].0)
+                        Some(posting_list[pointers[i]].1)
                     } else {
                         None
                     }
@@ -355,7 +357,7 @@ impl<'me> FullTextIndexReader<'me> {
                 // All tokens appear in the same document, so check positional alignment.
                 let mut positions_per_posting_list = Vec::with_capacity(num_tokens);
                 for (i, posting_list) in posting_lists.iter().enumerate() {
-                    let (_, positions) = posting_list[pointers[i]];
+                    let (_, _, positions) = posting_list[pointers[i]];
                     positions_per_posting_list.push(positions);
                 }
 
@@ -418,10 +420,30 @@ impl<'me> FullTextIndexReader<'me> {
             .get_range(token..=token, ..)
             .await?;
         let mut results = vec![];
-        for (doc_id, positions) in positional_posting_list.iter() {
+        for (_, doc_id, positions) in positional_posting_list.iter() {
             results.push((*doc_id, positions.to_vec()));
         }
         Ok(results)
+    }
+}
+
+#[async_trait::async_trait]
+impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'reader> {
+    fn maximum_branching_factor(&self) -> usize {
+        6
+    }
+
+    async fn lookup_ngram_range<'me, NgramRange>(
+        &'me self,
+        ngram_range: NgramRange,
+    ) -> Result<Vec<(&'me str, u32, &'me [u32])>, FullTextIndexError>
+    where
+        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync,
+    {
+        Ok(self
+            .posting_lists_blockfile_reader
+            .get_range(ngram_range, ..)
+            .await?)
     }
 }
 

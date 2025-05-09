@@ -477,10 +477,10 @@ impl CheckRecord for DocumentExpression {
             DocumentOperator::NotContains => {
                 !document.is_some_and(|doc| doc.contains(&self.pattern.replace("%", "")))
             }
-            DocumentOperator::Matches => {
+            DocumentOperator::Regex => {
                 document.is_some_and(|doc| Regex::new(&self.pattern).unwrap().is_match(doc))
             }
-            DocumentOperator::NotMatches => {
+            DocumentOperator::NotRegex => {
                 !document.is_some_and(|doc| Regex::new(&self.pattern).unwrap().is_match(doc))
             }
         }
