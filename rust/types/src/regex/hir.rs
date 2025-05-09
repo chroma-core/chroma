@@ -24,6 +24,18 @@ pub enum ChromaHir {
     Alternation(Vec<ChromaHir>),
 }
 
+impl ChromaHir {
+    pub fn contains_ngram_literal(&self, n: usize) -> bool {
+        match self {
+            ChromaHir::Empty | ChromaHir::Class(_) => false,
+            ChromaHir::Literal(s) => s.len() >= n,
+            ChromaHir::Repetition { min, max: _, sub } => *min > 0 && sub.contains_ngram_literal(n),
+            ChromaHir::Concat(hirs) => hirs.iter().any(|hir| hir.contains_ngram_literal(n)),
+            ChromaHir::Alternation(hirs) => hirs.iter().all(|hir| hir.contains_ngram_literal(n)),
+        }
+    }
+}
+
 impl TryFrom<hir::Hir> for ChromaHir {
     type Error = ChromaRegexError;
 
