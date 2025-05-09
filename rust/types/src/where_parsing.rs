@@ -146,7 +146,7 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidati
     };
     if matches!(
         operator_type,
-        DocumentOperator::Matches | DocumentOperator::NotMatches
+        DocumentOperator::Regex | DocumentOperator::NotRegex
     ) {
         let regex = ChromaRegex::try_from(value_str.to_string())?;
         if !regex.hir().contains_ngram_literal(3) {
