@@ -265,10 +265,10 @@ impl<'me> MetadataProvider<'me> {
                                     .try_collect::<Vec<_>>()
                                     .await?
                                 {
-                                    if candidate_offsets
-                                        .as_ref()
-                                        .map(|offsets| offsets.contains(offset))
-                                        .unwrap_or(candidate_offsets.is_none())
+                                    if (candidate_offsets.is_none()
+                                        || candidate_offsets
+                                            .as_ref()
+                                            .is_some_and(|offsets| offsets.contains(offset)))
                                         && record.document.is_some_and(|doc| regex.is_match(doc))
                                     {
                                         exact_matching_offset_ids.insert(offset);

@@ -428,25 +428,22 @@ impl<'me> FullTextIndexReader<'me> {
 }
 
 #[async_trait::async_trait]
-impl<'me> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'me> {
+impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'reader> {
     fn maximum_branching_factor(&self) -> usize {
         6
     }
 
-    async fn lookup_ngram_range<'fts, NgramRange>(
-        &'fts self,
+    async fn lookup_ngram_range<'me, NgramRange>(
+        &'me self,
         ngram_range: NgramRange,
-    ) -> Result<Vec<(&'fts str, u32, RoaringBitmap)>, FullTextIndexError>
+    ) -> Result<Vec<(&'me str, u32, &'me [u32])>, FullTextIndexError>
     where
-        NgramRange: Clone + RangeBounds<&'fts str> + Send + Sync,
+        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync,
     {
         Ok(self
             .posting_lists_blockfile_reader
             .get_range(ngram_range, ..)
-            .await?
-            .into_iter()
-            .map(|(ngram, doc, pos)| (ngram, doc, pos.iter().collect()))
-            .collect())
+            .await?)
     }
 }
 
