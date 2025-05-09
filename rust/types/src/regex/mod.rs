@@ -1,7 +1,7 @@
 pub mod hir;
 pub mod literal_expr;
 
-use hir::Hir;
+use hir::ChromaHir;
 use regex::Regex;
 use regex_syntax::{hir::Properties, parse};
 use thiserror::Error;
@@ -17,7 +17,7 @@ use thiserror::Error;
 /// parsed syntax tree.
 #[derive(Clone, Debug)]
 pub struct ChromaRegex {
-    hir: Hir,
+    hir: ChromaHir,
     pattern: String,
     properties: Properties,
 }
@@ -37,7 +37,7 @@ pub enum ChromaRegexError {
 }
 
 impl ChromaRegex {
-    pub fn hir(&self) -> &Hir {
+    pub fn hir(&self) -> &ChromaHir {
         &self.hir
     }
     pub fn properties(&self) -> &Properties {
@@ -61,8 +61,8 @@ impl TryFrom<String> for ChromaRegex {
         if let Some(0) = properties.minimum_len() {
             return Err(ChromaRegexError::PermissivePattern);
         }
-        let chroma_hir = Hir::try_from(hir)?;
-        if let Hir::Empty = chroma_hir {
+        let chroma_hir = ChromaHir::try_from(hir)?;
+        if let ChromaHir::Empty = chroma_hir {
             return Err(ChromaRegexError::PermissivePattern);
         }
         Ok(Self {

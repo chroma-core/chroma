@@ -4,25 +4,27 @@ use super::ChromaRegexError;
 
 /// Chroma custom internal representation for a Regex pattern.
 ///
-/// This Hir is modeled from regex_syntax::HirKind, with some totable difference:
+/// This Hir is modeled from regex_syntax::HirKind, with some notable difference:
+/// - HirKind::Literal contains a String instead of a Box<[u8]>, because we do not support byte patterns.
+/// - HirKind::Class omits the ClassBytes variant, because we do not support byte patterns.
 /// - HirKind::Look is not present. We do not support look for now.
 /// - HirKind::Capture is not present. We do not need to support capture group because
 ///   we only use regex for filtering. It should be flatten to its inner pattern.
 #[derive(Clone, Debug)]
-pub enum Hir {
+pub enum ChromaHir {
     Empty,
     Literal(String),
     Class(ClassUnicode),
     Repetition {
         min: u32,
         max: Option<u32>,
-        sub: Box<Hir>,
+        sub: Box<ChromaHir>,
     },
-    Concat(Vec<Hir>),
-    Alternation(Vec<Hir>),
+    Concat(Vec<ChromaHir>),
+    Alternation(Vec<ChromaHir>),
 }
 
-impl TryFrom<hir::Hir> for Hir {
+impl TryFrom<hir::Hir> for ChromaHir {
     type Error = ChromaRegexError;
 
     fn try_from(value: hir::Hir) -> Result<Self, Self::Error> {
