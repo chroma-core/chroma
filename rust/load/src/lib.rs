@@ -1409,7 +1409,7 @@ impl LoadService {
                         }
                     };
                 };
-                let span = tracing::info_span!(parent: None, "step");
+                let span = tracing::info_span!(parent: None, "step", workload_uuid = %spec.uuid);
                 tokio::spawn(fut.instrument(span));
             }
         }
