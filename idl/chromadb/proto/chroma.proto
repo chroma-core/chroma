@@ -165,8 +165,8 @@ message DirectWhereDocument {
 enum WhereDocumentOperator {
     CONTAINS = 0;
     NOT_CONTAINS = 1;
-    MATCHES = 2;
-    NOT_MATCHES = 3;
+    REGEX = 2;
+    NOT_REGEX = 3;
 }
 
 // A branch-node `WhereDocument` node has a list of children.

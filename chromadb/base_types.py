@@ -31,8 +31,8 @@ Where = Dict[
 WhereDocumentOperator = Union[
     Literal["$contains"],
     Literal["$not_contains"],
-    Literal["$matches"],
-    Literal["$not_matches"],
+    Literal["$regex"],
+    Literal["$not_regex"],
     LogicalOperator,
 ]
 WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]

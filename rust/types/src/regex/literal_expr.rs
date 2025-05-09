@@ -1,4 +1,7 @@
-use std::{collections::HashMap, ops::RangeBounds};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::RangeBounds,
+};
 
 use regex_syntax::hir::ClassUnicode;
 use roaring::RoaringBitmap;
@@ -27,6 +30,22 @@ pub enum LiteralExpr {
     Alternation(Vec<LiteralExpr>),
 }
 
+impl LiteralExpr {
+    pub fn contains_ngram_literal(&self, n: usize, max_literal_width: usize) -> bool {
+        match self {
+            LiteralExpr::Literal(literals) => literals
+                .split(|lit| lit.width() > max_literal_width)
+                .any(|chunk| chunk.len() >= n),
+            LiteralExpr::Concat(literal_exprs) => literal_exprs
+                .iter()
+                .any(|expr| expr.contains_ngram_literal(n, max_literal_width)),
+            LiteralExpr::Alternation(literal_exprs) => literal_exprs
+                .iter()
+                .all(|expr| expr.contains_ngram_literal(n, max_literal_width)),
+        }
+    }
+}
+
 impl From<ChromaHir> for LiteralExpr {
     fn from(value: ChromaHir) -> Self {
         match value {
@@ -35,10 +54,12 @@ impl From<ChromaHir> for LiteralExpr {
                 Self::Literal(literal.chars().map(Literal::Char).collect())
             }
             ChromaHir::Class(class_unicode) => Self::Literal(vec![Literal::Class(class_unicode)]),
-            ChromaHir::Repetition { min, max: _, sub } => {
+            ChromaHir::Repetition { min, max, sub } => {
                 let mut repeat = vec![*sub; min as usize];
-                // Append a breakpoint Hir to prevent merge with literal on the right
-                repeat.push(ChromaHir::Alternation(vec![ChromaHir::Empty]));
+                if max.is_none() || max.is_some_and(|m| m > min) {
+                    // Append a breakpoint Hir to prevent merge with literal on the right
+                    repeat.push(ChromaHir::Alternation(vec![ChromaHir::Empty]));
+                }
                 ChromaHir::Concat(repeat).into()
             }
             ChromaHir::Concat(hirs) => {
@@ -75,7 +96,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
     async fn lookup_ngram_range<'me, NgramRange>(
         &'me self,
         ngram_range: NgramRange,
-    ) -> Result<Vec<(&'me str, u32, RoaringBitmap)>, E>
+    ) -> Result<Vec<(&'me str, u32, &'me [u32])>, E>
     where
         NgramRange: Clone + RangeBounds<&'me str> + Send + Sync;
 
@@ -84,10 +105,10 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
     async fn match_literal_with_mask(
         &self,
         literals: &[Literal],
-        mask: Option<&RoaringBitmap>,
-    ) -> Result<Option<RoaringBitmap>, E> {
+        mask: Option<&HashSet<u32>>,
+    ) -> Result<HashSet<u32>, E> {
         if mask.is_some_and(|m| m.is_empty()) {
-            return Ok(mask.cloned());
+            return Ok(HashSet::new());
         }
 
         let (initial_literals, remaining_literals) = literals.split_at(N);
@@ -115,7 +136,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 });
 
         // ngram suffix -> doc_id -> position
-        let mut suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> = HashMap::new();
+        let mut suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, HashSet<u32>>> = HashMap::new();
         for ngram in initial_ngrams {
             let ngram_string = ngram.iter().collect::<String>();
             let ngram_doc_pos = self
@@ -128,12 +149,13 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
 
             let suffix = ngram[1..].to_vec();
             for (_, doc_id, pos) in ngram_doc_pos {
-                if mask.map(|m| m.contains(doc_id)).unwrap_or(mask.is_none()) {
-                    *suffix_doc_pos
+                if mask.is_none() || mask.is_some_and(|m| m.contains(&doc_id)) {
+                    suffix_doc_pos
                         .entry(suffix.clone())
                         .or_default()
                         .entry(doc_id)
-                        .or_default() |= pos;
+                        .or_default()
+                        .extend(pos);
                 }
             }
         }
@@ -142,7 +164,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             if suffix_doc_pos.is_empty() {
                 break;
             }
-            let mut new_suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, RoaringBitmap>> =
+            let mut new_suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, HashSet<u32>>> =
                 HashMap::new();
             for (mut suffix, doc_pos) in suffix_doc_pos {
                 let ngram_ranges = match literal {
@@ -170,27 +192,19 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                         .await?;
                     for (ngram, doc_id, next_pos) in ngram_doc_pos {
                         if let Some(pos) = doc_pos.get(&doc_id) {
-                            if ngram.chars().last().is_some_and(|c| match literal {
-                                Literal::Char(literal_char) => c == *literal_char,
-                                Literal::Class(class_unicode) => {
-                                    class_unicode.iter().any(|r| r.start() <= c && c <= r.end())
-                                }
-                            }) {
-                                // SAFETY(Sicheng): The RoaringBitmap iterator should be sorted
-                                let valid_next_pos = RoaringBitmap::from_sorted_iter(
-                                    pos.iter()
-                                        .filter_map(|p| next_pos.contains(p + 1).then_some(p + 1)),
-                                )
-                                .expect("RoaringBitmap iterator should be sorted");
-
-                                if !valid_next_pos.is_empty() {
-                                    let new_suffix = ngram.chars().skip(1).collect();
-                                    *new_suffix_doc_pos
-                                        .entry(new_suffix)
-                                        .or_default()
-                                        .entry(doc_id)
-                                        .or_default() |= valid_next_pos;
-                                }
+                            let next_pos_set: HashSet<&u32> = HashSet::from_iter(next_pos);
+                            let mut valid_next_pos = pos
+                                .iter()
+                                .filter_map(|p| next_pos_set.contains(&(p + 1)).then_some(p + 1))
+                                .peekable();
+                            if valid_next_pos.peek().is_some() {
+                                let new_suffix = ngram.chars().skip(1).collect();
+                                new_suffix_doc_pos
+                                    .entry(new_suffix)
+                                    .or_default()
+                                    .entry(doc_id)
+                                    .or_default()
+                                    .extend(valid_next_pos);
                             }
                         }
                     }
@@ -203,7 +217,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             .into_values()
             .flat_map(|doc_pos| doc_pos.into_keys())
             .collect();
-        Ok(Some(result))
+        Ok(result)
     }
 
     // Return the documents matching the literal expression. The search space is restricted to the documents in the mask if specified
@@ -211,8 +225,8 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
     async fn match_literal_expression_with_mask(
         &self,
         literal_expression: &LiteralExpr,
-        mask: Option<&RoaringBitmap>,
-    ) -> Result<Option<RoaringBitmap>, E> {
+        mask: Option<&HashSet<u32>>,
+    ) -> Result<Option<HashSet<u32>>, E> {
         match literal_expression {
             LiteralExpr::Literal(literals) => {
                 let mut result = mask.cloned();
@@ -221,7 +235,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                         break;
                     }
                     if query.len() >= N {
-                        result = self.match_literal_with_mask(query, result.as_ref()).await?;
+                        result = Some(self.match_literal_with_mask(query, result.as_ref()).await?);
                     }
                 }
                 Ok(result)
@@ -239,17 +253,17 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 Ok(result)
             }
             LiteralExpr::Alternation(literal_exprs) => {
-                let mut result = RoaringBitmap::new();
+                let mut result = Vec::new();
                 for expr in literal_exprs {
                     if let Some(matching_docs) =
                         self.match_literal_expression_with_mask(expr, mask).await?
                     {
-                        result |= matching_docs;
+                        result.extend(matching_docs);
                     } else {
                         return Ok(mask.cloned());
                     }
                 }
-                Ok(Some(result))
+                Ok(Some(HashSet::from_iter(result)))
             }
         }
     }
@@ -262,6 +276,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
     ) -> Result<Option<RoaringBitmap>, E> {
         self.match_literal_expression_with_mask(literal_expression, None)
             .await
+            .map(|res| res.map(RoaringBitmap::from_iter))
     }
 
     fn can_match_exactly(&self, literal_expression: &LiteralExpr) -> bool {

@@ -220,7 +220,7 @@ impl<'me> MetadataProvider<'me> {
         }
     }
 
-    pub(crate) async fn filter_by_document_matches(
+    pub(crate) async fn filter_by_document_regex(
         &self,
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
@@ -246,7 +246,9 @@ impl<'me> MetadataProvider<'me> {
                         let mut exact_matching_offset_ids = RoaringBitmap::new();
                         match approximate_matching_offset_ids {
                             // Perform point lookup for potential matching documents is there is not too many of them
-                            Some(offset_ids) if offset_ids.len() < 10000 => {
+                            Some(offset_ids)
+                                if offset_ids.len() < rec_reader.count().await? as u64 / 10 =>
+                            {
                                 for id in offset_ids {
                                     if rec_reader.get_data_for_offset_id(id).await?.is_some_and(
                                         |rec| rec.document.is_some_and(|doc| regex.is_match(doc)),
@@ -263,10 +265,10 @@ impl<'me> MetadataProvider<'me> {
                                     .try_collect::<Vec<_>>()
                                     .await?
                                 {
-                                    if candidate_offsets
-                                        .as_ref()
-                                        .map(|offsets| offsets.contains(offset))
-                                        .unwrap_or(candidate_offsets.is_none())
+                                    if (candidate_offsets.is_none()
+                                        || candidate_offsets
+                                            .as_ref()
+                                            .is_some_and(|offsets| offsets.contains(offset)))
                                         && record.document.is_some_and(|doc| regex.is_match(doc))
                                     {
                                         exact_matching_offset_ids.insert(offset);
@@ -455,14 +457,14 @@ impl<'me> RoaringMetadataFilter<'me> for DocumentExpression {
                     .filter_by_document_contains(self.pattern.as_str())
                     .await?,
             )),
-            DocumentOperator::Matches => Ok(SignedRoaringBitmap::Include(
+            DocumentOperator::Regex => Ok(SignedRoaringBitmap::Include(
                 metadata_provider
-                    .filter_by_document_matches(self.pattern.as_str())
+                    .filter_by_document_regex(self.pattern.as_str())
                     .await?,
             )),
-            DocumentOperator::NotMatches => Ok(SignedRoaringBitmap::Exclude(
+            DocumentOperator::NotRegex => Ok(SignedRoaringBitmap::Exclude(
                 metadata_provider
-                    .filter_by_document_matches(self.pattern.as_str())
+                    .filter_by_document_regex(self.pattern.as_str())
                     .await?,
             )),
         }
