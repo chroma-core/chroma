@@ -76,7 +76,7 @@ impl ArrowBlockfileFlusher {
         self.count
     }
 
-    pub(crate) fn num_blocks(&self) -> usize {
-        self.blocks.len()
+    pub(crate) fn num_entries(&self) -> usize {
+        self.blocks.iter().fold(0, |acc, block| acc + block.len())
     }
 }

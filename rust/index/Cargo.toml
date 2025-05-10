@@ -27,6 +27,7 @@ chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
+chroma-tracing = { workspace = true }
 chroma-distance = { workspace = true }
 itertools = { workspace = true }
 hnswlib = { workspace = true }

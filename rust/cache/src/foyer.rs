@@ -1,6 +1,7 @@
 use super::{CacheError, Weighted};
 use ahash::RandomState;
 use chroma_error::ChromaError;
+use chroma_tracing::util::Stopwatch;
 use clap::Parser;
 use foyer::{
     CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
@@ -286,24 +287,6 @@ impl Default for FoyerCacheConfig {
     }
 }
 
-struct Stopwatch<'a>(
-    &'a opentelemetry::metrics::Histogram<u64>,
-    std::time::Instant,
-);
-
-impl<'a> Stopwatch<'a> {
-    fn new(histogram: &'a opentelemetry::metrics::Histogram<u64>) -> Self {
-        Self(histogram, std::time::Instant::now())
-    }
-}
-
-impl Drop for Stopwatch<'_> {
-    fn drop(&mut self) {
-        let elapsed = self.1.elapsed().as_micros() as u64;
-        self.0.record(elapsed, &[]);
-    }
-}
-
 #[derive(Clone)]
 pub struct FoyerHybridCache<K, V>
 where
@@ -457,7 +440,7 @@ where
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.get_latency);
+        let _stopwatch = Stopwatch::new(&self.get_latency, &[]);
         let res = self.cache.get(key).await?.map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, &[]);
@@ -468,22 +451,22 @@ where
     }
 
     async fn insert(&self, key: K, value: V) {
-        let _stopwatch = Stopwatch::new(&self.insert_latency);
+        let _stopwatch = Stopwatch::new(&self.insert_latency, &[]);
         self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
-        let _stopwatch = Stopwatch::new(&self.remove_latency);
+        let _stopwatch = Stopwatch::new(&self.remove_latency, &[]);
         self.cache.remove(key);
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
-        let _stopwatch = Stopwatch::new(&self.clear_latency);
+        let _stopwatch = Stopwatch::new(&self.clear_latency, &[]);
         Ok(self.cache.clear().await?)
     }
 
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.obtain_latency);
+        let _stopwatch = Stopwatch::new(&self.obtain_latency, &[]);
         let res = self.cache.obtain(key).await?.map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, &[]);
@@ -622,7 +605,7 @@ where
     V: Clone + Send + Sync + Weighted + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.get_latency);
+        let _stopwatch = Stopwatch::new(&self.get_latency, &[]);
         let res = self.cache.get(key).map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, &[]);
@@ -633,23 +616,23 @@ where
     }
 
     async fn insert(&self, key: K, value: V) {
-        let _stopwatch = Stopwatch::new(&self.insert_latency);
+        let _stopwatch = Stopwatch::new(&self.insert_latency, &[]);
         self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
-        let _stopwatch = Stopwatch::new(&self.remove_latency);
+        let _stopwatch = Stopwatch::new(&self.remove_latency, &[]);
         self.cache.remove(key);
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
-        let _stopwatch = Stopwatch::new(&self.clear_latency);
+        let _stopwatch = Stopwatch::new(&self.clear_latency, &[]);
         self.cache.clear();
         Ok(())
     }
 
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.obtain_latency);
+        let _stopwatch = Stopwatch::new(&self.obtain_latency, &[]);
         let res = self.cache.get(&key).map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, &[]);
