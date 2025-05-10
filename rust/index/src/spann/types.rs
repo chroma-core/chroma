@@ -1,6 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{atomic::AtomicU32, Arc},
+    sync::{
+        atomic::{AtomicU32, AtomicU64},
+        Arc,
+    },
 };
 
 use chroma_blockstore::{
@@ -10,6 +13,7 @@ use chroma_blockstore::{
 use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_tracing::util::Stopwatch;
 use chroma_types::SpannPostingList;
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
 use opentelemetry::{global, KeyValue};
@@ -169,6 +173,37 @@ impl Configurable<RandomSamplePolicyConfig> for RandomSamplePolicy {
 }
 
 #[derive(Clone, Debug)]
+struct WriteStats {
+    num_pl_modified: Arc<AtomicU32>,
+    num_heads_created: Arc<AtomicU32>,
+    num_heads_deleted: Arc<AtomicU32>,
+    num_reassigns: Arc<AtomicU32>,
+    num_splits: Arc<AtomicU32>,
+    num_reassigns_split_point: Arc<AtomicU32>,
+    num_reassigns_nbrs: Arc<AtomicU32>,
+    num_reassigns_merged_point: Arc<AtomicU32>,
+    num_centers_fetched_rng: Arc<AtomicU64>,
+    num_rng_calls: Arc<AtomicU32>,
+}
+
+impl Default for WriteStats {
+    fn default() -> Self {
+        Self {
+            num_pl_modified: Arc::new(AtomicU32::new(0)),
+            num_heads_created: Arc::new(AtomicU32::new(0)),
+            num_heads_deleted: Arc::new(AtomicU32::new(0)),
+            num_reassigns: Arc::new(AtomicU32::new(0)),
+            num_splits: Arc::new(AtomicU32::new(0)),
+            num_reassigns_split_point: Arc::new(AtomicU32::new(0)),
+            num_reassigns_nbrs: Arc::new(AtomicU32::new(0)),
+            num_reassigns_merged_point: Arc::new(AtomicU32::new(0)),
+            num_centers_fetched_rng: Arc::new(AtomicU64::new(0)),
+            num_rng_calls: Arc::new(AtomicU32::new(0)),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SpannMetrics {
     pub num_pl_modified: opentelemetry::metrics::Counter<u64>,
     pub num_heads_created: opentelemetry::metrics::Counter<u64>,
@@ -179,14 +214,15 @@ pub struct SpannMetrics {
     pub num_reassigns_nbrs: opentelemetry::metrics::Counter<u64>,
     pub num_reassigns_merged_point: opentelemetry::metrics::Counter<u64>,
     pub num_centers_fetched_rng: opentelemetry::metrics::Counter<u64>,
+    pub num_rng_calls: opentelemetry::metrics::Counter<u64>,
     pub pl_commit_latency: opentelemetry::metrics::Histogram<u64>,
     pub versions_map_commit_latency: opentelemetry::metrics::Histogram<u64>,
     pub hnsw_commit_latency: opentelemetry::metrics::Histogram<u64>,
     pub pl_flush_latency: opentelemetry::metrics::Histogram<u64>,
     pub versions_map_flush_latency: opentelemetry::metrics::Histogram<u64>,
     pub hnsw_flush_latency: opentelemetry::metrics::Histogram<u64>,
-    pub num_pl_blocks_flushed: opentelemetry::metrics::Counter<u64>,
-    pub num_versions_map_blocks_flushed: opentelemetry::metrics::Counter<u64>,
+    pub num_pl_entries_flushed: opentelemetry::metrics::Counter<u64>,
+    pub num_versions_map_entries_flushed: opentelemetry::metrics::Counter<u64>,
 }
 
 impl Default for SpannMetrics {
@@ -201,32 +237,16 @@ impl Default for SpannMetrics {
         let num_reassigns_nbrs = meter.u64_counter("num_reassigns_nbrs").build();
         let num_reassigns_merged_point = meter.u64_counter("num_reassigns_merged_point").build();
         let num_centers_fetched_rng = meter.u64_counter("num_centers_fetched_rng").build();
-        let pl_commit_latency = meter
-            .u64_histogram("pl_commit_latency")
-            .with_unit("ms")
-            .build();
-        let versions_map_commit_latency = meter
-            .u64_histogram("versions_map_commit_latency")
-            .with_unit("ms")
-            .build();
-        let hnsw_commit_latency = meter
-            .u64_histogram("hnsw_commit_latency")
-            .with_unit("ms")
-            .build();
-        let pl_flush_latency = meter
-            .u64_histogram("pl_flush_latency")
-            .with_unit("ms")
-            .build();
-        let versions_map_flush_latency = meter
-            .u64_histogram("versions_map_flush_latency")
-            .with_unit("ms")
-            .build();
-        let hnsw_flush_latency = meter
-            .u64_histogram("hnsw_flush_latency")
-            .with_unit("ms")
-            .build();
-        let num_pl_blocks_flushed = meter.u64_counter("num_pl_blocks_flushed").build();
-        let num_versions_map_blocks_flushed =
+        let num_rng_calls = meter.u64_counter("num_rng_calls").build();
+        let pl_commit_latency = meter.u64_histogram("pl_commit_latency").build();
+        let versions_map_commit_latency =
+            meter.u64_histogram("versions_map_commit_latency").build();
+        let hnsw_commit_latency = meter.u64_histogram("hnsw_commit_latency").build();
+        let pl_flush_latency = meter.u64_histogram("pl_flush_latency").build();
+        let versions_map_flush_latency = meter.u64_histogram("versions_map_flush_latency").build();
+        let hnsw_flush_latency = meter.u64_histogram("hnsw_flush_latency").build();
+        let num_pl_entries_flushed = meter.u64_counter("num_pl_blocks_flushed").build();
+        let num_versions_map_entries_flushed =
             meter.u64_counter("num_versions_map_blocks_flushed").build();
         Self {
             num_pl_modified,
@@ -238,14 +258,15 @@ impl Default for SpannMetrics {
             num_reassigns_nbrs,
             num_reassigns_merged_point,
             num_centers_fetched_rng,
+            num_rng_calls,
             pl_commit_latency,
             versions_map_commit_latency,
             hnsw_commit_latency,
             pl_flush_latency,
             versions_map_flush_latency,
             hnsw_flush_latency,
-            num_pl_blocks_flushed,
-            num_versions_map_blocks_flushed,
+            num_pl_entries_flushed,
+            num_versions_map_entries_flushed,
         }
     }
 }
@@ -271,6 +292,7 @@ pub struct SpannIndexWriter {
     pub gc_context: GarbageCollectionContext,
     pub collection_id: CollectionUuid,
     metrics: SpannMetrics,
+    stats: WriteStats,
 }
 
 #[derive(Error, Debug)]
@@ -408,6 +430,7 @@ impl SpannIndexWriter {
             gc_context,
             collection_id,
             metrics,
+            stats: Default::default(),
         }
     }
 
@@ -663,12 +686,12 @@ impl SpannIndexWriter {
             tracing::error!("Error rng querying hnsw for {:?}: {:?}", query, e);
             SpannIndexWriterError::RngQueryError(e)
         });
-        self.metrics.num_centers_fetched_rng.add(
-            1,
-            &[KeyValue::new(
-                "collection_id",
-                self.collection_id.to_string(),
-            )],
+        self.stats
+            .num_rng_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.stats.num_centers_fetched_rng.fetch_add(
+            res.as_ref().map(|r| r.0.len() as u64).unwrap_or(0),
+            std::sync::atomic::Ordering::SeqCst,
         );
         res
     }
@@ -847,40 +870,24 @@ impl SpannIndexWriter {
                 next_version,
                 prev_head_id
             );
-            self.metrics.num_reassigns.add(
-                1,
-                &[KeyValue::new(
-                    "collection_id",
-                    self.collection_id.to_string(),
-                )],
-            );
+            self.stats
+                .num_reassigns
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             match reason {
                 ReassignReason::Split => {
-                    self.metrics.num_reassigns_split_point.add(
-                        1,
-                        &[KeyValue::new(
-                            "collection_id",
-                            self.collection_id.to_string(),
-                        )],
-                    );
+                    self.stats
+                        .num_reassigns_split_point
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }
                 ReassignReason::Nearby => {
-                    self.metrics.num_reassigns_nbrs.add(
-                        1,
-                        &[KeyValue::new(
-                            "collection_id",
-                            self.collection_id.to_string(),
-                        )],
-                    );
+                    self.stats
+                        .num_reassigns_nbrs
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }
                 ReassignReason::Merge => {
-                    self.metrics.num_reassigns_merged_point.add(
-                        1,
-                        &[KeyValue::new(
-                            "collection_id",
-                            self.collection_id.to_string(),
-                        )],
-                    );
+                    self.stats
+                        .num_reassigns_merged_point
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }
             }
             self.append(
@@ -1128,23 +1135,15 @@ impl SpannIndexWriter {
                         tracing::error!("Error setting posting list for head {}: {}", head_id, e);
                         SpannIndexWriterError::PostingListSetError(e)
                     })?;
-                self.metrics.num_pl_modified.add(
-                    1,
-                    &[KeyValue::new(
-                        "collection_id",
-                        self.collection_id.to_string(),
-                    )],
-                );
+                self.stats
+                    .num_pl_modified
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
                 return Ok(());
             }
-            self.metrics.num_splits.add(
-                1,
-                &[KeyValue::new(
-                    "collection_id",
-                    self.collection_id.to_string(),
-                )],
-            );
+            self.stats
+                .num_splits
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             tracing::debug!(
                 "Splitting posting list of head {} since it exceeds threshold in lieu of appending point {} at version {}",
                 head_id, id, version
@@ -1206,14 +1205,9 @@ impl SpannIndexWriter {
                         tracing::error!("Error setting posting list for head {}: {}", head_id, e);
                         SpannIndexWriterError::PostingListSetError(e)
                     })?;
-                self.metrics.num_pl_modified.add(
-                    1,
-                    &[KeyValue::new(
-                        "collection_id",
-                        self.collection_id.to_string(),
-                    )],
-                );
-
+                self.stats
+                    .num_pl_modified
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 return Ok(());
             } else {
                 // None of the cluster_counts should be 0. Points to some error if it is.
@@ -1250,7 +1244,7 @@ impl SpannIndexWriter {
                             .distance(&clustering_output.cluster_centers[k], &head_embedding)
                             < 1e-6
                     {
-                        tracing::info!(
+                        tracing::debug!(
                             "One of the heads remains the same id {} after splitting in lieu of adding point {} at version {}",
                             head_id, id, version
                         );
@@ -1271,13 +1265,9 @@ impl SpannIndexWriter {
                                 );
                                 SpannIndexWriterError::PostingListSetError(e)
                             })?;
-                        self.metrics.num_pl_modified.add(
-                            1,
-                            &[KeyValue::new(
-                                "collection_id",
-                                self.collection_id.to_string(),
-                            )],
-                        );
+                        self.stats
+                            .num_pl_modified
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         new_head_ids[k] = head_id as i32;
                         new_head_embeddings[k] = Some(&head_embedding);
                     } else {
@@ -1285,7 +1275,7 @@ impl SpannIndexWriter {
                         let next_id = self
                             .next_head_id
                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        tracing::info!(
+                        tracing::debug!(
                             "Creating new head {}, old head {} in lieu of adding point {} at version {}",
                             next_id, head_id, id, version
                         );
@@ -1306,13 +1296,9 @@ impl SpannIndexWriter {
                                 );
                                 SpannIndexWriterError::PostingListSetError(e)
                             })?;
-                        self.metrics.num_pl_modified.add(
-                            1,
-                            &[KeyValue::new(
-                                "collection_id",
-                                self.collection_id.to_string(),
-                            )],
-                        );
+                        self.stats
+                            .num_pl_modified
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                         new_head_ids[k] = next_id as i32;
                         new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
@@ -1320,7 +1306,7 @@ impl SpannIndexWriter {
                         let hnsw_len = hnsw_write_guard.len_with_deleted();
                         let hnsw_capacity = hnsw_write_guard.capacity();
                         if hnsw_len + 1 > hnsw_capacity {
-                            tracing::info!("Resizing hnsw index");
+                            tracing::info!("Resizing hnsw index to {}", hnsw_capacity * 2);
                             hnsw_write_guard.resize(hnsw_capacity * 2).map_err(|e| {
                                 tracing::error!(
                                     "Error resizing hnsw index during append to {}: {}",
@@ -1340,17 +1326,13 @@ impl SpannIndexWriter {
                                 );
                                 SpannIndexWriterError::HnswIndexMutateError(e)
                             })?;
-                        self.metrics.num_heads_created.add(
-                            1,
-                            &[KeyValue::new(
-                                "collection_id",
-                                self.collection_id.to_string(),
-                            )],
-                        );
+                        self.stats
+                            .num_heads_created
+                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     }
                 }
                 if !same_head {
-                    tracing::info!(
+                    tracing::debug!(
                         "Deleting head {} after splitting in lieu of adding point {} at version {}",
                         head_id,
                         id,
@@ -1362,13 +1344,9 @@ impl SpannIndexWriter {
                         tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
                         SpannIndexWriterError::HnswIndexMutateError(e)
                     })?;
-                    self.metrics.num_heads_deleted.add(
-                        1,
-                        &[KeyValue::new(
-                            "collection_id",
-                            self.collection_id.to_string(),
-                        )],
-                    );
+                    self.stats
+                        .num_heads_deleted
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }
             }
         }
@@ -1408,7 +1386,7 @@ impl SpannIndexWriter {
             let next_id = self
                 .next_head_id
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            tracing::info!(
+            tracing::debug!(
                 "Created new head {} in lieu of adding point {} at version {}",
                 next_id,
                 id,
@@ -1431,13 +1409,9 @@ impl SpannIndexWriter {
                         tracing::error!("Error setting posting list for head {}: {}", next_id, e);
                         SpannIndexWriterError::PostingListSetError(e)
                     })?;
-                self.metrics.num_pl_modified.add(
-                    1,
-                    &[KeyValue::new(
-                        "collection_id",
-                        self.collection_id.to_string(),
-                    )],
-                );
+                self.stats
+                    .num_pl_modified
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
             // Next add to hnsw.
             {
@@ -1459,13 +1433,9 @@ impl SpannIndexWriter {
                     tracing::error!("Error adding new head {} to hnsw index: {}", next_id, e);
                     SpannIndexWriterError::HnswIndexMutateError(e)
                 })?;
-                self.metrics.num_heads_created.add(
-                    1,
-                    &[KeyValue::new(
-                        "collection_id",
-                        self.collection_id.to_string(),
-                    )],
-                );
+                self.stats
+                    .num_heads_created
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             }
             return Ok(());
         }
@@ -1682,13 +1652,9 @@ impl SpannIndexWriter {
                         tracing::error!("Error setting posting list for head {}: {}", head_id, e);
                         SpannIndexWriterError::PostingListSetError(e)
                     })?;
-                self.metrics.num_pl_modified.add(
-                    1,
-                    &[KeyValue::new(
-                        "collection_id",
-                        self.collection_id.to_string(),
-                    )],
-                );
+                self.stats
+                    .num_pl_modified
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
                 return Ok(());
             }
@@ -1700,6 +1666,9 @@ impl SpannIndexWriter {
                     tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
                     SpannIndexWriterError::HnswIndexMutateError(e)
                 })?;
+                self.stats
+                    .num_heads_deleted
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 return Ok(());
             }
             // Find candidates for merge.
@@ -1771,19 +1740,18 @@ impl SpannIndexWriter {
                             );
                             SpannIndexWriterError::PostingListSetError(e)
                         })?;
-                    self.metrics.num_pl_modified.add(
-                        1,
-                        &[KeyValue::new(
-                            "collection_id",
-                            self.collection_id.to_string(),
-                        )],
-                    );
+                    self.stats
+                        .num_pl_modified
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     // Delete from hnsw.
                     let hnsw_write_guard = self.hnsw_index.inner.write();
                     hnsw_write_guard.delete(head_id).map_err(|e| {
                         tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
                         SpannIndexWriterError::HnswIndexMutateError(e)
                     })?;
+                    self.stats
+                        .num_heads_deleted
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 } else {
                     pl_guard
                         .set("", head_id as u32, &merged_posting_list)
@@ -1796,13 +1764,9 @@ impl SpannIndexWriter {
                             );
                             SpannIndexWriterError::PostingListSetError(e)
                         })?;
-                    self.metrics.num_pl_modified.add(
-                        1,
-                        &[KeyValue::new(
-                            "collection_id",
-                            self.collection_id.to_string(),
-                        )],
-                    );
+                    self.stats
+                        .num_pl_modified
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     // Delete from hnsw.
                     let hnsw_write_guard = self.hnsw_index.inner.write();
                     hnsw_write_guard.delete(nearest_head_id).map_err(|e| {
@@ -1813,6 +1777,9 @@ impl SpannIndexWriter {
                         );
                         SpannIndexWriterError::HnswIndexMutateError(e)
                     })?;
+                    self.stats
+                        .num_heads_deleted
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 }
                 // This center is now merged with a neighbor.
                 target_head = nearest_head_id;
@@ -1942,7 +1909,7 @@ impl SpannIndexWriter {
                 let hnsw_len = clean_hnsw_write_guard.len_with_deleted();
                 let hnsw_capacity = clean_hnsw_write_guard.capacity();
                 if hnsw_len + 1 > hnsw_capacity {
-                    tracing::info!("Resizing hnsw index");
+                    tracing::info!("Resizing hnsw index to {}", hnsw_capacity * 2);
                     clean_hnsw_write_guard
                         .resize(hnsw_capacity * 2)
                         .map_err(|e| {
@@ -1971,6 +1938,10 @@ impl SpannIndexWriter {
         &self,
         sample_size: f32,
     ) -> Result<(), SpannIndexWriterError> {
+        tracing::info!(
+            "Garbage collecting {} random samples of posting list",
+            sample_size
+        );
         // Get all the heads.
         let non_deleted_heads;
         {
@@ -2004,7 +1975,7 @@ impl SpannIndexWriter {
                     SpannIndexWriterError::HnswIndexSearchError(e)
                 })?
                 .ok_or(SpannIndexWriterError::HeadNotFound)?;
-            tracing::info!("Garbage collecting head {}", head_id);
+            tracing::debug!("Garbage collecting head {}", head_id);
             self.garbage_collect_head(*head_id, &head_embedding).await?;
         }
         Ok(())
@@ -2036,74 +2007,203 @@ impl SpannIndexWriter {
         Ok(())
     }
 
+    fn emit_counters(&self) {
+        let attribute = &[KeyValue::new(
+            "collection_id",
+            self.collection_id.to_string(),
+        )];
+        tracing::info!(
+            "Total number of centers fetched from rng in this compaction run: {}",
+            self.stats
+                .num_centers_fetched_rng
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+        // Emit metrics.
+        self.metrics.num_centers_fetched_rng.add(
+            self.stats
+                .num_centers_fetched_rng
+                .load(std::sync::atomic::Ordering::SeqCst),
+            attribute,
+        );
+        tracing::info!(
+            "Total number of rng calls in this compaction run: {}",
+            self.stats
+                .num_rng_calls
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+        self.metrics.num_rng_calls.add(
+            self.stats
+                .num_rng_calls
+                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+            attribute,
+        );
+        tracing::info!(
+            "Total number of heads created in this compaction run: {}",
+            self.stats
+                .num_heads_created
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+        self.metrics.num_heads_created.add(
+            self.stats
+                .num_heads_created
+                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+            attribute,
+        );
+        tracing::info!(
+            "Total number of heads deleted in this compaction run: {}",
+            self.stats
+                .num_heads_deleted
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+        self.metrics.num_heads_deleted.add(
+            self.stats
+                .num_heads_deleted
+                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+            attribute,
+        );
+        tracing::info!(
+            "Total number of posting lists modified in this compaction run: {}",
+            self.stats
+                .num_pl_modified
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+        self.metrics.num_pl_modified.add(
+            self.stats
+                .num_pl_modified
+                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+            attribute,
+        );
+        tracing::info!(
+            "Total number of reassigns in this compaction run: {}",
+            self.stats
+                .num_reassigns
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+        self.metrics.num_reassigns.add(
+            self.stats
+                .num_reassigns
+                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+            attribute,
+        );
+        tracing::info!(
+            "Total number of reassigns due to center merges in this compaction run: {}",
+            self.stats
+                .num_reassigns_merged_point
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+        self.metrics.num_reassigns_merged_point.add(
+            self.stats
+                .num_reassigns_merged_point
+                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+            attribute,
+        );
+        tracing::info!(
+            "Total number of reassigns of neighbors of split cluster in this compaction run: {}",
+            self.stats
+                .num_reassigns_nbrs
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+        self.metrics.num_reassigns_nbrs.add(
+            self.stats
+                .num_reassigns_nbrs
+                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+            attribute,
+        );
+        tracing::info!(
+            "Total number of reassigns of points in split cluster in this compaction run: {}",
+            self.stats
+                .num_reassigns_split_point
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+        self.metrics.num_reassigns_split_point.add(
+            self.stats
+                .num_reassigns_split_point
+                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+            attribute,
+        );
+        tracing::info!(
+            "Total number of splits in this compaction run: {}",
+            self.stats
+                .num_splits
+                .load(std::sync::atomic::Ordering::SeqCst)
+        );
+        self.metrics.num_splits.add(
+            self.stats
+                .num_splits
+                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+            attribute,
+        );
+    }
+
     pub async fn commit(self) -> Result<SpannIndexFlusher, SpannIndexWriterError> {
+        self.emit_counters();
         // NOTE(Sanket): This is not the best way to drain the writer but the orchestrator keeps a
         // reference to the writer so cannot do an Arc::try_unwrap() here.
         // Pl list.
-        let mut now = std::time::Instant::now();
-        let pl_writer_clone = self.posting_list_writer.lock().await.clone();
-        let pl_flusher = pl_writer_clone
-            .commit::<u32, &SpannPostingList<'_>>()
-            .await
-            .map_err(|e| {
-                tracing::error!("Error committing posting list: {}", e);
-                SpannIndexWriterError::PostingListCommitError(e)
-            })?;
-        let mut elapsed = now.elapsed().as_millis() as u64;
-        self.metrics.pl_commit_latency.record(
-            elapsed,
-            &[KeyValue::new(
-                "collection_id",
-                self.collection_id.to_string(),
-            )],
-        );
-        tracing::info!("Committed posting list");
-        now = std::time::Instant::now();
-        // Versions map. Create a writer, write all the data and commit.
-        let mut bf_options = BlockfileWriterOptions::new();
-        bf_options = bf_options.unordered_mutations();
-        let versions_map_bf_writer = self
-            .blockfile_provider
-            .write::<u32, u32>(bf_options)
-            .await
-            .map_err(|e| {
-                tracing::error!("Error creating versions map writer: {}", e);
-                SpannIndexWriterError::VersionsMapWriterCreateError(*e)
-            })?;
-        {
-            let mut version_map_guard = self.versions_map.write().await;
-            for (doc_offset_id, doc_version) in version_map_guard.versions_map.drain() {
-                versions_map_bf_writer
-                    .set("", doc_offset_id, doc_version)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!(
-                            "Error setting version in versions map for {}, version {}: {}",
-                            doc_offset_id,
-                            doc_version,
-                            e
-                        );
-                        SpannIndexWriterError::VersionsMapSetError(e)
-                    })?;
-            }
-        }
-        let versions_map_flusher =
-            versions_map_bf_writer
-                .commit::<u32, u32>()
+        let attribute = &[KeyValue::new(
+            "collection_id",
+            self.collection_id.to_string(),
+        )];
+        let pl_flusher = {
+            let stopwatch = Stopwatch::new(&self.metrics.pl_commit_latency, attribute);
+            let pl_writer_clone = self.posting_list_writer.lock().await.clone();
+            let pl_flusher = pl_writer_clone
+                .commit::<u32, &SpannPostingList<'_>>()
                 .await
                 .map_err(|e| {
-                    tracing::error!("Error committing versions map: {}", e);
-                    SpannIndexWriterError::VersionsMapCommitError(e)
+                    tracing::error!("Error committing posting list: {}", e);
+                    SpannIndexWriterError::PostingListCommitError(e)
                 })?;
-        tracing::info!("Committed versions map");
-        elapsed = now.elapsed().as_millis() as u64;
-        self.metrics.versions_map_commit_latency.record(
-            elapsed,
-            &[KeyValue::new(
-                "collection_id",
-                self.collection_id.to_string(),
-            )],
-        );
+            tracing::info!(
+                "Committed posting list in {} ms",
+                stopwatch.elapsed_micros() / 1000
+            );
+            pl_flusher
+        };
+        let versions_map_flusher = {
+            let stopwatch = Stopwatch::new(&self.metrics.versions_map_commit_latency, attribute);
+            // Versions map. Create a writer, write all the data and commit.
+            let mut bf_options = BlockfileWriterOptions::new();
+            bf_options = bf_options.unordered_mutations();
+            let versions_map_bf_writer = self
+                .blockfile_provider
+                .write::<u32, u32>(bf_options)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Error creating versions map writer: {}", e);
+                    SpannIndexWriterError::VersionsMapWriterCreateError(*e)
+                })?;
+            {
+                let mut version_map_guard = self.versions_map.write().await;
+                for (doc_offset_id, doc_version) in version_map_guard.versions_map.drain() {
+                    versions_map_bf_writer
+                        .set("", doc_offset_id, doc_version)
+                        .await
+                        .map_err(|e| {
+                            tracing::error!(
+                                "Error setting version in versions map for {}, version {}: {}",
+                                doc_offset_id,
+                                doc_version,
+                                e
+                            );
+                            SpannIndexWriterError::VersionsMapSetError(e)
+                        })?;
+                }
+            }
+            let versions_map_flusher =
+                versions_map_bf_writer
+                    .commit::<u32, u32>()
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Error committing versions map: {}", e);
+                        SpannIndexWriterError::VersionsMapCommitError(e)
+                    })?;
+            tracing::info!(
+                "Committed versions map in {} ms",
+                stopwatch.elapsed_micros() / 1000
+            );
+            versions_map_flusher
+        };
         // Next head.
         let mut bf_options = BlockfileWriterOptions::new();
         bf_options = bf_options.unordered_mutations();
@@ -2130,31 +2230,29 @@ impl SpannIndexWriter {
         tracing::info!("Committed max head id");
 
         // Hnsw.
-        now = std::time::Instant::now();
-        let (hnsw_id, hnsw_index) = match self.cleaned_up_hnsw_index {
-            Some(index) => {
-                tracing::info!("Committing cleaned up hnsw index");
-                let index_id = index.inner.read().id;
-                (index_id, index)
-            }
-            None => {
-                let index_id = self.hnsw_index.inner.read().id;
-                (index_id, self.hnsw_index)
-            }
+        let hnsw_id = {
+            let stopwatch = Stopwatch::new(&self.metrics.hnsw_commit_latency, attribute);
+            let (hnsw_id, hnsw_index) = match self.cleaned_up_hnsw_index {
+                Some(index) => {
+                    tracing::info!("Committing cleaned up hnsw index");
+                    let index_id = index.inner.read().id;
+                    (index_id, index)
+                }
+                None => {
+                    let index_id = self.hnsw_index.inner.read().id;
+                    (index_id, self.hnsw_index)
+                }
+            };
+            self.hnsw_provider.commit(hnsw_index).map_err(|e| {
+                tracing::error!("Error committing hnsw index: {}", e);
+                SpannIndexWriterError::HnswIndexCommitError(e)
+            })?;
+            tracing::info!(
+                "Committed hnsw index in {} ms",
+                stopwatch.elapsed_micros() / 1000
+            );
+            hnsw_id
         };
-        self.hnsw_provider.commit(hnsw_index).map_err(|e| {
-            tracing::error!("Error committing hnsw index: {}", e);
-            SpannIndexWriterError::HnswIndexCommitError(e)
-        })?;
-        tracing::info!("Committed hnsw index");
-        elapsed = now.elapsed().as_millis() as u64;
-        self.metrics.hnsw_commit_latency.record(
-            elapsed,
-            &[KeyValue::new(
-                "collection_id",
-                self.collection_id.to_string(),
-            )],
-        );
 
         Ok(SpannIndexFlusher {
             pl_flusher,
@@ -2167,10 +2265,10 @@ impl SpannIndexWriter {
                 pl_flush_latency: self.metrics.pl_flush_latency.clone(),
                 versions_map_flush_latency: self.metrics.versions_map_flush_latency.clone(),
                 hnsw_flush_latency: self.metrics.hnsw_flush_latency.clone(),
-                num_pl_blocks_flushed: self.metrics.num_pl_blocks_flushed.clone(),
-                num_versions_map_blocks_flushed: self
+                num_pl_entries_flushed: self.metrics.num_pl_entries_flushed.clone(),
+                num_versions_map_entries_flushed: self
                     .metrics
-                    .num_versions_map_blocks_flushed
+                    .num_versions_map_entries_flushed
                     .clone(),
             },
         })
@@ -2181,8 +2279,8 @@ struct SpannIndexFlusherMetrics {
     pl_flush_latency: opentelemetry::metrics::Histogram<u64>,
     versions_map_flush_latency: opentelemetry::metrics::Histogram<u64>,
     hnsw_flush_latency: opentelemetry::metrics::Histogram<u64>,
-    num_pl_blocks_flushed: opentelemetry::metrics::Counter<u64>,
-    num_versions_map_blocks_flushed: opentelemetry::metrics::Counter<u64>,
+    num_pl_entries_flushed: opentelemetry::metrics::Counter<u64>,
+    num_versions_map_entries_flushed: opentelemetry::metrics::Counter<u64>,
 }
 
 pub struct SpannIndexFlusher {
@@ -2211,54 +2309,48 @@ impl SpannIndexFlusher {
             max_head_id_id: self.max_head_id_flusher.id(),
             hnsw_id: self.hnsw_id,
         };
-        let num_pl_blocks_flushed = self.pl_flusher.num_blocks();
-        let mut now = std::time::Instant::now();
-        self.pl_flusher
-            .flush::<u32, &SpannPostingList<'_>>()
-            .await
-            .map_err(|e| {
-                tracing::error!("Error flushing posting list {}: {}", res.pl_id, e);
-                SpannIndexWriterError::PostingListFlushError(e)
-            })?;
-        let mut elapsed = now.elapsed().as_millis() as u64;
-        self.metrics.pl_flush_latency.record(
-            elapsed,
-            &[KeyValue::new(
-                "collection_id",
-                self.collection_id.to_string(),
-            )],
-        );
-        self.metrics.num_pl_blocks_flushed.add(
-            num_pl_blocks_flushed as u64,
-            &[KeyValue::new(
-                "collection_id",
-                self.collection_id.to_string(),
-            )],
-        );
-        let num_versions_map_blocks_flushed = self.versions_map_flusher.num_blocks();
-        now = std::time::Instant::now();
-        self.versions_map_flusher
-            .flush::<u32, u32>()
-            .await
-            .map_err(|e| {
-                tracing::error!("Error flushing versions map {}: {}", res.versions_map_id, e);
-                SpannIndexWriterError::VersionsMapFlushError(e)
-            })?;
-        elapsed = now.elapsed().as_millis() as u64;
-        self.metrics.versions_map_flush_latency.record(
-            elapsed,
-            &[KeyValue::new(
-                "collection_id",
-                self.collection_id.to_string(),
-            )],
-        );
-        self.metrics.num_versions_map_blocks_flushed.add(
-            num_versions_map_blocks_flushed as u64,
-            &[KeyValue::new(
-                "collection_id",
-                self.collection_id.to_string(),
-            )],
-        );
+        let attribute = &[KeyValue::new(
+            "collection_id",
+            self.collection_id.to_string(),
+        )];
+        {
+            let stopwatch = Stopwatch::new(&self.metrics.pl_flush_latency, attribute);
+            let num_pl_entries_flushed = self.pl_flusher.num_entries();
+            self.pl_flusher
+                .flush::<u32, &SpannPostingList<'_>>()
+                .await
+                .map_err(|e| {
+                    tracing::error!("Error flushing posting list {}: {}", res.pl_id, e);
+                    SpannIndexWriterError::PostingListFlushError(e)
+                })?;
+            self.metrics
+                .num_pl_entries_flushed
+                .add(num_pl_entries_flushed as u64, attribute);
+            tracing::info!(
+                "Flushed {} entries from posting list in {} ms",
+                num_pl_entries_flushed,
+                stopwatch.elapsed_micros() / 1000
+            );
+        }
+        {
+            let stopwatch = Stopwatch::new(&self.metrics.versions_map_flush_latency, attribute);
+            let num_versions_map_entries_flushed = self.versions_map_flusher.num_entries();
+            self.versions_map_flusher
+                .flush::<u32, u32>()
+                .await
+                .map_err(|e| {
+                    tracing::error!("Error flushing versions map {}: {}", res.versions_map_id, e);
+                    SpannIndexWriterError::VersionsMapFlushError(e)
+                })?;
+            self.metrics
+                .num_versions_map_entries_flushed
+                .add(num_versions_map_entries_flushed as u64, attribute);
+            tracing::info!(
+                "Flushed {} entries from versions map in {} ms",
+                num_versions_map_entries_flushed,
+                stopwatch.elapsed_micros() / 1000
+            );
+        }
         self.max_head_id_flusher
             .flush::<&str, u32>()
             .await
@@ -2266,19 +2358,18 @@ impl SpannIndexFlusher {
                 tracing::error!("Error flushing max head id {}: {}", res.max_head_id_id, e);
                 SpannIndexWriterError::MaxHeadIdFlushError(e)
             })?;
-        now = std::time::Instant::now();
-        self.hnsw_flusher.flush(&self.hnsw_id).await.map_err(|e| {
-            tracing::error!("Error flushing hnsw index {}: {}", res.hnsw_id, e);
-            SpannIndexWriterError::HnswIndexFlushError(*e)
-        })?;
-        elapsed = now.elapsed().as_millis() as u64;
-        self.metrics.hnsw_flush_latency.record(
-            elapsed,
-            &[KeyValue::new(
-                "collection_id",
-                self.collection_id.to_string(),
-            )],
-        );
+        {
+            let stopwatch = Stopwatch::new(&self.metrics.hnsw_flush_latency, attribute);
+            self.hnsw_flusher.flush(&self.hnsw_id).await.map_err(|e| {
+                tracing::error!("Error flushing hnsw index {}: {}", res.hnsw_id, e);
+                SpannIndexWriterError::HnswIndexFlushError(*e)
+            })?;
+            tracing::info!(
+                "Flushed hnsw index {} in {} ms",
+                res.hnsw_id,
+                stopwatch.elapsed_micros() / 1000
+            );
+        }
         Ok(res)
     }
 }
