@@ -672,6 +672,7 @@ mod tests {
             hnsw_provider: hnsw_provider.clone(),
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: Some(gc_context),
+            metrics: Default::default(),
         };
         let mut manager = CompactionManager::new(
             scheduler,

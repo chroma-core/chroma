@@ -1,4 +1,7 @@
-use opentelemetry::trace::{SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState};
+use opentelemetry::{
+    trace::{SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState},
+    KeyValue,
+};
 use tonic::metadata::MetadataMap;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -60,4 +63,30 @@ pub fn wrap_span_with_parent_context(
         request_span.set_parent(context);
     }
     request_span
+}
+
+pub struct Stopwatch<'a>(
+    &'a opentelemetry::metrics::Histogram<u64>,
+    &'a [KeyValue],
+    std::time::Instant,
+);
+
+impl<'a> Stopwatch<'a> {
+    pub fn new(
+        histogram: &'a opentelemetry::metrics::Histogram<u64>,
+        attributes: &'a [KeyValue],
+    ) -> Self {
+        Self(histogram, attributes, std::time::Instant::now())
+    }
+
+    pub fn elapsed_micros(&self) -> u64 {
+        self.2.elapsed().as_micros() as u64
+    }
+}
+
+impl Drop for Stopwatch<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.2.elapsed().as_micros() as u64;
+        self.0.record(elapsed, self.1);
+    }
 }

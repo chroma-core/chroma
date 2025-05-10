@@ -98,6 +98,7 @@ fn add_to_index_and_get_reader<'a>(
             &blockfile_provider,
             params.clone(),
             gc_context,
+            Default::default(),
         )
         .await
         .expect("Error creating spann index writer");

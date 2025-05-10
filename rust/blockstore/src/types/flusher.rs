@@ -38,4 +38,11 @@ impl BlockfileFlusher {
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.count(),
         }
     }
+
+    pub fn num_entries(&self) -> usize {
+        match self {
+            BlockfileFlusher::MemoryBlockfileFlusher(_) => unimplemented!(),
+            BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.num_entries(),
+        }
+    }
 }
