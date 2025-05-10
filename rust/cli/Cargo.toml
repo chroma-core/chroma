@@ -40,6 +40,7 @@ tui-input = { version = "0.12.1", default-features = false, features = ["crosste
 textwrap = "0.16.2"
 futures = {workspace = true}
 supports-color = "3.0.2"
+async-trait = { workspace = true }
 
 
 [[bin]]

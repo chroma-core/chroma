@@ -10,14 +10,15 @@ use crate::commands::db::{db_command, DbCommand};
 use crate::commands::install::{install, InstallArgs};
 use crate::commands::login::{login, LoginArgs};
 use crate::commands::profile::{profile_command, ProfileCommand};
-use crate::commands::run::{run, RunArgs};
+use crate::commands::run::{RunArgs, RunCommand};
 use crate::commands::update::update;
 use crate::commands::vacuum::{vacuum, VacuumArgs};
 use crate::commands::webpage::{open_browser, WebPageCommand};
+use crate::utils::{CliError, UtilsError};
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 enum Command {
     Browse(BrowseArgs),
     Copy(CopyArgs),
@@ -34,6 +35,11 @@ enum Command {
     Vacuum(VacuumArgs),
 }
 
+#[async_trait::async_trait]
+pub trait CommandHandler {
+    async fn run(&mut self) -> Result<(), CliError>;
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "chroma")]
 #[command(version = "1.0.0")]
@@ -43,12 +49,12 @@ struct Cli {
     command: Command,
 }
 
-pub fn chroma_cli(args: Vec<String>) {
+pub fn chroma_cli(args: Vec<String>) -> Result<(), CliError> {
     let cli = Cli::parse_from(args);
 
     println!();
 
-    let result = match cli.command {
+    let mut result = match cli.command.clone() {
         Command::Browse(args) => browse(args),
         Command::Copy(args) => copy(args),
         Command::Db(db_subcommand) => db_command(db_subcommand),
@@ -56,11 +62,21 @@ pub fn chroma_cli(args: Vec<String>) {
         Command::Install(args) => install(args),
         Command::Login(args) => login(args),
         Command::Profile(profile_subcommand) => profile_command(profile_subcommand),
-        Command::Run(args) => run(args),
         Command::Support => open_browser(WebPageCommand::Discord),
         Command::Update => update(),
         Command::Vacuum(args) => vacuum(args),
+        _ => Ok(()),
     };
+
+    let handler: Option<Box<dyn CommandHandler>> = match cli.command {
+        Command::Run(args) => Some(Box::new(RunCommand::default(args))),
+        _ => None,
+    };
+
+    if let Some(mut handler) = handler {
+        let runtime = tokio::runtime::Runtime::new().map_err(|_| UtilsError::Runtime)?;
+        result = runtime.block_on(async { handler.run().await });
+    }
 
     if result.is_err() {
         let error_message = result.err().unwrap().to_string();
@@ -68,4 +84,6 @@ pub fn chroma_cli(args: Vec<String>) {
     }
 
     println!();
+
+    Ok(())
 }
