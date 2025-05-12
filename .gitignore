@@ -60,3 +60,11 @@ swift_package/chroma_swift_framework.xcframework
 *.xcassets
 *.nib
 *.storyboard
+
+
+# Ignore generated Swift bindings
+/out/
+
+# Ignore Swift Package Manager and Xcode build artifacts
+.build/
+/DerivedData/
