@@ -45,3 +45,18 @@ target/
 
 # Rapid test data
 testdata
+
+# Swift bindings and frameworks
+*.xcframework
+*.xcodeproj
+*.dSYM
+*.swiftpm
+*.build
+swift_package/Sources/ChromaSwift/*.swift
+swift_package/chroma_swift_framework.xcframework
+*.dylib
+*.metallib
+*.framework
+*.xcassets
+*.nib
+*.storyboard
