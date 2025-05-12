@@ -826,7 +826,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_may_contains() {
+    async fn test_may_contain() {
         let dir = tempfile::tempdir()
             .expect("To be able to create temp path")
             .path()
@@ -844,5 +844,6 @@ mod test {
 
         cache.insert("key1".to_string(), "foo".to_string()).await;
         assert!(cache.may_contain(&"key1".to_string()).await);
+        assert!(!cache.may_contain(&"key2".to_string()).await);
     }
 }
