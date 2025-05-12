@@ -492,6 +492,10 @@ where
         }
         Ok(res)
     }
+
+    async fn may_contain(&self, key: &K) -> bool {
+        self.may_contain(key).await
+    }
 }
 
 impl<K, V> super::PersistentCache<K, V> for FoyerHybridCache<K, V>
