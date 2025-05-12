@@ -19,8 +19,14 @@ tokio = { version = "1.38.0", features = ["macros", "sync"] }
 thiserror   = "1.0"
 anyhow      = "1.0"
 ndarray     = "0.15.6"
-chromadb    = "2.2"
 futures     = "0.3"
+
+chromadb    = "2.2"
+
+# Local Chroma crates - these replace the published chromadb crate
+#chroma = { path = "../chroma" }
+#chroma-frontend = { path = "../frontend" }
+#chroma-types = { path = "../types" }
 
 [build-dependencies]
 uniffi = { version = "0.25.3", features = ["build"] }
