@@ -376,18 +376,14 @@ impl SqliteMetadataWriter {
 }
 
 trait IntoSqliteExpr {
-    /// Evaluate to a binary integer (0/1) indicating boolean value
-    /// We cannot directly use a boolean value because `Any` and `All` aggregation does not exist
-    /// We need to use `Min` and `Max` as a workaround
-    /// In SQLite, boolean can be implicitly treated as binary integer
-    fn eval(&self) -> SimpleExpr;
+    fn eval_with_limit(&self, limit: Limit) -> SimpleExpr;
 }
 
 impl IntoSqliteExpr for Where {
-    fn eval(&self) -> SimpleExpr {
+    fn eval_with_limit(&self, limit: Limit) -> SimpleExpr {
         match self {
-            Where::Composite(expr) => expr.eval(),
-            Where::Document(expr) => expr.eval(),
+            Where::Composite(expr) => expr.eval_with_limit(limit),
+            Where::Document(expr) => expr.eval_with_limit(limit),
             Where::Metadata(expr) => {
                 // Local chroma is mixing the usage of int and float
                 match &expr.comparison {
@@ -404,7 +400,7 @@ impl IntoSqliteExpr for Where {
                             ) =>
                     {
                         // Just pass through to MetadataExpression which will use the UNION approach
-                        expr.eval()
+                        expr.eval_with_limit(limit)
                     }
                     MetadataComparison::Primitive(op, MetadataValue::Int(i)) => {
                         let alt = MetadataExpression {
@@ -415,8 +411,12 @@ impl IntoSqliteExpr for Where {
                             ),
                         };
                         match op {
-                            PrimitiveOperator::NotEqual => expr.eval().and(alt.eval()),
-                            _ => expr.eval().or(alt.eval()),
+                            PrimitiveOperator::NotEqual => expr
+                                .eval_with_limit(limit.clone())
+                                .and(alt.eval_with_limit(limit.clone())),
+                            _ => expr
+                                .eval_with_limit(limit.clone())
+                                .or(alt.eval_with_limit(limit.clone())),
                         }
                     }
                     MetadataComparison::Primitive(op, MetadataValue::Float(f)) => {
@@ -428,8 +428,12 @@ impl IntoSqliteExpr for Where {
                             ),
                         };
                         match op {
-                            PrimitiveOperator::NotEqual => expr.eval().and(alt.eval()),
-                            _ => expr.eval().or(alt.eval()),
+                            PrimitiveOperator::NotEqual => expr
+                                .eval_with_limit(limit.clone())
+                                .and(alt.eval_with_limit(limit.clone())),
+                            _ => expr
+                                .eval_with_limit(limit.clone())
+                                .or(alt.eval_with_limit(limit.clone())),
                         }
                     }
                     MetadataComparison::Set(op, MetadataSetValue::Int(is)) => {
@@ -443,8 +447,12 @@ impl IntoSqliteExpr for Where {
                             ),
                         };
                         match op {
-                            SetOperator::In => expr.eval().or(alt.eval()),
-                            SetOperator::NotIn => expr.eval().and(alt.eval()),
+                            SetOperator::In => expr
+                                .eval_with_limit(limit.clone())
+                                .or(alt.eval_with_limit(limit.clone())),
+                            SetOperator::NotIn => expr
+                                .eval_with_limit(limit.clone())
+                                .and(alt.eval_with_limit(limit.clone())),
                         }
                     }
                     MetadataComparison::Set(op, MetadataSetValue::Float(fs)) => {
@@ -458,11 +466,15 @@ impl IntoSqliteExpr for Where {
                             ),
                         };
                         match op {
-                            SetOperator::In => expr.eval().or(alt.eval()),
-                            SetOperator::NotIn => expr.eval().and(alt.eval()),
+                            SetOperator::In => expr
+                                .eval_with_limit(limit.clone())
+                                .or(alt.eval_with_limit(limit.clone())),
+                            SetOperator::NotIn => expr
+                                .eval_with_limit(limit.clone())
+                                .and(alt.eval_with_limit(limit.clone())),
                         }
                     }
-                    _ => expr.eval(),
+                    _ => expr.eval_with_limit(limit),
                 }
             }
         }
@@ -478,6 +490,7 @@ fn create_union_subquery_for_int_float_range_ops(
     key: String,
     op: PrimitiveOperator,
     val: MetadataValue,
+    limit: Limit,
 ) -> sea_query::SelectStatement {
     let key_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key));
     let key_cond = key_col.clone().eq(key).and(key_col.is_not_null());
@@ -543,27 +556,43 @@ fn create_union_subquery_for_int_float_range_ops(
                 _ => unreachable!(),
             }
         }
-        _ => return subq1,
+        _ => {
+            if limit.skip > 0 {
+                subq1.offset(limit.skip as u64);
+            }
+            if let Some(fetch) = limit.fetch {
+                subq1.limit(fetch as u64);
+            }
+            return subq1;
+        }
     }
 
     subq1.union(sea_query::UnionType::Distinct, subq2);
+
+    if limit.skip > 0 {
+        subq1.offset(limit.skip as u64);
+    }
+    if let Some(fetch) = limit.fetch {
+        subq1.limit(fetch as u64);
+    }
+
     subq1
 }
 
 impl IntoSqliteExpr for CompositeExpression {
-    fn eval(&self) -> SimpleExpr {
+    fn eval_with_limit(&self, limit: Limit) -> SimpleExpr {
         match self.operator {
             BooleanOperator::And => {
                 let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(true)));
                 for child in &self.children {
-                    expr = Expr::expr(expr).and(child.eval());
+                    expr = Expr::expr(expr).and(child.eval_with_limit(limit.clone()));
                 }
                 expr
             }
             BooleanOperator::Or => {
                 let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(false)));
                 for child in &self.children {
-                    expr = Expr::expr(expr).or(child.eval());
+                    expr = Expr::expr(expr).or(child.eval_with_limit(limit.clone()));
                 }
                 expr
             }
@@ -572,7 +601,7 @@ impl IntoSqliteExpr for CompositeExpression {
 }
 
 impl IntoSqliteExpr for DocumentExpression {
-    fn eval(&self) -> SimpleExpr {
+    fn eval_with_limit(&self, _limit: Limit) -> SimpleExpr {
         let doc_col = Expr::col((
             EmbeddingFulltextSearch::Table,
             EmbeddingFulltextSearch::StringValue,
@@ -591,7 +620,7 @@ impl IntoSqliteExpr for DocumentExpression {
 }
 
 impl IntoSqliteExpr for MetadataExpression {
-    fn eval(&self) -> SimpleExpr {
+    fn eval_with_limit(&self, limit: Limit) -> SimpleExpr {
         let key_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key));
         let key_cond = key_col
             .clone()
@@ -627,6 +656,7 @@ impl IntoSqliteExpr for MetadataExpression {
                                 self.key.clone(),
                                 op.clone(),
                                 val.clone(),
+                                limit.clone(),
                             );
                         } else {
                             subq.and_where(scol.gt(sval));
@@ -639,6 +669,7 @@ impl IntoSqliteExpr for MetadataExpression {
                                 self.key.clone(),
                                 op.clone(),
                                 val.clone(),
+                                limit.clone(),
                             );
                         } else {
                             subq.and_where(scol.gte(sval));
@@ -651,6 +682,7 @@ impl IntoSqliteExpr for MetadataExpression {
                                 self.key.clone(),
                                 op.clone(),
                                 val.clone(),
+                                limit.clone(),
                             );
                         } else {
                             subq.and_where(scol.lt(sval));
@@ -663,6 +695,7 @@ impl IntoSqliteExpr for MetadataExpression {
                                 self.key.clone(),
                                 op.clone(),
                                 val.clone(),
+                                limit.clone(),
                             );
                         } else {
                             subq.and_where(scol.lte(sval));
@@ -820,7 +853,9 @@ impl SqliteMetadataReader {
                         .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
                 );
             };
-            filter_limit_query.distinct().cond_where(whr.eval());
+            filter_limit_query
+                .distinct()
+                .cond_where(whr.eval_with_limit(Limit { skip, fetch }));
         }
 
         filter_limit_query
