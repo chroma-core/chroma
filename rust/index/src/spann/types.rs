@@ -215,6 +215,7 @@ pub struct SpannMetrics {
     pub num_reassigns_merged_point: opentelemetry::metrics::Counter<u64>,
     pub num_centers_fetched_rng: opentelemetry::metrics::Counter<u64>,
     pub num_rng_calls: opentelemetry::metrics::Counter<u64>,
+    pub gc_latency: opentelemetry::metrics::Histogram<u64>,
     pub pl_commit_latency: opentelemetry::metrics::Histogram<u64>,
     pub versions_map_commit_latency: opentelemetry::metrics::Histogram<u64>,
     pub hnsw_commit_latency: opentelemetry::metrics::Histogram<u64>,
@@ -238,6 +239,7 @@ impl Default for SpannMetrics {
         let num_reassigns_merged_point = meter.u64_counter("num_reassigns_merged_point").build();
         let num_centers_fetched_rng = meter.u64_counter("num_centers_fetched_rng").build();
         let num_rng_calls = meter.u64_counter("num_rng_calls").build();
+        let gc_latency = meter.u64_histogram("gc_latency").build();
         let pl_commit_latency = meter.u64_histogram("pl_commit_latency").build();
         let versions_map_commit_latency =
             meter.u64_histogram("versions_map_commit_latency").build();
@@ -259,6 +261,7 @@ impl Default for SpannMetrics {
             num_reassigns_merged_point,
             num_centers_fetched_rng,
             num_rng_calls,
+            gc_latency,
             pl_commit_latency,
             versions_map_commit_latency,
             hnsw_commit_latency,
@@ -1984,6 +1987,12 @@ impl SpannIndexWriter {
     // Note(Sanket): This has not been tested for running concurrently with
     // other add/update/delete operations.
     pub async fn garbage_collect(&mut self) -> Result<(), SpannIndexWriterError> {
+        let attributes = &[KeyValue::new(
+            "collection_id",
+            self.collection_id.to_string(),
+        )];
+        let gc_latency_metric = self.metrics.gc_latency.clone();
+        let stopwatch = Stopwatch::new(&gc_latency_metric, attributes);
         if self.gc_context.pl_context.enabled {
             match &self.gc_context.pl_context.policy {
                 PlGarbageCollectionPolicy::RandomSample(random_sample) => {
@@ -2004,6 +2013,10 @@ impl SpannIndexWriter {
                 }
             }
         }
+        tracing::info!(
+            "Garbage collected in {} ms",
+            stopwatch.elapsed_micros() / 1000
+        );
         Ok(())
     }
 
