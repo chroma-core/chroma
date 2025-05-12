@@ -8,7 +8,7 @@ BASE_DIR=$(pwd)
 OUT_DIR="${BASE_DIR}/out"
 HEADERPATH="${OUT_DIR}/${NAME}FFI.h"
 TARGETDIR="${BASE_DIR}/target"
-OUTDIR="${BASE_DIR}/../swift_package"
+OUTDIR="${BASE_DIR}/swift_package"
 RELDIR="release"
 STATIC_LIB_NAME="lib${NAME}.a"
 NEW_HEADER_DIR="${OUT_DIR}/include"
@@ -20,11 +20,11 @@ mkdir -p "${OUTDIR}/Sources"
 
 # Build for macOS
 echo "Building for macOS..."
-cargo build --release --manifest-path="$(pwd)/Cargo.toml"
+cargo build --release --manifest-path="${BASE_DIR}/Cargo.toml"
 
 # Generate bindings using UniFFI
 echo "Generating Swift bindings..."
-cargo run --bin uniffi-bindgen --manifest-path="$(pwd)/Cargo.toml" -- generate --library "$(pwd)/target/release/lib${NAME}.dylib" --language swift --out-dir "$(pwd)/out"
+cargo run --bin uniffi-bindgen --manifest-path="${BASE_DIR}/Cargo.toml" -- generate --library "${BASE_DIR}/target/release/lib${NAME}.dylib" --language swift --out-dir "${OUT_DIR}"
 
 # Check if files were generated successfully
 if [ ! -f "${HEADERPATH}" ]; then
@@ -94,6 +94,7 @@ let package = Package(
 )
 EOL
 
+# Create README for Swift package
 echo "Creating README for Swift package..."
 cat > "${OUTDIR}/README.md" << EOL
 # ChromaSwift
