@@ -151,7 +151,7 @@ jobs:
       matrix:
         python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
         platform: ["blacksmith-16vcpu-ubuntu-2204"]
-        test-globs: ["chromadb/test/distributed/test_sanity.py"]
+        test-globs: ["chromadb/test/distributed/test_embeddings.py"]
     runs-on: ${{ matrix.platform }}
     # OIDC token auth for AWS
     permissions:
