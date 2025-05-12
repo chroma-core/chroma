@@ -11,7 +11,10 @@ use chroma_index::{
     config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig},
     hnsw_provider::HnswIndexProvider,
     spann::{
-        types::{GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannPosting},
+        types::{
+            GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannMetrics,
+            SpannPosting,
+        },
         utils::rng_query,
     },
 };
@@ -98,6 +101,7 @@ fn add_to_index_and_get_reader<'a>(
             &blockfile_provider,
             params.clone(),
             gc_context,
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann index writer");

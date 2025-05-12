@@ -7,7 +7,9 @@ use super::{
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
-use chroma_index::{hnsw_provider::HnswIndexProvider, test_hnsw_index_provider};
+use chroma_index::{
+    hnsw_provider::HnswIndexProvider, spann::types::SpannMetrics, test_hnsw_index_provider,
+};
 use chroma_types::{
     operator::{
         CountResult, GetResult, KnnBatchResult, KnnProjectionOutput, KnnProjectionRecord,
@@ -54,6 +56,7 @@ impl TestDistributedSegment {
                 hnsw_provider,
                 blockfile_provider,
                 garbage_collection_context: None,
+                metrics: SpannMetrics::default(),
             },
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
