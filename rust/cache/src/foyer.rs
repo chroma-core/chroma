@@ -492,6 +492,10 @@ where
         }
         Ok(res)
     }
+
+    async fn may_contain(&self, key: &K) -> bool {
+        self.cache.contains(key)
+    }
 }
 
 impl<K, V> super::PersistentCache<K, V> for FoyerHybridCache<K, V>
@@ -819,5 +823,27 @@ mod test {
             .expect("Expected to be able to get value")
             .expect("Value should not be None");
         assert_eq!(value, "foo");
+    }
+
+    #[tokio::test]
+    async fn test_may_contain() {
+        let dir = tempfile::tempdir()
+            .expect("To be able to create temp path")
+            .path()
+            .to_str()
+            .expect("To be able to parse path")
+            .to_string();
+        let cache = FoyerCacheConfig {
+            dir: Some(dir.clone()),
+            flush: true,
+            ..Default::default()
+        }
+        .build_hybrid_test::<String, String>()
+        .await
+        .unwrap();
+
+        cache.insert("key1".to_string(), "foo".to_string()).await;
+        assert!(cache.may_contain(&"key1".to_string()).await);
+        assert!(!cache.may_contain(&"key2".to_string()).await);
     }
 }
