@@ -495,7 +495,7 @@ func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.Lis
 		absoluteCutoffTimeSecs = &cutoffTime
 	}
 
-	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx, absoluteCutoffTimeSecs, req.Limit)
+	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx, absoluteCutoffTimeSecs, req.Limit, req.TenantId)
 	if err != nil {
 		log.Error("ListCollectionsToGc failed", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
@@ -507,6 +507,7 @@ func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.Lis
 			Name:            collectionToGc.Name,
 			VersionFilePath: collectionToGc.VersionFilePath,
 			TenantId:        collectionToGc.TenantID,
+			LineageFilePath: collectionToGc.LineageFilePath,
 		})
 	}
 	return res, nil

@@ -33,10 +33,9 @@ type CollectionToGc struct {
 	ID              string    `gorm:"id;primaryKey"`
 	TenantID        string    `gorm:"tenant_id;not null;index:idx_tenant_id"`
 	Name            string    `gorm:"name;not null;index:idx_name,unique;"`
-	Version         int32     `gorm:"version;default:0"`
 	VersionFileName string    `gorm:"version_file_name"`
 	OldestVersionTs time.Time `gorm:"oldest_version_ts;type:timestamp"`
-	NumVersions     uint32    `gorm:"num_versions;default:0"`
+	LineageFileName *string   `gorm:"lineage_file_name"`
 }
 
 func (v Collection) TableName() string {
@@ -65,7 +64,7 @@ type ICollectionDb interface {
 		sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64) (int64, error)
 	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
 	GetCollectionSize(collectionID string) (uint64, error)
-	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64) ([]*CollectionToGc, error)
+	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*CollectionToGc, error)
 	UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error)
 	LockCollection(collectionID string) error
 	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath string, newLineageFilePath string) error
