@@ -7,6 +7,37 @@ settings:
 importers:
 
   .:
+    devDependencies:
+      '@types/node':
+        specifier: ^20.8.10
+        version: 20.17.46
+      npm-run-all:
+        specifier: ^4.1.5
+        version: 4.1.5
+      rimraf:
+        specifier: ^5.0.0
+        version: 5.0.10
+      ts-node:
+        specifier: ^10.9.1
+        version: 10.9.2(@types/node@20.17.46)(typescript@5.8.3)
+      typescript:
+        specifier: ^5.0.4
+        version: 5.8.3
+
+  packages/ai-embeddings/jina:
+    dependencies:
+      chromadb:
+        specifier: workspace:^
+        version: link:../../chromadb
+    devDependencies:
+      rimraf:
+        specifier: ^5.0.0
+        version: 5.0.10
+      tsup:
+        specifier: ^8.3.5
+        version: 8.4.0(jiti@2.4.2)(typescript@5.8.3)(yaml@2.7.1)
+
+  packages/chromadb:
     dependencies:
       semver:
         specifier: ^7.7.1
