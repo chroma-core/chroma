@@ -444,14 +444,14 @@ func (tc *Catalog) GetCollectionSize(ctx context.Context, collectionID types.Uni
 	return total_records_post_compaction, nil
 }
 
-func (tc *Catalog) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64) ([]*model.CollectionToGc, error) {
+func (tc *Catalog) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*model.CollectionToGc, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
 		_, span := tracer.Start(ctx, "Catalog.ListCollectionsToGc")
 		defer span.End()
 	}
 
-	collectionsToGc, err := tc.metaDomain.CollectionDb(ctx).ListCollectionsToGc(cutoffTimeSecs, limit)
+	collectionsToGc, err := tc.metaDomain.CollectionDb(ctx).ListCollectionsToGc(cutoffTimeSecs, limit, tenantID)
 
 	if err != nil {
 		return nil, err
