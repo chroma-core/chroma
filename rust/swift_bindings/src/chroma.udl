@@ -1,3 +1,0 @@
-namespace chroma_swift {
-    string get_chroma_version();
-};

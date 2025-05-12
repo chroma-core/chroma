@@ -26,13 +26,6 @@ impl From<anyhow::Error> for ChromaError {
 
 type FfiResult<T> = Result<T, ChromaError>;
 
-// ----------------------------------------------------------------------
-//  Tiny demo items
-// ----------------------------------------------------------------------
-#[uniffi::export]                    // plain sync fn
-pub fn get_chroma_version() -> String {
-    "0.1.0".into()
-}
 
 #[derive(uniffi::Enum)]
 pub enum Fruits {
