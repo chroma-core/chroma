@@ -1464,6 +1464,7 @@ def test_encompassing_delete(client: ClientAPI) -> None:
     reset(client)
 
     col = client.create_collection("encompassing_delete")
+    initial_version = get_collection_version(client, col.name)
 
     id_start = 0
     # Add and then Delete 6 records
@@ -1476,8 +1477,9 @@ def test_encompassing_delete(client: ClientAPI) -> None:
 
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, col.name, get_collection_version(client, col.name), VERSION_INCREASE_WAIT_TIME
+            client, col.name, initial_version, VERSION_INCREASE_WAIT_TIME
         )
+    initial_version = get_collection_version(client, col.name)
 
     # Add and then delete and then add 16
     len_to_add = 16
@@ -1490,7 +1492,7 @@ def test_encompassing_delete(client: ClientAPI) -> None:
 
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, col.name, get_collection_version(client, col.name), VERSION_INCREASE_WAIT_TIME
+            client, col.name, initial_version, VERSION_INCREASE_WAIT_TIME
         )
 
     # Ensure we can get all
