@@ -27,19 +27,6 @@ impl From<anyhow::Error> for ChromaError {
 type FfiResult<T> = Result<T, ChromaError>;
 
 
-#[derive(uniffi::Enum)]
-pub enum Fruits {
-    Watermelon,
-    Cranberry,
-    Cherry,
-}
-
-#[derive(uniffi::Record)]
-pub struct Person { pub name: String, pub age: u8 }
-
-#[uniffi::export]
-pub fn add(a: u32, b: u32) -> u32 { a + b }
-
 // ----------------------------------------------------------------------
 //  Chroma helpers (Tokio async)
 // ----------------------------------------------------------------------
