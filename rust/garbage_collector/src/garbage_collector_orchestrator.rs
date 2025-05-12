@@ -861,7 +861,7 @@ mod tests {
             .unwrap();
 
         // Get collection info for GC from sysdb
-        let collections_to_gc = sysdb.get_collections_to_gc(None, None).await.unwrap();
+        let collections_to_gc = sysdb.get_collections_to_gc(None, None, None).await.unwrap();
         let collection_info = collections_to_gc
             .iter()
             .find(|c| c.id == collection_id)
@@ -1017,7 +1017,7 @@ mod tests {
             .unwrap();
 
         // Get collection info for GC from sysdb
-        let collections_to_gc = sysdb.get_collections_to_gc(None, None).await.unwrap();
+        let collections_to_gc = sysdb.get_collections_to_gc(None, None, None).await.unwrap();
         let collection_info = collections_to_gc
             .iter()
             .find(|c| c.id == collection_id)
@@ -1175,7 +1175,7 @@ mod tests {
             .unwrap();
 
         // Get collection info for GC from sysdb
-        let collections_to_gc = sysdb.get_collections_to_gc(None, None).await.unwrap();
+        let collections_to_gc = sysdb.get_collections_to_gc(None, None, None).await.unwrap();
         let collection_info = collections_to_gc
             .iter()
             .find(|c| c.id == collection_id)
