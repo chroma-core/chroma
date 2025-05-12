@@ -115,7 +115,7 @@ impl Log {
         }
     }
 
-    #[tracing::instrument(skip(self), err(Display))]
+    #[tracing::instrument(skip(self), ret, err(Display))]
     pub async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,

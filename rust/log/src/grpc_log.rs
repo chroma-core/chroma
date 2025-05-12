@@ -371,6 +371,7 @@ impl GrpcLog {
             ._get_collections_with_new_data(false, min_compaction_size)
             .await?;
         if self.config.use_alt_host_for_everything
+            || !self.config.use_alt_for_tenants.is_empty()
             || !self.config.use_alt_for_collections.is_empty()
         {
             let alt = self
