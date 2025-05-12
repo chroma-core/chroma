@@ -50,6 +50,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
+        if api_key is not None:
+            os.environ[self.api_key_env_var] = api_key
         self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")

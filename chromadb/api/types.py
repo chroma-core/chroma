@@ -599,12 +599,18 @@ class EmbeddingFunction(Protocol[D]):
         return
 
     def is_legacy(self) -> bool:
-        if (
-            self.name() is NotImplemented
-            or self.get_config() is NotImplemented
-            or self.build_from_config(self.get_config()) is NotImplemented
-        ):
+        # Check if name() returns NotImplemented
+        if self.name() is NotImplemented:
             return True
+
+        # Check if get_config() returns NotImplemented
+        if self.get_config() is NotImplemented:
+            return True
+
+        # Check if build_from_config is implemented by comparing with the base class implementation
+        if self.__class__.build_from_config == EmbeddingFunction.build_from_config:
+            return True
+
         return False
 
 

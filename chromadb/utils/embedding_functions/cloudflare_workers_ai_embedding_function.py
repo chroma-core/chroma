@@ -46,6 +46,8 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self.model_name = model_name
         self.account_id = account_id
         self.api_key_env_var = api_key_env_var
+        if api_key is not None:
+            os.environ[self.api_key_env_var] = api_key
         self.api_key = api_key or os.getenv(api_key_env_var)
         self.gateway_id = gateway_id
 

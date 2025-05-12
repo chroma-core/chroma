@@ -41,6 +41,8 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self.model_name = model_name
         self.api_key = api_key
         self.api_key_env_var = api_key_env_var
+        if api_key is not None:
+            os.environ[self.api_key_env_var] = api_key
 
         if not self.api_key:
             self.api_key = os.getenv(self.api_key_env_var)

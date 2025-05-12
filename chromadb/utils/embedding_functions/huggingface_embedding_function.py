@@ -34,6 +34,8 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
+        if api_key is not None:
+            os.environ[self.api_key_env_var] = api_key
         self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
@@ -146,6 +148,8 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         self.url = url
 
         self.api_key_env_var = api_key_env_var
+        if api_key is not None and self.api_key_env_var is not None:
+            os.environ[self.api_key_env_var] = api_key
         if self.api_key_env_var is not None:
             self.api_key = api_key or os.getenv(self.api_key_env_var)
         else:
@@ -191,7 +195,7 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         url = config.get("url")
-        api_key_env_var = config.get("api_key_env_var")
+        api_key_env_var = config.get("api_key_env_var") or None
         if url is None:
             raise ValueError("URL must be provided for HuggingFaceEmbeddingServer")
 
