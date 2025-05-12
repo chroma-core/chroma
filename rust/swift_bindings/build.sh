@@ -84,7 +84,10 @@ let package = Package(
         .target(
             name: "ChromaSwift",
             dependencies: ["${NAME}_framework"],
-            path: "Sources"
+            path: "Sources",
+            linkerSettings: [
+                .linkedFramework("SystemConfiguration")
+            ]
         ),
         .binaryTarget(
             name: "${NAME}_framework",
