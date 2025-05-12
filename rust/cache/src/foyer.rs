@@ -3,9 +3,9 @@ use ahash::RandomState;
 use chroma_error::ChromaError;
 use clap::Parser;
 use foyer::{
-    CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
-    InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
-    StorageKey, StorageValue, TracingOptions,
+    AdmitAllPicker, CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker,
+    HybridCacheBuilder, InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig,
+    RateLimitPicker, S3FifoConfig, StorageKey, StorageValue, TracingOptions,
 };
 use opentelemetry::global;
 use serde::{Deserialize, Serialize};
@@ -411,7 +411,8 @@ where
                     .with_eviction_pickers(vec![
                         Box::new(InvalidRatioPicker::new(config.invalid_ratio)),
                         Box::new(FifoPicker::default()),
-                    ]),
+                    ])
+                    .with_reinsertion_picker(Arc::new(AdmitAllPicker)),
             );
 
         if config.admission_rate_limit > 0 {
