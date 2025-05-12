@@ -446,7 +446,7 @@ mod tests {
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_index::config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig};
-    use chroma_index::spann::types::GarbageCollectionContext;
+    use chroma_index::spann::types::{GarbageCollectionContext, SpannMetrics};
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
@@ -672,6 +672,7 @@ mod tests {
             hnsw_provider: hnsw_provider.clone(),
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: Some(gc_context),
+            metrics: SpannMetrics::default(),
         };
         let mut manager = CompactionManager::new(
             scheduler,
