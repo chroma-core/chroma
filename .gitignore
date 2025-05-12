@@ -64,7 +64,7 @@ swift_package/chroma_swift_framework.xcframework
 
 # Ignore generated Swift bindings
 /rust/swift_bindings/out/
-/rust/swift_bindings/swift_package/
+/rust/swift_bindings/ChromaSwift/
 
 # Ignore Swift Package Manager and Xcode build artifacts
 .build/
