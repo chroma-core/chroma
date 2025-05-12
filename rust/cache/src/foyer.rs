@@ -95,8 +95,17 @@ const fn default_trace_fetch_us() -> usize {
     1000 * 100
 }
 
+fn default_name() -> String {
+    String::from("foyer")
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize, Parser)]
 pub struct FoyerCacheConfig {
+    /// Name of the cache. All metrics for the cache are prefixed with name_.
+    #[arg(long, default_value = "foyer")]
+    #[serde(default = "default_name")]
+    pub name: String,
+
     /// Directory for disk cache data.
     #[arg(short, long)]
     pub dir: Option<String>,
@@ -263,6 +272,7 @@ impl FoyerCacheConfig {
 impl Default for FoyerCacheConfig {
     fn default() -> Self {
         FoyerCacheConfig {
+            name: default_name(),
             dir: None,
             capacity: default_capacity(),
             mem: default_mem(),
@@ -335,6 +345,7 @@ where
             ),
         );
         let builder = HybridCacheBuilder::<K, V>::new()
+            .with_name(config.name.clone())
             .with_metrics_registry(otel_0_27_metrics)
             .with_tracing_options(tracing_options.clone())
             .with_policy(foyer::HybridCachePolicy::WriteOnInsertion)
@@ -524,6 +535,7 @@ where
         config: &FoyerCacheConfig,
     ) -> Result<FoyerPlainCache<K, V>, Box<dyn ChromaError>> {
         let cache = CacheBuilder::new(config.capacity)
+            .with_name(config.name.clone())
             .with_shards(config.shards)
             .with_weighter(|_: &_, v: &V| v.weight())
             .build();
@@ -577,6 +589,7 @@ where
         let evl = TokioEventListener(tx);
 
         let cache = CacheBuilder::new(config.capacity)
+            .with_name(config.name.clone())
             .with_shards(config.shards)
             .with_weighter(|_: &_, v: &V| v.weight())
             .with_event_listener(Arc::new(evl))
