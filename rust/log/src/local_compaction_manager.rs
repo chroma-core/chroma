@@ -171,7 +171,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
                 &collection_and_segments.collection.tenant,
                 collection_and_segments.collection.collection_id,
                 mt_max_seq_id.min(hnsw_max_seq_id) as i64,
-                -1,
+                0,
                 None,
             )
             .await
