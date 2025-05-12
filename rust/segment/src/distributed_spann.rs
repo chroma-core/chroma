@@ -566,7 +566,7 @@ mod test {
             PlGarbageCollectionConfig, PlGarbageCollectionPolicyConfig, RandomSamplePolicyConfig,
         },
         hnsw_provider::HnswIndexProvider,
-        spann::types::GarbageCollectionContext,
+        spann::types::{GarbageCollectionContext, SpannMetrics},
         Index,
     };
     use chroma_storage::{local::LocalStorage, Storage};
@@ -648,7 +648,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
-            Default::default(),
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann segment writer");
@@ -730,7 +730,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
-            Default::default(),
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann segment writer");
@@ -860,7 +860,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
-            Default::default(),
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann segment writer");
@@ -1034,7 +1034,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
-            Default::default(),
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann segment writer");
@@ -1131,7 +1131,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
-            Default::default(),
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann segment writer");

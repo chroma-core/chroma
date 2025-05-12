@@ -433,7 +433,7 @@ impl SpannIndexWriter {
             gc_context,
             collection_id,
             metrics,
-            stats: Default::default(),
+            stats: WriteStats::default(),
         }
     }
 
@@ -691,10 +691,10 @@ impl SpannIndexWriter {
         });
         self.stats
             .num_rng_calls
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.stats.num_centers_fetched_rng.fetch_add(
             res.as_ref().map(|r| r.0.len() as u64).unwrap_or(0),
-            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::Relaxed,
         );
         res
     }
@@ -875,22 +875,22 @@ impl SpannIndexWriter {
             );
             self.stats
                 .num_reassigns
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             match reason {
                 ReassignReason::Split => {
                     self.stats
                         .num_reassigns_split_point
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 ReassignReason::Nearby => {
                     self.stats
                         .num_reassigns_nbrs
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 ReassignReason::Merge => {
                     self.stats
                         .num_reassigns_merged_point
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
             self.append(
@@ -1140,13 +1140,13 @@ impl SpannIndexWriter {
                     })?;
                 self.stats
                     .num_pl_modified
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 return Ok(());
             }
             self.stats
                 .num_splits
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             tracing::debug!(
                 "Splitting posting list of head {} since it exceeds threshold in lieu of appending point {} at version {}",
                 head_id, id, version
@@ -1210,7 +1210,7 @@ impl SpannIndexWriter {
                     })?;
                 self.stats
                     .num_pl_modified
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 return Ok(());
             } else {
                 // None of the cluster_counts should be 0. Points to some error if it is.
@@ -1270,14 +1270,14 @@ impl SpannIndexWriter {
                             })?;
                         self.stats
                             .num_pl_modified
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         new_head_ids[k] = head_id as i32;
                         new_head_embeddings[k] = Some(&head_embedding);
                     } else {
                         // Create new head.
                         let next_id = self
                             .next_head_id
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         tracing::debug!(
                             "Creating new head {}, old head {} in lieu of adding point {} at version {}",
                             next_id, head_id, id, version
@@ -1301,7 +1301,7 @@ impl SpannIndexWriter {
                             })?;
                         self.stats
                             .num_pl_modified
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         new_head_ids[k] = next_id as i32;
                         new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
@@ -1331,7 +1331,7 @@ impl SpannIndexWriter {
                             })?;
                         self.stats
                             .num_heads_created
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
                 if !same_head {
@@ -1349,7 +1349,7 @@ impl SpannIndexWriter {
                     })?;
                     self.stats
                         .num_heads_deleted
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
         }
@@ -1388,7 +1388,7 @@ impl SpannIndexWriter {
             );
             let next_id = self
                 .next_head_id
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             tracing::debug!(
                 "Created new head {} in lieu of adding point {} at version {}",
                 next_id,
@@ -1414,7 +1414,7 @@ impl SpannIndexWriter {
                     })?;
                 self.stats
                     .num_pl_modified
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
             // Next add to hnsw.
             {
@@ -1438,7 +1438,7 @@ impl SpannIndexWriter {
                 })?;
                 self.stats
                     .num_heads_created
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
             return Ok(());
         }
@@ -1657,7 +1657,7 @@ impl SpannIndexWriter {
                     })?;
                 self.stats
                     .num_pl_modified
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
                 return Ok(());
             }
@@ -1671,7 +1671,7 @@ impl SpannIndexWriter {
                 })?;
                 self.stats
                     .num_heads_deleted
-                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 return Ok(());
             }
             // Find candidates for merge.
@@ -1745,7 +1745,7 @@ impl SpannIndexWriter {
                         })?;
                     self.stats
                         .num_pl_modified
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     // Delete from hnsw.
                     let hnsw_write_guard = self.hnsw_index.inner.write();
                     hnsw_write_guard.delete(head_id).map_err(|e| {
@@ -1754,7 +1754,7 @@ impl SpannIndexWriter {
                     })?;
                     self.stats
                         .num_heads_deleted
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 } else {
                     pl_guard
                         .set("", head_id as u32, &merged_posting_list)
@@ -1769,7 +1769,7 @@ impl SpannIndexWriter {
                         })?;
                     self.stats
                         .num_pl_modified
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     // Delete from hnsw.
                     let hnsw_write_guard = self.hnsw_index.inner.write();
                     hnsw_write_guard.delete(nearest_head_id).map_err(|e| {
@@ -1782,7 +1782,7 @@ impl SpannIndexWriter {
                     })?;
                     self.stats
                         .num_heads_deleted
-                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
                 // This center is now merged with a neighbor.
                 target_head = nearest_head_id;
@@ -2029,121 +2029,121 @@ impl SpannIndexWriter {
             "Total number of centers fetched from rng in this compaction run: {}",
             self.stats
                 .num_centers_fetched_rng
-                .load(std::sync::atomic::Ordering::SeqCst)
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
         // Emit metrics.
         self.metrics.num_centers_fetched_rng.add(
             self.stats
                 .num_centers_fetched_rng
-                .load(std::sync::atomic::Ordering::SeqCst),
+                .load(std::sync::atomic::Ordering::Relaxed),
             attribute,
         );
         tracing::info!(
             "Total number of rng calls in this compaction run: {}",
             self.stats
                 .num_rng_calls
-                .load(std::sync::atomic::Ordering::SeqCst)
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
         self.metrics.num_rng_calls.add(
             self.stats
                 .num_rng_calls
-                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                .load(std::sync::atomic::Ordering::Relaxed) as u64,
             attribute,
         );
         tracing::info!(
             "Total number of heads created in this compaction run: {}",
             self.stats
                 .num_heads_created
-                .load(std::sync::atomic::Ordering::SeqCst)
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
         self.metrics.num_heads_created.add(
             self.stats
                 .num_heads_created
-                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                .load(std::sync::atomic::Ordering::Relaxed) as u64,
             attribute,
         );
         tracing::info!(
             "Total number of heads deleted in this compaction run: {}",
             self.stats
                 .num_heads_deleted
-                .load(std::sync::atomic::Ordering::SeqCst)
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
         self.metrics.num_heads_deleted.add(
             self.stats
                 .num_heads_deleted
-                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                .load(std::sync::atomic::Ordering::Relaxed) as u64,
             attribute,
         );
         tracing::info!(
             "Total number of posting lists modified in this compaction run: {}",
             self.stats
                 .num_pl_modified
-                .load(std::sync::atomic::Ordering::SeqCst)
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
         self.metrics.num_pl_modified.add(
             self.stats
                 .num_pl_modified
-                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                .load(std::sync::atomic::Ordering::Relaxed) as u64,
             attribute,
         );
         tracing::info!(
             "Total number of reassigns in this compaction run: {}",
             self.stats
                 .num_reassigns
-                .load(std::sync::atomic::Ordering::SeqCst)
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
         self.metrics.num_reassigns.add(
             self.stats
                 .num_reassigns
-                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                .load(std::sync::atomic::Ordering::Relaxed) as u64,
             attribute,
         );
         tracing::info!(
             "Total number of reassigns due to center merges in this compaction run: {}",
             self.stats
                 .num_reassigns_merged_point
-                .load(std::sync::atomic::Ordering::SeqCst)
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
         self.metrics.num_reassigns_merged_point.add(
             self.stats
                 .num_reassigns_merged_point
-                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                .load(std::sync::atomic::Ordering::Relaxed) as u64,
             attribute,
         );
         tracing::info!(
             "Total number of reassigns of neighbors of split cluster in this compaction run: {}",
             self.stats
                 .num_reassigns_nbrs
-                .load(std::sync::atomic::Ordering::SeqCst)
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
         self.metrics.num_reassigns_nbrs.add(
             self.stats
                 .num_reassigns_nbrs
-                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                .load(std::sync::atomic::Ordering::Relaxed) as u64,
             attribute,
         );
         tracing::info!(
             "Total number of reassigns of points in split cluster in this compaction run: {}",
             self.stats
                 .num_reassigns_split_point
-                .load(std::sync::atomic::Ordering::SeqCst)
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
         self.metrics.num_reassigns_split_point.add(
             self.stats
                 .num_reassigns_split_point
-                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                .load(std::sync::atomic::Ordering::Relaxed) as u64,
             attribute,
         );
         tracing::info!(
             "Total number of splits in this compaction run: {}",
             self.stats
                 .num_splits
-                .load(std::sync::atomic::Ordering::SeqCst)
+                .load(std::sync::atomic::Ordering::Relaxed)
         );
         self.metrics.num_splits.add(
             self.stats
                 .num_splits
-                .load(std::sync::atomic::Ordering::SeqCst) as u64,
+                .load(std::sync::atomic::Ordering::Relaxed) as u64,
             attribute,
         );
     }
@@ -2228,7 +2228,7 @@ impl SpannIndexWriter {
                 tracing::error!("Error creating max head id writer: {}", e);
                 SpannIndexWriterError::MaxHeadIdWriterCreateError(*e)
             })?;
-        let max_head_oid = self.next_head_id.load(std::sync::atomic::Ordering::SeqCst);
+        let max_head_oid = self.next_head_id.load(std::sync::atomic::Ordering::Relaxed);
         max_head_id_bf
             .set("", MAX_HEAD_OFFSET_ID, max_head_oid)
             .await
@@ -2703,6 +2703,7 @@ mod tests {
         hnsw_provider::HnswIndexProvider,
         spann::types::{
             GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannIndexWriterError,
+            SpannMetrics,
         },
         Index,
     };
@@ -2757,7 +2758,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
-            Default::default(),
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann index writer");
@@ -2969,7 +2970,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
-            Default::default(),
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann index writer");
@@ -3216,7 +3217,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
-            Default::default(),
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann index writer");
@@ -3431,7 +3432,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
-            Default::default(),
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann index writer");
@@ -3689,7 +3690,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
-            Default::default(),
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann index writer");
@@ -3984,7 +3985,7 @@ mod tests {
                 &blockfile_provider,
                 params,
                 gc_context,
-                Default::default(),
+                SpannMetrics::default(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -4095,7 +4096,7 @@ mod tests {
                 &blockfile_provider,
                 params,
                 gc_context,
-                Default::default(),
+                SpannMetrics::default(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -4230,7 +4231,7 @@ mod tests {
                     &blockfile_provider,
                     params.clone(),
                     gc_context.clone(),
-                    Default::default(),
+                    SpannMetrics::default(),
                 )
                 .await
                 .expect("Error creating spann index writer");
@@ -4368,7 +4369,7 @@ mod tests {
                     &blockfile_provider,
                     params.clone(),
                     gc_context.clone(),
-                    Default::default(),
+                    SpannMetrics::default(),
                 )
                 .await
                 .expect("Error creating spann index writer");
@@ -4527,7 +4528,7 @@ mod tests {
                     &blockfile_provider,
                     params.clone(),
                     gc_context.clone(),
-                    Default::default(),
+                    SpannMetrics::default(),
                 )
                 .await
                 .expect("Error creating spann index writer");
@@ -4642,7 +4643,7 @@ mod tests {
                 &blockfile_provider,
                 params.clone(),
                 gc_context.clone(),
-                Default::default(),
+                SpannMetrics::default(),
             )
             .await
             .expect("Error creating spann index writer");
@@ -4761,7 +4762,7 @@ mod tests {
                 &blockfile_provider,
                 params,
                 gc_context,
-                Default::default(),
+                SpannMetrics::default(),
             )
             .await
             .expect("Error creating spann index writer");

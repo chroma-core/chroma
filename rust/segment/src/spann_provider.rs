@@ -40,7 +40,7 @@ impl Configurable<(HnswIndexProvider, BlockfileProvider, SpannProviderConfig)> f
             hnsw_provider: config.0.clone(),
             blockfile_provider: config.1.clone(),
             garbage_collection_context: Some(garbage_collection_context),
-            metrics: Default::default(),
+            metrics: SpannMetrics::default(),
         })
     }
 }
