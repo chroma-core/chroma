@@ -1,154 +1,131 @@
 #!/bin/bash
-# Swift bindings build script for Chroma
-set -e  # Exit immediately if a command exits with a non-zero status
+# Swift bindings build script for Chroma – now builds for macOS & iOS (device + simulator)
+set -euo pipefail
 
-# Set variables
-NAME="chroma_swift"
-BASE_DIR=$(pwd)
-OUT_DIR="${BASE_DIR}/out"
-HEADERPATH="${OUT_DIR}/${NAME}FFI.h"
-TARGETDIR="${BASE_DIR}/target"
-OUTDIR="${BASE_DIR}/ChromaSwift"
-RELDIR="release"
-STATIC_LIB_NAME="lib${NAME}.a"
-NEW_HEADER_DIR="${OUT_DIR}/include"
+############################################
+# ─────────── Configuration ───────────────
+############################################
+NAME="chroma_swift"                   # Base library name produced by Cargo
+PACKAGE_NAME="ChromaSwift"            # Swift‑package name / output folder
+BASE_DIR="$(pwd)"
+OUT_DIR="${BASE_DIR}/out"             # UniFFI output (headers, .swift, modulemap)
+TARGET_DIR="${BASE_DIR}/target"       # Cargo build artefacts
+RELEASE_DIR="release"
+HEADER_FILE="${OUT_DIR}/${NAME}FFI.h"
+INCLUDE_TMP="${OUT_DIR}/include"      # Temp header folder for the XCFramework
+XCFRAMEWORK_NAME="${NAME}_framework.xcframework"
 
-# Create directories
-mkdir -p "${OUT_DIR}"
-mkdir -p "${OUTDIR}"
-mkdir -p "${OUTDIR}/Sources"
+############################################
+# ─────────── Rust target list ────────────
+############################################
+RUST_TARGETS=(
+  "aarch64-apple-darwin"
+  "x86_64-apple-darwin"
+  "aarch64-apple-ios"
+  "aarch64-apple-ios-sim"
+  "x86_64-apple-ios"
+)
 
-# Build for macOS
-echo "Building for macOS..."
-cargo build --release --manifest-path="${BASE_DIR}/Cargo.toml"
+############################################
+# ─────── Install missing targets ─────────
+############################################
+echo "🔧 Ensuring required Rust targets are installed…"
+for T in "${RUST_TARGETS[@]}"; do
+  rustup target add "$T" &>/dev/null || true
+done
 
-# Generate bindings using UniFFI
-echo "Generating Swift bindings..."
-cargo run --bin uniffi-bindgen --manifest-path="${BASE_DIR}/Cargo.toml" -- generate --library "${BASE_DIR}/target/release/lib${NAME}.dylib" --language swift --out-dir "${OUT_DIR}"
+############################################
+# ───────────── Build Rust ────────────────
+############################################
+echo "🦀 Building static libraries…"
+for TARGET in "${RUST_TARGETS[@]}"; do
+  echo "  • $TARGET"
+  cargo build --manifest-path "$BASE_DIR/Cargo.toml" --release --target "$TARGET"
+done
 
-# Check if files were generated successfully
-if [ ! -f "${HEADERPATH}" ]; then
-    echo "Error: Header file ${HEADERPATH} was not generated."
-    exit 1
+############################################
+# ──────── Generate Swift bindings ────────
+############################################
+echo "🪄 Generating UniFFI Swift bindings…"
+mkdir -p "$OUT_DIR"
+cargo run --bin uniffi-bindgen \
+  --manifest-path "$BASE_DIR/Cargo.toml" \
+  -- generate --library "${TARGET_DIR}/aarch64-apple-darwin/${RELEASE_DIR}/lib${NAME}.dylib" \
+  --language swift \
+  --out-dir "$OUT_DIR"
+
+if [[ ! -f "$HEADER_FILE" ]]; then
+  echo "❌  UniFFI failed to generate $HEADER_FILE" ; exit 1
 fi
 
-if [ ! -f "${OUT_DIR}/${NAME}FFI.modulemap" ]; then
-    echo "Error: Module map ${OUT_DIR}/${NAME}FFI.modulemap was not generated."
-    exit 1
-fi
+############################################
+# ───── Create fat/universal libraries ────
+############################################
+echo "📦 Creating universal (fat) libs…"
+mkdir -p "$OUT_DIR/universal"
 
-if [ ! -f "${OUT_DIR}/${NAME}.swift" ]; then
-    echo "Error: Swift file ${OUT_DIR}/${NAME}.swift was not generated."
-    exit 1
-fi
+# macOS (arm64 + x86_64)
+lipo -create -output "$OUT_DIR/universal/lib${NAME}_macOS.a" \
+  "$TARGET_DIR/aarch64-apple-darwin/${RELEASE_DIR}/lib${NAME}.a" \
+  "$TARGET_DIR/x86_64-apple-darwin/${RELEASE_DIR}/lib${NAME}.a"
 
-# Create header directory
-mkdir -p "${NEW_HEADER_DIR}"
-cp "${HEADERPATH}" "${NEW_HEADER_DIR}/"
-cp "${OUT_DIR}/${NAME}FFI.modulemap" "${NEW_HEADER_DIR}/module.modulemap"
+# iOS Simulator (arm64 + x86_64)
+lipo -create -output "$OUT_DIR/universal/lib${NAME}_iOS_Simulator.a" \
+  "$TARGET_DIR/aarch64-apple-ios-sim/${RELEASE_DIR}/lib${NAME}.a" \
+  "$TARGET_DIR/x86_64-apple-ios/${RELEASE_DIR}/lib${NAME}.a"
 
-# Remove previous framework if it exists
-rm -rf "${OUTDIR}/${NAME}_framework.xcframework"
+# iOS Device (arm64) – no lipo needed
+IOS_DEVICE_LIB="$TARGET_DIR/aarch64-apple-ios/${RELEASE_DIR}/lib${NAME}.a"
 
-# Create XCFramework
-echo "Creating XCFramework..."
+############################################
+# ───────── Create XCFramework ────────────
+############################################
+echo "🏗️  Building XCFramework…"
+rm -rf "$PACKAGE_NAME/$XCFRAMEWORK_NAME" "$INCLUDE_TMP"
+mkdir -p "$INCLUDE_TMP"
+cp "$HEADER_FILE" "$INCLUDE_TMP/"
+cp "$OUT_DIR/${NAME}FFI.modulemap" "$INCLUDE_TMP/module.modulemap"
+
 xcodebuild -create-xcframework \
-    -library "${TARGETDIR}/${RELDIR}/${STATIC_LIB_NAME}" \
-    -headers "${NEW_HEADER_DIR}" \
-    -output "${OUTDIR}/${NAME}_framework.xcframework"
+  -library "$OUT_DIR/universal/lib${NAME}_macOS.a"        -headers "$INCLUDE_TMP" \
+  -library "$IOS_DEVICE_LIB"                              -headers "$INCLUDE_TMP" \
+  -library "$OUT_DIR/universal/lib${NAME}_iOS_Simulator.a" -headers "$INCLUDE_TMP" \
+  -output "$PACKAGE_NAME/$XCFRAMEWORK_NAME"
 
-# Copy Swift file to the output directory
-echo "Copying Swift bindings to output directory..."
-cp "${OUT_DIR}/${NAME}.swift" "${OUTDIR}/Sources/"
+############################################
+# ─────────── Swift Package  ──────────────
+############################################
+echo "📦 Preparing Swift package…"
+mkdir -p "$PACKAGE_NAME/Sources"
+cp "$OUT_DIR/${NAME}.swift" "$PACKAGE_NAME/Sources/"
 
-# Create Swift package manifest
-echo "Creating Swift Package Manager manifest..."
-cat > "${OUTDIR}/Package.swift" << EOL
+cat > "$PACKAGE_NAME/Package.swift" <<EOF
 // swift-tools-version:5.10
 import PackageDescription
 
 let package = Package(
-    name: "ChromaSwift",
-    platforms: [
-        .macOS(.v10_15),
-        .iOS(.v13)
-    ],
+    name: "$PACKAGE_NAME",
+    platforms: [.macOS(.v10_15), .iOS(.v13)],
     products: [
-        .library(
-            name: "ChromaSwift",
-            targets: ["ChromaSwift"]
-        ),
+        .library(name: "$PACKAGE_NAME", targets: ["$PACKAGE_NAME"])
     ],
-    dependencies: [],
     targets: [
         .target(
-            name: "ChromaSwift",
+            name: "$PACKAGE_NAME",
             dependencies: ["${NAME}_framework"],
             path: "Sources",
-            linkerSettings: [
-                .linkedFramework("SystemConfiguration")
-            ]
+            linkerSettings: [.linkedFramework("SystemConfiguration")]
         ),
         .binaryTarget(
             name: "${NAME}_framework",
-            path: "${NAME}_framework.xcframework"
+            path: "$XCFRAMEWORK_NAME"
         )
     ]
 )
-EOL
+EOF
 
-# Create README for Swift package
-echo "Creating README for Swift package..."
-cat > "${OUTDIR}/README.md" << EOL
-# ChromaSwift
-
-Swift bindings for the Chroma vector database in-memory components.
-
-## Installation
-
-Add this package to your Xcode project using Swift Package Manager.
-
-## Usage
-
-\`\`\`swift
-import ChromaSwift
-
-// Initialize Chroma
-initialize_chroma()
-
-// Create a collection
-let collection = try ChromaCollection(
-    name: "my_collection", 
-    dimension: 384, 
-    distance_function: .Cosine
-)
-
-// Add embeddings
-try collection.add(
-    ids: ["id1", "id2"],
-    embeddings: [[0.1, 0.2, 0.3, ...], [0.4, 0.5, 0.6, ...]],
-    metadatas: ["{\"text\": \"document 1\"}", "{\"text\": \"document 2\"}"]
-)
-
-// Query embeddings
-let results = try collection.query(
-    query_embedding: [0.1, 0.2, 0.3, ...],
-    n_results: 2
-)
-
-// Retrieve embeddings
-let embeddings = try collection.get(ids: ["id1"])
-
-// Count embeddings
-let count = try collection.count()
-
-// Delete embeddings
-try collection.delete(ids: ["id1"])
-\`\`\`
-EOL
-
-# Clean up temporary directories
-rm -rf "${NEW_HEADER_DIR}"
-
-echo "Swift bindings generation complete!"
-echo "Framework and Swift files are available in ${OUTDIR}"
+############################################
+# ───────────── House‑keeping ─────────────
+############################################
+rm -rf "$INCLUDE_TMP"
+echo "✅ Build complete – XCFramework and Swift package are in  →  $PACKAGE_NAME"
