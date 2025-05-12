@@ -22,7 +22,7 @@ export class DefaultService {
     /**
      * Retrieves the current user's identity, tenant, and databases.
      */
-    public static getUserIdentity<ThrowOnError extends boolean = false>(options?: Options<GetUserIdentityData, ThrowOnError>) {
+    public static getUserIdentity<ThrowOnError extends boolean = true>(options?: Options<GetUserIdentityData, ThrowOnError>) {
         return (options?.client ?? _heyApiClient).get<GetUserIdentityResponse2, GetUserIdentityError, ThrowOnError>({
             url: '/api/v2/auth/identity',
             ...options
@@ -32,7 +32,7 @@ export class DefaultService {
     /**
      * Health check endpoint that returns 200 if the server and executor are ready
      */
-    public static healthcheck<ThrowOnError extends boolean = false>(options?: Options<HealthcheckData, ThrowOnError>) {
+    public static healthcheck<ThrowOnError extends boolean = true>(options?: Options<HealthcheckData, ThrowOnError>) {
         return (options?.client ?? _heyApiClient).get<HealthcheckResponse, HealthcheckError, ThrowOnError>({
             url: '/api/v2/healthcheck',
             ...options
@@ -42,7 +42,7 @@ export class DefaultService {
     /**
      * Heartbeat endpoint that returns a nanosecond timestamp of the current time.
      */
-    public static heartbeat<ThrowOnError extends boolean = false>(options?: Options<HeartbeatData, ThrowOnError>) {
+    public static heartbeat<ThrowOnError extends boolean = true>(options?: Options<HeartbeatData, ThrowOnError>) {
         return (options?.client ?? _heyApiClient).get<HeartbeatResponse2, HeartbeatError, ThrowOnError>({
             url: '/api/v2/heartbeat',
             ...options
@@ -52,7 +52,7 @@ export class DefaultService {
     /**
      * Pre-flight checks endpoint reporting basic readiness info.
      */
-    public static preFlightChecks<ThrowOnError extends boolean = false>(options?: Options<PreFlightChecksData, ThrowOnError>) {
+    public static preFlightChecks<ThrowOnError extends boolean = true>(options?: Options<PreFlightChecksData, ThrowOnError>) {
         return (options?.client ?? _heyApiClient).get<PreFlightChecksResponse, PreFlightChecksError, ThrowOnError>({
             url: '/api/v2/pre-flight-checks',
             ...options
@@ -62,7 +62,7 @@ export class DefaultService {
     /**
      * Reset endpoint allowing authorized users to reset the database.
      */
-    public static reset<ThrowOnError extends boolean = false>(options?: Options<ResetData, ThrowOnError>) {
+    public static reset<ThrowOnError extends boolean = true>(options?: Options<ResetData, ThrowOnError>) {
         return (options?.client ?? _heyApiClient).post<ResetResponse, ResetError, ThrowOnError>({
             url: '/api/v2/reset',
             ...options
@@ -72,7 +72,7 @@ export class DefaultService {
     /**
      * Creates a new tenant.
      */
-    public static createTenant<ThrowOnError extends boolean = false>(options: Options<CreateTenantData, ThrowOnError>) {
+    public static createTenant<ThrowOnError extends boolean = true>(options: Options<CreateTenantData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CreateTenantResponse2, CreateTenantError, ThrowOnError>({
             url: '/api/v2/tenants',
             ...options,
@@ -86,7 +86,7 @@ export class DefaultService {
     /**
      * Returns an existing tenant by name.
      */
-    public static getTenant<ThrowOnError extends boolean = false>(options: Options<GetTenantData, ThrowOnError>) {
+    public static getTenant<ThrowOnError extends boolean = true>(options: Options<GetTenantData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).get<GetTenantResponse2, GetTenantError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant_name}',
             ...options
@@ -96,7 +96,7 @@ export class DefaultService {
     /**
      * Lists all databases for a given tenant.
      */
-    public static listDatabases<ThrowOnError extends boolean = false>(options: Options<ListDatabasesData, ThrowOnError>) {
+    public static listDatabases<ThrowOnError extends boolean = true>(options: Options<ListDatabasesData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).get<ListDatabasesResponse, ListDatabasesError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases',
             ...options
@@ -106,7 +106,7 @@ export class DefaultService {
     /**
      * Creates a new database for a given tenant.
      */
-    public static createDatabase<ThrowOnError extends boolean = false>(options: Options<CreateDatabaseData, ThrowOnError>) {
+    public static createDatabase<ThrowOnError extends boolean = true>(options: Options<CreateDatabaseData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CreateDatabaseResponse2, CreateDatabaseError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases',
             ...options,
@@ -120,7 +120,7 @@ export class DefaultService {
     /**
      * Deletes a specific database.
      */
-    public static deleteDatabase<ThrowOnError extends boolean = false>(options: Options<DeleteDatabaseData, ThrowOnError>) {
+    public static deleteDatabase<ThrowOnError extends boolean = true>(options: Options<DeleteDatabaseData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).delete<DeleteDatabaseResponse2, DeleteDatabaseError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}',
             ...options
@@ -130,7 +130,7 @@ export class DefaultService {
     /**
      * Retrieves a specific database by name.
      */
-    public static getDatabase<ThrowOnError extends boolean = false>(options: Options<GetDatabaseData, ThrowOnError>) {
+    public static getDatabase<ThrowOnError extends boolean = true>(options: Options<GetDatabaseData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).get<GetDatabaseResponse, GetDatabaseError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}',
             ...options
@@ -140,7 +140,7 @@ export class DefaultService {
     /**
      * Lists all collections in the specified database.
      */
-    public static listCollections<ThrowOnError extends boolean = false>(options: Options<ListCollectionsData, ThrowOnError>) {
+    public static listCollections<ThrowOnError extends boolean = true>(options: Options<ListCollectionsData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).get<ListCollectionsResponse, ListCollectionsError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections',
             ...options
@@ -150,7 +150,7 @@ export class DefaultService {
     /**
      * Creates a new collection under the specified database.
      */
-    public static createCollection<ThrowOnError extends boolean = false>(options: Options<CreateCollectionData, ThrowOnError>) {
+    public static createCollection<ThrowOnError extends boolean = true>(options: Options<CreateCollectionData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CreateCollectionResponse, CreateCollectionError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections',
             ...options,
@@ -164,7 +164,7 @@ export class DefaultService {
     /**
      * Deletes a collection in a given database.
      */
-    public static deleteCollection<ThrowOnError extends boolean = false>(options: Options<DeleteCollectionData, ThrowOnError>) {
+    public static deleteCollection<ThrowOnError extends boolean = true>(options: Options<DeleteCollectionData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).delete<DeleteCollectionResponse, DeleteCollectionError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}',
             ...options
@@ -174,7 +174,7 @@ export class DefaultService {
     /**
      * Retrieves a collection by ID or name.
      */
-    public static getCollection<ThrowOnError extends boolean = false>(options: Options<GetCollectionData, ThrowOnError>) {
+    public static getCollection<ThrowOnError extends boolean = true>(options: Options<GetCollectionData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).get<GetCollectionResponse, GetCollectionError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}',
             ...options
@@ -184,7 +184,7 @@ export class DefaultService {
     /**
      * Updates an existing collection's name or metadata.
      */
-    public static updateCollection<ThrowOnError extends boolean = false>(options: Options<UpdateCollectionData, ThrowOnError>) {
+    public static updateCollection<ThrowOnError extends boolean = true>(options: Options<UpdateCollectionData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).put<UpdateCollectionResponse2, UpdateCollectionError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}',
             ...options,
@@ -198,7 +198,7 @@ export class DefaultService {
     /**
      * Adds records to a collection.
      */
-    public static collectionAdd<ThrowOnError extends boolean = false>(options: Options<CollectionAddData, ThrowOnError>) {
+    public static collectionAdd<ThrowOnError extends boolean = true>(options: Options<CollectionAddData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CollectionAddResponse, unknown, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add',
             ...options,
@@ -212,7 +212,7 @@ export class DefaultService {
     /**
      * Retrieves the number of records in a collection.
      */
-    public static collectionCount<ThrowOnError extends boolean = false>(options: Options<CollectionCountData, ThrowOnError>) {
+    public static collectionCount<ThrowOnError extends boolean = true>(options: Options<CollectionCountData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).get<CollectionCountResponse, CollectionCountError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count',
             ...options
@@ -222,7 +222,7 @@ export class DefaultService {
     /**
      * Deletes records in a collection. Can filter by IDs or metadata.
      */
-    public static collectionDelete<ThrowOnError extends boolean = false>(options: Options<CollectionDeleteData, ThrowOnError>) {
+    public static collectionDelete<ThrowOnError extends boolean = true>(options: Options<CollectionDeleteData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CollectionDeleteResponse, CollectionDeleteError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete',
             ...options,
@@ -236,7 +236,7 @@ export class DefaultService {
     /**
      * Forks an existing collection.
      */
-    public static forkCollection<ThrowOnError extends boolean = false>(options: Options<ForkCollectionData, ThrowOnError>) {
+    public static forkCollection<ThrowOnError extends boolean = true>(options: Options<ForkCollectionData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<ForkCollectionResponse, ForkCollectionError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork',
             ...options,
@@ -250,7 +250,7 @@ export class DefaultService {
     /**
      * Retrieves records from a collection by ID or metadata filter.
      */
-    public static collectionGet<ThrowOnError extends boolean = false>(options: Options<CollectionGetData, ThrowOnError>) {
+    public static collectionGet<ThrowOnError extends boolean = true>(options: Options<CollectionGetData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CollectionGetResponse, CollectionGetError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get',
             ...options,
@@ -264,7 +264,7 @@ export class DefaultService {
     /**
      * Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
      */
-    public static collectionQuery<ThrowOnError extends boolean = false>(options: Options<CollectionQueryData, ThrowOnError>) {
+    public static collectionQuery<ThrowOnError extends boolean = true>(options: Options<CollectionQueryData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CollectionQueryResponse, CollectionQueryError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query',
             ...options,
@@ -278,7 +278,7 @@ export class DefaultService {
     /**
      * Updates records in a collection by ID.
      */
-    public static collectionUpdate<ThrowOnError extends boolean = false>(options: Options<CollectionUpdateData, ThrowOnError>) {
+    public static collectionUpdate<ThrowOnError extends boolean = true>(options: Options<CollectionUpdateData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CollectionUpdateResponse, unknown, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update',
             ...options,
@@ -292,7 +292,7 @@ export class DefaultService {
     /**
      * Upserts records in a collection (create if not exists, otherwise update).
      */
-    public static collectionUpsert<ThrowOnError extends boolean = false>(options: Options<CollectionUpsertData, ThrowOnError>) {
+    public static collectionUpsert<ThrowOnError extends boolean = true>(options: Options<CollectionUpsertData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).post<CollectionUpsertResponse, CollectionUpsertError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert',
             ...options,
@@ -306,7 +306,7 @@ export class DefaultService {
     /**
      * Retrieves the total number of collections in a given database.
      */
-    public static countCollections<ThrowOnError extends boolean = false>(options: Options<CountCollectionsData, ThrowOnError>) {
+    public static countCollections<ThrowOnError extends boolean = true>(options: Options<CountCollectionsData, ThrowOnError>) {
         return (options.client ?? _heyApiClient).get<CountCollectionsResponse, CountCollectionsError, ThrowOnError>({
             url: '/api/v2/tenants/{tenant}/databases/{database}/collections_count',
             ...options
@@ -316,7 +316,7 @@ export class DefaultService {
     /**
      * Returns the version of the server.
      */
-    public static version<ThrowOnError extends boolean = false>(options?: Options<VersionData, ThrowOnError>) {
+    public static version<ThrowOnError extends boolean = true>(options?: Options<VersionData, ThrowOnError>) {
         return (options?.client ?? _heyApiClient).get<VersionResponse, unknown, ThrowOnError>({
             url: '/api/v2/version',
             ...options

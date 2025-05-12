@@ -8,7 +8,7 @@ import { createClient } from "@hey-api/openapi-ts";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-const startServer = () => {
+export const startServer = () => {
   const tsNodePath = join(process.cwd(), "node_modules", ".bin", "ts-node");
   const serverProcess = spawn(tsNodePath, [join(__dirname, "run-server.ts")], {
     stdio: "inherit",
@@ -48,7 +48,7 @@ const main = async () => {
       input: "http://localhost:8000/openapi.json",
       output: join(__dirname, "../src/api"),
       plugins: [
-        "@hey-api/client-fetch",
+        { name: "@hey-api/client-fetch", throwOnError: true },
         { name: "@hey-api/sdk", asClass: true },
         "@hey-api/typescript",
       ],
