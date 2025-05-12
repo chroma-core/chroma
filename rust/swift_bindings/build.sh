@@ -6,7 +6,7 @@ set -euo pipefail
 # ─────────── Configuration ───────────────
 ############################################
 NAME="chroma_swift"                   # Base library name produced by Cargo
-PACKAGE_NAME="ChromaSwift"            # Swift‑package name / output folder
+PACKAGE_NAME="Chroma"                 # Swift‑package name / output folder
 BASE_DIR="$(pwd)"
 OUT_DIR="${BASE_DIR}/out"             # UniFFI output (headers, .swift, modulemap)
 TARGET_DIR="${BASE_DIR}/target"       # Cargo build artefacts
