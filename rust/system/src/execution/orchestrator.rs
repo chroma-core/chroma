@@ -1,12 +1,54 @@
+use super::Operator;
 use crate::{ChannelError, Component, ComponentContext, ComponentHandle, PanicError, System};
+use crate::{Dispatcher, TaskMessage};
 use async_trait::async_trait;
 use chroma_error::ChromaError;
 use core::fmt::Debug;
+use parking_lot::Mutex;
 use std::any::type_name;
+use thiserror::Error;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
+use tracing::Instrument;
 use tracing::Span;
 
-use crate::{Dispatcher, TaskMessage};
+#[derive(Debug)]
+struct WrappedOrchestratorOperator<O: Orchestrator>(Mutex<Option<O>>, System, Span);
+
+#[derive(Debug, Error)]
+#[error("Orchestrator was already consumed")]
+pub struct WrappedOrchestratorOperatorError {}
+
+#[async_trait]
+impl<O: Orchestrator> Operator<(), O::Output> for WrappedOrchestratorOperator<O>
+where
+    O: Sync,
+    O::Output: Sync,
+    O::Error: From<WrappedOrchestratorOperatorError>,
+{
+    type Error = O::Error;
+
+    fn get_type(&self) -> crate::OperatorType {
+        crate::OperatorType::IO
+    }
+
+    fn get_name(&self) -> &'static str {
+        O::name()
+    }
+
+    async fn run(&self, _: &()) -> Result<O::Output, Self::Error> {
+        let orchestrator = {
+            let mut orchestrator = self.0.lock();
+            orchestrator
+                .take()
+                .ok_or(WrappedOrchestratorOperatorError {})?
+        };
+
+        orchestrator
+            .run(self.1.clone())
+            .instrument(self.2.clone())
+            .await
+    }
+}
 
 #[async_trait]
 pub trait Orchestrator: Debug + Send + Sized + 'static {
@@ -115,6 +157,19 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
             }
         }
     }
+
+    fn to_operator(self, system: System) -> Box<dyn Operator<(), Self::Output, Error = Self::Error>>
+    where
+        Self: Sync,
+        <Self as Orchestrator>::Output: Sync,
+        <Self as Orchestrator>::Error: From<WrappedOrchestratorOperatorError>,
+    {
+        Box::new(WrappedOrchestratorOperator(
+            Mutex::new(Some(self)),
+            system,
+            Span::current(),
+        ))
+    }
 }
 
 #[async_trait]
@@ -142,5 +197,130 @@ impl<O: Orchestrator> Component for O {
         if channel.send(Err(O::Error::from(error))).is_err() {
             tracing::error!("Error reporting panic to {}", Self::name());
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::wrap;
+    use crate::ChannelError;
+    use crate::ComponentContext;
+    use crate::Handler;
+    use crate::System;
+    use crate::TaskResult;
+    use async_trait::async_trait;
+    use thiserror::Error;
+
+    #[derive(Debug, Error)]
+    enum TestOrchestratorError {
+        #[error("Receive error: {0}")]
+        Receive(#[from] RecvError),
+        #[error("Channel error: {0}")]
+        Channel(#[from] ChannelError),
+        #[error("Panic error: {0}")]
+        Panic(#[from] PanicError),
+        #[error("Wrapped orchestrator error: {0}")]
+        OrchestratorWrapper(#[from] WrappedOrchestratorOperatorError),
+    }
+    impl ChromaError for TestOrchestratorError {
+        fn code(&self) -> chroma_error::ErrorCodes {
+            chroma_error::ErrorCodes::Internal
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestOrchestrator {
+        result_channel: Option<Sender<Result<usize, TestOrchestratorError>>>,
+        dispatcher: ComponentHandle<Dispatcher>,
+        system: System,
+        spawn_self: bool,
+    }
+
+    impl TestOrchestrator {
+        fn new(dispatcher: ComponentHandle<Dispatcher>, system: System, spawn_self: bool) -> Self {
+            Self {
+                result_channel: None,
+                dispatcher,
+                system,
+                spawn_self,
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestMessageRequest;
+
+    #[async_trait]
+    impl Orchestrator for TestOrchestrator {
+        type Output = usize;
+        type Error = TestOrchestratorError;
+
+        fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
+            self.dispatcher.clone()
+        }
+        async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+            if self.spawn_self {
+                let task = wrap(
+                    TestOrchestrator::new(self.dispatcher.clone(), self.system.clone(), false)
+                        .to_operator(self.system.clone()),
+                    (),
+                    ctx.receiver(),
+                );
+
+                return vec![task];
+            }
+
+            ctx.receiver()
+                .send(TestMessageRequest {}, None)
+                .await
+                .unwrap();
+
+            vec![]
+        }
+        fn set_result_channel(&mut self, sender: Sender<Result<Self::Output, Self::Error>>) {
+            self.result_channel = Some(sender);
+        }
+        fn take_result_channel(&mut self) -> Sender<Result<Self::Output, Self::Error>> {
+            self.result_channel.take().unwrap()
+        }
+    }
+
+    #[async_trait]
+    impl Handler<TestMessageRequest> for TestOrchestrator {
+        type Result = ();
+
+        async fn handle(
+            &mut self,
+            _: TestMessageRequest,
+            ctx: &ComponentContext<TestOrchestrator>,
+        ) {
+            self.default_terminate_with_result(Ok(42), ctx).await;
+        }
+    }
+
+    #[async_trait]
+    impl Handler<TaskResult<usize, TestOrchestratorError>> for TestOrchestrator {
+        type Result = ();
+
+        async fn handle(
+            &mut self,
+            result: TaskResult<usize, TestOrchestratorError>,
+            ctx: &ComponentContext<TestOrchestrator>,
+        ) {
+            self.default_terminate_with_result(Ok(result.into_inner().unwrap()), ctx)
+                .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_wrapped_orchestrator() {
+        let system = System::new();
+        let dispatcher = Dispatcher::new(Default::default());
+        let dispatcher_handle = system.start_component(dispatcher);
+        let orchestrator = TestOrchestrator::new(dispatcher_handle, system.clone(), true);
+
+        let result = orchestrator.run(system).await.unwrap();
+        assert_eq!(result, 42);
     }
 }
