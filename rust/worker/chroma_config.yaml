@@ -56,6 +56,7 @@ query_service:
                 max_block_size_bytes: 8388608 # 8MB
                 block_cache_config:
                     disk:
+                        name: "block_cache"
                         dir: "/cache/chroma/query-service/block-cache"
                         # 1k blocks * 8MiB = 8GiB, this is actually ignored in the disk cache config. Leaving it set to 1k for consistency.
                         capacity: 1000
@@ -72,11 +73,13 @@ query_service:
             sparse_index_manager_config:
                 sparse_index_cache_config:
                     lru:
+                        name: "sparse_index_cache"
                         capacity: 1000
     hnsw_provider:
         hnsw_temporary_path: "~/tmp"
         hnsw_cache_config:
             weighted_lru:
+                name: "hnsw_cache"
                 capacity: 8589934592 # 8GB
         permitted_parallelism: 180
 
@@ -138,15 +141,18 @@ compaction_service:
                 max_block_size_bytes: 8388608 # 8MB
                 block_cache_config:
                     lru:
+                        name: "block_cache"
                         capacity: 1000
             sparse_index_manager_config:
                 sparse_index_cache_config:
                     lru:
+                        name: "sparse_index_cache"
                         capacity: 1000
     hnsw_provider:
         hnsw_temporary_path: "~/tmp"
         hnsw_cache_config:
             weighted_lru:
+                name: "hnsw_cache"
                 capacity: 8192 # 8192 MiB = 8GB
         permitted_parallelism: 180
     spann_provider:

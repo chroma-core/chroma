@@ -79,7 +79,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, SoftDelete, suite.s3MetaStore, false)
+	c, err := NewCoordinator(ctx, SoftDelete, suite.s3MetaStore, true)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -1482,6 +1482,17 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	collections, err := suite.coordinator.GetCollections(ctx, forkCollectionWithSameName.TargetCollectionID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(collections)
+
+	res, err := suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil)
+	suite.NoError(err)
+	suite.NotEmpty(res)
+	suite.Equal(1, len(res))
+	// ListCollectionsToGc groups by fork trees and should always return the root of the tree
+	suite.Equal(forkCollectionWithSameName.SourceCollectionID, res[0].ID)
+
+	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, *res[0].LineageFilePath)
+	suite.NoError(err)
+	suite.True(exists, "Lineage file should exist in S3")
 }
 
 func (suite *APIsTestSuite) TestCountForks() {

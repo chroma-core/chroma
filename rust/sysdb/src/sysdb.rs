@@ -355,9 +355,10 @@ impl SysDb {
         &mut self,
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
+        tenant: Option<String>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit).await,
+            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit, tenant).await,
             SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
@@ -564,7 +565,7 @@ pub struct CollectionToGcInfo {
     pub tenant: String,
     pub name: String,
     pub version_file_path: String,
-    pub latest_version: i64,
+    pub lineage_file_path: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -598,7 +599,7 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
             tenant: value.tenant_id,
             name: value.name,
             version_file_path: value.version_file_path,
-            latest_version: value.latest_version,
+            lineage_file_path: value.lineage_file_path,
         })
     }
 }
@@ -1009,12 +1010,14 @@ impl GrpcSysDb {
         &mut self,
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
+        tenant: Option<String>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
             .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {
                 cutoff_time: cutoff_time.map(|t| t.into()),
                 limit,
+                tenant_id: tenant,
             })
             .await;
 
