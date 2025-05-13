@@ -29,15 +29,12 @@
     "build": "tsup",
     "watch": "tsup --watch"
   },
-  "dependencies": {
-    "chromadb": "workspace:^"
-  },
   "devDependencies": {
     "rimraf": "^5.0.0",
     "tsup": "^8.3.5"
   },
   "peerDependencies": {
-
+    "chromadb": "workspace:^"
   },
   "engines": {
     "node": ">=14.17.0"

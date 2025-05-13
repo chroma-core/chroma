@@ -68,7 +68,8 @@
     "tsd": "^0.28.1",
     "tsup": "^8.3.5",
     "typescript": "^5.0.4",
-    "wait-on": "^8.0.3"
+    "wait-on": "^8.0.3",
+    "@chroma-core/default-embed": "workspace:^"
   },
   "optionalDependencies": {
     "chromadb-js-bindings-darwin-arm64": "^0.1.1",

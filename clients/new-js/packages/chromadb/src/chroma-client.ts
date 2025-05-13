@@ -9,6 +9,7 @@ import { CollectionMetadata, UserIdentity } from "./types";
 import { Collection, CollectionImpl } from "./collection";
 import {
   EmbeddingFunction,
+  getDefaultEFConfig,
   getEmbeddingFunction,
   serializeEmbeddingFunction,
 } from "./embedding-function";
@@ -126,7 +127,7 @@ export class ChromaClient {
       ...(configuration || {}),
       embedding_function: embeddingFunction
         ? serializeEmbeddingFunction(embeddingFunction)
-        : undefined,
+        : await getDefaultEFConfig(),
     };
 
     const { data } = await Api.createCollection({
@@ -134,7 +135,7 @@ export class ChromaClient {
       path: this.path(),
       body: {
         name,
-        // configuration: undefined,
+        configuration: collectionConfig,
         metadata,
         get_or_create: false,
       },

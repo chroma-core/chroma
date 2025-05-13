@@ -2,7 +2,6 @@ import {
   IEmbeddingFunction,
   EmbeddingFunctionSpace,
 } from "./embeddings/IEmbeddingFunction";
-import { DefaultEmbeddingFunction } from "./embeddings/DefaultEmbeddingFunction";
 import { Api } from "./generated";
 export type HnswSpace = EmbeddingFunctionSpace;
 

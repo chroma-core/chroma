@@ -23,18 +23,18 @@ interface JinaRequestBody {
 }
 
 export class JinaEmbeddingFunction implements EmbeddingFunction {
-  name = "jina";
+  public readonly name = "jina";
 
-  private api_key_env_var: string;
-  private model_name: string;
-  private api_url: string;
-  private headers: { [key: string]: string };
-  private task: string | undefined;
-  private late_chunking: boolean | undefined;
-  private truncate: boolean | undefined;
-  private dimensions: number | undefined;
-  private embedding_type: string | undefined;
-  private normalized: boolean | undefined;
+  private readonly api_key_env_var: string;
+  private readonly model_name: string;
+  private readonly api_url: string;
+  private readonly headers: { [key: string]: string };
+  private readonly task: string | undefined;
+  private readonly late_chunking: boolean | undefined;
+  private readonly truncate: boolean | undefined;
+  private readonly dimensions: number | undefined;
+  private readonly embedding_type: string | undefined;
+  private readonly normalized: boolean | undefined;
 
   constructor({
     jinaai_api_key,
@@ -163,4 +163,4 @@ export class JinaEmbeddingFunction implements EmbeddingFunction {
   }
 }
 
-registerEmbeddingFunction(JinaEmbeddingFunction.prototype);
+registerEmbeddingFunction(JinaEmbeddingFunction);

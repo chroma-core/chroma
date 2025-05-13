@@ -119,7 +119,7 @@ const validateEmbeddings = ({
     );
   }
 
-  if (embeddings.filter((e) => e.every((n: any) => typeof n === "number"))) {
+  if (!embeddings.filter((e) => e.every((n: any) => typeof n === "number"))) {
     throw new Error("Expected each embedding to be an array of numbers");
   }
 
