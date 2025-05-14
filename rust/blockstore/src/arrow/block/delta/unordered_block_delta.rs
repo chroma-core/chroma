@@ -149,7 +149,7 @@ mod test {
     use chroma_storage::{
         admissioncontrolleds3::StorageRequestPriority, local::LocalStorage, Storage,
     };
-    use chroma_types::{DataRecord, MetadataValue};
+    use chroma_types::{DataRecord, MetadataValue, SpannPostingList};
     use rand::{random, Rng};
     use roaring::RoaringBitmap;
     use std::collections::HashMap;
@@ -632,6 +632,48 @@ mod test {
                 document: Some(&random_doc),
             };
             delta.add(prefix, key, &value);
+        }
+
+        // benchmark conversion to record batch
+        let start_time = std::time::Instant::now();
+        let record_batch = delta.finish::<u32, u32>(None);
+        let elapsed = start_time.elapsed();
+        println!("Time taken to convert {} items: {:?}", n, elapsed);
+
+        let block = Block::from_record_batch(uuid::Uuid::new_v4(), record_batch);
+        let block_size = block.get_size();
+        println!("Block size: {}", block_size);
+        let start_time = std::time::Instant::now();
+        let forked_delta =
+            UnorderedBlockDelta::fork_block::<u32, &DataRecord>(uuid::Uuid::new_v4(), &block);
+        let elapsed = start_time.elapsed();
+        println!(
+            "Time taken to convert {} items into block: {:?}",
+            n, elapsed
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delta_conversion_speed_spann() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().to_str().unwrap();
+        let storage = Storage::Local(LocalStorage::new(path));
+        let cache = new_cache_for_test();
+        let block_manager = BlockManager::new(storage, TEST_MAX_BLOCK_SIZE_BYTES, cache);
+        let delta = block_manager.create::<u32, &SpannPostingList, UnorderedBlockDelta>();
+
+        let n = 8;
+        let pl_size = 200;
+        let embedding_size = 1536;
+        let spann_posting_list = SpannPostingList {
+            doc_offset_ids: &vec![0; pl_size],
+            doc_versions: &vec![0; pl_size],
+            doc_embeddings: &vec![0.0; pl_size * embedding_size],
+        };
+
+        for i in 0..n {
+            let prefix = "";
+            delta.add(prefix, i as u32, &spann_posting_list);
         }
 
         // benchmark conversion to record batch
