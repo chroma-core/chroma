@@ -19,8 +19,11 @@ XCFRAMEWORK_NAME="${NAME}_framework.xcframework"
 # ─────────── Rust target list ────────────
 ############################################
 RUST_TARGETS=(
-  "aarch64-apple-darwin"
-  "x86_64-apple-darwin"
+  "aarch64-apple-darwin"         # macOS Apple Silicon
+  "x86_64-apple-darwin"          # macOS Intel
+  "aarch64-apple-ios"            # iOS device
+  "x86_64-apple-ios"             # iOS simulator (Intel)
+  "aarch64-apple-ios-sim"        # iOS simulator (Apple Silicon)
 )
 
 ############################################
@@ -37,6 +40,11 @@ done
 echo "🦀 Building static libraries…"
 for TARGET in "${RUST_TARGETS[@]}"; do
   echo "  • $TARGET"
+  if [[ "$TARGET" == "aarch64-apple-ios-sim" ]]; then
+    export BINDGEN_EXTRA_CLANG_ARGS="-target arm64-apple-ios-simulator -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path)"
+  else
+    unset BINDGEN_EXTRA_CLANG_ARGS
+  fi
   cargo build --manifest-path "$BASE_DIR/Cargo.toml" --release --target "$TARGET"
 done
 
@@ -66,6 +74,15 @@ lipo -create -output "$OUT_DIR/universal/lib${NAME}_macOS.a" \
   "$TARGET_DIR/aarch64-apple-darwin/${RELEASE_DIR}/lib${NAME}.a" \
   "$TARGET_DIR/x86_64-apple-darwin/${RELEASE_DIR}/lib${NAME}.a"
 
+# iOS Simulator (arm64 + x86_64)
+# Note: Apple Silicon simulators use aarch64-apple-ios-sim, Intel simulators use x86_64-apple-ios
+lipo -create -output "$OUT_DIR/universal/lib${NAME}_iOS-sim.a" \
+  "$TARGET_DIR/aarch64-apple-ios-sim/${RELEASE_DIR}/lib${NAME}.a" \
+  "$TARGET_DIR/x86_64-apple-ios/${RELEASE_DIR}/lib${NAME}.a"
+
+# iOS Device (just aarch64)
+cp "$TARGET_DIR/aarch64-apple-ios/${RELEASE_DIR}/lib${NAME}.a" "$OUT_DIR/universal/lib${NAME}_iOS.a"
+
 ############################################
 # ───────── Create XCFramework ────────────
 ############################################
@@ -77,6 +94,8 @@ cp "$OUT_DIR/${NAME}FFI.modulemap" "$INCLUDE_TMP/module.modulemap"
 
 xcodebuild -create-xcframework \
   -library "$OUT_DIR/universal/lib${NAME}_macOS.a" -headers "$INCLUDE_TMP" \
+  -library "$OUT_DIR/universal/lib${NAME}_iOS.a" -headers "$INCLUDE_TMP" \
+  -library "$OUT_DIR/universal/lib${NAME}_iOS-sim.a" -headers "$INCLUDE_TMP" \
   -output "$PACKAGE_NAME/$XCFRAMEWORK_NAME"
 
 ############################################
@@ -92,7 +111,10 @@ import PackageDescription
 
 let package = Package(
     name: "$PACKAGE_NAME",
-    platforms: [.macOS(.v10_15)],
+    platforms: [
+        .macOS(.v10_15),
+        .iOS(.v13)
+    ],
     products: [
         .library(name: "$PACKAGE_NAME", targets: ["$PACKAGE_NAME"])
     ],

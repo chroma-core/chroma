@@ -1,9 +1,9 @@
 use worker::compaction_service_entrypoint;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), not(target_os = "ios"), not(target_os = "tvos")))]
 use tikv_jemallocator::Jemalloc;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), not(target_os = "ios"), not(target_os = "tvos")))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
