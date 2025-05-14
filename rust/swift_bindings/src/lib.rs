@@ -66,6 +66,7 @@ static FRONTEND: Lazy<Mutex<Option<InMemoryFrontend>>> = Lazy::new(|| Mutex::new
 
 #[uniffi::export]
 pub fn initialize() -> FfiResult<()> {
+    tracing::info!("Swift FFI: initialize() called");
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_target(false)
@@ -78,6 +79,7 @@ pub fn initialize() -> FfiResult<()> {
 
 #[uniffi::export]
 pub fn create_collection(name: String) -> FfiResult<String> {
+    tracing::info!("Swift FFI: create_collection() called with name={}", name);
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic { 
         message: "Chroma not initialized. Call initialize() first.".to_string() 
@@ -97,6 +99,8 @@ pub fn create_collection(name: String) -> FfiResult<String> {
 
 #[uniffi::export]
 pub fn add_documents(collection_name: String, ids: Vec<String>, embeddings: Vec<Vec<f32>>, documents: Vec<String>) -> FfiResult<u32> {
+    tracing::info!("Swift FFI: add_documents() called with collection_name={}, num_ids={}, num_embeddings={}, num_documents={}", 
+        collection_name, ids.len(), embeddings.len(), documents.len());
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic { 
         message: "Chroma not initialized. Call initialize() first.".to_string() 
@@ -136,6 +140,8 @@ pub struct QueryResult {
 
 #[uniffi::export]
 pub fn query_collection(collection_name: String, query_embedding: Vec<f32>, n_results: u32) -> FfiResult<QueryResult> {
+    tracing::info!("Swift FFI: query_collection() called with collection_name={}, embedding_dim={}, n_results={}", 
+        collection_name, query_embedding.len(), n_results);
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic { 
         message: "Chroma not initialized. Call initialize() first.".to_string() 
@@ -173,6 +179,7 @@ pub struct GetResult {
 
 #[uniffi::export]
 pub fn get_all_documents(collection_name: String) -> FfiResult<GetResult> {
+    tracing::info!("Swift FFI: get_all_documents() called with collection_name={}", collection_name);
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic { 
         message: "Chroma not initialized. Call initialize() first.".to_string() 
@@ -204,6 +211,7 @@ pub fn get_all_documents(collection_name: String) -> FfiResult<GetResult> {
 
 #[uniffi::export]
 pub fn list_collections() -> FfiResult<Vec<String>> {
+    tracing::info!("Swift FFI: list_collections() called");
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic {
         message: "Chroma not initialized. Call initialize() first.".to_string()
@@ -222,6 +230,7 @@ pub fn list_collections() -> FfiResult<Vec<String>> {
 
 #[uniffi::export]
 pub fn delete_collection(collection_name: String) -> FfiResult<()> {
+    tracing::info!("Swift FFI: delete_collection() called with collection_name={}", collection_name);
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic {
         message: "Chroma not initialized. Call initialize() first.".to_string()
@@ -245,6 +254,7 @@ pub struct CollectionInfo {
 
 #[uniffi::export]
 pub fn get_collection_info(collection_name: String) -> FfiResult<CollectionInfo> {
+    tracing::info!("Swift FFI: get_collection_info() called with collection_name={}", collection_name);
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic {
         message: "Chroma not initialized. Call initialize() first.".to_string()
@@ -273,6 +283,7 @@ pub fn get_collection_info(collection_name: String) -> FfiResult<CollectionInfo>
 
 #[uniffi::export]
 pub fn reset() -> FfiResult<()> {
+    tracing::info!("Swift FFI: reset() called");
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic {
         message: "Chroma not initialized. Call initialize() first.".to_string()
@@ -284,12 +295,14 @@ pub fn reset() -> FfiResult<()> {
 
 #[uniffi::export]
 pub fn get_version() -> FfiResult<String> {
+    tracing::info!("Swift FFI: get_version() called");
     // For now, return a hardcoded version since InMemoryFrontend doesn't have a version method
     Ok("0.1.0".to_string())
 }
 
 #[uniffi::export]
 pub fn get_max_batch_size() -> FfiResult<u32> {
+    tracing::info!("Swift FFI: get_max_batch_size() called");
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic {
         message: "Chroma not initialized. Call initialize() first.".to_string()
