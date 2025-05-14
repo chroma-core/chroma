@@ -1,13 +1,13 @@
 //
-//  ChromaLocalTestUITests.swift
-//  ChromaLocalTestUITests
+//  ChromaDemoUITests.swift
+//  ChromaDemoUITests
 //
-//  Created by Nicholas Arner on 5/13/25.
+//  Created by Nicholas Arner on 5/14/25.
 //
 
 import XCTest
 
-final class ChromaLocalTestUITests: XCTestCase {
+final class ChromaDemoUITests: XCTestCase {
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
