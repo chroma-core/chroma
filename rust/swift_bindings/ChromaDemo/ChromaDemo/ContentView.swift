@@ -85,7 +85,7 @@ struct ContentView: View {
                         
                         Button("Add Document (Ephemeral)") {
                             do {
-                                let ids = ["doc1"]
+                                let ids = [UUID().uuidString]
                                 let embeddings: [[Float]] = [[0.1, 0.2, 0.3, 0.4]]
                                 let docs = [docText]
                                 _ = try addDocuments(
