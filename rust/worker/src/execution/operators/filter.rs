@@ -498,6 +498,11 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
         tracing::debug!("[{}]: {:?}", self.get_name(), input);
 
+        // NOTE: This is temporary traces to capture filter arguments
+        //       We suspect certain filters break the FTS algorithm
+        // TODO: Remove this after the bug is found
+        tracing::debug!("[DEBUG FILTER OPERATOR]: {:?}", self);
+
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
