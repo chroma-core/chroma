@@ -7,6 +7,8 @@ use chroma_types::{
     CreateCollectionError,
     AddCollectionRecordsError,
     QueryError,
+    GetRequest,
+    GetCollectionRequest,
 };
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
@@ -159,5 +161,42 @@ pub fn query_collection(collection_name: String, query_embedding: Vec<f32>, n_re
     let ids = response.ids.into_iter().flatten().collect();
     let documents = response.documents.unwrap_or_default().into_iter().flatten().collect();
     Ok(QueryResult { ids, documents })
+}
+
+#[derive(uniffi::Record)]
+pub struct GetResult {
+    pub ids: Vec<String>,
+    pub documents: Vec<Option<String>>,
+}
+
+#[uniffi::export]
+pub fn get_all_documents(collection_name: String) -> FfiResult<GetResult> {
+    let mut frontend_lock = FRONTEND.lock().unwrap();
+    let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic { 
+        message: "Chroma not initialized. Call initialize() first.".to_string() 
+    })?;
+    // Get collection id
+    let get_request = chroma_types::GetCollectionRequest::try_new(
+        "default".to_string(),
+        "default".to_string(),
+        collection_name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
+    let coll = frontend.get_collection(get_request)
+        .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
+    let request = GetRequest::try_new(
+        "default".to_string(),
+        "default".to_string(),
+        coll.collection_id,
+        None, // ids
+        None, // where
+        None, // limit (None means no limit)
+        0, // offset
+        chroma_types::IncludeList::default_get(), // Use default get includes
+    ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
+    let response = frontend.get(request)
+        .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
+    let ids = response.ids;
+    let documents = response.documents.unwrap_or_default();
+    Ok(GetResult { ids, documents })
 }
 

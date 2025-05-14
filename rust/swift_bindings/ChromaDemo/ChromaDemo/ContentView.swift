@@ -13,8 +13,10 @@ struct ContentView: View {
     @State private var status: String = ""
     @State private var result: String = ""
     @State private var docText: String = "Hello, Chroma!"
-    @State private var errorMessage: String? = nil 
+    @State private var errorMessage: String? = nil
     @State private var logs: [String] = []
+    @State private var docCounter: Int = 0
+    @State private var showingSuccess: Bool = false
     
     func addLog(_ message: String) {
         logs.append("[\(Date().formatted(date: .omitted, time: .standard))] \(message)")
@@ -85,7 +87,8 @@ struct ContentView: View {
                         
                         Button("Add Document (Ephemeral)") {
                             do {
-                                let ids = [UUID().uuidString]
+                                docCounter += 1
+                                let ids = ["doc\(docCounter)"]
                                 let embeddings: [[Float]] = [[0.1, 0.2, 0.3, 0.4]]
                                 let docs = [docText]
                                 _ = try addDocuments(
@@ -94,11 +97,14 @@ struct ContentView: View {
                                     embeddings: embeddings,
                                     documents: docs
                                 )
-                                status = "Document added to ephemeral"
+                                showingSuccess = true
                                 addLog("Document added to ephemeral: \(docText)")
+                                // Hide success message after 2 seconds
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                    showingSuccess = false
+                                }
                                 errorMessage = nil
                             } catch {
-                                status = "Ephemeral add error"
                                 errorMessage = error.localizedDescription
                                 addLog("Ephemeral add error: \(error)")
                             }
@@ -129,8 +135,33 @@ struct ContentView: View {
                         }
                     }
                     .frame(maxWidth: .infinity)
+
+                    Button("Get All Documents") {
+                        do {
+                            let res = try getAllDocuments(collectionName: "my_collection")
+                            let pairs = zip(res.ids, res.documents).map { id, doc in
+                                "ID: \(id)\nDoc: \(doc ?? "(nil)")"
+                            }
+                            result = pairs.joined(separator: "\n---\n")
+                            addLog("Fetched all documents in ephemeral collection: \(res.ids.count) found")
+                            errorMessage = nil
+                        } catch {
+                            result = "Get all documents error"
+                            errorMessage = error.localizedDescription
+                            addLog("Get all documents error: \(error)")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
                 .padding()
+            }
+            
+            if showingSuccess {
+                Text("Document added to ephemeral")
+                    .foregroundColor(.blue)
+                    .multilineTextAlignment(.center)
+                    .transition(.opacity)
+                    .animation(.easeInOut, value: showingSuccess)
             }
             
             Text(status)
