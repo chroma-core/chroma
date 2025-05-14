@@ -541,6 +541,9 @@ impl CheckRecord for MetadataExpression {
                     PrimitiveOperator::LessThanOrEqual => {
                         match_type && stored.is_some_and(|v| *v <= metadata_value)
                     }
+                    PrimitiveOperator::Distinct => {
+                        match_type && stored.is_some_and(|v| *v == metadata_value)
+                    }
                 }
             }
             MetadataComparison::Set(set_operator, metadata_set_value) => {

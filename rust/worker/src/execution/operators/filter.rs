@@ -80,6 +80,8 @@ pub enum FilterError {
     RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error parsing regular expression: {0}")]
     Regex(#[from] ChromaRegexError),
+    #[error("Distinct filter is not supported")]
+    Distinct,
 }
 
 impl ChromaError for FilterError {
@@ -91,6 +93,7 @@ impl ChromaError for FilterError {
             FilterError::Record(e) => e.code(),
             FilterError::RecordReader(e) => e.code(),
             FilterError::Regex(_) => ErrorCodes::InvalidArgument,
+            FilterError::Distinct => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -170,6 +173,7 @@ impl<'me> MetadataLogReader<'me> {
                 PrimitiveOperator::NotEqual => unreachable!(
                     "Inequality filter should be handled above the metadata provider level"
                 ),
+                PrimitiveOperator::Distinct => return Err(FilterError::Distinct),
             };
             Ok(metadata_value_to_offset_ids
                 .range(bounds)
@@ -334,6 +338,7 @@ impl<'me> MetadataProvider<'me> {
                         PrimitiveOperator::NotEqual => unreachable!(
                             "Inequality filter should be handled above the metadata provider level"
                         ),
+                        PrimitiveOperator::Distinct => return Err(FilterError::Distinct),
                     }
                 } else {
                     Ok(RoaringBitmap::new())
@@ -391,7 +396,8 @@ impl<'me> RoaringMetadataFilter<'me> for MetadataExpression {
                     | PrimitiveOperator::GreaterThan
                     | PrimitiveOperator::GreaterThanOrEqual
                     | PrimitiveOperator::LessThan
-                    | PrimitiveOperator::LessThanOrEqual => SignedRoaringBitmap::Include(
+                    | PrimitiveOperator::LessThanOrEqual
+                    | PrimitiveOperator::Distinct => SignedRoaringBitmap::Include(
                         metadata_provider
                             .filter_by_metadata(&self.key, metadata_value, primitive_operator)
                             .await?,

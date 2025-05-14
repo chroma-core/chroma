@@ -901,6 +901,7 @@ pub enum PrimitiveOperator {
     GreaterThanOrEqual,
     LessThan,
     LessThanOrEqual,
+    Distinct,
 }
 
 impl From<chroma_proto::GenericComparator> for PrimitiveOperator {

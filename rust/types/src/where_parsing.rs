@@ -320,6 +320,8 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                 operator_type = PrimitiveOperator::Equal;
             } else if operator == "$ne" {
                 operator_type = PrimitiveOperator::NotEqual;
+            } else if operator == "$distinct" {
+                operator_type = PrimitiveOperator::Distinct;
             } else {
                 return Err(WhereValidationError::WhereClause);
             }
@@ -338,6 +340,8 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                 operator_type = PrimitiveOperator::Equal;
             } else if operator == "$ne" {
                 operator_type = PrimitiveOperator::NotEqual;
+            } else if operator == "$distinct" {
+                operator_type = PrimitiveOperator::Distinct;
             } else {
                 return Err(WhereValidationError::WhereClause);
             }
@@ -364,6 +368,8 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                 operator_type = PrimitiveOperator::GreaterThan;
             } else if operator == "$gte" {
                 operator_type = PrimitiveOperator::GreaterThanOrEqual;
+            } else if operator == "$distinct" {
+                operator_type = PrimitiveOperator::Distinct;
             } else {
                 return Err(WhereValidationError::WhereClause);
             }
@@ -390,6 +396,8 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                 operator_type = PrimitiveOperator::GreaterThan;
             } else if operator == "$gte" {
                 operator_type = PrimitiveOperator::GreaterThanOrEqual;
+            } else if operator == "$distinct" {
+                operator_type = PrimitiveOperator::Distinct;
             } else {
                 return Err(WhereValidationError::WhereClause);
             }

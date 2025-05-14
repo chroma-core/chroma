@@ -790,9 +790,10 @@ def validate_where(where: Where) -> None:
                     "$eq",
                     "$in",
                     "$nin",
+                    "$distinct",
                 ]:
                     raise ValueError(
-                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, "
+                        f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, $distinct, "
                         f"got {operator}"
                     )
 

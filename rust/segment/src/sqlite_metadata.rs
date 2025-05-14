@@ -675,6 +675,12 @@ impl IntoSqliteExpr for MetadataExpression {
                         }
                         Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
+                    PrimitiveOperator::Distinct => {
+                        subq.and_where(scol.eq(sval));
+                        subq.order_by((Embeddings::Table, Embeddings::Id), sea_query::Order::Asc);
+                        subq.limit(1);
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
+                    }
                 }
             }
             MetadataComparison::Set(op, vals) => {
