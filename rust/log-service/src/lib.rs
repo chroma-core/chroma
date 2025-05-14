@@ -4,7 +4,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
@@ -24,6 +24,7 @@ use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
 use opentelemetry::metrics::Meter;
+use parking_lot::Mutex;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -646,15 +647,13 @@ pub struct LogServer {
 impl LogServer {
     fn set_backpressure(&self, to_pressure: &[CollectionUuid]) {
         let mut new_backpressure = Arc::new(HashSet::from_iter(to_pressure.iter().cloned()));
-        // SAFETY(rescrv): Mutex poisoning.
-        let mut backpressure = self.backpressure.lock().unwrap();
+        let mut backpressure = self.backpressure.lock();
         std::mem::swap(&mut *backpressure, &mut new_backpressure);
     }
 
     fn check_for_backpressure(&self, collection_id: CollectionUuid) -> Result<(), Status> {
         let backpressure = {
-            // SAFETY(rescrv): Mutex poisoning.
-            let backpressure = self.backpressure.lock().unwrap();
+            let backpressure = self.backpressure.lock();
             Arc::clone(&backpressure)
         };
         if backpressure.contains(&collection_id) {
