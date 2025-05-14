@@ -16,9 +16,19 @@ struct ContentView: View {
     @State private var docCounter: Int = 0
     @State private var showingSuccess: Bool = false
     @State private var collectionName: String = "my_collection"
+    @State private var collections: [String] = []
 
     func addLog(_ message: String) {
         logs.append("[\(Date().formatted(date: .omitted, time: .standard))] \(message)")
+    }
+    
+    func refreshCollections() {
+        do {
+            collections = try listCollections()
+            addLog("Found \(collections.count) collections")
+        } catch {
+            addLog("Failed to list collections: \(error)")
+        }
     }
     
     func resetState() {
@@ -28,6 +38,7 @@ struct ContentView: View {
         docCounter = 0
         showingSuccess = false
         collectionName = "my_collection"
+        collections = []
     }
     
     var body: some View {
@@ -81,37 +92,50 @@ struct ContentView: View {
                 Text("Database Controls")
                     .font(.headline)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                
-                TextField("Collection name", text: $collectionName)
-                    .textFieldStyle(.roundedBorder)
-                
-                ActionButton(title: "Reset") {
-                    resetState()  // Clear state first
-                    try reset()
-                    addLog("System reset complete")
-                }
-                
+      
                 ActionButton(title: "Initialize Ephemeral") {
                     try initialize()
                     addLog("Ephemeral Chroma initialized")
                     errorMessage = nil
                 }
                 
+                TextField("Collection name", text: $collectionName)
+                    .textFieldStyle(.roundedBorder)
+                
                 ActionButton(title: "Create Collection") {
                     let collectionId = try createCollection(name: collectionName)
                     addLog("Ephemeral collection created: \(collectionId)")
+                    refreshCollections()
                     errorMessage = nil
                 }
 
                 ActionButton(title: "Get All Documents") {
-                    let res = try getAllDocuments(collectionName: collectionName)
-                    let pairs = zip(res.ids, res.documents).map { id, doc in
-                        "Document ID: \(id)\nContent: \(doc ?? "(nil)")"
+                    if collections.isEmpty {
+                        addLog("No collections to get documents from")
+                        return
                     }
+                    
                     addLog("--- Retrieved Documents ---")
-                    pairs.forEach { addLog($0) }
+                    for collection in collections {
+                        addLog("Collection: \(collection)")
+                        let res = try getAllDocuments(collectionName: collection)
+                        if res.ids.isEmpty {
+                            addLog("  (empty)")
+                        } else {
+                            let pairs = zip(res.ids, res.documents).map { id, doc in
+                                "  Document ID: \(id)\n  Content: \(doc ?? "(nil)")"
+                            }
+                            pairs.forEach { addLog($0) }
+                        }
+                    }
                     addLog("--- End of Documents ---")
                     errorMessage = nil
+                }
+                
+                ActionButton(title: "Reset") {
+                    resetState()
+                    try reset()
+                    addLog("System reset complete")
                 }
                 
             }
@@ -128,10 +152,22 @@ struct ContentView: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
+                if collections.isEmpty {
+                    Text("No collections available")
+                        .foregroundColor(.secondary)
+                } else {
+                    Picker("Collection", selection: $collectionName) {
+                        ForEach(collections, id: \.self) { name in
+                            Text(name).tag(name)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+                
                 TextField("Enter document text...", text: $docText)
                     .textFieldStyle(.roundedBorder)
                 
-                ActionButton(title: "Add Document", disabled: docText.isEmpty) {
+                ActionButton(title: "Add Document", disabled: docText.isEmpty || collections.isEmpty) {
                     docCounter += 1
                     let ids = ["doc\(docCounter)"]
                     let embeddings: [[Float]] = [[0.1, 0.2, 0.3, 0.4]]
@@ -143,7 +179,7 @@ struct ContentView: View {
                         documents: docs
                     )
                     showingSuccess = true
-                    addLog("Document added to ephemeral: \(docText)")
+                    addLog("Document added to collection '\(collectionName)': \(docText)")
                     docText = ""
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                         showingSuccess = false
