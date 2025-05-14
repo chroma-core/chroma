@@ -43,8 +43,10 @@ pub struct StartRequest {
     pub name: String,
     /// The workload to run.
     pub workload: Workload,
-    /// The data set to use.
-    pub data_set: String,
+    /// The data set to use, referred to by name.
+    pub data_set: Option<String>,
+    /// The custom data set to use.
+    pub custom_data_set: Option<serde_json::Value>,
     /// The connection to use.
     pub connection: Connection,
     /// When the workload should expire.
