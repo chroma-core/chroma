@@ -66,8 +66,7 @@ jobs:
         uses: useblacksmith/build-push-action@v1.1
         with:
           context: .
-          file: rust/Dockerfile
-          target: cli
+          file: rust/cli/Dockerfile
           platforms: ${{ env.PLATFORMS }}
           push: true
           build-args: |

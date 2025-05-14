@@ -191,7 +191,6 @@ jobs:
     needs: change-detection
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
     uses: ./.github/workflows/_go-tests.yml
-    secrets: inherit
 
   check-title:
     name: Check PR Title
