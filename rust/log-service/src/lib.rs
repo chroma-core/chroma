@@ -22,6 +22,7 @@ use chroma_types::chroma_proto::{
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
+use opentelemetry::metrics::Meter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -47,6 +48,22 @@ const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 // SAFETY(rescrv):  There's a test that this produces a valid type.
 static STABLE_PREFIX: CursorName = unsafe { CursorName::from_string_unchecked("stable_prefix") };
 static COMPACTION: CursorName = unsafe { CursorName::from_string_unchecked("compaction") };
+
+////////////////////////////////////////////// Metrics /////////////////////////////////////////////
+
+pub struct Metrics {
+    log_total_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
+}
+
+impl Metrics {
+    pub fn new(meter: Meter) -> Self {
+        Self {
+            log_total_uncompacted_records_count: meter
+                .f64_gauge("log_total_uncompacted_records_count")
+                .build(),
+        }
+    }
+}
 
 ///////////////////////////////////////// state maintenance ////////////////////////////////////////
 
@@ -334,6 +351,7 @@ impl DirtyMarker {
 
     /// Given a contiguous prefix of markers, process the log into a rollup.  That is, a set of
     /// markers to reinsert, a set of collections to compact, and an advance_to log position.
+    #[allow(clippy::too_many_arguments)]
     pub async fn rollup<
         F1: Future<Output = Result<Option<Manifest>, wal3::Error>>,
         F2: Future<Output = Result<Option<Witness>, wal3::Error>>,
@@ -345,6 +363,7 @@ impl DirtyMarker {
         record_count_threshold: u64,
         reinsert_threshold: u64,
         timeout_us: u64,
+        metrics: &Metrics,
     ) -> Result<Option<Rollup>, wal3::Error> {
         // NOTE(rescrv);  This is complicated code because it's a hard problem to do efficiently.
         // To cut complexity, I've chosen to do it in a way that is not the most efficient but is
@@ -434,6 +453,7 @@ impl DirtyMarker {
             .into_iter()
             .flat_map(Result::ok)
             .collect::<HashMap<_, _>>();
+        let mut uncompacted = 0u64;
         let compactable = compactable
             .into_iter()
             .filter_map(|collection_id| {
@@ -473,6 +493,7 @@ impl DirtyMarker {
                             cursor.position,
                             manifest.maximum_log_position(),
                         );
+                        uncompacted += maximum_log_position - cursor.position;
                         if maximum_log_position - cursor.position >= record_count_threshold {
                             Some(CollectionInfo {
                                 collection_id: collection_id.to_string(),
@@ -514,6 +535,9 @@ impl DirtyMarker {
                 }
             }
         }
+        metrics
+            .log_total_uncompacted_records_count
+            .record(uncompacted as f64, &[]);
         Ok(Some(Rollup {
             advance_to,
             reinsert,
@@ -608,6 +632,7 @@ pub struct LogServer {
     dirty_log: Arc<LogWriter>,
     compacting: tokio::sync::Mutex<()>,
     cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedParquetFragment>>>,
+    metrics: Metrics,
 }
 
 #[async_trait::async_trait]
@@ -977,6 +1002,7 @@ impl LogService for LogServer {
             ),
             self.config.reinsert_threshold,
             self.config.timeout_us,
+            &self.metrics,
         )
         .await
         .map_err(|err| Status::unavailable(err.to_string()))?;
@@ -1456,6 +1482,7 @@ impl Configurable<LogServerConfig> for LogServer {
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
         let dirty_log = Arc::new(dirty_log);
         let compacting = tokio::sync::Mutex::new(());
+        let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
         Ok(Self {
             config: config.clone(),
             open_logs: Arc::new(StateHashTable::default()),
@@ -1463,6 +1490,7 @@ impl Configurable<LogServerConfig> for LogServer {
             dirty_log,
             compacting,
             cache,
+            metrics,
         })
     }
 }
@@ -1565,6 +1593,7 @@ mod tests {
             1,
             1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
@@ -1626,6 +1655,7 @@ mod tests {
             3,
             1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
@@ -1709,6 +1739,7 @@ mod tests {
             3,
             1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
@@ -1822,6 +1853,7 @@ mod tests {
             3,
             1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
