@@ -932,17 +932,18 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			LastCompactionTimeSecs:     sourceCollection.LastCompactionTimeSecs,
 		}
 
-		createSegments := []*model.CreateSegment{}
+		createSegments := []*model.Segment{}
 		flushFilePaths := []*model.FlushSegmentCompaction{}
 		for _, segment := range sourceSegments {
 			newSegmentID := types.NewUniqueID()
-			createSegment := &model.CreateSegment{
+			createSegment := &model.Segment{
 				ID:           newSegmentID,
 				Type:         segment.Type,
 				Scope:        segment.Scope,
 				CollectionID: forkCollection.TargetCollectionID,
 				Metadata:     segment.Metadata,
 				Ts:           ts.Unix(),
+				FilePaths:    segment.FilePaths,
 			}
 			createSegments = append(createSegments, createSegment)
 			flushFilePath := &model.FlushSegmentCompaction{
@@ -1034,7 +1035,7 @@ func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.Uniq
 	return uint64(len(lineageFile.Dependencies)), nil
 }
 
-func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.CreateSegment, ts types.Timestamp) (*model.Segment, error) {
+func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Segment, ts types.Timestamp) (*model.Segment, error) {
 	var result *model.Segment
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
@@ -1050,7 +1051,7 @@ func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.Creat
 	return result, nil
 }
 
-func (tc *Catalog) createSegmentImpl(txCtx context.Context, createSegment *model.CreateSegment, ts types.Timestamp) (*model.Segment, error) {
+func (tc *Catalog) createSegmentImpl(txCtx context.Context, createSegment *model.Segment, ts types.Timestamp) (*model.Segment, error) {
 	var result *model.Segment
 
 	// insert segment
@@ -1090,7 +1091,21 @@ func (tc *Catalog) createSegmentImpl(txCtx context.Context, createSegment *model
 	return result, nil
 }
 
-func (tc *Catalog) createFirstVersionFile(ctx context.Context, databaseID string, createCollection *model.CreateCollection, createSegments []*model.CreateSegment, ts types.Timestamp) (string, error) {
+func (tc *Catalog) createFirstVersionFile(ctx context.Context, databaseID string, createCollection *model.CreateCollection, createSegments []*model.Segment, ts types.Timestamp) (string, error) {
+	segmentCompactionInfos := make([]*coordinatorpb.FlushSegmentCompactionInfo, 0, len(createSegments))
+	for _, segment := range createSegments {
+		convertedPaths := make(map[string]*coordinatorpb.FilePaths)
+		for k, v := range segment.FilePaths {
+			convertedPaths[k] = &coordinatorpb.FilePaths{Paths: v}
+		}
+
+		info := &coordinatorpb.FlushSegmentCompactionInfo{
+			SegmentId: segment.ID.String(),
+			FilePaths: convertedPaths,
+		}
+		segmentCompactionInfos = append(segmentCompactionInfos, info)
+	}
+
 	collectionVersionFilePb := &coordinatorpb.CollectionVersionFile{
 		CollectionInfoImmutable: &coordinatorpb.CollectionInfoImmutable{
 			TenantId:               createCollection.TenantID,
@@ -1104,6 +1119,9 @@ func (tc *Catalog) createFirstVersionFile(ctx context.Context, databaseID string
 				{
 					Version:       0,
 					CreatedAtSecs: int64(ts),
+					SegmentInfo: &coordinatorpb.CollectionSegmentInfo{
+						SegmentCompactionInfo: segmentCompactionInfos,
+					},
 				},
 			},
 		},
@@ -1117,7 +1135,7 @@ func (tc *Catalog) createFirstVersionFile(ctx context.Context, databaseID string
 	return fullFilePath, nil
 }
 
-func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment, ts types.Timestamp) (*model.Collection, bool, error) {
+func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.Segment, ts types.Timestamp) (*model.Collection, bool, error) {
 	var resultCollection *model.Collection
 	created := false
 
