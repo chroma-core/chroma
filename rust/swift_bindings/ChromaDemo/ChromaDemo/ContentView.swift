@@ -5,40 +5,56 @@
 //  Created by Nicholas Arner on 5/14/25.
 //
 
-
 import SwiftUI
 import Chroma
 
 struct ContentView: View {
+    @StateObject private var contentViewRef = ContentViewRef()
     @State private var docText: String = ""
     @State private var errorMessage: String? = nil
     @State private var logs: [String] = []
     @State private var docCounter: Int = 0
     @State private var showingSuccess: Bool = false
-    
+    @State private var collectionName: String = "my_collection"
+
     func addLog(_ message: String) {
         logs.append("[\(Date().formatted(date: .omitted, time: .standard))] \(message)")
     }
     
+    func resetState() {
+        docText = ""
+        errorMessage = nil
+        logs.removeAll()
+        docCounter = 0
+        showingSuccess = false
+        collectionName = "my_collection"
+    }
+    
     var body: some View {
         GeometryReader { geometry in
-            if geometry.size.width > 600 {
-                // iPad/Mac layout (horizontal)
-                HStack(spacing: 0) {
-                    mainContent
-                        .frame(width: min(400, geometry.size.width * 0.4))
-                    logsView
-                }
-            } else {
-                // iPhone layout (vertical)
-                ScrollView {
-                    VStack(spacing: 0) {
+            VStack(spacing: 0) {
+                if geometry.size.width > 600 {
+                    // iPad/Mac layout (horizontal)
+                    HStack(spacing: 0) {
                         mainContent
-                            .padding(.horizontal)
+                            .frame(width: min(400, geometry.size.width * 0.4))
                         logsView
+                    }
+                } else {
+                    // iPhone layout (vertical)
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            mainContent
+                                .padding(.horizontal)
+                            logsView
+                        }
                     }
                 }
             }
+        }
+        .environmentObject(contentViewRef)
+        .onAppear {
+            contentViewRef.addLog = addLog
         }
     }
     
@@ -52,7 +68,7 @@ struct ContentView: View {
     }
     
     private var headerView: some View {
-        Text("Chroma SwiftUI Demo")
+        Text("Chroma Demo")
             .font(.title)
             .fontWeight(.bold)
             .multilineTextAlignment(.center)
@@ -66,43 +82,38 @@ struct ContentView: View {
                     .font(.headline)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
+                TextField("Collection name", text: $collectionName)
+                    .textFieldStyle(.roundedBorder)
+                
+                ActionButton(title: "Reset") {
+                    resetState()  // Clear state first
+                    try reset()
+                    addLog("System reset complete")
+                }
+                
                 ActionButton(title: "Initialize Ephemeral") {
-                    do {
-                        try initialize()
-                        addLog("Ephemeral Chroma initialized")
-                        errorMessage = nil
-                    } catch {
-                        errorMessage = error.localizedDescription
-                        addLog("Ephemeral init error: \(error)")
-                    }
+                    try initialize()
+                    addLog("Ephemeral Chroma initialized")
+                    errorMessage = nil
                 }
                 
                 ActionButton(title: "Create Collection") {
-                    do {
-                        let collectionId = try createCollection(name: "my_collection")
-                        addLog("Ephemeral collection created: \(collectionId)")
-                        errorMessage = nil
-                    } catch {
-                        errorMessage = error.localizedDescription
-                        addLog("Ephemeral create error: \(error)")
+                    let collectionId = try createCollection(name: collectionName)
+                    addLog("Ephemeral collection created: \(collectionId)")
+                    errorMessage = nil
+                }
+
+                ActionButton(title: "Get All Documents") {
+                    let res = try getAllDocuments(collectionName: collectionName)
+                    let pairs = zip(res.ids, res.documents).map { id, doc in
+                        "Document ID: \(id)\nContent: \(doc ?? "(nil)")"
                     }
+                    addLog("--- Retrieved Documents ---")
+                    pairs.forEach { addLog($0) }
+                    addLog("--- End of Documents ---")
+                    errorMessage = nil
                 }
                 
-                ActionButton(title: "Get All Documents") {
-                    do {
-                        let res = try getAllDocuments(collectionName: "my_collection")
-                        let pairs = zip(res.ids, res.documents).map { id, doc in
-                            "Document ID: \(id)\nContent: \(doc ?? "(nil)")"
-                        }
-                        addLog("--- Retrieved Documents ---")
-                        pairs.forEach { addLog($0) }
-                        addLog("--- End of Documents ---")
-                        errorMessage = nil
-                    } catch {
-                        errorMessage = error.localizedDescription
-                        addLog("Get all documents error: \(error)")
-                    }
-                }
             }
             .padding()
         } label: {
@@ -121,28 +132,23 @@ struct ContentView: View {
                     .textFieldStyle(.roundedBorder)
                 
                 ActionButton(title: "Add Document", disabled: docText.isEmpty) {
-                    do {
-                        docCounter += 1
-                        let ids = ["doc\(docCounter)"]
-                        let embeddings: [[Float]] = [[0.1, 0.2, 0.3, 0.4]]
-                        let docs = [docText]
-                        _ = try addDocuments(
-                            collectionName: "my_collection",
-                            ids: ids,
-                            embeddings: embeddings,
-                            documents: docs
-                        )
-                        showingSuccess = true
-                        addLog("Document added to ephemeral: \(docText)")
-                        docText = ""
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            showingSuccess = false
-                        }
-                        errorMessage = nil
-                    } catch {
-                        errorMessage = error.localizedDescription
-                        addLog("Ephemeral add error: \(error)")
+                    docCounter += 1
+                    let ids = ["doc\(docCounter)"]
+                    let embeddings: [[Float]] = [[0.1, 0.2, 0.3, 0.4]]
+                    let docs = [docText]
+                    _ = try addDocuments(
+                        collectionName: collectionName,
+                        ids: ids,
+                        embeddings: embeddings,
+                        documents: docs
+                    )
+                    showingSuccess = true
+                    addLog("Document added to ephemeral: \(docText)")
+                    docText = ""
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        showingSuccess = false
                     }
+                    errorMessage = nil
                 }
             }
             .padding()
@@ -180,10 +186,17 @@ struct ContentView: View {
 struct ActionButton: View {
     let title: String
     var disabled: Bool = false
-    let action: () -> Void
+    let action: () throws -> Void
+    @EnvironmentObject private var contentViewRef: ContentViewRef
     
     var body: some View {
-        Button(action: action) {
+        Button(action: {
+            do {
+                try action()
+            } catch {
+                contentViewRef.addLog("Action failed: \(error)")
+            }
+        }) {
             Text(title)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
@@ -191,4 +204,8 @@ struct ActionButton: View {
         .buttonStyle(.borderedProminent)
         .disabled(disabled)
     }
+}
+
+class ContentViewRef: ObservableObject {
+    var addLog: (String) -> Void = { _ in }
 }

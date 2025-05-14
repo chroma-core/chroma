@@ -9,6 +9,8 @@ use chroma_types::{
     QueryError,
     GetRequest,
     GetCollectionRequest,
+    ListCollectionsRequest,
+    DeleteCollectionRequest,
 };
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
@@ -198,5 +200,100 @@ pub fn get_all_documents(collection_name: String) -> FfiResult<GetResult> {
     let ids = response.ids;
     let documents = response.documents.unwrap_or_default();
     Ok(GetResult { ids, documents })
+}
+
+#[uniffi::export]
+pub fn list_collections() -> FfiResult<Vec<String>> {
+    let mut frontend_lock = FRONTEND.lock().unwrap();
+    let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string()
+    })?;
+    let request = chroma_types::ListCollectionsRequest::try_new(
+        "default".to_string(),
+        "default".to_string(),
+        None, // limit
+        0,    // offset
+    ).map_err(|e| ChromaError::Generic { message: format!("list req: {e}") })?;
+    let collections = frontend.list_collections(request)
+        .map_err(|e| ChromaError::Generic { message: format!("list: {e}") })?;
+    let names = collections.into_iter().map(|c| c.name).collect();
+    Ok(names)
+}
+
+#[uniffi::export]
+pub fn delete_collection(collection_name: String) -> FfiResult<()> {
+    let mut frontend_lock = FRONTEND.lock().unwrap();
+    let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string()
+    })?;
+    let request = DeleteCollectionRequest::try_new(
+        "default".to_string(),
+        "default".to_string(),
+        collection_name,
+    ).map_err(|e| ChromaError::Generic { message: format!("delete req: {e}") })?;
+    frontend.delete_collection(request)
+        .map_err(|e| ChromaError::Generic { message: format!("delete: {e}") })?;
+    Ok(())
+}
+
+#[derive(uniffi::Record)]
+pub struct CollectionInfo {
+    pub name: String,
+    pub collection_id: String,
+    pub num_documents: u32,
+}
+
+#[uniffi::export]
+pub fn get_collection_info(collection_name: String) -> FfiResult<CollectionInfo> {
+    let mut frontend_lock = FRONTEND.lock().unwrap();
+    let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string()
+    })?;
+    let get_request = chroma_types::GetCollectionRequest::try_new(
+        "default".to_string(),
+        "default".to_string(),
+        collection_name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
+    let coll = frontend.get_collection(get_request)
+        .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
+    // Count documents in the collection
+    let count_request = chroma_types::CountRequest::try_new(
+        "default".to_string(),
+        "default".to_string(),
+        coll.collection_id,
+    ).map_err(|e| ChromaError::Generic { message: format!("count req: {e}") })?;
+    let num_documents = frontend.count(count_request)
+        .map_err(|e| ChromaError::Generic { message: format!("count: {e}") })?;
+    Ok(CollectionInfo {
+        name: coll.name,
+        collection_id: coll.collection_id.to_string(),
+        num_documents,
+    })
+}
+
+#[uniffi::export]
+pub fn reset() -> FfiResult<()> {
+    let mut frontend_lock = FRONTEND.lock().unwrap();
+    let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string()
+    })?;
+    frontend.reset()
+        .map_err(|e| ChromaError::Generic { message: format!("reset: {e}") })?;
+    Ok(())
+}
+
+#[uniffi::export]
+pub fn get_version() -> FfiResult<String> {
+    // For now, return a hardcoded version since InMemoryFrontend doesn't have a version method
+    Ok("0.1.0".to_string())
+}
+
+#[uniffi::export]
+pub fn get_max_batch_size() -> FfiResult<u32> {
+    let mut frontend_lock = FRONTEND.lock().unwrap();
+    let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string()
+    })?;
+    Ok(frontend.get_max_batch_size())
 }
 
