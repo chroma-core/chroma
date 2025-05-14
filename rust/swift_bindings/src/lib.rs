@@ -1,29 +1,15 @@
 // lib.rs ---------------------------------------------------------------
 use thiserror::Error;
-use chroma_config::registry::Registry;
-use chroma_frontend::config::FrontendConfig;
-use chroma_frontend::impls::service_based_frontend::ServiceBasedFrontend;
 use chroma_types::{
     CreateCollectionRequest, 
     AddCollectionRecordsRequest, 
-    GetCollectionRequest, 
     QueryRequest,
+    CreateCollectionError,
     AddCollectionRecordsError,
-    GetCollectionError,
-    CreateTenantRequest,
-    CreateDatabaseRequest
+    QueryError,
 };
-use chroma_frontend::get_collection_with_segments_provider::CollectionsWithSegmentsProviderConfig;
-use chroma_log::config::LogConfig;
-use chroma_frontend::executor::config::ExecutorConfig;
-use chroma_sysdb::config::SysDbConfig;
-use chroma_system::System;
-use chroma_config::Configurable;
-use std::path::Path;
-use std::sync::Mutex;
 use once_cell::sync::Lazy;
-use tokio::sync::Mutex as TokioMutex;
-use serde_json;
+use std::sync::Mutex;
 use tracing;
 use tracing_subscriber;
 use chroma_frontend::impls::in_memory_frontend::InMemoryFrontend;
@@ -48,14 +34,20 @@ impl From<anyhow::Error> for ChromaError {
     }
 }
 
+impl From<CreateCollectionError> for ChromaError {
+    fn from(e: CreateCollectionError) -> Self {
+        Self::Generic { message: e.to_string() }
+    }
+}
+
 impl From<AddCollectionRecordsError> for ChromaError {
     fn from(e: AddCollectionRecordsError) -> Self {
         Self::Generic { message: e.to_string() }
     }
 }
 
-impl From<GetCollectionError> for ChromaError {
-    fn from(e: GetCollectionError) -> Self {
+impl From<QueryError> for ChromaError {
+    fn from(e: QueryError) -> Self {
         Self::Generic { message: e.to_string() }
     }
 }
@@ -63,160 +55,109 @@ impl From<GetCollectionError> for ChromaError {
 type FfiResult<T> = Result<T, ChromaError>;
 
 // ----------------------------------------------------------------------
-//  Chroma API Functions
+//  Chroma API Functions (in-memory only)
 // ----------------------------------------------------------------------
 
-static FRONTEND: Lazy<TokioMutex<Option<ServiceBasedFrontend>>> = Lazy::new(|| TokioMutex::new(None));
+static FRONTEND: Lazy<Mutex<Option<InMemoryFrontend>>> = Lazy::new(|| Mutex::new(None));
 
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn initialize() -> FfiResult<()> {
-    tracing::info!("Initializing local Chroma instance...");
+#[uniffi::export]
+pub fn initialize() -> FfiResult<()> {
     let _ = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_target(false)
         .try_init();
-    let frontend = InMemoryFrontend::default();
-    *FRONTEND.lock().await = Some(frontend);
+    let frontend = InMemoryFrontend::new();
+    let mut frontend_lock = FRONTEND.lock().unwrap();
+    *frontend_lock = Some(frontend);
     Ok(())
 }
 
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn create_tenant(name: String) -> FfiResult<()> {
-    let mut frontend = FRONTEND.lock().await;
-    let frontend = frontend.as_mut().ok_or_else(|| ChromaError::Generic { 
+#[uniffi::export]
+pub fn create_collection(name: String) -> FfiResult<String> {
+    let mut frontend_lock = FRONTEND.lock().unwrap();
+    let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic { 
         message: "Chroma not initialized. Call initialize() first.".to_string() 
     })?;
-    let tenant_req = CreateTenantRequest::try_new(name)
-        .map_err(|e| ChromaError::Generic { message: format!("tenant req: {e}") })?;
-    frontend.create_tenant(tenant_req).await
-        .map_err(|e| ChromaError::Generic { message: format!("create tenant: {e}") })?;
-    Ok(())
-}
-
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn create_database(tenant_id: String, database_name: String) -> FfiResult<()> {
-    let mut frontend = FRONTEND.lock().await;
-    let frontend = frontend.as_mut().ok_or_else(|| ChromaError::Generic { 
-        message: "Chroma not initialized. Call initialize() first.".to_string() 
-    })?;
-    let db_req = CreateDatabaseRequest::try_new(tenant_id, database_name)
-        .map_err(|e| ChromaError::Generic { message: format!("db req: {e}") })?;
-    frontend.create_database(db_req).await
-        .map_err(|e| ChromaError::Generic { message: format!("create database: {e}") })?;
-    Ok(())
-}
-
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn create_collection(name: String) -> FfiResult<String> {
-    let mut frontend = FRONTEND.lock().await;
-    let frontend = frontend.as_mut().ok_or_else(|| ChromaError::Generic { 
-        message: "Chroma not initialized. Call initialize() first.".to_string() 
-    })?;
-    
     let request = CreateCollectionRequest::try_new(
         "default".to_string(),
         "default".to_string(),
-        name,
+        name.clone(),
         None,
         None,
         true,
     ).map_err(|e| ChromaError::Generic { message: format!("request: {e}") })?;
-    
     let coll = frontend.create_collection(request)
-        .await
         .map_err(|e| ChromaError::Generic { message: format!("create: {e}") })?;
-    
     Ok(coll.collection_id.to_string())
 }
 
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn add_document(collection_name: String, doc_id: String, text: String, embedding: Vec<f32>) -> FfiResult<u32> {
-    let mut frontend = FRONTEND.lock().await;
-    let frontend = frontend.as_mut().ok_or_else(|| ChromaError::Generic { 
+#[uniffi::export]
+pub fn add_documents(collection_name: String, ids: Vec<String>, embeddings: Vec<Vec<f32>>, documents: Vec<String>) -> FfiResult<u32> {
+    let mut frontend_lock = FRONTEND.lock().unwrap();
+    let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic { 
         message: "Chroma not initialized. Call initialize() first.".to_string() 
     })?;
-    
-    // Get the collection first
-    let get_request = GetCollectionRequest::try_new(
+    // Get collection id
+    let get_request = chroma_types::GetCollectionRequest::try_new(
         "default".to_string(),
         "default".to_string(),
         collection_name.clone(),
     ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
-    
     let coll = frontend.get_collection(get_request)
-        .await
         .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
-    
-    println!("Adding document to collection: {}", coll.collection_id);
-    
-    // Add the document
+    // Prepare documents as Option<Vec<Option<String>>>
+    let documents_opt = Some(documents.into_iter().map(Some).collect());
+    let embeddings_opt = Some(embeddings);
     let request = AddCollectionRecordsRequest::try_new(
         "default".to_string(),
         "default".to_string(),
         coll.collection_id,
-        vec![doc_id],
-        Some(vec![embedding]),
-        Some(vec![Some(text)]),
+        ids,
+        embeddings_opt,
+        documents_opt,
         None,
         None,
     ).map_err(|e| ChromaError::Generic { message: format!("add req: {e}") })?;
-    
-    println!("Add request: {:?}", request);
-    
     frontend.add(request)
-        .await
         .map_err(|e| ChromaError::Generic { message: format!("add: {e}") })?;
-    
-    println!("Document added successfully");
     Ok(1)
 }
 
-#[uniffi::export(async_runtime = "tokio")]
-pub async fn get_document_by_id(collection_name: String, doc_id: String) -> FfiResult<Option<String>> {
-    let mut frontend = FRONTEND.lock().await;
-    let frontend = frontend.as_mut().ok_or_else(|| ChromaError::Generic { 
+// Add a new struct for query results
+#[derive(uniffi::Record)]
+pub struct QueryResult {
+    pub ids: Vec<String>,
+    pub documents: Vec<Option<String>>,
+}
+
+#[uniffi::export]
+pub fn query_collection(collection_name: String, query_embedding: Vec<f32>, n_results: u32) -> FfiResult<QueryResult> {
+    let mut frontend_lock = FRONTEND.lock().unwrap();
+    let frontend = frontend_lock.as_mut().ok_or_else(|| ChromaError::Generic { 
         message: "Chroma not initialized. Call initialize() first.".to_string() 
     })?;
-    
-    // Get the collection first
-    let get_request = GetCollectionRequest::try_new(
+    // Get collection id
+    let get_request = chroma_types::GetCollectionRequest::try_new(
         "default".to_string(),
         "default".to_string(),
         collection_name.clone(),
     ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
-    
     let coll = frontend.get_collection(get_request)
-        .await
         .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
-    
-    println!("Getting document by ID from collection: {}", coll.collection_id);
-    
-    // Query with ids parameter
-    let query_request = QueryRequest::try_new(
+    let request = QueryRequest::try_new(
         "default".to_string(),
         "default".to_string(),
         coll.collection_id,
-        Some(vec![doc_id]), // ids
+        None, // ids
         None, // where
-        Vec::new(), // embeddings
-        1, // n_results
+        vec![query_embedding], // embeddings
+        n_results,
         chroma_types::IncludeList(vec![chroma_types::Include::Document]),
     ).map_err(|e| ChromaError::Generic { message: format!("query req: {e}") })?;
-    
-    println!("Query request: {:?}", query_request);
-    
-    let response = frontend.query(query_request)
-        .await
+    let response = frontend.query(request)
         .map_err(|e| ChromaError::Generic { message: format!("query: {e}") })?;
-    
-    println!("Query response: {:?}", response);
-    
-    // response.documents: Option<Vec<Vec<Option<String>>>>
-    let document = response.documents
-        .and_then(|doc_groups| doc_groups.into_iter().next())
-        .and_then(|group| group.into_iter().next())
-        .flatten();
-    
-    println!("Document found: {:?}", document);
-    Ok(document)
+    let ids = response.ids.into_iter().flatten().collect();
+    let documents = response.documents.unwrap_or_default().into_iter().flatten().collect();
+    Ok(QueryResult { ids, documents })
 }
+
