@@ -21,9 +21,6 @@ XCFRAMEWORK_NAME="${NAME}_framework.xcframework"
 RUST_TARGETS=(
   "aarch64-apple-darwin"
   "x86_64-apple-darwin"
-  "aarch64-apple-ios"
-  "aarch64-apple-ios-sim"
-  "x86_64-apple-ios"
 )
 
 ############################################
@@ -69,14 +66,6 @@ lipo -create -output "$OUT_DIR/universal/lib${NAME}_macOS.a" \
   "$TARGET_DIR/aarch64-apple-darwin/${RELEASE_DIR}/lib${NAME}.a" \
   "$TARGET_DIR/x86_64-apple-darwin/${RELEASE_DIR}/lib${NAME}.a"
 
-# iOS Simulator (arm64 + x86_64)
-lipo -create -output "$OUT_DIR/universal/lib${NAME}_iOS_Simulator.a" \
-  "$TARGET_DIR/aarch64-apple-ios-sim/${RELEASE_DIR}/lib${NAME}.a" \
-  "$TARGET_DIR/x86_64-apple-ios/${RELEASE_DIR}/lib${NAME}.a"
-
-# iOS Device (arm64) – no lipo needed
-IOS_DEVICE_LIB="$TARGET_DIR/aarch64-apple-ios/${RELEASE_DIR}/lib${NAME}.a"
-
 ############################################
 # ───────── Create XCFramework ────────────
 ############################################
@@ -87,9 +76,7 @@ cp "$HEADER_FILE" "$INCLUDE_TMP/"
 cp "$OUT_DIR/${NAME}FFI.modulemap" "$INCLUDE_TMP/module.modulemap"
 
 xcodebuild -create-xcframework \
-  -library "$OUT_DIR/universal/lib${NAME}_macOS.a"        -headers "$INCLUDE_TMP" \
-  -library "$IOS_DEVICE_LIB"                              -headers "$INCLUDE_TMP" \
-  -library "$OUT_DIR/universal/lib${NAME}_iOS_Simulator.a" -headers "$INCLUDE_TMP" \
+  -library "$OUT_DIR/universal/lib${NAME}_macOS.a" -headers "$INCLUDE_TMP" \
   -output "$PACKAGE_NAME/$XCFRAMEWORK_NAME"
 
 ############################################
@@ -105,7 +92,7 @@ import PackageDescription
 
 let package = Package(
     name: "$PACKAGE_NAME",
-    platforms: [.macOS(.v10_15), .iOS(.v13)],
+    platforms: [.macOS(.v10_15)],
     products: [
         .library(name: "$PACKAGE_NAME", targets: ["$PACKAGE_NAME"])
     ],

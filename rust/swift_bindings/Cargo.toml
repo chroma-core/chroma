@@ -20,13 +20,16 @@ thiserror   = "1.0"
 anyhow      = "1.0"
 ndarray     = "0.15.6"
 futures     = "0.3"
+once_cell   = "1.19.0"
 
-chromadb    = "2.2"
-
-# Local Chroma crates - these replace the published chromadb crate
-#chroma = { path = "../chroma" }
-#chroma-frontend = { path = "../frontend" }
-#chroma-types = { path = "../types" }
+# Local Chroma crates
+chroma = { path = "../chroma" }
+chroma-frontend = { path = "../frontend" }
+chroma-types = { path = "../types" }
+chroma-config = { path = "../config" }
+chroma-log = { path = "../log" }
+chroma-sysdb = { path = "../sysdb" }
+chroma-system = { path = "../system" }
 
 [build-dependencies]
 uniffi = { version = "0.25.3", features = ["build"] }
