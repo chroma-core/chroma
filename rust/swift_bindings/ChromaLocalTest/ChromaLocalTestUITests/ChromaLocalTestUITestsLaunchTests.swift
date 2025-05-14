@@ -1,13 +1,13 @@
 //
-//  ChromaDemoAppUITestsLaunchTests.swift
-//  ChromaDemoAppUITests
+//  ChromaLocalTestUITestsLaunchTests.swift
+//  ChromaLocalTestUITests
 //
-//  Created by Nicholas Arner on 5/12/25.
+//  Created by Nicholas Arner on 5/13/25.
 //
 
 import XCTest
 
-final class ChromaDemoAppUITestsLaunchTests: XCTestCase {
+final class ChromaLocalTestUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true

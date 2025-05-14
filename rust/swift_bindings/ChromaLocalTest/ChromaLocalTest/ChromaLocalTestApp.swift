@@ -1,14 +1,14 @@
 //
-//  ChromaDemoAppApp.swift
-//  ChromaDemoApp
+//  ChromaLocalTestApp.swift
+//  ChromaLocalTest
 //
-//  Created by Nicholas Arner on 5/12/25.
+//  Created by Nicholas Arner on 5/13/25.
 //
 
 import SwiftUI
 
 @main
-struct ChromaDemoAppApp: App {
+struct ChromaLocalTestApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
