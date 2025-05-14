@@ -1838,6 +1838,8 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "uniffi 0.25.3",
  "uniffi 0.29.2",
 ]

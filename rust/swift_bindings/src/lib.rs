@@ -1,6 +1,5 @@
 // lib.rs ---------------------------------------------------------------
 use thiserror::Error;
-use anyhow::Context;
 use chroma_config::registry::Registry;
 use chroma_frontend::config::FrontendConfig;
 use chroma_frontend::impls::service_based_frontend::ServiceBasedFrontend;
@@ -24,6 +23,10 @@ use std::path::Path;
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use tokio::sync::Mutex as TokioMutex;
+use serde_json;
+use tracing;
+use tracing_subscriber;
+use chroma_frontend::impls::in_memory_frontend::InMemoryFrontend;
 
 // ----------------------------------------------------------------------
 //  UniFFI scaffolding
@@ -67,12 +70,12 @@ static FRONTEND: Lazy<TokioMutex<Option<ServiceBasedFrontend>>> = Lazy::new(|| T
 
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn initialize() -> FfiResult<()> {
-    let registry = Registry::new();
-    let system = System::new();
-    let frontend_config = FrontendConfig::sqlite_in_memory();
-    let frontend = ServiceBasedFrontend::try_from_config(&(frontend_config, system), &registry)
-        .await
-        .map_err(|e| ChromaError::Generic { message: format!("frontend init: {e}") })?;
+    tracing::info!("Initializing local Chroma instance...");
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::INFO)
+        .with_target(false)
+        .try_init();
+    let frontend = InMemoryFrontend::default();
     *FRONTEND.lock().await = Some(frontend);
     Ok(())
 }
@@ -169,7 +172,7 @@ pub async fn add_document(collection_name: String, doc_id: String, text: String,
 }
 
 #[uniffi::export(async_runtime = "tokio")]
-pub async fn list_documents(collection_name: String) -> FfiResult<Vec<String>> {
+pub async fn get_document_by_id(collection_name: String, doc_id: String) -> FfiResult<Option<String>> {
     let mut frontend = FRONTEND.lock().await;
     let frontend = frontend.as_mut().ok_or_else(|| ChromaError::Generic { 
         message: "Chroma not initialized. Call initialize() first.".to_string() 
@@ -186,19 +189,21 @@ pub async fn list_documents(collection_name: String) -> FfiResult<Vec<String>> {
         .await
         .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
     
-    println!("Listing documents from collection: {}", coll.collection_id);
+    println!("Getting document by ID from collection: {}", coll.collection_id);
     
-    // Query all documents (no embeddings, just list)
+    // Query with ids parameter
     let query_request = QueryRequest::try_new(
         "default".to_string(),
         "default".to_string(),
         coll.collection_id,
-        None, // ids
+        Some(vec![doc_id]), // ids
         None, // where
-        vec![], // embeddings
-        1000, // n_results
+        Vec::new(), // embeddings
+        1, // n_results
         chroma_types::IncludeList(vec![chroma_types::Include::Document]),
     ).map_err(|e| ChromaError::Generic { message: format!("query req: {e}") })?;
+    
+    println!("Query request: {:?}", query_request);
     
     let response = frontend.query(query_request)
         .await
@@ -207,16 +212,11 @@ pub async fn list_documents(collection_name: String) -> FfiResult<Vec<String>> {
     println!("Query response: {:?}", response);
     
     // response.documents: Option<Vec<Vec<Option<String>>>>
-    let mut documents = Vec::new();
-    if let Some(doc_groups) = response.documents {
-        for group in doc_groups {
-            for doc in group {
-                if let Some(text) = doc {
-                    documents.push(text);
-                }
-            }
-        }
-    }
-    println!("Documents found: {:?}", documents);
-    Ok(documents)
+    let document = response.documents
+        .and_then(|doc_groups| doc_groups.into_iter().next())
+        .and_then(|group| group.into_iter().next())
+        .flatten();
+    
+    println!("Document found: {:?}", document);
+    Ok(document)
 }
