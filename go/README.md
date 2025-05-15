@@ -35,3 +35,12 @@ ALSO, ensure you have copied the `/include` directory of the release to `../incl
 Then, to install the plugins, run the `go install` commands from the `Dockerfile`. The exact commands are not here because we would be duplicating where versions live if we did. The `Dockerfile` is the source of truth for the versions.
 
 Once those are all installed, you can run `make build` to build the project and most importantly, the generated protobuf files which your IDE will complain about until they are generated.
+
+## Schema Migrations
+
+From the directory with the migrations/ and schema/ directories, you can generate a new schema by
+changing the files in schema directly and running this command:
+
+```
+atlas migrate diff --dir file://migrations --to file://schema --dev-url 'docker://postgres/15/dev?search_path=public'
+```

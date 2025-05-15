@@ -45,12 +45,12 @@ func (suite *LogTestSuite) TestGarbageCollection() {
 	collectionID2 := types.NewUniqueID()
 
 	// Add records to collection 1
-	count, err := suite.lr.InsertRecords(ctx, collectionID1.String(), [][]byte{{1, 2, 3}})
+	count, isSealed, err := suite.lr.InsertRecords(ctx, collectionID1.String(), [][]byte{{1, 2, 3}})
 	assert.NoError(suite.t, err, "Failed to insert records")
 	assert.Equal(suite.t, int64(1), count, "Failed to insert records")
 
 	// Add records to collection 2
-	count, err = suite.lr.InsertRecords(ctx, collectionID2.String(), [][]byte{{1, 2, 3}})
+	count, isSealed, err = suite.lr.InsertRecords(ctx, collectionID2.String(), [][]byte{{1, 2, 3}})
 	assert.NoError(suite.t, err, "Failed to insert records")
 	assert.Equal(suite.t, int64(1), count, "Failed to insert records")
 
@@ -72,7 +72,7 @@ func (suite *LogTestSuite) TestGarbageCollection() {
 	assert.Equal(suite.t, 0, len(records), "Failed to run garbage collection")
 
 	// Add records to collection 2, expect offset to reset
-	count, err = suite.lr.InsertRecords(ctx, collectionID2.String(), [][]byte{{4, 5, 6}})
+	count, isSealed, err = suite.lr.InsertRecords(ctx, collectionID2.String(), [][]byte{{4, 5, 6}})
 	assert.NoError(suite.t, err, "Failed to insert records")
 	assert.Equal(suite.t, int64(1), count, "Failed to insert records")
 	records, err = suite.lr.PullRecords(ctx, collectionID2.String(), 1, 1, time.Now().UnixNano())
@@ -100,7 +100,7 @@ func (suite *LogTestSuite) TestUniqueConstraintPushLogs() {
 			Timestamp:    time.Now().UnixNano(),
 		}
 	}
-	_, err := suite.lr.queries.InsertRecord(ctx, params)
+	_, _, err := suite.lr.queries.InsertRecord(ctx, params)
 	assert.Error(suite.t, err, "Failed to insert records")
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
@@ -108,6 +108,26 @@ func (suite *LogTestSuite) TestUniqueConstraintPushLogs() {
 	} else {
 		assert.Fail(suite.t, "Expected pgconn.PgError but got different error", err)
 	}
+}
+
+func (suite *LogTestSuite) TestSealedLogWontPush() {
+	ctx := context.Background()
+	collectionId := types.NewUniqueID()
+	_, err := suite.lr.queries.SealLog(ctx, collectionId.String())
+	assert.NoError(suite.t, err, "Sealing log should not fail.")
+	params := make([]log.InsertRecordParams, 2)
+	for i, record := range records {
+		offset := 1
+		params[i] = log.InsertRecordParams{
+			CollectionID: collectionId.String(),
+			Record:       record,
+			Offset:       int64(offset),
+			Timestamp:    time.Now().UnixNano(),
+		}
+	}
+	_, isSealed, err := suite.lr.queries.InsertRecord(ctx, params)
+	assert.NoError(suite.t, err, "Failed to push logs")
+	assert.True(suite.t, isSealed, "Expected isSealed to be true")
 }
 
 func TestLogTestSuite(t *testing.T) {

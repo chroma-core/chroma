@@ -43,6 +43,8 @@ impl ChromaError for GrpcPullLogsError {
 pub enum GrpcPushLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
+    #[error("The log is sealed.  No writes can happen.")]
+    Sealed,
     #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] tonic::Status),
     #[error("Failed to convert records to proto")]
@@ -55,6 +57,7 @@ impl ChromaError for GrpcPushLogsError {
             GrpcPushLogsError::Backoff => ErrorCodes::AlreadyExists,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
+            GrpcPushLogsError::Sealed => ErrorCodes::FailedPrecondition,
         }
     }
 }
@@ -323,7 +326,8 @@ impl GrpcLog {
                 >>()?,
         };
 
-        self.client_for(tenant, collection_id)
+        let resp = self
+            .client_for(tenant, collection_id)
             .push_logs(request)
             .await
             .map_err(|err| {
@@ -335,8 +339,12 @@ impl GrpcLog {
                     err.into()
                 }
             })?;
-
-        Ok(())
+        let resp = resp.into_inner();
+        if resp.log_is_sealed {
+            Err(GrpcPushLogsError::Sealed)
+        } else {
+            Ok(())
+        }
     }
 
     pub(super) async fn fork_logs(
