@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/pingcap/log"
@@ -1353,6 +1354,27 @@ func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 	// suite.True(exists, "Version file should exist in S3")
 }
 
+func findSegmentInfo(segmentID types.UniqueID, segmentInfos []*coordinatorpb.FlushSegmentCompactionInfo) *coordinatorpb.FlushSegmentCompactionInfo {
+	for _, segmentInfo := range segmentInfos {
+		if segmentInfo.SegmentId == segmentID.String() {
+			return segmentInfo
+		}
+	}
+	return nil
+}
+
+func assertExpectedSegmentInfoExist(suite *APIsTestSuite, expectedSegment *model.Segment, segmentInfos []*coordinatorpb.FlushSegmentCompactionInfo) {
+	segmentInfo := findSegmentInfo(expectedSegment.ID, segmentInfos)
+	suite.NotNil(segmentInfo)
+	suite.NotNil(segmentInfo.FilePaths)
+
+	filePaths := map[string][]string{}
+	for key, filePath := range segmentInfo.FilePaths {
+		filePaths[key] = filePath.Paths
+	}
+	suite.Equal(filePaths, expectedSegment.FilePaths)
+}
+
 func (suite *APIsTestSuite) TestForkCollection() {
 	ctx := context.Background()
 
@@ -1465,6 +1487,22 @@ func (suite *APIsTestSuite) TestForkCollection() {
 			suite.NotEqual(sourceCreateVectorSegment.ID, segment.ID)
 			suite.Equal(sourceFlushVectorSegment.FilePaths, segment.FilePaths)
 		}
+	}
+
+	// Check version file of forked collection
+	versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(collection.TenantID, suite.databaseId, forkCollection.TargetCollectionID.String(), "0")
+	versionFile, err := suite.s3MetaStore.GetVersionFile(versionFilePathPrefix)
+	suite.NoError(err)
+	suite.NotNil(versionFile)
+	v0 := versionFile.VersionHistory.Versions[0]
+	suite.NotNil(v0)
+	// Validate file paths of segments
+	suite.NotNil(v0.SegmentInfo)
+	suite.NotNil(v0.SegmentInfo.SegmentCompactionInfo)
+	suite.Equal(len(v0.SegmentInfo.SegmentCompactionInfo), 3)
+
+	for _, segment := range collection_segments {
+		assertExpectedSegmentInfoExist(suite, segment, v0.SegmentInfo.SegmentCompactionInfo)
 	}
 
 	// Attempt to fork a collcetion with same name (should fail)
