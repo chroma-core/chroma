@@ -579,17 +579,17 @@ impl IntoSqliteExpr for CompositeExpression {
 
 impl IntoSqliteExpr for DocumentExpression {
     fn eval(&self) -> SimpleExpr {
-        let doc_col = Expr::col((
-            EmbeddingFulltextSearch::Table,
-            EmbeddingFulltextSearch::StringValue,
-        ));
-        let doc_contains = doc_col
-            .clone()
-            .like(format!("%{}%", self.pattern.replace("%", "")))
-            .and(doc_col.is_not_null());
+        let subq = Query::select()
+            .column(EmbeddingFulltextSearch::Rowid)
+            .from(EmbeddingFulltextSearch::Table)
+            .and_where(
+                Expr::col(EmbeddingFulltextSearch::StringValue)
+                    .like(format!("%{}%", self.pattern.replace("%", ""))),
+            )
+            .to_owned();
         match self.operator {
-            DocumentOperator::Contains => doc_contains,
-            DocumentOperator::NotContains => doc_contains.not(),
+            DocumentOperator::Contains => Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq),
+            DocumentOperator::NotContains => Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq),
             DocumentOperator::Regex => todo!("Implement Regex matching. The result must be a not-nullable boolean (use `<expr>.is(true)`)"),
             DocumentOperator::NotRegex => todo!("Implement negated Regex matching. This must be exact opposite of Regex matching (use `<expr>.not()`)"),
         }
@@ -805,20 +805,11 @@ impl SqliteMetadataReader {
         }
 
         if let Some(whr) = &where_clause {
-            let (has_document_expr, has_metadata_expr) = match whr {
+            let (_, has_metadata_expr) = match whr {
                 Where::Composite(expr) => expr.has_document_and_metadata(),
                 Where::Document(_) => (true, false),
                 Where::Metadata(_) => (false, true),
             };
-            if has_document_expr {
-                filter_limit_query.left_join(
-                    EmbeddingFulltextSearch::Table,
-                    Expr::col((Embeddings::Table, Embeddings::Id)).equals((
-                        EmbeddingFulltextSearch::Table,
-                        EmbeddingFulltextSearch::Rowid,
-                    )),
-                );
-            }
             if has_metadata_expr {
                 filter_limit_query.left_join(
                     EmbeddingMetadata::Table,
