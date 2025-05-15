@@ -47,11 +47,13 @@ func (suite *LogTestSuite) TestGarbageCollection() {
 	// Add records to collection 1
 	count, isSealed, err := suite.lr.InsertRecords(ctx, collectionID1.String(), [][]byte{{1, 2, 3}})
 	assert.NoError(suite.t, err, "Failed to insert records")
+	assert.False(suite.t, isSealed, count, "Log sealed")
 	assert.Equal(suite.t, int64(1), count, "Failed to insert records")
 
 	// Add records to collection 2
 	count, isSealed, err = suite.lr.InsertRecords(ctx, collectionID2.String(), [][]byte{{1, 2, 3}})
 	assert.NoError(suite.t, err, "Failed to insert records")
+	assert.False(suite.t, isSealed, count, "Log sealed")
 	assert.Equal(suite.t, int64(1), count, "Failed to insert records")
 
 	// Add collection 1 to sysdb
@@ -74,6 +76,7 @@ func (suite *LogTestSuite) TestGarbageCollection() {
 	// Add records to collection 2, expect offset to reset
 	count, isSealed, err = suite.lr.InsertRecords(ctx, collectionID2.String(), [][]byte{{4, 5, 6}})
 	assert.NoError(suite.t, err, "Failed to insert records")
+	assert.False(suite.t, isSealed, count, "Log sealed")
 	assert.Equal(suite.t, int64(1), count, "Failed to insert records")
 	records, err = suite.lr.PullRecords(ctx, collectionID2.String(), 1, 1, time.Now().UnixNano())
 	assert.NoError(suite.t, err, "Failed to pull records")
@@ -100,7 +103,7 @@ func (suite *LogTestSuite) TestUniqueConstraintPushLogs() {
 			Timestamp:    time.Now().UnixNano(),
 		}
 	}
-	_, _, err := suite.lr.queries.InsertRecord(ctx, params)
+	_, err := suite.lr.queries.InsertRecord(ctx, params)
 	assert.Error(suite.t, err, "Failed to insert records")
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
@@ -113,21 +116,19 @@ func (suite *LogTestSuite) TestUniqueConstraintPushLogs() {
 func (suite *LogTestSuite) TestSealedLogWontPush() {
 	ctx := context.Background()
 	collectionId := types.NewUniqueID()
-	_, err := suite.lr.queries.SealLog(ctx, collectionId.String())
-	assert.NoError(suite.t, err, "Sealing log should not fail.")
-	params := make([]log.InsertRecordParams, 2)
-	for i, record := range records {
-		offset := 1
-		params[i] = log.InsertRecordParams{
-			CollectionID: collectionId.String(),
-			Record:       record,
-			Offset:       int64(offset),
-			Timestamp:    time.Now().UnixNano(),
-		}
+	params := log.InsertCollectionParams {
+		ID: collectionId.String(),
+		RecordEnumerationOffsetPosition: 1,
+		RecordCompactionOffsetPosition: 0,
 	}
-	_, isSealed, err := suite.lr.queries.InsertRecord(ctx, params)
+	_, err := suite.lr.queries.InsertCollection(ctx, params)
+	assert.NoError(suite.t, err, "Initializing log should not fail.")
+	_, err = suite.lr.queries.SealLog(ctx, collectionId.String())
+	assert.NoError(suite.t, err, "Sealing log should not fail.")
+	var isSealed bool
+	_, isSealed, err = suite.lr.InsertRecords(ctx, collectionId.String(), [][]byte{{1,2,3}})
 	assert.NoError(suite.t, err, "Failed to push logs")
-	assert.True(suite.t, isSealed, "Expected isSealed to be true")
+	assert.True(suite.t, isSealed, "Did not report was sealed")
 }
 
 func TestLogTestSuite(t *testing.T) {

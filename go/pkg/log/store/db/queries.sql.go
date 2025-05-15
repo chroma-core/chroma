@@ -276,7 +276,7 @@ func (q *Queries) PurgeRecords(ctx context.Context) error {
 }
 
 const sealLog = `-- name: SealLog :one
-UPDATE COLLECTION collection SET id = $1, is_sealed = true returning id, record_compaction_offset_position, record_enumeration_offset_position, is_sealed
+UPDATE collection SET is_sealed = true WHERE id = $1 returning id, record_compaction_offset_position, record_enumeration_offset_position, is_sealed
 `
 
 func (q *Queries) SealLog(ctx context.Context, id string) (Collection, error) {
