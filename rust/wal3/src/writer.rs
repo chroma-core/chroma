@@ -14,7 +14,7 @@ use tracing::Instrument;
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
     ExponentialBackoff, Fragment, FragmentSeqNo, LogPosition, LogReader, LogReaderOptions,
-    LogWriterOptions, Manifest, ManifestManager,
+    LogWriterOptions, Manifest, ManifestManager, ThrottleOptions,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -130,6 +130,69 @@ impl LogWriter {
             mark_dirty,
             inner: Mutex::new(Some(inner)),
         })
+    }
+
+    /// Open or try once to initialize the log.
+    pub async fn bootstrap<D: MarkDirty>(
+        options: &LogWriterOptions,
+        storage: &Arc<Storage>,
+        prefix: &str,
+        writer: &str,
+        mark_dirty: D,
+        first_record_offset: LogPosition,
+        messages: Vec<Vec<u8>>,
+    ) -> Result<Self, Error> {
+        let num_records = messages.len();
+        let start = first_record_offset;
+        let limit = first_record_offset + num_records;
+        let manifest = Manifest::load(&ThrottleOptions::default(), storage, prefix).await?;
+        if manifest.is_some() {
+            return Err(Error::LogContention);
+        }
+        let (unprefixed_path, setsum, num_bytes) = upload_parquet(
+            options,
+            storage,
+            prefix,
+            FragmentSeqNo(1),
+            first_record_offset,
+            messages,
+        )
+        .await?;
+        Manifest::initialize(options, storage, prefix, writer).await?;
+        let Some((manifest, e_tag)) =
+            Manifest::load(&ThrottleOptions::default(), storage, prefix).await?
+        else {
+            tracing::error!("Manifest was initialized and then was None.");
+            return Err(Error::Internal);
+        };
+        let path = unprefixed_path;
+        let seq_no = FragmentSeqNo(1);
+        let num_bytes = num_bytes as u64;
+        let frag = Fragment {
+            path,
+            seq_no,
+            start,
+            limit,
+            num_bytes,
+            setsum,
+        };
+        let mut new_manifest = manifest.clone();
+        if !new_manifest.can_apply_fragment(&frag) {
+            tracing::error!("Cannot apply frag to a clean manifest.");
+            return Err(Error::Internal);
+        }
+        new_manifest.apply_fragment(frag);
+        manifest
+            .install(
+                &ThrottleOptions::default(),
+                storage,
+                prefix,
+                Some(&e_tag),
+                &new_manifest,
+            )
+            .await?;
+        mark_dirty.mark_dirty(limit, num_records).await?;
+        todo!();
     }
 
     /// This will close the log.
