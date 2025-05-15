@@ -1,0 +1,42 @@
+Token indices sequence length is longer than the specified maximum sequence length for this model (679 > 512). Running this sequence through the model will result in indexing errors
+Traceback (most recent call last):
+  File "/Users/kylediaz/Repos/chroma-core/chroma/sample_apps/code_search/test.py", line 49, in <module>
+    code_collection.add(
+    ~~~~~~~~~~~~~~~~~~~^
+        documents=[code],
+        ^^^^^^^^^^^^^^^^^
+        metadatas=[json_obj],
+        ^^^^^^^^^^^^^^^^^^^^^
+        ids=[id]
+        ^^^^^^^^
+    )
+    ^
+  File "/Users/kylediaz/Library/Caches/pypoetry/virtualenvs/code-search-ylE-RT-b-py3.13/lib/python3.13/site-packages/chromadb/api/models/Collection.py", line 80, in add
+    add_request = self._validate_and_prepare_add_request(
+        ids=ids,
+    ...<4 lines>...
+        uris=uris,
+    )
+  File "/Users/kylediaz/Library/Caches/pypoetry/virtualenvs/code-search-ylE-RT-b-py3.13/lib/python3.13/site-packages/chromadb/api/models/CollectionCommon.py", line 95, in wrapper
+    return func(self, *args, **kwargs)
+  File "/Users/kylediaz/Library/Caches/pypoetry/virtualenvs/code-search-ylE-RT-b-py3.13/lib/python3.13/site-packages/chromadb/api/models/CollectionCommon.py", line 236, in _validate_and_prepare_add_request
+    add_embeddings = self._embed_record_set(record_set=add_records)
+  File "/Users/kylediaz/Library/Caches/pypoetry/virtualenvs/code-search-ylE-RT-b-py3.13/lib/python3.13/site-packages/chromadb/api/models/CollectionCommon.py", line 562, in _embed_record_set
+    return self._embed(input=record_set[field])  # type: ignore[literal-required]
+           ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kylediaz/Library/Caches/pypoetry/virtualenvs/code-search-ylE-RT-b-py3.13/lib/python3.13/site-packages/chromadb/api/models/CollectionCommon.py", line 575, in _embed
+    return self._embedding_function(input=input)
+           ~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "/Users/kylediaz/Library/Caches/pypoetry/virtualenvs/code-search-ylE-RT-b-py3.13/lib/python3.13/site-packages/chromadb/api/types.py", line 490, in __call__
+    result = call(self, input)
+  File "/Users/kylediaz/Repos/chroma-core/chroma/sample_apps/code_search/test.py", line 19, in __call__
+    context_embeddings=self.model(torch.tensor(tokens_ids)[None,:])[0]
+                       ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/kylediaz/Library/Caches/pypoetry/virtualenvs/code-search-ylE-RT-b-py3.13/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1751, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/Users/kylediaz/Library/Caches/pypoetry/virtualenvs/code-search-ylE-RT-b-py3.13/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1762, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/Users/kylediaz/Library/Caches/pypoetry/virtualenvs/code-search-ylE-RT-b-py3.13/lib/python3.13/site-packages/transformers/models/roberta/modeling_roberta.py", line 909, in forward
+    buffered_token_type_ids_expanded = buffered_token_type_ids.expand(batch_size, seq_length)
+RuntimeError: The expanded size of the tensor (682) must match the existing size (514) at non-singleton dimension 1.  Target sizes: [1, 682].  Tensor sizes: [1, 514] in add.
