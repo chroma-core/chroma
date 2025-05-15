@@ -77,9 +77,9 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	}
 
 	// Convert the request segments to create segment models
-	createSegments := []*model.Segment{}
+	createSegments := []*model.CreateSegment{}
 	for _, segment := range req.Segments {
-		createSegment, err := convertProtoSegment(segment)
+		createSegment, err := convertSegmentToModel(segment)
 		if err != nil {
 			log.Error("Error in creating segments for the collection", zap.Error(err))
 			res.Collection = nil // We don't need to set the collection in case of error
