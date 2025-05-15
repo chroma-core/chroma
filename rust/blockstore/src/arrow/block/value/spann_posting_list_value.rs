@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use arrow::{
     array::{
-        Array, ArrayRef, FixedSizeListArray, FixedSizeListBuilder, Float32Array, Float32Builder,
-        ListArray, ListBuilder, StructArray, UInt32Array, UInt32Builder,
+        Array, ArrayData, ArrayRef, FixedSizeListArray, FixedSizeListBuilder, Float32Array,
+        Float32Builder, ListArray, ListBuilder, StructArray, UInt32Array, UInt32Builder,
     },
     datatypes::{DataType, Field, Fields},
 };
@@ -115,14 +115,21 @@ impl ArrowWriteableValue for &SpannPostingList<'_> {
             inner_version_ref.append_value(doc_version);
         }
         let inner_embeddings_ref = builder.doc_embeddings_builder.values();
-        let mut f32_count = 0;
-        for embedding in doc_embeddings.into_iter() {
-            inner_embeddings_ref.values().append_value(embedding);
-            f32_count += 1;
-            if f32_count == embedding_dim {
-                inner_embeddings_ref.append(true);
-                f32_count = 0;
-            }
+        // let mut f32_count = 0;
+        // for embedding in doc_embeddings.into_iter() {
+        //     inner_embeddings_ref.values().append_value(embedding);
+        //     f32_count += 1;
+        //     if f32_count == embedding_dim {
+        //         inner_embeddings_ref.append(true);
+        //         f32_count = 0;
+        //     }
+        // }
+        for chunk in doc_embeddings.chunks(embedding_dim) {
+            let validity = vec![true; chunk.len()];
+            inner_embeddings_ref
+                .values()
+                .append_values(chunk, &validity);
+            inner_embeddings_ref.append(true);
         }
         builder.doc_offset_ids_builder.append(true);
         builder.doc_versions_builder.append(true);

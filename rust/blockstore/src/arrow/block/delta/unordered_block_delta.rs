@@ -636,7 +636,7 @@ mod test {
 
         // benchmark conversion to record batch
         let start_time = std::time::Instant::now();
-        let record_batch = delta.finish::<u32, u32>(None);
+        let record_batch = delta.finish::<u32, &DataRecord>(None);
         let elapsed = start_time.elapsed();
         println!("Time taken to convert {} items: {:?}", n, elapsed);
 
@@ -678,7 +678,7 @@ mod test {
 
         // benchmark conversion to record batch
         let start_time = std::time::Instant::now();
-        let record_batch = delta.finish::<u32, u32>(None);
+        let record_batch = delta.finish::<u32, &SpannPostingList>(None);
         let elapsed = start_time.elapsed();
         println!("Time taken to convert {} items: {:?}", n, elapsed);
 
@@ -687,7 +687,7 @@ mod test {
         println!("Block size: {}", block_size);
         let start_time = std::time::Instant::now();
         let forked_delta =
-            UnorderedBlockDelta::fork_block::<u32, &DataRecord>(uuid::Uuid::new_v4(), &block);
+            UnorderedBlockDelta::fork_block::<u32, &SpannPostingList>(uuid::Uuid::new_v4(), &block);
         let elapsed = start_time.elapsed();
         println!(
             "Time taken to convert {} items into block: {:?}",
