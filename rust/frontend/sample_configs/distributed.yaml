@@ -12,6 +12,7 @@ sysdb:
 collections_with_segments_provider:
   cache:
     lru:
+      name: "collections_with_segments_cache"
       capacity: 1000
   cache_ttl_secs: 60
   permitted_parallelism: 180
@@ -47,4 +48,3 @@ scorecard:
     score: 100
 enable_span_indexing: true
 default_knn_index: "spann"
-enable_set_index_params: false

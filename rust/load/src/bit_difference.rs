@@ -266,19 +266,17 @@ impl SyntheticDataSet {
         let mut embeddings = vec![];
         let mut docs = vec![];
         let mut seen: HashSet<String> = HashSet::default();
-        for _ in 0..uq.batch_size {
-            let cluster = self.cluster_by_skew(skew, guac);
-            let num_this_cluster = (cluster.docs.len() as f64 * uq.associativity).ceil() as usize;
-            for _ in 0..num_this_cluster {
-                let doc_idx = (any::<u32>(guac) as u64 * cluster.docs.len() as u64) >> 32;
-                if seen.contains(&cluster.docs[doc_idx as usize].id()) {
-                    continue;
-                }
-                seen.insert(cluster.docs[doc_idx as usize].id());
-                ids.push(cluster.docs[doc_idx as usize].id());
-                embeddings.push(cluster.docs[doc_idx as usize].embedding());
-                docs.push(cluster.docs[doc_idx as usize].content.clone());
+        let cluster = self.cluster_by_skew(skew, guac);
+        let num_this_cluster = (cluster.docs.len() as f64 * uq.associativity).ceil() as usize;
+        for _ in 0..num_this_cluster {
+            let doc_idx = (any::<u32>(guac) as u64 * cluster.docs.len() as u64) >> 32;
+            if seen.contains(&cluster.docs[doc_idx as usize].id()) {
+                continue;
             }
+            seen.insert(cluster.docs[doc_idx as usize].id());
+            ids.push(cluster.docs[doc_idx as usize].id());
+            embeddings.push(cluster.docs[doc_idx as usize].embedding());
+            docs.push(cluster.docs[doc_idx as usize].content.clone());
         }
         let ids = ids.iter().map(String::as_str).collect();
         let docs = docs.iter().map(String::as_str).collect();

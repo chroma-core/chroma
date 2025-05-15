@@ -986,6 +986,11 @@ impl DataSet for VerifyingDataSet {
         &self,
         client: &ChromaClient,
     ) -> Result<(), Box<dyn std::error::Error + Send>> {
+        // Reset the cardinality and cardinality heap.
+        self.cardinality
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+        self.cardinality_heap.lock().await.clear();
+
         // Attempt to delete the collection. If it doesn't exist, ignore the error.
         match client.delete_collection(&self.test_data_set).await {
             Ok(_) => (),
@@ -1212,13 +1217,6 @@ impl DataSet for VerifyingDataSet {
             }
         };
 
-        event!(
-            Level::INFO,
-            "Upserting {} keys, new cardinality: {}",
-            uq.batch_size,
-            key_start_index + uq.batch_size
-        );
-
         for offset in 0..uq.batch_size {
             let key = uq.key.select_from_reference(self, offset);
             if !keys.contains(&key) {
@@ -1262,13 +1260,50 @@ impl DataSet for VerifyingDataSet {
             } else {
                 return Err(Box::new(Error::InvalidRequest("No documents".into())));
             }
-            let entries = CollectionEntries {
-                ids: keys,
-                metadatas: res.metadatas,
-                documents: Some(documents),
-                embeddings: Some(embeddings),
-            };
-            collection.upsert(entries, None).await?;
+
+            let max_retries = 10;
+            let base_delay = std::time::Duration::from_millis(10);
+            let max_delay = std::time::Duration::from_secs(10);
+            let mut retry_count = 0;
+            let mut delay = base_delay;
+
+            loop {
+                let entries = CollectionEntries {
+                    ids: keys.clone(),
+                    metadatas: res.metadatas.clone(),
+                    documents: Some(documents.clone()),
+                    embeddings: Some(embeddings.clone()),
+                };
+                let result = collection.upsert(entries, None).await;
+                if let Err(err) = result {
+                    if format!("{err:?}").contains("429") {
+                        if retry_count >= max_retries {
+                            return Err(Box::new(Error::InvalidRequest(format!(
+                                "UPSERT for {} failed after {} retries: RATE LIMITED {err:?}",
+                                key_start_index, max_retries
+                            ))));
+                        }
+
+                        tracing::warn!(
+                            "UPSERT for {} failed: RATE LIMITED {err:?}, retry {}/{}, sleeping for {:?}",
+                            key_start_index, retry_count + 1, max_retries, delay
+                        );
+
+                        tokio::time::sleep(delay).await;
+
+                        // Exponential backoff with max delay
+                        delay = std::cmp::min(delay * 2, max_delay);
+                        retry_count += 1;
+                        continue;
+                    } else {
+                        return Err(Box::new(Error::InvalidRequest(format!(
+                            "UPSERT failed: {err:?}"
+                        ))));
+                    }
+                } else {
+                    break;
+                }
+            }
             self.record_load(key_start_index, uq.batch_size).await;
         } else {
             return Err(Box::new(Error::InvalidRequest("No results".into())));
@@ -1461,9 +1496,9 @@ pub fn all_data_sets() -> Vec<Arc<dyn DataSet>> {
 
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct References {
-    references: serde_json::Value,
-    operates_on: String,
-    cardinality: usize,
+    pub references: serde_json::Value,
+    pub operates_on: String,
+    pub cardinality: usize,
 }
 
 /// Get a data set from a particular JSON value.

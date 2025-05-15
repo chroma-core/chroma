@@ -161,6 +161,10 @@ func (s *Coordinator) ForkCollection(ctx context.Context, forkCollection *model.
 	return s.catalog.ForkCollection(ctx, forkCollection)
 }
 
+func (s *Coordinator) CountForks(ctx context.Context, sourceCollectionID types.UniqueID) (uint64, error) {
+	return s.catalog.CountForks(ctx, sourceCollectionID)
+}
+
 func (s *Coordinator) CreateSegment(ctx context.Context, segment *model.CreateSegment) error {
 	if err := verifyCreateSegment(segment); err != nil {
 		return err
@@ -243,8 +247,8 @@ func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollec
 	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
 }
 
-func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64) ([]*model.CollectionToGc, error) {
-	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit)
+func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*model.CollectionToGc, error) {
+	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit, tenantID)
 }
 
 func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *int64, versionsAtOrAfter *int64, includeMarkedForDeletion bool) ([]*coordinatorpb.CollectionVersionInfo, error) {

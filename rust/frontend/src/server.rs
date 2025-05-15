@@ -13,12 +13,11 @@ use chroma_types::{
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
     GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse,
-    HnswConfiguration, IncludeList, InternalCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
-    QueryResponse, SpannConfiguration, UpdateCollectionConfiguration,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse,
+    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
+    InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -914,83 +913,15 @@ async fn create_collection(
 
     let payload_clone = payload.clone();
 
-    let configuration = if !server.config.enable_set_index_params {
-        if let Some(mut new_configuration) = payload.configuration.clone() {
-            let hnsw_config = new_configuration.hnsw.clone();
-            let spann_config = new_configuration.spann.clone();
-
-            if let Some(hnsw) = &hnsw_config {
-                let space = hnsw.space.clone();
-                if hnsw.ef_construction.is_some()
-                    || hnsw.ef_search.is_some()
-                    || hnsw.max_neighbors.is_some()
-                    || hnsw.num_threads.is_some()
-                    || hnsw.resize_factor.is_some()
-                    || hnsw.sync_threshold.is_some()
-                    || hnsw.batch_size.is_some()
-                {
-                    return Err(ValidationError::SpaceConfigurationForVectorIndexType(
-                        "HNSW".to_string(),
-                    )
-                    .into());
-                }
-                let new_hnsw = HnswConfiguration {
-                    space,
-                    ..Default::default()
-                };
-                new_configuration.hnsw = Some(new_hnsw);
-            } else if let Some(spann) = &spann_config {
-                let space = spann.space.clone();
-                if spann.search_nprobe.is_some()
-                    || spann.write_nprobe.is_some()
-                    || spann.ef_construction.is_some()
-                    || spann.ef_search.is_some()
-                    || spann.max_neighbors.is_some()
-                    || spann.reassign_neighbor_count.is_some()
-                    || spann.split_threshold.is_some()
-                    || spann.merge_threshold.is_some()
-                {
-                    return Err(ValidationError::SpaceConfigurationForVectorIndexType(
-                        "SPANN".to_string(),
-                    )
-                    .into());
-                }
-                let new_spann = SpannConfiguration {
-                    space,
-                    ..Default::default()
-                };
-                new_configuration.spann = Some(new_spann);
-            }
-
-            Some(InternalCollectionConfiguration::try_from_config(
-                new_configuration,
-                server.config.frontend.default_knn_index,
-            )?)
-        } else {
-            Some(InternalCollectionConfiguration::try_from_config(
-                CollectionConfiguration {
-                    hnsw: None,
-                    spann: None,
-                    embedding_function: None,
-                },
-                server.config.frontend.default_knn_index,
-            )?)
-        }
-    } else {
-        match payload_clone.configuration {
-            Some(c) => Some(InternalCollectionConfiguration::try_from_config(
-                c,
-                server.config.frontend.default_knn_index,
-            )?),
-            None => Some(InternalCollectionConfiguration::try_from_config(
-                CollectionConfiguration {
-                    hnsw: None,
-                    spann: None,
-                    embedding_function: None,
-                },
-                server.config.frontend.default_knn_index,
-            )?),
-        }
+    let configuration = match payload_clone.configuration {
+        Some(c) => Some(InternalCollectionConfiguration::try_from_config(
+            c,
+            server.config.frontend.default_knn_index,
+        )?),
+        None => Some(InternalCollectionConfiguration::try_from_config(
+            CollectionConfiguration::default(),
+            server.config.frontend.default_knn_index,
+        )?),
     };
 
     let request = CreateCollectionRequest::try_new(
@@ -1235,10 +1166,20 @@ async fn fork_collection(
             },
         )
         .await?;
-    let _guard =
-        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
+
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let mut quota_payload = QuotaPayload::new(Action::ForkCollection, tenant.clone(), api_token);
+    quota_payload = quota_payload.with_collection_uuid(collection_id);
+    quota_payload = quota_payload.with_collection_name(&payload.new_name);
+    server.quota_enforcer.enforce(&quota_payload).await?;
+
+    let _guard =
+        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
 
     let request = chroma_types::ForkCollectionRequest::try_new(
         tenant,

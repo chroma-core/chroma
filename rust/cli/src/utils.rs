@@ -11,6 +11,7 @@ use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
 use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
+use crate::commands::webpage::WebPageError;
 use crate::ui_utils::Theme;
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
@@ -64,6 +65,8 @@ pub enum CliError {
     Copy(#[from] CopyError),
     #[error("{0}")]
     Collection(#[from] CollectionAPIError),
+    #[error("{0}")]
+    WebPage(#[from] WebPageError),
 }
 
 #[derive(Debug, Error)]
@@ -90,8 +93,6 @@ pub enum UtilsError {
     ConfigFileWriteFailed,
     #[error("Failed to get user input")]
     UserInputFailed,
-    #[error("Failed to open browser. {0}")]
-    BrowserOpenFailed(String),
     #[error("Failed to copy to clipboard")]
     CopyToClipboardFailed,
     #[error("Input validation failed")]

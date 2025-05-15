@@ -626,6 +626,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                         .unwrap_or_default(),
                     maximum_fetch_count: Some(self.max_compaction_size as u32),
                     collection_uuid: self.collection_id,
+                    tenant: collection.tenant.clone(),
                 }),
                 (),
                 ctx.receiver(),
@@ -1131,6 +1132,7 @@ mod tests {
                 .unwrap_or_default(),
             maximum_fetch_count: None,
             collection_uuid: collection_id,
+            tenant: old_cas.collection.tenant.clone(),
         };
         let filter = FilterOperator {
             query_ids: None,

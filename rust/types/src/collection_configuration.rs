@@ -211,18 +211,52 @@ impl InternalCollectionConfiguration {
         match (value.hnsw, value.spann) {
             (Some(_), Some(_)) => Err(CollectionConfigurationToInternalConfigurationError::MultipleVectorIndexConfigurations),
             (Some(hnsw), None) => {
-                let hnsw: InternalHnswConfiguration = hnsw.into();
-                Ok(InternalCollectionConfiguration {
-                    vector_index: hnsw.into(),
-                    embedding_function: value.embedding_function,
-                })
+                match default_knn_index {
+                    // Create a spann index. Only inherit the space if it exists in the hnsw config.
+                    // This is for backwards compatibility so that users who migrate to distributed
+                    // from local don't break their code.
+                    KnnIndex::Spann => {
+                        let internal_config = InternalSpannConfiguration {
+                            space: hnsw.space,
+                            ..Default::default()
+                        };
+                        Ok(InternalCollectionConfiguration {
+                            vector_index: VectorIndexConfiguration::Spann(internal_config),
+                            embedding_function: value.embedding_function,
+                        })
+                    },
+                    KnnIndex::Hnsw => {
+                        let hnsw: InternalHnswConfiguration = hnsw.into();
+                        Ok(InternalCollectionConfiguration {
+                            vector_index: hnsw.into(),
+                            embedding_function: value.embedding_function,
+                        })
+                    }
+                }
             }
             (None, Some(spann)) => {
-                let spann: InternalSpannConfiguration = spann.into();
-                Ok(InternalCollectionConfiguration {
-                    vector_index: spann.into(),
-                    embedding_function: value.embedding_function,
-                })
+                match default_knn_index {
+                    // Create a hnsw index. Only inherit the space if it exists in the spann config.
+                    // This is for backwards compatibility so that users who migrate to local
+                    // from distributed don't break their code.
+                    KnnIndex::Hnsw => {
+                        let internal_config = InternalHnswConfiguration {
+                            space: spann.space,
+                            ..Default::default()
+                        };
+                        Ok(InternalCollectionConfiguration {
+                            vector_index: VectorIndexConfiguration::Hnsw(internal_config),
+                            embedding_function: value.embedding_function,
+                        })
+                    }
+                    KnnIndex::Spann => {
+                        let spann: InternalSpannConfiguration = spann.into();
+                        Ok(InternalCollectionConfiguration {
+                            vector_index: spann.into(),
+                            embedding_function: value.embedding_function,
+                        })
+                    }
+                }
             }
             (None, None) => {
                 let vector_index = match default_knn_index {
@@ -280,7 +314,7 @@ impl ChromaError for CollectionConfigurationToInternalConfigurationError {
     }
 }
 
-#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+#[derive(Default, Deserialize, Serialize, ToSchema, Debug, Clone)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct CollectionConfiguration {
     pub hnsw: Option<HnswConfiguration>,
@@ -347,6 +381,9 @@ pub struct UpdateCollectionConfiguration {
 
 #[cfg(test)]
 mod tests {
+    use crate::hnsw_configuration::HnswConfiguration;
+    use crate::hnsw_configuration::HnswSpace;
+    use crate::spann_configuration::SpannConfiguration;
     use crate::{test_segment, CollectionUuid, Metadata};
 
     use super::*;
@@ -397,5 +434,129 @@ mod tests {
 
         // Setting from metadata is ignored since the config is not default
         assert_eq!(overridden_config.ef_construction, 2);
+    }
+
+    #[test]
+    fn test_hnsw_config_with_hnsw_default() {
+        let hnsw_config = HnswConfiguration {
+            max_neighbors: Some(16),
+            ef_construction: Some(100),
+            ef_search: Some(10),
+            batch_size: Some(100),
+            num_threads: Some(4),
+            sync_threshold: Some(500),
+            resize_factor: Some(1.2),
+            space: HnswSpace::Cosine,
+        };
+
+        let collection_config = CollectionConfiguration {
+            hnsw: Some(hnsw_config.clone()),
+            spann: None,
+            embedding_function: None,
+        };
+
+        let internal_config_result =
+            InternalCollectionConfiguration::try_from_config(collection_config, KnnIndex::Hnsw);
+
+        assert!(internal_config_result.is_ok());
+        let internal_config = internal_config_result.unwrap();
+
+        let expected_vector_index = VectorIndexConfiguration::Hnsw(hnsw_config.into());
+        assert_eq!(internal_config.vector_index, expected_vector_index);
+    }
+
+    #[test]
+    fn test_hnsw_config_with_spann_default() {
+        let hnsw_config = HnswConfiguration {
+            max_neighbors: Some(16),
+            ef_construction: Some(100),
+            ef_search: Some(10),
+            batch_size: Some(100),
+            num_threads: Some(4),
+            sync_threshold: Some(500),
+            resize_factor: Some(1.2),
+            space: HnswSpace::Cosine,
+        };
+
+        let collection_config = CollectionConfiguration {
+            hnsw: Some(hnsw_config.clone()),
+            spann: None,
+            embedding_function: None,
+        };
+
+        let internal_config_result =
+            InternalCollectionConfiguration::try_from_config(collection_config, KnnIndex::Spann);
+
+        assert!(internal_config_result.is_ok());
+        let internal_config = internal_config_result.unwrap();
+
+        let expected_vector_index = VectorIndexConfiguration::Spann(InternalSpannConfiguration {
+            space: hnsw_config.space,
+            ..Default::default()
+        });
+        assert_eq!(internal_config.vector_index, expected_vector_index);
+    }
+
+    #[test]
+    fn test_spann_config_with_spann_default() {
+        let spann_config = SpannConfiguration {
+            ef_construction: Some(100),
+            ef_search: Some(10),
+            max_neighbors: Some(16),
+            search_nprobe: Some(1),
+            write_nprobe: Some(1),
+            space: HnswSpace::Cosine,
+            reassign_neighbor_count: Some(64),
+            split_threshold: Some(200),
+            merge_threshold: Some(100),
+        };
+
+        let collection_config = CollectionConfiguration {
+            hnsw: None,
+            spann: Some(spann_config.clone()),
+            embedding_function: None,
+        };
+
+        let internal_config_result =
+            InternalCollectionConfiguration::try_from_config(collection_config, KnnIndex::Spann);
+
+        assert!(internal_config_result.is_ok());
+        let internal_config = internal_config_result.unwrap();
+
+        let expected_vector_index = VectorIndexConfiguration::Spann(spann_config.into());
+        assert_eq!(internal_config.vector_index, expected_vector_index);
+    }
+
+    #[test]
+    fn test_spann_config_with_hnsw_default() {
+        let spann_config = SpannConfiguration {
+            ef_construction: Some(100),
+            ef_search: Some(10),
+            max_neighbors: Some(16),
+            search_nprobe: Some(1),
+            write_nprobe: Some(1),
+            space: HnswSpace::Cosine,
+            reassign_neighbor_count: Some(64),
+            split_threshold: Some(200),
+            merge_threshold: Some(100),
+        };
+
+        let collection_config = CollectionConfiguration {
+            hnsw: None,
+            spann: Some(spann_config.clone()),
+            embedding_function: None,
+        };
+
+        let internal_config_result =
+            InternalCollectionConfiguration::try_from_config(collection_config, KnnIndex::Hnsw);
+
+        let expected_vector_index = VectorIndexConfiguration::Hnsw(InternalHnswConfiguration {
+            space: spann_config.space,
+            ..Default::default()
+        });
+        assert_eq!(
+            internal_config_result.unwrap().vector_index,
+            expected_vector_index
+        );
     }
 }

@@ -76,9 +76,11 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - uses: useblacksmith/build-push-action@v1.1
+      - name: Set up Docker
+        uses: ./.github/actions/docker
         with:
-          setup-only: true
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
       - name: Build CLI

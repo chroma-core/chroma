@@ -7,20 +7,22 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
+use chroma_cache::CacheConfig;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_types::chroma_proto::{
     log_service_server::LogService, CollectionInfo, GetAllCollectionInfoToCompactRequest,
-    GetAllCollectionInfoToCompactResponse, LogRecord, OperationRecord, PullLogsRequest,
-    PullLogsResponse, PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse,
-    PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
-    UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
+    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
+    LogRecord, OperationRecord, PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
+    PurgeDirtyForCollectionResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
+    ScoutLogsResponse, UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
+use opentelemetry::metrics::Meter;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -46,6 +48,22 @@ const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 // SAFETY(rescrv):  There's a test that this produces a valid type.
 static STABLE_PREFIX: CursorName = unsafe { CursorName::from_string_unchecked("stable_prefix") };
 static COMPACTION: CursorName = unsafe { CursorName::from_string_unchecked("compaction") };
+
+////////////////////////////////////////////// Metrics /////////////////////////////////////////////
+
+pub struct Metrics {
+    log_total_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
+}
+
+impl Metrics {
+    pub fn new(meter: Meter) -> Self {
+        Self {
+            log_total_uncompacted_records_count: meter
+                .f64_gauge("log_total_uncompacted_records_count")
+                .build(),
+        }
+    }
+}
 
 ///////////////////////////////////////// state maintenance ////////////////////////////////////////
 
@@ -223,6 +241,19 @@ async fn get_log_from_handle<'a>(
     })
 }
 
+////////////////////////////////////////// CachedFragment //////////////////////////////////////////
+
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct CachedParquetFragment {
+    bytes: Vec<u8>,
+}
+
+impl chroma_cache::Weighted for CachedParquetFragment {
+    fn weight(&self) -> usize {
+        self.bytes.len()
+    }
+}
+
 ////////////////////////////////////////////// Rollup //////////////////////////////////////////////
 
 /// A rollup is a summary of the dirty log.  It specifies a position that can be advanced to if and
@@ -320,6 +351,7 @@ impl DirtyMarker {
 
     /// Given a contiguous prefix of markers, process the log into a rollup.  That is, a set of
     /// markers to reinsert, a set of collections to compact, and an advance_to log position.
+    #[allow(clippy::too_many_arguments)]
     pub async fn rollup<
         F1: Future<Output = Result<Option<Manifest>, wal3::Error>>,
         F2: Future<Output = Result<Option<Witness>, wal3::Error>>,
@@ -331,6 +363,7 @@ impl DirtyMarker {
         record_count_threshold: u64,
         reinsert_threshold: u64,
         timeout_us: u64,
+        metrics: &Metrics,
     ) -> Result<Option<Rollup>, wal3::Error> {
         // NOTE(rescrv);  This is complicated code because it's a hard problem to do efficiently.
         // To cut complexity, I've chosen to do it in a way that is not the most efficient but is
@@ -420,6 +453,7 @@ impl DirtyMarker {
             .into_iter()
             .flat_map(Result::ok)
             .collect::<HashMap<_, _>>();
+        let mut uncompacted = 0u64;
         let compactable = compactable
             .into_iter()
             .filter_map(|collection_id| {
@@ -459,6 +493,7 @@ impl DirtyMarker {
                             cursor.position,
                             manifest.maximum_log_position(),
                         );
+                        uncompacted += maximum_log_position - cursor.position;
                         if maximum_log_position - cursor.position >= record_count_threshold {
                             Some(CollectionInfo {
                                 collection_id: collection_id.to_string(),
@@ -500,6 +535,9 @@ impl DirtyMarker {
                 }
             }
         }
+        metrics
+            .log_total_uncompacted_records_count
+            .record(uncompacted as f64, &[]);
         Ok(Some(Rollup {
             advance_to,
             reinsert,
@@ -593,6 +631,8 @@ pub struct LogServer {
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Arc<LogWriter>,
     compacting: tokio::sync::Mutex<()>,
+    cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedParquetFragment>>>,
+    metrics: Metrics,
 }
 
 #[async_trait::async_trait]
@@ -736,7 +776,22 @@ impl LogService for LogServer {
             };
             let futures = fragments
                 .iter()
-                .map(|fragment| async { log_reader.fetch(fragment).await })
+                .map(|fragment| async {
+                    let cache_key = format!("{collection_id}::{}", fragment.path);
+                    if let Some(cache) = self.cache.as_ref() {
+                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
+                            return Ok(Arc::new(answer.bytes));
+                        }
+                        let answer = log_reader.fetch(fragment).await?;
+                        let cache_value = CachedParquetFragment {
+                            bytes: Clone::clone(&*answer),
+                        };
+                        cache.insert(cache_key, cache_value).await;
+                        Ok(answer)
+                    } else {
+                        log_reader.fetch(fragment).await
+                    }
+                })
                 .collect::<Vec<_>>();
             let parquets = futures::future::try_join_all(futures)
                 .await
@@ -947,6 +1002,7 @@ impl LogService for LogServer {
             ),
             self.config.reinsert_threshold,
             self.config.timeout_us,
+            &self.metrics,
         )
         .await
         .map_err(|err| Status::unavailable(err.to_string()))?;
@@ -1079,6 +1135,65 @@ impl LogService for LogServer {
             .await
             .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+    }
+
+    #[tracing::instrument(skip(self, _request))]
+    async fn inspect_dirty_log(
+        &self,
+        _request: Request<InspectDirtyLogRequest>,
+    ) -> Result<Response<InspectDirtyLogResponse>, Status> {
+        let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
+            return Err(Status::unavailable("Failed to get dirty log reader"));
+        };
+        let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+            return Err(Status::unavailable("Failed to get dirty log cursors"));
+        };
+        let witness = match cursors.load(&STABLE_PREFIX).await {
+            Ok(witness) => witness,
+            Err(err) => {
+                return Err(Status::new(err.code().into(), err.to_string()));
+            }
+        };
+        let default = Cursor::default();
+        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
+        tracing::info!("cursoring from {cursor:?}");
+        let dirty_fragments = reader
+            .scan(
+                cursor.position,
+                Limits {
+                    max_files: Some(1_000_000),
+                    max_bytes: Some(1_000_000_000),
+                },
+            )
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        let dirty_futures = dirty_fragments
+            .iter()
+            .map(|fragment| reader.read_parquet(fragment))
+            .collect::<Vec<_>>();
+        let dirty_raw = futures::future::try_join_all(dirty_futures)
+            .await
+            .map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("Failed to fetch dirty parquet: {}", err),
+                )
+            })?;
+        let mut markers = vec![];
+        for (_, records, _) in dirty_raw {
+            let records = records
+                .into_iter()
+                .map(|x| String::from_utf8(x.1))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| {
+                    Status::new(
+                        chroma_error::ErrorCodes::DataLoss.into(),
+                        format!("Failed to extract records: {}", err),
+                    )
+                })?;
+            markers.extend(records);
+        }
+        Ok(Response::new(InspectDirtyLogResponse { markers }))
     }
 }
 
@@ -1290,6 +1405,8 @@ pub struct LogServerConfig {
     pub writer: LogWriterOptions,
     #[serde(default)]
     pub reader: LogReaderOptions,
+    #[serde(default)]
+    pub cache: Option<CacheConfig>,
     #[serde(default = "LogServerConfig::default_record_count_threshold")]
     pub record_count_threshold: u64,
     #[serde(default = "LogServerConfig::default_reinsert_threshold")]
@@ -1323,6 +1440,7 @@ impl Default for LogServerConfig {
             storage: StorageConfig::default(),
             writer: LogWriterOptions::default(),
             reader: LogReaderOptions::default(),
+            cache: None,
             record_count_threshold: Self::default_record_count_threshold(),
             reinsert_threshold: Self::default_reinsert_threshold(),
             timeout_us: Self::default_timeout_us(),
@@ -1336,6 +1454,21 @@ impl Configurable<LogServerConfig> for LogServer {
         config: &LogServerConfig,
         registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let cache = if let Some(cache_config) = &config.cache {
+            match chroma_cache::from_config_persistent::<String, CachedParquetFragment>(
+                cache_config,
+            )
+            .await
+            {
+                Ok(cache) => Some(cache),
+                Err(err) => {
+                    tracing::error!("cache not configured: {err:?}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let storage = Arc::new(storage);
         let dirty_log = LogWriter::open_or_initialize(
@@ -1349,12 +1482,15 @@ impl Configurable<LogServerConfig> for LogServer {
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
         let dirty_log = Arc::new(dirty_log);
         let compacting = tokio::sync::Mutex::new(());
+        let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
         Ok(Self {
             config: config.clone(),
             open_logs: Arc::new(StateHashTable::default()),
             storage,
             dirty_log,
             compacting,
+            cache,
+            metrics,
         })
     }
 }
@@ -1457,6 +1593,7 @@ mod tests {
             1,
             1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
@@ -1518,6 +1655,7 @@ mod tests {
             3,
             1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
@@ -1601,6 +1739,7 @@ mod tests {
             3,
             1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
@@ -1714,6 +1853,7 @@ mod tests {
             3,
             1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()

@@ -842,6 +842,26 @@ impl ChromaError for ForkCollectionError {
 }
 
 #[derive(Debug, Error)]
+pub enum CountForksError {
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Count forks is unsupported for local chroma")]
+    Local,
+}
+
+impl ChromaError for CountForksError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CountForksError::NotFound(_) => ErrorCodes::NotFound,
+            CountForksError::Internal(chroma_error) => chroma_error.code(),
+            CountForksError::Local => ErrorCodes::Unimplemented,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
 pub enum GetCollectionSizeError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),

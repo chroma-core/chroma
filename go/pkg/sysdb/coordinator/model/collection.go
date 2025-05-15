@@ -28,7 +28,7 @@ type CollectionToGc struct {
 	TenantID        string
 	Name            string
 	VersionFilePath string
-	LatestVersion   int64
+	LineageFilePath *string
 }
 
 type CreateCollection struct {

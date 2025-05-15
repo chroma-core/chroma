@@ -676,31 +676,29 @@ func TestCatalog_ListCollectionsToGc(t *testing.T) {
 	limit := uint64(10)
 
 	// Mock collections to return
+	lineageFileName := "lineage_file_1"
 	collectionsToGc := []*dbmodel.CollectionToGc{
 		{
 			ID:              "00000000-0000-0000-0000-000000000001",
 			Name:            "collection1",
-			Version:         3,
 			VersionFileName: "3_existing_version",
 			OldestVersionTs: time.Now().Add(-48 * time.Hour), // 48 hours ago
-			NumVersions:     3,
 		},
 		{
 			ID:              "00000000-0000-0000-0000-000000000002",
 			Name:            "collection2",
-			Version:         2,
 			VersionFileName: "2_existing_version",
 			OldestVersionTs: time.Now().Add(-36 * time.Hour), // 36 hours ago
-			NumVersions:     2,
+			LineageFileName: &lineageFileName,
 		},
 	}
 
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("ListCollectionsToGc", &cutoffTimeSecs, &limit).Return(collectionsToGc, nil)
+	mockCollectionDb.On("ListCollectionsToGc", &cutoffTimeSecs, &limit, (*string)(nil)).Return(collectionsToGc, nil)
 
 	// Execute test
-	result, err := catalog.ListCollectionsToGc(context.Background(), &cutoffTimeSecs, &limit)
+	result, err := catalog.ListCollectionsToGc(context.Background(), &cutoffTimeSecs, &limit, nil)
 
 	// Verify results
 	assert.NoError(t, err)
@@ -710,14 +708,13 @@ func TestCatalog_ListCollectionsToGc(t *testing.T) {
 	// Verify first collection
 	assert.Equal(t, "00000000-0000-0000-0000-000000000001", result[0].ID.String())
 	assert.Equal(t, "collection1", result[0].Name)
-	assert.Equal(t, int64(3), result[0].LatestVersion)
 	assert.Equal(t, "3_existing_version", result[0].VersionFilePath)
 
 	// Verify second collection
 	assert.Equal(t, "00000000-0000-0000-0000-000000000002", result[1].ID.String())
 	assert.Equal(t, "collection2", result[1].Name)
-	assert.Equal(t, int64(2), result[1].LatestVersion)
 	assert.Equal(t, "2_existing_version", result[1].VersionFilePath)
+	assert.Equal(t, "lineage_file_1", *result[1].LineageFilePath)
 
 	// Verify mock expectations
 	mockMetaDomain.AssertExpectations(t)
@@ -739,19 +736,17 @@ func TestCatalog_ListCollectionsToGc_NilParameters(t *testing.T) {
 		{
 			ID:              "00000000-0000-0000-0000-000000000001",
 			Name:            "collection1",
-			Version:         3,
 			VersionFileName: "3_existing_version",
 			OldestVersionTs: time.Now().Add(-48 * time.Hour),
-			NumVersions:     3,
 		},
 	}
 
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("ListCollectionsToGc", (*uint64)(nil), (*uint64)(nil)).Return(collectionsToGc, nil)
+	mockCollectionDb.On("ListCollectionsToGc", (*uint64)(nil), (*uint64)(nil), (*string)(nil)).Return(collectionsToGc, nil)
 
 	// Execute test with nil parameters
-	result, err := catalog.ListCollectionsToGc(context.Background(), nil, nil)
+	result, err := catalog.ListCollectionsToGc(context.Background(), nil, nil, nil)
 
 	// Verify results
 	assert.NoError(t, err)
@@ -761,7 +756,6 @@ func TestCatalog_ListCollectionsToGc_NilParameters(t *testing.T) {
 	// Verify collection details
 	assert.Equal(t, "00000000-0000-0000-0000-000000000001", result[0].ID.String())
 	assert.Equal(t, "collection1", result[0].Name)
-	assert.Equal(t, int64(3), result[0].LatestVersion)
 	assert.Equal(t, "3_existing_version", result[0].VersionFilePath)
 
 	// Verify mock expectations

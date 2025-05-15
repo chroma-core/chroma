@@ -284,8 +284,8 @@ mod tests {
                 for (blockfile_entry, expected_entry) in
                     all_entries.iter().zip(ref_last_commit.iter())
                 {
-                    assert_eq!(blockfile_entry.0, expected_entry.0 .1); // key matches
-                    assert_eq!(blockfile_entry.1, expected_entry.1); // value matches
+                    assert_eq!(blockfile_entry.1, expected_entry.0 .1); // key matches
+                    assert_eq!(blockfile_entry.2, expected_entry.1); // value matches
                 }
             }
 

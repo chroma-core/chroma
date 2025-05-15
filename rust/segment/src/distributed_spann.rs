@@ -6,6 +6,7 @@ use super::types::{
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::GarbageCollectionContext;
+use chroma_index::spann::types::SpannMetrics;
 use chroma_index::spann::types::{
     SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError, SpannPosting,
 };
@@ -96,6 +97,7 @@ impl SpannSegmentWriter {
         hnsw_provider: &HnswIndexProvider,
         dimensionality: usize,
         gc_context: GarbageCollectionContext,
+        metrics: SpannMetrics,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
@@ -186,6 +188,7 @@ impl SpannSegmentWriter {
             blockfile_provider,
             params,
             gc_context,
+            metrics,
         )
         .await
         {
@@ -563,7 +566,7 @@ mod test {
             PlGarbageCollectionConfig, PlGarbageCollectionPolicyConfig, RandomSamplePolicyConfig,
         },
         hnsw_provider::HnswIndexProvider,
-        spann::types::GarbageCollectionContext,
+        spann::types::{GarbageCollectionContext, SpannMetrics},
         Index,
     };
     use chroma_storage::{local::LocalStorage, Storage};
@@ -645,6 +648,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann segment writer");
@@ -726,6 +730,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann segment writer");
@@ -855,6 +860,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann segment writer");
@@ -945,19 +951,25 @@ mod test {
             .get_range(.., ..)
             .await
             .expect("Error getting all data from reader");
-        pl.sort_by(|a, b| a.0.cmp(&b.0));
+        pl.sort_by(|a, b| a.0.cmp(b.0));
         assert_eq!(pl.len(), 1);
-        assert_eq!(pl[0].1.doc_offset_ids, &[1, 2]);
-        assert_eq!(pl[0].1.doc_versions, &[1, 1]);
-        assert_eq!(pl[0].1.doc_embeddings, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(pl[0].2.doc_offset_ids, &[1, 2]);
+        assert_eq!(pl[0].2.doc_versions, &[1, 1]);
+        assert_eq!(pl[0].2.doc_embeddings, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
         let mut versions_map = spann_reader
             .index_reader
             .versions_map
             .get_range(.., ..)
             .await
             .expect("Error gettting all data from reader");
-        versions_map.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(versions_map, vec![(1, 1), (2, 1)]);
+        versions_map.sort_by(|a, b| a.1.cmp(&b.1));
+        assert_eq!(
+            versions_map
+                .into_iter()
+                .map(|t| (t.1, t.2))
+                .collect::<Vec<_>>(),
+            vec![(1, 1), (2, 1)]
+        );
     }
 
     #[tokio::test]
@@ -1022,6 +1034,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann segment writer");
@@ -1118,6 +1131,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann segment writer");

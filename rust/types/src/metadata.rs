@@ -693,16 +693,16 @@ impl From<DocumentExpression> for chroma_proto::DirectWhereDocument {
 pub enum DocumentOperator {
     Contains,
     NotContains,
-    Matches,
-    NotMatches,
+    Regex,
+    NotRegex,
 }
 impl From<chroma_proto::WhereDocumentOperator> for DocumentOperator {
     fn from(value: chroma_proto::WhereDocumentOperator) -> Self {
         match value {
             chroma_proto::WhereDocumentOperator::Contains => Self::Contains,
             chroma_proto::WhereDocumentOperator::NotContains => Self::NotContains,
-            chroma_proto::WhereDocumentOperator::Matches => Self::Matches,
-            chroma_proto::WhereDocumentOperator::NotMatches => Self::NotMatches,
+            chroma_proto::WhereDocumentOperator::Regex => Self::Regex,
+            chroma_proto::WhereDocumentOperator::NotRegex => Self::NotRegex,
         }
     }
 }
@@ -712,8 +712,8 @@ impl From<DocumentOperator> for chroma_proto::WhereDocumentOperator {
         match value {
             DocumentOperator::Contains => Self::Contains,
             DocumentOperator::NotContains => Self::NotContains,
-            DocumentOperator::Matches => Self::Matches,
-            DocumentOperator::NotMatches => Self::NotMatches,
+            DocumentOperator::Regex => Self::Regex,
+            DocumentOperator::NotRegex => Self::NotRegex,
         }
     }
 }

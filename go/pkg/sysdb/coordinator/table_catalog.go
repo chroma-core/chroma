@@ -444,14 +444,14 @@ func (tc *Catalog) GetCollectionSize(ctx context.Context, collectionID types.Uni
 	return total_records_post_compaction, nil
 }
 
-func (tc *Catalog) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64) ([]*model.CollectionToGc, error) {
+func (tc *Catalog) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*model.CollectionToGc, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
 		_, span := tracer.Start(ctx, "Catalog.ListCollectionsToGc")
 		defer span.End()
 	}
 
-	collectionsToGc, err := tc.metaDomain.CollectionDb(ctx).ListCollectionsToGc(cutoffTimeSecs, limit)
+	collectionsToGc, err := tc.metaDomain.CollectionDb(ctx).ListCollectionsToGc(cutoffTimeSecs, limit, tenantID)
 
 	if err != nil {
 		return nil, err
@@ -967,8 +967,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		if err != nil {
 			return err
 		}
-		// NOTE: This is a temporary hardcoded limit for the size of the lineage file
-		// TODO: Load the limit value from quota / scorecard, and/or improve the lineage file design to avoid large lineage file
+		// Defensive backstop to prevent too many forks
 		if len(lineageFile.Dependencies) > 1000000 {
 			return common.ErrCollectionTooManyFork
 		}
@@ -991,6 +990,48 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 	}
 
 	return tc.GetCollectionWithSegments(ctx, forkCollection.TargetCollectionID)
+}
+
+func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.UniqueID) (uint64, error) {
+	var rootCollectionID types.UniqueID
+
+	sourceCollectionIDStr := sourceCollectionID.String()
+	sourceCollectionDb, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(&sourceCollectionIDStr, nil)
+	if err != nil {
+		return 0, err
+	}
+	if sourceCollectionDb == nil {
+		return 0, common.ErrCollectionNotFound
+	}
+
+	if len(sourceCollectionDb.RootCollectionId) > 0 {
+		rootCollectionID, err = types.Parse(sourceCollectionDb.RootCollectionId)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		rootCollectionID = sourceCollectionID
+	}
+
+	limit := int32(1)
+	collections, err := tc.GetCollections(ctx, rootCollectionID, nil, "", "", &limit, nil)
+	if err != nil {
+		return 0, err
+	}
+	if len(collections) == 0 {
+		return 0, common.ErrCollectionNotFound
+	}
+	rootCollection := collections[0]
+
+	lineageFile, err := tc.getLineageFile(ctx, rootCollection)
+	if err != nil {
+		return 0, err
+	}
+
+	if lineageFile == nil || lineageFile.Dependencies == nil {
+		return 0, nil
+	}
+	return uint64(len(lineageFile.Dependencies)), nil
 }
 
 func (tc *Catalog) CreateSegment(ctx context.Context, createSegment *model.CreateSegment, ts types.Timestamp) (*model.Segment, error) {
