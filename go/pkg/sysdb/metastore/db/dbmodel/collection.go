@@ -19,8 +19,8 @@ type Collection struct {
 	LogPosition                int64           `gorm:"log_position;default:0"`
 	Version                    int32           `gorm:"version;default:0"`
 	VersionFileName            string          `gorm:"version_file_name"`
-	RootCollectionId           string          `gorm:"column:root_collection_id"`
-	LineageFileName            string          `gorm:"column:lineage_file_name"`
+	RootCollectionId           *string         `gorm:"column:root_collection_id"`
+	LineageFileName            *string         `gorm:"column:lineage_file_name"`
 	TotalRecordsPostCompaction uint64          `gorm:"total_records_post_compaction;default:0"`
 	SizeBytesPostCompaction    uint64          `gorm:"size_bytes_post_compaction;default:0"`
 	LastCompactionTimeSecs     uint64          `gorm:"last_compaction_time_secs;default:0"`
@@ -67,5 +67,5 @@ type ICollectionDb interface {
 	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*CollectionToGc, error)
 	UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error)
 	LockCollection(collectionID string) error
-	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath string, newLineageFilePath string) error
+	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath *string, newLineageFilePath string) error
 }
