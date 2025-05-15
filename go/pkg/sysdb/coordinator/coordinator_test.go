@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/pingcap/log"
@@ -179,8 +180,8 @@ func testSegment(t *rapid.T) {
 
 	t.Repeat(map[string]func(*rapid.T){
 		"create_segment": func(t *rapid.T) {
-			segment := rapid.Custom[*model.CreateSegment](func(t *rapid.T) *model.CreateSegment {
-				return &model.CreateSegment{
+			segment := rapid.Custom[*model.Segment](func(t *rapid.T) *model.Segment {
+				return &model.Segment{
 					ID:           types.MustParse(rapid.StringMatching(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`).Draw(t, "segment_id")),
 					Type:         "test-segment-type",
 					Scope:        "test-segment-scope",
@@ -294,7 +295,7 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 		DatabaseName: suite.databaseName,
 	}
 
-	segments := []*model.CreateSegment{
+	segments := []*model.Segment{
 		{
 			ID:           types.NewUniqueID(),
 			Type:         "test_type",
@@ -306,6 +307,9 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 			Type:         "test_type",
 			Scope:        "VECTOR",
 			CollectionID: newCollection.ID,
+			FilePaths: map[string][]string{
+				"test_path": {"test_file1"},
+			},
 		},
 	}
 
@@ -346,6 +350,22 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 		actual_ids = append(actual_ids, segment.ID)
 	}
 	suite.ElementsMatch(expected_ids, actual_ids)
+
+	// Validate version file
+	versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(collection.TenantID, suite.databaseId, newCollection.ID.String(), "0")
+	versionFile, err := suite.s3MetaStore.GetVersionFile(versionFilePathPrefix)
+	suite.NoError(err)
+	suite.NotNil(versionFile)
+	v0 := versionFile.VersionHistory.Versions[0]
+	suite.NotNil(v0)
+
+	// Validate file paths of segments
+	suite.NotNil(v0.SegmentInfo)
+	suite.NotNil(v0.SegmentInfo.SegmentCompactionInfo)
+	suite.Equal(len(v0.SegmentInfo.SegmentCompactionInfo), 2)
+	for _, segment := range segments {
+		assertExpectedSegmentInfoExist(suite, segment, v0.SegmentInfo.SegmentCompactionInfo)
+	}
 
 	// Attempt to create a duplicate collection (should fail)
 	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
@@ -486,7 +506,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	suite.Equal(createCollection.Metadata, results[0].Metadata)
 
 	// Create segments associated with collection
-	segment := &model.CreateSegment{
+	segment := &model.Segment{
 		ID:           types.MustParse("00000000-0000-0000-0000-000000000001"),
 		CollectionID: createCollection.ID,
 		Type:         "test_segment",
@@ -993,7 +1013,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 
 	sampleSegments := SampleSegments(suite.sampleCollections)
 	for _, segment := range sampleSegments {
-		errSegmentCreation := c.CreateSegment(ctx, &model.CreateSegment{
+		errSegmentCreation := c.CreateSegment(ctx, &model.Segment{
 			ID:           segment.ID,
 			Type:         segment.Type,
 			Scope:        segment.Scope,
@@ -1003,7 +1023,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 		suite.NoError(errSegmentCreation)
 
 		// Create segment with empty collection id fails
-		errSegmentCreation = c.CreateSegment(ctx, &model.CreateSegment{
+		errSegmentCreation = c.CreateSegment(ctx, &model.Segment{
 			ID:           segment.ID,
 			Type:         segment.Type,
 			Scope:        segment.Scope,
@@ -1014,7 +1034,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 
 		// Create segment to test unique constraint violation on segment.id.
 		// This should fail because the id is already taken.
-		errSegmentCreation = c.CreateSegment(ctx, &model.CreateSegment{
+		errSegmentCreation = c.CreateSegment(ctx, &model.Segment{
 			ID:           segment.ID,
 			Type:         segment.Type,
 			Scope:        segment.Scope,
@@ -1037,7 +1057,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 	suite.Equal(sampleSegments, results)
 
 	// Duplicate create fails
-	err := c.CreateSegment(ctx, &model.CreateSegment{
+	err := c.CreateSegment(ctx, &model.Segment{
 		ID:           sampleSegments[0].ID,
 		Type:         sampleSegments[0].Type,
 		Scope:        sampleSegments[0].Scope,
@@ -1108,7 +1128,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 	}
 
 	ctx := context.Background()
-	errSegmentCreation := suite.coordinator.CreateSegment(ctx, &model.CreateSegment{
+	errSegmentCreation := suite.coordinator.CreateSegment(ctx, &model.Segment{
 		ID:           segment.ID,
 		Type:         segment.Type,
 		Scope:        segment.Scope,
@@ -1313,7 +1333,7 @@ func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 		DatabaseName: suite.databaseName,
 	}
 
-	segments := []*model.CreateSegment{
+	segments := []*model.Segment{
 		{
 			ID:           types.NewUniqueID(),
 			Type:         "test_type_a",
@@ -1353,6 +1373,33 @@ func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 	// suite.True(exists, "Version file should exist in S3")
 }
 
+func findSegmentInfo(segmentID types.UniqueID, segmentInfos []*coordinatorpb.FlushSegmentCompactionInfo) *coordinatorpb.FlushSegmentCompactionInfo {
+	for _, segmentInfo := range segmentInfos {
+		if segmentInfo.SegmentId == segmentID.String() {
+			return segmentInfo
+		}
+	}
+	return nil
+}
+
+func assertExpectedSegmentInfoExist(suite *APIsTestSuite, expectedSegment *model.Segment, segmentInfos []*coordinatorpb.FlushSegmentCompactionInfo) {
+	segmentInfo := findSegmentInfo(expectedSegment.ID, segmentInfos)
+	suite.NotNil(segmentInfo)
+
+	if expectedSegment.FilePaths == nil {
+		suite.Nil(segmentInfo.FilePaths)
+		return
+	}
+
+	suite.NotNil(segmentInfo.FilePaths)
+
+	filePaths := map[string][]string{}
+	for key, filePath := range segmentInfo.FilePaths {
+		filePaths[key] = filePath.Paths
+	}
+	suite.Equal(filePaths, expectedSegment.FilePaths)
+}
+
 func (suite *APIsTestSuite) TestForkCollection() {
 	ctx := context.Background()
 
@@ -1363,28 +1410,28 @@ func (suite *APIsTestSuite) TestForkCollection() {
 		DatabaseName: suite.databaseName,
 	}
 
-	sourceCreateMetadataSegment := &model.CreateSegment{
+	sourceCreateMetadataSegment := &model.Segment{
 		ID:           types.NewUniqueID(),
 		Type:         "test_blockfile",
 		Scope:        "METADATA",
 		CollectionID: sourceCreateCollection.ID,
 	}
 
-	sourceCreateRecordSegment := &model.CreateSegment{
+	sourceCreateRecordSegment := &model.Segment{
 		ID:           types.NewUniqueID(),
 		Type:         "test_blockfile",
 		Scope:        "RECORD",
 		CollectionID: sourceCreateCollection.ID,
 	}
 
-	sourceCreateVectorSegment := &model.CreateSegment{
+	sourceCreateVectorSegment := &model.Segment{
 		ID:           types.NewUniqueID(),
 		Type:         "test_hnsw",
 		Scope:        "VECTOR",
 		CollectionID: sourceCreateCollection.ID,
 	}
 
-	segments := []*model.CreateSegment{
+	segments := []*model.Segment{
 		sourceCreateMetadataSegment,
 		sourceCreateRecordSegment,
 		sourceCreateVectorSegment,
@@ -1467,6 +1514,22 @@ func (suite *APIsTestSuite) TestForkCollection() {
 		}
 	}
 
+	// Check version file of forked collection
+	versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(collection.TenantID, suite.databaseId, forkCollection.TargetCollectionID.String(), "0")
+	versionFile, err := suite.s3MetaStore.GetVersionFile(versionFilePathPrefix)
+	suite.NoError(err)
+	suite.NotNil(versionFile)
+	v0 := versionFile.VersionHistory.Versions[0]
+	suite.NotNil(v0)
+	// Validate file paths of segments
+	suite.NotNil(v0.SegmentInfo)
+	suite.NotNil(v0.SegmentInfo.SegmentCompactionInfo)
+	suite.Equal(len(v0.SegmentInfo.SegmentCompactionInfo), 3)
+
+	for _, segment := range collection_segments {
+		assertExpectedSegmentInfoExist(suite, segment, v0.SegmentInfo.SegmentCompactionInfo)
+	}
+
 	// Attempt to fork a collcetion with same name (should fail)
 	forkCollectionWithSameName := &model.ForkCollection{
 		SourceCollectionID:                   sourceCreateCollection.ID,
@@ -1505,28 +1568,28 @@ func (suite *APIsTestSuite) TestCountForks() {
 		DatabaseName: suite.databaseName,
 	}
 
-	sourceCreateMetadataSegment := &model.CreateSegment{
+	sourceCreateMetadataSegment := &model.Segment{
 		ID:           types.NewUniqueID(),
 		Type:         "test_blockfile",
 		Scope:        "METADATA",
 		CollectionID: sourceCreateCollection.ID,
 	}
 
-	sourceCreateRecordSegment := &model.CreateSegment{
+	sourceCreateRecordSegment := &model.Segment{
 		ID:           types.NewUniqueID(),
 		Type:         "test_blockfile",
 		Scope:        "RECORD",
 		CollectionID: sourceCreateCollection.ID,
 	}
 
-	sourceCreateVectorSegment := &model.CreateSegment{
+	sourceCreateVectorSegment := &model.Segment{
 		ID:           types.NewUniqueID(),
 		Type:         "test_hnsw",
 		Scope:        "VECTOR",
 		CollectionID: sourceCreateCollection.ID,
 	}
 
-	segments := []*model.CreateSegment{
+	segments := []*model.Segment{
 		sourceCreateMetadataSegment,
 		sourceCreateRecordSegment,
 		sourceCreateVectorSegment,
