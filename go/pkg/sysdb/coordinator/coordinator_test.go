@@ -307,6 +307,9 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 			Type:         "test_type",
 			Scope:        "VECTOR",
 			CollectionID: newCollection.ID,
+			FilePaths: map[string][]string{
+				"test_path": {"test_file1"},
+			},
 		},
 	}
 
@@ -347,6 +350,22 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 		actual_ids = append(actual_ids, segment.ID)
 	}
 	suite.ElementsMatch(expected_ids, actual_ids)
+
+	// Validate version file
+	versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(collection.TenantID, suite.databaseId, newCollection.ID.String(), "0")
+	versionFile, err := suite.s3MetaStore.GetVersionFile(versionFilePathPrefix)
+	suite.NoError(err)
+	suite.NotNil(versionFile)
+	v0 := versionFile.VersionHistory.Versions[0]
+	suite.NotNil(v0)
+
+	// Validate file paths of segments
+	suite.NotNil(v0.SegmentInfo)
+	suite.NotNil(v0.SegmentInfo.SegmentCompactionInfo)
+	suite.Equal(len(v0.SegmentInfo.SegmentCompactionInfo), 2)
+	for _, segment := range segments {
+		assertExpectedSegmentInfoExist(suite, segment, v0.SegmentInfo.SegmentCompactionInfo)
+	}
 
 	// Attempt to create a duplicate collection (should fail)
 	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
@@ -1366,6 +1385,12 @@ func findSegmentInfo(segmentID types.UniqueID, segmentInfos []*coordinatorpb.Flu
 func assertExpectedSegmentInfoExist(suite *APIsTestSuite, expectedSegment *model.Segment, segmentInfos []*coordinatorpb.FlushSegmentCompactionInfo) {
 	segmentInfo := findSegmentInfo(expectedSegment.ID, segmentInfos)
 	suite.NotNil(segmentInfo)
+
+	if expectedSegment.FilePaths == nil {
+		suite.Nil(segmentInfo.FilePaths)
+		return
+	}
+
 	suite.NotNil(segmentInfo.FilePaths)
 
 	filePaths := map[string][]string{}
