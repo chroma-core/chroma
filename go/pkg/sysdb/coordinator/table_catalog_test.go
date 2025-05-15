@@ -203,6 +203,19 @@ func (m *mockS3MetaStore) GetVersionFile(fileName string) (*coordinatorpb.Collec
 	}, nil
 }
 
+func (m *mockS3MetaStore) ListVersionFiles() ([]*coordinatorpb.CollectionVersionFile, []string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var files []*coordinatorpb.CollectionVersionFile
+	var names []string
+	for fileName, file := range m.versionFiles {
+		names = append(names, fileName)
+		files = append(files, file)
+	}
+	return files, names, nil
+}
+
 func (m *mockS3MetaStore) PutVersionFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -240,6 +253,13 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 	tenantID := "test_tenant"
 	currentVersion := int32(1)
 	logPosition := int64(100)
+	dbId := "00000000-0000-0000-0000-000000000002"
+
+	version1FilePath := map[string]*coordinatorpb.FilePaths{
+		"test_path": {
+			Paths: []string{"test_file"},
+		},
+	}
 
 	// Set up initial version file that would have been created by CreateCollection
 	initialVersionFile := &coordinatorpb.CollectionVersionFile{
@@ -250,6 +270,13 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 			Versions: []*coordinatorpb.CollectionVersionInfo{
 				{
 					Version: 1,
+					SegmentInfo: &coordinatorpb.CollectionSegmentInfo{
+						SegmentCompactionInfo: []*coordinatorpb.FlushSegmentCompactionInfo{
+							{
+								FilePaths: version1FilePath,
+							},
+						},
+					},
 				},
 			},
 		},
@@ -258,12 +285,59 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "version_1.pb", fileName)
 
-	// Setup mock collection entry
-	mockCollectionEntry := &dbmodel.Collection{
-		ID:              collectionID.String(),
-		Version:         int32(currentVersion),
-		VersionFileName: "version_1.pb",
-		LogPosition:     logPosition,
+	collectionName := "test_collection"
+	configurationJson := "{test_config}"
+	dim := int32(128)
+
+	mockCollectionsAndMetadata := []*dbmodel.CollectionAndMetadata{
+		{
+			// Fill all the fields with necessary data
+			Collection: &dbmodel.Collection{
+				ID:                         collectionID.String(),
+				Name:                       &collectionName,
+				ConfigurationJsonStr:       &configurationJson,
+				Dimension:                  &dim,
+				DatabaseID:                 dbId,
+				Ts:                         types.Timestamp(0),
+				IsDeleted:                  false,
+				CreatedAt:                  time.Now(),
+				UpdatedAt:                  time.Now(),
+				LogPosition:                10,
+				Version:                    int32(currentVersion),
+				VersionFileName:            "version_1.pb",
+				RootCollectionId:           "",
+				LineageFileName:            "",
+				TotalRecordsPostCompaction: 10,
+				SizeBytesPostCompaction:    100,
+				LastCompactionTimeSecs:     0,
+				NumVersions:                1,
+				OldestVersionTs:            time.Now(),
+				Tenant:                     tenantID,
+			},
+			CollectionMetadata: []*dbmodel.CollectionMetadata{},
+			TenantID:           tenantID,
+			DatabaseName:       "test_database",
+		},
+	}
+
+	collectionIdStr := collectionID.String()
+	mockSegments := []*dbmodel.SegmentAndMetadata{
+		{
+			Segment: &dbmodel.Segment{
+				CollectionID: &collectionIdStr,
+				ID:           "00000000-0000-0000-0000-000000000003",
+				Type:         "test_type",
+				Scope:        "test_scope",
+				Ts:           types.Timestamp(0),
+				IsDeleted:    false,
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+				FilePaths: map[string][]string{
+					"test_path": {"test_file"},
+				},
+			},
+			SegmentMetadata: []*dbmodel.SegmentMetadata{},
+		},
 	}
 
 	// Setup mock behaviors
@@ -271,7 +345,8 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 	mockMetaDomain.On("TenantDb", mock.Anything).Return(mockTenantDb)
 	mockMetaDomain.On("SegmentDb", mock.Anything).Return(mockSegmentDb)
 
-	mockCollectionDb.On("GetCollectionEntry", types.FromUniqueID(collectionID), mock.Anything).Return(mockCollectionEntry, nil)
+	mockCollectionDb.On("GetCollections", types.FromUniqueID(collectionID), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockCollectionsAndMetadata, nil)
+	mockSegmentDb.On("GetSegments", mock.Anything, mock.Anything, mock.Anything, collectionID).Return(mockSegments, nil)
 	mockCollectionDb.On("UpdateLogPositionAndVersionInfo",
 		collectionID.String(),
 		logPosition,
@@ -292,13 +367,24 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 		fn(context.Background())
 	}).Return(nil)
 
+	segmentIdStr := "00000000-0000-0000-0000-000000000004"
+	segmentId, _ := types.ToUniqueID(&segmentIdStr)
+	flushSegment := []*model.FlushSegmentCompaction{
+		{
+			ID: segmentId,
+			FilePaths: map[string][]string{
+				"test_path2": {"test_file2"},
+			},
+		},
+	}
+
 	// Create test input
 	flushRequest := &model.FlushCollectionCompaction{
 		ID:                         collectionID,
 		TenantID:                   tenantID,
 		CurrentCollectionVersion:   currentVersion,
 		LogPosition:                logPosition,
-		FlushSegmentCompactions:    []*model.FlushSegmentCompaction{},
+		FlushSegmentCompactions:    flushSegment,
 		TotalRecordsPostCompaction: 1,
 		SizeBytesPostCompaction:    1,
 	}
@@ -321,6 +407,228 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 
 	// Verify S3 store has the new version file
 	assert.Greater(t, len(mockS3Store.versionFiles), 0)
+
+	// Verify the contents of the s3 file.
+	versionFiles, fileNames, err := mockS3Store.ListVersionFiles()
+	assert.NoError(t, err)
+
+	assert.Equal(t, 2, len(versionFiles))
+	var index = -1
+	for i, name := range fileNames {
+		if name != "version_1.pb" {
+			index = i
+			break
+		}
+	}
+	assert.Greater(t, index, -1)
+	fileToValidate := versionFiles[index]
+	version2FilePath := map[string]*coordinatorpb.FilePaths{
+		"test_path2": {
+			Paths: []string{"test_file2"},
+		},
+	}
+	for _, version := range fileToValidate.VersionHistory.Versions {
+		if version.Version == 2 {
+			// assert that segment info is set to test_path2
+			assert.Equal(t, version2FilePath, version.SegmentInfo.SegmentCompactionInfo[0].FilePaths)
+		} else if version.Version == 1 {
+			// assert that segment info is set to test_path
+			assert.Equal(t, version1FilePath, version.SegmentInfo.SegmentCompactionInfo[0].FilePaths)
+		} else {
+			assert.Fail(t, "Unexpected version found")
+		}
+	}
+}
+
+func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePaths(t *testing.T) {
+	// Create mocks
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockCollectionDb := &mocks.ICollectionDb{}
+	mockTenantDb := &mocks.ITenantDb{}
+	mockSegmentDb := &mocks.ISegmentDb{}
+	mockS3Store := newMockS3MetaStore()
+
+	// Create catalog with version file enabled
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, mockS3Store, true)
+
+	// Test data
+	collectionID := types.MustParse("00000000-0000-0000-0000-000000000001")
+	tenantID := "test_tenant"
+	currentVersion := int32(1)
+	logPosition := int64(100)
+	dbId := "00000000-0000-0000-0000-000000000002"
+
+	version1FilePath := map[string]*coordinatorpb.FilePaths{
+		"test_path": {
+			Paths: []string{"test_file"},
+		},
+	}
+
+	// Set up initial version file that would have been created by CreateCollection
+	initialVersionFile := &coordinatorpb.CollectionVersionFile{
+		CollectionInfoImmutable: &coordinatorpb.CollectionInfoImmutable{
+			CollectionId: collectionID.String(),
+		},
+		VersionHistory: &coordinatorpb.CollectionVersionHistory{
+			Versions: []*coordinatorpb.CollectionVersionInfo{
+				{
+					Version: 1,
+					SegmentInfo: &coordinatorpb.CollectionSegmentInfo{
+						SegmentCompactionInfo: []*coordinatorpb.FlushSegmentCompactionInfo{
+							{
+								FilePaths: version1FilePath,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	fileName, err := mockS3Store.PutVersionFile(tenantID, "test_database", collectionID.String(), "version_1.pb", initialVersionFile)
+	assert.NoError(t, err)
+	assert.Equal(t, "version_1.pb", fileName)
+
+	collectionName := "test_collection"
+	configurationJson := "{test_config}"
+	dim := int32(128)
+
+	mockCollectionsAndMetadata := []*dbmodel.CollectionAndMetadata{
+		{
+			// Fill all the fields with necessary data
+			Collection: &dbmodel.Collection{
+				ID:                         collectionID.String(),
+				Name:                       &collectionName,
+				ConfigurationJsonStr:       &configurationJson,
+				Dimension:                  &dim,
+				DatabaseID:                 dbId,
+				Ts:                         types.Timestamp(0),
+				IsDeleted:                  false,
+				CreatedAt:                  time.Now(),
+				UpdatedAt:                  time.Now(),
+				LogPosition:                10,
+				Version:                    int32(currentVersion),
+				VersionFileName:            "version_1.pb",
+				RootCollectionId:           "",
+				LineageFileName:            "",
+				TotalRecordsPostCompaction: 10,
+				SizeBytesPostCompaction:    100,
+				LastCompactionTimeSecs:     0,
+				NumVersions:                1,
+				OldestVersionTs:            time.Now(),
+				Tenant:                     tenantID,
+			},
+			CollectionMetadata: []*dbmodel.CollectionMetadata{},
+			TenantID:           tenantID,
+			DatabaseName:       "test_database",
+		},
+	}
+
+	collectionIdStr := collectionID.String()
+	mockSegments := []*dbmodel.SegmentAndMetadata{
+		{
+			Segment: &dbmodel.Segment{
+				CollectionID: &collectionIdStr,
+				ID:           "00000000-0000-0000-0000-000000000003",
+				Type:         "test_type",
+				Scope:        "test_scope",
+				Ts:           types.Timestamp(0),
+				IsDeleted:    false,
+				CreatedAt:    time.Now(),
+				UpdatedAt:    time.Now(),
+				FilePaths: map[string][]string{
+					"test_path": {"test_file"},
+				},
+			},
+			SegmentMetadata: []*dbmodel.SegmentMetadata{},
+		},
+	}
+
+	// Setup mock behaviors
+	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
+	mockMetaDomain.On("TenantDb", mock.Anything).Return(mockTenantDb)
+	mockMetaDomain.On("SegmentDb", mock.Anything).Return(mockSegmentDb)
+
+	mockCollectionDb.On("GetCollections", types.FromUniqueID(collectionID), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockCollectionsAndMetadata, nil)
+	mockSegmentDb.On("GetSegments", mock.Anything, mock.Anything, mock.Anything, collectionID).Return(mockSegments, nil)
+	mockCollectionDb.On("UpdateLogPositionAndVersionInfo",
+		collectionID.String(),
+		logPosition,
+		currentVersion,
+		"version_1.pb",
+		currentVersion+1,
+		mock.Anything,
+		uint64(1),
+		uint64(1),
+		mock.Anything,
+	).Return(int64(1), nil)
+
+	mockTenantDb.On("UpdateTenantLastCompactionTime", tenantID, mock.Anything).Return(nil)
+	mockSegmentDb.On("RegisterFilePaths", mock.Anything).Return(nil)
+
+	mockTxImpl.On("Transaction", mock.Anything, mock.Anything).Run(func(args mock.Arguments) {
+		fn := args.Get(1).(func(context.Context) error)
+		fn(context.Background())
+	}).Return(nil)
+
+	// Flush segment with empty file paths
+	flushSegment := []*model.FlushSegmentCompaction{}
+
+	// Create test input
+	flushRequest := &model.FlushCollectionCompaction{
+		ID:                         collectionID,
+		TenantID:                   tenantID,
+		CurrentCollectionVersion:   currentVersion,
+		LogPosition:                logPosition,
+		FlushSegmentCompactions:    flushSegment,
+		TotalRecordsPostCompaction: 1,
+		SizeBytesPostCompaction:    1,
+	}
+
+	// Execute test
+	result, err := catalog.FlushCollectionCompaction(context.Background(), flushRequest)
+
+	// Verify results
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, collectionID.String(), result.ID)
+	assert.Equal(t, currentVersion+1, result.CollectionVersion)
+	assert.Greater(t, result.TenantLastCompactionTime, int64(0))
+
+	// Verify mock expectations
+	mockMetaDomain.AssertExpectations(t)
+	mockCollectionDb.AssertExpectations(t)
+	mockTenantDb.AssertExpectations(t)
+	mockSegmentDb.AssertExpectations(t)
+
+	// Verify S3 store has the new version file
+	assert.Greater(t, len(mockS3Store.versionFiles), 0)
+
+	// Verify the contents of the s3 file.
+	versionFiles, fileNames, err := mockS3Store.ListVersionFiles()
+	assert.NoError(t, err)
+
+	assert.Equal(t, 2, len(versionFiles))
+	var index = -1
+	for i, name := range fileNames {
+		if name != "version_1.pb" {
+			index = i
+			break
+		}
+	}
+	assert.Greater(t, index, -1)
+	fileToValidate := versionFiles[index]
+	for _, version := range fileToValidate.VersionHistory.Versions {
+		if version.Version == 2 {
+			// assert that segment info is set to test_path2
+			assert.Equal(t, version1FilePath, version.SegmentInfo.SegmentCompactionInfo[0].FilePaths)
+		} else if version.Version == 1 {
+			// assert that segment info is set to test_path
+			assert.Equal(t, version1FilePath, version.SegmentInfo.SegmentCompactionInfo[0].FilePaths)
+		} else {
+			assert.Fail(t, "Unexpected version found")
+		}
+	}
 }
 
 func TestCatalog_DeleteCollectionVersion(t *testing.T) {

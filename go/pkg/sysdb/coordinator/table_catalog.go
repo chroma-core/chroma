@@ -1407,20 +1407,35 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 	return filteredVersions, nil
 }
 
-func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction, ts_secs int64) (string, error) {
+func (tc *Catalog) updateVersionFileInS3(existingVersionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction, previousSegmentInfo []*model.Segment, ts_secs int64) (string, error) {
 	segmentCompactionInfos := make([]*coordinatorpb.FlushSegmentCompactionInfo, 0, len(flushCollectionCompaction.FlushSegmentCompactions))
-	for _, compaction := range flushCollectionCompaction.FlushSegmentCompactions {
-		// Convert map[string][]string to map[string]*coordinatorpb.FilePaths
-		convertedPaths := make(map[string]*coordinatorpb.FilePaths)
-		for k, v := range compaction.FilePaths {
-			convertedPaths[k] = &coordinatorpb.FilePaths{Paths: v}
+	// If flushCollectionCompaction.FlushSegmentCompactions is empty then use previousSegmentInfo.
+	if len(flushCollectionCompaction.FlushSegmentCompactions) == 0 {
+		for _, segment := range previousSegmentInfo {
+			convertedPaths := make(map[string]*coordinatorpb.FilePaths)
+			for k, v := range segment.FilePaths {
+				convertedPaths[k] = &coordinatorpb.FilePaths{Paths: v}
+			}
+			info := &coordinatorpb.FlushSegmentCompactionInfo{
+				SegmentId: segment.ID.String(),
+				FilePaths: convertedPaths,
+			}
+			segmentCompactionInfos = append(segmentCompactionInfos, info)
 		}
+	} else {
+		for _, compaction := range flushCollectionCompaction.FlushSegmentCompactions {
+			// Convert map[string][]string to map[string]*coordinatorpb.FilePaths
+			convertedPaths := make(map[string]*coordinatorpb.FilePaths)
+			for k, v := range compaction.FilePaths {
+				convertedPaths[k] = &coordinatorpb.FilePaths{Paths: v}
+			}
 
-		info := &coordinatorpb.FlushSegmentCompactionInfo{
-			SegmentId: compaction.ID.String(),
-			FilePaths: convertedPaths,
+			info := &coordinatorpb.FlushSegmentCompactionInfo{
+				SegmentId: compaction.ID.String(),
+				FilePaths: convertedPaths,
+			}
+			segmentCompactionInfos = append(segmentCompactionInfos, info)
 		}
-		segmentCompactionInfos = append(segmentCompactionInfos, info)
 	}
 
 	existingVersionFilePb.GetVersionHistory().Versions = append(existingVersionFilePb.GetVersionHistory().Versions, &coordinatorpb.CollectionVersionInfo{
@@ -1562,7 +1577,8 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 	for numAttempts < maxAttempts {
 		numAttempts++
 		// Get the current version info and the version file from the table.
-		collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(flushCollectionCompaction.ID), nil)
+		collectionEntry, segments, err := tc.GetCollectionWithSegments(ctx, flushCollectionCompaction.ID)
+		// collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(flushCollectionCompaction.ID), nil)
 		if err != nil {
 			return nil, err
 		}
@@ -1592,15 +1608,16 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 		}
 
 		existingVersionFileName := collectionEntry.VersionFileName
+		// existingSegments := segments
 		var existingVersionFilePb *coordinatorpb.CollectionVersionFile
 		if existingVersionFileName == "" {
 			// The VersionFile has not been created.
 			existingVersionFilePb = &coordinatorpb.CollectionVersionFile{
 				CollectionInfoImmutable: &coordinatorpb.CollectionInfoImmutable{
-					TenantId:               collectionEntry.Tenant,
-					DatabaseId:             collectionEntry.DatabaseID,
-					CollectionId:           collectionEntry.ID,
-					CollectionName:         *collectionEntry.Name,
+					TenantId:               collectionEntry.TenantID,
+					DatabaseId:             collectionEntry.DatabaseId.String(),
+					CollectionId:           collectionEntry.ID.String(),
+					CollectionName:         collectionEntry.Name,
 					CollectionCreationSecs: collectionEntry.CreatedAt.Unix(),
 				},
 				VersionHistory: &coordinatorpb.CollectionVersionHistory{
@@ -1616,10 +1633,10 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 
 			// There was previously a bug that resulted in the tenant ID missing from some version files (https://github.com/chroma-core/chroma/pull/4408).
 			// This line can be removed once all corrupted version files are fixed.
-			existingVersionFilePb.CollectionInfoImmutable.TenantId = collectionEntry.Tenant
+			existingVersionFilePb.CollectionInfoImmutable.TenantId = collectionEntry.TenantID
 
 			// Do a simple validation of the version file.
-			err = tc.validateVersionFile(existingVersionFilePb, collectionEntry.ID, existingVersion)
+			err = tc.validateVersionFile(existingVersionFilePb, collectionEntry.ID.String(), existingVersion)
 			if err != nil {
 				log.Error("version file validation failed", zap.Error(err))
 				return nil, err
@@ -1629,7 +1646,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 		// The update function takes the content of the existing version file,
 		// and the set of segments that are part of the new version file.
 		// NEW VersionFile is created in S3 at this step.
-		newVersionFileName, err := tc.updateVersionFileInS3(ctx, existingVersionFilePb, flushCollectionCompaction, time.Now().Unix())
+		newVersionFileName, err := tc.updateVersionFileInS3(existingVersionFilePb, flushCollectionCompaction, segments, time.Now().Unix())
 		if err != nil {
 			return nil, err
 		}
