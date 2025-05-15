@@ -3055,9 +3055,9 @@ dependencies = [
 
 [[package]]
 name = "foyer"
-version = "0.17.0"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25b39eac8bbda09ae8bf9b65c9f81a3644cff845cab79953332fc382295a3dac"
+checksum = "cb25c56c00380bdfa22d7244500f4a622e112ff36b9cf8a9664d361e001ed80e"
 dependencies = [
  "ahash",
  "anyhow",
@@ -3076,9 +3076,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-common"
-version = "0.17.0"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58bc1526450debd8e2189622b443c891d80e679d8088a673111f68ba26fdba6d"
+checksum = "9dcf6da77c0ebca8e9e12617053701418c1eb13f545f95ef92a88bc253e18aff"
 dependencies = [
  "ahash",
  "bincode",
@@ -3106,9 +3106,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-memory"
-version = "0.17.0"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9bb1c500379344e82472b8576767a71a58650bb669b31491c7b7f4e91eb9efc"
+checksum = "5aebb1cb9c17f96fef00e6531e44bfa71766db89c9102703c46e52a0d821c19f"
 dependencies = [
  "ahash",
  "arc-swap",
@@ -3132,9 +3132,9 @@ dependencies = [
 
 [[package]]
 name = "foyer-storage"
-version = "0.17.0"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc512db7757a9b2162d43a0708608e0deec1768acf622ed1b0a3024c1351d268"
+checksum = "a7198d530656e979be993775019e40edc7adbefe00afce575c684b9ee48a9299"
 dependencies = [
  "ahash",
  "allocator-api2",
@@ -4508,7 +4508,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -7308,7 +7308,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2 1.0.92",
  "quote 1.0.37",
  "syn 2.0.101",
