@@ -30,7 +30,7 @@ func (s *collectionDb) DeleteAll() error {
 func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *string) (*dbmodel.Collection, error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, collections.tenant, collections.version, collections.version_file_name, collections.root_collection_id").
+		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, collections.tenant, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("collections.id = ?", collectionID)
 
@@ -116,8 +116,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		LogPosition                int64      `gorm:"column:log_position"`
 		Version                    int32      `gorm:"column:version"`
 		VersionFileName            string     `gorm:"column:version_file_name"`
-		RootCollectionId           string     `gorm:"column:root_collection_id"`
-		LineageFileName            string     `gorm:"column:lineage_file_name"`
+		RootCollectionId           *string    `gorm:"column:root_collection_id"`
+		LineageFileName            *string    `gorm:"column:lineage_file_name"`
 		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
 		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
 		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
@@ -136,7 +136,7 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	}
 
 	query := s.db.Table("collections").
-		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, collections.lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
+		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -519,7 +519,7 @@ func (s *collectionDb) LockCollection(collectionID string) error {
 	return nil
 }
 
-func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFileName string, newLineageFileName string) error {
+func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFileName *string, newLineageFileName string) error {
 	return s.db.Model(&dbmodel.Collection{}).
 		Where("id = ? AND (lineage_file_name IS NULL OR lineage_file_name = ?)", collectionID, currentLineageFileName).
 		Updates(map[string]interface{}{

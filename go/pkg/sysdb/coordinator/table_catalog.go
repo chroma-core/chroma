@@ -819,14 +819,14 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 }
 
 func (tc *Catalog) getLineageFile(ctx context.Context, collection *model.Collection) (*coordinatorpb.CollectionLineageFile, error) {
-	if len(collection.LineageFileName) == 0 {
+	if collection.LineageFileName == nil {
 		// There is no lineage file for the given collection
 		return &coordinatorpb.CollectionLineageFile{
 			Dependencies: []*coordinatorpb.CollectionVersionDependency{},
 		}, nil
 	}
 
-	return tc.s3Store.GetLineageFile(collection.LineageFileName)
+	return tc.s3Store.GetLineageFile(*collection.LineageFileName)
 }
 
 func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.ForkCollection) (*model.Collection, []*model.Segment, error) {
@@ -852,8 +852,8 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			return err
 		}
 
-		if len(sourceCollectionDb.RootCollectionId) > 0 {
-			rootCollectionID, err = types.Parse(sourceCollectionDb.RootCollectionId)
+		if sourceCollectionDb.RootCollectionId != nil {
+			rootCollectionID, err = types.Parse(*sourceCollectionDb.RootCollectionId)
 			if err != nil {
 				return err
 			}
@@ -926,7 +926,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			DatabaseName:               sourceCollection.DatabaseName,
 			Ts:                         ts.Unix(),
 			LogPosition:                sourceCollection.LogPosition,
-			RootCollectionId:           rootCollectionIDStr,
+			RootCollectionId:           &rootCollectionIDStr,
 			TotalRecordsPostCompaction: sourceCollection.TotalRecordsPostCompaction,
 			SizeBytesPostCompaction:    sourceCollection.SizeBytesPostCompaction,
 			LastCompactionTimeSecs:     sourceCollection.LastCompactionTimeSecs,
@@ -1005,8 +1005,8 @@ func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.Uniq
 		return 0, common.ErrCollectionNotFound
 	}
 
-	if len(sourceCollectionDb.RootCollectionId) > 0 {
-		rootCollectionID, err = types.Parse(sourceCollectionDb.RootCollectionId)
+	if sourceCollectionDb.RootCollectionId != nil {
+		rootCollectionID, err = types.Parse(*sourceCollectionDb.RootCollectionId)
 		if err != nil {
 			return 0, err
 		}

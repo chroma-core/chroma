@@ -501,11 +501,7 @@ mod tests {
                 dimension: None,
                 tenant: "test-tenant".to_string(),
                 database: "test-database".to_string(),
-                log_position: 0,
-                version: 0,
-                total_records_post_compaction: 0,
-                size_bytes_post_compaction: 0,
-                last_compaction_time_secs: 0,
+                ..Default::default()
             }),
             knn: Some(chroma_proto::Segment {
                 id: Uuid::new_v4().to_string(),
@@ -606,11 +602,7 @@ mod tests {
             dimension: None,
             tenant: "test-tenant".to_string(),
             database: "test-database".to_string(),
-            log_position: 0,
-            version: 0,
-            total_records_post_compaction: 0,
-            size_bytes_post_compaction: 0,
-            last_compaction_time_secs: 0,
+            ..Default::default()
         });
         let request = chroma_proto::GetPlan {
             scan: Some(scan_operator.clone()),

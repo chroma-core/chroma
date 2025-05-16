@@ -338,6 +338,9 @@ impl SqliteSysDb {
             version: 0,
             size_bytes_post_compaction: 0,
             last_compaction_time_secs: 0,
+            version_file_path: None,
+            root_collection_id: None,
+            lineage_file_path: None,
         })
     }
 
@@ -724,6 +727,9 @@ impl SqliteSysDb {
                     database: first_row.get(5),
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
+                    version_file_path: None,
+                    root_collection_id: None,
+                    lineage_file_path: None,
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;

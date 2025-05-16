@@ -51,7 +51,15 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 		TotalRecordsPostCompaction: collection.TotalRecordsPostCompaction,
 		SizeBytesPostCompaction:    collection.SizeBytesPostCompaction,
 		LastCompactionTimeSecs:     collection.LastCompactionTimeSecs,
+		VersionFilePath:            &collection.VersionFileName,
+		LineageFilePath:            collection.LineageFileName,
 	}
+
+	if collection.RootCollectionID != nil {
+		rootCollectionId := collection.RootCollectionID.String()
+		collectionpb.RootCollectionId = &rootCollectionId
+	}
+
 	if collection.Metadata == nil {
 		return collectionpb
 	}
