@@ -8,4 +8,5 @@ pub mod fetch_lineage_file;
 pub mod fetch_sparse_index_files;
 pub mod fetch_version_file;
 pub mod get_version_file_paths;
+pub mod list_files_at_version;
 pub mod mark_versions_at_sysdb;
