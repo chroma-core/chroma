@@ -640,15 +640,21 @@ pub struct LogServer {
 }
 
 impl LogServer {
-    fn should_initialize_log(&self, collection: CollectionUuid) -> bool {
-        todo!();
-    }
-
     async fn forward_push_logs(
         &self,
         request: Request<PushLogsRequest>,
     ) -> Result<Response<PushLogsResponse>, Status> {
-        todo!();
+        if let Some(proxy) = self.proxy.as_ref() {
+            let resp = proxy.clone().push_logs(request).await?;
+            let resp = resp.into_inner();
+            if resp.log_is_sealed {
+                todo!();
+            } else {
+                Ok(Response::new(resp))
+            }
+        } else {
+            Err(Status::failed_precondition("proxy not initialized"))
+        }
     }
 
     async fn forward_scout_logs(
@@ -734,19 +740,6 @@ impl LogService for LogServer {
             {
                 Ok(log) => log,
                 Err(wal3::Error::UninitializedLog) => {
-                    if self.should_initialize_log(collection_id) {
-                        if let Err(err) = LogWriter::initialize(
-                            &self.config.writer,
-                            &self.storage,
-                            &prefix,
-                            "push_logs initializer",
-                        )
-                        .await
-                        {
-                            return Err(Status::unknown(err.to_string()));
-                        }
-                        return Box::pin(self.push_logs(Request::new(push_logs))).await;
-                    }
                     return self.forward_push_logs(Request::new(push_logs)).await;
                 }
                 Err(err) => {
@@ -803,15 +796,7 @@ impl LogService for LogServer {
                     manifest.maximum_log_position(),
                 ),
                 Ok(None) | Err(wal3::Error::UninitializedLog) => {
-                    // NOTE(rescrv):  In this case, what we have is a guarantee that we know the
-                    // log is ours.  This only comes from the by-tenant or by-collection alt-log
-                    // shunts.  The log is uninitialized, so we know it's not because
-                    // has_manifest().
-                    if self.should_initialize_log(collection_id) {
-                        (LogPosition::from_offset(1), LogPosition::from_offset(1))
-                    } else {
-                        return self.forward_scout_logs(Request::new(scout_logs)).await;
-                    }
+                    return self.forward_scout_logs(Request::new(scout_logs)).await;
                 }
                 Err(err) => {
                     return Err(Status::new(
@@ -865,13 +850,7 @@ impl LogService for LogServer {
             {
                 Ok(fragments) => fragments,
                 Err(wal3::Error::UninitializedLog) => {
-                    // NOTE(rescrv):  Same as with ScoutLogs.
-                    if self.should_initialize_log(collection_id) {
-                        tracing::info!("Uninitialized log for collection {}", collection_id);
-                        return Ok(Response::new(PullLogsResponse { records: vec![] }));
-                    } else {
-                        return self.forward_pull_logs(Request::new(pull_logs)).await;
-                    }
+                    return self.forward_pull_logs(Request::new(pull_logs)).await;
                 }
                 Err(err) => {
                     return Err(Status::new(err.code().into(), err.to_string()));
@@ -957,25 +936,7 @@ impl LogService for LogServer {
             if let Err(err) = log_reader.maximum_log_position().await {
                 match err {
                     wal3::Error::UninitializedLog => {
-                        // NOTE(rescrv):  Same as with ScoutLogs.
-                        if self.should_initialize_log(source_collection_id) {
-                            LogWriter::initialize(
-                                &self.config.writer,
-                                &storage,
-                                &source_prefix,
-                                "fork logs initializer",
-                            )
-                            .await
-                            .map_err(|err| {
-                                Status::new(
-                                    err.code().into(),
-                                    format!("Failed to initialize log for fork: {err:?}"),
-                                )
-                            })?;
-                            return Box::pin(self.fork_logs(Request::new(request))).await;
-                        } else {
-                            return self.forward_fork_logs(Request::new(request)).await;
-                        }
+                        return self.forward_fork_logs(Request::new(request)).await;
                     }
                     _ => {
                         return Err(Status::new(
@@ -1209,15 +1170,9 @@ impl LogService for LogServer {
 
         let res = log_reader.maximum_log_position().await;
         if let Err(wal3::Error::UninitializedLog) = res {
-            if self.should_initialize_log(collection_id) {
-                return Err(Status::failed_precondition(
-                    "uninitialized log has its cursor updated",
-                ));
-            } else {
-                return self
-                    .forward_update_collection_log_offset(Request::new(request))
-                    .await;
-            }
+            return self
+                .forward_update_collection_log_offset(Request::new(request))
+                .await;
         }
         res.map_err(|err| Status::unknown(err.to_string()))?;
 
