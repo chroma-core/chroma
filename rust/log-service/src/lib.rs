@@ -691,7 +691,10 @@ impl LogService for LogServer {
                     Status::new(err.code().into(), err.to_string())
                 }
             })?;
-            Ok(Response::new(PushLogsResponse { record_count }))
+            Ok(Response::new(PushLogsResponse {
+                record_count,
+                log_is_sealed: false,
+            }))
         }
         .instrument(span)
         .await
