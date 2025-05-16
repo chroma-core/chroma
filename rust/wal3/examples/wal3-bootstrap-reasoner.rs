@@ -165,7 +165,11 @@ pub fn main() {
                     println!("panic({fs:?}, {im:?}, {rm:?}) -> {reason}");
                     break;
                 }
-                Disposition::Drop(_, _, _, _) => {
+                Disposition::Drop(reason, fs, im, rm) => {
+                    _ = reason;
+                    _ = fs;
+                    _ = im;
+                    _ = rm;
                     break;
                 }
                 Disposition::Raise(reason, fs, im, rm) => {
