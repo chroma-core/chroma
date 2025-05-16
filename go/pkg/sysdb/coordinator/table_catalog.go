@@ -2000,6 +2000,20 @@ func (tc *Catalog) DeleteCollectionVersion(ctx context.Context, req *coordinator
 	return &result, nil
 }
 
+func (tc *Catalog) BatchGetCollectionVersionFilePaths(ctx context.Context, req *coordinatorpb.BatchGetCollectionVersionFilePathsRequest) (*coordinatorpb.BatchGetCollectionVersionFilePathsResponse, error) {
+	result := coordinatorpb.BatchGetCollectionVersionFilePathsResponse{
+		CollectionIdToVersionFilePath: make(map[string]string),
+	}
+
+	paths, err := tc.metaDomain.CollectionDb(ctx).BatchGetCollectionVersionFilePaths(req.CollectionIds)
+	if err != nil {
+		return nil, err
+	}
+	result.CollectionIdToVersionFilePath = paths
+
+	return &result, nil
+}
+
 func (tc *Catalog) GetVersionFileNamesForCollection(ctx context.Context, tenantID string, collectionID string) (string, error) {
 	collectionIDPtr := &collectionID
 	collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(collectionIDPtr, nil)
