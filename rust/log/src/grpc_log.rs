@@ -172,6 +172,7 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
         my_config: &GrpcLogConfig,
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        // NOTE(rescrv):  This code is duplicated with primary_client_from_config below.  A transient hack.
         let host = &my_config.host;
         let port = &my_config.port;
         let max_encoding_message_size = my_config.max_encoding_message_size;
@@ -209,6 +210,40 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
 }
 
 impl GrpcLog {
+    // NOTE(rescrv) This is a transient hack, so the code duplication is not worth eliminating.
+    pub async fn primary_client_from_config(
+        my_config: &GrpcLogConfig,
+    ) -> Result<
+        LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+        Box<dyn ChromaError>,
+    > {
+        let host = &my_config.host;
+        let port = &my_config.port;
+        let max_encoding_message_size = my_config.max_encoding_message_size;
+        let max_decoding_message_size = my_config.max_decoding_message_size;
+        let connection_string = format!("http://{}:{}", host, port);
+        let client_for_conn_str =
+            |connection_string: String| -> Result<LogServiceClient<_>, Box<dyn ChromaError>> {
+                tracing::info!("Connecting to log service at {}", connection_string);
+                let endpoint_res = match Endpoint::from_shared(connection_string) {
+                    Ok(endpoint) => endpoint,
+                    Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
+                };
+                let endpoint_res = endpoint_res
+                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
+                let channel = endpoint_res.connect_lazy();
+                let channel = ServiceBuilder::new()
+                    .layer(chroma_tracing::GrpcTraceLayer)
+                    .service(channel);
+                let client = LogServiceClient::new(channel)
+                    .max_encoding_message_size(max_encoding_message_size)
+                    .max_decoding_message_size(max_decoding_message_size);
+                Ok(client)
+            };
+        client_for_conn_str(connection_string)
+    }
+
     fn client_for(
         &mut self,
         tenant: &str,

@@ -191,3 +191,10 @@ log_service:
             batch_size_bytes: 8388608 # 8MiB
             throughput: 3300
             headroom: 200
+    proxy_to:
+        host: "logservice.chroma"
+        port: 50051
+        connect_timeout_ms: 5000
+        request_timeout_ms: 60000 # 1 minute
+        alt_host: "rust-log-service.chroma"
+        use_alt_host_for_everything: true
