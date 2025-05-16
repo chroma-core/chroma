@@ -496,12 +496,13 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
     type Error = FilterError;
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
-        tracing::debug!("[{}]: {:?}", self.get_name(), input);
-
-        // NOTE: This is temporary traces to capture filter arguments
-        //       We suspect certain filters break the FTS algorithm
-        // TODO: Remove this after the bug is found
-        tracing::debug!("[DEBUG FILTER OPERATOR]: {:?}", self);
+        tracing::debug!(
+            "[{}]: Num log entries {:?}, metadata segment {:?}, record segment {:?}",
+            self.get_name(),
+            input.logs.len(),
+            input.metadata_segment,
+            input.record_segment
+        );
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
