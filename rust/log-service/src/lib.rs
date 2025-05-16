@@ -716,18 +716,24 @@ impl LogService for LogServer {
                 Arc::clone(&self.storage),
                 prefix,
             );
-            let limit_position = match log_reader.maximum_log_position().await {
-                Ok(limit_position) => limit_position,
+            let (start_position, limit_position) = match log_reader.manifest().await {
+                Ok(Some(manifest)) => (
+                    manifest.minimum_log_position(),
+                    manifest.maximum_log_position(),
+                ),
+                Ok(None) => (LogPosition::from_offset(0), LogPosition::from_offset(1)),
                 Err(err) => {
                     if err.code() == chroma_error::ErrorCodes::FailedPrecondition {
-                        LogPosition::from_offset(1)
+                        (LogPosition::from_offset(1), LogPosition::from_offset(1))
                     } else {
                         return Err(Status::new(err.code().into(), err.to_string()));
                     }
                 }
             };
+            let start_offset = start_position.offset() as i64;
             let limit_offset = limit_position.offset() as i64;
             Ok(Response::new(ScoutLogsResponse {
+                first_uncompacted_record_offset: start_offset,
                 first_uninserted_record_offset: limit_offset,
             }))
         }
