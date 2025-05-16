@@ -16,9 +16,10 @@ use chroma_storage::Storage;
 use chroma_types::chroma_proto::{
     log_service_server::LogService, CollectionInfo, GetAllCollectionInfoToCompactRequest,
     GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
-    LogRecord, OperationRecord, PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
-    PurgeDirtyForCollectionResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
-    ScoutLogsResponse, UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
+    LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord, PullLogsRequest,
+    PullLogsResponse, PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse,
+    PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse, SealLogRequest,
+    SealLogResponse, UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
@@ -1229,6 +1230,24 @@ impl LogService for LogServer {
             markers.extend(records);
         }
         Ok(Response::new(InspectDirtyLogResponse { markers }))
+    }
+
+    async fn seal_log(
+        &self,
+        _request: Request<SealLogRequest>,
+    ) -> Result<Response<SealLogResponse>, Status> {
+        Err(Status::failed_precondition(
+            "rust log service doesn't do sealing",
+        ))
+    }
+
+    async fn migrate_log(
+        &self,
+        _request: Request<MigrateLogRequest>,
+    ) -> Result<Response<MigrateLogResponse>, Status> {
+        Err(Status::failed_precondition(
+            "rust log service doesn't do migrating yet",
+        ))
     }
 }
 
