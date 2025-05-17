@@ -14,6 +14,28 @@ type Segment struct {
 	FilePaths    map[string][]string
 }
 
+type CreateSegment struct {
+	ID           types.UniqueID
+	Type         string
+	Scope        string
+	CollectionID types.UniqueID
+	Metadata     *SegmentMetadata[SegmentMetadataValueType]
+	Ts           types.Timestamp
+	FilePaths    map[string][]string
+}
+
+func CreateSegmentToSegment(createSegment *CreateSegment) *Segment {
+	return &Segment{
+		ID:           createSegment.ID,
+		Type:         createSegment.Type,
+		Scope:        createSegment.Scope,
+		CollectionID: createSegment.CollectionID,
+		Metadata:     createSegment.Metadata,
+		Ts:           createSegment.Ts,
+		FilePaths:    createSegment.FilePaths,
+	}
+}
+
 type UpdateSegment struct {
 	ID            types.UniqueID
 	ResetTopic    bool
