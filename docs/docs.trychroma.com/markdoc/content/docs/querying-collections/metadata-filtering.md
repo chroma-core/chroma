@@ -1,6 +1,6 @@
 # Metadata Filtering
 
-Chroma supports filtering queries by `metadata` and `document` contents. The `where` filter is used to filter by `metadata`.
+Chroma supports filtering queries by `metadata` and `document` contents. The `where` filter is used to filter by `metadata`. As usual, filtering is applied before the query; that is, the query is run against the filtered collection.
 
 In order to filter on metadata, you must supply a `where` filter dictionary to the query. The dictionary must have the following structure:
 
@@ -12,6 +12,18 @@ In order to filter on metadata, you must supply a `where` filter dictionary to t
 }
 ```
 
+#### NOTE:
+
+A `where` filter must have, at any level of nesting, one key (a string) and one key only. The following examples are not well-formed:
+
+```python
+{"topic": "history", "source": "wikipedia"}
+{"date": {"$gte": 2000, "$lte" 1900}}
+{123: {"$gt": 100}}
+```
+
+If you wish to perform more complex queries, you can use the logical operators described below.
+
 Filtering metadata supports the following operators:
 
 - `$eq` - equal to (string, int, float)
@@ -21,7 +33,7 @@ Filtering metadata supports the following operators:
 - `$lt` - less than (int, float)
 - `$lte` - less than or equal to (int, float)
 
-Using the `$eq` operator is equivalent to using the `where` filter.
+The syntax allows for a shorthand expression for the `$eq` operator as a simple key-value pair, as in the following example:
 
 ```python
 {
@@ -102,6 +114,18 @@ An `$nin` operator will return results where the metadata attribute is not part 
 {
   "metadata_field": {
     "$nin": ["value1", "value2", "value3"]
+  }
+}
+```
+
+#### NOTE:
+
+The values for the `$in` and `$nin` operators must be non-empty lists, and each value must be of the same _same type_. For example, the following is not valid:
+
+```json
+{
+  "metadata_field": {
+    "$in": ["value1", 2, True]
   }
 }
 ```
