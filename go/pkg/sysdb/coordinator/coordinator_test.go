@@ -407,7 +407,15 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Name < results[j].Name
 	})
-	suite.Equal(suite.sampleCollections, results)
+	suite.Len(results, len(suite.sampleCollections))
+	for i, collection := range results {
+		suite.Equal(suite.sampleCollections[i].ID, collection.ID)
+		suite.Equal(suite.sampleCollections[i].Name, collection.Name)
+		suite.Equal(suite.sampleCollections[i].TenantID, collection.TenantID)
+		suite.Equal(suite.sampleCollections[i].DatabaseName, collection.DatabaseName)
+		suite.Equal(suite.sampleCollections[i].Dimension, collection.Dimension)
+		suite.Equal(suite.sampleCollections[i].Metadata, collection.Metadata)
+	}
 
 	// Duplicate create fails
 	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
@@ -448,14 +456,26 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	for _, collection := range suite.sampleCollections {
 		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &collection.Name, suite.tenantName, suite.databaseName, nil, nil)
 		suite.NoError(err)
-		suite.Equal([]*model.Collection{collection}, result)
+		suite.Equal(len(result), 1)
+		suite.Equal(collection.ID, result[0].ID)
+		suite.Equal(collection.Name, result[0].Name)
+		suite.Equal(collection.TenantID, result[0].TenantID)
+		suite.Equal(collection.DatabaseName, result[0].DatabaseName)
+		suite.Equal(collection.Dimension, result[0].Dimension)
+		suite.Equal(collection.Metadata, result[0].Metadata)
 	}
 
 	// Find by id
 	for _, collection := range suite.sampleCollections {
 		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 		suite.NoError(err)
-		suite.Equal([]*model.Collection{collection}, result)
+		suite.Equal(len(result), 1)
+		suite.Equal(collection.ID, result[0].ID)
+		suite.Equal(collection.Name, result[0].Name)
+		suite.Equal(collection.TenantID, result[0].TenantID)
+		suite.Equal(collection.DatabaseName, result[0].DatabaseName)
+		suite.Equal(collection.Dimension, result[0].Dimension)
+		suite.Equal(collection.Metadata, result[0].Metadata)
 	}
 
 	// Delete
@@ -470,10 +490,18 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 
 	results, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
+	result_ids := make([]types.UniqueID, len(results))
+	for i, result := range results {
+		result_ids[i] = result.ID
+	}
 
-	suite.NotContains(results, c1)
+	sample_ids := make([]types.UniqueID, len(suite.sampleCollections))
+	for i, collection := range suite.sampleCollections {
+		sample_ids[i] = collection.ID
+	}
+	suite.NotContains(result_ids, c1.ID)
 	suite.Len(results, len(suite.sampleCollections)-1)
-	suite.ElementsMatch(results, suite.sampleCollections[1:])
+	suite.ElementsMatch(result_ids, sample_ids[1:])
 	byIDResult, err := suite.coordinator.GetCollections(ctx, c1.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(byIDResult)
@@ -632,20 +660,44 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	coll.Name = "new_name"
 	result, err := suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Name: &coll.Name})
 	suite.NoError(err)
-	suite.Equal(coll, result)
+	suite.Equal(coll.ID, result.ID)
+	suite.Equal(coll.Name, result.Name)
+	suite.Equal(coll.TenantID, result.TenantID)
+	suite.Equal(coll.DatabaseName, result.DatabaseName)
+	suite.Equal(coll.Dimension, result.Dimension)
+	suite.Equal(coll.Metadata, result.Metadata)
+
 	resultList, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &coll.Name, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Equal([]*model.Collection{coll}, resultList)
+	suite.Equal(len(resultList), 1)
+	suite.Equal(coll.ID, resultList[0].ID)
+	suite.Equal(coll.Name, resultList[0].Name)
+	suite.Equal(coll.TenantID, resultList[0].TenantID)
+	suite.Equal(coll.DatabaseName, resultList[0].DatabaseName)
+	suite.Equal(coll.Dimension, resultList[0].Dimension)
+	suite.Equal(coll.Metadata, resultList[0].Metadata)
 
 	// Update dimension
 	newDimension := int32(128)
 	coll.Dimension = &newDimension
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Dimension: coll.Dimension})
 	suite.NoError(err)
-	suite.Equal(coll, result)
+	suite.Equal(coll.ID, result.ID)
+	suite.Equal(coll.Name, result.Name)
+	suite.Equal(coll.TenantID, result.TenantID)
+	suite.Equal(coll.DatabaseName, result.DatabaseName)
+	suite.Equal(coll.Dimension, result.Dimension)
+	suite.Equal(coll.Metadata, result.Metadata)
+
 	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Equal([]*model.Collection{coll}, resultList)
+	suite.Equal(len(resultList), 1)
+	suite.Equal(coll.ID, resultList[0].ID)
+	suite.Equal(coll.Name, resultList[0].Name)
+	suite.Equal(coll.TenantID, resultList[0].TenantID)
+	suite.Equal(coll.DatabaseName, resultList[0].DatabaseName)
+	suite.Equal(coll.Dimension, resultList[0].Dimension)
+	suite.Equal(coll.Metadata, resultList[0].Metadata)
 
 	// Reset the metadata
 	newMetadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
@@ -653,19 +705,43 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	coll.Metadata = newMetadata
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata})
 	suite.NoError(err)
-	suite.Equal(coll, result)
+	suite.Equal(coll.ID, result.ID)
+	suite.Equal(coll.Name, result.Name)
+	suite.Equal(coll.TenantID, result.TenantID)
+	suite.Equal(coll.DatabaseName, result.DatabaseName)
+	suite.Equal(coll.Dimension, result.Dimension)
+	suite.Equal(coll.Metadata, result.Metadata)
+
 	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Equal([]*model.Collection{coll}, resultList)
+	suite.Equal(len(resultList), 1)
+	suite.Equal(coll.ID, resultList[0].ID)
+	suite.Equal(coll.Name, resultList[0].Name)
+	suite.Equal(coll.TenantID, resultList[0].TenantID)
+	suite.Equal(coll.DatabaseName, resultList[0].DatabaseName)
+	suite.Equal(coll.Dimension, resultList[0].Dimension)
+	suite.Equal(coll.Metadata, resultList[0].Metadata)
 
 	// Delete all metadata keys
 	coll.Metadata = nil
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata, ResetMetadata: true})
 	suite.NoError(err)
-	suite.Equal(coll, result)
+	suite.Equal(coll.ID, result.ID)
+	suite.Equal(coll.Name, result.Name)
+	suite.Equal(coll.TenantID, result.TenantID)
+	suite.Equal(coll.DatabaseName, result.DatabaseName)
+	suite.Equal(coll.Dimension, result.Dimension)
+	suite.Equal(coll.Metadata, result.Metadata)
+
 	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Equal([]*model.Collection{coll}, resultList)
+	suite.Equal(len(resultList), 1)
+	suite.Equal(coll.ID, resultList[0].ID)
+	suite.Equal(coll.Name, resultList[0].Name)
+	suite.Equal(coll.TenantID, resultList[0].TenantID)
+	suite.Equal(coll.DatabaseName, resultList[0].DatabaseName)
+	suite.Equal(coll.Dimension, resultList[0].Dimension)
+	suite.Equal(coll.Metadata, resultList[0].Metadata)
 }
 
 func (suite *APIsTestSuite) TestGetOrCreateCollectionsTwice() {
@@ -794,7 +870,14 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Name < result[j].Name
 	})
-	suite.Equal(suite.sampleCollections, result)
+	for index, collection := range result {
+		suite.Equal(suite.sampleCollections[index].ID, collection.ID)
+		suite.Equal(suite.sampleCollections[index].Name, collection.Name)
+		suite.Equal(suite.sampleCollections[index].TenantID, collection.TenantID)
+		suite.Equal(suite.sampleCollections[index].DatabaseName, collection.DatabaseName)
+		suite.Equal(suite.sampleCollections[index].Dimension, collection.Dimension)
+		suite.Equal(suite.sampleCollections[index].Metadata, collection.Metadata)
+	}
 
 	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
@@ -876,7 +959,12 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, newDatabaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(result, 1)
-	suite.Equal(expected[0], result[0])
+	suite.Equal(expected[0].ID, result[0].ID)
+	suite.Equal(expected[0].Name, result[0].Name)
+	suite.Equal(expected[0].TenantID, result[0].TenantID)
+	suite.Equal(expected[0].DatabaseName, result[0].DatabaseName)
+	suite.Equal(expected[0].Dimension, result[0].Dimension)
+	suite.Equal(expected[0].Metadata, result[0].Metadata)
 
 	expected = []*model.Collection{suite.sampleCollections[1]}
 	expected[0].TenantID = suite.tenantName
@@ -884,7 +972,12 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, newDatabaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(result, 1)
-	suite.Equal(expected[0], result[0])
+	suite.Equal(expected[0].ID, result[0].ID)
+	suite.Equal(expected[0].Name, result[0].Name)
+	suite.Equal(expected[0].TenantID, result[0].TenantID)
+	suite.Equal(expected[0].DatabaseName, result[0].DatabaseName)
+	suite.Equal(expected[0].Dimension, result[0].Dimension)
+	suite.Equal(expected[0].Metadata, result[0].Metadata)
 
 	// A new tenant DOES NOT have a default database. This does not error, instead 0
 	// results are returned

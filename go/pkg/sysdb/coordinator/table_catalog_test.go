@@ -95,6 +95,7 @@ func TestCatalog_GetCollections(t *testing.T) {
 	name := "test_collection"
 	testKey := "test_key"
 	testValue := "test_value"
+	dbId := types.NewUniqueID()
 	collectionConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	collectionAndMetadataList := []*dbmodel.CollectionAndMetadata{
 		{
@@ -103,6 +104,7 @@ func TestCatalog_GetCollections(t *testing.T) {
 				Name:                 &name,
 				ConfigurationJsonStr: &collectionConfigurationJsonStr,
 				Ts:                   types.Timestamp(1234567890),
+				DatabaseID:           dbId.String(),
 			},
 			CollectionMetadata: []*dbmodel.CollectionMetadata{
 				{
@@ -136,6 +138,7 @@ func TestCatalog_GetCollections(t *testing.T) {
 			ConfigurationJsonStr: collectionConfigurationJsonStr,
 			Ts:                   types.Timestamp(1234567890),
 			Metadata:             metadata,
+			DatabaseId:           dbId,
 		},
 	}, collections)
 
@@ -345,7 +348,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 	mockMetaDomain.On("TenantDb", mock.Anything).Return(mockTenantDb)
 	mockMetaDomain.On("SegmentDb", mock.Anything).Return(mockSegmentDb)
 
-	mockCollectionDb.On("GetCollections", types.FromUniqueID(collectionID), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockCollectionsAndMetadata, nil)
+	mockCollectionDb.On("GetCollectionEntries", types.FromUniqueID(collectionID), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockCollectionsAndMetadata, nil)
 	mockSegmentDb.On("GetSegments", mock.Anything, mock.Anything, mock.Anything, collectionID).Return(mockSegments, nil)
 	mockCollectionDb.On("UpdateLogPositionAndVersionInfo",
 		collectionID.String(),
@@ -549,7 +552,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 	mockMetaDomain.On("TenantDb", mock.Anything).Return(mockTenantDb)
 	mockMetaDomain.On("SegmentDb", mock.Anything).Return(mockSegmentDb)
 
-	mockCollectionDb.On("GetCollections", types.FromUniqueID(collectionID), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockCollectionsAndMetadata, nil)
+	mockCollectionDb.On("GetCollectionEntries", types.FromUniqueID(collectionID), mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(mockCollectionsAndMetadata, nil)
 	mockSegmentDb.On("GetSegments", mock.Anything, mock.Anything, mock.Anything, collectionID).Return(mockSegments, nil)
 	mockCollectionDb.On("UpdateLogPositionAndVersionInfo",
 		collectionID.String(),
