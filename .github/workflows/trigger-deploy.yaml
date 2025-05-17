@@ -5,8 +5,9 @@ on:
   push:
     branches:
       # main is not included here because it is handled by the release-chromadb.yaml workflow
+      # production deploys (release branches) are also not here because they are currently
+      # meant to be handled manually.
       - rc/**-**-**
-      - release/**-**-**
 
 jobs:
   deploy:
@@ -25,7 +26,7 @@ jobs:
               ref: 'main',
               inputs: {
                 'planes': 'control,data',
-                 environment: '${{ contains(github.ref, 'release/') && 'production' || 'staging' }}',
+                 environment: 'staging',
                 'ignore-lock': true,
                 'oss-ref': '${{ github.ref_name }}',
                 'hosted-ref': '${{ github.ref_name }}'
