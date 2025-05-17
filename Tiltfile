@@ -40,7 +40,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-log-service',
-    'docker buildx build --load -t $EXPECTED_REF --target=log_service -f ./rust/Dockerfile .',
+    'docker buildx build --load -t $EXPECTED_REF -f ./rust/log-service/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -48,8 +48,7 @@ else:
     'rust-log-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/Dockerfile',
-    target='log_service'
+    dockerfile='./rust/log-service/Dockerfile',
   )
 
 if config.tilt_subcommand == "ci":
@@ -85,7 +84,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-frontend-service',
-    'docker buildx build --load -t $EXPECTED_REF -f ./rust/Dockerfile --target cli . ',
+    'docker buildx build --load -t $EXPECTED_REF -f ./rust/cli/Dockerfile . ',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -93,14 +92,13 @@ else:
     'rust-frontend-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/Dockerfile',
-    target='cli'
+    dockerfile='./rust/cli/Dockerfile',
   )
 
 if config.tilt_subcommand == "ci":
   custom_build(
     'query-service',
-    'docker buildx build --load -t $EXPECTED_REF --target query_service -f ./rust/Dockerfile .',
+    'docker buildx build --load -t $EXPECTED_REF --target query_service -f ./rust/worker/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -108,14 +106,14 @@ else:
     'query-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/Dockerfile',
+    dockerfile='./rust/worker/Dockerfile',
     target='query_service'
   )
 
 if config.tilt_subcommand == "ci":
   custom_build(
     'compaction-service',
-    'docker buildx build --load -t $EXPECTED_REF --target compaction_service -f ./rust/Dockerfile .',
+    'docker buildx build --load -t $EXPECTED_REF --target compaction_service -f ./rust/worker/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -123,14 +121,14 @@ else:
     'compaction-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/Dockerfile',
+    dockerfile='./rust/worker/Dockerfile',
     target='compaction_service'
   )
 
 if config.tilt_subcommand == "ci":
   custom_build(
     'garbage-collector',
-    'docker buildx build --load -t $EXPECTED_REF --target garbage_collector -f ./rust/Dockerfile .',
+    'docker buildx build --load -t $EXPECTED_REF --target garbage_collector -f ./rust/garbage_collector/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -138,7 +136,7 @@ else:
     'garbage-collector',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/Dockerfile',
+    dockerfile='./rust/garbage_collector/Dockerfile',
     target='garbage_collector'
   )
 
