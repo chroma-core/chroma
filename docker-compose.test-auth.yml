@@ -7,7 +7,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    hostname: chromadb
+    container_name: chromadb
     volumes:
+      # Default configuration for persist_directory in chromadb/config.py
+      # Currently it's located in "/chroma/chroma/"
       - chroma-data:/chroma/chroma
     command: "--workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30"
     environment:

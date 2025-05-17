@@ -6,8 +6,14 @@ networks:
 services:
   server:
     image: ghcr.io/chroma-core/chroma:latest
+    hostname: chromadb
+    container_name: chromadb
     environment:
       - IS_PERSISTENT=TRUE
+      - HOSTNAME="chromadb"
+      - CHROMA_WORKERS=4
+      - TZ="UTC"
+      - ADDRESS=0.0.0.0
     volumes:
       # Default configuration for persist_directory in chromadb/config.py
       # Currently it's located in "/chroma/chroma/"
@@ -16,6 +22,12 @@ services:
       - 8000:8000
     networks:
       - net
+    healthcheck:
+      test: curl http://127.0.0.1:8000/api/v2/heartbeat
+      interval: 12s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
 
 volumes:
   chroma-data:
