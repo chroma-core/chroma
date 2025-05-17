@@ -1062,6 +1062,7 @@ func (tc *Catalog) createSegmentImpl(txCtx context.Context, createSegment *model
 		Type:         createSegment.Type,
 		Scope:        createSegment.Scope,
 		Ts:           ts,
+		FilePaths:    createSegment.FilePaths,
 	}
 	err := tc.metaDomain.SegmentDb(txCtx).Insert(dbSegment)
 	if err != nil {
