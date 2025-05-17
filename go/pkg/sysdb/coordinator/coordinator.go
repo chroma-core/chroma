@@ -131,7 +131,7 @@ func (s *Coordinator) GetCollectionSize(ctx context.Context, collectionID types.
 }
 
 func (s *Coordinator) GetCollectionWithSegments(ctx context.Context, collectionID types.UniqueID) (*model.Collection, []*model.Segment, error) {
-	return s.catalog.GetCollectionWithSegments(ctx, collectionID)
+	return s.catalog.GetCollectionWithSegments(ctx, collectionID, false)
 }
 
 func (s *Coordinator) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, error) {
