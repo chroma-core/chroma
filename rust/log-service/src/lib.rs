@@ -684,16 +684,50 @@ impl LogServer {
                 std::iter::zip(start..limit, resp.records.into_iter().enumerate())
             {
                 if expect != idx as u64 {
-                    todo!();
+                    return Err(Status::data_loss(format!(
+                        "expected log position {expect} but got {idx}"
+                    )));
                 }
                 if (record.log_offset as u64).wrapping_add(1) != expect {
-                    todo!();
+                    return Err(Status::data_loss(format!(
+                        "expected log position {expect} but got {}",
+                        (record.log_offset as u64).wrapping_add(1)
+                    )));
                 }
                 records.push(record);
             }
         }
-
-        todo!();
+        let record_bytes = records
+            .into_iter()
+            .map(|record| -> Result<Vec<u8>, Status> {
+                let mut buf = vec![];
+                record
+                    .encode(&mut buf)
+                    .map_err(|err| Status::internal(err.to_string()))?;
+                Ok(buf)
+            })
+            .collect::<Result<Vec<_>, Status>>()?;
+        let prefix = storage_prefix_for_log(collection_id);
+        let mark_dirty = MarkDirty {
+            collection_id,
+            dirty_log: Arc::clone(&self.dirty_log),
+        };
+        LogWriter::bootstrap(
+            &self.config.writer,
+            &self.storage,
+            &prefix,
+            "effectuate log transfer",
+            mark_dirty,
+            LogPosition::from_offset(start),
+            record_bytes,
+        )
+        .await
+        .map_err(|err| {
+            Status::new(
+                err.code().into(),
+                format!("failed to effectuate log transfer: {err:?}"),
+            )
+        })
     }
 
     async fn forward_push_logs(
