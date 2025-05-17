@@ -24,6 +24,14 @@ pub const LOGO: &str = "
                 \x1b[38;5;069m(((((\x1b[38;5;203m((((    \x1b[38;5;220m#########\x1b[0m
 ";
 
+#[macro_export]
+macro_rules! cli_writeln {
+    ($writer:expr, $($arg:tt)*) => {
+        writeln!($writer, $($arg)*)
+            .map_err(|_| UtilsError::ConsoleWriteFailed)
+    }
+}
+
 pub enum ColorLevel {
     Ansi256,
     TrueColor,
