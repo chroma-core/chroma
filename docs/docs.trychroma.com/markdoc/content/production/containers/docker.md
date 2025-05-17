@@ -25,7 +25,7 @@ We would love to help you think through the design of your system, or if you wou
 
 You can run a Chroma server in a Docker container, and access it using the `HttpClient`. We provide images on both [docker.com](https://hub.docker.com/r/chromadb/chroma) and [ghcr.io](https://github.com/chroma-core/chroma/pkgs/container/chroma).
 
-To start the server, run:
+To start the server from the Docker Hub image, run:
 
 ```terminal
 docker run -v ./chroma-data:/data -p 8000:8000 chromadb/chroma
