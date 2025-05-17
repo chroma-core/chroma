@@ -49,11 +49,12 @@ func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *st
 }
 
 func (s *collectionDb) GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	return s.getCollections(id, name, tenantID, databaseName, limit, offset, true)
+	return s.getCollections(id, name, tenantID, databaseName, limit, offset, nil)
 }
 
 func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	return s.getCollections(id, name, tenantID, databaseName, limit, offset, false)
+	is_deleted := false
+	return s.getCollections(id, name, tenantID, databaseName, limit, offset, &is_deleted)
 }
 
 func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*dbmodel.CollectionToGc, error) {
@@ -101,7 +102,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	return collections, nil
 }
 
-func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
+func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	type Result struct {
 		// Collection fields
 		CollectionId               string     `gorm:"column:collection_id"`
@@ -152,7 +153,9 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	if name != nil {
 		query = query.Where("collections.name = ?", *name)
 	}
-	query = query.Where("collections.is_deleted = ?", is_deleted)
+	if is_deleted != nil {
+		query = query.Where("collections.is_deleted = ?", *is_deleted)
+	}
 
 	if limit != nil {
 		query = query.Limit(int(*limit))
@@ -319,7 +322,8 @@ func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
 }
 
 func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	return s.getCollections(collectionID, nil, tenantID, databaseName, &limit, nil, true)
+	is_deleted := true
+	return s.getCollections(collectionID, nil, tenantID, databaseName, &limit, nil, &is_deleted)
 }
 
 // NOTE: This is the only method to do a hard delete of a single collection.

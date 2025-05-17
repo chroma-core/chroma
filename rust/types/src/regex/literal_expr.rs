@@ -149,6 +149,9 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
 
             let suffix = ngram[1..].to_vec();
             for (_, doc_id, pos) in ngram_doc_pos {
+                if pos.is_empty() {
+                    continue;
+                }
                 if mask.is_none() || mask.is_some_and(|m| m.contains(&doc_id)) {
                     suffix_doc_pos
                         .entry(suffix.clone())
