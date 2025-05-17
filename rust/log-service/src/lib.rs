@@ -640,15 +640,78 @@ pub struct LogServer {
 }
 
 impl LogServer {
+    async fn effectuate_log_transfer(
+        &self,
+        collection_id: CollectionUuid,
+        mut proxy: LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+    ) -> Result<(), Status> {
+        let scout_request = Request::new(ScoutLogsRequest {
+            collection_id: collection_id.to_string(),
+        });
+        let scout_resp = proxy.clone().scout_logs(scout_request).await?.into_inner();
+        let start = scout_resp.first_uncompacted_record_offset as u64;
+        let limit = scout_resp.first_uninserted_record_offset as u64;
+        const STEP: u64 = 100;
+        let num_steps = (limit.saturating_sub(start) + STEP - 1) / STEP;
+        let actual_steps = (0..num_steps)
+            .map(|x| {
+                (
+                    start + x * STEP,
+                    std::cmp::min(start + x * STEP + STEP, limit),
+                )
+            })
+            .collect::<Vec<_>>();
+        let pull_logs_reqs = actual_steps
+            .iter()
+            .cloned()
+            .map(|(start, limit)| PullLogsRequest {
+                collection_id: collection_id.to_string(),
+                start_from_offset: start as i64 - 1,
+                // SAFETY(rescrv):  STEP fits a i32.
+                batch_size: (limit - start) as i32,
+                end_timestamp: i64::MAX,
+            });
+        let mut responses = vec![];
+        for req in pull_logs_reqs {
+            let resp = proxy.pull_logs(Request::new(req)).await?.into_inner();
+            responses.push(resp);
+        }
+        let mut records = vec![];
+        for ((start, limit), resp) in
+            std::iter::zip(actual_steps.into_iter(), responses.into_iter())
+        {
+            for (expect, (idx, record)) in
+                std::iter::zip(start..limit, resp.records.into_iter().enumerate())
+            {
+                if expect != idx as u64 {
+                    todo!();
+                }
+                if (record.log_offset as u64).wrapping_add(1) != expect {
+                    todo!();
+                }
+                records.push(record);
+            }
+        }
+
+        todo!();
+    }
+
     async fn forward_push_logs(
         &self,
+        collection_id: CollectionUuid,
         request: Request<PushLogsRequest>,
     ) -> Result<Response<PushLogsResponse>, Status> {
+        let request = request.into_inner();
         if let Some(proxy) = self.proxy.as_ref() {
-            let resp = proxy.clone().push_logs(request).await?;
-            let resp = resp.into_inner();
+            let resp = proxy
+                .clone()
+                .push_logs(Request::new(request.clone()))
+                .await?
+                .into_inner();
             if resp.log_is_sealed {
-                todo!();
+                self.effectuate_log_transfer(collection_id, proxy.clone())
+                    .await?;
+                self.push_logs(Request::new(request)).await
             } else {
                 Ok(Response::new(resp))
             }
@@ -740,7 +803,9 @@ impl LogService for LogServer {
             {
                 Ok(log) => log,
                 Err(wal3::Error::UninitializedLog) => {
-                    return self.forward_push_logs(Request::new(push_logs)).await;
+                    return self
+                        .forward_push_logs(collection_id, Request::new(push_logs))
+                        .await;
                 }
                 Err(err) => {
                     return Err(Status::unknown(err.to_string()));
