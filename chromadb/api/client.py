@@ -151,11 +151,31 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> Collection:
         if configuration is None:
             configuration = {}
+
+        configuration_ef = configuration.get("embedding_function")
+
+        # If ef provided in function params and collection config, check if they are the same
+        # If not, raise an error
+        # ef is by default "default" if not provided, so ignore that case.
         if (
             embedding_function is not None
-            and configuration.get("embedding_function") is None
+            and embedding_function.name() != "default"
+            and configuration_ef is not None
         ):
+            ef_configuration = embedding_function.get_config()
+            coll_config_ef_configuration = configuration_ef.get_config()
+            if (
+                embedding_function.name() != configuration_ef.name()
+                or ef_configuration != coll_config_ef_configuration
+            ):
+                raise ValueError(
+                    "Multiple embedding functions provided. Please provide only one."
+                )
+
+        # If ef provided in function params and collection config is None, set the collection config to the function params
+        if embedding_function is not None and configuration_ef is None:
             configuration["embedding_function"] = embedding_function
+
         model = self._server.create_collection(
             name=name,
             metadata=metadata,
@@ -185,6 +205,25 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
+        configuration_ef = model.get_configuration().get("embedding_function")
+
+        # if ef has been loaded from the collection config, and a new ef is provided, check if they are the same
+        # if not, raise an error
+        if (
+            embedding_function is not None
+            and embedding_function.name() != "default"
+            and configuration_ef is not None
+        ):
+            ef_configuration = embedding_function.get_config()
+            coll_config_ef_configuration = configuration_ef.get_config()
+            if (
+                embedding_function.name() != configuration_ef.name()
+                or ef_configuration != coll_config_ef_configuration
+            ):
+                raise ValueError(
+                    "An embedding function already exists in the collection configuration, and a new one is provided. If this is intentional, please embed documents separately."
+                )
+
         return Collection(
             client=self._server,
             model=model,
@@ -205,10 +244,27 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> Collection:
         if configuration is None:
             configuration = {}
+
+        configuration_ef = configuration.get("embedding_function")
+
+        # if ef has been loaded from the collection config, and a new ef is provided, check if they are the same
+        # if not, raise an error
         if (
             embedding_function is not None
-            and configuration.get("embedding_function") is None
+            and embedding_function.name() != "default"
+            and configuration_ef is not None
         ):
+            ef_configuration = embedding_function.get_config()
+            coll_config_ef_configuration = configuration_ef.get_config()
+            if (
+                embedding_function.name() != configuration_ef.name()
+                or ef_configuration != coll_config_ef_configuration
+            ):
+                raise ValueError(
+                    "An embedding function already exists in the collection configuration, and a new one is provided. If this is intentional, please embed documents separately."
+                )
+
+        if embedding_function is not None and configuration_ef is None:
             configuration["embedding_function"] = embedding_function
         model = self._server.get_or_create_collection(
             name=name,
