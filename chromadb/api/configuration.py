@@ -205,9 +205,14 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
     def from_json(cls, json_map: Dict[str, Any]) -> Self:
         """Returns a configuration from the given JSON string."""
         if cls.__name__ != json_map.get("_type", None):
-            raise ValueError(
-                f"Trying to instantiate configuration of type {cls.__name__} from JSON with type {json_map['_type']}"
-            )
+            if '_type' in json_map:
+                raise ValueError(
+                    f"Trying to instantiate configuration of type {cls.__name__} from JSON with type {json_map.get('_type')}"
+                )
+            else:
+                raise ValueError(
+                    f"Trying to instantiate configuration of type {cls.__name__} from JSON, but no type found in json_map"
+                )
         parameters = []
         for name, value in json_map.items():
             # Type value is only for storage
