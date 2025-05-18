@@ -119,6 +119,10 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		if err == common.ErrDatabaseNotFound {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
+		if err == common.ErrConcurrentDeleteCollection {
+			log.Info("[HAMMAD] erorr is", zap.Error(err))
+			return res, grpcutils.BuildAbortedGrpcError(err.Error())
+		}
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Collection = convertCollectionToProto(collection)
