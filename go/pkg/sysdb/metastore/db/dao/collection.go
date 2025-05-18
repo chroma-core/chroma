@@ -355,9 +355,7 @@ func (s *collectionDb) Insert(in *dbmodel.Collection) error {
 // It returns an error if there was a problem with the insert.
 // This is used for upstream get_or_create
 func (s *collectionDb) InsertOnConflictDoNothing(in *dbmodel.Collection) (didInsert bool, err error) {
-	// Ignore conflict on (name, database_id) since we have "idx_name" unique index on it in migration
-	// Conflict on id should not (theoretically) happen since we are using unique ids TODO(hammadb): discuss with sanket
-	// '20240411201006'
+	// Ignore conflict on (name, database_id) since we have "idx_name" unique index on it in migration 20240411201006
 	err = s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "name"}, {Name: "database_id"}},
 		DoNothing: true,

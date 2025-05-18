@@ -324,7 +324,6 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	}
 
 	if err != nil {
-		log.Error("[HAMMAD]")
 		log.Error("error inserting collection", zap.Error(err))
 		return nil, false, err
 	}
@@ -342,9 +341,6 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 			}
 		}
 	}
-
-	// sleep to make the delete case more likely for testing
-	time.Sleep(100 * time.Millisecond)
 
 	// Get the inserted collection (by name, to handle the case where some other request created the collection)
 	collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName, nil, nil)
