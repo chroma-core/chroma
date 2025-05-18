@@ -481,14 +481,23 @@ impl IntoSqliteExpr for DocumentExpression {
             EmbeddingFulltextSearch::Table,
             EmbeddingFulltextSearch::StringValue,
         ));
-        let doc_contains = doc_col
-            .like(format!("%{}%", self.pattern.replace("%", "")))
-            .is(true);
         match self.operator {
-            DocumentOperator::Contains => doc_contains,
-            DocumentOperator::NotContains => doc_contains.not(),
-            DocumentOperator::Regex => todo!("Implement Regex matching. The result must be a not-nullable boolean (use `<expr>.is(true)`)"),
-            DocumentOperator::NotRegex => todo!("Implement negated Regex matching. This must be exact opposite of Regex matching (use `<expr>.not()`)"),
+            DocumentOperator::Contains => doc_col
+                .like(format!("%{}%", self.pattern.replace("%", "")))
+                .is(true),
+            DocumentOperator::NotContains => doc_col
+                .like(format!("%{}%", self.pattern.replace("%", "")))
+                .is(true)
+                .not(),
+            DocumentOperator::Regex => {
+                Expr::cust_with_exprs("? REGEXP ?", [doc_col.into(), Expr::value(&self.pattern)])
+                    .is(true)
+            }
+            DocumentOperator::NotRegex => {
+                Expr::cust_with_exprs("? REGEXP ?", [doc_col.into(), Expr::value(&self.pattern)])
+                    .is(true)
+                    .not()
+            }
         }
     }
 }
