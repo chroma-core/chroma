@@ -36,12 +36,14 @@ func (s *logServer) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequ
 		recordsContent = append(recordsContent, data)
 	}
 	var recordCount int64
-	recordCount, err = s.lr.InsertRecords(ctx, collectionID.String(), recordsContent)
+	var isSealed bool
+	recordCount, isSealed, err = s.lr.InsertRecords(ctx, collectionID.String(), recordsContent)
 	if err != nil {
 		return
 	}
 	res = &logservicepb.PushLogsResponse{
 		RecordCount: int32(recordCount),
+		LogIsSealed: isSealed,
 	}
 	return
 }
