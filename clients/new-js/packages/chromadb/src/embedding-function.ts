@@ -16,6 +16,12 @@ export interface EmbeddingFunction {
   validateConfig?(config: Record<string, any>): void;
 }
 
+export interface EmbeddingFunctionClass {
+  new (...args: any[]): EmbeddingFunction;
+  name: string;
+  buildFromConfig(config: Record<string, any>): EmbeddingFunction;
+}
+
 class MalformedEmbeddingFunction implements EmbeddingFunction {
   public readonly name: string;
 
@@ -29,33 +35,34 @@ class MalformedEmbeddingFunction implements EmbeddingFunction {
   }
 }
 
-export const knownEmbeddingFunctions = new Map<string, EmbeddingFunction>();
+export const knownEmbeddingFunctions = new Map<
+  string,
+  EmbeddingFunctionClass
+>();
 
-export const registerEmbeddingFunction = (fn: EmbeddingFunction) => {
-  if (!fn.name) {
-    throw new Error("Embedding function must have a name to be registered.");
-  }
-  if (knownEmbeddingFunctions.has(fn.name)) {
+export const registerEmbeddingFunction = (
+  name: string,
+  fn: EmbeddingFunctionClass,
+) => {
+  if (knownEmbeddingFunctions.has(name)) {
     throw new Error(
-      `Embedding function with name ${fn.name} is already registered.`,
+      `Embedding function with name ${name} is already registered.`,
     );
   }
-  knownEmbeddingFunctions.set(fn.name, fn);
+  knownEmbeddingFunctions.set(name, fn);
 };
 
-export const getEmbeddingFunction = (
+export const getEmbeddingFunction = async (
   collectionName: string,
   efConfig?: EmbeddingFunctionConfiguration,
 ) => {
   if (!efConfig) {
-    return new MalformedEmbeddingFunction(
-      collectionName,
-      `Missing embedding function config`,
-    );
+    efConfig = { type: "legacy" };
   }
 
   let name: string;
   if (efConfig.type === "legacy") {
+    efConfig = await getDefaultEFConfig();
     name = "default";
   } else {
     name = efConfig.name;
@@ -65,7 +72,7 @@ export const getEmbeddingFunction = (
   if (!embeddingFunction) {
     return new MalformedEmbeddingFunction(
       collectionName,
-      `Embedding function ${name} is not registered. Make sure that the @ai-embeddings/${name} package is installed`,
+      `Embedding function ${name} is not registered. Make sure that the @chroma-core/${name} package is installed`,
     );
   }
 
@@ -89,12 +96,8 @@ export const getEmbeddingFunction = (
 };
 
 export const serializeEmbeddingFunction = (
-  ef?: EmbeddingFunction,
+  ef: EmbeddingFunction,
 ): EmbeddingFunctionConfiguration => {
-  if (!ef) {
-    return { type: "legacy" };
-  }
-
   if (!ef.getConfig || !ef.name) {
     throw new Error(
       "Failed to serialize embedding function: missing 'getConfig' or 'name'",
@@ -108,3 +111,25 @@ export const serializeEmbeddingFunction = (
     config: ef.getConfig(),
   };
 };
+
+export const getDefaultEFConfig =
+  async (): Promise<EmbeddingFunctionConfiguration> => {
+    try {
+      const { DefaultEmbeddingFunction } = await import(
+        "@chroma-core/default-embed"
+      );
+      if (!knownEmbeddingFunctions.has(new DefaultEmbeddingFunction().name)) {
+        registerEmbeddingFunction("default", DefaultEmbeddingFunction);
+      }
+    } catch (e) {
+      console.error(e);
+      throw new Error(
+        "Cannot instantiate a collection with the DefaultEmbeddingFunction. Please install @chroma-core/default-embed, or provide a different embedding function",
+      );
+    }
+    return {
+      name: "default",
+      type: "known",
+      config: {},
+    };
+  };

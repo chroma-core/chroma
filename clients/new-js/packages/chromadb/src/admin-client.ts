@@ -1,6 +1,7 @@
 import { defaultAdminClientArgs, HttpMethod, normalizeMethod } from "./utils";
 import { createClient, createConfig } from "@hey-api/client-fetch";
 import { Database, DefaultService as Api } from "./api";
+import { chromaFetch } from "./chroma-fetch";
 
 export interface AdminClientArgs {
   host: string;
@@ -36,6 +37,7 @@ export class AdminClient {
     };
 
     this.apiClient = createClient(createConfig(configOptions));
+    this.apiClient.setConfig({ fetch: chromaFetch });
   }
 
   public async createDatabase({ name }: { name: string }): Promise<void> {

@@ -6,8 +6,8 @@ const config: Config.InitialOptions = {
   clearMocks: true,
   collectCoverage: false,
   testTimeout: 15000,
-  globalSetup: "./test/test-env-setup.ts",
-  globalTeardown: "./test/test-env-teardown.ts",
+  globalSetup: "./test/utils/test-env-setup.ts",
+  globalTeardown: "./test/utils/test-env-teardown.ts",
   coverageDirectory: "./test/coverage",
   coverageReporters: ["json", "html", "lcov"],
   collectCoverageFrom: [

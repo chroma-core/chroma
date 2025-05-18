@@ -46,7 +46,7 @@ export interface Collection {
     documents?: string[];
     uris?: string[];
   }): Promise<void>;
-  get(args: {
+  get(args?: {
     ids?: string[];
     where?: Where;
     limit?: number;
@@ -170,8 +170,7 @@ export class CollectionImpl implements Collection {
   }
 
   private async embed(documents: string[]): Promise<number[][]> {
-    // TODO
-    return [[]];
+    return await this.embeddingFunction.generate(documents);
   }
 
   private async prepareRecords({
@@ -279,6 +278,7 @@ export class CollectionImpl implements Collection {
     await this.prepareRecords({ recordSet });
 
     await Api.collectionAdd({
+      client: this.apiClient,
       path: this.path(),
       body: {
         ids: recordSet.ids,
@@ -321,12 +321,12 @@ export class CollectionImpl implements Collection {
     });
 
     return {
-      documents: data.documents ?? undefined,
-      embeddings: data.embeddings ?? undefined,
+      documents: data.documents ?? [],
+      embeddings: data.embeddings ?? [],
       ids: data.ids,
       include: data.include,
-      metadatas: data.metadatas ?? undefined,
-      uris: data.uris ?? undefined,
+      metadatas: data.metadatas ?? [],
+      uris: data.uris ?? [],
     };
   }
 
@@ -380,13 +380,13 @@ export class CollectionImpl implements Collection {
     });
 
     return {
-      distances: data.distances ?? undefined,
-      documents: data.documents ?? undefined,
-      embeddings: data.embeddings ?? undefined,
-      ids: data.ids ?? undefined,
+      distances: data.distances ?? [],
+      documents: data.documents ?? [],
+      embeddings: data.embeddings ?? [],
+      ids: data.ids ?? [],
       include: data.include,
-      metadatas: data.metadatas ?? undefined,
-      uris: data.uris ?? undefined,
+      metadatas: data.metadatas ?? [],
+      uris: data.uris ?? [],
     };
   }
 

@@ -69,20 +69,20 @@ export enum IncludeEnum {
 }
 
 export interface GetResult {
-  documents?: (string | null)[];
-  embeddings?: number[][];
+  documents: (string | null)[];
+  embeddings: number[][];
   ids: string[];
   include: Include[];
-  metadatas?: (Metadata | null)[];
-  uris?: (string | null)[];
+  metadatas: (Metadata | null)[];
+  uris: (string | null)[];
 }
 
 export interface QueryResult {
-  distances?: (number | null)[][];
-  documents?: (string | null)[][];
-  embeddings?: (number[] | null)[][];
+  distances: (number | null)[][];
+  documents: (string | null)[][];
+  embeddings: (number[] | null)[][];
   ids: string[][];
   include: Include[];
-  metadatas?: (Metadata | null)[][];
-  uris?: (string | null)[][];
+  metadatas: (Metadata | null)[][];
+  uris: (string | null)[][];
 }

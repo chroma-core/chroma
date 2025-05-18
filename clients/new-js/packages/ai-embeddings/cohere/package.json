@@ -1,21 +1,21 @@
 {
-  "name": "@chroma-core/jina",
+  "name": "@chroma-core/cohere",
   "version": "0.1.0",
   "private": false,
-  "description": "Jina embedding provider for Chroma",
-  "main": "dist/cjs/jina.cjs",
-  "types": "dist/jina.d.ts",
-  "module": "dist/jina.legacy-esm.js",
+  "description": "Cohere embedding provider for Chroma",
+  "main": "dist/cjs/cohere.cjs",
+  "types": "dist/cohere.d.ts",
+  "module": "dist/cohere.legacy-esm.js",
   "type": "module",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/jina.d.ts",
-        "default": "./dist/jina.mjs"
+        "types": "./dist/cohere.d.ts",
+        "default": "./dist/cohere.mjs"
       },
       "require": {
-        "types": "./dist/cjs/jina.d.cts",
-        "default": "./dist/cjs/jina.cjs"
+        "types": "./dist/cjs/cohere.d.cts",
+        "default": "./dist/cjs/cohere.cjs"
       }
     }
   },
@@ -30,9 +30,6 @@
     "watch": "tsup --watch",
     "test": "jest"
   },
-  "dependencies": {
-    "chromadb": "workspace:^"
-  },
   "devDependencies": {
     "@jest/globals": "^29.7.0",
     "dotenv": "^16.3.1",
@@ -43,10 +40,11 @@
     "tsup": "^8.3.5"
   },
   "peerDependencies": {
-
+    "chromadb": "workspace:^"
   },
   "dependencies": {
-    "@chromadb/ai-embeddings-common": "workspace:^0.1.0"
+    "@chromadb/ai-embeddings-common": "workspace:^0.1.0",
+    "cohere-ai": "^7.17.1"
   },
   "engines": {
     "node": ">=14.17.0"
