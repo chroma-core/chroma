@@ -52,19 +52,17 @@ export const registerEmbeddingFunction = (
   knownEmbeddingFunctions.set(name, fn);
 };
 
-export const getEmbeddingFunction = (
+export const getEmbeddingFunction = async (
   collectionName: string,
   efConfig?: EmbeddingFunctionConfiguration,
 ) => {
   if (!efConfig) {
-    return new MalformedEmbeddingFunction(
-      collectionName,
-      `Missing embedding function config`,
-    );
+    efConfig = { type: "legacy" };
   }
 
   let name: string;
   if (efConfig.type === "legacy") {
+    efConfig = await getDefaultEFConfig();
     name = "default";
   } else {
     name = efConfig.name;
@@ -124,6 +122,7 @@ export const getDefaultEFConfig =
         registerEmbeddingFunction("default", DefaultEmbeddingFunction);
       }
     } catch (e) {
+      console.error(e);
       throw new Error(
         "Cannot instantiate a collection with the DefaultEmbeddingFunction. Please install @chroma-core/default-embed, or provide a different embedding function",
       );

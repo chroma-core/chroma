@@ -13,6 +13,7 @@ import {
   getEmbeddingFunction,
   serializeEmbeddingFunction,
 } from "./embedding-function";
+import { chromaFetch } from "./chroma-fetch";
 
 export interface ChromaClientArgs {
   host?: string;
@@ -53,6 +54,7 @@ export class ChromaClient {
     };
 
     this.apiClient = createClient(createConfig(configOptions));
+    this.apiClient.setConfig({ fetch: chromaFetch });
   }
 
   private path(): { tenant: string; database: string } {
@@ -73,33 +75,36 @@ export class ChromaClient {
     return data["nanosecond heartbeat"];
   }
 
-  public async listCollections({
-    limit,
-    offset,
-  }: {
-    limit?: number;
-    offset?: number;
-  }): Promise<Collection[]> {
+  public async listCollections(
+    args?: Partial<{
+      limit: number;
+      offset: number;
+    }>,
+  ): Promise<Collection[]> {
+    const { limit = 100, offset = 0 } = args || {};
+
     const { data } = await Api.listCollections({
       client: this.apiClient,
       path: this.path(),
       query: { limit, offset },
     });
 
-    return data.map(
-      (collection) =>
-        new CollectionImpl({
-          chromaClient: this,
-          apiClient: this.apiClient,
-          name: collection.name,
-          id: collection.id,
-          embeddingFunction: getEmbeddingFunction(
-            collection.name,
-            collection.configuration_json.embedding_function ?? undefined,
-          ),
-          configuration: collection.configuration_json,
-          metadata: collection.metadata ?? undefined,
-        }),
+    return Promise.all(
+      data.map(
+        async (collection) =>
+          new CollectionImpl({
+            chromaClient: this,
+            apiClient: this.apiClient,
+            name: collection.name,
+            id: collection.id,
+            embeddingFunction: await getEmbeddingFunction(
+              collection.name,
+              collection.configuration_json.embedding_function ?? undefined,
+            ),
+            configuration: collection.configuration_json,
+            metadata: collection.metadata ?? undefined,
+          }),
+      ),
     );
   }
 
@@ -149,10 +154,10 @@ export class ChromaClient {
       metadata,
       embeddingFunction:
         embeddingFunction ??
-        getEmbeddingFunction(
+        (await getEmbeddingFunction(
           data.name,
           data.configuration_json.embedding_function ?? undefined,
-        ),
+        )),
       id: data.id,
     });
   }
@@ -169,7 +174,7 @@ export class ChromaClient {
       name,
       configuration: data.configuration_json,
       metadata: data.metadata ?? undefined,
-      embeddingFunction: getEmbeddingFunction(
+      embeddingFunction: await getEmbeddingFunction(
         data.name,
         data.configuration_json.embedding_function ?? undefined,
       ),
@@ -214,10 +219,10 @@ export class ChromaClient {
       metadata,
       embeddingFunction:
         embeddingFunction ??
-        getEmbeddingFunction(
+        (await getEmbeddingFunction(
           name,
           data.configuration_json.embedding_function ?? undefined,
-        ),
+        )),
       id: data.id,
     });
   }

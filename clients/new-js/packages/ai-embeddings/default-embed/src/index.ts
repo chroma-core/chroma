@@ -1,3 +1,4 @@
+import { validateConfigSchema } from "@chromadb/ai-embeddings-common";
 import { pipeline, ProgressCallback } from "@huggingface/transformers";
 
 export type DType =
@@ -14,38 +15,58 @@ export type DType =
 export type Quantization = DType | Record<string, DType>;
 
 interface StoredConfig {
-  model?: string;
+  model_name?: string;
   revision?: string;
   dtype?: Quantization;
+  quantized?: boolean;
+}
+
+export interface DefaultEmbeddingFunctionConfig {
+  modelName?: string;
+  revision?: string;
+  dtype?: Quantization;
+  /** @deprecated Use 'dtype' instead. If set to true, dtype value will be 'uint8' */
+  quantized?: boolean;
 }
 
 export class DefaultEmbeddingFunction {
   public readonly name: string = "default";
-  private readonly model: string;
+  private readonly modelName: string;
   private readonly revision: string;
   private readonly dtype: Quantization | undefined;
+  private readonly quantized: boolean;
   private readonly progressCallback: ProgressCallback | undefined = undefined;
 
   constructor(
     args: Partial<
-      StoredConfig & { progressCallback: ProgressCallback | undefined }
+      DefaultEmbeddingFunctionConfig & {
+        progressCallback: ProgressCallback | undefined;
+      }
     > = {},
   ) {
     const {
-      model = "Xenova/all-MiniLM-L6-v2",
+      modelName = "Xenova/all-MiniLM-L6-v2",
       revision = "main",
       dtype = undefined,
       progressCallback = undefined,
+      quantized = false,
     } = args;
 
-    this.model = model;
+    this.modelName = modelName;
     this.revision = revision;
-    this.dtype = dtype;
+    this.dtype = dtype || (quantized ? "uint8" : undefined);
+    this.quantized = quantized;
     this.progressCallback = progressCallback;
   }
 
+  public static buildFromConfig(
+    config: StoredConfig,
+  ): DefaultEmbeddingFunction {
+    return new DefaultEmbeddingFunction(config);
+  }
+
   public async generate(texts: string[]): Promise<number[][]> {
-    const pipe = await pipeline("feature-extraction", this.model, {
+    const pipe = await pipeline("feature-extraction", this.modelName, {
       revision: this.revision,
       progress_callback: this.progressCallback,
       dtype: this.dtype,
@@ -55,19 +76,27 @@ export class DefaultEmbeddingFunction {
     return output.tolist();
   }
 
-  public getConfig(): Record<string, any> {
+  public getConfig(): StoredConfig {
     return {
-      model: this.model,
+      model_name: this.modelName,
       revision: this.revision,
       dtype: this.dtype,
+      quantized: this.quantized,
     };
   }
 
-  public buildFromConfig(config: StoredConfig): DefaultEmbeddingFunction {
-    return new DefaultEmbeddingFunction(config);
+  public static validateConfigUpdate(
+    oldConfig: StoredConfig,
+    newConfig: StoredConfig,
+  ): void {
+    if (oldConfig.model_name !== newConfig.model_name) {
+      throw new Error(
+        "The DefaultEmbeddingFunction's 'model' cannot be changed after initialization.",
+      );
+    }
   }
 
-  static buildFromConfig(config: StoredConfig): DefaultEmbeddingFunction {
-    return new DefaultEmbeddingFunction(config);
+  public static validateConfig(config: StoredConfig): void {
+    validateConfigSchema(config, "transformers");
   }
 }

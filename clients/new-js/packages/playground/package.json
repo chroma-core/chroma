@@ -1,0 +1,29 @@
+{
+  "name": "@chroma-core/playground",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Playground for testing chromadb and jina",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "start": "node dist/index.js"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.0.4"
+  },
+  "dependencies": {
+    "chromadb": "workspace:^",
+    "@chroma-core/jina": "workspace:^",
+    "@chroma-core/default-embed": "workspace:^"
+  },
+  "engines": {
+    "node": ">=14.17.0"
+  }
+}

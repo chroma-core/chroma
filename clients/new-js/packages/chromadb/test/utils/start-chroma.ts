@@ -6,7 +6,7 @@ import waitOn from "wait-on";
 
 const CHROMADB_PORT = 8000;
 
-const BUILD_CONTEXT_DIR = path.join(__dirname, "../../../../..");
+const BUILD_CONTEXT_DIR = path.join(__dirname, "../../../../../..");
 
 const buildDockerImage = async (
   dockerfilePath: string,

@@ -1,4 +1,11 @@
 import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
+import {
+  snakeCase,
+  validateConfigSchema,
+} from "@chromadb/ai-embeddings-common";
+import * as process from "node:process";
+
+const NAME = "jina";
 
 type StoredConfig = {
   api_key_env_var: string;
@@ -7,126 +14,114 @@ type StoredConfig = {
   late_chunking?: boolean;
   truncate?: boolean;
   dimensions?: number;
-  embedding_type?: string;
   normalized?: boolean;
+  embedding_type?: string;
 };
 
-interface JinaRequestBody {
-  input: string[];
-  model: string;
+interface JinaArgs {
+  modelName?: string;
   task?: string;
-  late_chunking?: boolean;
+  lateChunking?: boolean;
   truncate?: boolean;
   dimensions?: number;
-  embedding_type?: string;
   normalized?: boolean;
+  embeddingType?: string;
+}
+
+export interface JinaConfig extends JinaArgs {
+  apiKey?: string;
+  apiKeyEnvVar?: string;
+}
+
+interface JinaRequestBody extends JinaArgs {
+  model: string;
+  input: string[];
+}
+
+export interface JinaEmbeddingsResponse {
+  data: {
+    embedding: number[];
+  }[];
+  usage: {
+    total_tokens: number;
+  };
 }
 
 export class JinaEmbeddingFunction implements EmbeddingFunction {
-  public readonly name = "jina";
+  public readonly name = NAME;
 
-  private readonly api_key_env_var: string;
-  private readonly model_name: string;
-  private readonly api_url: string;
+  private readonly apiKeyEnvVar: string;
+  private readonly modelName: string;
+  private readonly url: string;
   private readonly headers: { [key: string]: string };
   private readonly task: string | undefined;
-  private readonly late_chunking: boolean | undefined;
+  private readonly lateChunking: boolean | undefined;
   private readonly truncate: boolean | undefined;
   private readonly dimensions: number | undefined;
-  private readonly embedding_type: string | undefined;
+  private readonly embeddingType: string | undefined;
   private readonly normalized: boolean | undefined;
 
-  constructor({
-    jinaai_api_key,
-    model_name = "jina-embeddings-v2-base-en",
-    api_key_env_var = "JINAAI_API_KEY",
-    task,
-    late_chunking,
-    truncate,
-    dimensions,
-    embedding_type,
-    normalized,
-  }: {
-    jinaai_api_key?: string;
-    model_name?: string;
-    api_key_env_var: string;
-    task?: string;
-    late_chunking?: boolean;
-    truncate?: boolean;
-    dimensions?: number;
-    embedding_type?: string;
-    normalized?: boolean;
-  }) {
-    const apiKey = jinaai_api_key ?? process.env[api_key_env_var];
+  constructor(args: Partial<JinaConfig> = {}) {
+    const {
+      apiKeyEnvVar = "JINA_API_KEY",
+      modelName = "jina-clip-v2",
+      task,
+      lateChunking,
+      truncate,
+      dimensions,
+      normalized,
+      embeddingType,
+    } = args;
+
+    const apiKey = args.apiKey || process.env[apiKeyEnvVar];
+
     if (!apiKey) {
       throw new Error(
-        `Jina AI API key is required. Please provide it in the constructor or set the environment variable ${api_key_env_var}.`,
+        `Jina AI API key is required. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
       );
     }
 
-    this.model_name = model_name;
-    this.api_key_env_var = api_key_env_var;
+    this.modelName = modelName;
+    this.apiKeyEnvVar = apiKeyEnvVar;
     this.task = task;
-    this.late_chunking = late_chunking;
+    this.lateChunking = lateChunking;
     this.truncate = truncate;
     this.dimensions = dimensions;
-    this.embedding_type = embedding_type;
     this.normalized = normalized;
+    this.embeddingType = embeddingType;
 
-    this.api_url = "https://api.jina.ai/v1/embeddings";
+    this.url = "https://api.jina.ai/v1/embeddings";
     this.headers = {
-      Authorization: `Bearer ${jinaai_api_key}`,
+      Authorization: `Bearer ${apiKey}`,
       "Accept-Encoding": "identity",
       "Content-Type": "application/json",
     };
   }
 
-  public async generate(texts: string[]) {
-    let json_body: JinaRequestBody = {
+  public async generate(texts: string[]): Promise<number[][]> {
+    let body: JinaRequestBody = {
       input: texts,
-      model: this.model_name,
+      model: this.modelName,
+      task: this.task,
+      lateChunking: this.lateChunking,
+      truncate: this.truncate,
+      dimensions: this.dimensions,
+      normalized: this.normalized,
+      embeddingType: this.embeddingType,
     };
 
-    if (this.task) {
-      json_body.task = this.task;
-    }
-
-    if (this.late_chunking) {
-      json_body.late_chunking = this.late_chunking;
-    }
-
-    if (this.truncate) {
-      json_body.truncate = this.truncate;
-    }
-
-    if (this.dimensions) {
-      json_body.dimensions = this.dimensions;
-    }
-
-    if (this.embedding_type) {
-      json_body.embedding_type = this.embedding_type;
-    }
-
-    if (this.normalized) {
-      json_body.normalized = this.normalized;
-    }
-
     try {
-      const response = await fetch(this.api_url, {
+      const response = await fetch(this.url, {
         method: "POST",
         headers: this.headers,
-        body: JSON.stringify(json_body),
+        body: JSON.stringify(snakeCase(body)),
       });
 
-      const data = (await response.json()) as { data: any[]; detail: string };
+      const data = (await response.json()) as JinaEmbeddingsResponse;
       if (!data || !data.data) {
-        throw new Error(data.detail);
+        throw new Error("Failed to generate jina embedding data.");
       }
-
-      const embeddings: any[] = data.data;
-      const sortedEmbeddings = embeddings.sort((a, b) => a.index - b.index);
-
-      return sortedEmbeddings.map((result) => result.embedding);
+      return data.data.map((result) => result.embedding);
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Error calling Jina AI API: ${error.message}`);
@@ -138,29 +133,33 @@ export class JinaEmbeddingFunction implements EmbeddingFunction {
 
   public static buildFromConfig(config: StoredConfig): JinaEmbeddingFunction {
     return new JinaEmbeddingFunction({
-      model_name: config.model_name,
-      api_key_env_var: config.api_key_env_var,
+      modelName: config.model_name,
       task: config.task,
-      late_chunking: config.late_chunking,
+      lateChunking: config.late_chunking,
       truncate: config.truncate,
       dimensions: config.dimensions,
-      embedding_type: config.embedding_type,
       normalized: config.normalized,
+      embeddingType: config.embedding_type,
+      apiKeyEnvVar: config.api_key_env_var,
     });
   }
 
   getConfig(): StoredConfig {
     return {
-      api_key_env_var: this.api_key_env_var,
-      model_name: this.model_name,
+      api_key_env_var: this.apiKeyEnvVar,
+      model_name: this.modelName,
       task: this.task,
-      late_chunking: this.late_chunking,
+      late_chunking: this.lateChunking,
       truncate: this.truncate,
       dimensions: this.dimensions,
-      embedding_type: this.embedding_type,
+      embedding_type: this.embeddingType,
       normalized: this.normalized,
     };
   }
+
+  public static validateConfig(config: StoredConfig): void {
+    validateConfigSchema(config, NAME);
+  }
 }
 
-registerEmbeddingFunction(JinaEmbeddingFunction);
+registerEmbeddingFunction(NAME, JinaEmbeddingFunction);
