@@ -247,7 +247,7 @@ def test_multithreaded_get_or_create(client: ClientAPI) -> None:
             if i % 2 == 0:
                 client.delete_collection(new_name)
         except ChromaError as e:
-            if "not found" not in e.message():
+            if "does not exist" not in e.message():
                 raise e
 
     # Stress to trigger a potential race condition
