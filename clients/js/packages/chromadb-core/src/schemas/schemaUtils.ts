@@ -20,7 +20,8 @@ import sentenceTransformerSchema from "../../../../../../schemas/embedding_funct
 import text2vecSchema from "../../../../../../schemas/embedding_functions/text2vec.json";
 import transformersSchema from "../../../../../../schemas/embedding_functions/transformers.json";
 import voyageaiSchema from "../../../../../../schemas/embedding_functions/voyageai.json";
-
+import cloudflareWorkersAiSchema from "../../../../../../schemas/embedding_functions/cloudflare_workers_ai.json";
+import togetherAiSchema from "../../../../../../schemas/embedding_functions/together_ai.json";
 import Ajv from "ajv";
 
 // Define a common interface for all schemas
@@ -64,6 +65,8 @@ const schemaMap = {
   text2vec: text2vecSchema as Schema,
   transformers: transformersSchema as Schema,
   voyageai: voyageaiSchema as Schema,
+  cloudflare_workers_ai: cloudflareWorkersAiSchema as Schema,
+  together_ai: togetherAiSchema as Schema,
 };
 
 /**
@@ -126,7 +129,9 @@ export function getSchemaVersion(schemaName: keyof typeof schemaMap): string {
  * @returns A list of schema names (without .json extension)
  */
 export function getAvailableSchemas(): (keyof typeof schemaMap)[] {
-  return Object.keys(schemaMap).filter((name) => name !== "base_schema") as (keyof typeof schemaMap)[];
+  return Object.keys(schemaMap).filter(
+    (name) => name !== "base_schema",
+  ) as (keyof typeof schemaMap)[];
 }
 
 /**

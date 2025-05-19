@@ -86,7 +86,7 @@ pub enum CompactionManagerError {
     HnswApplyLogsError,
     #[error("Error getting collection with segments: {0}")]
     GetCollectionWithSegmentsError(#[from] GetCollectionWithSegmentsError),
-    #[error("Error reading from metadata segment reader")]
+    #[error("Error reading from metadata segment reader: {0} ")]
     MetadataReaderError(#[from] SqliteMetadataError),
     #[error("Error reading from hnsw segment reader: {0}")]
     HnswReaderError(#[from] LocalHnswSegmentReaderError),
@@ -168,6 +168,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
         let logs = self
             .log
             .read(
+                &collection_and_segments.collection.tenant,
                 collection_and_segments.collection.collection_id,
                 mt_max_seq_id.min(hnsw_max_seq_id) as i64,
                 -1,

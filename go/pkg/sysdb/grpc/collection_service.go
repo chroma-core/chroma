@@ -3,7 +3,6 @@ package grpc
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 
@@ -78,9 +77,9 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	}
 
 	// Convert the request segments to create segment models
-	createSegments := []*model.CreateSegment{}
+	createSegments := []*model.Segment{}
 	for _, segment := range req.Segments {
-		createSegment, err := convertSegmentToModel(segment)
+		createSegment, err := convertProtoSegment(segment)
 		if err != nil {
 			log.Error("Error in creating segments for the collection", zap.Error(err))
 			res.Collection = nil // We don't need to set the collection in case of error
@@ -91,6 +90,12 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 			}
 			return res, grpcutils.BuildInternalGrpcError(err.Error())
 		}
+		filePaths := make(map[string][]string)
+		for key, filePath := range segment.FilePaths {
+			filePaths[key] = filePath.Paths
+		}
+		createSegment.FilePaths = filePaths
+
 		createSegments = append(createSegments, createSegment)
 	}
 
@@ -250,31 +255,15 @@ func (s *Server) GetCollectionWithSegments(ctx context.Context, req *coordinator
 		}
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-
 	res.Collection = convertCollectionToProto(collection)
+
 	segmentpbList := make([]*coordinatorpb.Segment, 0, len(segments))
-	scopeToSegmentMap := map[coordinatorpb.SegmentScope]*coordinatorpb.Segment{}
 	for _, segment := range segments {
 		segmentpb := convertSegmentToProto(segment)
-		scopeToSegmentMap[segmentpb.GetScope()] = segmentpb
 		segmentpbList = append(segmentpbList, segmentpb)
 	}
-
-	if len(segmentpbList) != 3 {
-		log.Error("GetCollectionWithSegments failed. Unexpected number of collection segments", zap.String("collection_id", collectionID))
-		return res, grpcutils.BuildInternalGrpcError(fmt.Sprintf("Unexpected number of segments for collection %s: %d", collectionID, len(segmentpbList)))
-	}
-
-	scopes := []coordinatorpb.SegmentScope{coordinatorpb.SegmentScope_METADATA, coordinatorpb.SegmentScope_RECORD, coordinatorpb.SegmentScope_VECTOR}
-
-	for _, scope := range scopes {
-		if _, exists := scopeToSegmentMap[scope]; !exists {
-			log.Error("GetCollectionWithSegments failed. Collection segment scope not found", zap.String("collection_id", collectionID), zap.String("missing_scope", scope.String()))
-			return res, grpcutils.BuildInternalGrpcError(fmt.Sprintf("Missing segment scope for collection %s: %s", collectionID, scope.String()))
-		}
-	}
-
 	res.Segments = segmentpbList
+
 	return res, nil
 }
 
@@ -314,9 +303,10 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 	}
 
 	updateCollection := &model.UpdateCollection{
-		ID:        parsedCollectionID,
-		Name:      req.Name,
-		Dimension: req.Dimension,
+		ID:                      parsedCollectionID,
+		Name:                    req.Name,
+		Dimension:               req.Dimension,
+		NewConfigurationJsonStr: req.ConfigurationJsonStr,
 	}
 
 	resetMetadata := req.GetResetMetadata()
@@ -356,6 +346,77 @@ func (s *Server) UpdateCollection(ctx context.Context, req *coordinatorpb.Update
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
+	return res, nil
+}
+
+func (s *Server) ForkCollection(ctx context.Context, req *coordinatorpb.ForkCollectionRequest) (*coordinatorpb.ForkCollectionResponse, error) {
+	res := &coordinatorpb.ForkCollectionResponse{}
+
+	sourceCollectionID := req.SourceCollectionId
+	parsedSourceCollectionID, err := types.ToUniqueID(&sourceCollectionID)
+	if err != nil {
+		log.Error("ForkCollection failed. Failed to parse source collection id", zap.Error(err), zap.String("collection_id", sourceCollectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	targetCollectionID := req.TargetCollectionId
+	parsedTargetCollectionID, err := types.ToUniqueID(&targetCollectionID)
+	if err != nil {
+		log.Error("ForkCollection failed. Failed to parse target collection id", zap.Error(err), zap.String("collection_id", targetCollectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	forkCollection := &model.ForkCollection{
+		SourceCollectionID:                   parsedSourceCollectionID,
+		SourceCollectionLogCompactionOffset:  req.SourceCollectionLogCompactionOffset,
+		SourceCollectionLogEnumerationOffset: req.SourceCollectionLogEnumerationOffset,
+		TargetCollectionID:                   parsedTargetCollectionID,
+		TargetCollectionName:                 req.TargetCollectionName,
+	}
+	collection, segments, err := s.coordinator.ForkCollection(ctx, forkCollection)
+	if err != nil {
+		log.Error("ForkCollection failed. ", zap.Error(err), zap.String("collection_id", sourceCollectionID))
+		if err == common.ErrCollectionNotFound {
+			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		if err == common.ErrCollectionEntryIsStale {
+			return res, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
+		}
+		if err == common.ErrCollectionUniqueConstraintViolation {
+			return res, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
+		}
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	res.Collection = convertCollectionToProto(collection)
+
+	segmentpbList := make([]*coordinatorpb.Segment, 0, len(segments))
+	for _, segment := range segments {
+		segmentpb := convertSegmentToProto(segment)
+		segmentpbList = append(segmentpbList, segmentpb)
+	}
+	res.Segments = segmentpbList
+
+	return res, nil
+}
+
+func (s *Server) CountForks(ctx context.Context, req *coordinatorpb.CountForksRequest) (*coordinatorpb.CountForksResponse, error) {
+	res := &coordinatorpb.CountForksResponse{}
+
+	sourceCollectionID := req.SourceCollectionId
+	parsedSourceCollectionID, err := types.ToUniqueID(&sourceCollectionID)
+	if err != nil {
+		log.Error("CountForks failed. Failed to parse source collection id", zap.Error(err), zap.String("collection_id", sourceCollectionID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	count, err := s.coordinator.CountForks(ctx, parsedSourceCollectionID)
+	if err != nil {
+		if err == common.ErrCollectionNotFound {
+			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	res.Count = count
 	return res, nil
 }
 
@@ -440,7 +501,7 @@ func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.Lis
 		absoluteCutoffTimeSecs = &cutoffTime
 	}
 
-	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx, absoluteCutoffTimeSecs, req.Limit)
+	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx, absoluteCutoffTimeSecs, req.Limit, req.TenantId)
 	if err != nil {
 		log.Error("ListCollectionsToGc failed", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
@@ -452,6 +513,7 @@ func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.Lis
 			Name:            collectionToGc.Name,
 			VersionFilePath: collectionToGc.VersionFilePath,
 			TenantId:        collectionToGc.TenantID,
+			LineageFilePath: collectionToGc.LineageFilePath,
 		})
 	}
 	return res, nil

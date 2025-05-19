@@ -4,11 +4,12 @@ use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{PutOptions, Storage, StorageError};
+use chroma_storage::{GetOptions, PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
+use tracing::Instrument;
 
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
@@ -151,29 +152,36 @@ impl LogWriter {
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
         let inner = { self.inner.lock().unwrap().clone() };
-        if let Some(ref epoch_writer) = inner {
+        if let Some(epoch_writer) = inner {
             let res = epoch_writer.writer.append(messages.clone()).await;
             if matches!(res, Err(Error::LogContention)) {
-                let writer = OnceLogWriter::open(
-                    epoch_writer.writer.options.clone(),
-                    epoch_writer.writer.storage.clone(),
-                    epoch_writer.writer.prefix.clone(),
-                    self.writer.clone(),
-                    Arc::clone(&self.mark_dirty),
-                )
-                .await?;
-                // SAFETY(rescrv):  Mutex poisoning.
-                let mut inner = self.inner.lock().unwrap();
-                if let Some(second) = inner.as_mut() {
-                    if second.epoch == epoch_writer.epoch {
-                        second.epoch += 1;
-                        second.writer.shutdown();
-                        second.writer = writer;
+                loop {
+                    let writer = OnceLogWriter::open(
+                        epoch_writer.writer.options.clone(),
+                        epoch_writer.writer.storage.clone(),
+                        epoch_writer.writer.prefix.clone(),
+                        self.writer.clone(),
+                        Arc::clone(&self.mark_dirty),
+                    )
+                    .await;
+                    let writer = match writer {
+                        Ok(writer) => writer,
+                        Err(Error::LogContention) => continue,
+                        Err(err) => return Err(err),
+                    };
+                    // SAFETY(rescrv):  Mutex poisoning.
+                    let mut inner = self.inner.lock().unwrap();
+                    if let Some(second) = inner.as_mut() {
+                        if second.epoch == epoch_writer.epoch {
+                            second.epoch += 1;
+                            second.writer.shutdown();
+                            second.writer = writer;
+                        }
+                        return Err(Error::LogContention);
+                    } else {
+                        // This should never happen, so just be polite with an error.
+                        return Err(Error::LogClosed);
                     }
-                    Err(Error::LogContention)
-                } else {
-                    // This should never happen, so just be polite with an error.
-                    Err(Error::LogClosed)
                 }
             } else {
                 res
@@ -256,7 +264,7 @@ impl OnceLogWriter {
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         let batch_manager = BatchManager::new(options.throttle_fragment).ok_or(Error::Internal)?;
-        let mut manifest_manager = ManifestManager::new(
+        let manifest_manager = ManifestManager::new(
             options.throttle_manifest,
             options.snapshot_manifest,
             Arc::clone(&storage),
@@ -338,7 +346,8 @@ impl OnceLogWriter {
             let this = Arc::clone(self);
             this.append_batch(fragment_seq_no, log_position, work).await
         }
-        rx.await.map_err(|_| Error::Internal)?
+        let span = tracing::info_span!("wait_for_durability");
+        rx.instrument(span).await.map_err(|_| Error::Internal)?
     }
 
     #[tracing::instrument(skip(self, work))]
@@ -418,12 +427,12 @@ impl OnceLogWriter {
         };
         self.manifest_manager.publish_fragment(fragment).await?;
         // Record the records/batches written.
-        self.batch_manager.update_average_batch_size(messages_len);
         self.batch_manager.finish_write();
         Ok(log_position)
     }
 }
 
+#[tracing::instrument(skip(messages))]
 pub fn construct_parquet(
     log_position: LogPosition,
     messages: &[Vec<u8>],
@@ -489,8 +498,8 @@ pub async fn upload_parquet(
     let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
     let start = Instant::now();
     loop {
-        tracing::info!("upload_parquet: {:?}", path);
         let (buffer, setsum) = construct_parquet(log_position, &messages)?;
+        tracing::info!("upload_parquet: {:?} with {} bytes", path, buffer.len());
         match storage
             .put_bytes(
                 &path,
@@ -505,6 +514,44 @@ pub async fn upload_parquet(
             Err(StorageError::Precondition { path: _, source: _ }) => {
                 return Err(Error::LogContention);
             }
+            Err(err) => {
+                if start.elapsed() > Duration::from_secs(60) {
+                    return Err(Error::StorageError(Arc::new(err)));
+                }
+                let mut backoff = exp_backoff.next();
+                if backoff > Duration::from_secs(3_600) {
+                    backoff = Duration::from_secs(3_600);
+                }
+                tokio::time::sleep(backoff).await;
+            }
+        }
+    }
+}
+
+#[tracing::instrument(skip(options, storage))]
+pub async fn copy_parquet(
+    options: &LogWriterOptions,
+    storage: &Storage,
+    source: &str,
+    target: &str,
+) -> Result<(), Error> {
+    let parquet = storage
+        .get(source, GetOptions::new(StorageRequestPriority::P0))
+        .await
+        .map_err(Arc::new)?;
+    let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
+    let start = Instant::now();
+    loop {
+        match storage
+            .put_bytes(
+                target,
+                parquet.to_vec(),
+                PutOptions::if_not_exists(StorageRequestPriority::P0),
+            )
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(StorageError::Precondition { path: _, source: _ }) => return Ok(()),
             Err(err) => {
                 if start.elapsed() > Duration::from_secs(60) {
                     return Err(Error::StorageError(Arc::new(err)));

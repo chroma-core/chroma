@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
-use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannMetrics};
 use chroma_log::Log;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
@@ -142,6 +142,7 @@ impl WorkerServer {
                 .unwrap_or_default(),
             maximum_fetch_count: None,
             collection_uuid: collection_and_segments.collection.collection_id,
+            tenant: collection_and_segments.collection.tenant.clone(),
         }
     }
 
@@ -297,6 +298,7 @@ impl WorkerServer {
                 hnsw_provider: self.hnsw_index_provider.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 garbage_collection_context: None,
+                metrics: SpannMetrics::default(),
             };
             let knn_orchestrator_futures = from_proto_knn(knn)?
                 .into_iter()

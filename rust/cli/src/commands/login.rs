@@ -1,10 +1,13 @@
-use crate::client::get_chroma_client;
+use crate::client::admin_client::get_admin_client;
+use crate::client::dashboard_client::{
+    get_dashboard_client, DashboardClient, DashboardClientError, Team,
+};
 use crate::commands::db::DbError;
 use crate::commands::login::LoginError::BrowserAuthFailed;
-use crate::dashboard_client::{get_dashboard_client, DashboardClient, DashboardClientError, Team};
+use crate::ui_utils::validate_uri;
 use crate::utils::{
-    read_config, read_profiles, validate_uri, write_config, write_profiles, CliError, Profile,
-    Profiles, UtilsError, CHROMA_DIR, CREDENTIALS_FILE,
+    read_config, read_profiles, write_config, write_profiles, CliError, Profile, Profiles,
+    UtilsError, CHROMA_DIR, CREDENTIALS_FILE,
 };
 use clap::Parser;
 use colored::Colorize;
@@ -186,11 +189,11 @@ pub async fn browser_login(args: LoginArgs) -> Result<(), CliError> {
 
     let (api_key, team) = match args.api_key {
         Some(api_key) => {
-            let chroma_client = get_chroma_client(
+            let admin_client = get_admin_client(
                 Some(&Profile::new(api_key.clone(), "default".to_string())),
                 args.dev,
             );
-            let team_id = chroma_client.get_tenant_id().await?;
+            let team_id = admin_client.get_tenant_id().await?;
             let team = filter_team(&team_id, teams)?;
             (api_key, team)
         }

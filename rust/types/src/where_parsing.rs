@@ -1,5 +1,7 @@
+use crate::regex::literal_expr::LiteralExpr;
+use crate::regex::{ChromaRegex, ChromaRegexError};
 use crate::{CompositeExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where};
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
@@ -50,6 +52,8 @@ impl RawWhereFields {
 
 #[derive(Error, Debug)]
 pub enum WhereValidationError {
+    #[error(transparent)]
+    Regex(#[from] ChromaRegexError),
     #[error("Invalid where clause")]
     WhereClause,
     #[error("Invalid where document clause")]
@@ -58,10 +62,7 @@ pub enum WhereValidationError {
 
 impl ChromaError for WhereValidationError {
     fn code(&self) -> chroma_error::ErrorCodes {
-        match self {
-            WhereValidationError::WhereClause => chroma_error::ErrorCodes::InvalidArgument,
-            WhereValidationError::WhereDocumentClause => chroma_error::ErrorCodes::InvalidArgument,
-        }
+        ErrorCodes::InvalidArgument
     }
 }
 
@@ -137,17 +138,25 @@ pub fn parse_where_document(json_payload: &Value) -> Result<Where, WhereValidati
         return Err(WhereValidationError::WhereDocumentClause);
     }
     let value_str = value.as_str().unwrap();
-    let operator_type;
-    if key == "$contains" {
-        operator_type = DocumentOperator::Contains;
-    } else if key == "$not_contains" {
-        operator_type = DocumentOperator::NotContains;
-    } else {
-        return Err(WhereValidationError::WhereDocumentClause);
+    let operator_type = match key.as_str() {
+        "$contains" => DocumentOperator::Contains,
+        "$not_contains" => DocumentOperator::NotContains,
+        "$regex" => DocumentOperator::Regex,
+        "$not_regex" => DocumentOperator::NotRegex,
+        _ => return Err(WhereValidationError::WhereDocumentClause),
+    };
+    if matches!(
+        operator_type,
+        DocumentOperator::Regex | DocumentOperator::NotRegex
+    ) {
+        let regex = ChromaRegex::try_from(value_str.to_string())?;
+        if !LiteralExpr::from(regex.hir().clone()).contains_ngram_literal(3, 6) {
+            return Err(ChromaRegexError::PermissivePattern.into());
+        }
     }
     Ok(Where::Document(crate::DocumentExpression {
         operator: operator_type,
-        text: value_str.to_string(),
+        pattern: value_str.to_string(),
     }))
 }
 
@@ -446,18 +455,18 @@ mod tests {
                 children: vec![
                     Where::Document(crate::DocumentExpression {
                         operator: DocumentOperator::Contains,
-                        text: "value1".to_string(),
+                        pattern: "value1".to_string(),
                     }),
                     Where::Composite(CompositeExpression {
                         operator: crate::BooleanOperator::Or,
                         children: vec![
                             Where::Document(crate::DocumentExpression {
                                 operator: DocumentOperator::Contains,
-                                text: "value2".to_string(),
+                                pattern: "value2".to_string(),
                             }),
                             Where::Document(crate::DocumentExpression {
                                 operator: DocumentOperator::Contains,
-                                text: "value3".to_string(),
+                                pattern: "value3".to_string(),
                             }),
                         ],
                     }),
@@ -466,7 +475,7 @@ mod tests {
             // $not_contains
             Where::Document(crate::DocumentExpression {
                 operator: DocumentOperator::NotContains,
-                text: "value1".to_string(),
+                pattern: "value1".to_string(),
             }),
         ];
 

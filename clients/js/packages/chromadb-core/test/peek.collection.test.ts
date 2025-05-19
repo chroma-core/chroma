@@ -1,9 +1,4 @@
-import {
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "@jest/globals";
+import { beforeEach, describe, expect, test } from "@jest/globals";
 import { IDS, EMBEDDINGS } from "./data";
 import { ChromaNotFoundError } from "../src/Errors";
 import { ChromaClient } from "../src/ChromaClient";

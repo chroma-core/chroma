@@ -19,7 +19,6 @@ use tempfile::tempdir;
 pub use types::*;
 
 pub fn test_hnsw_index_provider() -> HnswIndexProvider {
-    let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
     HnswIndexProvider::new(
         test_storage(),
         tempdir()
@@ -27,6 +26,5 @@ pub fn test_hnsw_index_provider() -> HnswIndexProvider {
             .into_path(),
         new_non_persistent_cache_for_test(),
         16,
-        rx,
     )
 }

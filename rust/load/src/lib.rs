@@ -32,6 +32,7 @@ use guacamole::{Guacamole, Zipf};
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use opentelemetry::{Key, KeyValue, Value};
+use tokio::sync::Mutex as TokioMutex;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -174,38 +175,34 @@ impl ZipfCache {
     }
 }
 
-////////////////////////////////////////////// client //////////////////////////////////////////////
+////////////////////////////////////////////// Connection /////////////////////////////////////////////
 
-/// Instantiate a new Chroma client.  This will use the CHROMA_HOST environment variable (or
-/// http://localhost:8000 when unset) as the argument to [client_for_url].
-pub async fn client() -> ChromaClient {
-    let url = std::env::var("CHROMA_HOST").unwrap_or_else(|_| "http://localhost:8000".into());
-    client_for_url(url).await
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct Connection {
+    pub url: String,
+    pub api_key: Option<String>,
+    pub database: String,
 }
 
-/// Create a new Chroma client for the given URL.  This will use the CHROMA_TOKEN environment
-/// variable if set, or no authentication if unset.
-pub async fn client_for_url(url: String) -> ChromaClient {
-    if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
-        ChromaClient::new(ChromaClientOptions {
-            url: Some(url),
-            auth: ChromaAuthMethod::TokenAuth {
-                token: auth,
-                header: ChromaTokenHeader::XChromaToken,
-            },
-            database: "hf-tiny-stories".to_string(),
-        })
-        .await
-        .unwrap()
+////////////////////////////////////////////// client //////////////////////////////////////////////
+
+/// Instantiate a new Chroma client.
+pub async fn client(connection: Connection) -> ChromaClient {
+    let auth = if let Some(api_key) = connection.api_key.clone() {
+        ChromaAuthMethod::TokenAuth {
+            token: api_key,
+            header: ChromaTokenHeader::XChromaToken,
+        }
     } else {
-        ChromaClient::new(ChromaClientOptions {
-            url: Some(url),
-            auth: ChromaAuthMethod::None,
-            database: "default_database".to_string(),
-        })
-        .await
-        .unwrap()
-    }
+        ChromaAuthMethod::None
+    };
+    ChromaClient::new(ChromaClientOptions {
+        url: Some(connection.url.clone()),
+        auth,
+        database: connection.database.clone(),
+    })
+    .await
+    .unwrap()
 }
 
 ////////////////////////////////////////////// DataSet /////////////////////////////////////////////
@@ -229,6 +226,16 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
 
     /// The number of documents in the data set.
     fn cardinality(&self) -> usize;
+
+    /// The number of documents in the reference data set.
+    fn reference_cardinality(&self) -> usize {
+        self.cardinality()
+    }
+
+    // Hook to perform initialization of the data set, if necessary.
+    async fn initialize(&self, _: &ChromaClient) -> Result<(), Box<dyn std::error::Error + Send>> {
+        Ok(())
+    }
 
     /// Get documents by key.  This is used when one workload references another.  Return None to
     /// indicate the data set does not support referencing by index.
@@ -521,18 +528,14 @@ impl KeySelector {
         format!("{:0>16}", index)
     }
 
-    /// Select a key from the distribution.
-    pub fn select_with_offset(
-        &self,
-        guac: &mut Guacamole,
-        data_set: &dyn DataSet,
-        offset: usize,
-    ) -> String {
+    /// Select a key from the reference data set distribution.
+    /// Only supports index selection.
+    pub fn select_from_reference(&self, data_set: &dyn DataSet, offset: usize) -> String {
         let index = match self {
             KeySelector::Index(i) => *i,
-            KeySelector::Random(skew) => skew.sample(guac, data_set.cardinality()),
+            _ => panic!("Only index selection is supported for reference data sets"),
         };
-        let index = (index + offset) % data_set.cardinality();
+        let index = (index + offset) % data_set.reference_cardinality();
         format!("{:0>16}", index)
     }
 }
@@ -559,7 +562,7 @@ pub struct UpsertQuery {
 /// The state of a workload.
 #[derive(Clone)]
 pub struct WorkloadState {
-    seq_no: u64,
+    seq_no: Arc<TokioMutex<u64>>,
     guac: Guacamole,
 }
 
@@ -718,7 +721,16 @@ impl Workload {
                 Box::pin(wrap.step(client, metrics, data_set, state, done)).await
             }
             Workload::Load => {
-                if (state.seq_no * 100) >= data_set.cardinality() as u64 {
+                let load_start_idx: u64;
+                {
+                    // Get the seq_no, increment it, and immediately drop the lock (to allow for
+                    // concurrent loads)
+                    let mut seq_no = state.seq_no.lock().await;
+                    load_start_idx = *seq_no * 100;
+                    *seq_no += 1;
+                }
+
+                if load_start_idx >= data_set.reference_cardinality() as u64 {
                     done.store(true, std::sync::atomic::Ordering::Relaxed);
                     return Ok(());
                 }
@@ -733,7 +745,7 @@ impl Workload {
                     .upsert(
                         client,
                         UpsertQuery {
-                            key: KeySelector::Index((state.seq_no * 100) as usize),
+                            key: KeySelector::Index(load_start_idx as usize),
                             batch_size: 100,
                             // Associativity is the ratio of documents in a cluster to documents
                             // written by the workload.  It is ignored for load.
@@ -915,14 +927,15 @@ impl PartialEq for Throughput {
 
 ////////////////////////////////////////// RunningWorkload /////////////////////////////////////////
 
-/// A running workload is a workload that has been bound to a data set at a given throughput.  It
-/// is assigned a name, uuid, and expiration time.
+/// A running workload is a workload that has been bound to a data set and connection at a given
+/// throughput.  It is assigned a name, uuid, and expiration time.
 #[derive(Clone, Debug)]
 pub struct RunningWorkload {
     uuid: Uuid,
     name: String,
     workload: Workload,
     data_set: Arc<dyn DataSet>,
+    connection: Connection,
     expires: chrono::DateTime<chrono::FixedOffset>,
     throughput: Throughput,
 }
@@ -942,6 +955,7 @@ impl From<WorkloadSummary> for Option<RunningWorkload> {
                 name: s.name,
                 workload: s.workload,
                 data_set,
+                connection: s.connection,
                 expires: s.expires,
                 throughput: s.throughput,
             })
@@ -977,6 +991,8 @@ pub struct WorkloadSummary {
     pub workload: Workload,
     /// The data set the workload is bound to.
     pub data_set: serde_json::Value,
+    /// The connection to use.
+    pub connection: Connection,
     /// The expiration time of the workload.
     pub expires: chrono::DateTime<chrono::FixedOffset>,
     /// The throughput of the workload.
@@ -990,6 +1006,7 @@ impl From<RunningWorkload> for WorkloadSummary {
             name: r.name,
             workload: r.workload,
             data_set: r.data_set.json(),
+            connection: r.connection,
             expires: r.expires,
             throughput: r.throughput,
         }
@@ -1014,8 +1031,16 @@ pub struct LoadHarness {
 
 impl LoadHarness {
     /// The status of the load harness.
+    /// This returns the list of running workloads with secrets redacted.
     pub fn status(&self) -> Vec<RunningWorkload> {
-        self.running.clone()
+        self.running
+            .iter()
+            .map(|w| {
+                let mut w = w.clone();
+                w.connection.api_key = Some("REDACTED".to_string());
+                w
+            })
+            .collect()
     }
 
     /// Start a workload on the load harness.
@@ -1024,6 +1049,7 @@ impl LoadHarness {
         name: String,
         workload: Workload,
         data_set: &Arc<dyn DataSet>,
+        connection: Connection,
         expires: chrono::DateTime<chrono::FixedOffset>,
         throughput: Throughput,
     ) -> Uuid {
@@ -1034,6 +1060,7 @@ impl LoadHarness {
             name,
             workload,
             data_set,
+            connection,
             expires,
             throughput,
         });
@@ -1163,19 +1190,41 @@ impl LoadService {
     pub fn start(
         &self,
         name: String,
+        workload: Workload,
         data_set: String,
-        mut workload: Workload,
+        connection: Connection,
         expires: chrono::DateTime<chrono::FixedOffset>,
         throughput: Throughput,
     ) -> Result<Uuid, Error> {
         let Some(data_set) = self.data_sets().iter().find(|ds| ds.name() == data_set) else {
             return Err(Error::NotFound("data set not found".to_string()));
         };
+        let data_set = Arc::clone(data_set);
+        self.start_struct(name, workload, data_set, connection, expires, throughput)
+    }
+
+    /// Start a workload on the load service using structs rather than resolving strings.
+    pub fn start_struct(
+        &self,
+        name: String,
+        mut workload: Workload,
+        data_set: Arc<dyn DataSet>,
+        connection: Connection,
+        expires: chrono::DateTime<chrono::FixedOffset>,
+        throughput: Throughput,
+    ) -> Result<Uuid, Error> {
         workload.resolve_by_name(self.workloads())?;
         let res = {
             // SAFETY(rescrv):  Mutex poisoning.
             let mut harness = self.harness.lock().unwrap();
-            Ok(harness.start(name, workload.clone(), data_set, expires, throughput))
+            Ok(harness.start(
+                name,
+                workload.clone(),
+                &data_set,
+                connection,
+                expires,
+                throughput,
+            ))
         };
         self.save_persistent()?;
         res
@@ -1236,13 +1285,11 @@ impl LoadService {
             for declared in declared {
                 if let Entry::Vacant(entry) = running.entry(declared.uuid) {
                     tracing::info!("spawning workload {}", declared.uuid);
-                    let root = tracing::info_span!(parent: None, "workload");
                     let this = Arc::clone(self);
                     let done = Arc::new(AtomicBool::new(false));
                     let done_p = Arc::clone(&done);
                     let inhibit = Arc::clone(&self.inhibit);
                     let task = tokio::task::spawn(async move {
-                        let _enter = root.enter();
                         this.run_one_workload(done, inhibit, declared).await
                     });
                     entry.insert((done_p, task));
@@ -1257,43 +1304,20 @@ impl LoadService {
         inhibit: Arc<AtomicBool>,
         spec: RunningWorkload,
     ) {
-        let client = Arc::new(client().await);
+        let client = Arc::new(client(spec.connection.clone()).await);
         let mut guac = Guacamole::new(spec.expires.timestamp_millis() as u64);
         let mut next_op = Instant::now();
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1000);
-        let _ = tx
-            .send(tokio::spawn(async move { Ok::<(), Error>(()) }))
-            .await;
-        let this = Arc::clone(&self);
+
+        // Initialize the data set.
         let data_set = Arc::clone(&spec.data_set);
-        let reaper = tokio::spawn(async move {
-            while let Some(task) = rx.recv().await {
-                if let Err(err) = task.await.unwrap() {
-                    if !format!("{err:?}").contains("429") {
-                        this.metrics.failed.add(
-                            1,
-                            &[KeyValue::new(
-                                Key::from_static_str("data_set"),
-                                Value::from(data_set.name()),
-                            )],
-                        );
-                        tracing::error!("workload task failed: {err:?}");
-                    } else {
-                        this.metrics.limited.add(
-                            1,
-                            &[KeyValue::new(
-                                Key::from_static_str("data_set"),
-                                Value::from(data_set.name()),
-                            )],
-                        );
-                    }
-                }
-            }
-        });
-        let mut seq_no = 0u64;
+        if let Err(err) = data_set.initialize(&client).await {
+            tracing::error!("failed to initialize data set: {err:?}");
+            return;
+        }
+
+        let seq_no = Arc::new(TokioMutex::new(0u64));
         let start = Instant::now();
         while !done.load(std::sync::atomic::Ordering::Relaxed) {
-            seq_no += 1;
             let throughput = match spec.throughput {
                 Throughput::Constant(throughput) => throughput,
                 Throughput::Sinusoidal {
@@ -1347,7 +1371,10 @@ impl LoadService {
                 let client = Arc::clone(&client);
                 let data_set = Arc::clone(&spec.data_set);
                 let guac = Guacamole::new(any(&mut guac));
-                let mut state = WorkloadState { seq_no, guac };
+                let mut state = WorkloadState {
+                    seq_no: Arc::clone(&seq_no),
+                    guac,
+                };
                 let done = Arc::clone(&done);
                 let fut = async move {
                     this.metrics.num_operations.add(1, &[]);
@@ -1363,9 +1390,9 @@ impl LoadService {
                         .await
                         .map_err(|err| Error::FailWorkload(err.to_string()))
                     {
-                        Ok(()) => Ok(()),
+                        Ok(()) => (),
                         Err(err) => {
-                            if err.to_string().contains("invalid request: No results") {
+                            if format!("{err:?}").contains("invalid request: No results") {
                                 this.metrics.no_results.add(
                                     1,
                                     &[KeyValue::new(
@@ -1373,20 +1400,34 @@ impl LoadService {
                                         Value::from(data_set.name()),
                                     )],
                                 );
-                                Ok(())
+                                tracing::warn!("workload step no results: {err:?}");
+                            } else if !format!("{err:?}").contains("429") {
+                                this.metrics.failed.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                tracing::error!("workload step failed: {err:?}");
                             } else {
-                                Err(err)
+                                this.metrics.limited.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                tracing::warn!("workload step rate limited: {err:?}");
                             }
                         }
-                    }
+                    };
                 };
-                tx.send(tokio::spawn(fut)).await.unwrap();
+                let span = tracing::info_span!(parent: None, "step", workload_uuid = %spec.uuid);
+                tokio::spawn(fut.instrument(span));
             }
         }
-        // Not an error, just needs to show up in stdout.
-        tracing::error!("workload done: {}/{}", spec.name, spec.description());
-        drop(tx);
-        reaper.await.unwrap();
+        tracing::info!("workload done: {}/{}", spec.name, spec.description());
     }
 
     fn load_persistent(&self) -> Result<(), Error> {
@@ -1598,14 +1639,41 @@ async fn start(
 ) -> Result<String, Error> {
     let expires = chrono::DateTime::parse_from_rfc3339(&req.expires)
         .map_err(|err| Error::InvalidRequest(format!("could not parse rfc3339: {err:?}")))?;
-    let uuid = state.load.start(
-        req.name,
-        req.data_set,
-        req.workload,
-        expires,
-        req.throughput,
-    )?;
-    Ok(uuid.to_string() + "\n")
+    match (req.data_set, req.custom_data_set) {
+        (Some(_), Some(_)) => Err(Error::InvalidRequest(
+            "provide at most one of data_set and custom_data_set".to_string(),
+        )),
+        (None, None) => Err(Error::InvalidRequest(
+            "provide at least one of data_set and custom_data_set".to_string(),
+        )),
+        (Some(data_set), None) => {
+            let uuid = state.load.start(
+                req.name,
+                req.workload,
+                data_set,
+                req.connection,
+                expires,
+                req.throughput,
+            )?;
+            Ok(uuid.to_string() + "\n")
+        }
+        (None, Some(custom_data_set)) => {
+            let Some(data_set) = data_sets::from_json(&custom_data_set) else {
+                return Err(Error::InvalidRequest(
+                    "custom data set returned nothing".to_string(),
+                ));
+            };
+            let uuid = state.load.start_struct(
+                req.name,
+                req.workload,
+                data_set,
+                req.connection,
+                expires,
+                req.throughput,
+            )?;
+            Ok(uuid.to_string() + "\n")
+        }
+    }
 }
 
 async fn stop(
@@ -1699,8 +1767,13 @@ mod tests {
         let load = LoadService::default();
         load.start(
             "foo".to_string(),
-            "nop".to_string(),
             Workload::ByName("get-no-filter".to_string()),
+            "nop".to_string(),
+            Connection {
+                url: "http://localhost:8000".to_string(),
+                api_key: None,
+                database: "".to_string(),
+            },
             (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),
             Throughput::Constant(1.0),
         )
@@ -1806,8 +1879,13 @@ mod tests {
             .unwrap();
         load.start(
             "foo".to_string(),
-            "nop".to_string(),
             Workload::ByName("get-no-filter".to_string()),
+            "nop".to_string(),
+            Connection {
+                url: "http://localhost:8000".to_string(),
+                api_key: None,
+                database: "".to_string(),
+            },
             (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),
             Throughput::Constant(1.0),
         )

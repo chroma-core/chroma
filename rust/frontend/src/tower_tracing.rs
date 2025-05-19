@@ -24,6 +24,11 @@ impl<B> MakeSpan<B> for RequestTracing {
             .get(header::HOST)
             .map_or("", |h| h.to_str().unwrap_or(""));
 
+        let user_agent = request
+            .headers()
+            .get(header::USER_AGENT)
+            .map_or("", |h| h.to_str().unwrap_or(""));
+
         let name = format!("{} {}", request.method(), http_route);
 
         tracing::span!(
@@ -35,6 +40,7 @@ impl<B> MakeSpan<B> for RequestTracing {
             http.version = ?request.version(),
             http.host = %host,
             http.status_code = tracing::field::Empty,
+            http.user_agent = %user_agent,
             otel.name = name,
             otel.status_code = tracing::field::Empty,
         )

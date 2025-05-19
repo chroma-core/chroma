@@ -85,4 +85,67 @@ mod tests {
             }
         });
     }
+
+    #[test]
+    fn test_concurrent_readers() {
+        let mut config = shuttle::Config::default();
+        config.stack_size = 1024 * 1024; // 1MB
+
+        let scheduler = RandomScheduler::new(100);
+        let runner = Runner::new(scheduler, config);
+
+        runner.run(|| {
+            let tmp_dir = tempfile::tempdir().unwrap();
+            let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+            let block_cache = new_cache_for_test();
+            let sparse_index_cache = new_cache_for_test();
+            let blockfile_provider = ArrowBlockfileProvider::new(
+                storage,
+                TEST_MAX_BLOCK_SIZE_BYTES,
+                block_cache,
+                sparse_index_cache,
+            );
+            let reader = future::block_on(async {
+                let writer = blockfile_provider
+                    .write::<&str, u32>(BlockfileWriterOptions::default())
+                    .await
+                    .expect("Failed to create writer");
+                let id = writer.id();
+                writer
+                    .set::<&str, u32>("", "key1", 1)
+                    .await
+                    .expect("Failed to set key");
+                let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
+                flusher.flush::<&str, u32>().await.unwrap();
+
+                // Clear cache.
+                blockfile_provider.clear().await.expect("Clear bf provider");
+
+                blockfile_provider.read::<&str, u32>(&id).await.unwrap()
+            });
+            // Make the max threads the number of cores * 2
+            let max_threads = num_cpus::get() * 2;
+            let t = shuttle::rand::thread_rng().gen_range(2..max_threads);
+            let mut join_handles = Vec::with_capacity(t);
+            for _ in 0..t {
+                let reader_clone = reader.clone();
+                let handle = thread::spawn(move || {
+                    future::block_on(async {
+                        reader_clone
+                            .get("", "key1")
+                            .await
+                            .expect("Expected value")
+                            .expect("Expected value")
+                    })
+                });
+                join_handles.push(handle);
+            }
+
+            // No errors.
+            for handle in join_handles {
+                let val = handle.join().unwrap();
+                assert_eq!(val, 1);
+            }
+        });
+    }
 }

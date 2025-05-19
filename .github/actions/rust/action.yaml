@@ -12,7 +12,8 @@ runs:
       # (reads from rust-toolchain.toml)
       run: |
         rustup --version
-        rustup toolchain install
+        rustup toolchain install 1.81.0
+        rustup default 1.81.0
     # Needed for sccache to work on Windows
     - name: Set default toolchain to rust-toolchain.toml on Windows
       if: runner.os == 'Windows'
@@ -31,7 +32,7 @@ runs:
           exit 1
         }
     - name: Install Protoc
-      uses: arduino/setup-protoc@v2
+      uses: arduino/setup-protoc@v3
       with:
         repo-token: ${{ inputs.github-token }}
     - name: Use sccache

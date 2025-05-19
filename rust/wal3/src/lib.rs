@@ -7,6 +7,7 @@ use setsum::Setsum;
 
 mod backoff;
 mod batch_manager;
+mod copy;
 mod cursors;
 mod manifest;
 mod manifest_manager;
@@ -15,6 +16,7 @@ mod writer;
 
 pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
+pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
 pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
@@ -43,6 +45,8 @@ pub enum Error {
     LogClosed,
     #[error("an empty batch was passed to append")]
     EmptyBatch,
+    #[error("perform exponential backoff and retry")]
+    Backoff,
     #[error("an internal, otherwise unclassifiable error")]
     Internal,
     #[error("could not find FSN in path: {0}")]
@@ -74,6 +78,7 @@ impl chroma_error::ChromaError for Error {
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
             Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
+            Self::Backoff => chroma_error::ErrorCodes::Unavailable,
             Self::Internal => chroma_error::ErrorCodes::Internal,
             Self::MissingFragmentSequenceNumber(_) => chroma_error::ErrorCodes::Internal,
             Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
@@ -212,6 +217,16 @@ impl std::ops::Add<usize> for LogPosition {
     fn add(self, rhs: usize) -> Self::Output {
         LogPosition {
             offset: self.offset.wrapping_add(rhs as u64),
+        }
+    }
+}
+
+impl std::ops::Sub<u64> for LogPosition {
+    type Output = LogPosition;
+
+    fn sub(self, rhs: u64) -> Self::Output {
+        LogPosition {
+            offset: self.offset.wrapping_sub(rhs),
         }
     }
 }

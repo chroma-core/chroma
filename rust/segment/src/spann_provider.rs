@@ -3,8 +3,9 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::{
-    config::SpannProviderConfig, hnsw_provider::HnswIndexProvider,
-    spann::types::GarbageCollectionContext,
+    config::SpannProviderConfig,
+    hnsw_provider::HnswIndexProvider,
+    spann::types::{GarbageCollectionContext, SpannMetrics},
 };
 use chroma_types::{Collection, Segment};
 
@@ -18,6 +19,7 @@ pub struct SpannProvider {
     pub blockfile_provider: BlockfileProvider,
     // Option because reader does not need it.
     pub garbage_collection_context: Option<GarbageCollectionContext>,
+    pub metrics: SpannMetrics,
 }
 
 #[async_trait]
@@ -38,6 +40,7 @@ impl Configurable<(HnswIndexProvider, BlockfileProvider, SpannProviderConfig)> f
             hnsw_provider: config.0.clone(),
             blockfile_provider: config.1.clone(),
             garbage_collection_context: Some(garbage_collection_context),
+            metrics: SpannMetrics::default(),
         })
     }
 }
@@ -76,6 +79,7 @@ impl SpannProvider {
             &self.hnsw_provider,
             dimensionality,
             gc_context.clone(),
+            self.metrics.clone(),
         )
         .await
     }

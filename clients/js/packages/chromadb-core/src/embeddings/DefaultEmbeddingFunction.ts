@@ -6,7 +6,7 @@ import { IEmbeddingFunction } from "./IEmbeddingFunction";
 let TransformersApi: Promise<any>;
 
 interface StoredConfig {
-  model_name: string;
+  model: string;
   revision: string;
   quantized: boolean;
 }
@@ -77,7 +77,7 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
 
   getConfig(): StoredConfig {
     return {
-      model_name: this.model,
+      model: this.model,
       revision: this.revision,
       quantized: this.quantized,
     };
@@ -85,16 +85,16 @@ export class DefaultEmbeddingFunction implements IEmbeddingFunction {
 
   buildFromConfig(config: StoredConfig): DefaultEmbeddingFunction {
     return new DefaultEmbeddingFunction({
-      model: config.model_name,
+      model: config.model,
       revision: config.revision,
       quantized: config.quantized,
     });
   }
 
   validateConfigUpdate(oldConfig: StoredConfig, newConfig: StoredConfig): void {
-    if (oldConfig.model_name !== newConfig.model_name) {
+    if (oldConfig.model !== newConfig.model) {
       throw new Error(
-        "DefaultEmbeddingFunction model_name cannot be changed after initialization.",
+        "DefaultEmbeddingFunction model cannot be changed after initialization.",
       );
     }
   }

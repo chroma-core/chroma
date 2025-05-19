@@ -1,7 +1,6 @@
-use crate::client::get_chroma_client;
-use crate::utils::{
-    copy_to_clipboard, get_current_profile, CliError, Profile, UtilsError, SELECTION_LIMIT,
-};
+use crate::client::admin_client::get_admin_client;
+use crate::ui_utils::copy_to_clipboard;
+use crate::utils::{get_current_profile, CliError, Profile, UtilsError, SELECTION_LIMIT};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
@@ -243,8 +242,7 @@ fn get_js_connection(url: String, tenant_id: String, db_name: String, api_key: S
     )
 }
 
-fn prompt_db_name(prompt: &str) -> Result<String, CliError> {
-    println!("{}", prompt.blue().bold());
+fn prompt_db_name() -> Result<String, CliError> {
     let input = Input::with_theme(&ColorfulTheme::default())
         .interact_text()
         .map_err(|_| UtilsError::UserInputFailed)?;
@@ -278,7 +276,7 @@ fn select_db(dbs: &[Database]) -> Result<String, CliError> {
     Ok(name)
 }
 
-fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
+pub fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
     if dbs.is_empty() {
         return Err(CliError::Db(DbError::NoDBs));
     }
@@ -286,7 +284,7 @@ fn get_db_name(dbs: &[Database], prompt: &str) -> Result<String, CliError> {
     println!("{}", prompt.blue().bold());
     let name = match dbs.len() {
         0..=SELECTION_LIMIT => select_db(dbs),
-        _ => prompt_db_name(prompt),
+        _ => prompt_db_name(),
     }?;
 
     validate_db_name(name.as_str())
@@ -321,8 +319,8 @@ fn confirm_db_deletion(name: &str) -> Result<bool, CliError> {
 }
 
 pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), CliError> {
-    let chroma_client = get_chroma_client(Some(&current_profile), args.db_args.dev);
-    let dbs = chroma_client.list_databases().await?;
+    let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
+    let dbs = admin_client.list_databases().await?;
 
     let name = match args.name {
         Some(name) => validate_db_name(&name),
@@ -339,10 +337,10 @@ pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), 
     };
 
     let connection_string = language.get_connection(
-        chroma_client.api_url,
+        admin_client.host,
         current_profile.tenant_id,
         name,
-        chroma_client.api_key.unwrap_or("".to_string()),
+        admin_client.api_key.unwrap_or("".to_string()),
     );
     println!("{}", connection_string);
 
@@ -352,12 +350,15 @@ pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), 
 }
 
 pub async fn create(args: CreateArgs, current_profile: Profile) -> Result<(), CliError> {
-    let chroma_client = get_chroma_client(Some(&current_profile), args.db_args.dev);
-    let dbs = chroma_client.list_databases().await?;
+    let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
+    let dbs = admin_client.list_databases().await?;
 
     let mut name = match args.name {
         Some(name) => name,
-        None => prompt_db_name(&create_db_name_prompt())?,
+        None => {
+            println!("{}", create_db_name_prompt());
+            prompt_db_name()?
+        }
     };
     name = validate_db_name(&name)?;
 
@@ -368,7 +369,7 @@ pub async fn create(args: CreateArgs, current_profile: Profile) -> Result<(), Cl
 
     println!("{}", creating_db_message(&name));
 
-    chroma_client.create_database(name.clone()).await?;
+    admin_client.create_database(name.clone()).await?;
 
     println!("{}", create_db_success_message(&name));
 
@@ -376,8 +377,8 @@ pub async fn create(args: CreateArgs, current_profile: Profile) -> Result<(), Cl
 }
 
 pub async fn delete(args: DeleteArgs, current_profile: Profile) -> Result<(), CliError> {
-    let chroma_client = get_chroma_client(Some(&current_profile), args.db_args.dev);
-    let dbs = chroma_client.list_databases().await?;
+    let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
+    let dbs = admin_client.list_databases().await?;
 
     let name = match args.name {
         Some(name) => validate_db_name(&name),
@@ -389,7 +390,7 @@ pub async fn delete(args: DeleteArgs, current_profile: Profile) -> Result<(), Cl
     }
 
     if args.force || confirm_db_deletion(&name)? {
-        chroma_client.delete_database(name.clone()).await?;
+        admin_client.delete_database(name.clone()).await?;
         println!("{}", db_delete_success_message(&name));
     } else {
         println!("{}", db_delete_cancelled())
@@ -403,8 +404,8 @@ pub async fn list(
     profile_name: String,
     current_profile: Profile,
 ) -> Result<(), CliError> {
-    let chroma_client = get_chroma_client(Some(&current_profile), args.db_args.dev);
-    let dbs = chroma_client.list_databases().await?;
+    let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
+    let dbs = admin_client.list_databases().await?;
 
     if dbs.is_empty() {
         println!("{}", no_dbs_message(&profile_name));

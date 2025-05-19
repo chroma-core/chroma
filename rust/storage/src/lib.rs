@@ -400,11 +400,20 @@ impl PutOptions {
 #[derive(Clone, Debug, Default)]
 pub struct GetOptions {
     priority: StorageRequestPriority,
+    requires_strong_consistency: bool,
 }
 
 impl GetOptions {
     pub fn new(priority: StorageRequestPriority) -> Self {
-        Self { priority }
+        Self {
+            priority,
+            requires_strong_consistency: false,
+        }
+    }
+
+    pub fn with_strong_consistency(mut self) -> Self {
+        self.requires_strong_consistency = true;
+        self
     }
 }
 

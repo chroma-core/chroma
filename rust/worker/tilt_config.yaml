@@ -40,7 +40,7 @@ query_service:
             host: "logservice.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 5000
+            request_timeout_ms: 60000 # 1 minute
             alt_host: "rust-log-service.chroma"
             use_alt_host_for_everything: true
     dispatcher:
@@ -52,10 +52,11 @@ query_service:
     blockfile_provider:
         arrow:
             block_manager_config:
-                max_block_size_bytes: 16384
+                max_block_size_bytes: 8388608 # 8MB
                 block_cache_config:
                     disk:
                         dir: "/cache/chroma/query-service/block-cache"
+                        name: "block_cache"
                         # 1k blocks * 8MiB = 8GiB, this is actually ignored in the disk cache config. Leaving it set to 1k for consistency.
                         capacity: 1000
                         mem: 8000 # 8GiB
@@ -71,14 +72,16 @@ query_service:
             sparse_index_manager_config:
                 sparse_index_cache_config:
                     lru:
+                        name: "sparse_index_cache"
                         capacity: 1000
     hnsw_provider:
         hnsw_temporary_path: "~/tmp"
         hnsw_cache_config:
             weighted_lru:
+                name: "hnsw_cache"
                 capacity: 8589934592 # 8GB
         permitted_parallelism: 180
-    fetch_log_batch_size: 4000
+    fetch_log_batch_size: 1000
 
 compaction_service:
     service_name: "compaction-service"
@@ -117,7 +120,7 @@ compaction_service:
             host: "logservice.chroma"
             port: 50051
             connect_timeout_ms: 5000
-            request_timeout_ms: 5000
+            request_timeout_ms: 60000 # 1 minute
             alt_host: "rust-log-service.chroma"
             use_alt_host_for_everything: true
     dispatcher:
@@ -134,22 +137,25 @@ compaction_service:
         max_compaction_size: 10000
         max_partition_size: 5000
         disabled_collections: [] # uuids to disable compaction for
-        fetch_log_batch_size: 4000
+        fetch_log_batch_size: 1000
     blockfile_provider:
         arrow:
             block_manager_config:
-                max_block_size_bytes: 16384
+                max_block_size_bytes: 8388608 # 8MB
                 block_cache_config:
                     lru:
+                        name: "block_cache"
                         capacity: 1000
             sparse_index_manager_config:
                 sparse_index_cache_config:
                     lru:
+                        name: "sparse_index_cache"
                         capacity: 1000
     hnsw_provider:
         hnsw_temporary_path: "~/tmp"
         hnsw_cache_config:
             weighted_lru:
+                name: "hnsw_cache"
                 capacity: 8192 # 8192 MiB = 8GB
         permitted_parallelism: 180
     spann_provider:
@@ -179,3 +185,9 @@ log_service:
                 count_based_policy:
                     max_concurrent_requests: 500
                     bandwidth_allocation: [1.0]
+    writer:
+        throttle_fragment:
+            batch_interval_us: 100000
+            batch_size_bytes: 8388608 # 8MiB
+            throughput: 3300
+            headroom: 200

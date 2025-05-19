@@ -349,8 +349,7 @@ impl Handler<ScheduledCompactMessage> for CompactionManager {
         ctx: &ComponentContext<CompactionManager>,
     ) {
         tracing::info!("CompactionManager: Performing scheduled compaction");
-        let ids = self.compact_batch().await;
-        self.hnsw_index_provider.purge_by_id(&ids).await;
+        let _ = self.compact_batch().await;
 
         // Compaction is done, schedule the next compaction
         ctx.scheduler.schedule(
@@ -447,7 +446,7 @@ mod tests {
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_index::config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig};
-    use chroma_index::spann::types::GarbageCollectionContext;
+    use chroma_index::spann::types::{GarbageCollectionContext, SpannMetrics};
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
@@ -456,7 +455,8 @@ mod tests {
     use chroma_types::SegmentUuid;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord, Segment};
     use std::collections::HashMap;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+    use tokio::fs;
 
     #[tokio::test]
     async fn test_compaction_manager() {
@@ -466,6 +466,10 @@ mod tests {
             _ => panic!("Expected InMemoryLog"),
         };
         let tmpdir = tempfile::tempdir().unwrap();
+        // Clear temp dir.
+        tokio::fs::remove_dir_all(tmpdir.path())
+            .await
+            .expect("Failed to remove temp dir");
         let storage = Storage::Local(LocalStorage::new(tmpdir.path().to_str().unwrap()));
 
         let tenant_1 = "tenant_1".to_string();
@@ -643,7 +647,6 @@ mod tests {
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),
@@ -664,12 +667,12 @@ mod tests {
             PathBuf::from(tmpdir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
         let spann_provider = SpannProvider {
             hnsw_provider: hnsw_provider.clone(),
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: Some(gc_context),
+            metrics: SpannMetrics::default(),
         };
         let mut manager = CompactionManager::new(
             scheduler,
@@ -703,5 +706,25 @@ mod tests {
             (compacted == vec![collection_uuid_1, collection_uuid_2])
                 || (compacted == vec![collection_uuid_2, collection_uuid_1])
         );
+        check_purge_successful(tmpdir.path()).await;
+    }
+
+    pub async fn check_purge_successful(path: impl AsRef<Path>) {
+        let mut entries = fs::read_dir(&path).await.expect("Failed to read dir");
+
+        while let Some(entry) = entries.next_entry().await.expect("Failed to read next dir") {
+            let path = entry.path();
+            let metadata = entry.metadata().await.expect("Failed to read metadata");
+
+            if metadata.is_dir() {
+                assert!(
+                    path.ends_with("hnsw")
+                        || path.ends_with("block")
+                        || path.ends_with("sparse_index")
+                );
+            } else {
+                panic!("Expected hnsw purge to be successful")
+            }
+        }
     }
 }

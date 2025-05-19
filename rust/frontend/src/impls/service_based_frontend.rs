@@ -2,7 +2,7 @@ use crate::{
     config::FrontendConfig, executor::Executor, types::errors::ValidationError,
     CollectionsWithSegmentsProvider,
 };
-use backon::Retryable;
+use backon::{ExponentialBuilder, Retryable};
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
@@ -21,32 +21,37 @@ use chroma_types::{
     CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
     DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
     DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionError, GetCollectionRequest, GetCollectionResponse, GetCollectionsError,
-    GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError,
-    HeartbeatResponse, Include, InternalCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
+    Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
+    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
+    QueryRequest, QueryResponse, ResetError, ResetResponse, Segment, SegmentScope, SegmentType,
+    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{collections::HashSet, time::Duration};
 
 use super::utils::to_records;
 
 #[derive(Debug)]
 struct Metrics {
+    fork_retries_counter: Counter<u64>,
     delete_retries_counter: Counter<u64>,
     count_retries_counter: Counter<u64>,
     query_retries_counter: Counter<u64>,
     get_retries_counter: Counter<u64>,
+    add_retries_counter: Counter<u64>,
+    update_retries_counter: Counter<u64>,
+    upsert_retries_counter: Counter<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +63,8 @@ pub struct ServiceBasedFrontend {
     collections_with_segments_provider: CollectionsWithSegmentsProvider,
     max_batch_size: u32,
     metrics: Arc<Metrics>,
+    default_knn_index: KnnIndex,
+    retries_builder: ExponentialBuilder,
 }
 
 impl ServiceBasedFrontend {
@@ -68,18 +75,39 @@ impl ServiceBasedFrontend {
         log_client: Log,
         executor: Executor,
         max_batch_size: u32,
+        default_knn_index: KnnIndex,
     ) -> Self {
         let meter = global::meter("chroma");
+        let fork_retries_counter = meter.u64_counter("fork_retries").build();
         let delete_retries_counter = meter.u64_counter("delete_retries").build();
         let count_retries_counter = meter.u64_counter("count_retries").build();
         let query_retries_counter = meter.u64_counter("query_retries").build();
-        let get_retries_counter = meter.u64_counter("query_retries").build();
+        let get_retries_counter = meter.u64_counter("get_retries").build();
+        let add_retries_counter = meter.u64_counter("add_retries").build();
+        let update_retries_counter = meter.u64_counter("update_retries").build();
+        let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
         let metrics = Arc::new(Metrics {
+            fork_retries_counter,
             delete_retries_counter,
             count_retries_counter,
             query_retries_counter,
             get_retries_counter,
+            add_retries_counter,
+            update_retries_counter,
+            upsert_retries_counter,
         });
+        // factor: 2.0,
+        // min_delay_ms: 100,
+        // max_delay_ms: 5000,
+        // max_attempts: 5,
+        // jitter: true,
+        // TODO(Sanket): Ideally config for this.
+        let retries_builder = ExponentialBuilder::default()
+            .with_max_times(5)
+            .with_factor(2.0)
+            .with_max_delay(Duration::from_millis(5000))
+            .with_min_delay(Duration::from_millis(100))
+            .with_jitter();
         ServiceBasedFrontend {
             allow_reset,
             executor,
@@ -88,7 +116,13 @@ impl ServiceBasedFrontend {
             collections_with_segments_provider,
             max_batch_size,
             metrics,
+            default_knn_index,
+            retries_builder,
         }
+    }
+
+    pub fn get_default_knn_index(&self) -> KnnIndex {
+        self.default_knn_index
     }
 
     pub async fn heartbeat(&self) -> Result<HeartbeatResponse, HeartbeatError> {
@@ -99,6 +133,10 @@ impl ServiceBasedFrontend {
 
     pub fn get_max_batch_size(&mut self) -> u32 {
         self.max_batch_size
+    }
+
+    pub fn get_supported_segment_types(&self) -> Vec<SegmentType> {
+        self.executor.get_supported_segment_types()
     }
 
     async fn get_collection_dimension(
@@ -338,8 +376,44 @@ impl ServiceBasedFrontend {
         }: CreateCollectionRequest,
     ) -> Result<CreateCollectionResponse, CreateCollectionError> {
         let collection_id = CollectionUuid::new();
-        let configuration: Option<InternalCollectionConfiguration> =
-            configuration.map(|c| c.try_into()).transpose()?;
+
+        let supported_segment_types: HashSet<SegmentType> =
+            self.get_supported_segment_types().into_iter().collect();
+
+        if let Some(config) = configuration.as_ref() {
+            match &config.vector_index {
+                VectorIndexConfiguration::Spann { .. } => {
+                    if !supported_segment_types.contains(&SegmentType::Spann) {
+                        return Err(CreateCollectionError::SpannNotImplemented);
+                    }
+                }
+                VectorIndexConfiguration::Hnsw { .. } => {
+                    if !supported_segment_types.contains(&SegmentType::HnswDistributed)
+                        && !supported_segment_types.contains(&SegmentType::HnswLocalMemory)
+                        && !supported_segment_types.contains(&SegmentType::HnswLocalPersisted)
+                    {
+                        return Err(CreateCollectionError::HnswNotSupported);
+                    }
+                }
+            }
+        }
+
+        // Check default server configuration's index type
+        match self.default_knn_index {
+            KnnIndex::Spann => {
+                if !supported_segment_types.contains(&SegmentType::Spann) {
+                    return Err(CreateCollectionError::SpannNotImplemented);
+                }
+            }
+            KnnIndex::Hnsw => {
+                if !supported_segment_types.contains(&SegmentType::HnswDistributed)
+                    && !supported_segment_types.contains(&SegmentType::HnswLocalMemory)
+                    && !supported_segment_types.contains(&SegmentType::HnswLocalPersisted)
+                {
+                    return Err(CreateCollectionError::HnswNotSupported);
+                }
+            }
+        }
 
         let segments = match self.executor {
             Executor::Distributed(_) => {
@@ -495,6 +569,101 @@ impl ServiceBasedFrontend {
         Ok(DeleteCollectionRecordsResponse {})
     }
 
+    pub async fn retryable_fork(
+        &mut self,
+        ForkCollectionRequest {
+            tenant_id,
+            database_name,
+            source_collection_id,
+            target_collection_name,
+            ..
+        }: ForkCollectionRequest,
+    ) -> Result<ForkCollectionResponse, ForkCollectionError> {
+        let target_collection_id = CollectionUuid::new();
+        let log_offsets = self
+            .log_client
+            .fork_logs(&tenant_id, source_collection_id, target_collection_id)
+            .await?;
+        let collection_and_segments = self
+            .sysdb_client
+            .fork_collection(
+                source_collection_id,
+                log_offsets.compaction_offset,
+                log_offsets.enumeration_offset,
+                target_collection_id,
+                target_collection_name,
+            )
+            .await?;
+        let collection = collection_and_segments.collection.clone();
+        let latest_collection_logical_size_bytes = collection_and_segments
+            .collection
+            .size_bytes_post_compaction;
+
+        // Update the cache.
+        self.collections_with_segments_provider
+            .set_collection_with_segments(collection_and_segments)
+            .await;
+
+        // TODO: Submit event after the response is sent
+        MeterEvent::CollectionFork {
+            tenant: tenant_id,
+            database: database_name,
+            collection_id: source_collection_id.0,
+            latest_collection_logical_size_bytes,
+        }
+        .submit()
+        .await;
+
+        Ok(collection)
+    }
+
+    pub async fn fork_collection(
+        &mut self,
+        request: ForkCollectionRequest,
+    ) -> Result<ForkCollectionResponse, ForkCollectionError> {
+        let retries = Arc::new(AtomicUsize::new(0));
+        let fork_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            async move { self_clone.retryable_fork(request_clone).await }
+        };
+
+        let res = fork_to_retry
+            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+            .when(|e| {
+                matches!(
+                    e.code(),
+                    ErrorCodes::FailedPrecondition | ErrorCodes::NotFound | ErrorCodes::Unknown
+                )
+            })
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying fork() request for collection {}",
+                        request.source_collection_id
+                    );
+                }
+            })
+            .await;
+        self.metrics
+            .fork_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+        res
+    }
+
+    pub async fn retryable_push_logs(
+        &mut self,
+        tenant_id: &str,
+        collection_id: CollectionUuid,
+        records: Vec<OperationRecord>,
+    ) -> Result<(), Box<dyn ChromaError>> {
+        self.log_client
+            .push_logs(tenant_id, collection_id, records)
+            .await
+    }
+
     pub async fn add(
         &mut self,
         AddCollectionRecordsRequest {
@@ -521,10 +690,30 @@ impl ServiceBasedFrontend {
             to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        self.log_client
-            .push_logs(collection_id, records)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let retries = Arc::new(AtomicUsize::new(0));
+        let add_to_retry = || {
+            let mut self_clone = self.clone();
+            let records_clone = records.clone();
+            let tenant_id_clone = tenant_id.clone();
+            async move {
+                self_clone
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .await
+            }
+        };
+        let res = add_to_retry
+            .retry(self.retries_builder)
+            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!("Retrying add() request for collection {}", collection_id);
+                }
+            })
+            .await;
+        self.metrics
+            .add_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -537,7 +726,16 @@ impl ServiceBasedFrontend {
         .submit()
         .await;
 
-        Ok(AddCollectionRecordsResponse {})
+        match res {
+            Ok(()) => Ok(AddCollectionRecordsResponse {}),
+            Err(e) => {
+                if e.code() == ErrorCodes::AlreadyExists {
+                    Err(AddCollectionRecordsError::Backoff)
+                } else {
+                    Err(AddCollectionRecordsError::Other(Box::new(e) as _))
+                }
+            }
+        }
     }
 
     pub async fn update(
@@ -570,10 +768,30 @@ impl ServiceBasedFrontend {
         )
         .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        self.log_client
-            .push_logs(collection_id, records)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let retries = Arc::new(AtomicUsize::new(0));
+        let add_to_retry = || {
+            let mut self_clone = self.clone();
+            let records_clone = records.clone();
+            let tenant_id_clone = tenant_id.clone();
+            async move {
+                self_clone
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .await
+            }
+        };
+        let res = add_to_retry
+            .retry(self.retries_builder)
+            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!("Retrying update() request for collection {}", collection_id);
+                }
+            })
+            .await;
+        self.metrics
+            .update_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -586,7 +804,16 @@ impl ServiceBasedFrontend {
         .submit()
         .await;
 
-        Ok(UpdateCollectionRecordsResponse {})
+        match res {
+            Ok(()) => Ok(UpdateCollectionRecordsResponse {}),
+            Err(e) => {
+                if e.code() == ErrorCodes::AlreadyExists {
+                    Err(UpdateCollectionRecordsError::Backoff)
+                } else {
+                    Err(UpdateCollectionRecordsError::Other(Box::new(e) as _))
+                }
+            }
+        }
     }
 
     pub async fn upsert(
@@ -621,10 +848,30 @@ impl ServiceBasedFrontend {
         )
         .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-        self.log_client
-            .push_logs(collection_id, records)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let retries = Arc::new(AtomicUsize::new(0));
+        let add_to_retry = || {
+            let mut self_clone = self.clone();
+            let records_clone = records.clone();
+            let tenant_id_clone = tenant_id.clone();
+            async move {
+                self_clone
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .await
+            }
+        };
+        let res = add_to_retry
+            .retry(self.retries_builder)
+            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!("Retrying upsert() request for collection {}", collection_id);
+                }
+            })
+            .await;
+        self.metrics
+            .upsert_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
         // TODO: Submit event after the response is sent
         MeterEvent::CollectionWrite {
@@ -637,7 +884,16 @@ impl ServiceBasedFrontend {
         .submit()
         .await;
 
-        Ok(UpsertCollectionRecordsResponse {})
+        match res {
+            Ok(()) => Ok(UpsertCollectionRecordsResponse {}),
+            Err(e) => {
+                if e.code() == ErrorCodes::AlreadyExists {
+                    Err(UpsertCollectionRecordsError::Backoff)
+                } else {
+                    Err(UpsertCollectionRecordsError::Other(Box::new(e) as _))
+                }
+            }
+        }
     }
 
     pub async fn retryable_delete(
@@ -736,9 +992,15 @@ impl ServiceBasedFrontend {
         let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
         self.log_client
-            .push_logs(collection_id, records)
+            .push_logs(&tenant_id, collection_id, records)
             .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    DeleteCollectionRecordsError::Backoff
+                } else {
+                    DeleteCollectionRecordsError::Internal(Box::new(err) as _)
+                }
+            })?;
 
         if let Some(event) = read_event {
             event.submit().await;
@@ -1203,6 +1465,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             log,
             executor,
             max_batch_size,
+            config.default_knn_index,
         ))
     }
 }
@@ -1293,9 +1556,13 @@ mod tests {
         assert!(segments.iter().any(
             |s| s.r#type == SegmentType::BlockfileMetadata && s.scope == SegmentScope::METADATA
         ));
-        assert!(segments
-            .iter()
-            .any(|s| s.r#type == SegmentType::HnswDistributed && s.scope == SegmentScope::VECTOR));
+        assert!(
+            segments.iter().any(
+                |s| s.r#type == SegmentType::HnswDistributed && s.scope == SegmentScope::VECTOR
+            ) || segments
+                .iter()
+                .any(|s| s.r#type == SegmentType::Spann && s.scope == SegmentScope::VECTOR)
+        );
         assert!(segments
             .iter()
             .any(|s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD));

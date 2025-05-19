@@ -6,7 +6,9 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self};
-use chroma_types::{CollectionUuid, LogRecord, OperationRecord, RecordConversionError};
+use chroma_types::{
+    CollectionUuid, ForkLogsResponse, LogRecord, OperationRecord, RecordConversionError,
+};
 use std::fmt::Debug;
 use std::time::Duration;
 use thiserror::Error;
@@ -16,6 +18,8 @@ use uuid::Uuid;
 
 #[derive(Error, Debug)]
 pub enum GrpcPullLogsError {
+    #[error("Please backoff exponentially and retry")]
+    Backoff,
     #[error("Failed to fetch")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to scout logs: {0}")]
@@ -27,6 +31,7 @@ pub enum GrpcPullLogsError {
 impl ChromaError for GrpcPullLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GrpcPullLogsError::Backoff => ErrorCodes::Unavailable,
             GrpcPullLogsError::FailedToPullLogs(err) => err.code().into(),
             GrpcPullLogsError::FailedToScoutLogs(err) => err.code().into(),
             GrpcPullLogsError::ConversionError(_) => ErrorCodes::Internal,
@@ -36,7 +41,11 @@ impl ChromaError for GrpcPullLogsError {
 
 #[derive(Error, Debug)]
 pub enum GrpcPushLogsError {
-    #[error("Failed to push logs")]
+    #[error("Please backoff exponentially and retry")]
+    Backoff,
+    #[error("The log is sealed.  No writes can happen.")]
+    Sealed,
+    #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] tonic::Status),
     #[error("Failed to convert records to proto")]
     ConversionError(#[from] RecordConversionError),
@@ -45,8 +54,27 @@ pub enum GrpcPushLogsError {
 impl ChromaError for GrpcPushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GrpcPushLogsError::Backoff => ErrorCodes::AlreadyExists,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
+            GrpcPushLogsError::Sealed => ErrorCodes::FailedPrecondition,
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GrpcForkLogsError {
+    #[error("Please backoff exponentially and retry")]
+    Backoff,
+    #[error("Failed to push logs: {0}")]
+    FailedToForkLogs(#[from] tonic::Status),
+}
+
+impl ChromaError for GrpcForkLogsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcForkLogsError::Backoff => ErrorCodes::Unavailable,
+            GrpcForkLogsError::FailedToForkLogs(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -183,11 +211,13 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
 impl GrpcLog {
     fn client_for(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
     ) -> &mut LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>> {
         let collection_id = collection_id.to_string();
         if let Some(alt) = self.alt_client.as_mut() {
             if self.config.use_alt_host_for_everything
+                || self.config.use_alt_for_tenants.iter().any(|t| t == tenant)
                 || self.config.use_alt_for_collections.contains(&collection_id)
             {
                 tracing::info!("using alt client for {collection_id}");
@@ -197,17 +227,26 @@ impl GrpcLog {
         &mut self.client
     }
 
+    fn client_for_purge(
+        &mut self,
+    ) -> Option<&mut LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>>
+    {
+        self.alt_client.as_mut()
+    }
+
     // ScoutLogs returns the offset of the next record to be inserted into the log.
+    #[tracing::instrument(skip(self), ret)]
     pub(super) async fn scout_logs(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
-        _: u64,
+        start_from: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
-        let request = self
-            .client_for(collection_id)
-            .scout_logs(chroma_proto::ScoutLogsRequest {
-                collection_id: collection_id.0.to_string(),
-            });
+        let request =
+            self.client_for(tenant, collection_id)
+                .scout_logs(chroma_proto::ScoutLogsRequest {
+                    collection_id: collection_id.0.to_string(),
+                });
         let response = request.await;
         let response = match response {
             Ok(response) => response,
@@ -220,8 +259,10 @@ impl GrpcLog {
         Ok(scout.first_uninserted_record_offset as u64)
     }
 
+    #[tracing::instrument(skip(self))]
     pub(super) async fn read(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
@@ -231,15 +272,15 @@ impl GrpcLog {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
         };
-        let request = self
-            .client_for(collection_id)
-            .pull_logs(chroma_proto::PullLogsRequest {
-                // NOTE(rescrv):  Use the untyped string representation of the collection ID.
-                collection_id: collection_id.0.to_string(),
-                start_from_offset: offset,
-                batch_size,
-                end_timestamp,
-            });
+        let request =
+            self.client_for(tenant, collection_id)
+                .pull_logs(chroma_proto::PullLogsRequest {
+                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                    collection_id: collection_id.0.to_string(),
+                    start_from_offset: offset,
+                    batch_size,
+                    end_timestamp,
+                });
         let response = request.await;
         match response {
             Ok(response) => {
@@ -259,14 +300,19 @@ impl GrpcLog {
                 Ok(result)
             }
             Err(e) => {
-                tracing::error!("Failed to pull logs: {}", e);
-                Err(GrpcPullLogsError::FailedToPullLogs(e))
+                if e.code() == chroma_error::ErrorCodes::Unavailable.into() {
+                    Err(GrpcPullLogsError::Backoff)
+                } else {
+                    tracing::error!("Failed to pull logs: {}", e);
+                    Err(GrpcPullLogsError::FailedToPullLogs(e))
+                }
             }
         }
     }
 
     pub(super) async fn push_logs(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
     ) -> Result<(), GrpcPushLogsError> {
@@ -280,9 +326,49 @@ impl GrpcLog {
                 >>()?,
         };
 
-        self.client_for(collection_id).push_logs(request).await?;
+        let resp = self
+            .client_for(tenant, collection_id)
+            .push_logs(request)
+            .await
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable.into()
+                    || err.code() == ErrorCodes::AlreadyExists.into()
+                {
+                    GrpcPushLogsError::Backoff
+                } else {
+                    err.into()
+                }
+            })?;
+        let resp = resp.into_inner();
+        if resp.log_is_sealed {
+            Err(GrpcPushLogsError::Sealed)
+        } else {
+            Ok(())
+        }
+    }
 
-        Ok(())
+    pub(super) async fn fork_logs(
+        &mut self,
+        tenant: &str,
+        source_collection_id: CollectionUuid,
+        target_collection_id: CollectionUuid,
+    ) -> Result<ForkLogsResponse, GrpcForkLogsError> {
+        let response = self
+            .client_for(tenant, source_collection_id)
+            .fork_logs(chroma_proto::ForkLogsRequest {
+                source_collection_id: source_collection_id.to_string(),
+                target_collection_id: target_collection_id.to_string(),
+            })
+            .await
+            .map_err(|err| match err.code() {
+                tonic::Code::Unavailable => GrpcForkLogsError::Backoff,
+                _ => err.into(),
+            })?
+            .into_inner();
+        Ok(ForkLogsResponse {
+            compaction_offset: response.compaction_offset,
+            enumeration_offset: response.enumeration_offset,
+        })
     }
 
     pub(crate) async fn get_collections_with_new_data(
@@ -363,16 +449,17 @@ impl GrpcLog {
 
     pub(super) async fn update_collection_log_offset(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), GrpcUpdateCollectionLogOffsetError> {
-        let request = self.client_for(collection_id).update_collection_log_offset(
-            chroma_proto::UpdateCollectionLogOffsetRequest {
+        let request = self
+            .client_for(tenant, collection_id)
+            .update_collection_log_offset(chroma_proto::UpdateCollectionLogOffsetRequest {
                 // NOTE(rescrv):  Use the untyped string representation of the collection ID.
                 collection_id: collection_id.0.to_string(),
                 log_offset: new_offset,
-            },
-        );
+            });
         let response = request.await;
         match response {
             Ok(_) => Ok(()),
@@ -384,16 +471,19 @@ impl GrpcLog {
         &mut self,
         collection_id: CollectionUuid,
     ) -> Result<(), GrpcPurgeDirtyForCollectionError> {
-        let request = self.client_for(collection_id).purge_dirty_for_collection(
-            chroma_proto::PurgeDirtyForCollectionRequest {
-                // NOTE(rescrv):  Use the untyped string representation of the collection ID.
-                collection_id: collection_id.0.to_string(),
-            },
-        );
-        let response = request.await;
-        match response {
-            Ok(_) => Ok(()),
-            Err(e) => Err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty(e)),
+        if let Some(client) = self.client_for_purge() {
+            let request =
+                client.purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
+                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                    collection_id: collection_id.0.to_string(),
+                });
+            let response = request.await;
+            match response {
+                Ok(_) => Ok(()),
+                Err(e) => Err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty(e)),
+            }
+        } else {
+            Ok(())
         }
     }
 }

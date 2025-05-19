@@ -3,11 +3,13 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	log "github.com/chroma-core/chroma/go/pkg/log/store/db"
 	"github.com/chroma-core/chroma/go/pkg/log/sysdb"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	trace_log "github.com/pingcap/log"
 	"go.uber.org/zap"
@@ -21,7 +23,7 @@ type LogRepository struct {
 	sysDb   sysdb.ISysDB
 }
 
-func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, records [][]byte) (insertCount int64, err error) {
+func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, records [][]byte) (insertCount int64, isSealed bool, err error) {
 	var tx pgx.Tx
 	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -49,6 +51,14 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 				RecordCompactionOffsetPosition:  0,
 			})
 			if err != nil {
+				var pgErr *pgconn.PgError
+				// This is a retryable error and should be retried by upstream. It happens
+				// when two concurrent adds to the same collection happen.
+				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+					trace_log.Error("Duplicate key error while inserting into collection table", zap.String("collectionId", collectionId), zap.String("detail", pgErr.Detail))
+					err = status.Error(codes.AlreadyExists, fmt.Sprintf("Duplicate key error while inserting into collection table: %s", pgErr.Detail))
+					return
+				}
 				trace_log.Error("Error in creating a new entry in collection table", zap.Error(err), zap.String("collectionId", collectionId))
 				return
 			}
@@ -56,6 +66,13 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 			return
 		}
 	}
+	if collection.IsSealed {
+		insertCount = 0
+		isSealed = true
+		err = nil
+		return
+	}
+	isSealed = false
 	params := make([]log.InsertRecordParams, len(records))
 	for i, record := range records {
 		offset := collection.RecordEnumerationOffsetPosition + int64(i) + 1
@@ -68,6 +85,14 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 	}
 	insertCount, err = queriesWithTx.InsertRecord(ctx, params)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		// This is a retryable error and should be retried by upstream. It happens
+		// when two concurrent adds to the same collection happen.
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			trace_log.Error("Duplicate key error while inserting into record_log", zap.String("collectionId", collectionId), zap.String("detail", pgErr.Detail))
+			err = status.Error(codes.AlreadyExists, fmt.Sprintf("Duplicate key error while inserting into record_log: %s", pgErr.Detail))
+			return
+		}
 		trace_log.Error("Error in inserting records to record_log table", zap.Error(err), zap.String("collectionId", collectionId))
 		return
 	}
@@ -122,6 +147,68 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 			records, err = nil, status.Error(codes.NotFound, "Some entries have been purged")
 			return
 		}
+	}
+	return
+}
+
+func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID string, targetCollectionID string) (compactionOffset uint64, enumerationOffset uint64, err error) {
+	var tx pgx.Tx
+	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		trace_log.Error("Error in begin transaction for forking logs in log service", zap.Error(err), zap.String("sourceCollectionID", sourceCollectionID))
+		return
+	}
+	queriesWithTx := r.queries.WithTx(tx)
+	defer func() {
+		if err != nil {
+			tx.Rollback(ctx)
+		} else {
+			err = tx.Commit(ctx)
+		}
+	}()
+
+	sourceBounds, err := queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
+	if err != nil {
+		trace_log.Error("Error in getting compaction and enumeration offset for source collection", zap.Error(err), zap.String("collectionId", sourceCollectionID))
+		return
+	}
+	err = queriesWithTx.ForkCollectionRecord(ctx, log.ForkCollectionRecordParams{
+		CollectionID:   sourceCollectionID,
+		CollectionID_2: targetCollectionID,
+	})
+	if err != nil {
+		trace_log.Error("Error forking log record", zap.String("sourceCollectionID", sourceCollectionID))
+		return
+	}
+	targetBounds, err := queriesWithTx.GetMinimumMaximumOffsetForCollection(ctx, targetCollectionID)
+	if err != nil {
+		trace_log.Error("Error in deriving compaction and enumeration offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
+		return
+	}
+
+	if targetBounds.MinOffset == 0 {
+		// Either the source collection is not compacted yet or no log is forked
+		compactionOffset = uint64(sourceBounds.RecordCompactionOffsetPosition)
+	} else {
+		// Some logs are forked, the min offset is guaranteed to be larger than source compaction offset
+		compactionOffset = uint64(targetBounds.MinOffset - 1)
+	}
+	if targetBounds.MaxOffset == 0 {
+		// Either the source collection is empty or no log is forked
+		enumerationOffset = uint64(sourceBounds.RecordEnumerationOffsetPosition)
+	} else {
+		// Some logs are forked. The max offset is the enumeration offset
+		enumerationOffset = uint64(targetBounds.MaxOffset)
+	}
+
+	_, err = queriesWithTx.InsertCollection(ctx, log.InsertCollectionParams{
+		ID:                              targetCollectionID,
+		RecordCompactionOffsetPosition:  int64(compactionOffset),
+		RecordEnumerationOffsetPosition: int64(enumerationOffset),
+	})
+	if err != nil {
+		trace_log.Error("Error in updating offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
+		return
 	}
 	return
 }

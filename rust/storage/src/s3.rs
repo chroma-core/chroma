@@ -310,6 +310,7 @@ impl S3Storage {
         self.get_with_e_tag(key).await.map(|(buf, _)| buf)
     }
 
+    /// Perform a strongly consistent get and return the e_tag.
     #[tracing::instrument(skip(self))]
     pub async fn get_with_e_tag(
         &self,
@@ -320,23 +321,23 @@ impl S3Storage {
             .instrument(tracing::trace_span!("S3 get stream"))
             .await?;
         let read_block_span = tracing::trace_span!("S3 read bytes to end");
-        let buf = read_block_span
-            .in_scope(|| async {
-                let mut buf: Vec<u8> = Vec::new();
-                while let Some(res) = stream.next().await {
-                    match res {
-                        Ok(chunk) => {
-                            buf.extend(chunk);
-                        }
-                        Err(e) => {
-                            tracing::error!("Error reading from S3: {}", e);
-                            return Err(e);
-                        }
+        let buf = async {
+            let mut buf: Vec<u8> = Vec::new();
+            while let Some(res) = stream.next().await {
+                match res {
+                    Ok(chunk) => {
+                        buf.extend(chunk);
+                    }
+                    Err(e) => {
+                        tracing::error!("Error reading from S3: {}", e);
+                        return Err(e);
                     }
                 }
-                Ok(Some(buf))
-            })
-            .await?;
+            }
+            Ok(Some(buf))
+        }
+        .instrument(read_block_span)
+        .await?;
         match buf {
             Some(buf) => Ok((Arc::new(buf), e_tag)),
             None => {

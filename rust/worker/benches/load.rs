@@ -58,6 +58,7 @@ pub fn empty_fetch_log(collection_uuid: CollectionUuid) -> FetchLogOperator {
         start_log_offset_id: 0,
         maximum_fetch_count: Some(0),
         collection_uuid,
+        tenant: "default_tenant".to_string(),
     }
 }
 

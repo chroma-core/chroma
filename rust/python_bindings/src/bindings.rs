@@ -19,12 +19,12 @@ use chroma_types::{
     CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
     DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
     GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
-    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse,
-    UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
+    InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListDatabasesRequest,
+    Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest,
+    UpdateMetadata, WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
-
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
 
@@ -111,6 +111,8 @@ impl Bindings {
 
         let executor_config = ExecutorConfig::Local(LocalExecutorConfig {});
 
+        let knn_index = KnnIndex::Hnsw;
+
         let frontend_config = FrontendConfig {
             allow_reset,
             segment_manager: Some(segment_manager_config),
@@ -119,6 +121,7 @@ impl Bindings {
             collections_with_segments_provider: collection_cache_config,
             log: log_config,
             executor: executor_config,
+            default_knn_index: knn_index,
         };
 
         let frontend = runtime.block_on(async {
@@ -265,12 +268,27 @@ impl Bindings {
             None => None,
         };
 
+        let configuration = match configuration_json {
+            Some(c) => Some(InternalCollectionConfiguration::try_from_config(
+                c,
+                self.frontend.get_default_knn_index(),
+            )?),
+            None => Some(InternalCollectionConfiguration::try_from_config(
+                CollectionConfiguration {
+                    hnsw: None,
+                    spann: None,
+                    embedding_function: None,
+                },
+                self.frontend.get_default_knn_index(),
+            )?),
+        };
+
         let request = CreateCollectionRequest::try_new(
             tenant,
             database,
             name,
             metadata,
-            configuration_json,
+            configuration,
             get_or_create,
         )?;
 
@@ -597,12 +615,13 @@ impl Bindings {
     }
 
     #[pyo3(
-        signature = (collection_id, query_embeddings, n_results, r#where = None, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (collection_id, ids, query_embeddings, n_results, r#where = None, where_document = None, include = ["metadatas".to_string(), "documents".to_string()].to_vec(), tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     #[allow(clippy::too_many_arguments)]
     fn query(
         &self,
         collection_id: String,
+        ids: Option<Vec<String>>,
         query_embeddings: Vec<Vec<f32>>,
         n_results: u32,
         r#where: Option<String>,
@@ -628,7 +647,7 @@ impl Bindings {
             tenant,
             database,
             collection_id,
-            None,
+            ids,
             r#where,
             query_embeddings,
             n_results,

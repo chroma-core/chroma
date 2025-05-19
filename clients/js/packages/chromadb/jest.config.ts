@@ -5,9 +5,12 @@ export default {
   collectCoverage: false,
   testTimeout: 15000,
   transform: {
-    "^.+\\.(ts|tsx)$": ["ts-jest", {
-      tsconfig: "tsconfig.json"
-    }]
+    "^.+\\.(ts|tsx)$": [
+      "ts-jest",
+      {
+        tsconfig: "tsconfig.json",
+      },
+    ],
   },
   collectCoverageFrom: [
     "./src/**/*.{js,ts}",
@@ -15,6 +18,6 @@ export default {
     "!**/vendor/**",
   ],
   moduleNameMapper: {
-    "@internal/chromadb-core": "<rootDir>/../chromadb-core/src"
-  }
+    "@internal/chromadb-core": "<rootDir>/../chromadb-core/src",
+  },
 };

@@ -226,10 +226,10 @@ class AsyncBaseAPI(ABC):
 
         Args:
             ids: The IDs of the entries to get. Defaults to None.
-            where: Conditional filtering on metadata. Defaults to {}.
+            where: Conditional filtering on metadata. Defaults to None.
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where_document: Conditional filtering on documents. Defaults to None.
             include: The fields to include in the response.
                           Defaults to ["embeddings", "metadatas", "documents"].
         Returns:
@@ -251,8 +251,8 @@ class AsyncBaseAPI(ABC):
         Args:
             collection_id: The UUID of the collection to delete the entries from.
             ids: The IDs of the entries to delete. Defaults to None.
-            where: Conditional filtering on metadata. Defaults to {}.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where: Conditional filtering on metadata. Defaults to None.
+            where_document: Conditional filtering on documents. Defaults to None.
 
         Returns:
             IDs: The list of IDs of the entries that were deleted.
@@ -264,6 +264,7 @@ class AsyncBaseAPI(ABC):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -275,8 +276,8 @@ class AsyncBaseAPI(ABC):
             collection_id: The UUID of the collection to query.
             query_embeddings: The embeddings to use as the query.
             n_results: The number of results to return. Defaults to 10.
-            where: Conditional filtering on metadata. Defaults to {}.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where: Conditional filtering on metadata. Defaults to None.
+            where_document: Conditional filtering on documents. Defaults to None.
             include: The fields to include in the response.
                           Defaults to ["embeddings", "metadatas", "documents", "distances"].
 
@@ -631,6 +632,16 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         pass
 
     @abstractmethod
+    async def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        pass
+
+    @abstractmethod
     @override
     async def _count(
         self,
@@ -718,6 +729,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,

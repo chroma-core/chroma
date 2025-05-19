@@ -25,6 +25,11 @@ import (
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 )
 
+// hard-coding this here despite it also being in pkg/grpcutils/service.go because
+// using the methods from grpcutils results in breaking our metrics collection for
+// some reason. This service is being deprecated soon, so this is just a quick fix.
+const maxGrpcFrameSize = 256 * 1024 * 1024
+
 func main() {
 	ctx := context.Background()
 
@@ -55,7 +60,10 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to listen", zap.Error(err))
 	}
-	s := grpc.NewServer(grpc.UnaryInterceptor(sharedOtel.ServerGrpcInterceptor))
+	s := grpc.NewServer(
+		grpc.MaxRecvMsgSize(maxGrpcFrameSize),
+		grpc.UnaryInterceptor(sharedOtel.ServerGrpcInterceptor),
+	)
 	healthcheck := health.NewServer()
 	healthgrpc.RegisterHealthServer(s, healthcheck)
 

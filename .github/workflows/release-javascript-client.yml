@@ -13,15 +13,12 @@ on:
 env:
   PNPM_CACHE_FOLDER: .cache/pnpm
 jobs:
-  release-js-bindings:
-    uses: ./.github/workflows/_build_js_binding.yml
   release:
-    needs: release-js-bindings
     strategy:
       fail-fast: false
       matrix:
         registry: [ "https://registry.npmjs.org", "https://npm.pkg.github.com" ]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     permissions: write-all
     steps:
     - name: Resolve tag
@@ -58,7 +55,7 @@ jobs:
         version: 9
         run_install: false
     - name: Setup Node.js
-      uses: actions/setup-node@v4
+      uses: useblacksmith/setup-node@v5
       with:
         node-version: "18.x"
         registry-url: ${{ matrix.registry }}
@@ -67,7 +64,7 @@ jobs:
         cache: 'pnpm'
         cache-dependency-path: 'clients/js/pnpm-lock.yaml'
     - name: Install dependencies
-      run: pnpm install --frozen-lockfile
+      run: pnpm install --no-frozen-lockfile
       working-directory: ./clients/js/
     - name: Build packages
       run: pnpm build

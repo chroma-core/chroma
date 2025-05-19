@@ -3,7 +3,10 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage};
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
+use chroma_types::{
+    chroma_proto::{CollectionVersionFile, VersionListForCollection},
+    HNSW_PATH,
+};
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -114,7 +117,7 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                                 file_type
                             );
                             // Skip hnsw_index files
-                            if file_type == "hnsw_index" {
+                            if file_type == "hnsw_index" || file_type == HNSW_PATH {
                                 if *version == input.oldest_version_to_keep {
                                     continue;
                                 }

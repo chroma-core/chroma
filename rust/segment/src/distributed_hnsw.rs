@@ -264,6 +264,10 @@ impl DistributedHNSWSegmentWriter {
         flushed_files.insert(HNSW_INDEX.to_string(), vec![hnsw_index_id.to_string()]);
         Ok(flushed_files)
     }
+
+    pub fn index_uuid(&self) -> IndexUuid {
+        self.index.inner.read().id
+    }
 }
 
 #[derive(Clone)]
@@ -329,37 +333,23 @@ impl DistributedHNSWSegmentReader {
                 }
             };
             let index_uuid = IndexUuid(index_uuid);
-            // We take a lock here to synchronize concurrent forks of the same index.
-            // Otherwise, we could end up with a corrupted index since the filesystem
-            // operations are not guaranteed to be atomic.
-            // The lock is a partitioned mutex to allow for higher concurrency across collections.
-            let _guard = hnsw_index_provider.write_mutex.lock(&index_uuid).await;
-            let index =
-                match hnsw_index_provider
-                    .get(&index_uuid, &segment.collection)
-                    .await
-                {
-                    Some(index) => index,
-                    None => {
-                        match hnsw_index_provider
-                            .open(
-                                &index_uuid,
-                                &segment.collection,
-                                dimensionality as i32,
-                                hnsw_configuration.space.clone().into(),
-                                hnsw_configuration.ef_search,
-                            )
-                            .await
-                        {
-                            Ok(index) => index,
-                            Err(e) => return Err(Box::new(
-                                DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(
-                                    *e,
-                                ),
-                            )),
-                        }
-                    }
-                };
+            let index = match hnsw_index_provider
+                .open(
+                    &index_uuid,
+                    &segment.collection,
+                    dimensionality as i32,
+                    hnsw_configuration.space.clone().into(),
+                    hnsw_configuration.ef_search,
+                )
+                .await
+            {
+                Ok(index) => index,
+                Err(e) => {
+                    return Err(Box::new(
+                        DistributedHNSWSegmentFromSegmentError::HnswIndexProviderOpenError(*e),
+                    ))
+                }
+            };
 
             Ok(Box::new(DistributedHNSWSegmentReader::new(
                 index, segment.id,
@@ -389,8 +379,8 @@ pub mod test {
 
     use chroma_index::{HnswIndexConfig, DEFAULT_MAX_ELEMENTS};
     use chroma_types::{
-        Collection, CollectionUuid, HnswConfiguration, InternalCollectionConfiguration, Segment,
-        SegmentUuid,
+        Collection, CollectionUuid, InternalCollectionConfiguration, InternalHnswConfiguration,
+        Segment, SegmentUuid,
     };
     use tempfile::tempdir;
     use uuid::Uuid;
@@ -399,7 +389,7 @@ pub mod test {
     fn parameter_defaults() {
         let persist_path = tempdir().unwrap().path().to_owned();
 
-        let hnsw_configuration = HnswConfiguration::default();
+        let hnsw_configuration = InternalHnswConfiguration::default();
         let config = HnswIndexConfig::new_persistent(
             hnsw_configuration.max_neighbors,
             hnsw_configuration.ef_construction,
@@ -408,7 +398,7 @@ pub mod test {
         )
         .expect("Error creating hnsw index config");
 
-        let default_hnsw_params = HnswConfiguration::default();
+        let default_hnsw_params = InternalHnswConfiguration::default();
 
         assert_eq!(config.max_elements, DEFAULT_MAX_ELEMENTS);
         assert_eq!(config.m, default_hnsw_params.max_neighbors);
@@ -423,10 +413,12 @@ pub mod test {
         // Try partial override
         let collection = Collection {
             config: InternalCollectionConfiguration {
-                vector_index: chroma_types::VectorIndexConfiguration::Hnsw(HnswConfiguration {
-                    max_neighbors: 10,
-                    ..Default::default()
-                }),
+                vector_index: chroma_types::VectorIndexConfiguration::Hnsw(
+                    InternalHnswConfiguration {
+                        max_neighbors: 10,
+                        ..Default::default()
+                    },
+                ),
                 embedding_function: None,
             },
             ..Default::default()

@@ -2,7 +2,7 @@
 against-tilt = { max-threads = 1 }
 
 [profile.default]
-default-filter = "not test(/test_k8s_integration_/)"
+default-filter = "not test(/test_k8s_integration_/) and not test(/test_long_running_/)"
 
 [profile.k8s_integration]
 default-filter = "test(/test_k8s_integration_/)"
@@ -22,4 +22,10 @@ filter = "all()"
 test-group = "against-tilt"
 
 [profile.ci_k8s_integration.junit]
+path = "junit.xml"
+
+[profile.ci_long_running]
+default-filter = "test(/test_long_running_/)"
+
+[profile.ci_long_running.junit]
 path = "junit.xml"

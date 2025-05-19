@@ -3,8 +3,9 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_segment::distributed_hnsw::{
-    DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
+use chroma_segment::{
+    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
+    distributed_spann::SpannSegmentReaderError,
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
@@ -61,6 +62,8 @@ pub enum KnnError {
     SpannHeadSearch(#[from] SpannCentersSearchError),
     #[error("Error running Spann Knn Merge Operator")]
     SpannKnnMerge(#[from] SpannKnnMergeError),
+    #[error("Error creating spann segment reader: {0}")]
+    SpannSegmentReaderCreationError(#[from] SpannSegmentReaderError),
     #[error("Invalid distance function")]
     InvalidDistanceFunction,
     #[error("Operation aborted because resources exhausted")]
@@ -88,6 +91,7 @@ impl ChromaError for KnnError {
             KnnError::SpannKnnMerge(_) => ErrorCodes::Internal,
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
+            KnnError::SpannSegmentReaderCreationError(e) => e.code(),
         }
     }
 }
@@ -208,7 +212,7 @@ impl Orchestrator for KnnFilterOrchestrator {
         self.dispatcher.clone()
     }
 
-    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
         vec![wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver())]
     }
 
@@ -236,7 +240,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -266,17 +270,20 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
         message: TaskResult<FilterOutput, FilterError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
-        let collection_dimension = match self.ok_or_terminate(
-            self.collection_and_segments
-                .collection
-                .dimension
-                .ok_or(KnnError::NoCollectionDimension),
-            ctx,
-        ) {
+        let collection_dimension = match self
+            .ok_or_terminate(
+                self.collection_and_segments
+                    .collection
+                    .dimension
+                    .ok_or(KnnError::NoCollectionDimension),
+                ctx,
+            )
+            .await
+        {
             Some(dim) => dim as u32,
             None => return,
         };
@@ -294,6 +301,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                         ),
                     ctx,
                 )
+                .await
                 .flatten()
             {
                 Some(hnsw_configuration) => hnsw_configuration,
@@ -315,19 +323,22 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                 }
 
                 Err(err) => {
-                    self.terminate_with_result(Err((*err).into()), ctx);
+                    self.terminate_with_result(Err((*err).into()), ctx).await;
                     return;
                 }
             }
         } else {
-            let params = match self.ok_or_terminate(
-                self.collection_and_segments
-                    .collection
-                    .config
-                    .get_spann_config()
-                    .ok_or(KnnError::InvalidDistanceFunction),
-                ctx,
-            ) {
+            let params = match self
+                .ok_or_terminate(
+                    self.collection_and_segments
+                        .collection
+                        .config
+                        .get_spann_config()
+                        .ok_or(KnnError::InvalidDistanceFunction),
+                    ctx,
+                )
+                .await
+            {
                 Some(params) => params,
                 None => return,
             };
@@ -351,7 +362,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
             dimension: collection_dimension as usize,
             fetch_log_bytes,
         };
-        self.terminate_with_result(Ok(output), ctx);
+        self.terminate_with_result(Ok(output), ctx).await;
     }
 }
 
