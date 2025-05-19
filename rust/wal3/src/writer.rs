@@ -197,27 +197,29 @@ impl LogWriter {
             num_bytes,
             setsum,
         };
-        let mut new_manifest = manifest.clone();
-        // SAFETY(rescrv):  This is unit tested to never happen.  If it happens, add more tests.
-        if !new_manifest.can_apply_fragment(&frag) {
-            tracing::error!("Cannot apply frag to a clean manifest.");
-            return Err(Error::Internal);
+        if start < limit {
+            let mut new_manifest = manifest.clone();
+            // SAFETY(rescrv):  This is unit tested to never happen.  If it happens, add more tests.
+            if !new_manifest.can_apply_fragment(&frag) {
+                tracing::error!("Cannot apply frag to a clean manifest.");
+                return Err(Error::Internal);
+            }
+            new_manifest.apply_fragment(frag);
+            // SAFETY(rescrv):  If this fails, there's nothing left to do.
+            manifest
+                .install(
+                    &ThrottleOptions::default(),
+                    storage,
+                    prefix,
+                    Some(&e_tag),
+                    &new_manifest,
+                )
+                .await?;
+            // Not Safety:
+            // We mark dirty, but if we lose that we lose that.
+            // Failure to mark dirty fails the bootstrap.
+            mark_dirty.mark_dirty(limit, num_records).await?;
         }
-        new_manifest.apply_fragment(frag);
-        // SAFETY(rescrv):  If this fails, there's nothing left to do.
-        manifest
-            .install(
-                &ThrottleOptions::default(),
-                storage,
-                prefix,
-                Some(&e_tag),
-                &new_manifest,
-            )
-            .await?;
-        // Not Safety:
-        // We mark dirty, but if we lose that we lose that.
-        // Failure to mark dirty fails the bootstrap.
-        mark_dirty.mark_dirty(limit, num_records).await?;
         Ok(())
     }
 
