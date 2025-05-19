@@ -6,7 +6,12 @@ import {
 } from "./utils";
 import { CollectionConfiguration, DefaultService as Api } from "./api";
 import { CollectionMetadata, UserIdentity } from "./types";
-import { Collection, CollectionImpl } from "./collection";
+import {
+  Collection,
+  CollectionAPI,
+  CollectionAPIImpl,
+  CollectionImpl,
+} from "./collection";
 import {
   EmbeddingFunction,
   getDefaultEFConfig,
@@ -14,6 +19,8 @@ import {
   serializeEmbeddingFunction,
 } from "./embedding-function";
 import { chromaFetch } from "./chroma-fetch";
+import { d } from "@hey-api/openapi-ts/dist/types.d-C5lgdIHG";
+import * as process from "node:process";
 
 export interface ChromaClientArgs {
   host?: string;
@@ -26,8 +33,8 @@ export interface ChromaClientArgs {
 }
 
 export class ChromaClient {
-  public readonly tenant: string;
-  public readonly database: string;
+  private _tenant: string | undefined;
+  private _database: string | undefined;
   private readonly apiClient: ReturnType<typeof createClient>;
 
   constructor(args: Partial<ChromaClientArgs> = {}) {
@@ -43,8 +50,8 @@ export class ChromaClient {
 
     const baseUrl = `${ssl ? "https" : "http"}://${host}:${port}`;
 
-    this.tenant = tenant as string;
-    this.database = database as string;
+    this._tenant = tenant || process.env.CHROMA_TENANT;
+    this._database = database || process.env.CHROMA_DATABASE;
 
     const configOptions = {
       ...fetchOptions,
@@ -57,7 +64,37 @@ export class ChromaClient {
     this.apiClient.setConfig({ fetch: chromaFetch });
   }
 
-  private path(): { tenant: string; database: string } {
+  public get tenant(): string | undefined {
+    return this._tenant;
+  }
+
+  protected set tenant(tenant: string | undefined) {
+    this._tenant = tenant;
+  }
+
+  public get database(): string | undefined {
+    return this._database;
+  }
+
+  protected set database(database: string | undefined) {
+    this._database = database;
+  }
+
+  private async path(): Promise<{ tenant: string; database: string }> {
+    if (!this._tenant || !this._database) {
+      const { tenant, databases } = await this.getUserIdentity();
+      this._tenant = tenant;
+      if (databases.length === 0) {
+        throw new Error(
+          `Your API key does not have access to any DBs for tenant ${this._tenant}`,
+        );
+      }
+      if (databases.length > 1 || databases[0] === "*") {
+        throw new Error(
+          "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
+        );
+      }
+    }
     return { tenant: this.tenant, database: this.database };
   }
 
@@ -162,7 +199,13 @@ export class ChromaClient {
     });
   }
 
-  public async getCollection({ name }: { name: string }): Promise<Collection> {
+  public async getCollection({
+    name,
+    embeddingFunction,
+  }: {
+    name: string;
+    embeddingFunction?: EmbeddingFunction;
+  }): Promise<Collection> {
     const { data } = await Api.getCollection({
       client: this.apiClient,
       path: { ...this.path(), collection_id: name },
@@ -174,10 +217,12 @@ export class ChromaClient {
       name,
       configuration: data.configuration_json,
       metadata: data.metadata ?? undefined,
-      embeddingFunction: await getEmbeddingFunction(
-        data.name,
-        data.configuration_json.embedding_function ?? undefined,
-      ),
+      embeddingFunction: embeddingFunction
+        ? embeddingFunction
+        : await getEmbeddingFunction(
+            data.name,
+            data.configuration_json.embedding_function ?? undefined,
+          ),
       id: data.id,
     });
   }
@@ -216,7 +261,7 @@ export class ChromaClient {
       apiClient: this.apiClient,
       name,
       configuration: data.configuration_json,
-      metadata,
+      metadata: data.metadata ?? undefined,
       embeddingFunction:
         embeddingFunction ??
         (await getEmbeddingFunction(
@@ -245,5 +290,20 @@ export class ChromaClient {
       client: this.apiClient,
     });
     return data;
+  }
+
+  public collection({
+    id,
+    embeddingFunction,
+  }: {
+    id: string;
+    embeddingFunction?: EmbeddingFunction;
+  }): CollectionAPI {
+    return new CollectionAPIImpl({
+      chromaClient: this,
+      apiClient: this.apiClient,
+      id,
+      embeddingFunction,
+    });
   }
 }

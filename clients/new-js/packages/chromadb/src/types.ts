@@ -41,8 +41,16 @@ type WhereOperator = "$gt" | "$gte" | "$lt" | "$lte" | "$ne" | "$eq";
 type InclusionExclusionOperator = "$in" | "$nin";
 
 type OperatorExpression =
-  | { [key in WhereOperator | LogicalOperator]: LiteralValue }
-  | { [key in InclusionExclusionOperator]: LiteralValue[] };
+  | { $gt: LiteralValue }
+  | { $gte: LiteralValue }
+  | { $lt: LiteralValue }
+  | { $lte: LiteralValue }
+  | { $ne: LiteralValue }
+  | { $eq: LiteralValue }
+  | { $and: LiteralValue }
+  | { $or: LiteralValue }
+  | { $in: LiteralValue[] }
+  | { $nin: LiteralValue[] };
 
 export type Where =
   | { [key: string]: LiteralValue | OperatorExpression }
@@ -56,9 +64,13 @@ type WhereDocumentOperator =
   | "$not_matches"
   | LogicalOperator;
 
-export type WhereDocument = {
-  [key in WhereDocumentOperator]: string | WhereDocument[];
-};
+export type WhereDocument =
+  | { $contains: string }
+  | { $not_contains: string }
+  | { $matches: string }
+  | { $not_matches: string }
+  | { $and: WhereDocument[] }
+  | { $or: WhereDocument[] };
 
 export enum IncludeEnum {
   distances = "distances",
@@ -68,21 +80,117 @@ export enum IncludeEnum {
   uris = "uris",
 }
 
-export interface GetResult {
-  documents: (string | null)[];
-  embeddings: number[][];
-  ids: string[];
-  include: Include[];
-  metadatas: (Metadata | null)[];
-  uris: (string | null)[];
+export class GetResult {
+  public readonly documents: (string | null)[];
+  public readonly embeddings: number[][];
+  public readonly ids: string[];
+  public readonly include: Include[];
+  public readonly metadatas: (Metadata | null)[];
+  public readonly uris: (string | null)[];
+
+  constructor({
+    documents,
+    embeddings,
+    ids,
+    include,
+    metadatas,
+    uris,
+  }: {
+    documents: (string | null)[];
+    embeddings: number[][];
+    ids: string[];
+    include: Include[];
+    metadatas: (Metadata | null)[];
+    uris: (string | null)[];
+  }) {
+    this.documents = documents;
+    this.embeddings = embeddings;
+    this.ids = ids;
+    this.include = include;
+    this.metadatas = metadatas;
+    this.uris = uris;
+  }
+
+  public rows() {
+    return {
+      include: this.include,
+      records: this.ids.map((id, index) => {
+        return {
+          id,
+          document: this.include.includes("documents")
+            ? this.documents[index]
+            : undefined,
+          embedding: this.include.includes("embeddings")
+            ? this.embeddings[index]
+            : undefined,
+          metadata: this.include.includes("metadatas")
+            ? this.metadatas[index]
+            : undefined,
+          uri: this.include.includes("uris") ? this.uris[index] : undefined,
+        };
+      }),
+    };
+  }
 }
 
-export interface QueryResult {
-  distances: (number | null)[][];
-  documents: (string | null)[][];
-  embeddings: (number[] | null)[][];
-  ids: string[][];
-  include: Include[];
-  metadatas: (Metadata | null)[][];
-  uris: (string | null)[][];
+export class QueryResult {
+  public readonly distances: (number | null)[][];
+  public readonly documents: (string | null)[][];
+  public readonly embeddings: (number[] | null)[][];
+  public readonly ids: string[][];
+  public readonly include: Include[];
+  public readonly metadatas: (Metadata | null)[][];
+  public readonly uris: (string | null)[][];
+
+  constructor({
+    distances,
+    documents,
+    embeddings,
+    ids,
+    include,
+    metadatas,
+    uris,
+  }: {
+    distances: (number | null)[][];
+    documents: (string | null)[][];
+    embeddings: (number[] | null)[][];
+    ids: string[][];
+    include: Include[];
+    metadatas: (Metadata | null)[][];
+    uris: (string | null)[][];
+  }) {
+    this.distances = distances;
+    this.documents = documents;
+    this.embeddings = embeddings;
+    this.ids = ids;
+    this.include = include;
+    this.metadatas = metadatas;
+    this.uris = uris;
+  }
+
+  public rows() {
+    return {
+      include: this.include,
+      queries: this.ids.map((queryIds, query) => {
+        queryIds.map((id, index) => {
+          return {
+            id,
+            document: this.include.includes("documents")
+              ? this.documents[index]
+              : undefined,
+            embedding: this.include.includes("embeddings")
+              ? this.embeddings[index]
+              : undefined,
+            metadata: this.include.includes("metadatas")
+              ? this.metadatas[index]
+              : undefined,
+            uri: this.include.includes("uris") ? this.uris[index] : undefined,
+            distance: this.include.includes("distances")
+              ? this.distances[index]
+              : undefined,
+          };
+        });
+      }),
+    };
+  }
 }
