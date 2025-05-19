@@ -320,7 +320,23 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	if createCollection.GetOrCreate {
 		created, err = tc.metaDomain.CollectionDb(txCtx).InsertOnConflictDoNothing(dbCollection)
 	} else {
+		/*
+			Note a potential race here for three writers
+			Thread 1 calls create_collection and inserts a row
+			Thread 2 calls delete and hard delete kicks in, which deletes the row
+			Thread 3 calls create_collection and creates a row
+			Thread 1 now proceeds to insert metadata and inserts the metadata for the collection
+			Thread 3 will now proceed to insert the metadata for the collection
+
+			So we have info and metadata from two different writers
+
+			We can avoid this with the timing assumption that hard delete runs far
+			behind the timeout of these operations
+		*/
 		err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
+		if err == nil {
+			created = true
+		}
 	}
 
 	if err != nil {
