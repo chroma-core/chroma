@@ -1694,6 +1694,7 @@ dependencies = [
  "figment",
  "futures",
  "opentelemetry",
+ "parking_lot",
  "parquet",
  "proptest",
  "prost 0.13.5",
