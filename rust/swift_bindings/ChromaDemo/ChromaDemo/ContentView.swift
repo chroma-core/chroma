@@ -63,7 +63,7 @@ struct ContentView: View {
                 addLog("Created persistent directory at: \(persistentPath)")
             }
             addLog("Using persistent storage at: \(persistentPath)")
-            try initializeWithPath(path: persistentPath)
+            try initializeWithPath(path: persistentPath, allowReset: true)
             isPersistentInitialized = true
             isInitialized = false
             activeMode = .persistent

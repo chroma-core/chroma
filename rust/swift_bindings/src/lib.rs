@@ -77,11 +77,11 @@ static RUNTIME: Lazy<Mutex<Option<Runtime>>> = Lazy::new(|| Mutex::new(None));
 
 #[uniffi::export]
 pub fn initialize() -> FfiResult<()> {
-    initialize_with_path(None)
+    initialize_with_path(None, false)
 }
 
 #[uniffi::export]
-pub fn initialize_with_path(path: Option<String>) -> FfiResult<()> {
+pub fn initialize_with_path(path: Option<String>, allow_reset: bool) -> FfiResult<()> {
     // Ensure runtime isn't already initialized
     {
         let runtime_lock = RUNTIME.lock().unwrap();
@@ -102,6 +102,7 @@ pub fn initialize_with_path(path: Option<String>) -> FfiResult<()> {
     
     // Configure storage based on the path parameter - exactly like Python bindings
     let mut config = FrontendConfig::sqlite_in_memory();
+    config.allow_reset = allow_reset;
     
     // Set persist_path in the segment manager config
     if let Some(segment_manager) = &mut config.segment_manager {
