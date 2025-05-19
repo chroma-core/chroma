@@ -1,6 +1,7 @@
 import { ChromaClient } from "./chroma-client";
 import {
   EmbeddingFunction,
+  getEmbeddingFunction,
   knownEmbeddingFunctions,
 } from "./embedding-function";
 import {
@@ -32,12 +33,9 @@ import {
 } from "./utils";
 import { createClient } from "@hey-api/client-fetch";
 
-export interface Collection {
-  name: string;
+export interface CollectionAPI {
   id: string;
-  embeddingFunction: EmbeddingFunction;
-  metadata: CollectionMetadata | undefined;
-  configuration: CollectionConfiguration;
+  embeddingFunction?: EmbeddingFunction;
   count(): Promise<number>;
   add(args: {
     ids: string[];
@@ -92,6 +90,13 @@ export interface Collection {
   }): Promise<void>;
 }
 
+export interface Collection extends CollectionAPI {
+  name: string;
+  embeddingFunction: EmbeddingFunction;
+  metadata: CollectionMetadata | undefined;
+  configuration: CollectionConfiguration;
+}
+
 export interface CollectionArgs {
   chromaClient: ChromaClient;
   apiClient: ReturnType<typeof createClient>;
@@ -102,66 +107,38 @@ export interface CollectionArgs {
   metadata?: CollectionMetadata;
 }
 
-export class CollectionImpl implements Collection {
-  private readonly chromaClient: ChromaClient;
-  private readonly apiClient: ReturnType<typeof createClient>;
-  private _name: string;
+export class CollectionAPIImpl implements CollectionAPI {
+  protected readonly chromaClient: ChromaClient;
+  protected readonly apiClient: ReturnType<typeof createClient>;
   public readonly id: string;
-  private _embeddingFunction: EmbeddingFunction;
-  private _metadata: CollectionMetadata | undefined;
-  private _configuration: CollectionConfiguration;
+  protected _embeddingFunction: EmbeddingFunction | undefined;
 
   constructor({
     chromaClient,
     apiClient,
-    name,
     id,
     embeddingFunction,
-    metadata,
-    configuration,
-  }: CollectionArgs) {
+  }: {
+    chromaClient: ChromaClient;
+    apiClient: ReturnType<typeof createClient>;
+    id: string;
+    embeddingFunction?: EmbeddingFunction;
+  }) {
     this.chromaClient = chromaClient;
     this.apiClient = apiClient;
-    this._name = name;
     this.id = id;
     this._embeddingFunction = embeddingFunction;
-    this._metadata = metadata;
-    this._configuration = configuration;
   }
 
-  public get name(): string {
-    return this._name;
-  }
-
-  private set name(name: string) {
-    this._name = name;
-  }
-
-  public get configuration(): CollectionConfiguration {
-    return this._configuration;
-  }
-
-  private set configuration(configuration: CollectionConfiguration) {
-    this._configuration = configuration;
-  }
-
-  public get metadata(): CollectionMetadata | undefined {
-    return this._metadata;
-  }
-
-  private set metadata(metadata: CollectionMetadata | undefined) {
-    this._metadata = metadata;
-  }
-
-  public get embeddingFunction(): EmbeddingFunction {
+  public get embeddingFunction(): EmbeddingFunction | undefined {
     return this._embeddingFunction;
   }
 
-  private set embeddingFunction(embeddingFunction: EmbeddingFunction) {
-    this._embeddingFunction = embeddingFunction;
-  }
-
-  private path(): { tenant: string; database: string; collection_id: string } {
+  protected path(): {
+    tenant: string;
+    database: string;
+    collection_id: string;
+  } {
     return {
       tenant: this.chromaClient.tenant,
       database: this.chromaClient.database,
@@ -170,7 +147,12 @@ export class CollectionImpl implements Collection {
   }
 
   private async embed(documents: string[]): Promise<number[][]> {
-    return await this.embeddingFunction.generate(documents);
+    if (!this._embeddingFunction) {
+      throw new Error(
+        "Embedding function must be defined for operations requiring embeddings.",
+      );
+    }
+    return await this._embeddingFunction.generate(documents);
   }
 
   private async prepareRecords({
@@ -290,21 +272,25 @@ export class CollectionImpl implements Collection {
     });
   }
 
-  public async get({
-    ids,
-    where,
-    limit,
-    offset,
-    whereDocument,
-    include = ["documents", "metadatas"],
-  }: {
-    ids?: string[];
-    where?: Where;
-    limit?: number;
-    offset?: number;
-    whereDocument?: WhereDocument;
-    include?: Include[];
-  }): Promise<GetResult> {
+  public async get(
+    args: Partial<{
+      ids?: string[];
+      where?: Where;
+      limit?: number;
+      offset?: number;
+      whereDocument?: WhereDocument;
+      include?: Include[];
+    }> = {},
+  ): Promise<GetResult> {
+    const {
+      ids,
+      where,
+      limit,
+      offset,
+      whereDocument,
+      include = ["documents", "metadatas"],
+    } = args;
+
     this.validateGet(include, ids, where, whereDocument);
 
     const { data } = await Api.collectionGet({
@@ -320,14 +306,14 @@ export class CollectionImpl implements Collection {
       },
     });
 
-    return {
+    return new GetResult({
       documents: data.documents ?? [],
       embeddings: data.embeddings ?? [],
       ids: data.ids,
       include: data.include,
       metadatas: data.metadatas ?? [],
       uris: data.uris ?? [],
-    };
+    });
   }
 
   public async peek({ limit = 10 }: { limit?: number }): Promise<GetResult> {
@@ -376,10 +362,12 @@ export class CollectionImpl implements Collection {
         include,
         n_results: nResults,
         query_embeddings: queryRecordSet.embeddings,
+        where,
+        where_document: whereDocument,
       },
     });
 
-    return {
+    return new QueryResult({
       distances: data.distances ?? [],
       documents: data.documents ?? [],
       embeddings: data.embeddings ?? [],
@@ -387,7 +375,7 @@ export class CollectionImpl implements Collection {
       include: data.include,
       metadatas: data.metadatas ?? [],
       uris: data.uris ?? [],
-    };
+    });
   }
 
   public async modify({
@@ -399,10 +387,7 @@ export class CollectionImpl implements Collection {
     metadata?: CollectionMetadata;
     configuration?: UpdateCollectionConfiguration;
   }): Promise<void> {
-    if (name) this.name = name;
-    if (configuration) this.configuration = configuration;
     if (metadata) {
-      this.metadata = metadata;
       validateMetadata(metadata);
     }
 
@@ -429,7 +414,12 @@ export class CollectionImpl implements Collection {
       apiClient: this.apiClient,
       name: data.name,
       id: data.name,
-      embeddingFunction: this.embeddingFunction,
+      embeddingFunction: this._embeddingFunction
+        ? this._embeddingFunction
+        : await getEmbeddingFunction(
+            data.name,
+            data.configuration_json.embedding_function ?? undefined,
+          ),
       metadata: data.metadata ?? undefined,
       configuration: data.configuration_json,
     });
@@ -526,6 +516,99 @@ export class CollectionImpl implements Collection {
         where,
         where_document: whereDocument,
       },
+    });
+  }
+}
+
+export class CollectionImpl extends CollectionAPIImpl implements Collection {
+  private _name: string;
+  override _embeddingFunction: EmbeddingFunction;
+  private _metadata: CollectionMetadata | undefined;
+  private _configuration: CollectionConfiguration;
+
+  constructor({
+    chromaClient,
+    apiClient,
+    name,
+    id,
+    embeddingFunction,
+    metadata,
+    configuration,
+  }: CollectionArgs) {
+    super({ chromaClient, apiClient, id });
+    this._name = name;
+    this._embeddingFunction = embeddingFunction;
+    this._metadata = metadata;
+    this._configuration = configuration;
+  }
+
+  public get name(): string {
+    return this._name;
+  }
+
+  private set name(name: string) {
+    this._name = name;
+  }
+
+  public get configuration(): CollectionConfiguration {
+    return this._configuration;
+  }
+
+  private set configuration(configuration: CollectionConfiguration) {
+    this._configuration = configuration;
+  }
+
+  public get metadata(): CollectionMetadata | undefined {
+    return this._metadata;
+  }
+
+  private set metadata(metadata: CollectionMetadata | undefined) {
+    this._metadata = metadata;
+  }
+
+  override get embeddingFunction(): EmbeddingFunction {
+    return this._embeddingFunction;
+  }
+
+  private set embeddingFunction(embeddingFunction: EmbeddingFunction) {
+    this._embeddingFunction = embeddingFunction;
+  }
+
+  override async modify({
+    name,
+    metadata,
+    configuration,
+  }: {
+    name?: string;
+    metadata?: CollectionMetadata;
+    configuration?: UpdateCollectionConfiguration;
+  }): Promise<void> {
+    if (name) this.name = name;
+    if (configuration) this.configuration = configuration;
+    if (metadata) {
+      validateMetadata(metadata);
+      this.metadata = metadata;
+    }
+
+    await super.modify({ name, metadata, configuration });
+  }
+
+  // OVERRIDE
+  override async fork({ name }: { name: string }): Promise<Collection> {
+    const { data } = await Api.forkCollection({
+      client: this.apiClient,
+      path: this.path(),
+      body: { new_name: name },
+    });
+
+    return new CollectionImpl({
+      chromaClient: this.chromaClient,
+      apiClient: this.apiClient,
+      name: data.name,
+      id: data.name,
+      embeddingFunction: this._embeddingFunction,
+      metadata: data.metadata ?? undefined,
+      configuration: data.configuration_json,
     });
   }
 }

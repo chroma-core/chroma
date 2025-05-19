@@ -20,11 +20,11 @@ export const defaultAdminClientArgs: AdminClientArgs = {
   host: "localhost",
   port: 8000,
   ssl: false,
-  tenant: DEFAULT_TENANT,
 };
 
 export const defaultChromaClientArgs: ChromaClientArgs = {
   ...defaultAdminClientArgs,
+  tenant: DEFAULT_TENANT,
   database: DEFAULT_DATABASE,
 };
 
@@ -340,7 +340,7 @@ export const validateWhere = (where: Where) => {
       }
 
       if (
-        !["string", "number", "boolean"].includes(typeof operand) ||
+        !["string", "number", "boolean"].includes(typeof operand) &&
         !Array.isArray(operand)
       ) {
         throw new Error(
