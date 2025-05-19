@@ -168,15 +168,19 @@ impl LogWriter {
         //
         // If the file exists, this will fail with LogContention, which fails us with
         // LogContention.  Other errors fail transparently, too.
-        let (unprefixed_path, setsum, num_bytes) = upload_parquet(
-            options,
-            storage,
-            prefix,
-            FragmentSeqNo(1),
-            first_record_offset,
-            messages,
-        )
-        .await?;
+        let (unprefixed_path, setsum, num_bytes) = if num_records > 0 {
+            upload_parquet(
+                options,
+                storage,
+                prefix,
+                FragmentSeqNo(1),
+                first_record_offset,
+                messages,
+            )
+            .await?
+        } else {
+            ("".to_string(), Setsum::default(), 0)
+        };
         // SAFETY(rescrv):  Any error here is an error.
         Manifest::initialize(options, storage, prefix, writer).await?;
         // SAFETY(rescrv):  We just initialized, so we should be able to load---done to get e_tag.
@@ -186,18 +190,18 @@ impl LogWriter {
             tracing::error!("Manifest was initialized and then was None.");
             return Err(Error::Internal);
         };
-        let path = unprefixed_path;
-        let seq_no = FragmentSeqNo(1);
-        let num_bytes = num_bytes as u64;
-        let frag = Fragment {
-            path,
-            seq_no,
-            start,
-            limit,
-            num_bytes,
-            setsum,
-        };
-        if start < limit {
+        if num_records > 0 {
+            let path = unprefixed_path;
+            let seq_no = FragmentSeqNo(1);
+            let num_bytes = num_bytes as u64;
+            let frag = Fragment {
+                path,
+                seq_no,
+                start,
+                limit,
+                num_bytes,
+                setsum,
+            };
             let mut new_manifest = manifest.clone();
             // SAFETY(rescrv):  This is unit tested to never happen.  If it happens, add more tests.
             if !new_manifest.can_apply_fragment(&frag) {
