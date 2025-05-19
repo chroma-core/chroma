@@ -153,7 +153,7 @@ pub fn init_panic_tracing_hook() {
 
 pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     let layers = vec![
-        init_global_filter_layer(),
+        // init_global_filter_layer(),
         init_otel_layer(service_name, otel_endpoint),
         init_stdout_layer(),
     ];
