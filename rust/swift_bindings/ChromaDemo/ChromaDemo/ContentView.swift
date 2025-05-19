@@ -1,10 +1,3 @@
-//
-//  ChromaDemoApp.swift
-//  ChromaDemo
-//
-//  Created by Nicholas Arner on 5/14/25.
-//
-
 import SwiftUI
 import Chroma
 import UniformTypeIdentifiers
@@ -21,7 +14,6 @@ struct ContentView: View {
     @State private var collections: [String] = []
     @State private var isInitialized: Bool = false
     @State private var isPersistentInitialized: Bool = false
-    // Default to Documents directory
     @State private var persistentPath: String = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path + "/chroma_data"
     @State private var activeMode: StorageMode = .none
     @State private var isShowingFolderPicker: Bool = false
@@ -45,19 +37,14 @@ struct ContentView: View {
     
     func switchToEphemeralMode() {
         do {
-            // Reset any existing Chroma instance
             if isPersistentInitialized {
                 try reset()
             }
-            
-            // Initialize ephemeral mode
             try initialize()
             isInitialized = true
             isPersistentInitialized = false
             activeMode = .ephemeral
             addLog("Switched to ephemeral mode")
-            
-            // Clear old collections and refresh
             collections = []
             refreshCollections()
         } catch {
@@ -67,29 +54,20 @@ struct ContentView: View {
     
     func switchToPersistentMode() {
         do {
-            // Reset any existing Chroma instance
             if isInitialized {
                 try reset()
             }
-            
-            // Create directory if needed
             let fileManager = FileManager.default
             if !fileManager.fileExists(atPath: persistentPath) {
                 try fileManager.createDirectory(atPath: persistentPath, withIntermediateDirectories: true)
                 addLog("Created persistent directory at: \(persistentPath)")
             }
-            
-            // Log the full path for reference
             addLog("Using persistent storage at: \(persistentPath)")
-            
-            // Initialize persistent mode
             try initializeWithPath(path: persistentPath)
             isPersistentInitialized = true
             isInitialized = false
             activeMode = .persistent
             addLog("Switched to persistent mode")
-            
-            // Clear old collections and refresh
             collections = []
             refreshCollections()
         } catch {
@@ -112,7 +90,6 @@ struct ContentView: View {
     }
     
     func checkForPersistentData() {
-        // Check if the directory exists and has data
         let fileManager = FileManager.default
         let dbPath = persistentPath + "/chroma.sqlite3"
         
@@ -139,26 +116,38 @@ struct ContentView: View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
                 if geometry.size.width > 600 {
-                    // iPad/Mac layout (horizontal)
                     HStack(spacing: 0) {
                         ScrollView {
                             VStack(spacing: 24) {
                                 headerView
-                                
-                                // Storage type selector
                                 storageModeSelector
                                 
                                 if activeMode == .ephemeral {
-                                    databaseControls
-                                    documentInput
+                                    EphemeralDemoView(
+                                        collectionName: $collectionName,
+                                        collections: $collections,
+                                        isInitialized: $isInitialized,
+                                        docText: $docText,
+                                        docCounter: $docCounter,
+                                        showingSuccess: $showingSuccess,
+                                        refreshCollections: refreshCollections,
+                                        addLog: addLog
+                                    )
                                 }
                                 
                                 if activeMode == .persistent {
-                                    persistentDatabaseControls
-                                    persistentDocumentInput
+                                    PersistentDemoView(
+                                        persistentCollectionName: $persistentCollectionName,
+                                        collections: $collections,
+                                        isPersistentInitialized: $isPersistentInitialized,
+                                        docText: $docText,
+                                        docCounter: $docCounter,
+                                        showingSuccess: $showingSuccess,
+                                        refreshCollections: refreshCollections,
+                                        persistentPath: $persistentPath,
+                                        addLog: addLog
+                                    )
                                 }
-                                
-                                querySection
                             }
                             .padding(.vertical)
                         }
@@ -166,26 +155,38 @@ struct ContentView: View {
                         logsView
                     }
                 } else {
-                    // iPhone layout (vertical)
                     ScrollView {
                         VStack(spacing: 0) {
                             VStack(spacing: 24) {
                                 headerView
-                                
-                                // Storage type selector
                                 storageModeSelector
                                 
                                 if activeMode == .ephemeral {
-                                    databaseControls
-                                    documentInput
+                                    EphemeralDemoView(
+                                        collectionName: $collectionName,
+                                        collections: $collections,
+                                        isInitialized: $isInitialized,
+                                        docText: $docText,
+                                        docCounter: $docCounter,
+                                        showingSuccess: $showingSuccess,
+                                        refreshCollections: refreshCollections,
+                                        addLog: addLog
+                                    )
                                 }
                                 
                                 if activeMode == .persistent {
-                                    persistentDatabaseControls
-                                    persistentDocumentInput
+                                    PersistentDemoView(
+                                        persistentCollectionName: $persistentCollectionName,
+                                        collections: $collections,
+                                        isPersistentInitialized: $isPersistentInitialized,
+                                        docText: $docText,
+                                        docCounter: $docCounter,
+                                        showingSuccess: $showingSuccess,
+                                        refreshCollections: refreshCollections,
+                                        persistentPath: $persistentPath,
+                                        addLog: addLog
+                                    )
                                 }
-                                
-                                querySection
                             }
                             .padding(.horizontal)
                             logsView
@@ -257,325 +258,7 @@ struct ContentView: View {
             Label("Select Mode", systemImage: "arrow.triangle.branch")
         }
     }
-         
-    private var databaseControls: some View {
-        GroupBox {
-            VStack(spacing: 16) {
-                Text("Ephemeral Database Controls")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-      
-                TextField("Collection name", text: $collectionName)
-                    .textFieldStyle(.roundedBorder)
-                
-                ActionButton(title: "Create Collection", disabled: !isInitialized) {
-                    let collectionId = try createCollection(name: collectionName)
-                    addLog("Ephemeral collection created: \(collectionId)")
-                    refreshCollections()
-                    errorMessage = nil
-                }
-                
-                ActionButton(title: "List Collections", disabled: !isInitialized) {
-                    refreshCollections()
-                }
-
-                ActionButton(title: "Get All Documents", disabled: !isInitialized || collections.isEmpty) {
-                    if collections.isEmpty {
-                        addLog("No collections to get documents from")
-                        return
-                    }
-                    
-                    addLog("--- Retrieved Documents ---")
-                    for collection in collections {
-                        addLog("Collection: \(collection)")
-                        let res = try getAllDocuments(collectionName: collection)
-                        if res.ids.isEmpty {
-                            addLog("  (empty)")
-                        } else {
-                            let pairs = zip(res.ids, res.documents).map { id, doc in
-                                "  Document ID: \(id)\n  Content: \(doc ?? "(nil)")"
-                            }
-                            pairs.forEach { addLog($0) }
-                        }
-                    }
-                    addLog("--- End of Documents ---")
-                    errorMessage = nil
-                }
-                
-                ActionButton(title: "Reset Chroma") {
-                    try reset()
-                    resetState()
-                    addLog("System reset complete")
-                }
-                
-                Text("Data only persists while app is running")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding()
-        } label: {
-            Label("Ephemeral Demo", systemImage: "cylinder.split")
-        }
-    }
     
-    private var persistentDatabaseControls: some View {
-        GroupBox {
-            VStack(spacing: 16) {
-                Text("Persistent Database Controls")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Storage path:")
-                        .font(.caption)
-                    
-                    HStack {
-                        Text(persistentPath)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        
-                        Spacer()
-                        
-                        Button {
-                            // Show directory picker using UIDocumentPickerViewController
-                            // For simplicity, we'll use a simple solution here
-                            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
-                            persistentPath = documentsPath + "/chroma_data"
-                            addLog("Set path to Documents directory: \(persistentPath)")
-                        } label: {
-                            HStack {
-                                Image(systemName: "folder.badge.plus")
-                                Text("Use Documents")
-                            }
-                        }
-                        .disabled(isPersistentInitialized)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(Color.gray.opacity(0.2))
-                        .cornerRadius(8)
-                    }
-                }
-                      
-                TextField("Collection name", text: $persistentCollectionName)
-                    .textFieldStyle(.roundedBorder)
-                
-                ActionButton(title: "Create Collection", disabled: !isPersistentInitialized) {
-                    let collectionId = try createCollection(name: persistentCollectionName)
-                    addLog("Persistent collection created: \(collectionId)")
-                    refreshCollections()
-                    errorMessage = nil
-                }
-                
-                ActionButton(title: "List Collections", disabled: !isPersistentInitialized) {
-                    refreshCollections()
-                }
-
-                ActionButton(title: "Get All Documents", disabled: !isPersistentInitialized || collections.isEmpty) {
-                    if collections.isEmpty {
-                        addLog("No persistent collections to get documents from")
-                        return
-                    }
-                    
-                    addLog("--- Retrieved Persistent Documents ---")
-                    for collection in collections {
-                        addLog("Collection: \(collection)")
-                        let res = try getAllDocuments(collectionName: collection)
-                        if res.ids.isEmpty {
-                            addLog("  (empty)")
-                        } else {
-                            let pairs = zip(res.ids, res.documents).map { id, doc in
-                                "  Document ID: \(id)\n  Content: \(doc ?? "(nil)")"
-                            }
-                            pairs.forEach { addLog($0) }
-                        }
-                    }
-                    addLog("--- End of Documents ---")
-                    errorMessage = nil
-                }
-                
-                Button {
-                    addLog("Storage location at: \(persistentPath)")
-                } label: {
-                    Text("Show Storage Location")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                }
-                .background(Color.gray.opacity(0.2))
-                .cornerRadius(8)
-                .disabled(!isPersistentInitialized)
-                
-                Text("Data will persist between app launches")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding()
-        } label: {
-            Label("Persistent Demo", systemImage: "externaldrive.fill")
-        }
-    }
-    
-    private var documentInput: some View {
-        GroupBox {
-            VStack(spacing: 16) {
-                Text("Add Document (Ephemeral)")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                
-                if collections.isEmpty {
-                    Text("No collections available")
-                        .foregroundColor(.secondary)
-                } else {
-                    Picker("Collection", selection: $collectionName) {
-                        ForEach(collections, id: \.self) { name in
-                            Text(name).tag(name)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                }
-                
-                TextField("Enter document text...", text: $docText)
-                    .textFieldStyle(.roundedBorder)
-                
-                ActionButton(title: "Add Document", disabled: !isInitialized || docText.isEmpty || collections.isEmpty) {
-                    docCounter += 1
-                    let ids = ["doc\(docCounter)"]
-                    let embeddings: [[Float]] = [[0.1, 0.2, 0.3, 0.4]]
-                    let docs = [docText]
-                    _ = try addDocuments(
-                        collectionName: collectionName,
-                        ids: ids,
-                        embeddings: embeddings,
-                        documents: docs
-                    )
-                    showingSuccess = true
-                    addLog("Document added to ephemeral collection '\(collectionName)': \(docText)")
-                    docText = ""
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        showingSuccess = false
-                    }
-                    errorMessage = nil
-                }
-            }
-            .padding()
-        } label: {
-            Label("Ephemeral Document Input", systemImage: "doc.text")
-        }
-    }
-    
-    private var persistentDocumentInput: some View {
-        GroupBox {
-            VStack(spacing: 16) {
-                Text("Add Document (Persistent)")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                
-                if collections.isEmpty {
-                    Text("No persistent collections available")
-                        .foregroundColor(.secondary)
-                } else {
-                    Picker("Collection", selection: $persistentCollectionName) {
-                        ForEach(collections, id: \.self) { name in
-                            Text(name).tag(name)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                }
-                
-                TextField("Enter document text...", text: $docText)
-                    .textFieldStyle(.roundedBorder)
-                
-                ActionButton(title: "Add Document", disabled: !isPersistentInitialized || docText.isEmpty || collections.isEmpty) {
-                    docCounter += 1
-                    let ids = ["persistent_doc\(docCounter)"]
-                    let embeddings: [[Float]] = [[0.1, 0.2, 0.3, 0.4]]
-                    let docs = [docText]
-                    _ = try addDocuments(
-                        collectionName: persistentCollectionName,
-                        ids: ids,
-                        embeddings: embeddings,
-                        documents: docs
-                    )
-                    showingSuccess = true
-                    addLog("Document added to persistent collection '\(persistentCollectionName)': \(docText)")
-                    docText = ""
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        showingSuccess = false
-                    }
-                    errorMessage = nil
-                }
-            }
-            .padding()
-        } label: {
-            Label("Persistent Document Input", systemImage: "doc.fill")
-        }
-    }
-    
-    private var querySection: some View {
-        GroupBox {
-            VStack(spacing: 16) {
-                Text("Query Collections")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                
-                if !isChromaReady() || collections.isEmpty {
-                    Text("No collections available to query")
-                        .foregroundColor(.secondary)
-                } else {
-                    if activeMode == .ephemeral {
-                        ActionButton(title: "Query Ephemeral", disabled: !isInitialized || collections.isEmpty) {
-                            // Example query embedding
-                            let queryEmbedding: [Float] = [0.1, 0.2, 0.3, 0.4]
-                            
-                            let result = try queryCollection(
-                                collectionName: collectionName,
-                                queryEmbedding: queryEmbedding,
-                                nResults: 1
-                            )
-                            
-                            if result.ids.isEmpty {
-                                addLog("No results found in ephemeral collection")
-                            } else {
-                                addLog("Ephemeral query results:")
-                                for i in 0..<result.ids.count {
-                                    let id = result.ids[i]
-                                    let doc = result.documents[i] ?? "(no document)"
-                                    addLog("ID: \(id), Doc: \(doc)")
-                                }
-                            }
-                        }
-                    } else if activeMode == .persistent {
-                        ActionButton(title: "Query Persistent", disabled: !isPersistentInitialized || collections.isEmpty) {
-                            // Example query embedding
-                            let queryEmbedding: [Float] = [0.1, 0.2, 0.3, 0.4]
-                            
-                            let result = try queryCollection(
-                                collectionName: persistentCollectionName,
-                                queryEmbedding: queryEmbedding,
-                                nResults: 1
-                            )
-                            
-                            if result.ids.isEmpty {
-                                addLog("No results found in persistent collection")
-                            } else {
-                                addLog("Persistent query results:")
-                                for i in 0..<result.ids.count {
-                                    let id = result.ids[i]
-                                    let doc = result.documents[i] ?? "(no document)"
-                                    addLog("ID: \(id), Doc: \(doc)")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            .padding()
-        } label: {
-            Label("Querying", systemImage: "magnifyingglass")
-        }
-    }
-
     private var logsView: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
