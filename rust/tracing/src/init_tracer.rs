@@ -33,6 +33,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "distance_metrics",
                 "full_text",
                 "hosted-frontend",
+                "billing_service",
                 "metadata_filtering",
                 "query_service",
                 "wal3",
@@ -146,8 +147,7 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 || metadata
                     .module_path()
                     .unwrap_or("")
-                    .starts_with("hosted-frontend")
-                || metadata.module_path().unwrap_or("").starts_with("billing")
+                    .starts_with("billing_service")
         }))
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
         .boxed()
