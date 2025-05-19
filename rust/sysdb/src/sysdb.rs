@@ -1331,14 +1331,14 @@ impl ChromaError for MarkVersionForDeletionError {
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionVersionError {
-    #[error("Failed to delete version")]
+    #[error("Failed to delete version: {0}")]
     FailedToDeleteVersion(#[from] tonic::Status),
 }
 
 impl ChromaError for DeleteCollectionVersionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            DeleteCollectionVersionError::FailedToDeleteVersion(_) => ErrorCodes::Internal,
+            DeleteCollectionVersionError::FailedToDeleteVersion(e) => e.code().into(),
         }
     }
 }
