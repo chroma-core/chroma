@@ -114,6 +114,14 @@ message MigrateLogResponse {
   // Empty
 }
 
+message InspectLogStateRequest {
+  string collection_id = 1;
+}
+
+message InspectLogStateResponse {
+  string debug = 1;
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
@@ -129,4 +137,6 @@ service LogService {
   rpc SealLog(SealLogRequest) returns (SealLogResponse) {}
   // This endpoint must route to the rust log service.
   rpc MigrateLog(MigrateLogRequest) returns (MigrateLogResponse) {}
+  // This endpoint can be supported by any log service.
+  rpc InspectLogState(InspectLogStateRequest) returns (InspectLogStateResponse) {}
 }

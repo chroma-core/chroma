@@ -80,6 +80,7 @@ with summary as (
     from record_log r, collection c
     where r.collection_id = c.id
     and (c.record_enumeration_offset_position - c.record_compaction_offset_position) >= $1
+    and not c.is_sealed
     and r.offset > c.record_compaction_offset_position
 )
 select collection_id, "offset", timestamp, rank from summary
