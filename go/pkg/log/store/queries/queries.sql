@@ -64,3 +64,6 @@ INSERT INTO record_log ("offset", collection_id, timestamp, record)
     SELECT record_log.offset, $2, record_log.timestamp, record_log.record
     FROM record_log
     WHERE record_log.collection_id = $1;
+
+-- name: SealLog :one
+UPDATE collection SET is_sealed = true WHERE id = $1 returning *;

@@ -12,6 +12,7 @@ message PushLogsRequest {
 
 message PushLogsResponse {
   int32 record_count = 1;
+  bool log_is_sealed = 2;
 }
 
 message ScoutLogsRequest {

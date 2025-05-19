@@ -23,7 +23,7 @@ type LogRepository struct {
 	sysDb   sysdb.ISysDB
 }
 
-func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, records [][]byte) (insertCount int64, err error) {
+func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, records [][]byte) (insertCount int64, isSealed bool, err error) {
 	var tx pgx.Tx
 	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -66,6 +66,13 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 			return
 		}
 	}
+	if collection.IsSealed {
+		insertCount = 0
+		isSealed = true
+		err = nil
+		return
+	}
+	isSealed = false
 	params := make([]log.InsertRecordParams, len(records))
 	for i, record := range records {
 		offset := collection.RecordEnumerationOffsetPosition + int64(i) + 1

@@ -12,7 +12,7 @@ use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRo
 use futures::StreamExt;
 use roaring::RoaringBitmap;
 use thiserror::Error;
-use tracing::{trace, Instrument, Span};
+use tracing::{Instrument, Span};
 
 /// The `LimitOperator` selects a range or records sorted by their offset ids
 ///
@@ -188,7 +188,8 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        tracing::debug!("[{}]: num log entries {:?}, record segment {:?}, log offset ids {:?}, compact ids {:?}", self.get_name(),
+            input.logs.len(), input.record_segment, input.log_offset_ids, input.compact_offset_ids);
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,

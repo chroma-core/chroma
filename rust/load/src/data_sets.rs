@@ -1496,9 +1496,9 @@ pub fn all_data_sets() -> Vec<Arc<dyn DataSet>> {
 
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct References {
-    references: serde_json::Value,
-    operates_on: String,
-    cardinality: usize,
+    pub references: serde_json::Value,
+    pub operates_on: String,
+    pub cardinality: usize,
 }
 
 /// Get a data set from a particular JSON value.

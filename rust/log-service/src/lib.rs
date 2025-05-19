@@ -2,6 +2,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
@@ -22,6 +23,8 @@ use chroma_types::chroma_proto::{
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
+use opentelemetry::metrics::Meter;
+use parking_lot::Mutex;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use prost::Message;
 use serde::{Deserialize, Serialize};
@@ -47,6 +50,22 @@ const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 // SAFETY(rescrv):  There's a test that this produces a valid type.
 static STABLE_PREFIX: CursorName = unsafe { CursorName::from_string_unchecked("stable_prefix") };
 static COMPACTION: CursorName = unsafe { CursorName::from_string_unchecked("compaction") };
+
+////////////////////////////////////////////// Metrics /////////////////////////////////////////////
+
+pub struct Metrics {
+    log_total_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
+}
+
+impl Metrics {
+    pub fn new(meter: Meter) -> Self {
+        Self {
+            log_total_uncompacted_records_count: meter
+                .f64_gauge("log_total_uncompacted_records_count")
+                .build(),
+        }
+    }
+}
 
 ///////////////////////////////////////// state maintenance ////////////////////////////////////////
 
@@ -247,6 +266,7 @@ pub struct Rollup {
     pub advance_to: LogPosition,
     pub reinsert: Vec<DirtyMarker>,
     pub compactable: Vec<CollectionInfo>,
+    pub backpressure: Vec<CollectionUuid>,
 }
 
 //////////////////////////////////////// RollupPerCollection ///////////////////////////////////////
@@ -334,6 +354,7 @@ impl DirtyMarker {
 
     /// Given a contiguous prefix of markers, process the log into a rollup.  That is, a set of
     /// markers to reinsert, a set of collections to compact, and an advance_to log position.
+    #[allow(clippy::too_many_arguments)]
     pub async fn rollup<
         F1: Future<Output = Result<Option<Manifest>, wal3::Error>>,
         F2: Future<Output = Result<Option<Witness>, wal3::Error>>,
@@ -343,8 +364,10 @@ impl DirtyMarker {
         retrieve_cursor: impl Fn(Arc<Storage>, CollectionUuid) -> F2,
         markers: &[(LogPosition, DirtyMarker)],
         record_count_threshold: u64,
+        record_count_backpressure: u64,
         reinsert_threshold: u64,
         timeout_us: u64,
+        metrics: &Metrics,
     ) -> Result<Option<Rollup>, wal3::Error> {
         // NOTE(rescrv);  This is complicated code because it's a hard problem to do efficiently.
         // To cut complexity, I've chosen to do it in a way that is not the most efficient but is
@@ -405,7 +428,6 @@ impl DirtyMarker {
             })
             .map(
                 |(collection_id, storage, retrieve_manifest, retrieve_cursor)| async move {
-                    // We play a funny game of Ok(Ok(_)) to force try_join_all to not short-circuit.
                     let cursor = (*retrieve_cursor)(Arc::clone(&storage), collection_id);
                     let manifest = (*retrieve_manifest)(Arc::clone(&storage), collection_id);
                     let (cursor, manifest) = futures::future::join(cursor, manifest).await;
@@ -434,6 +456,8 @@ impl DirtyMarker {
             .into_iter()
             .flat_map(Result::ok)
             .collect::<HashMap<_, _>>();
+        let mut uncompacted = 0u64;
+        let mut backpressure = vec![];
         let compactable = compactable
             .into_iter()
             .filter_map(|collection_id| {
@@ -473,6 +497,10 @@ impl DirtyMarker {
                             cursor.position,
                             manifest.maximum_log_position(),
                         );
+                        uncompacted += maximum_log_position - cursor.position;
+                        if maximum_log_position - cursor.position >= record_count_backpressure {
+                            backpressure.push(*collection_id);
+                        }
                         if maximum_log_position - cursor.position >= record_count_threshold {
                             Some(CollectionInfo {
                                 collection_id: collection_id.to_string(),
@@ -514,10 +542,14 @@ impl DirtyMarker {
                 }
             }
         }
+        metrics
+            .log_total_uncompacted_records_count
+            .record(uncompacted as f64, &[]);
         Ok(Some(Rollup {
             advance_to,
             reinsert,
             compactable,
+            backpressure,
         }))
     }
 
@@ -607,7 +639,28 @@ pub struct LogServer {
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Arc<LogWriter>,
     compacting: tokio::sync::Mutex<()>,
+    backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
     cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedParquetFragment>>>,
+    metrics: Metrics,
+}
+
+impl LogServer {
+    fn set_backpressure(&self, to_pressure: &[CollectionUuid]) {
+        let mut new_backpressure = Arc::new(HashSet::from_iter(to_pressure.iter().cloned()));
+        let mut backpressure = self.backpressure.lock();
+        std::mem::swap(&mut *backpressure, &mut new_backpressure);
+    }
+
+    fn check_for_backpressure(&self, collection_id: CollectionUuid) -> Result<(), Status> {
+        let backpressure = {
+            let backpressure = self.backpressure.lock();
+            Arc::clone(&backpressure)
+        };
+        if backpressure.contains(&collection_id) {
+            return Err(Status::resource_exhausted("log needs compaction; too full"));
+        }
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -627,6 +680,7 @@ impl LogService for LogServer {
         if push_logs.records.is_empty() {
             return Err(Status::invalid_argument("Too few records"));
         }
+        self.check_for_backpressure(collection_id)?;
         let span = tracing::info_span!("push_logs");
 
         async move {
@@ -666,7 +720,10 @@ impl LogService for LogServer {
                     Status::new(err.code().into(), err.to_string())
                 }
             })?;
-            Ok(Response::new(PushLogsResponse { record_count }))
+            Ok(Response::new(PushLogsResponse {
+                record_count,
+                log_is_sealed: false,
+            }))
         }
         .instrument(span)
         .await
@@ -807,6 +864,7 @@ impl LogService for LogServer {
         let source_collection_id = Uuid::parse_str(&request.source_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        self.check_for_backpressure(source_collection_id)?;
         let target_collection_id = Uuid::parse_str(&request.target_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
@@ -975,8 +1033,10 @@ impl LogService for LogServer {
                 self.config.record_count_threshold,
                 request.min_compaction_size,
             ),
+            self.config.num_records_before_backpressure,
             self.config.reinsert_threshold,
             self.config.timeout_us,
+            &self.metrics,
         )
         .await
         .map_err(|err| Status::unavailable(err.to_string()))?;
@@ -994,6 +1054,7 @@ impl LogService for LogServer {
                     .map_err(|err| Status::unavailable(err.to_string()))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        self.set_backpressure(&rollup.backpressure);
         if rollup.advance_to < cursor.position {
             tracing::error!(
                 "advance_to went back in time: {:?} -> {:?}",
@@ -1383,6 +1444,8 @@ pub struct LogServerConfig {
     pub cache: Option<CacheConfig>,
     #[serde(default = "LogServerConfig::default_record_count_threshold")]
     pub record_count_threshold: u64,
+    #[serde(default = "LogServerConfig::default_num_records_before_backpressure")]
+    pub num_records_before_backpressure: u64,
     #[serde(default = "LogServerConfig::default_reinsert_threshold")]
     pub reinsert_threshold: u64,
     #[serde(default = "LogServerConfig::default_timeout_us")]
@@ -1393,6 +1456,11 @@ impl LogServerConfig {
     /// one hundred records on the log.
     fn default_record_count_threshold() -> u64 {
         100
+    }
+
+    /// one million records on the log.
+    fn default_num_records_before_backpressure() -> u64 {
+        1_000_000
     }
 
     /// force compaction if a candidate comes up ten times.
@@ -1416,6 +1484,7 @@ impl Default for LogServerConfig {
             reader: LogReaderOptions::default(),
             cache: None,
             record_count_threshold: Self::default_record_count_threshold(),
+            num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
             timeout_us: Self::default_timeout_us(),
         }
@@ -1456,13 +1525,17 @@ impl Configurable<LogServerConfig> for LogServer {
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
         let dirty_log = Arc::new(dirty_log);
         let compacting = tokio::sync::Mutex::new(());
+        let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
+        let backpressure = Mutex::new(Arc::new(HashSet::default()));
         Ok(Self {
             config: config.clone(),
             open_logs: Arc::new(StateHashTable::default()),
             storage,
             dirty_log,
             compacting,
+            backpressure,
             cache,
+            metrics,
         })
     }
 }
@@ -1564,7 +1637,9 @@ mod tests {
             &markers,
             1,
             1,
+            1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
@@ -1625,7 +1700,9 @@ mod tests {
             &markers,
             3,
             1,
+            1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
@@ -1708,7 +1785,9 @@ mod tests {
             &markers,
             3,
             1,
+            1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
@@ -1821,7 +1900,9 @@ mod tests {
             &markers,
             3,
             1,
+            1,
             86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
         )
         .await
         .unwrap()
@@ -1830,6 +1911,76 @@ mod tests {
         assert_eq!(0, rollup.compactable.len());
         assert_eq!(1, rollup.reinsert.len());
         assert!(rollup.reinsert[0].collection_id() == collection_id_blocking);
+    }
+
+    #[tokio::test]
+    async fn dirty_marker_backpressure() {
+        // Test that the dirty marker gives proper backpressure.
+        let storage = chroma_storage::test_storage();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::Internal)
+            .unwrap()
+            .as_micros() as u64;
+        let collection_id = CollectionUuid::new();
+        let markers = vec![(
+            LogPosition::from_offset(1),
+            DirtyMarker::MarkDirty {
+                collection_id,
+                log_position: LogPosition::from_offset(1),
+                num_records: 1_000_000,
+                reinsert_count: 0,
+                initial_insertion_epoch_us: now,
+            },
+        )];
+        let rollup = DirtyMarker::rollup(
+            Arc::new(storage),
+            |_, collection_id| async move {
+                if collection_id == collection_id {
+                    Ok(Some(Manifest {
+                        writer: "TODO".to_string(),
+                        acc_bytes: 0,
+                        setsum: Setsum::default(),
+                        snapshots: vec![],
+                        fragments: vec![Fragment {
+                            seq_no: FragmentSeqNo(1),
+                            num_bytes: 0,
+                            path: "TODO".to_string(),
+                            setsum: Setsum::default(),
+                            start: LogPosition::from_offset(1),
+                            limit: LogPosition::from_offset(1_000_001),
+                        }],
+                    }))
+                } else {
+                    unreachable!("we aren't testing this case");
+                }
+            },
+            |_, collection_id| async move {
+                if collection_id == collection_id {
+                    Ok(Some(Witness::default_etag_with_cursor(Cursor {
+                        position: LogPosition::from_offset(1),
+                        epoch_us: 0,
+                        writer: "TODO".to_string(),
+                    })))
+                } else {
+                    unreachable!("we aren't testing this case");
+                }
+            },
+            &markers,
+            1,
+            1,
+            1,
+            86_400_000_000,
+            &Metrics::new(opentelemetry::global::meter("chroma")),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(LogPosition::from_offset(2), rollup.advance_to);
+        assert_eq!(1, rollup.compactable.len());
+        assert_eq!(1, rollup.reinsert.len());
+        assert_eq!(1, rollup.backpressure.len());
+        assert_eq!(collection_id, rollup.backpressure[0]);
     }
 
     #[test]

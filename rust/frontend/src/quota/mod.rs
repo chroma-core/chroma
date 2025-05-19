@@ -337,7 +337,7 @@ lazy_static::lazy_static! {
         m.insert(UsageType::NumDatabases, 10);
         m.insert(UsageType::NumQueryIDs, 1000);
         m.insert(UsageType::RegexPatternLength, 0);
-        m.insert(UsageType::NumForks, 10000);
+        m.insert(UsageType::NumForks, 256);
         m
     };
 }
