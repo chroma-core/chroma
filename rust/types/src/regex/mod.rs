@@ -26,8 +26,8 @@ pub struct ChromaRegex {
 pub enum ChromaRegexError {
     #[error("Byte pattern is not allowed")]
     BytePattern,
-    #[error("Pattern is too permissive")]
-    PermissivePattern,
+    #[error("Pattern is too permissive: {0}")]
+    PermissivePattern(String),
     // NOTE: regex::Error is a large type, so we only store its error message here.
     #[error("Unexpected regex error: {0}")]
     Regex(String),
@@ -59,14 +59,12 @@ impl TryFrom<String> for ChromaRegex {
         let hir = parse(&value).map_err(|e| ChromaRegexError::RegexSyntax(e.to_string()))?;
         let properties = hir.properties().clone();
         if let Some(0) = properties.minimum_len() {
-            return Err(ChromaRegexError::PermissivePattern);
-        }
-        let chroma_hir = ChromaHir::try_from(hir)?;
-        if let ChromaHir::Empty = chroma_hir {
-            return Err(ChromaRegexError::PermissivePattern);
+            return Err(ChromaRegexError::PermissivePattern(format!(
+                "[{value}] can match empty string"
+            )));
         }
         Ok(Self {
-            hir: chroma_hir,
+            hir: hir.try_into()?,
             pattern: value,
             properties,
         })
