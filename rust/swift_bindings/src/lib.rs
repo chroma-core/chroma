@@ -17,8 +17,7 @@ use chroma_types::{
 };
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
-use tracing;
-// tracing_subscriber removed - not needed
+
 use chroma_frontend::{Frontend, FrontendConfig};
 use chroma_config::registry::Registry;
 use chroma_system::System;
@@ -76,7 +75,7 @@ static FRONTEND: Lazy<Mutex<Option<Frontend>>> = Lazy::new(|| Mutex::new(None));
 static RUNTIME: Lazy<Mutex<Option<Runtime>>> = Lazy::new(|| Mutex::new(None));
 
 use std::sync::Once;
-static INIT_TRACING: Once = Once::new();
+
 
 #[uniffi::export]
 pub fn initialize() -> FfiResult<()> {
@@ -86,13 +85,7 @@ pub fn initialize() -> FfiResult<()> {
 #[uniffi::export]
 pub fn initialize_with_path(path: Option<String>, allow_reset: bool) -> FfiResult<()> {
     
-    INIT_TRACING.call_once(|| {
-        let _ = tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::INFO)
-            .with_target(false)
-            .try_init();
-        
-    });
+
     // Ensure runtime isn't already initialized
     {
         let runtime_lock = RUNTIME.lock().unwrap();
@@ -157,7 +150,7 @@ pub fn initialize_with_path(path: Option<String>, allow_reset: bool) -> FfiResul
                 message: format!("Failed to create tenant: {e}"),
             });
         }
-        // If tenant already exists, that's fine - log it but continue
+
         
     }
         
@@ -179,7 +172,7 @@ pub fn initialize_with_path(path: Option<String>, allow_reset: bool) -> FfiResul
                 message: format!("Failed to create database: {e}"),
             });
         }
-        // If database already exists, that's fine - log it but continue
+
         
     }
     
