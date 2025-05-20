@@ -351,6 +351,8 @@ impl FrontendServer {
             .await?)
     }
 
+    // This is used to authenticate API operations that are collection-specific.
+    // We need to send additional collection info to the auth service.
     async fn authenticate_and_authorize_collection(
         &mut self,
         headers: &HeaderMap,
