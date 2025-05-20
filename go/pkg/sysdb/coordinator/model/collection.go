@@ -18,7 +18,7 @@ type Collection struct {
 	LogPosition                int64
 	Version                    int32
 	RootCollectionID           *types.UniqueID
-	LineageFileName            string
+	LineageFileName            *string
 	UpdatedAt                  types.Timestamp
 	TotalRecordsPostCompaction uint64
 	SizeBytesPostCompaction    uint64 // Note: This represents the size of the records off the log
@@ -48,7 +48,7 @@ type CreateCollection struct {
 	DatabaseName               string
 	Ts                         types.Timestamp
 	LogPosition                int64
-	RootCollectionId           string
+	RootCollectionId           *string
 	TotalRecordsPostCompaction uint64
 	SizeBytesPostCompaction    uint64 // Note: This represents the size of the records off the log
 	LastCompactionTimeSecs     uint64

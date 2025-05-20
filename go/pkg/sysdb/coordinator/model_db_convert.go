@@ -15,8 +15,10 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 	collections := make([]*model.Collection, 0, len(collectionAndMetadataList))
 	for _, collectionAndMetadata := range collectionAndMetadataList {
 		var rootCollectionID *types.UniqueID
-		if id, err := types.Parse(collectionAndMetadata.Collection.RootCollectionId); err == nil {
-			rootCollectionID = &id
+		if collectionAndMetadata.Collection.RootCollectionId != nil {
+			if id, err := types.Parse(*collectionAndMetadata.Collection.RootCollectionId); err == nil {
+				rootCollectionID = &id
+			}
 		}
 		collection := &model.Collection{
 			ID:                         types.MustParse(collectionAndMetadata.Collection.ID),
