@@ -1,6 +1,6 @@
 {
   "name": "@chroma-core/cohere",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "private": false,
   "description": "Cohere embedding provider for Chroma",
   "main": "dist/cjs/cohere.cjs",
@@ -43,7 +43,7 @@
     "chromadb": "workspace:^"
   },
   "dependencies": {
-    "@chromadb/ai-embeddings-common": "workspace:^0.1.0",
+    "@chroma-core/ai-embeddings-common": "workspace:^",
     "cohere-ai": "^7.17.1"
   },
   "engines": {

@@ -1,5 +1,6 @@
-import { validateConfigSchema } from "@chromadb/ai-embeddings-common";
+import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import { pipeline, ProgressCallback } from "@huggingface/transformers";
+import { env as TransformersEnv } from "@huggingface/transformers";
 
 export type DType =
   | "auto"
@@ -19,6 +20,7 @@ interface StoredConfig {
   revision?: string;
   dtype?: Quantization;
   quantized?: boolean;
+  wasm?: boolean;
 }
 
 export interface DefaultEmbeddingFunctionConfig {
@@ -27,6 +29,7 @@ export interface DefaultEmbeddingFunctionConfig {
   dtype?: Quantization;
   /** @deprecated Use 'dtype' instead. If set to true, dtype value will be 'uint8' */
   quantized?: boolean;
+  wasm?: boolean;
 }
 
 export class DefaultEmbeddingFunction {
@@ -36,6 +39,7 @@ export class DefaultEmbeddingFunction {
   private readonly dtype: Quantization | undefined;
   private readonly quantized: boolean;
   private readonly progressCallback: ProgressCallback | undefined = undefined;
+  private readonly wasm: boolean;
 
   constructor(
     args: Partial<
@@ -50,6 +54,7 @@ export class DefaultEmbeddingFunction {
       dtype = undefined,
       progressCallback = undefined,
       quantized = false,
+      wasm = false,
     } = args;
 
     this.modelName = modelName;
@@ -57,6 +62,10 @@ export class DefaultEmbeddingFunction {
     this.dtype = dtype || (quantized ? "uint8" : undefined);
     this.quantized = quantized;
     this.progressCallback = progressCallback;
+    this.wasm = wasm;
+    if (this.wasm) {
+      TransformersEnv.backends.onnx.backend = "wasm";
+    }
   }
 
   public static buildFromConfig(

@@ -1,5 +1,5 @@
 import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
-import { validateConfigSchema } from "@chromadb/ai-embeddings-common";
+import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import process from "node:process";
 import { CohereClient } from "cohere-ai";
 

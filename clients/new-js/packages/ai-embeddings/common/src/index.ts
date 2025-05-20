@@ -20,3 +20,9 @@ export const snakeCase = (input: any): any => {
 
   return input;
 };
+
+export const isBrowser = (): boolean => {
+  return (
+    typeof window !== "undefined" && typeof window.document !== "undefined"
+  );
+};

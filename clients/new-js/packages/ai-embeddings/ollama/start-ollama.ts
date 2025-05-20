@@ -52,7 +52,13 @@ export async function startOllamaContainer(
     throw new Error("Invalid model name");
   }
   await startedContainer.exec(["ollama", "pull", model]);
+
+  console.log("5");
+
   await startedContainer.exec(["ollama", "pull", "nomic-embed-text"]);
+
+  console.log("6");
+
   await startedContainer.exec([
     "ollama",
     "pull",

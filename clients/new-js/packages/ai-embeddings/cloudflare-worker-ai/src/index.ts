@@ -1,5 +1,5 @@
 import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
-import { validateConfigSchema } from "@chromadb/ai-embeddings-common";
+import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import * as process from "node:process";
 
 const NAME = "cloudflare-worker-ai";

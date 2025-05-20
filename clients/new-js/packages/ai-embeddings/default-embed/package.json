@@ -1,6 +1,6 @@
 {
   "name": "@chroma-core/default-embed",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "private": false,
   "description": "Default embedding function for Chroma",
   "main": "dist/cjs/default-embed.cjs",
@@ -31,7 +31,7 @@
     "test": "jest"
   },
   "dependencies": {
-    "@chromadb/ai-embeddings-common": "workspace:^",
+    "@chroma-core/ai-embeddings-common": "workspace:^",
     "@huggingface/transformers": "^3.5.1"
   },
   "devDependencies": {
