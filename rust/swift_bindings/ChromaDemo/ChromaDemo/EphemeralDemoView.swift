@@ -82,7 +82,7 @@ struct EphemeralDemoView: View {
                 }
                 .padding()
             } label: {
-                Label("Ephemeral Demo", systemImage: "cylinder.split")
+                Label("Ephemeral Demo", systemImage: "cylinder.split.1x2")
             }
             
             GroupBox {
