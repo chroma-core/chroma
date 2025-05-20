@@ -364,7 +364,7 @@ func (s *collectionDb) InsertOnConflictDoNothing(in *dbmodel.Collection) (didIns
 		log.Error("InsertOnConflictDoNothing collection failed", zap.Error(err))
 		return false, err
 	}
-	if s.db.RowsAffected == 0 {
+	if tx.RowsAffected == 0 {
 		log.Debug("InsertOnConflictDoNothing collection already exists")
 		return false, nil
 	} else {
