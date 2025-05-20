@@ -57,6 +57,7 @@ type ICollectionDb interface {
 	DeleteCollectionByID(collectionID string) (int, error)
 	GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*CollectionAndMetadata, error)
 	Insert(in *Collection) error
+	InsertOnConflictDoNothing(in *Collection) (didInsert bool, err error)
 	Update(in *Collection) error
 	DeleteAll() error
 	UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string) (int32, error)
