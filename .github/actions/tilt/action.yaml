@@ -24,8 +24,8 @@ runs:
         for node in $(kind get nodes -n chart-testing); do
           docker exec "${node}" mkdir -p "${REGISTRY_DIR}"
           cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${REGISTRY_DIR}/hosts.toml"
-        server = "http://192.168.127.1:5001"
-        [host."http://192.168.127.1:5001"]
+        server = "http://192.168.127.1:5000"
+        [host."http://192.168.127.1:5000"]
           capabilities = ["pull", "resolve"]
         EOF
           echo "Added registry mirror to ${node}:"
