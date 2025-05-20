@@ -1038,7 +1038,7 @@ async fn update_collection(
         "Updating collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::UpdateCollection,
             AuthzResource {
@@ -1046,6 +1046,7 @@ async fn update_collection(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let api_token = headers
@@ -1264,9 +1265,7 @@ async fn collection_add(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
-            CollectionUuid::from_str(&collection_id)
-                .map_err(|_| ValidationError::CollectionId)?
-                .clone(),
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1354,9 +1353,7 @@ async fn collection_update(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
-            CollectionUuid::from_str(&collection_id)
-                .map_err(|_| ValidationError::CollectionId)?
-                .clone(),
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1448,9 +1445,7 @@ async fn collection_upsert(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
-            CollectionUuid::from_str(&collection_id)
-                .map_err(|_| ValidationError::CollectionId)?
-                .clone(),
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1541,9 +1536,7 @@ async fn collection_delete(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
-            CollectionUuid::from_str(&collection_id)
-                .map_err(|_| ValidationError::CollectionId)?
-                .clone(),
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1620,9 +1613,7 @@ async fn collection_count(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
-            CollectionUuid::from_str(&collection_id)
-                .map_err(|_| ValidationError::CollectionId)?
-                .clone(),
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let _guard = server.scorecard_request(&[
@@ -1690,9 +1681,7 @@ async fn collection_get(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
-            CollectionUuid::from_str(&collection_id)
-                .map_err(|_| ValidationError::CollectionId)?
-                .clone(),
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1787,9 +1776,7 @@ async fn collection_query(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
-            CollectionUuid::from_str(&collection_id)
-                .map_err(|_| ValidationError::CollectionId)?
-                .clone(),
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
