@@ -356,11 +356,11 @@ func (s *collectionDb) Insert(in *dbmodel.Collection) error {
 // This is used for upstream get_or_create
 func (s *collectionDb) InsertOnConflictDoNothing(in *dbmodel.Collection) (didInsert bool, err error) {
 	// Ignore conflict on (name, database_id) since we have "idx_name" unique index on it in migration 20240411201006
-	err = s.db.Clauses(clause.OnConflict{
+	tx := s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "name"}, {Name: "database_id"}},
 		DoNothing: true,
-	}).Create(&in).Error
-	if err != nil {
+	}).Create(&in)
+	if tx.Error != nil {
 		log.Error("InsertOnConflictDoNothing collection failed", zap.Error(err))
 		return false, err
 	}
