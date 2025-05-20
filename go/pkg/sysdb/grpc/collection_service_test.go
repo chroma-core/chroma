@@ -634,7 +634,7 @@ func (suite *CollectionServiceTestSuite) TestFork() {
 	res, err := suite.s.ForkCollection(context.Background(), &req)
 	suite.NoError(err)
 	suite.Equal(res.Collection.Id, targetCollectionID.String())
-	suite.Equal(len(res.Segments), 3)
+	suite.Equal(len(res.Segments), 2)
 
 	fork2CollectionId := types.NewUniqueID()
 	// Create fork of fork
@@ -648,7 +648,10 @@ func (suite *CollectionServiceTestSuite) TestFork() {
 	forkedCollection2, err := suite.s.ForkCollection(context.Background(), forkCollectionReq)
 	suite.NoError(err)
 	suite.Equal(forkedCollection2.Collection.Id, fork2CollectionId.String())
-	suite.Equal(len(forkedCollection2.Segments), 3)
+	suite.Equal(len(forkedCollection2.Segments), 2)
+
+	// Enable soft delete mode
+	suite.s.coordinator.SetDeleteMode(coordinator.SoftDelete)
 
 	// Delete the root.
 	deleteReq := model.DeleteCollection{
@@ -672,7 +675,7 @@ func (suite *CollectionServiceTestSuite) TestFork() {
 	forkedCollection3, err := suite.s.ForkCollection(context.Background(), fork3CollectionReq)
 	suite.NoError(err)
 	suite.Equal(forkedCollection3.Collection.Id, fork3CollectionId.String())
-	suite.Equal(len(forkedCollection2.Segments), 3)
+	suite.Equal(len(forkedCollection2.Segments), 2)
 
 	// Deleting the source and fork should not succeed.
 	deleteReq2 := model.DeleteCollection{

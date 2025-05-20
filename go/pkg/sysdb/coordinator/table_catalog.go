@@ -924,7 +924,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		for _, collectionID := range collectionsToLock {
 			isDeleted, e := tc.metaDomain.CollectionDb(txCtx).LockCollection(collectionID)
 			if e != nil {
-				return err
+				return e
 			}
 			// It's ok for the root collection to be deleted but not for the source collection.
 			// We disable hard delete for soft deleted collections that are root.
