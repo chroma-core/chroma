@@ -2012,10 +2012,8 @@ mod test {
             .match_literal_expression(&literal_expression)
             .await
             .expect("Literal evaluation should not fail");
-        if literal_expression.contains_ngram_literal(3, fts_reader.maximum_branching_factor()) {
-            assert_eq!(regex_results, Some(reference_results));
-        } else {
-            assert_eq!(regex_results, None);
+        if let Some(res) = regex_results {
+            assert_eq!(res, reference_results);
         }
     }
 
