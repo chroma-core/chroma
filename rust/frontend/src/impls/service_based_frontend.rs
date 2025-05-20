@@ -1425,7 +1425,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         (config, system): &(FrontendConfig, System),
         registry: &registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        tracing::info!("Initializing local Chroma instance in ServiceBasedFrontend...");
+
 
         // Create sqlitedb if configured
         if let Some(sqlite_conf) = &config.sqlitedb {

@@ -166,7 +166,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::ListCollectionsRequest,
     ) -> Result<chroma_types::ListCollectionsResponse, chroma_types::GetCollectionsError> {
-        tracing::info!("InMemoryFrontend::list_collections called: tenant_id={}, database_name={}", request.tenant_id, request.database_name);
+
         let collections: Vec<_> = self
             .inner
             .collections
@@ -187,7 +187,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::CountCollectionsRequest,
     ) -> Result<chroma_types::CountCollectionsResponse, chroma_types::CountCollectionsError> {
-        tracing::info!("InMemoryFrontend::count_collections called: tenant_id={}, database_name={}", request.tenant_id, request.database_name);
+
         let count = self
             .inner
             .collections
