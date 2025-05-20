@@ -1,21 +1,21 @@
 {
-  "name": "@chroma-core/cloudflare-worker-ai",
+  "name": "@chroma-core/openai",
   "version": "0.1.5",
   "private": false,
-  "description": "Cloudflare Workers AI embedding provider for Chroma",
-  "main": "dist/cjs/cloudflare-worker-ai.cjs",
-  "types": "dist/cloudflare-worker-ai.d.ts",
-  "module": "dist/cloudflare-worker-ai.legacy-esm.js",
+  "description": "OpenAI embedding provider for Chroma",
+  "main": "dist/cjs/openai.cjs",
+  "types": "dist/openai.d.ts",
+  "module": "dist/openai.legacy-esm.js",
   "type": "module",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/cloudflare-worker-ai.d.ts",
-        "default": "./dist/cloudflare-worker-ai.mjs"
+        "types": "./dist/openai.d.ts",
+        "default": "./dist/openai.mjs"
       },
       "require": {
-        "types": "./dist/cjs/cloudflare-worker-ai.d.cts",
-        "default": "./dist/cjs/cloudflare-worker-ai.cjs"
+        "types": "./dist/cjs/openai.d.cts",
+        "default": "./dist/cjs/openai.cjs"
       }
     }
   },
@@ -40,10 +40,11 @@
     "tsup": "^8.3.5"
   },
   "peerDependencies": {
-    "chromadb": "workspace:^" 
+    "chromadb": "workspace:^"
   },
   "dependencies": {
-    "@chroma-core/ai-embeddings-common": "workspace:^"
+    "@chroma-core/ai-embeddings-common": "workspace:^",
+    "openai": "^4.102.0"
   },
   "engines": {
     "node": ">=14.17.0"

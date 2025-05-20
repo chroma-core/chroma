@@ -1,21 +1,21 @@
 {
-  "name": "@chroma-core/cloudflare-worker-ai",
+  "name": "@chroma-core/ollama",
   "version": "0.1.5",
   "private": false,
-  "description": "Cloudflare Workers AI embedding provider for Chroma",
-  "main": "dist/cjs/cloudflare-worker-ai.cjs",
-  "types": "dist/cloudflare-worker-ai.d.ts",
-  "module": "dist/cloudflare-worker-ai.legacy-esm.js",
+  "description": "Ollama embedding provider for Chroma",
+  "main": "dist/cjs/ollama.cjs",
+  "types": "dist/ollama.d.ts",
+  "module": "dist/ollama.legacy-esm.js",
   "type": "module",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/cloudflare-worker-ai.d.ts",
-        "default": "./dist/cloudflare-worker-ai.mjs"
+        "types": "./dist/ollama.d.ts",
+        "default": "./dist/ollama.mjs"
       },
       "require": {
-        "types": "./dist/cjs/cloudflare-worker-ai.d.cts",
-        "default": "./dist/cjs/cloudflare-worker-ai.cjs"
+        "types": "./dist/cjs/ollama.d.cts",
+        "default": "./dist/cjs/ollama.cjs"
       }
     }
   },
@@ -40,10 +40,12 @@
     "tsup": "^8.3.5"
   },
   "peerDependencies": {
-    "chromadb": "workspace:^" 
+    "chromadb": "workspace:^"
   },
   "dependencies": {
-    "@chroma-core/ai-embeddings-common": "workspace:^"
+    "@chroma-core/ai-embeddings-common": "workspace:^",
+    "ollama": "^0.5.15",
+    "testcontainers": "^10.9.0"
   },
   "engines": {
     "node": ">=14.17.0"

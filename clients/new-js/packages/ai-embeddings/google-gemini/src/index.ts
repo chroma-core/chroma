@@ -1,5 +1,5 @@
 import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
-import { validateConfigSchema } from "@chromadb/ai-embeddings-common";
+import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import { GoogleGenAI } from "@google/genai";
 
 const NAME = "google-generative-ai";
@@ -21,7 +21,6 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
   public readonly name = NAME;
 
   private readonly client: GoogleGenAI;
-  private readonly apiKey: string;
   private readonly apiKeyEnvVar: string;
   private readonly modelName: string;
   private readonly taskType: string | undefined;
@@ -43,7 +42,6 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
 
     this.modelName = modelName;
     this.apiKeyEnvVar = apiKeyEnvVar;
-    this.apiKey = apiKey;
     this.taskType = taskType;
     this.client = new GoogleGenAI({ apiKey });
   }

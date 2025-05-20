@@ -2,8 +2,7 @@ import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
 import {
   snakeCase,
   validateConfigSchema,
-} from "@chromadb/ai-embeddings-common";
-import * as process from "node:process";
+} from "@chroma-core/ai-embeddings-common";
 
 const NAME = "jina";
 

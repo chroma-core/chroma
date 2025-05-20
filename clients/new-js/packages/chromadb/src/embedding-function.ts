@@ -99,7 +99,11 @@ export const getEmbeddingFunction = async (
 export const serializeEmbeddingFunction = (
   ef: EmbeddingFunction,
 ): EmbeddingFunctionConfiguration => {
-  if (!ef.getConfig || !ef.name || !ef.buildFromConfig) {
+  if (
+    !ef.getConfig ||
+    !ef.name ||
+    !(ef.constructor as EmbeddingFunctionClass).buildFromConfig
+  ) {
     return { type: "legacy" };
   }
 
