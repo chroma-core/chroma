@@ -223,7 +223,7 @@ impl<'me> MetadataProvider<'me> {
     pub(crate) async fn filter_by_document_regex(
         &self,
         query: &str,
-    ) -> Result<RoaringBitmap, FilterError> {
+    ) -> Result<SignedRoaringBitmap, FilterError> {
         let chroma_regex = ChromaRegex::try_from(query.to_string())?;
         match self {
             MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader) => {
@@ -231,6 +231,10 @@ impl<'me> MetadataProvider<'me> {
                     metadata_segment_reader.full_text_index_reader.as_ref(),
                     record_segment_reader,
                 ) {
+                    // The pattern can match empty string and thus match any document
+                    if let Some(0) = chroma_regex.properties().minimum_len() {
+                        return Ok(SignedRoaringBitmap::full());
+                    }
                     let literal_expr = LiteralExpr::from(chroma_regex.hir().clone());
                     let approximate_matching_offset_ids = fti_reader
                         .match_literal_expression(&literal_expr)
@@ -240,7 +244,8 @@ impl<'me> MetadataProvider<'me> {
                         && fti_reader.can_match_exactly(&literal_expr);
                     if is_exact_match {
                         Ok(approximate_matching_offset_ids
-                            .unwrap_or(rec_reader.get_offset_stream(..).try_collect().await?))
+                            .map(SignedRoaringBitmap::Include)
+                            .unwrap_or(SignedRoaringBitmap::full()))
                     } else {
                         let regex = chroma_regex.regex()?;
                         let mut exact_matching_offset_ids = RoaringBitmap::new();
@@ -277,21 +282,27 @@ impl<'me> MetadataProvider<'me> {
                             }
                         }
 
-                        Ok(exact_matching_offset_ids)
+                        Ok(SignedRoaringBitmap::Include(exact_matching_offset_ids))
                     }
                 } else {
-                    Ok(RoaringBitmap::new())
+                    Ok(SignedRoaringBitmap::empty())
                 }
             }
             MetadataProvider::Log(metadata_log_reader) => {
+                // The pattern can match empty string and thus match any document
+                if let Some(0) = chroma_regex.properties().minimum_len() {
+                    return Ok(SignedRoaringBitmap::full());
+                }
                 let regex = chroma_regex.regex()?;
-                Ok(metadata_log_reader
-                    .document
-                    .iter()
-                    .filter_map(|(offset_id, document)| {
-                        regex.is_match(document).then_some(offset_id)
-                    })
-                    .collect())
+                Ok(SignedRoaringBitmap::Include(
+                    metadata_log_reader
+                        .document
+                        .iter()
+                        .filter_map(|(offset_id, document)| {
+                            regex.is_match(document).then_some(offset_id)
+                        })
+                        .collect(),
+                ))
             }
         }
     }
@@ -457,16 +468,13 @@ impl<'me> RoaringMetadataFilter<'me> for DocumentExpression {
                     .filter_by_document_contains(self.pattern.as_str())
                     .await?,
             )),
-            DocumentOperator::Regex => Ok(SignedRoaringBitmap::Include(
-                metadata_provider
-                    .filter_by_document_regex(self.pattern.as_str())
-                    .await?,
-            )),
-            DocumentOperator::NotRegex => Ok(SignedRoaringBitmap::Exclude(
-                metadata_provider
-                    .filter_by_document_regex(self.pattern.as_str())
-                    .await?,
-            )),
+            DocumentOperator::Regex => Ok(metadata_provider
+                .filter_by_document_regex(self.pattern.as_str())
+                .await?),
+            DocumentOperator::NotRegex => Ok(metadata_provider
+                .filter_by_document_regex(self.pattern.as_str())
+                .await?
+                .flip()),
         }
     }
 }
@@ -621,7 +629,9 @@ mod tests {
         OperationRecord, PrimitiveOperator, SegmentUuid, SetOperator, SignedRoaringBitmap, Where,
     };
 
-    use crate::execution::operators::filter::{FilterOperator, MetadataProvider};
+    use crate::execution::operators::filter::{
+        FilterOperator, MetadataLogReader, MetadataProvider,
+    };
 
     use super::FilterInput;
 
@@ -1068,7 +1078,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn regex_empty_posting_list() {
+    async fn test_regex_empty_posting_list() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
@@ -1274,7 +1284,79 @@ mod tests {
             .filter_by_document_regex("(?i)def")
             .await
             .expect("Expected regex to work");
-        assert_eq!(res.len(), 1);
-        assert_eq!(res.iter().next(), Some(1));
+        assert_eq!(res, SignedRoaringBitmap::Include([1].into()));
+    }
+
+    #[tokio::test]
+    async fn test_regex_short_circuit() {
+        let filter_input = setup_filter_input().await;
+
+        let record_segment_reader = match RecordSegmentReader::from_segment(
+            &filter_input.record_segment,
+            &filter_input.blockfile_provider,
+        )
+        .await
+        {
+            Ok(reader) => Ok(Some(reader)),
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Ok(None)
+            }
+            Err(e) => Err(*e),
+        }
+        .unwrap();
+        let cloned_record_segment_reader = record_segment_reader.clone();
+        let materialized_logs = materialize_logs(
+            &cloned_record_segment_reader,
+            filter_input.logs.clone(),
+            None,
+        )
+        .await
+        .unwrap();
+        let metadata_log_reader =
+            MetadataLogReader::create(&materialized_logs, &record_segment_reader)
+                .await
+                .unwrap();
+        let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
+
+        let metadata_segement_reader = MetadataSegmentReader::from_segment(
+            &filter_input.metadata_segment,
+            &filter_input.blockfile_provider,
+        )
+        .await
+        .unwrap();
+        let compact_metadata_provider =
+            MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
+
+        let match_all = r".*";
+        assert_eq!(
+            log_metadata_provider
+                .filter_by_document_regex(match_all)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::full()
+        );
+        assert_eq!(
+            compact_metadata_provider
+                .filter_by_document_regex(match_all)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::full()
+        );
+
+        let selective_match = r"cat|dog";
+        assert!(matches!(
+            log_metadata_provider
+                .filter_by_document_regex(selective_match)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::Include(_)
+        ),);
+        assert!(matches!(
+            compact_metadata_provider
+                .filter_by_document_regex(selective_match)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::Include(_)
+        ),);
     }
 }
