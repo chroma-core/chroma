@@ -30,22 +30,6 @@ pub enum LiteralExpr {
     Alternation(Vec<LiteralExpr>),
 }
 
-impl LiteralExpr {
-    pub fn contains_ngram_literal(&self, n: usize, max_literal_width: usize) -> bool {
-        match self {
-            LiteralExpr::Literal(literals) => literals
-                .split(|lit| lit.width() > max_literal_width)
-                .any(|chunk| chunk.len() >= n),
-            LiteralExpr::Concat(literal_exprs) => literal_exprs
-                .iter()
-                .any(|expr| expr.contains_ngram_literal(n, max_literal_width)),
-            LiteralExpr::Alternation(literal_exprs) => literal_exprs
-                .iter()
-                .all(|expr| expr.contains_ngram_literal(n, max_literal_width)),
-        }
-    }
-}
-
 impl From<ChromaHir> for LiteralExpr {
     fn from(value: ChromaHir) -> Self {
         match value {
