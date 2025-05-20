@@ -151,6 +151,90 @@ struct PersistentDemoView: View {
                 Label("Persistent Document Input", systemImage: "doc.fill")
             }
             
+            // --- Persistent Query Section ---
+            GroupBox {
+                VStack(spacing: 16) {
+                    Text("Query Collection (Persistent)")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    if collections.isEmpty {
+                        Text("No persistent collections available to query")
+                            .foregroundColor(.secondary)
+                    } else {
+                        Picker("Collection", selection: $persistentCollectionName) {
+                            ForEach(collections, id: \.self) { name in
+                                Text(name).tag(name)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    
+                    // Query Embedding Input
+                    @State var persistentQueryEmbeddingText: String = "0.1,0.2,0.3,0.4"
+                    TextField("Enter query embedding (comma-separated floats)", text: $persistentQueryEmbeddingText)
+                        .textFieldStyle(.roundedBorder)
+
+                    // Include fields input
+                    @State var persistentIncludeFieldsText: String = "documents"
+                    TextField("Fields to include (comma-separated, e.g. documents,embeddings)", text: $persistentIncludeFieldsText)
+                        .textFieldStyle(.roundedBorder)
+                    
+                    ActionButton(title: "Query Collection", disabled: !isPersistentInitialized || collections.isEmpty) {
+                        guard let embedding = parseEmbedding(persistentQueryEmbeddingText) else {
+                            addLog("[Query] Invalid embedding format. Please enter comma-separated floats.")
+                            return
+                        }
+                        let includeFields = persistentIncludeFieldsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+                        addLog("[Query] Querying persistent collection: \(persistentCollectionName)")
+                        addLog("[Query] Embedding: \(embedding) (dim: \(embedding.count))")
+                        addLog("[Query] Include fields: \(includeFields)")
+                        Task {
+                            do {
+                                let nResults: UInt32 = 5
+                                let result = try await withCheckedThrowingContinuation { continuation in
+                                    DispatchQueue.global(qos: .userInitiated).async {
+                                        do {
+                                            let result = try queryCollection(
+                                                collectionName: persistentCollectionName,
+                                                queryEmbeddings: [embedding],
+                                                nResults: nResults,
+                                                whereFilter: nil,
+                                                ids: nil,
+                                                include: includeFields
+                                            )
+                                            continuation.resume(returning: result)
+                                        } catch {
+                                            continuation.resume(throwing: error)
+                                        }
+                                    }
+                                }
+                                let ids = result.ids.first ?? []
+                                let docs = result.documents.first ?? []
+                                await MainActor.run {
+                                    addLog("[Query] Query result IDs: \(ids)")
+                                    addLog("[Query] Query result Docs: \(docs)")
+                                    addLog("[Query] Raw QueryResult: \(result)")
+                                }
+                            } catch {
+                                await MainActor.run {
+                                    addLog("[Query] Query failed: \(error)")
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding()
+            } label: {
+                Label("Persistent Query", systemImage: "magnifyingglass")
+            }
         }
     }
+}
+
+// Helper to parse comma-separated floats
+private func parseEmbedding(_ text: String) -> [Float]? {
+    let parts = text.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+    let floats = parts.compactMap { Float($0) }
+    return floats.count == parts.count ? floats : nil
 }

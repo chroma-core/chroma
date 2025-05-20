@@ -75,6 +75,9 @@ type FfiResult<T> = Result<T, ChromaError>;
 static FRONTEND: Lazy<Mutex<Option<Frontend>>> = Lazy::new(|| Mutex::new(None));
 static RUNTIME: Lazy<Mutex<Option<Runtime>>> = Lazy::new(|| Mutex::new(None));
 
+use std::sync::Once;
+static INIT_TRACING: Once = Once::new();
+
 #[uniffi::export]
 pub fn initialize() -> FfiResult<()> {
     initialize_with_path(None, false)
@@ -82,6 +85,14 @@ pub fn initialize() -> FfiResult<()> {
 
 #[uniffi::export]
 pub fn initialize_with_path(path: Option<String>, allow_reset: bool) -> FfiResult<()> {
+    
+    INIT_TRACING.call_once(|| {
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_target(false)
+            .try_init();
+        
+    });
     // Ensure runtime isn't already initialized
     {
         let runtime_lock = RUNTIME.lock().unwrap();
@@ -264,54 +275,88 @@ pub fn add_documents(collection_name: String, ids: Vec<String>, embeddings: Vec<
 // Add a new struct for query results
 #[derive(uniffi::Record)]
 pub struct QueryResult {
-    pub ids: Vec<String>,
-    pub documents: Vec<Option<String>>,
+    pub ids: Vec<Vec<String>>, // batched: one Vec<String> per query embedding
+    pub documents: Vec<Vec<Option<String>>>, // batched: one Vec<Option<String>> per query embedding
 }
 
 #[uniffi::export]
-pub fn query_collection(collection_name: String, query_embedding: Vec<f32>, n_results: u32) -> FfiResult<QueryResult> {
-    tracing::info!("Swift FFI: query_collection() called with collection_name={}, embedding_dim={}, n_results={}",
-        collection_name, query_embedding.len(), n_results);
+pub fn query_collection(
+    collection_name: String,
+    query_embeddings: Vec<Vec<f32>>, // batching
+    n_results: u32,
+    where_filter: Option<String>,
+    ids: Option<Vec<String>>,
+    include: Option<Vec<String>>,
+) -> FfiResult<QueryResult> {
+    
+    
+
+    // Acquire frontend
     let mut frontend_lock = FRONTEND.lock().unwrap();
-    let frontend = {
-        let frontend_lock = FRONTEND.lock().unwrap();
-        frontend_lock
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| ChromaError::Generic {
-                message: "Chroma not initialized. Call initialize() first.".to_string(),
-            })?
-    };
+    let mut frontend = frontend_lock
+        .as_ref()
+        .cloned()
+        .ok_or_else(|| ChromaError::Generic {
+            message: "Chroma not initialized. Call initialize() first.".to_string(),
+        })?;
+
+    // Acquire runtime
     let runtime_lock = RUNTIME.lock().unwrap();
     let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
-        message: "Chroma not initialized. Call initialize() first.".to_string(),    })?;
-    // Get collection id
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+
+    // Get collection ID
+    
     let get_request = chroma_types::GetCollectionRequest::try_new(
         DEFAULT_TENANT.to_string(),
         DEFAULT_DATABASE.to_string(),
         collection_name.clone(),
     ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
-    let mut frontend_clone = frontend.clone();
     let coll = runtime
-        .block_on(async { frontend_clone.get_collection(get_request).await })
+        .block_on(async { frontend.get_collection(get_request).await })
         .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
-    let request = QueryRequest::try_new(
+
+    // Parse include list
+    let include_list = if let Some(ref inc) = include {
+        chroma_types::IncludeList(
+            inc.iter().filter_map(|s| match s.to_lowercase().as_str() {
+                "documents" => Some(chroma_types::Include::Document),
+                "embeddings" => Some(chroma_types::Include::Embedding),
+                "metadatas" => Some(chroma_types::Include::Metadata),
+                "distances" => Some(chroma_types::Include::Distance),
+                _ => None,
+            }).collect()
+        )
+    } else {
+        chroma_types::IncludeList(vec![chroma_types::Include::Document])
+    };
+
+    
+    let request = chroma_types::QueryRequest::try_new(
         DEFAULT_TENANT.to_string(),
         DEFAULT_DATABASE.to_string(),
         coll.collection_id,
-        None, // ids
-        None, // where
-        vec![query_embedding], // embeddings
+        ids, // Option<Vec<String>>
+        None, // Option<chroma_types::Where>
+        query_embeddings, // Vec<Vec<f32>>
         n_results,
-        chroma_types::IncludeList(vec![chroma_types::Include::Document]),
+        include_list,
     ).map_err(|e| ChromaError::Generic { message: format!("query req: {e}") })?;
-    let mut frontend_clone = frontend.clone();
-    let response = runtime
-        .block_on(async { frontend_clone.query(request).await })
+    
+
+    
+    let result = runtime
+        .block_on(async { frontend.query(request).await })
         .map_err(|e| ChromaError::Generic { message: format!("query: {e}") })?;
-    let ids = response.ids.into_iter().flatten().collect();
-    let documents = response.documents.unwrap_or_default().into_iter().flatten().collect();
-    Ok(QueryResult { ids, documents })
+    
+
+    
+    let ids = result.ids;
+    let documents = result.documents.unwrap_or_default();
+    let ffi_result = QueryResult { ids, documents };
+    Ok(ffi_result)
+
 }
 
 #[derive(uniffi::Record)]
@@ -322,9 +367,12 @@ pub struct GetResult {
 
 #[uniffi::export]
 pub fn get_all_documents(collection_name: String) -> FfiResult<GetResult> {
-    tracing::info!("Swift FFI: get_all_documents() called with collection_name={}", collection_name);
+    
+    
+    
     let frontend = {
         let frontend_lock = FRONTEND.lock().unwrap();
+        
         frontend_lock
             .as_ref()
             .cloned()
@@ -334,7 +382,9 @@ pub fn get_all_documents(collection_name: String) -> FfiResult<GetResult> {
     };
     let runtime_lock = RUNTIME.lock().unwrap();
     let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
-        message: "Chroma not initialized. Call initialize() first.".to_string(),    })?;
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
     // Get collection id
     let get_request = chroma_types::GetCollectionRequest::try_new(
         DEFAULT_TENANT.to_string(),
