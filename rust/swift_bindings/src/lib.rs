@@ -158,7 +158,7 @@ pub fn initialize_with_path(path: Option<String>, allow_reset: bool) -> FfiResul
             });
         }
         // If tenant already exists, that's fine - log it but continue
-        tracing::info!("Tenant already exists: {}", DEFAULT_TENANT);
+        
     }
         
     // Create the default database (ignoring if it already exists)
@@ -180,7 +180,7 @@ pub fn initialize_with_path(path: Option<String>, allow_reset: bool) -> FfiResul
             });
         }
         // If database already exists, that's fine - log it but continue
-        tracing::info!("Database already exists: {}", DEFAULT_DATABASE);
+        
     }
     
     // Store the runtime in the global variable
@@ -196,7 +196,7 @@ pub fn initialize_with_path(path: Option<String>, allow_reset: bool) -> FfiResul
 
 #[uniffi::export]
 pub fn create_collection(name: String) -> FfiResult<String> {
-    tracing::info!("Swift FFI: create_collection() called with name={}", name);
+    
     let frontend = {
         let frontend_lock = FRONTEND.lock().unwrap();
         frontend_lock
@@ -227,8 +227,8 @@ pub fn create_collection(name: String) -> FfiResult<String> {
 
 #[uniffi::export]
 pub fn add_documents(collection_name: String, ids: Vec<String>, embeddings: Vec<Vec<f32>>, documents: Vec<String>) -> FfiResult<u32> {
-    tracing::info!("Swift FFI: add_documents() called with collection_name={}, num_ids={}, num_embeddings={}, num_documents={}",
-        collection_name, ids.len(), embeddings.len(), documents.len());
+    
+    
     let frontend = {
         let frontend_lock = FRONTEND.lock().unwrap();
         frontend_lock
@@ -416,7 +416,7 @@ pub fn get_all_documents(collection_name: String) -> FfiResult<GetResult> {
 
 #[uniffi::export]
 pub fn list_collections() -> FfiResult<Vec<String>> {
-    tracing::info!("Swift FFI: list_collections() called");
+    
     let frontend = {
         let frontend_lock = FRONTEND.lock().unwrap();
         frontend_lock
@@ -446,7 +446,7 @@ pub fn list_collections() -> FfiResult<Vec<String>> {
 
 #[uniffi::export]
 pub fn delete_collection(collection_name: String) -> FfiResult<()> {
-    tracing::info!("Swift FFI: delete_collection() called with collection_name={}", collection_name);
+    
     let frontend = {
         let frontend_lock = FRONTEND.lock().unwrap();
         frontend_lock
@@ -481,7 +481,7 @@ pub struct CollectionInfo {
 
 #[uniffi::export]
 pub fn get_collection_info(collection_name: String) -> FfiResult<CollectionInfo> {
-    tracing::info!("Swift FFI: get_collection_info() called with collection_name={}", collection_name);
+    
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = {
         let frontend_lock = FRONTEND.lock().unwrap();
@@ -524,7 +524,7 @@ pub fn get_collection_info(collection_name: String) -> FfiResult<CollectionInfo>
 
 #[uniffi::export]
 pub fn reset() -> FfiResult<()> {
-    tracing::info!("Swift FFI: reset() called");
+    
     let frontend = {
         let frontend_lock = FRONTEND.lock().unwrap();
         frontend_lock
@@ -547,14 +547,14 @@ pub fn reset() -> FfiResult<()> {
 
 #[uniffi::export]
 pub fn get_version() -> FfiResult<String> {
-    tracing::info!("Swift FFI: get_version() called");
+    
     // For now, return a hardcoded version since InMemoryFrontend doesn't have a version method
     Ok("0.1.0".to_string())
 }
 
 #[uniffi::export]
 pub fn get_max_batch_size() -> FfiResult<u32> {
-    tracing::info!("Swift FFI: get_max_batch_size() called");
+    
     let mut frontend = {
         let frontend_lock = FRONTEND.lock().unwrap();
         frontend_lock
