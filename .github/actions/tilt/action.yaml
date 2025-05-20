@@ -10,13 +10,16 @@ runs:
         curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v$TILT_VERSION/tilt.$TILT_VERSION.linux.x86_64.tar.gz | \
           tar -xzv -C /usr/local/bin tilt
     - name: Set up kind
-      id: kind
-      uses: helm/kind-action@v1
+      uses: Wandalen/wretry.action@v3.7.0
       with:
-        registry: true
-        registry_name: my-registry
-        registry_port: 5001
-        registry_enable_delete: true
+        action: helm/kind-action@v1
+        attempt_limit: 3
+        attempt_delay: 2000
+        with: |
+          registry: true
+          registry_name: my-registry
+          registry_port: 5001
+          registry_enable_delete: true
     - name: Add blacksmith registry mirror
       shell: bash
       run: |
