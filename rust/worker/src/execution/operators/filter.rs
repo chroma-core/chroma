@@ -223,7 +223,7 @@ impl<'me> MetadataProvider<'me> {
     pub(crate) async fn filter_by_document_regex(
         &self,
         query: &str,
-    ) -> Result<RoaringBitmap, FilterError> {
+    ) -> Result<SignedRoaringBitmap, FilterError> {
         let chroma_regex = ChromaRegex::try_from(query.to_string())?;
         match self {
             MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader) => {
@@ -233,7 +233,7 @@ impl<'me> MetadataProvider<'me> {
                 ) {
                     // The pattern can match empty string and thus match any document
                     if let Some(0) = chroma_regex.properties().minimum_len() {
-                        return Ok(rec_reader.get_offset_stream(..).try_collect().await?);
+                        return Ok(SignedRoaringBitmap::full());
                     }
                     let literal_expr = LiteralExpr::from(chroma_regex.hir().clone());
                     let approximate_matching_offset_ids = fti_reader
@@ -244,7 +244,8 @@ impl<'me> MetadataProvider<'me> {
                         && fti_reader.can_match_exactly(&literal_expr);
                     if is_exact_match {
                         Ok(approximate_matching_offset_ids
-                            .unwrap_or(rec_reader.get_offset_stream(..).try_collect().await?))
+                            .map(SignedRoaringBitmap::Include)
+                            .unwrap_or(SignedRoaringBitmap::full()))
                     } else {
                         let regex = chroma_regex.regex()?;
                         let mut exact_matching_offset_ids = RoaringBitmap::new();
@@ -281,25 +282,27 @@ impl<'me> MetadataProvider<'me> {
                             }
                         }
 
-                        Ok(exact_matching_offset_ids)
+                        Ok(SignedRoaringBitmap::Include(exact_matching_offset_ids))
                     }
                 } else {
-                    Ok(RoaringBitmap::new())
+                    Ok(SignedRoaringBitmap::empty())
                 }
             }
             MetadataProvider::Log(metadata_log_reader) => {
                 // The pattern can match empty string and thus match any document
                 if let Some(0) = chroma_regex.properties().minimum_len() {
-                    return Ok(metadata_log_reader.document.keys().collect());
+                    return Ok(SignedRoaringBitmap::full());
                 }
                 let regex = chroma_regex.regex()?;
-                Ok(metadata_log_reader
-                    .document
-                    .iter()
-                    .filter_map(|(offset_id, document)| {
-                        regex.is_match(document).then_some(offset_id)
-                    })
-                    .collect())
+                Ok(SignedRoaringBitmap::Include(
+                    metadata_log_reader
+                        .document
+                        .iter()
+                        .filter_map(|(offset_id, document)| {
+                            regex.is_match(document).then_some(offset_id)
+                        })
+                        .collect(),
+                ))
             }
         }
     }
@@ -465,16 +468,13 @@ impl<'me> RoaringMetadataFilter<'me> for DocumentExpression {
                     .filter_by_document_contains(self.pattern.as_str())
                     .await?,
             )),
-            DocumentOperator::Regex => Ok(SignedRoaringBitmap::Include(
-                metadata_provider
-                    .filter_by_document_regex(self.pattern.as_str())
-                    .await?,
-            )),
-            DocumentOperator::NotRegex => Ok(SignedRoaringBitmap::Exclude(
-                metadata_provider
-                    .filter_by_document_regex(self.pattern.as_str())
-                    .await?,
-            )),
+            DocumentOperator::Regex => Ok(metadata_provider
+                .filter_by_document_regex(self.pattern.as_str())
+                .await?),
+            DocumentOperator::NotRegex => Ok(metadata_provider
+                .filter_by_document_regex(self.pattern.as_str())
+                .await?
+                .flip()),
         }
     }
 }
@@ -1282,7 +1282,6 @@ mod tests {
             .filter_by_document_regex("(?i)def")
             .await
             .expect("Expected regex to work");
-        assert_eq!(res.len(), 1);
-        assert_eq!(res.iter().next(), Some(1));
+        assert_eq!(res, SignedRoaringBitmap::Include([1].into()));
     }
 }
