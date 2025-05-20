@@ -6,6 +6,7 @@ use opentelemetry::trace::TraceContextExt;
 use std::time::Duration;
 use tower::Service;
 use tower_http::trace::{MakeSpan, OnResponse, TraceLayer};
+use tracing::Instrument;
 
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -16,8 +17,7 @@ impl<B> MakeSpan<B> for RequestTracing {
         let http_route = request
             .extensions()
             .get::<MatchedPath>()
-            .map_or_else(|| "(unknown route)", |mp| mp.as_str())
-            .to_owned();
+            .map_or_else(|| "(unknown route)", |mp| mp.as_str());
 
         let host = request
             .headers()
@@ -56,15 +56,18 @@ impl<B> OnResponse<B> for RequestTracing {
     }
 }
 
+/// TracingMiddleware adds trace ID to the response headers
+/// and wraps the inner handler with a span.
 #[derive(Clone)]
-pub struct TraceIdMiddleware<S> {
+pub struct TracingMiddleware<S> {
     inner: S,
 }
 
-impl<S, Request, Rs> Service<Request> for TraceIdMiddleware<S>
+impl<S, B, Rs> Service<Request<B>> for TracingMiddleware<S>
 where
-    S: Service<Request, Response = Response<Rs>> + Send + 'static,
+    S: Service<Request<B>, Response = Response<Rs>> + Send + 'static,
     S::Future: Send + 'static,
+    B: Send + 'static,
 {
     type Response = S::Response;
     type Error = S::Error;
@@ -77,10 +80,23 @@ where
         self.inner.poll_ready(cx)
     }
 
-    fn call(&mut self, req: Request) -> Self::Future {
+    fn call(&mut self, req: Request<B>) -> Self::Future {
+        let http_route = req
+            .extensions()
+            .get::<MatchedPath>()
+            .map_or_else(|| "(unknown route)", |mp| mp.as_str());
+
+        let handler_span = tracing::span!(
+            tracing::Level::DEBUG,
+            "HTTP request handler",
+            http.route = http_route,
+            http.version = ?req.version(),
+        );
+
         let future = self.inner.call(req);
+
         Box::pin(async move {
-            let mut response: Response<Rs> = future.await?;
+            let mut response: Response<Rs> = future.instrument(handler_span).await?;
             if response.status().is_client_error() || response.status().is_server_error() {
                 let trace_id = tracing::Span::current()
                     .context()
@@ -109,10 +125,10 @@ impl SetTraceIdLayer {
 }
 
 impl<S> tower::layer::Layer<S> for SetTraceIdLayer {
-    type Service = TraceIdMiddleware<S>;
+    type Service = TracingMiddleware<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        TraceIdMiddleware { inner }
+        TracingMiddleware { inner }
     }
 }
 
