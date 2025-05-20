@@ -8,7 +8,10 @@ inputs:
 runs:
   using: "composite"
   steps:
-
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
     - name: Set up Python 3.9 for protos
       uses: useblacksmith/setup-python@v6
       # NOTE(hammadb) Blacksmith does not support windows, so we use the official action for windows and
@@ -16,19 +19,15 @@ runs:
       if: runner.os != 'Windows'
       with:
         python-version: "3.9"
-        cache: "pip"
-        cache-dependency-path: "requirements*.txt"
     - name: Set up Python 3.9 for protos (Windows)
       if: runner.os == 'Windows'
       uses: actions/setup-python@v5
       with:
         python-version: "3.9"
-        cache: "pip"
-        cache-dependency-path: "requirements*.txt"
 
     - name: Install proto dependencies
       run: |
-        python -m pip install grpcio==1.58.0 grpcio-tools==1.58.0
+        uv pip install --system grpcio==1.58.0 grpcio-tools==1.58.0
       shell: bash
     - name: Generate Proto Files
       if: runner.os != 'Windows'
@@ -40,30 +39,24 @@ runs:
       shell: cmd
     - name: Uninstall proto dependencies
       run: |
-        python -m pip uninstall -y grpcio grpcio-tools
+        uv pip uninstall --system grpcio grpcio-tools
       shell: bash
     - name: Set up Python ${{ inputs.python-version }}
       uses: useblacksmith/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
-        cache: "pip"
-        cache-dependency-path: "requirements*.txt"
     - name: Set up Python ${{ inputs.python-version }} (Windows)
       if: runner.os == 'Windows'
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
-        cache: "pip"
-        cache-dependency-path: "requirements*.txt"
     - name: Install dependencies
       run: |
-        python -m pip install -r requirements.txt && python -m pip install -r requirements_dev.txt
+        uv pip install --system -r requirements.txt -r requirements_dev.txt
       shell: bash
     - name: Install protobuf compiler (protoc) - Linux
       if: runner.os != 'Windows'
       run: |
-        sudo apt-get update
-        sudo apt-get install -y wget unzip
         wget https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip
         sudo unzip protoc-28.2-linux-x86_64.zip -d /usr/local/
         sudo rm protoc-28.2-linux-x86_64.zip
