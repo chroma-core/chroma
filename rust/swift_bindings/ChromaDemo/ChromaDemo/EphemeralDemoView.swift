@@ -112,43 +112,6 @@ struct EphemeralDemoView: View {
             } label: {
                 Label("Ephemeral Document Input", systemImage: "doc.text")
             }
-            
-            GroupBox {
-                VStack(spacing: 16) {
-                    Text("Query Collections")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    
-                    if collections.isEmpty {
-                        Text("No collections available to query")
-                            .foregroundColor(.secondary)
-                    } else {
-                        ActionButton(title: "Query Ephemeral", disabled: !isInitialized || collections.isEmpty) {
-                            let queryEmbedding: [Float] = [0.1, 0.2, 0.3, 0.4]
-                            
-                            let result = try queryCollection(
-                                collectionName: collectionName,
-                                queryEmbedding: queryEmbedding,
-                                nResults: 1
-                            )
-                            
-                            if result.ids.isEmpty {
-                                addLog("No results found in ephemeral collection")
-                            } else {
-                                addLog("Ephemeral query results:")
-                                for i in 0..<result.ids.count {
-                                    let id = result.ids[i]
-                                    let doc = result.documents[i] ?? "(no document)"
-                                    addLog("ID: \(id), Doc: \(doc)")
-                                }
-                            }
-                        }
-                    }
-                }
-                .padding()
-            } label: {
-                Label("Querying", systemImage: "magnifyingglass")
-            }
         }
     }
 }
