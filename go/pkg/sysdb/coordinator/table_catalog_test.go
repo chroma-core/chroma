@@ -680,7 +680,7 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("GetCollectionWithoutMetadata", &collectionID, mock.Anything).Return(mockCollectionEntry, nil)
+	mockCollectionDb.On("GetCollectionWithoutMetadata", &collectionID, mock.Anything, mock.Anything).Return(mockCollectionEntry, nil)
 	mockCollectionDb.On("UpdateVersionRelatedFields",
 		collectionID,
 		existingVersionFileName,
@@ -742,7 +742,7 @@ func TestCatalog_DeleteCollectionVersion_CollectionNotFound(t *testing.T) {
 
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("GetCollectionWithoutMetadata", &collectionID, mock.Anything).Return(nil, nil)
+	mockCollectionDb.On("GetCollectionWithoutMetadata", &collectionID, mock.Anything, mock.Anything).Return(nil, nil)
 
 	// Create test request
 	req := &coordinatorpb.DeleteCollectionVersionRequest{
@@ -811,7 +811,7 @@ func TestCatalog_MarkVersionForDeletion(t *testing.T) {
 
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("GetCollectionWithoutMetadata", &collectionID, mock.Anything).Return(mockCollectionEntry, nil)
+	mockCollectionDb.On("GetCollectionWithoutMetadata", &collectionID, mock.Anything, mock.Anything).Return(mockCollectionEntry, nil)
 	mockCollectionDb.On("UpdateVersionRelatedFields",
 		collectionID,
 		existingVersionFileName,
@@ -878,7 +878,7 @@ func TestCatalog_MarkVersionForDeletion_CollectionNotFound(t *testing.T) {
 
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("GetCollectionWithoutMetadata", &collectionID, mock.Anything).Return(nil, nil)
+	mockCollectionDb.On("GetCollectionWithoutMetadata", &collectionID, mock.Anything, mock.Anything).Return(nil, nil)
 
 	// Create test request
 	req := &coordinatorpb.MarkVersionForDeletionRequest{
@@ -946,7 +946,7 @@ func TestCatalog_MarkVersionForDeletion_VersionNotFound(t *testing.T) {
 
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("GetCollectionWithoutMetadata", &collectionID, mock.Anything).Return(mockCollectionEntry, nil)
+	mockCollectionDb.On("GetCollectionWithoutMetadata", &collectionID, mock.Anything, mock.Anything).Return(mockCollectionEntry, nil)
 
 	// Create test request
 	req := &coordinatorpb.MarkVersionForDeletionRequest{
