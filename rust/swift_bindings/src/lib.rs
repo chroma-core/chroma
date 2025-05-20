@@ -122,7 +122,8 @@ pub fn initialize_with_path(path: Option<String>, allow_reset: bool) -> FfiResul
             
             // Set up the SQLite URL to point to a file in this directory
             let db_path = path_obj.join("chroma.sqlite3");
-            sqlitedb.url = Some(format!("sqlite://{}", db_path.to_string_lossy()));
+            // Use absolute path format without protocol prefix to avoid file system display artifacts
+            sqlitedb.url = Some(db_path.to_string_lossy().to_string());
         }
     }
     
