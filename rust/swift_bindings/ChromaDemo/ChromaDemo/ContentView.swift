@@ -143,8 +143,8 @@ struct ContentView: View {
                                         docText: $docText,
                                         docCounter: $docCounter,
                                         showingSuccess: $showingSuccess,
-                                        refreshCollections: refreshCollections,
                                         persistentPath: $persistentPath,
+                                        refreshCollections: refreshCollections,
                                         addLog: addLog
                                     )
                                 }
@@ -182,8 +182,7 @@ struct ContentView: View {
                                         docText: $docText,
                                         docCounter: $docCounter,
                                         showingSuccess: $showingSuccess,
-                                        refreshCollections: refreshCollections,
-                                        persistentPath: $persistentPath,
+                                        persistentPath: $persistentPath, refreshCollections: refreshCollections,
                                         addLog: addLog
                                     )
                                 }

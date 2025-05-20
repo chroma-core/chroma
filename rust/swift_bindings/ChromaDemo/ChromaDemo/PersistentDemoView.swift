@@ -8,8 +8,10 @@ struct PersistentDemoView: View {
     @Binding var docText: String
     @Binding var docCounter: Int
     @Binding var showingSuccess: Bool
-    var refreshCollections: () -> Void
     @Binding var persistentPath: String
+    @State private var persistentQueryEmbeddingText: String = "0.1,0.2,0.3,0.4"
+    @State private var persistentIncludeFieldsText: String = "documents"
+    var refreshCollections: () -> Void
     var addLog: (String) -> Void
     
     var body: some View {
@@ -153,12 +155,10 @@ struct PersistentDemoView: View {
                     }
                     
                     // Query Embedding Input
-                    @State var persistentQueryEmbeddingText: String = "0.1,0.2,0.3,0.4"
                     TextField("Enter query embedding (comma-separated floats)", text: $persistentQueryEmbeddingText)
                         .textFieldStyle(.roundedBorder)
 
                     // Include fields input
-                    @State var persistentIncludeFieldsText: String = "documents"
                     TextField("Fields to include (comma-separated, e.g. documents,embeddings)", text: $persistentIncludeFieldsText)
                         .textFieldStyle(.roundedBorder)
                     
