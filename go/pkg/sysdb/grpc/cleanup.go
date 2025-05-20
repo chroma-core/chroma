@@ -59,7 +59,8 @@ func (s *SoftDeleteCleaner) run() {
 		numDeleted := 0
 		for _, collection := range collections {
 			// Skip root collections.
-			if collection.LineageFileName == nil || *collection.LineageFileName == "" {
+			// Only roots have lineage file name set.
+			if collection.LineageFileName != nil && *collection.LineageFileName != "" {
 				continue
 			}
 			timeSinceDelete := time.Since(time.Unix(collection.UpdatedAt, 0))
