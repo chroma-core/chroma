@@ -231,6 +231,10 @@ impl<'me> MetadataProvider<'me> {
                     metadata_segment_reader.full_text_index_reader.as_ref(),
                     record_segment_reader,
                 ) {
+                    // The pattern can match empty string and thus match any document
+                    if let Some(0) = chroma_regex.properties().minimum_len() {
+                        return Ok(rec_reader.get_offset_stream(..).try_collect().await?);
+                    }
                     let literal_expr = LiteralExpr::from(chroma_regex.hir().clone());
                     let approximate_matching_offset_ids = fti_reader
                         .match_literal_expression(&literal_expr)
@@ -284,6 +288,10 @@ impl<'me> MetadataProvider<'me> {
                 }
             }
             MetadataProvider::Log(metadata_log_reader) => {
+                // The pattern can match empty string and thus match any document
+                if let Some(0) = chroma_regex.properties().minimum_len() {
+                    return Ok(metadata_log_reader.document.keys().collect());
+                }
                 let regex = chroma_regex.regex()?;
                 Ok(metadata_log_reader
                     .document
