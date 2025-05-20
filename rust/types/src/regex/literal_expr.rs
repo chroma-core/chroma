@@ -288,6 +288,7 @@ mod tests {
     use super::{Literal, NgramLiteralProvider};
 
     struct StaticLiteralProvider {
+        #[allow(clippy::type_complexity)]
         inverted_literal_index: Vec<(String, Vec<(u32, Vec<u32>)>)>,
     }
 
@@ -309,7 +310,7 @@ mod tests {
                 .iter()
                 .filter(|(literal, _)| ngram_range.contains(&literal.as_str()))
                 .flat_map(|(literal, m)| {
-                    m.into_iter()
+                    m.iter()
                         .map(|(doc, pos)| (literal.as_str(), *doc, pos.as_slice()))
                 })
                 .collect())
