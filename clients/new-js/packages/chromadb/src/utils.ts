@@ -12,6 +12,7 @@ import {
 } from "./types";
 import { Include } from "./api";
 import { a, b } from "@hey-api/openapi-ts/dist/types.d-C5lgdIHG";
+import { ChromaValueError } from "./errors";
 
 export const DEFAULT_TENANT = "default_tenant";
 export const DEFAULT_DATABASE = "default_database";
@@ -77,7 +78,7 @@ export const validateRecordSetLengthConsistency = (recordSet: RecordSet) => {
     .map(([field, value]) => [field, value.length]);
 
   if (lengths.length === 0) {
-    throw new Error(
+    throw new ChromaValueError(
       `At least one of ${recordSetFields.join(", ")} must be provided`,
     );
   }
@@ -86,13 +87,13 @@ export const validateRecordSetLengthConsistency = (recordSet: RecordSet) => {
     .filter(([_, length]) => length === 0)
     .map(([field, _]) => field);
   if (zeroLength.length > 0) {
-    throw new Error(
+    throw new ChromaValueError(
       `Non-empty lists are required for ${zeroLength.join(", ")}`,
     );
   }
 
   if (new Set(lengths.map(([_, length]) => length)).size > 1) {
-    throw new Error(
+    throw new ChromaValueError(
       `Unequal lengths for fields ${lengths
         .map(([field, _]) => field)
         .join(", ")}`,
@@ -108,24 +109,26 @@ const validateEmbeddings = ({
   fieldName: string;
 }) => {
   if (!Array.isArray(embeddings)) {
-    throw new Error(
+    throw new ChromaValueError(
       `Expected '${fieldName}' to be an array, but got ${typeof embeddings}`,
     );
   }
 
   if (embeddings.length === 0) {
-    throw new Error(
+    throw new ChromaValueError(
       "Expected embeddings to be an array with at least one item",
     );
   }
 
-  if (embeddings.filter((e) => e.every((n: any) => typeof n === "number"))) {
-    throw new Error("Expected each embedding to be an array of numbers");
+  if (!embeddings.filter((e) => e.every((n: any) => typeof n === "number"))) {
+    throw new ChromaValueError(
+      "Expected each embedding to be an array of numbers",
+    );
   }
 
   embeddings.forEach((embedding, i) => {
     if (embedding.length === 0) {
-      throw new Error(
+      throw new ChromaValueError(
         `Expected each embedding to be a non-empty array of numbers, but got an empty array at index ${i}`,
       );
     }
@@ -142,18 +145,20 @@ const validateDocuments = ({
   nullable?: boolean;
 }) => {
   if (!Array.isArray(documents)) {
-    throw new Error(
+    throw new ChromaValueError(
       `Expected '${fieldName}' to be an array, but got ${typeof documents}`,
     );
   }
 
   if (documents.length === 0) {
-    throw new Error(`Expected '${fieldName}' to be a non-empty list`);
+    throw new ChromaValueError(
+      `Expected '${fieldName}' to be a non-empty list`,
+    );
   }
 
   documents.forEach((document) => {
     if (!nullable && typeof document !== "string" && !document) {
-      throw new Error(
+      throw new ChromaValueError(
         `Expected each document to be a string, but got ${typeof document}`,
       );
     }
@@ -162,11 +167,13 @@ const validateDocuments = ({
 
 export const validateIDs = (ids: string[]) => {
   if (!Array.isArray(ids)) {
-    throw new Error(`Expected 'ids' to be an array, but got ${typeof ids}`);
+    throw new ChromaValueError(
+      `Expected 'ids' to be an array, but got ${typeof ids}`,
+    );
   }
 
   if (ids.length === 0) {
-    throw new Error("Expected 'ids' to be a non-empty list");
+    throw new ChromaValueError("Expected 'ids' to be a non-empty list");
   }
 
   const nonStrings = ids
@@ -175,7 +182,9 @@ export const validateIDs = (ids: string[]) => {
     .map(([_, i]) => i);
 
   if (nonStrings.length > 0) {
-    throw new Error(`Found non-string IDs at ${nonStrings.join(", ")}`);
+    throw new ChromaValueError(
+      `Found non-string IDs at ${nonStrings.join(", ")}`,
+    );
   }
 
   const seen = new Set();
@@ -187,10 +196,10 @@ export const validateIDs = (ids: string[]) => {
   });
   let message = "Expected IDs to be unique, but found duplicates of";
   if (duplicates.length > 0 && duplicates.length <= 5) {
-    throw new Error(`${message} ${duplicates.join(", ")}`);
+    throw new ChromaValueError(`${message} ${duplicates.join(", ")}`);
   }
   if (duplicates.length > 0) {
-    throw new Error(
+    throw new ChromaValueError(
       `${message} ${duplicates.slice(0, 5).join(", ")}, ..., ${duplicates
         .slice(duplicates.length - 5)
         .join(", ")}`,
@@ -204,7 +213,7 @@ export const validateMetadata = (metadata?: Metadata) => {
   }
 
   if (Object.keys(metadata).length === 0) {
-    throw new Error("Expected metadata to be non-empty");
+    throw new ChromaValueError("Expected metadata to be non-empty");
   }
 
   if (
@@ -217,7 +226,7 @@ export const validateMetadata = (metadata?: Metadata) => {
         typeof v === "boolean",
     )
   ) {
-    throw new Error(
+    throw new ChromaValueError(
       "Expected metadata to be a string, number, boolean, or nullable",
     );
   }
@@ -225,7 +234,7 @@ export const validateMetadata = (metadata?: Metadata) => {
 
 const validateMetadatas = (metadatas: Metadata[]) => {
   if (!Array.isArray(metadatas)) {
-    throw new Error(
+    throw new ChromaValueError(
       `Expected metadatas to be an array, but got ${typeof metadatas}`,
     );
   }
@@ -245,7 +254,7 @@ export const validateBaseRecordSet = ({
   documentsField?: string;
 }) => {
   if (!recordSet.embeddings && !recordSet.documents && !update) {
-    throw new Error(
+    throw new ChromaValueError(
       `At least one of '${embeddingsField}' and '${documentsField}' must be provided`,
     );
   }
@@ -271,11 +280,11 @@ export const validateBaseRecordSet = ({
 
 export const validateWhere = (where: Where) => {
   if (typeof where !== "object") {
-    throw new Error("Expected where to be a non-empty object");
+    throw new ChromaValueError("Expected where to be a non-empty object");
   }
 
   if (Object.keys(where).length != 1) {
-    throw new Error(
+    throw new ChromaValueError(
       `Expected 'where' to have exactly one operator, but got ${
         Object.keys(where).length
       }`,
@@ -290,14 +299,14 @@ export const validateWhere = (where: Where) => {
       key !== "$nin" &&
       !["string", "number", "boolean", "object"].includes(typeof value)
     ) {
-      throw new Error(
+      throw new ChromaValueError(
         `Expected 'where' value to be a string, number, boolean, or an operator expression, but got ${value}`,
       );
     }
 
     if (key === "$and" || key === "$or") {
       if (Object.keys(value).length <= 1) {
-        throw new Error(
+        throw new ChromaValueError(
           `Expected 'where' value for $and or $or to be a list of 'where' expressions, but got ${value}`,
         );
       }
@@ -307,7 +316,7 @@ export const validateWhere = (where: Where) => {
 
     if (typeof value === "object") {
       if (Object.keys(value).length != 1) {
-        throw new Error(
+        throw new ChromaValueError(
           `Expected operator expression to have one operator, but got ${value}`,
         );
       }
@@ -318,13 +327,13 @@ export const validateWhere = (where: Where) => {
         ["$gt", "$gte", "$lt", "$lte"].includes(operator) &&
         typeof operand !== "number"
       ) {
-        throw new Error(
+        throw new ChromaValueError(
           `Expected operand value to be a number for ${operator}, but got ${typeof operand}`,
         );
       }
 
       if (["$in", "$nin"].includes(operator) && !Array.isArray(operand)) {
-        throw new Error(
+        throw new ChromaValueError(
           `Expected operand value to be an array for ${operator}, but got ${operand}`,
         );
       }
@@ -334,7 +343,7 @@ export const validateWhere = (where: Where) => {
           operator,
         )
       ) {
-        throw new Error(
+        throw new ChromaValueError(
           `Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, but got ${operator}`,
         );
       }
@@ -343,7 +352,7 @@ export const validateWhere = (where: Where) => {
         !["string", "number", "boolean"].includes(typeof operand) &&
         !Array.isArray(operand)
       ) {
-        throw new Error(
+        throw new ChromaValueError(
           "Expected operand value to be a string, number, boolean, or a list of those types",
         );
       }
@@ -353,7 +362,7 @@ export const validateWhere = (where: Where) => {
         (operand.length === 0 ||
           !operand.every((item) => typeof item !== typeof operand[0]))
       ) {
-        throw new Error(
+        throw new ChromaValueError(
           "Expected 'where' operand value to be a non-empty list and all values to be of the same type",
         );
       }
@@ -363,11 +372,13 @@ export const validateWhere = (where: Where) => {
 
 export const validateWhereDocument = (whereDocument: WhereDocument) => {
   if (typeof whereDocument !== "object") {
-    throw new Error("Expected 'whereDocument' to be a non-empty object");
+    throw new ChromaValueError(
+      "Expected 'whereDocument' to be a non-empty object",
+    );
   }
 
   if (Object.keys(whereDocument).length != 1) {
-    throw new Error(
+    throw new ChromaValueError(
       `Expected 'whereDocument' to have exactly one operator, but got ${whereDocument}`,
     );
   }
@@ -383,20 +394,20 @@ export const validateWhereDocument = (whereDocument: WhereDocument) => {
       "$or",
     ].includes(operator)
   ) {
-    throw new Error(
+    throw new ChromaValueError(
       `Expected 'whereDocument' operator to be one of $contains, $not_contains, $matches, $not_matches, $and, or $or, but got ${operator}`,
     );
   }
 
   if (operator === "$and" || operator === "$or") {
     if (!Array.isArray(operand)) {
-      throw new Error(
+      throw new ChromaValueError(
         `Expected operand for ${operator} to be a list of 'whereDocument' expressions, but got ${operand}`,
       );
     }
 
     if (operand.length <= 1) {
-      throw new Error(
+      throw new ChromaValueError(
         `Expected 'whereDocument' operand for ${operator} to be a list with at least two 'whereDocument' expressions`,
       );
     }
@@ -408,7 +419,7 @@ export const validateWhereDocument = (whereDocument: WhereDocument) => {
     (operand === "$contains" || operand === "$not_contains") &&
     (typeof (operator as any) !== "string" || operator.length === 0)
   ) {
-    throw new Error(
+    throw new ChromaValueError(
       `Expected operand for ${operator} to be a non empty string, but got ${operand}`,
     );
   }
@@ -422,17 +433,17 @@ export const validateInclude = ({
   exclude?: Include[];
 }) => {
   if (!Array.isArray(include)) {
-    throw new Error("Expected 'include' to be a non-empty array");
+    throw new ChromaValueError("Expected 'include' to be a non-empty array");
   }
 
   const validValues = Object.keys(IncludeEnum);
   include.forEach((item) => {
     if (typeof (item as any) !== "string") {
-      throw new Error("Expected 'include' items to be strings");
+      throw new ChromaValueError("Expected 'include' items to be strings");
     }
 
     if (!validValues.includes(item)) {
-      throw new Error(
+      throw new ChromaValueError(
         `Expected 'include' items to be one of ${validValues.join(
           ", ",
         )}, but got ${item}`,
@@ -440,19 +451,19 @@ export const validateInclude = ({
     }
 
     if (exclude?.includes(item)) {
-      throw new Error(`${item} is not allowed for this operation`);
+      throw new ChromaValueError(`${item} is not allowed for this operation`);
     }
   });
 };
 
 export const validateNResults = (nResults: number) => {
   if (typeof (nResults as any) !== "number") {
-    throw new Error(
+    throw new ChromaValueError(
       `Expected 'nResults' to be a number, but got ${typeof nResults}`,
     );
   }
 
   if (nResults <= 0) {
-    throw new Error("Number of requested results has to positive");
+    throw new ChromaValueError("Number of requested results has to positive");
   }
 };

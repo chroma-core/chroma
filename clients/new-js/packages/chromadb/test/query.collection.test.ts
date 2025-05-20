@@ -3,6 +3,7 @@ import { ChromaClient, EmbeddingFunction } from "../src";
 import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./utils/data";
 
 class TestEmbeddingFunction implements EmbeddingFunction {
+  public name: string = "test";
   constructor() {}
 
   public async generate(texts: string[]): Promise<number[][]> {
