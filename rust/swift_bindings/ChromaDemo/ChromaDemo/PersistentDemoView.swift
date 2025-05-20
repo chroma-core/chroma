@@ -112,21 +112,42 @@ struct PersistentDemoView: View {
                         .textFieldStyle(.roundedBorder)
                     
                     ActionButton(title: "Add Document", disabled: !isPersistentInitialized || docText.isEmpty || collections.isEmpty) {
-                        docCounter += 1
-                        let ids = ["persistent_doc\(docCounter)"]
-                        let embeddings: [[Float]] = [[0.1, 0.2, 0.3, 0.4]]
-                        let docs = [docText]
-                        _ = try addDocuments(
-                            collectionName: persistentCollectionName,
-                            ids: ids,
-                            embeddings: embeddings,
-                            documents: docs
-                        )
-                        showingSuccess = true
-                        addLog("Document added to persistent collection '\(persistentCollectionName)': \(docText)")
-                        docText = ""
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            showingSuccess = false
+                        Task {
+                            do {
+                                docCounter += 1
+                                let ids = ["persistent_doc\(docCounter)"]
+                                let embeddings: [[Float]] = [[0.1, 0.2, 0.3, 0.4]]
+                                let docs = [docText]
+                                
+                                _ = try await withCheckedThrowingContinuation { continuation in
+                                    DispatchQueue.global(qos: .userInitiated).async {
+                                        do {
+                                            let result = try addDocuments(
+                                                collectionName: persistentCollectionName,
+                                                ids: ids,
+                                                embeddings: embeddings,
+                                                documents: docs
+                                            )
+                                            continuation.resume(returning: result)
+                                        } catch {
+                                            continuation.resume(throwing: error)
+                                        }
+                                    }
+                                }
+                                
+                                await MainActor.run {
+                                    showingSuccess = true
+                                    addLog("Document added to persistent collection '\(persistentCollectionName)': \(docText)")
+                                    docText = ""
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                        showingSuccess = false
+                                    }
+                                }
+                            } catch {
+                                await MainActor.run {
+                                    addLog("Failed to add document: \(error)")
+                                }
+                            }
                         }
                     }
                 }
