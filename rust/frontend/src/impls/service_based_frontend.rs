@@ -61,7 +61,7 @@ pub struct ServiceBasedFrontend {
     executor: Executor,
     log_client: Log,
     sysdb_client: SysDb,
-    pub collections_with_segments_provider: CollectionsWithSegmentsProvider,
+    collections_with_segments_provider: CollectionsWithSegmentsProvider,
     max_batch_size: u32,
     metrics: Arc<Metrics>,
     default_knn_index: KnnIndex,
