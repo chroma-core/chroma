@@ -865,15 +865,16 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 	return result, nil
 }
 
-func (tc *Catalog) getLineageFile(ctx context.Context, lineageFileName string) (*coordinatorpb.CollectionLineageFile, error) {
-	if len(lineageFileName) == 0 {
+func (tc *Catalog) getLineageFile(ctx context.Context, lineageFileName *string) (*coordinatorpb.CollectionLineageFile, error) {
+	if lineageFileName == nil {
 		// There is no lineage file for the given collection
 		return &coordinatorpb.CollectionLineageFile{
 			Dependencies: []*coordinatorpb.CollectionVersionDependency{},
 		}, nil
 	}
 
-	return tc.s3Store.GetLineageFile(lineageFileName)
+	// Safe to deref.
+	return tc.s3Store.GetLineageFile(*lineageFileName)
 }
 
 func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.ForkCollection) (*model.Collection, []*model.Segment, error) {
@@ -886,7 +887,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		var sourceCollection *model.Collection
 		var sourceSegments []*model.Segment
 		var newLineageFileFullName string
-		var oldLineageFileName string
+		var oldLineageFileName *string
 
 		ts := time.Now().UTC()
 
@@ -957,13 +958,9 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			if collection.LineageFileName == nil {
 				return common.ErrMissingLineageFileName
 			}
-			oldLineageFileName = *collection.LineageFileName
+			oldLineageFileName = collection.LineageFileName
 		} else {
-			if sourceCollection.LineageFileName == nil {
-				return common.ErrMissingLineageFileName
-			}
-			// Safe to deref.
-			oldLineageFileName = *sourceCollection.LineageFileName
+			oldLineageFileName = sourceCollection.LineageFileName
 		}
 		databases, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(sourceCollection.TenantID, sourceCollection.DatabaseName)
 		if err != nil {
@@ -1056,7 +1053,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			return err
 		}
 
-		return tc.metaDomain.CollectionDb(txCtx).UpdateCollectionLineageFilePath(rootCollectionIDStr, &oldLineageFileName, newLineageFileFullName)
+		return tc.metaDomain.CollectionDb(txCtx).UpdateCollectionLineageFilePath(rootCollectionIDStr, oldLineageFileName, newLineageFileFullName)
 	})
 	if err != nil {
 		return nil, nil, err
@@ -1096,11 +1093,8 @@ func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.Uniq
 		return 0, common.ErrCollectionNotFound
 	}
 	rootCollection := collections[0]
-	if rootCollection.LineageFileName == nil {
-		return 0, common.ErrMissingLineageFileName
-	}
 
-	lineageFile, err := tc.getLineageFile(ctx, *rootCollection.LineageFileName)
+	lineageFile, err := tc.getLineageFile(ctx, rootCollection.LineageFileName)
 	if err != nil {
 		return 0, err
 	}
