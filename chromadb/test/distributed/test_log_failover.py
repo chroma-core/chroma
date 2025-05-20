@@ -65,4 +65,6 @@ def test_log_failover(
 
     for i in range(200):
         result = collection.get(ids=[str(i)], include=["embeddings"])
+        if len(result["embeddings"]) == 0:
+            print("missing result", i)
         assert all([math.fabs(x - y) < 0.001 for (x, y) in zip(result["embeddings"][0], embeddings[i])])

@@ -252,7 +252,6 @@ impl GrpcLog {
             };
             let to_evaluate = to_evaluate.0.as_u64_pair().0;
             let alt_host_threshold = alt_host_threshold.as_u64_pair().0;
-            println!("{to_evaluate:16x} {alt_host_threshold:16x}");
             to_evaluate <= alt_host_threshold
         } else {
             false
