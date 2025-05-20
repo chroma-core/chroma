@@ -71,10 +71,10 @@ class Text2VecEmbeddingFunction(EmbeddingFunction[Documents]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        if "model_name" in new_config:
-            raise ValueError(
-                "The model name cannot be changed after the embedding function has been initialized."
-            )
+        # model_name is also used as the identifier for model path if stored locally.
+        # Users should be able to change the path if needed, so we should not validate that.
+        # e.g. moving file path from /v1/my-model.bin to /v2/my-model.bin
+        return
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:
