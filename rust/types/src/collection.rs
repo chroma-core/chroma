@@ -94,6 +94,12 @@ pub struct Collection {
     pub size_bytes_post_compaction: u64,
     #[serde(skip)]
     pub last_compaction_time_secs: u64,
+    #[serde(skip)]
+    pub version_file_path: Option<String>,
+    #[serde(skip)]
+    pub root_collection_id: Option<CollectionUuid>,
+    #[serde(skip)]
+    pub lineage_file_path: Option<String>,
 }
 
 impl Default for Collection {
@@ -111,6 +117,9 @@ impl Default for Collection {
             total_records_post_compaction: 0,
             size_bytes_post_compaction: 0,
             last_compaction_time_secs: 0,
+            version_file_path: None,
+            root_collection_id: None,
+            lineage_file_path: None,
         }
     }
 }
@@ -226,6 +235,11 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             total_records_post_compaction: proto_collection.total_records_post_compaction,
             size_bytes_post_compaction: proto_collection.size_bytes_post_compaction,
             last_compaction_time_secs: proto_collection.last_compaction_time_secs,
+            version_file_path: proto_collection.version_file_path,
+            root_collection_id: proto_collection
+                .root_collection_id
+                .map(|uuid| CollectionUuid(Uuid::try_parse(&uuid).unwrap())),
+            lineage_file_path: proto_collection.lineage_file_path,
         })
     }
 }
@@ -261,6 +275,9 @@ impl TryFrom<Collection> for chroma_proto::Collection {
             total_records_post_compaction: value.total_records_post_compaction,
             size_bytes_post_compaction: value.size_bytes_post_compaction,
             last_compaction_time_secs: value.last_compaction_time_secs,
+            version_file_path: value.version_file_path,
+            root_collection_id: value.root_collection_id.map(|uuid| uuid.0.to_string()),
+            lineage_file_path: value.lineage_file_path,
         })
     }
 }
@@ -306,6 +323,9 @@ mod test {
             total_records_post_compaction: 0,
             size_bytes_post_compaction: 0,
             last_compaction_time_secs: 0,
+            version_file_path: Some("version_file_path".to_string()),
+            root_collection_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
+            lineage_file_path: Some("lineage_file_path".to_string()),
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(
@@ -318,5 +338,19 @@ mod test {
         assert_eq!(converted_collection.tenant, "baz".to_string());
         assert_eq!(converted_collection.database, "qux".to_string());
         assert_eq!(converted_collection.total_records_post_compaction, 0);
+        assert_eq!(converted_collection.size_bytes_post_compaction, 0);
+        assert_eq!(converted_collection.last_compaction_time_secs, 0);
+        assert_eq!(
+            converted_collection.version_file_path,
+            Some("version_file_path".to_string())
+        );
+        assert_eq!(
+            converted_collection.root_collection_id,
+            Some(CollectionUuid(Uuid::nil()))
+        );
+        assert_eq!(
+            converted_collection.lineage_file_path,
+            Some("lineage_file_path".to_string())
+        );
     }
 }
