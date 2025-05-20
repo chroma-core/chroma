@@ -1,16 +1,19 @@
-use crate::operators::{
-    fetch_lineage_file::{
-        FetchLineageFileError, FetchLineageFileInput, FetchLineageFileOperator,
-        FetchLineageFileOutput,
+use crate::{
+    operators::{
+        fetch_lineage_file::{
+            FetchLineageFileError, FetchLineageFileInput, FetchLineageFileOperator,
+            FetchLineageFileOutput,
+        },
+        fetch_version_file::{
+            FetchVersionFileError, FetchVersionFileInput, FetchVersionFileOperator,
+            FetchVersionFileOutput,
+        },
+        get_version_file_paths::{
+            GetVersionFilePathsError, GetVersionFilePathsInput, GetVersionFilePathsOperator,
+            GetVersionFilePathsOutput,
+        },
     },
-    fetch_version_file::{
-        FetchVersionFileError, FetchVersionFileInput, FetchVersionFileOperator,
-        FetchVersionFileOutput,
-    },
-    get_version_file_paths::{
-        GetVersionFilePathsError, GetVersionFilePathsInput, GetVersionFilePathsOperator,
-        GetVersionFilePathsOutput,
-    },
+    types::{VersionGraph, VersionGraphNode, VersionStatus},
 };
 use async_trait::async_trait;
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -31,15 +34,6 @@ use std::{
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
-
-#[derive(Debug, Clone, Copy)]
-pub enum VersionStatus {
-    #[allow(dead_code)]
-    Alive {
-        created_at: DateTime<chrono::Utc>,
-    },
-    Deleted,
-}
 
 #[derive(Debug, Clone)]
 struct VersionDependency {
@@ -91,16 +85,6 @@ impl ConstructVersionGraphOrchestrator {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct VersionGraphNode {
-    pub collection_id: CollectionUuid,
-    pub version: i64,
-    #[allow(dead_code)]
-    pub status: VersionStatus,
-}
-
-pub type VersionGraph = DiGraph<VersionGraphNode, ()>;
-
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct ConstructVersionGraphResponse {
@@ -130,8 +114,10 @@ pub enum ConstructVersionGraphError {
     InvalidUuid(#[from] uuid::Error),
     #[error("Invalid timestamp: {0}")]
     InvalidTimestamp(i64),
-    #[error("Expected node not found while constructing graph")]
-    ExpectedNodeNotFound,
+    #[error("Expected node not found while constructing graph (collection {0}@v{1:?})")]
+    ExpectedNodeNotFound(CollectionUuid, Option<i64>),
+    #[error("Invariant violation: {0}")]
+    InvariantViolation(String),
 }
 
 impl<E> From<TaskError<E>> for ConstructVersionGraphError
@@ -159,7 +145,8 @@ impl ChromaError for ConstructVersionGraphError {
             ConstructVersionGraphError::FetchVersionFilePaths(err) => err.code(),
             ConstructVersionGraphError::InvalidUuid(_) => ErrorCodes::Internal,
             ConstructVersionGraphError::InvalidTimestamp(_) => ErrorCodes::InvalidArgument,
-            ConstructVersionGraphError::ExpectedNodeNotFound => ErrorCodes::Internal,
+            ConstructVersionGraphError::ExpectedNodeNotFound(_, _) => ErrorCodes::Internal,
+            ConstructVersionGraphError::InvariantViolation(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -224,9 +211,11 @@ impl ConstructVersionGraphOrchestrator {
         ctx: &ComponentContext<ConstructVersionGraphOrchestrator>,
     ) -> Result<(), ConstructVersionGraphError> {
         if self.num_pending_tasks == 0 {
+            // This map will be used as a basis for building the graph
             let mut versions_by_collection_id: HashMap<CollectionUuid, Vec<(i64, VersionStatus)>> =
                 HashMap::new();
 
+            // Add all known versions from version files to map
             for (collection_id, version_file) in self.version_files.iter() {
                 if let Some(versions) = &version_file.version_history {
                     for version in versions.versions.iter() {
@@ -251,6 +240,7 @@ impl ConstructVersionGraphOrchestrator {
                 }
             }
 
+            // If any version appears as a version dependency (from the lineage file) but does not already exist in the map from the version files, the version must have been deleted.
             for dependency in self.version_dependencies.iter() {
                 let source_collection_id = dependency.source_collection_id;
                 let source_collection_version = dependency.source_collection_version;
@@ -272,6 +262,11 @@ impl ConstructVersionGraphOrchestrator {
                 versions.sort_unstable_by_key(|v| v.0);
             }
 
+            tracing::trace!(
+                "Versions by collection ID: {:#?}",
+                versions_by_collection_id
+            );
+
             let mut graph = DiGraph::new();
             for (collection_id, versions) in versions_by_collection_id.iter() {
                 let mut prev_node = None;
@@ -282,12 +277,14 @@ impl ConstructVersionGraphOrchestrator {
                         status: *status,
                     });
                     if let Some(prev) = prev_node {
+                        // Add edge between each successive pair of collection versions
                         graph.add_edge(prev, node, ());
                     }
                     prev_node = Some(node);
                 }
             }
 
+            // Add edges for forked collections
             for dependency in self.version_dependencies.iter() {
                 let source_node = graph
                     .node_indices()
@@ -296,7 +293,12 @@ impl ConstructVersionGraphOrchestrator {
                         node.collection_id == dependency.source_collection_id
                             && node.version == dependency.source_collection_version
                     })
-                    .ok_or(ConstructVersionGraphError::ExpectedNodeNotFound)?;
+                    .ok_or_else(|| {
+                        ConstructVersionGraphError::ExpectedNodeNotFound(
+                            dependency.source_collection_id,
+                            Some(dependency.source_collection_version),
+                        )
+                    })?;
 
                 let target_node = graph
                     .node_indices()
@@ -304,7 +306,12 @@ impl ConstructVersionGraphOrchestrator {
                         let node = graph.node_weight(*n).expect("node index should exist");
                         node.collection_id == dependency.target_collection_id
                     })
-                    .ok_or(ConstructVersionGraphError::ExpectedNodeNotFound)?;
+                    .ok_or_else(|| {
+                        ConstructVersionGraphError::ExpectedNodeNotFound(
+                            dependency.target_collection_id,
+                            None,
+                        )
+                    })?;
 
                 graph.add_edge(source_node, target_node, ());
             }
@@ -316,6 +323,15 @@ impl ConstructVersionGraphOrchestrator {
             }
 
             tracing::trace!("Version files: {:#?}", self.version_files);
+
+            let components = petgraph::algo::connected_components(&graph);
+            if components != 1 {
+                // This is a defensive check, it should never happen
+                return Err(ConstructVersionGraphError::InvariantViolation(format!(
+                    "Graph is not fully connected, found {} components",
+                    components
+                )));
+            }
 
             self.terminate_with_result(
                 Ok(ConstructVersionGraphResponse {

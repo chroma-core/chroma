@@ -18,7 +18,14 @@ use proptest::strategy::Strategy;
 use proptest::{prelude::Just, prop_oneof};
 use proptest_state_machine::ReferenceStateMachine;
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CollectionStatus {
+    Alive,
+    SoftDeleted,
+    Deleted,
+}
 
 #[derive(Clone)]
 struct CollectionVersionGraphNode {
@@ -65,9 +72,9 @@ impl CollectionVersionGraphNode {
 #[derive(Debug, Clone)]
 pub struct ReferenceState {
     pub runtime: Arc<tokio::runtime::Runtime>,
+    pub collection_status: HashMap<CollectionUuid, CollectionStatus>,
     version_graph: DiGraph<CollectionVersionGraphNode, ()>,
-    has_created_root_collection: bool,
-    deleted_collection_ids: HashSet<CollectionUuid>,
+    root_collection_id: Option<CollectionUuid>,
 }
 
 impl ReferenceState {
@@ -87,7 +94,9 @@ impl ReferenceState {
             // Iterate over the file references in the node
             for file_ref in &node_data.segments.get_all_file_paths() {
                 let entry = file_ref_counts.entry(file_ref.clone()).or_default();
-                if !node_data.is_deleted {
+                if !node_data.is_deleted
+                    && self.collection_status[&node_data.collection_id] != CollectionStatus::Deleted
+                {
                     entry.insert((node_data.collection_id, node_data.version));
                 }
             }
@@ -98,9 +107,9 @@ impl ReferenceState {
     pub fn check_invariants(&self) {
         // If all collections are deleted, all file ref counts should be 0
         let all_collections_deleted = self
-            .version_graph
-            .node_indices()
-            .all(|node| self.version_graph[node].is_deleted);
+            .collection_status
+            .values()
+            .all(|status| *status == CollectionStatus::Deleted);
         if !all_collections_deleted {
             return;
         }
@@ -138,7 +147,8 @@ impl ReferenceState {
         // Iterate over the nodes in the graph
         for node in self.version_graph.node_indices() {
             let node_data = &self.version_graph[node];
-            if !node_data.is_deleted {
+            let status = &self.collection_status[&node_data.collection_id];
+            if !node_data.is_deleted && *status == CollectionStatus::Alive {
                 let versions = expected_alive_collection_versions
                     .entry(node_data.collection_id)
                     .or_insert_with(Vec::new);
@@ -160,17 +170,20 @@ impl ReferenceState {
     }
 
     fn get_collection_ids(&self) -> HashSet<CollectionUuid> {
-        let mut collection_ids = HashSet::new();
-        // Iterate over the nodes in the graph
-        for node in self.version_graph.node_indices() {
-            let node_data = &self.version_graph[node];
-            if !node_data.is_deleted {
-                collection_ids.insert(node_data.collection_id);
-            }
-        }
-        collection_ids
+        self.collection_status
+            .iter()
+            .filter_map(|(collection_id, status)| {
+                if *status == CollectionStatus::Alive {
+                    Some(*collection_id)
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
+
+static RUNTIME_ONCE: OnceLock<Arc<tokio::runtime::Runtime>> = OnceLock::new();
 
 pub struct ReferenceGarbageCollector {}
 
@@ -179,25 +192,30 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
     type Transition = Transition;
 
     fn init_state() -> proptest::prelude::BoxedStrategy<Self::State> {
+        let runtime = RUNTIME_ONCE
+            .get_or_init(|| Arc::new(tokio::runtime::Runtime::new().unwrap()))
+            .clone();
+
         Just(ReferenceState {
-            runtime: Arc::new(tokio::runtime::Runtime::new().unwrap()),
-            has_created_root_collection: false,
-            deleted_collection_ids: HashSet::new(),
+            runtime,
             version_graph: DiGraph::new(),
+            collection_status: HashMap::new(),
+            root_collection_id: None,
         })
         .boxed()
     }
 
     fn transitions(state: &Self::State) -> proptest::prelude::BoxedStrategy<Self::Transition> {
-        let collection_ids = state
-            .version_graph
-            .node_indices()
-            .map(|idx| state.version_graph[idx].collection_id)
-            .collect::<HashSet<_>>();
-
-        let alive_collection_ids = collection_ids
-            .difference(&state.deleted_collection_ids)
-            .cloned()
+        let alive_collection_ids = state
+            .collection_status
+            .iter()
+            .filter_map(|(collection_id, status)| {
+                if matches!(status, CollectionStatus::Alive) {
+                    Some(*collection_id)
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
 
         let alive_collection_id_strategy = any::<proptest::sample::Index>().prop_map({
@@ -254,15 +272,11 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                 }
             });
 
-        let garbage_collect_transition = (alive_collection_id_strategy, 1..=2usize).prop_map(
-            move |(collection_id, min_versions_to_keep)| Transition::GarbageCollect {
-                collection_id,
-                min_versions_to_keep,
-            },
-        );
+        let delete_collection_transition =
+            alive_collection_id_strategy.prop_map(Transition::DeleteCollection);
 
         if alive_collection_ids.is_empty() {
-            if state.has_created_root_collection {
+            if state.root_collection_id.is_some() {
                 // If all collections are deleted, we cannot create a new collection, so there is nothing further to do
                 return Just(Transition::NoOp).boxed();
             }
@@ -270,24 +284,24 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
             return prop_oneof![create_collection_transition,].boxed();
         }
 
-        if state.has_created_root_collection {
+        // While the garbage collector can technically run on any collection in a fork tree, we always run it on the root collection as the test fixture will call `ListCollectionsToGc()` which only returns the root collection.
+        if let Some(root_collection_id) = state.root_collection_id {
+            let garbage_collect_transition =
+                (1..=2usize).prop_map(move |min_versions_to_keep| Transition::GarbageCollect {
+                    collection_id: root_collection_id,
+                    min_versions_to_keep,
+                });
+
             return prop_oneof![
-                // TODO(@codetheweb): add delete transition
-                1 => fork_collection_transition,
+                2 => fork_collection_transition,
                 3 => increment_collection_version_transition,
                 2 => garbage_collect_transition,
+                1 => delete_collection_transition,
             ]
             .boxed();
         }
 
-        prop_oneof![
-            // TODO(@codetheweb): add delete transition
-            1 => create_collection_transition,
-            1 => fork_collection_transition,
-            3 => increment_collection_version_transition,
-            2 => garbage_collect_transition,
-        ]
-        .boxed()
+        create_collection_transition.boxed()
     }
 
     fn preconditions(state: &Self::State, transition: &Self::Transition) -> bool {
@@ -298,19 +312,23 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                 next_segments,
             } => {
                 // Check if the collection exists and if the new version has at least 1 file path
-                state.get_collection_ids().contains(collection_id)
+                state.collection_status.get(collection_id) == Some(&CollectionStatus::Alive)
                     && !next_segments.get_all_file_paths().is_empty()
             }
             Transition::ForkCollection {
                 source_collection_id,
                 ..
-            } => state.get_collection_ids().contains(source_collection_id),
+            } => {
+                state.collection_status.get(source_collection_id) == Some(&CollectionStatus::Alive)
+            }
             Transition::DeleteCollection(collection_id) => {
-                state.get_collection_ids().contains(collection_id)
+                state.collection_status.get(collection_id) == Some(&CollectionStatus::Alive)
             }
             Transition::GarbageCollect { collection_id, .. } => {
-                // TODO(@codetheweb): should we run GC on soft deleted collections?
-                state.get_collection_ids().contains(collection_id)
+                matches!(
+                    state.collection_status.get(collection_id),
+                    Some(CollectionStatus::Alive) | Some(CollectionStatus::SoftDeleted)
+                )
             }
             Transition::NoOp => true,
         }
@@ -330,7 +348,10 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                     is_deleted: false,
                 };
                 state.version_graph.add_node(new_node);
-                state.has_created_root_collection = true;
+                state.root_collection_id = Some(*collection_id);
+                state
+                    .collection_status
+                    .insert(*collection_id, CollectionStatus::Alive);
             }
             Self::Transition::IncrementCollectionVersion {
                 collection_id,
@@ -386,11 +407,89 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                 state
                     .version_graph
                     .add_edge(parent_node_index, new_node_index, ());
+                state
+                    .collection_status
+                    .insert(*new_collection_id, CollectionStatus::Alive);
             }
             Self::Transition::GarbageCollect {
                 min_versions_to_keep,
                 ..
             } => {
+                // Transition soft deleted collections to deleted
+                let mut collection_ids_to_delete = HashSet::new();
+                for (collection_id, status) in state.collection_status.iter() {
+                    if *status == CollectionStatus::SoftDeleted {
+                        let first_collection_node = state
+                            .version_graph
+                            .node_indices()
+                            .filter(|&n| {
+                                let node = state
+                                    .version_graph
+                                    .node_weight(n)
+                                    .expect("Node should exist");
+                                node.collection_id == *collection_id
+                            })
+                            .max_by(|a, b| {
+                                let a_node = state
+                                    .version_graph
+                                    .node_weight(*a)
+                                    .expect("Node should exist");
+                                let b_node = state
+                                    .version_graph
+                                    .node_weight(*b)
+                                    .expect("Node should exist");
+                                b_node.version.cmp(&a_node.version)
+                            })
+                            .expect("collection should have at least one version node");
+
+                        let mut dfs =
+                            petgraph::visit::Dfs::new(&state.version_graph, first_collection_node);
+                        let mut seen_collection_ids: HashSet<CollectionUuid> = HashSet::new();
+
+                        while let Some(nx) = dfs.next(&state.version_graph) {
+                            let node = state
+                                .version_graph
+                                .node_weight(nx)
+                                .expect("Node should exist");
+                            seen_collection_ids.insert(node.collection_id);
+                        }
+
+                        let are_all_children_in_fork_tree_also_dead =
+                            seen_collection_ids.iter().all(|collection_id| {
+                                state.collection_status.get(collection_id)
+                                    != Some(&CollectionStatus::Alive)
+                            });
+
+                        if are_all_children_in_fork_tree_also_dead {
+                            // Can now transition to hard deleted state
+                            collection_ids_to_delete.insert(*collection_id);
+                        }
+                    }
+                }
+                for collection_id in collection_ids_to_delete {
+                    state
+                        .collection_status
+                        .insert(collection_id, CollectionStatus::Deleted);
+                }
+
+                // Mark all versions of soft deleted collections as deleted
+                let soft_deleted_collections = state
+                    .collection_status
+                    .iter()
+                    .filter_map(|(collection_id, status)| {
+                        if *status == CollectionStatus::SoftDeleted {
+                            Some(*collection_id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<HashSet<_>>();
+                for node in state.version_graph.node_weights_mut() {
+                    if soft_deleted_collections.contains(&node.collection_id) {
+                        node.is_deleted = true;
+                    }
+                }
+
                 for collection_id in state.get_collection_ids() {
                     let mut versions_for_collection = vec![];
                     for node in state.version_graph.node_indices() {
@@ -419,8 +518,10 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
                     }
                 }
             }
-            Self::Transition::DeleteCollection(_) => {
-                todo!()
+            Self::Transition::DeleteCollection(collection_id) => {
+                state
+                    .collection_status
+                    .insert(*collection_id, CollectionStatus::SoftDeleted);
             }
             Self::Transition::NoOp => {}
         }
