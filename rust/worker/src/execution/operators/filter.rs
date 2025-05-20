@@ -629,7 +629,9 @@ mod tests {
         OperationRecord, PrimitiveOperator, SegmentUuid, SetOperator, SignedRoaringBitmap, Where,
     };
 
-    use crate::execution::operators::filter::{FilterOperator, MetadataProvider};
+    use crate::execution::operators::filter::{
+        FilterOperator, MetadataLogReader, MetadataProvider,
+    };
 
     use super::FilterInput;
 
@@ -1076,7 +1078,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn regex_empty_posting_list() {
+    async fn test_regex_empty_posting_list() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
@@ -1283,5 +1285,78 @@ mod tests {
             .await
             .expect("Expected regex to work");
         assert_eq!(res, SignedRoaringBitmap::Include([1].into()));
+    }
+
+    #[tokio::test]
+    async fn test_regex_short_circuit() {
+        let filter_input = setup_filter_input().await;
+
+        let record_segment_reader = match RecordSegmentReader::from_segment(
+            &filter_input.record_segment,
+            &filter_input.blockfile_provider,
+        )
+        .await
+        {
+            Ok(reader) => Ok(Some(reader)),
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Ok(None)
+            }
+            Err(e) => Err(*e),
+        }
+        .unwrap();
+        let cloned_record_segment_reader = record_segment_reader.clone();
+        let materialized_logs = materialize_logs(
+            &cloned_record_segment_reader,
+            filter_input.logs.clone(),
+            None,
+        )
+        .await
+        .unwrap();
+        let metadata_log_reader =
+            MetadataLogReader::create(&materialized_logs, &record_segment_reader)
+                .await
+                .unwrap();
+        let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
+
+        let metadata_segement_reader = MetadataSegmentReader::from_segment(
+            &filter_input.metadata_segment,
+            &filter_input.blockfile_provider,
+        )
+        .await
+        .unwrap();
+        let compact_metadata_provider =
+            MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
+
+        let match_all = r".*";
+        assert_eq!(
+            log_metadata_provider
+                .filter_by_document_regex(match_all)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::full()
+        );
+        assert_eq!(
+            compact_metadata_provider
+                .filter_by_document_regex(match_all)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::full()
+        );
+
+        let selective_match = r"cat|dog";
+        assert!(matches!(
+            log_metadata_provider
+                .filter_by_document_regex(selective_match)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::Include(_)
+        ),);
+        assert!(matches!(
+            compact_metadata_provider
+                .filter_by_document_regex(selective_match)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::Include(_)
+        ),);
     }
 }
