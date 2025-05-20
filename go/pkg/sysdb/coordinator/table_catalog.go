@@ -284,6 +284,9 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	}
 	if len(existing) != 0 {
 		if createCollection.GetOrCreate {
+			// In the happy path for get or create, the collection exists and under
+			// read commited isolation, we know its not deleted at the time we
+			// we started the transaction. So we return it
 			collection := convertCollectionToModel(existing)[0]
 			return collection, false, nil
 		} else {
@@ -307,25 +310,68 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		LastCompactionTimeSecs:     createCollection.LastCompactionTimeSecs,
 	}
 
-	err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
+	created := false
+	// In get or create mode, ignore conflicts
+	// NOTE(hammadb) 5/16/2025 - We could skip the above get() and always InsertOnConflictDoNothing
+	// however when adding this change to handle a race condition I am biasing towards keeping the exisitng
+	// performance of the happy get() path without profiling whether InsertOnConflictDoNothing is equivalent
+	// If this proves to be a performance issue, we can change this to always use InsertOnConflictDoNothing
+	// and remove the get() above
+	if createCollection.GetOrCreate {
+		created, err = tc.metaDomain.CollectionDb(txCtx).InsertOnConflictDoNothing(dbCollection)
+	} else {
+		/*
+			Note a potential race here for three writers
+			Thread 1 calls create_collection and inserts a row
+			Thread 2 calls delete and hard delete kicks in, which deletes the row
+			Thread 3 calls create_collection and creates a row
+			Thread 1 now proceeds to insert metadata and inserts the metadata for the collection
+			Thread 3 will now proceed to insert the metadata for the collection
+
+			So we have info and metadata from two different writers
+
+			We can avoid this with the timing assumption that hard delete runs far
+			behind the timeout of these operations
+		*/
+		err = tc.metaDomain.CollectionDb(txCtx).Insert(dbCollection)
+		if err == nil {
+			created = true
+		}
+	}
+
 	if err != nil {
 		log.Error("error inserting collection", zap.Error(err))
 		return nil, false, err
 	}
-	// insert collection metadata
-	metadata := createCollection.Metadata
-	dbCollectionMetadataList := convertCollectionMetadataToDB(createCollection.ID.String(), metadata)
-	if len(dbCollectionMetadataList) != 0 {
-		err = tc.metaDomain.CollectionMetadataDb(txCtx).Insert(dbCollectionMetadataList)
-		if err != nil {
-			return nil, false, err
+
+	// Under read-commited isolation with get_or_create, its possible someone else created the collection, in which case
+	// we don't want to insert the metadata again, and create an inconsistent state
+	if created {
+		// insert collection metadata
+		metadata := createCollection.Metadata
+		dbCollectionMetadataList := convertCollectionMetadataToDB(createCollection.ID.String(), metadata)
+		if len(dbCollectionMetadataList) != 0 {
+			err = tc.metaDomain.CollectionMetadataDb(txCtx).Insert(dbCollectionMetadataList)
+			if err != nil {
+				return nil, false, err
+			}
 		}
 	}
-	// get collection
-	collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(createCollection.ID), nil, tenantID, databaseName, nil, nil)
+
+	// Get the inserted collection (by name, to handle the case where some other request created the collection)
+	collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName, nil, nil)
+	// It is possible, under read-commited isolation that someone else deleted the collection
+	// in between writing the collection and reading it back, in that case this will return empty, and we should throw an error
 	if err != nil {
 		log.Error("error getting collection", zap.Error(err))
 		return nil, false, err
+	}
+
+	if len(collectionList) == 0 {
+		// This can happen if the collection was deleted in between the insert and the get
+		// we inform downstream of this contention, and let the client decide what to do based on their application logic
+		log.Error("collection not found after insert, implying a concurrent delete")
+		return nil, false, common.ErrConcurrentDeleteCollection
 	}
 	result := convertCollectionToModel(collectionList)[0]
 	return result, true, nil

@@ -854,6 +854,7 @@ impl GrpcSysDb {
             .await
             .map_err(|err| match err.code() {
                 Code::AlreadyExists => CreateCollectionError::AlreadyExists(name),
+                Code::Aborted => CreateCollectionError::Aborted(err.message().to_string()),
                 _ => CreateCollectionError::Internal(err.into()),
             })?;
 

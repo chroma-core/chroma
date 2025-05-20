@@ -336,7 +336,7 @@ func (s *collectionDb) DeleteCollectionByID(collectionID string) (int, error) {
 func (s *collectionDb) Insert(in *dbmodel.Collection) error {
 	err := s.db.Create(&in).Error
 	if err != nil {
-		log.Error("create collection failed", zap.Error(err))
+		log.Error("Insert collection failed", zap.Error(err))
 		var pgErr *pgconn.PgError
 		ok := errors.As(err, &pgErr)
 		if ok {
@@ -352,6 +352,29 @@ func (s *collectionDb) Insert(in *dbmodel.Collection) error {
 		return err
 	}
 	return nil
+}
+
+// InsertOnConflictDoNothing inserts a collection into the database, ignoring any conflicts.
+// It returns true if the collection was inserted, false if it already existed.
+// It returns an error if there was a problem with the insert.
+// This is used for upstream get_or_create
+func (s *collectionDb) InsertOnConflictDoNothing(in *dbmodel.Collection) (didInsert bool, err error) {
+	// Ignore conflict on (name, database_id) since we have "idx_name" unique index on it in migration 20240411201006
+	tx := s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "name"}, {Name: "database_id"}},
+		DoNothing: true,
+	}).Create(&in)
+	if tx.Error != nil {
+		log.Error("InsertOnConflictDoNothing collection failed", zap.Error(err))
+		return false, err
+	}
+	if tx.RowsAffected == 0 {
+		log.Debug("InsertOnConflictDoNothing collection already exists")
+		return false, nil
+	} else {
+		log.Debug("InsertOnConflictDoNothing collection inserted")
+		return true, nil
+	}
 }
 
 func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]interface{} {
