@@ -1,4 +1,5 @@
 import { EmbeddingFunctionConfiguration } from "./api";
+import { ChromaValueError } from "./errors";
 
 export type EmbeddingFunctionSpace = "cosine" | "l2" | "ip";
 
@@ -31,7 +32,7 @@ class MalformedEmbeddingFunction implements EmbeddingFunction {
   }
 
   generate(texts: string[]): Promise<number[][]> {
-    throw new Error(this.name);
+    throw new ChromaValueError(this.name);
   }
 }
 
@@ -45,7 +46,7 @@ export const registerEmbeddingFunction = (
   fn: EmbeddingFunctionClass,
 ) => {
   if (knownEmbeddingFunctions.has(name)) {
-    throw new Error(
+    throw new ChromaValueError(
       `Embedding function with name ${name} is already registered.`,
     );
   }
@@ -98,10 +99,8 @@ export const getEmbeddingFunction = async (
 export const serializeEmbeddingFunction = (
   ef: EmbeddingFunction,
 ): EmbeddingFunctionConfiguration => {
-  if (!ef.getConfig || !ef.name) {
-    throw new Error(
-      "Failed to serialize embedding function: missing 'getConfig' or 'name'",
-    );
+  if (!ef.getConfig || !ef.name || !ef.buildFromConfig) {
+    return { type: "legacy" };
   }
 
   if (ef.validateConfig) ef.validateConfig(ef.getConfig());

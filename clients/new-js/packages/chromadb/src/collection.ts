@@ -1,6 +1,7 @@
 import { ChromaClient } from "./chroma-client";
 import {
   EmbeddingFunction,
+  getDefaultEFConfig,
   getEmbeddingFunction,
   knownEmbeddingFunctions,
 } from "./embedding-function";
@@ -32,6 +33,7 @@ import {
   validateMetadata,
 } from "./utils";
 import { createClient } from "@hey-api/client-fetch";
+import { ChromaValueError } from "./errors";
 
 export interface CollectionAPI {
   id: string;
@@ -44,16 +46,16 @@ export interface CollectionAPI {
     documents?: string[];
     uris?: string[];
   }): Promise<void>;
-  get(args?: {
+  get<TMeta extends Metadata = Metadata>(args?: {
     ids?: string[];
     where?: Where;
     limit?: number;
     offset?: number;
     whereDocument?: WhereDocument;
     include?: Include[];
-  }): Promise<GetResult>;
+  }): Promise<GetResult<TMeta>>;
   peek(args: { limit?: number }): Promise<GetResult>;
-  query(args: {
+  query<TMeta extends Metadata = Metadata>(args: {
     queryEmbeddings?: number[][];
     queryTexts?: string[];
     queryURIs?: string[];
@@ -62,7 +64,7 @@ export interface CollectionAPI {
     where?: Where;
     whereDocument?: WhereDocument;
     include?: Include[];
-  }): Promise<QueryResult>;
+  }): Promise<QueryResult<TMeta>>;
   modify(args: {
     name?: string;
     metadata?: CollectionMetadata;
@@ -134,24 +136,33 @@ export class CollectionAPIImpl implements CollectionAPI {
     return this._embeddingFunction;
   }
 
-  protected path(): {
+  protected async path(): Promise<{
     tenant: string;
     database: string;
     collection_id: string;
-  } {
+  }> {
+    const clientPath = await this.chromaClient._path();
     return {
-      tenant: this.chromaClient.tenant,
-      database: this.chromaClient.database,
+      ...clientPath,
       collection_id: this.id,
     };
   }
 
   private async embed(documents: string[]): Promise<number[][]> {
     if (!this._embeddingFunction) {
-      throw new Error(
+      throw new ChromaValueError(
         "Embedding function must be defined for operations requiring embeddings.",
       );
     }
+
+    if (
+      this._embeddingFunction &&
+      this._embeddingFunction.name === "default" &&
+      !knownEmbeddingFunctions.has("default")
+    ) {
+      await getDefaultEFConfig();
+    }
+
     return await this._embeddingFunction.generate(documents);
   }
 
@@ -230,7 +241,7 @@ export class CollectionAPIImpl implements CollectionAPI {
   public async count(): Promise<number> {
     const { data } = await Api.collectionCount({
       client: this.apiClient,
-      path: this.path(),
+      path: await this.path(),
     });
 
     return data;
@@ -261,7 +272,7 @@ export class CollectionAPIImpl implements CollectionAPI {
 
     await Api.collectionAdd({
       client: this.apiClient,
-      path: this.path(),
+      path: await this.path(),
       body: {
         ids: recordSet.ids,
         embeddings: recordSet.embeddings,
@@ -272,7 +283,7 @@ export class CollectionAPIImpl implements CollectionAPI {
     });
   }
 
-  public async get(
+  public async get<TMeta extends Metadata = Metadata>(
     args: Partial<{
       ids?: string[];
       where?: Where;
@@ -281,7 +292,7 @@ export class CollectionAPIImpl implements CollectionAPI {
       whereDocument?: WhereDocument;
       include?: Include[];
     }> = {},
-  ): Promise<GetResult> {
+  ): Promise<GetResult<TMeta>> {
     const {
       ids,
       where,
@@ -295,7 +306,7 @@ export class CollectionAPIImpl implements CollectionAPI {
 
     const { data } = await Api.collectionGet({
       client: this.apiClient,
-      path: this.path(),
+      path: await this.path(),
       body: {
         ids,
         where,
@@ -306,12 +317,12 @@ export class CollectionAPIImpl implements CollectionAPI {
       },
     });
 
-    return new GetResult({
+    return new GetResult<TMeta>({
       documents: data.documents ?? [],
       embeddings: data.embeddings ?? [],
       ids: data.ids,
       include: data.include,
-      metadatas: data.metadatas ?? [],
+      metadatas: (data.metadatas ?? []) as (TMeta | null)[],
       uris: data.uris ?? [],
     });
   }
@@ -320,7 +331,7 @@ export class CollectionAPIImpl implements CollectionAPI {
     return this.get({ limit });
   }
 
-  public async query({
+  public async query<TMeta extends Metadata = Metadata>({
     queryEmbeddings,
     queryTexts,
     queryURIs,
@@ -338,7 +349,7 @@ export class CollectionAPIImpl implements CollectionAPI {
     where?: Where;
     whereDocument?: WhereDocument;
     include?: Include[];
-  }): Promise<QueryResult> {
+  }): Promise<QueryResult<TMeta>> {
     const recordSet: BaseRecordSet = {
       embeddings: queryEmbeddings,
       documents: queryTexts,
@@ -356,7 +367,7 @@ export class CollectionAPIImpl implements CollectionAPI {
 
     const { data } = await Api.collectionQuery({
       client: this.apiClient,
-      path: this.path(),
+      path: await this.path(),
       body: {
         ids: queryRecordSet.ids,
         include,
@@ -373,7 +384,7 @@ export class CollectionAPIImpl implements CollectionAPI {
       embeddings: data.embeddings ?? [],
       ids: data.ids ?? [],
       include: data.include,
-      metadatas: data.metadatas ?? [],
+      metadatas: (data.metadatas ?? []) as (TMeta | null)[][],
       uris: data.uris ?? [],
     });
   }
@@ -393,7 +404,7 @@ export class CollectionAPIImpl implements CollectionAPI {
 
     await Api.updateCollection({
       client: this.apiClient,
-      path: this.path(),
+      path: await this.path(),
       body: {
         new_name: name,
         new_metadata: metadata,
@@ -405,7 +416,7 @@ export class CollectionAPIImpl implements CollectionAPI {
   public async fork({ name }: { name: string }): Promise<Collection> {
     const { data } = await Api.forkCollection({
       client: this.apiClient,
-      path: this.path(),
+      path: await this.path(),
       body: { new_name: name },
     });
 
@@ -450,7 +461,7 @@ export class CollectionAPIImpl implements CollectionAPI {
 
     await Api.collectionUpdate({
       client: this.apiClient,
-      path: this.path(),
+      path: await this.path(),
       body: {
         ids: recordSet.ids,
         embeddings: recordSet.embeddings,
@@ -486,7 +497,7 @@ export class CollectionAPIImpl implements CollectionAPI {
 
     await Api.collectionUpsert({
       client: this.apiClient,
-      path: this.path(),
+      path: await this.path(),
       body: {
         ids: recordSet.ids,
         embeddings: recordSet.embeddings,
@@ -510,7 +521,7 @@ export class CollectionAPIImpl implements CollectionAPI {
 
     await Api.collectionDelete({
       client: this.apiClient,
-      path: this.path(),
+      path: await this.path(),
       body: {
         ids,
         where,
@@ -593,11 +604,10 @@ export class CollectionImpl extends CollectionAPIImpl implements Collection {
     await super.modify({ name, metadata, configuration });
   }
 
-  // OVERRIDE
   override async fork({ name }: { name: string }): Promise<Collection> {
     const { data } = await Api.forkCollection({
       client: this.apiClient,
-      path: this.path(),
+      path: await this.path(),
       body: { new_name: name },
     });
 

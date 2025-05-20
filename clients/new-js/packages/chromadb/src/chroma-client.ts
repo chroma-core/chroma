@@ -21,6 +21,7 @@ import {
 import { chromaFetch } from "./chroma-fetch";
 import { d } from "@hey-api/openapi-ts/dist/types.d-C5lgdIHG";
 import * as process from "node:process";
+import { ChromaUnauthorizedError, ChromaValueError } from "./errors";
 
 export interface ChromaClientArgs {
   host?: string;
@@ -80,22 +81,24 @@ export class ChromaClient {
     this._database = database;
   }
 
-  private async path(): Promise<{ tenant: string; database: string }> {
+  /** @ignore */
+  public async _path(): Promise<{ tenant: string; database: string }> {
     if (!this._tenant || !this._database) {
       const { tenant, databases } = await this.getUserIdentity();
       this._tenant = tenant;
       if (databases.length === 0) {
-        throw new Error(
+        throw new ChromaUnauthorizedError(
           `Your API key does not have access to any DBs for tenant ${this._tenant}`,
         );
       }
       if (databases.length > 1 || databases[0] === "*") {
-        throw new Error(
+        throw new ChromaValueError(
           "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
         );
       }
+      this._database = databases[0];
     }
-    return { tenant: this.tenant, database: this.database };
+    return { tenant: this._tenant, database: this._database };
   }
 
   public async getUserIdentity(): Promise<UserIdentity> {
@@ -122,7 +125,7 @@ export class ChromaClient {
 
     const { data } = await Api.listCollections({
       client: this.apiClient,
-      path: this.path(),
+      path: await this._path(),
       query: { limit, offset },
     });
 
@@ -148,7 +151,7 @@ export class ChromaClient {
   public async countCollections(): Promise<number> {
     const { data } = await Api.countCollections({
       client: this.apiClient,
-      path: this.path(),
+      path: await this._path(),
     });
 
     return data;
@@ -174,7 +177,7 @@ export class ChromaClient {
 
     const { data } = await Api.createCollection({
       client: this.apiClient,
-      path: this.path(),
+      path: await this._path(),
       body: {
         name,
         configuration: collectionConfig,
@@ -208,7 +211,7 @@ export class ChromaClient {
   }): Promise<Collection> {
     const { data } = await Api.getCollection({
       client: this.apiClient,
-      path: { ...this.path(), collection_id: name },
+      path: { ...(await this._path()), collection_id: name },
     });
 
     return new CollectionImpl({
@@ -225,6 +228,30 @@ export class ChromaClient {
           ),
       id: data.id,
     });
+  }
+
+  public async getCollections(
+    items: string[] | { name: string; embeddingFunction?: EmbeddingFunction }[],
+  ) {
+    if (items.length === 0) return [];
+
+    let requestedCollections = items;
+    if (typeof items[0] === "string") {
+      requestedCollections = (items as string[]).map((item) => {
+        return { name: item, embeddingFunction: undefined };
+      });
+    }
+
+    let collections = requestedCollections as {
+      name: string;
+      embeddingFunction?: EmbeddingFunction;
+    }[];
+
+    return Promise.all(
+      collections.map(async (collection) => {
+        await this.getCollection({ ...collection });
+      }),
+    );
   }
 
   public async getOrCreateCollection({
@@ -247,7 +274,7 @@ export class ChromaClient {
 
     const { data } = await Api.createCollection({
       client: this.apiClient,
-      path: this.path(),
+      path: await this._path(),
       body: {
         name,
         configuration: collectionConfig,
@@ -275,7 +302,7 @@ export class ChromaClient {
   public async deleteCollection({ name }: { name: string }): Promise<void> {
     await Api.deleteCollection({
       client: this.apiClient,
-      path: { ...this.path(), collection_id: name },
+      path: { ...(await this._path()), collection_id: name },
     });
   }
 
@@ -305,5 +332,33 @@ export class ChromaClient {
       id,
       embeddingFunction,
     });
+  }
+
+  public collections(
+    items: string[] | { id: string; embeddingFunction?: EmbeddingFunction }[],
+  ) {
+    if (items.length === 0) return [];
+
+    let requestedCollections = items;
+    if (typeof items[0] === "string") {
+      requestedCollections = (items as string[]).map((item) => {
+        return { id: item, embeddingFunction: undefined };
+      });
+    }
+
+    return (
+      requestedCollections as {
+        id: string;
+        embeddingFunction?: EmbeddingFunction;
+      }[]
+    ).map(
+      (requestedCollection) =>
+        new CollectionAPIImpl({
+          chromaClient: this,
+          apiClient: this.apiClient,
+          id: requestedCollection.id,
+          embeddingFunction: requestedCollection.embeddingFunction,
+        }),
+    );
   }
 }

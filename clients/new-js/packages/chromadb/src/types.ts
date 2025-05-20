@@ -80,12 +80,12 @@ export enum IncludeEnum {
   uris = "uris",
 }
 
-export class GetResult {
+export class GetResult<TMeta extends Metadata = Metadata> {
   public readonly documents: (string | null)[];
   public readonly embeddings: number[][];
   public readonly ids: string[];
   public readonly include: Include[];
-  public readonly metadatas: (Metadata | null)[];
+  public readonly metadatas: (TMeta | null)[];
   public readonly uris: (string | null)[];
 
   constructor({
@@ -100,7 +100,7 @@ export class GetResult {
     embeddings: number[][];
     ids: string[];
     include: Include[];
-    metadatas: (Metadata | null)[];
+    metadatas: (TMeta | null)[];
     uris: (string | null)[];
   }) {
     this.documents = documents;
@@ -133,13 +133,13 @@ export class GetResult {
   }
 }
 
-export class QueryResult {
+export class QueryResult<TMeta extends Metadata = Metadata> {
   public readonly distances: (number | null)[][];
   public readonly documents: (string | null)[][];
   public readonly embeddings: (number[] | null)[][];
   public readonly ids: string[][];
   public readonly include: Include[];
-  public readonly metadatas: (Metadata | null)[][];
+  public readonly metadatas: (TMeta | null)[][];
   public readonly uris: (string | null)[][];
 
   constructor({
@@ -156,7 +156,7 @@ export class QueryResult {
     embeddings: (number[] | null)[][];
     ids: string[][];
     include: Include[];
-    metadatas: (Metadata | null)[][];
+    metadatas: (TMeta | null)[][];
     uris: (string | null)[][];
   }) {
     this.distances = distances;
