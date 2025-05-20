@@ -30,24 +30,6 @@ struct PersistentDemoView: View {
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
-                            
-                            Spacer()
-                            
-                            Button {
-                                let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
-                                persistentPath = documentsPath + "/chroma_data"
-                                addLog("Set path to Documents directory: \(persistentPath)")
-                            } label: {
-                                HStack {
-                                    Image(systemName: "folder.badge.plus")
-                                    Text("Use Documents")
-                                }
-                            }
-                            .disabled(isPersistentInitialized)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.gray.opacity(0.2))
-                            .cornerRadius(8)
                         }
                     }
                           
