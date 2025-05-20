@@ -9,7 +9,7 @@ runs:
   using: "composite"
   steps:
     - name: Install uv
-      uses: useblacksmith/setup-uv@v5
+      uses: astral-sh/setup-uv@v6
       with:
         enable-cache: true
     - name: Set up Python 3.9 for protos
