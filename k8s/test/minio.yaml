@@ -19,7 +19,7 @@ spec:
           emptyDir: {}
       containers:
         - name: minio
-          image: docker.io/minio/minio:latest
+          image: minio/minio:latest
           args:
             - server
             - /storage
@@ -46,7 +46,7 @@ metadata:
 spec:
   ports:
     - name: http
-      # Put the lb on a different port so we can run minio locally since the port is already in use
+    # Put the lb on a different port so we can run minio locally since the port is already in use
       port: 9001
       targetPort: 9000
   selector:

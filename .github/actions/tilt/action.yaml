@@ -17,7 +17,6 @@ runs:
         registry_name: my-registry
         registry_port: 5001
         registry_enable_delete: true
-        config: ./kind-config.yaml
     - name: Add blacksmith registry mirror
       shell: bash
       run: |
