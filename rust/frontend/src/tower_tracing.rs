@@ -90,7 +90,7 @@ where
             tracing::Level::DEBUG,
             "HTTP request handler",
             http.route = http_route,
-            http.version = ?req.version(),
+            otel.name = format!("Handler {} {}", req.method(), http_route),
         );
 
         let future = self.inner.call(req);
