@@ -28,7 +28,7 @@ def generate_record_set(N: int, D: int) -> RecordSet:
     # Create a normalized record set to compare against
     normalized_record_set: RecordSet = {
         "ids": ids,
-        "embeddings": embeddings,
+        "embeddings": embeddings,  # type: ignore
         "metadatas": metadatas,  # type: ignore
         "documents": documents,
     }
