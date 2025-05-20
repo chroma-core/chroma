@@ -38,7 +38,6 @@ struct Inner {
     segments: HashMap<SegmentUuid, Segment>,
     tenant_last_compaction_time: HashMap<String, i64>,
     collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
-    collection_to_version_file_name: HashMap<CollectionUuid, String>,
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
     mock_time: u64,
@@ -53,7 +52,6 @@ impl TestSysDb {
                 segments: HashMap::new(),
                 tenant_last_compaction_time: HashMap::new(),
                 collection_to_version_file: HashMap::new(),
-                collection_to_version_file_name: HashMap::new(),
                 storage: None,
                 mock_time: 0,
             })),
@@ -100,9 +98,8 @@ impl TestSysDb {
     ) {
         let mut inner = self.inner.lock();
 
-        inner
-            .collection_to_version_file_name
-            .insert(collection_id, version_file_path);
+        let collection = inner.collections.get_mut(&collection_id).unwrap();
+        collection.version_file_path = Some(version_file_path);
     }
 
     fn filter_collections(
@@ -332,9 +329,11 @@ impl TestSysDb {
             VERSION_FILE_S3_PREFIX, collection_id, next_version
         );
 
-        inner
-            .collection_to_version_file_name
-            .insert(collection_id, version_file_name.clone());
+        let collection = inner
+            .collections
+            .get_mut(&collection_id)
+            .expect("Expected collection");
+        collection.version_file_path = Some(version_file_name.clone());
 
         // Serialize the version file to bytes and write to storage
         let version_file_bytes = version_file.encode_to_vec();
@@ -393,11 +392,8 @@ impl TestSysDb {
 
     pub fn get_version_file_name(&self, collection_id: CollectionUuid) -> String {
         let inner = self.inner.lock();
-        inner
-            .collection_to_version_file_name
-            .get(&collection_id)
-            .unwrap()
-            .clone()
+        let collection = inner.collections.get(&collection_id).unwrap();
+        collection.version_file_path.clone().unwrap()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -569,7 +565,12 @@ impl TestSysDb {
         let inner = self.inner.lock();
         let mut paths = HashMap::new();
         for collection_id in collection_ids {
-            if let Some(path) = inner.collection_to_version_file_name.get(&collection_id) {
+            if let Some(path) = &inner
+                .collections
+                .get(&collection_id)
+                .unwrap()
+                .version_file_path
+            {
                 paths.insert(collection_id, path.clone());
             } else {
                 return Err(BatchGetCollectionVersionFilePathsError::Grpc(
