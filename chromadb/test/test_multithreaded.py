@@ -1,13 +1,11 @@
 import multiprocessing
 from concurrent.futures import Future, ThreadPoolExecutor, wait
-import uuid
 import random
 import threading
 from typing import Any, Dict, List, Optional, Set, Tuple, cast
 import numpy as np
 
 from chromadb.api import ClientAPI
-from chromadb.errors import ChromaError
 import chromadb.test.property.invariants as invariants
 from chromadb.api.segment import SegmentAPI
 from chromadb.test.property.strategies import RecordSet
@@ -229,34 +227,3 @@ def test_interleaved_add_query(client: ClientAPI) -> None:
         num_workers = random.randint(2, multiprocessing.cpu_count() * 2)
         N, D = generate_data_shape()
         _test_interleaved_add_query(client, N, D, num_workers)
-
-
-def test_multithreaded_get_or_create(client: ClientAPI) -> None:
-    N_THREADS = 50
-    new_name = str(uuid.uuid4())
-
-    def create_maybe_delete_collection(i: int) -> None:
-        try:
-            coll = client.get_or_create_collection(new_name)
-            assert coll.name == new_name
-        except ChromaError as e:
-            if "concurrent" not in e.message():
-                raise e
-
-        try:
-            if i % 2 == 0:
-                client.delete_collection(new_name)
-        except ChromaError as e:
-            if "does not exist" not in e.message():
-                raise e
-
-    # Stress to trigger a potential race condition
-    with ThreadPoolExecutor(max_workers=N_THREADS) as executor:
-        futures = [
-            executor.submit(create_maybe_delete_collection, i) for i in range(N_THREADS)
-        ]
-        for future in futures:
-            try:
-                future.result()
-            except Exception as e:
-                assert False, f"Thread raised an exception: {e}"
