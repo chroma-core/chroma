@@ -45,4 +45,7 @@ var (
 
 	// Segment metadata errors
 	ErrUnknownSegmentMetadataType = errors.New("segment metadata value type not supported")
+
+	// Others
+	ErrCompactionOffsetSomehowAhead = errors.New("system invariant was violated. Compaction offset in sysdb should always be behind or equal to offset in log")
 )

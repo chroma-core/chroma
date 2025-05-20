@@ -979,8 +979,11 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		// t1: User writes to source collection, compaction takes place, source collection log offset become [400, 500]
 		// t2: Fork source collection in sysdb, the latest source collection compaction offset is 400. If we add new logs, it will start after offset 300, and the data is lost after compaction.
 		latestSourceCompactionOffset := uint64(sourceCollection.LogPosition)
-		if forkCollection.SourceCollectionLogEnumerationOffset < latestSourceCompactionOffset || latestSourceCompactionOffset < forkCollection.SourceCollectionLogCompactionOffset {
+		if forkCollection.SourceCollectionLogEnumerationOffset < latestSourceCompactionOffset {
 			return common.ErrCollectionLogPositionStale
+		}
+		if latestSourceCompactionOffset < forkCollection.SourceCollectionLogCompactionOffset {
+			return common.ErrCompactionOffsetSomehowAhead
 		}
 
 		// Create the new collection with source collection information
