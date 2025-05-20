@@ -1,4 +1,4 @@
-import { GetUserIdentityResponse, HashMap, Include } from "./api";
+import { GetUserIdentityResponse, Include } from "./api";
 
 export type UserIdentity = GetUserIdentityResponse;
 
@@ -133,6 +133,18 @@ export class GetResult<TMeta extends Metadata = Metadata> {
   }
 }
 
+export interface QueryRowResult<TMeta extends Metadata = Metadata> {
+  include: Include[];
+  queries: {
+    distance?: number | null;
+    document?: string | null;
+    embedding?: number[] | null;
+    id: string;
+    metadata?: TMeta | null;
+    uri?: string | null;
+  }[][];
+}
+
 export class QueryResult<TMeta extends Metadata = Metadata> {
   public readonly distances: (number | null)[][];
   public readonly documents: (string | null)[][];
@@ -168,29 +180,42 @@ export class QueryResult<TMeta extends Metadata = Metadata> {
     this.uris = uris;
   }
 
-  public rows() {
+  public rows(): QueryRowResult<TMeta> {
+    const queries: {
+      distance?: number | null;
+      document?: string | null;
+      embedding?: number[] | null;
+      id: string;
+      metadata?: TMeta | null;
+      uri?: string | null;
+    }[][] = [];
+
+    for (let q = 0; q < this.ids.length; q++) {
+      const records = this.ids[q].map((id, index) => {
+        return {
+          id,
+          document: this.include.includes("documents")
+            ? this.documents[q][index]
+            : undefined,
+          embedding: this.include.includes("embeddings")
+            ? this.embeddings[q][index]
+            : undefined,
+          metadata: this.include.includes("metadatas")
+            ? this.metadatas[q][index]
+            : undefined,
+          uri: this.include.includes("uris") ? this.uris[q][index] : undefined,
+          distance: this.include.includes("distances")
+            ? this.distances[q][index]
+            : undefined,
+        };
+      });
+
+      queries.push(records);
+    }
+
     return {
       include: this.include,
-      queries: this.ids.map((queryIds, query) => {
-        queryIds.map((id, index) => {
-          return {
-            id,
-            document: this.include.includes("documents")
-              ? this.documents[index]
-              : undefined,
-            embedding: this.include.includes("embeddings")
-              ? this.embeddings[index]
-              : undefined,
-            metadata: this.include.includes("metadatas")
-              ? this.metadatas[index]
-              : undefined,
-            uri: this.include.includes("uris") ? this.uris[index] : undefined,
-            distance: this.include.includes("distances")
-              ? this.distances[index]
-              : undefined,
-          };
-        });
-      }),
+      queries,
     };
   }
 }
