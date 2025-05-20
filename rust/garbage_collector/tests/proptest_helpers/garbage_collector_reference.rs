@@ -293,8 +293,13 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
     fn preconditions(state: &Self::State, transition: &Self::Transition) -> bool {
         match transition {
             Transition::CreateCollection { .. } => true,
-            Transition::IncrementCollectionVersion { collection_id, .. } => {
+            Transition::IncrementCollectionVersion {
+                collection_id,
+                next_segments,
+            } => {
+                // Check if the collection exists and if the new version has at least 1 file path
                 state.get_collection_ids().contains(collection_id)
+                    && !next_segments.get_all_file_paths().is_empty()
             }
             Transition::ForkCollection {
                 source_collection_id,
