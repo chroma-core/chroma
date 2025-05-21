@@ -78,8 +78,9 @@ use std::sync::Once;
 
 
 #[uniffi::export]
-pub fn initialize() -> FfiResult<()> {
-    initialize_with_path(None, false)
+pub fn initialize(allow_reset: bool) -> FfiResult<()> {
+    // Pass through the allow_reset parameter for configurability
+    initialize_with_path(None, allow_reset)
 }
 
 #[uniffi::export]

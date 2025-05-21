@@ -43,10 +43,11 @@ struct ContentView: View {
         }
     }
     
-    func initialize() throws {
-        try Chroma.initialize()
+    func initialize(allowReset: Bool = true) throws {
+        try Chroma.initialize(allowReset: allowReset)
+        
         isInitialized = true
-        addLog("Ephemeral Chroma initialized")
+        addLog("Ephemeral Chroma initialized (allowReset: \(allowReset))")
     }
     
     func reset() throws {
