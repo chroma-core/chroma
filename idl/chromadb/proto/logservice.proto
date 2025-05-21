@@ -24,6 +24,8 @@ message ScoutLogsResponse {
   reserved 1;
   // The next record to insert will have this offset.
   int64 first_uninserted_record_offset = 2;
+  // The oldest record on the log will have this offset.
+  int64 first_uncompacted_record_offset = 3;
 }
 
 message PullLogsRequest {
