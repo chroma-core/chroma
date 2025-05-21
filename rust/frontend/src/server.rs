@@ -350,6 +350,22 @@ impl FrontendServer {
             .authenticate_and_authorize(headers, action, resource)
             .await?)
     }
+
+    // This is used to authenticate API operations that are collection-specific.
+    // We need to send additional collection info to the auth service.
+    async fn authenticate_and_authorize_collection(
+        &mut self,
+        headers: &HeaderMap,
+        action: AuthzAction,
+        resource: AuthzResource,
+        collection_id: CollectionUuid,
+    ) -> Result<(), ServerError> {
+        let collection = self.frontend.get_cached_collection(collection_id).await?;
+        Ok(self
+            .auth
+            .authenticate_and_authorize_collection(headers, action, resource, collection)
+            .await?)
+    }
 }
 
 ////////////////////////// Method Handlers //////////////////////////
@@ -1024,7 +1040,7 @@ async fn update_collection(
         "Updating collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::UpdateCollection,
             AuthzResource {
@@ -1032,6 +1048,7 @@ async fn update_collection(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let api_token = headers
@@ -1242,7 +1259,7 @@ async fn collection_add(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Add,
             AuthzResource {
@@ -1250,6 +1267,7 @@ async fn collection_add(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1329,7 +1347,7 @@ async fn collection_update(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Update,
             AuthzResource {
@@ -1337,6 +1355,7 @@ async fn collection_update(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1420,7 +1439,7 @@ async fn collection_upsert(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Update,
             AuthzResource {
@@ -1428,6 +1447,7 @@ async fn collection_upsert(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1510,7 +1530,7 @@ async fn collection_delete(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Delete,
             AuthzResource {
@@ -1518,6 +1538,7 @@ async fn collection_delete(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1586,7 +1607,7 @@ async fn collection_count(
         "Counting number of records in collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Count,
             AuthzResource {
@@ -1594,6 +1615,7 @@ async fn collection_count(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let _guard = server.scorecard_request(&[
@@ -1653,7 +1675,7 @@ async fn collection_get(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Get,
             AuthzResource {
@@ -1661,6 +1683,7 @@ async fn collection_get(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1747,7 +1770,7 @@ async fn collection_query(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Query,
             AuthzResource {
@@ -1755,6 +1778,7 @@ async fn collection_query(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =

@@ -16,9 +16,10 @@ use chroma_storage::Storage;
 use chroma_types::chroma_proto::{
     log_service_server::LogService, CollectionInfo, GetAllCollectionInfoToCompactRequest,
     GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
-    LogRecord, OperationRecord, PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
-    PurgeDirtyForCollectionResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
-    ScoutLogsResponse, UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
+    LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord, PullLogsRequest,
+    PullLogsResponse, PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse,
+    PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse, SealLogRequest,
+    SealLogResponse, UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
@@ -745,18 +746,24 @@ impl LogService for LogServer {
                 Arc::clone(&self.storage),
                 prefix,
             );
-            let limit_position = match log_reader.maximum_log_position().await {
-                Ok(limit_position) => limit_position,
+            let (start_position, limit_position) = match log_reader.manifest().await {
+                Ok(Some(manifest)) => (
+                    manifest.minimum_log_position(),
+                    manifest.maximum_log_position(),
+                ),
+                Ok(None) => (LogPosition::from_offset(0), LogPosition::from_offset(1)),
                 Err(err) => {
                     if err.code() == chroma_error::ErrorCodes::FailedPrecondition {
-                        LogPosition::from_offset(1)
+                        (LogPosition::from_offset(1), LogPosition::from_offset(1))
                     } else {
                         return Err(Status::new(err.code().into(), err.to_string()));
                     }
                 }
             };
+            let start_offset = start_position.offset() as i64;
             let limit_offset = limit_position.offset() as i64;
             Ok(Response::new(ScoutLogsResponse {
+                first_uncompacted_record_offset: start_offset,
                 first_uninserted_record_offset: limit_offset,
             }))
         }
@@ -1229,6 +1236,24 @@ impl LogService for LogServer {
             markers.extend(records);
         }
         Ok(Response::new(InspectDirtyLogResponse { markers }))
+    }
+
+    async fn seal_log(
+        &self,
+        _request: Request<SealLogRequest>,
+    ) -> Result<Response<SealLogResponse>, Status> {
+        Err(Status::failed_precondition(
+            "rust log service doesn't do sealing",
+        ))
+    }
+
+    async fn migrate_log(
+        &self,
+        _request: Request<MigrateLogRequest>,
+    ) -> Result<Response<MigrateLogResponse>, Status> {
+        Err(Status::failed_precondition(
+            "rust log service doesn't do migrating yet",
+        ))
     }
 }
 

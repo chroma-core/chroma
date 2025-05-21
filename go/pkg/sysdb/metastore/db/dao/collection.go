@@ -27,7 +27,7 @@ func (s *collectionDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.Collection{}).Error
 }
 
-func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *string) (*dbmodel.Collection, error) {
+func (s *collectionDb) GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*dbmodel.Collection, error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
 		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, collections.tenant, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
@@ -36,6 +36,10 @@ func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *st
 
 	if databaseName != nil && *databaseName != "" {
 		query = query.Where("databases.name = ?", databaseName)
+	}
+
+	if softDeletedFlag != nil {
+		query = query.Where("collections.is_deleted = ?", *softDeletedFlag)
 	}
 
 	err := query.Find(&collections).Error
@@ -53,8 +57,8 @@ func (s *collectionDb) GetCollectionEntries(id *string, name *string, tenantID s
 }
 
 func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	is_deleted := false
-	return s.getCollections(id, name, tenantID, databaseName, limit, offset, &is_deleted)
+	isDeleted := false
+	return s.getCollections(id, name, tenantID, databaseName, limit, offset, &isDeleted)
 }
 
 func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*dbmodel.CollectionToGc, error) {
@@ -322,8 +326,8 @@ func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
 }
 
 func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	is_deleted := true
-	return s.getCollections(collectionID, nil, tenantID, databaseName, &limit, nil, &is_deleted)
+	isDeleted := true
+	return s.getCollections(collectionID, nil, tenantID, databaseName, &limit, nil, &isDeleted)
 }
 
 // NOTE: This is the only method to do a hard delete of a single collection.
@@ -500,17 +504,17 @@ func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionF
 	return result.RowsAffected, nil
 }
 
-func (s *collectionDb) LockCollection(collectionID string) error {
+func (s *collectionDb) LockCollection(collectionID string) (*bool, error) {
 	var collections []dbmodel.Collection
 	err := s.db.Model(&dbmodel.Collection{}).
 		Where("collections.id = ?", collectionID).Clauses(clause.Locking{
 		Strength: "UPDATE",
 	}).Find(&collections).Error
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(collections) == 0 {
-		return common.ErrCollectionNotFound
+		return nil, common.ErrCollectionNotFound
 	}
 
 	err = s.db.Model(&dbmodel.CollectionMetadata{}).
@@ -518,7 +522,7 @@ func (s *collectionDb) LockCollection(collectionID string) error {
 		Strength: "UPDATE",
 	}).Find(nil).Error
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var segments []*dbmodel.Segment
@@ -527,7 +531,7 @@ func (s *collectionDb) LockCollection(collectionID string) error {
 		Strength: "UPDATE",
 	}).Find(&segments).Error
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var segmentIDs []*string
@@ -540,10 +544,10 @@ func (s *collectionDb) LockCollection(collectionID string) error {
 		Strength: "UPDATE",
 	}).Find(nil).Error
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &collections[0].IsDeleted, nil
 }
 
 func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFileName *string, newLineageFileName string) error {

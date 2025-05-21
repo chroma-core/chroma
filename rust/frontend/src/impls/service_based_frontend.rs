@@ -15,23 +15,24 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest,
-    CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
-    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
-    DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
-    Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
-    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
-    QueryRequest, QueryResponse, ResetError, ResetResponse, Segment, SegmentScope, SegmentType,
-    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
+    Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
+    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
+    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
+    DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError,
+    DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest,
+    ForkCollectionResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
+    HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -137,6 +138,18 @@ impl ServiceBasedFrontend {
 
     pub fn get_supported_segment_types(&self) -> Vec<SegmentType> {
         self.executor.get_supported_segment_types()
+    }
+
+    pub async fn get_cached_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Collection, GetCollectionError> {
+        Ok(self
+            .collections_with_segments_provider
+            .get_collection_with_segments(collection_id)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
+            .collection)
     }
 
     async fn get_collection_dimension(
@@ -634,7 +647,7 @@ impl ServiceBasedFrontend {
             .when(|e| {
                 matches!(
                     e.code(),
-                    ErrorCodes::FailedPrecondition | ErrorCodes::NotFound | ErrorCodes::Unknown
+                    ErrorCodes::FailedPrecondition | ErrorCodes::Unknown
                 )
             })
             .notify(|_, _| {
