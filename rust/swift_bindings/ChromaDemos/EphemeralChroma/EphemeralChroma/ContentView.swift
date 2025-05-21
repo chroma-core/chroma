@@ -55,6 +55,10 @@ struct ContentView: View {
         collections = []
         isInitialized = false
         addLog("Chroma reset complete")
+        
+        // Re-initialize Chroma after reset
+        try initialize()
+        addLog("System reset complete")
     }
     
     var body: some View {
