@@ -7,7 +7,14 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Setup Rust
+    - name: Cache Rust toolchain
+      id: cache-rustup
+      uses: useblacksmith/cache@v5
+      with:
+        path: ~/.rustup
+        key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
+    - name: Install Rust toolchain
+      if: ${{ steps.cache-rustup.outputs.cache-hit != 'true' }}
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         cache: false # we use Blacksmith's cache package below
