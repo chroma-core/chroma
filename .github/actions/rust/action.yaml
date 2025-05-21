@@ -10,6 +10,7 @@ runs:
     - name: Cache Rust toolchain
       id: cache-rustup
       uses: useblacksmith/cache@v5
+      if: ${{ runner.os != 'windows' }}
       with:
         path: ~/.rustup
         key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
@@ -24,5 +25,9 @@ runs:
         repo-token: ${{ inputs.github-token }}
     - name: Set up cache
       uses: useblacksmith/rust-cache@v3
+      if: ${{ runner.os != 'windows' }}
+    - name: Set up cache (Windows)
+      uses: Swatinem/rust-cache@v2
+      if: ${{ runner.os == 'windows' }}
     - name: Setup Nextest
       uses: taiki-e/install-action@nextest
