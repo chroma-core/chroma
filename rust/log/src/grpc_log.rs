@@ -557,5 +557,9 @@ mod tests {
             CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
             Some("fffdb379-d592-41d1-8de6-412abc6e0b35"),
         ));
+        assert!(GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
+            Some("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+        ));
     }
 }
