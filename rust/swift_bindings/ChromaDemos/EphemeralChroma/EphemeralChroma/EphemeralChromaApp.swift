@@ -1,15 +1,14 @@
 //
-//  ChromaDemoApp.swift
-//  ChromaDemo
+//  EphemeralChromaApp.swift
+//  EphemeralChroma
 //
-//  Created by Nicholas Arner on 5/14/25.
+//  Created by Nicholas Arner on 5/21/25.
 //
 
 import SwiftUI
-import Chroma
 
 @main
-struct ChromaDemoApp: App {
+struct EphemeralChromaApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()

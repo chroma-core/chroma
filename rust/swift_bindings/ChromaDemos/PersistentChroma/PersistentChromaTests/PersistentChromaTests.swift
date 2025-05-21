@@ -1,13 +1,13 @@
 //
-//  ChromaDemoTests.swift
-//  ChromaDemoTests
+//  PersistentChromaTests.swift
+//  PersistentChromaTests
 //
-//  Created by Nicholas Arner on 5/14/25.
+//  Created by Nicholas Arner on 5/21/25.
 //
 
 import Testing
 
-struct ChromaDemoTests {
+struct PersistentChromaTests {
 
     @Test func example() async throws {
         // Write your test here and use APIs like `#expect(...)` to check expected conditions.
