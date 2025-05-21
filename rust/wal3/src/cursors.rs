@@ -77,7 +77,7 @@ pub struct Cursor {
 impl Default for Cursor {
     fn default() -> Self {
         Self {
-            position: LogPosition::from_offset(0),
+            position: LogPosition::from_offset(1),
             epoch_us: 1,
             writer: "default-cursor".to_string(),
         }
