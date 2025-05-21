@@ -888,7 +888,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		var sourceSegments []*model.Segment
 		var newLineageFileFullName string
 		var oldLineageFileName *string
-		var versionFileTenantId string
+		var lineageFileTenantId string
 
 		ts := time.Now().UTC()
 
@@ -959,10 +959,10 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			if collection.LineageFileName == nil {
 				return common.ErrMissingLineageFileName
 			}
-			versionFileTenantId = collection.Tenant
+			lineageFileTenantId = collection.Tenant
 			oldLineageFileName = collection.LineageFileName
 		} else {
-			versionFileTenantId = sourceCollection.TenantID
+			lineageFileTenantId = sourceCollection.TenantID
 			oldLineageFileName = sourceCollection.LineageFileName
 		}
 		databases, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(sourceCollection.TenantID, sourceCollection.DatabaseName)
@@ -1054,7 +1054,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		})
 
 		newLineageFileBaseName := fmt.Sprintf("%s/%d/%s.binpb", sourceCollectionIDStr, sourceCollection.Version, forkCollection.TargetCollectionID)
-		newLineageFileFullName, err = tc.s3Store.PutLineageFile(versionFileTenantId, databaseID, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
+		newLineageFileFullName, err = tc.s3Store.PutLineageFile(lineageFileTenantId, databaseID, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
 		if err != nil {
 			return err
 		}
