@@ -155,22 +155,28 @@ func (s *logServer) UpdateCollectionLogOffset(ctx context.Context, req *logservi
 }
 
 func (s *logServer) PurgeDirtyForCollection(ctx context.Context, req *logservicepb.PurgeDirtyForCollectionRequest) (res *logservicepb.PurgeDirtyForCollectionResponse, err error) {
-	// no-op for now
 	return
 }
 
 func (s *logServer) InspectDirtyLog(ctx context.Context, req *logservicepb.InspectDirtyLogRequest) (res *logservicepb.InspectDirtyLogResponse, err error) {
-	// no-op for now
 	return
 }
 
 func (s *logServer) SealLog(ctx context.Context, req *logservicepb.SealLogRequest) (res *logservicepb.SealLogResponse, err error) {
-	// no-op for now
+	var collectionID types.UniqueID
+	collectionID, err = types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		return
+	}
+	err = s.lr.SealCollection(ctx, collectionID.String())
 	return
 }
 
 func (s *logServer) MigrateLog(ctx context.Context, req *logservicepb.MigrateLogRequest) (res *logservicepb.MigrateLogResponse, err error) {
-	// no-op for now
+	return
+}
+
+func (s *logServer) InspectLogState(ctx context.Context, req *logservicepb.InspectLogStateRequest) (res *logservicepb.InspectLogStateResponse, err error) {
 	return
 }
 

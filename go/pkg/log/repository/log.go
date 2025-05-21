@@ -213,6 +213,11 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 	return
 }
 
+func (r *LogRepository) SealCollection(ctx context.Context, collectionID string) (err error) {
+	_, err = r.queries.SealLog(ctx, collectionID)
+	return
+}
+
 func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCompactionSize uint64) (collectionToCompact []log.GetAllCollectionsToCompactRow, err error) {
 	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx, int64(minCompactionSize))
 	if collectionToCompact == nil {
@@ -223,6 +228,7 @@ func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCo
 	}
 	return
 }
+
 func (r *LogRepository) UpdateCollectionCompactionOffsetPosition(ctx context.Context, collectionId string, offsetPosition int64) (err error) {
 	err = r.queries.UpdateCollectionCompactionOffsetPosition(ctx, log.UpdateCollectionCompactionOffsetPositionParams{
 		ID:                             collectionId,
