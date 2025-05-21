@@ -164,6 +164,15 @@ func (s *logServer) InspectDirtyLog(ctx context.Context, req *logservicepb.Inspe
 	return
 }
 
+func (s *logServer) SealLog(ctx context.Context, req *logservicepb.SealLogRequest) (res *logservicepb.SealLogResponse, err error) {
+	// no-op for now
+	return
+}
+
+func (s *logServer) MigrateLog(ctx context.Context, req *logservicepb.MigrateLogRequest) (res *logservicepb.MigrateLogResponse, err error) {
+	// no-op for now
+	return
+}
 
 func NewLogServer(lr *repository.LogRepository) logservicepb.LogServiceServer {
 	return &logServer{

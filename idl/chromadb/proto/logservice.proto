@@ -98,6 +98,22 @@ message InspectDirtyLogResponse {
   repeated string markers = 1;
 }
 
+message SealLogRequest {
+  string collection_id = 1;
+}
+
+message SealLogResponse {
+  // Empty
+}
+
+message MigrateLogRequest {
+  string collection_id = 1;
+}
+
+message MigrateLogResponse {
+  // Empty
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
@@ -106,5 +122,11 @@ service LogService {
   rpc GetAllCollectionInfoToCompact(GetAllCollectionInfoToCompactRequest) returns (GetAllCollectionInfoToCompactResponse) {}
   rpc UpdateCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
   rpc PurgeDirtyForCollection(PurgeDirtyForCollectionRequest) returns (PurgeDirtyForCollectionResponse) {}
+  // RPC endpoints to expose for operator debuggability.
+  // This endpoint must route to the rust log service.
   rpc InspectDirtyLog(InspectDirtyLogRequest) returns (InspectDirtyLogResponse) {}
+  // This endpoint must route to the go log service.
+  rpc SealLog(SealLogRequest) returns (SealLogResponse) {}
+  // This endpoint must route to the rust log service.
+  rpc MigrateLog(MigrateLogRequest) returns (MigrateLogResponse) {}
 }
