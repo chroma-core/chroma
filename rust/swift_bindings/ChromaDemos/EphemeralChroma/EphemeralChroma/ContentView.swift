@@ -59,6 +59,10 @@ struct ContentView: View {
         // Re-initialize Chroma after reset
         try initialize()
         addLog("System reset complete")
+        
+        DispatchQueue.main.async {
+            logs.removeAll()
+        }
     }
     
     var body: some View {
