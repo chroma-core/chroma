@@ -37,7 +37,10 @@ struct ContentView: View {
         
         do {
             collections = try listCollections()
-            addLog("Found \(collections.count) collections")
+            addLog("Found \(collections.count) collections:")
+            collections.forEach { collection in
+                addLog("  - \(collection)")
+            }
         } catch {
             addLog("Failed to list collections: \(error)")
         }

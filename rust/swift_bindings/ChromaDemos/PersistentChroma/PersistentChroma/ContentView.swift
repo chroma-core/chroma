@@ -8,6 +8,20 @@
 import SwiftUI
 import Chroma
 
+#if canImport(UIKit)
+extension View {
+    func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+#else
+extension View {
+    func dismissKeyboard() {
+        // No-op for macOS
+    }
+}
+#endif
+
 class ContentViewRef: ObservableObject {
     var addLog: (String) -> Void = { _ in }
 }
@@ -32,14 +46,12 @@ struct ContentView: View {
     }
     
     func refreshCollections() {
-        guard isPersistentInitialized else {
-            addLog("Cannot refresh collections: Chroma not initialized")
-            return
-        }
-        
         do {
             collections = try listCollections()
-            addLog("Found \(collections.count) collections in persistent mode")
+            addLog("Found \(collections.count) collections:")
+            collections.forEach { collection in
+                addLog("  - \(collection)")
+            }
         } catch {
             addLog("Failed to list collections: \(error)")
         }
@@ -55,6 +67,15 @@ struct ContentView: View {
         collections = []
         isPersistentInitialized = false
         addLog("Chroma reset complete")
+        
+        // Re-initialize Chroma after reset
+        try initializeWithPath(path: persistentPath, allowReset: true)
+        isPersistentInitialized = true
+        addLog("System reset complete")
+        
+        DispatchQueue.main.async {
+            logs.removeAll()
+        }
     }
     
     func checkForPersistentData() {
@@ -189,7 +210,7 @@ struct ContentView: View {
                             addLog("  (empty)")
                         } else {
                             let pairs = zip(res.ids, res.documents).map { id, doc in
-                                "  Document ID: \(id)\n  Content: \(doc ?? "(nil)")" 
+                                "  Document ID: \(id)\n  Content: \(doc ?? "(nil)")"
                             }
                             pairs.forEach { addLog($0) }
                         }
@@ -197,16 +218,14 @@ struct ContentView: View {
                     addLog("--- End of Documents ---")
                 }
                 
-                Button {
+                ActionButton(title: "Show Storage Location", disabled: !isPersistentInitialized) {
                     addLog("Storage location at: \(persistentPath)")
-                } label: {
-                    Text("Show Storage Location")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
                 }
-                .background(Color.gray.opacity(0.2))
-                .cornerRadius(8)
-                .disabled(!isPersistentInitialized)
+                
+                ActionButton(title: "Reset System", disabled: !isPersistentInitialized) {
+                    try reset()
+                    refreshCollections()
+                }
                 
                 Text("Data will persist between app launches")
                     .font(.caption)
@@ -391,7 +410,7 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding()
             } else {
-                ScrollViewReader { scrollView in 
+                ScrollViewReader { scrollView in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(logs.indices, id: \.self) { index in
@@ -434,6 +453,7 @@ struct ActionButton: View {
     
     var body: some View {
         Button {
+            dismissKeyboard()
             inProgress = true
             errorMessage = nil
             
