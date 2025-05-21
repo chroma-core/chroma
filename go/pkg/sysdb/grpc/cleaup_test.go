@@ -73,7 +73,7 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	collections := make([]string, 2)
 	for i := 0; i < 2; i++ {
 		collectionName := "cleanup_test_collection_" + strconv.Itoa(i)
-		collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+		collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, "")
 		suite.NoError(err)
 		collections[i] = collectionID
 	}
@@ -109,7 +109,7 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 
 	// Create a test collection
 	collectionName := "cleanup_test_collection_double_delete"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, "")
 	suite.NoError(err)
 
 	// Hard delete it once
@@ -142,13 +142,13 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanupForkedCollection() {
 	print("Creating collection")
 	collectionName := "cleanup_root_test_collection"
 	lineageFileName := "lineageFileName"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, &lineageFileName)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, lineageFileName)
 	suite.NoError(err)
 	collections[0] = collectionID
 
 	for i := 1; i < 3; i++ {
 		collectionName := "cleanup_non_root_test_collection_" + strconv.Itoa(i)
-		collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+		collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, "")
 		suite.NoError(err)
 		collections[i] = collectionID
 	}

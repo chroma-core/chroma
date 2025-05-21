@@ -67,11 +67,6 @@ type ICollectionDb interface {
 	GetCollectionSize(collectionID string) (uint64, error)
 	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*CollectionToGc, error)
 	UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error)
-<<<<<<< HEAD
-	LockCollection(collectionID string) error
-	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath string, newLineageFilePath string) error
-=======
 	LockCollection(collectionID string) (*bool, error)
-	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath *string, newLineageFilePath string) error
->>>>>>> 08672f5cb ([BUG]: Miscellanous fixes for forking (#4585))
+	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath string, newLineageFilePath string) error
 }

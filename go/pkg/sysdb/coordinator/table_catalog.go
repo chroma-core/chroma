@@ -865,25 +865,15 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 	return result, nil
 }
 
-<<<<<<< HEAD
-func (tc *Catalog) getLineageFile(ctx context.Context, collection *model.Collection) (*coordinatorpb.CollectionLineageFile, error) {
-	if len(collection.LineageFileName) == 0 {
-=======
-func (tc *Catalog) getLineageFile(ctx context.Context, lineageFileName *string) (*coordinatorpb.CollectionLineageFile, error) {
-	if lineageFileName == nil {
->>>>>>> 08672f5cb ([BUG]: Miscellanous fixes for forking (#4585))
+func (tc *Catalog) getLineageFile(ctx context.Context, lineageFileName string) (*coordinatorpb.CollectionLineageFile, error) {
+	if len(lineageFileName) == 0 {
 		// There is no lineage file for the given collection
 		return &coordinatorpb.CollectionLineageFile{
 			Dependencies: []*coordinatorpb.CollectionVersionDependency{},
 		}, nil
 	}
 
-<<<<<<< HEAD
-	return tc.s3Store.GetLineageFile(collection.LineageFileName)
-=======
-	// Safe to deref.
-	return tc.s3Store.GetLineageFile(*lineageFileName)
->>>>>>> 08672f5cb ([BUG]: Miscellanous fixes for forking (#4585))
+	return tc.s3Store.GetLineageFile(lineageFileName)
 }
 
 func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.ForkCollection) (*model.Collection, []*model.Segment, error) {
@@ -896,7 +886,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		var sourceCollection *model.Collection
 		var sourceSegments []*model.Segment
 		var newLineageFileFullName string
-		var oldLineageFileName *string
+		var oldLineageFileName string
 		var lineageFileTenantId string
 
 		ts := time.Now().UTC()
@@ -965,7 +955,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 				return common.ErrCollectionDeletedWithLocksHeld
 			}
 			// Root should always have a lineage file
-			if collection.LineageFileName == nil {
+			if len(collection.LineageFileName) == 0 {
 				return common.ErrMissingLineageFileName
 			}
 			lineageFileTenantId = collection.Tenant

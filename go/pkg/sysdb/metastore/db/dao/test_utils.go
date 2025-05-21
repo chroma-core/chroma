@@ -125,7 +125,7 @@ func CleanUpTestTenant(db *gorm.DB, tenantName string) error {
 	return nil
 }
 
-func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, databaseID string, lineageFileName *string) (string, error) {
+func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, databaseID string, lineageFileName string) (string, error) {
 	log.Info("create test collection", zap.String("collectionName", collectionName), zap.Int32("dimension", dimension), zap.String("databaseID", databaseID))
 	collectionDb := &collectionDb{
 		db: db,

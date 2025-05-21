@@ -348,7 +348,7 @@ func (suite *CollectionServiceTestSuite) TestCreateCollection() {
 func (suite *CollectionServiceTestSuite) TestServer_GetCollection() {
 	// Create a test collection
 	collectionName := "test_get_collection"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, "")
 	suite.NoError(err)
 
 	// Enable soft delete mode
@@ -382,7 +382,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	log.Info("TestServer_FlushCollectionCompaction")
 	// create test collection
 	collectionName := "collection_service_test_flush_collection_compaction"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, "")
 	suite.NoError(err)
 
 	// flush collection compaction
@@ -533,7 +533,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	// It should fail with a failed precondition error.
 	// Create collection and soft-delete it.
 	suite.s.coordinator.SetDeleteMode(coordinator.SoftDelete)
-	collectionID, err = dao.CreateTestCollection(suite.db, "test_flush_collection_compaction_soft_delete", 128, suite.databaseId, nil)
+	collectionID, err = dao.CreateTestCollection(suite.db, "test_flush_collection_compaction_soft_delete", 128, suite.databaseId, "")
 	suite.NoError(err)
 	suite.s.coordinator.DeleteCollection(context.Background(), &model.DeleteCollection{
 		ID:           types.MustParse(collectionID),
@@ -559,7 +559,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 
 func (suite *CollectionServiceTestSuite) TestGetCollectionSize() {
 	collectionName := "collection_service_test_get_collection_size"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, "")
 	suite.NoError(err)
 
 	req := coordinatorpb.GetCollectionSizeRequest{
@@ -575,7 +575,7 @@ func (suite *CollectionServiceTestSuite) TestGetCollectionSize() {
 
 func (suite *CollectionServiceTestSuite) TestCountForks() {
 	collectionName := "collection_service_test_count_forks"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, "")
 	suite.NoError(err)
 
 	req := coordinatorpb.CountForksRequest{
@@ -620,7 +620,7 @@ func (suite *CollectionServiceTestSuite) TestCountForks() {
 
 func (suite *CollectionServiceTestSuite) TestFork() {
 	collectionName := "collection_service_test_forks"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, "")
 	suite.NoError(err)
 	targetCollectionID := types.NewUniqueID()
 
