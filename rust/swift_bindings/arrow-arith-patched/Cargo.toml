@@ -1,0 +1,25 @@
+[package]
+name = "arrow-arith"
+version = "52.2.0"
+description = "Arrow arithmetic kernels"
+homepage = "https://github.com/apache/arrow-rs"
+repository = "https://github.com/apache/arrow-rs"
+authors = ["Apache Arrow <dev@arrow.apache.org>"]
+license = "Apache-2.0"
+keywords = ["arrow"]
+edition = "2021"
+rust-version = "1.62.1"
+
+[lib]
+name = "arrow_arith"
+path = "src/lib.rs"
+
+[dependencies]
+arrow-array = "52.2.0"
+arrow-buffer = "52.2.0"
+arrow-data = "52.2.0"
+arrow-schema = "52.2.0"
+arrow-select = "52.2.0"
+chrono = { version = "0.4", default-features = false }
+half = { version = "2.1", default-features = false }
+num = { version = "0.4", default-features = false }
