@@ -402,7 +402,7 @@ func (tc *Catalog) CheckCollection(ctx context.Context, collectionID types.Uniqu
 		defer span.End()
 	}
 
-	collectionInfo, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(collectionID), nil)
+	collectionInfo, err := tc.metaDomain.CollectionDb(ctx).GetCollectionWithoutMetadata(types.FromUniqueID(collectionID), nil, nil)
 	if err != nil {
 		return false, err
 	}
@@ -555,7 +555,7 @@ func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *m
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		collectionID := deleteCollection.ID
 
-		collectionEntry, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionEntry(types.FromUniqueID(collectionID), &deleteCollection.DatabaseName)
+		collectionEntry, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionWithoutMetadata(types.FromUniqueID(collectionID), &deleteCollection.DatabaseName, nil)
 		if err != nil {
 			return err
 		}
@@ -647,12 +647,13 @@ func (tc *Catalog) GetSoftDeletedCollections(ctx context.Context, collectionID *
 	collectionList := make([]*model.Collection, 0, len(collections))
 	for _, dbCollection := range collections {
 		collection := &model.Collection{
-			ID:           types.MustParse(dbCollection.Collection.ID),
-			Name:         *dbCollection.Collection.Name,
-			DatabaseName: dbCollection.DatabaseName,
-			TenantID:     dbCollection.TenantID,
-			Ts:           types.Timestamp(dbCollection.Collection.Ts),
-			UpdatedAt:    types.Timestamp(dbCollection.Collection.UpdatedAt.Unix()),
+			ID:              types.MustParse(dbCollection.Collection.ID),
+			Name:            *dbCollection.Collection.Name,
+			DatabaseName:    dbCollection.DatabaseName,
+			TenantID:        dbCollection.TenantID,
+			Ts:              types.Timestamp(dbCollection.Collection.Ts),
+			UpdatedAt:       types.Timestamp(dbCollection.Collection.UpdatedAt.Unix()),
+			LineageFileName: dbCollection.Collection.LineageFileName,
 		}
 		collectionList = append(collectionList, collection)
 	}
@@ -864,15 +865,25 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 	return result, nil
 }
 
+<<<<<<< HEAD
 func (tc *Catalog) getLineageFile(ctx context.Context, collection *model.Collection) (*coordinatorpb.CollectionLineageFile, error) {
 	if len(collection.LineageFileName) == 0 {
+=======
+func (tc *Catalog) getLineageFile(ctx context.Context, lineageFileName *string) (*coordinatorpb.CollectionLineageFile, error) {
+	if lineageFileName == nil {
+>>>>>>> 08672f5cb ([BUG]: Miscellanous fixes for forking (#4585))
 		// There is no lineage file for the given collection
 		return &coordinatorpb.CollectionLineageFile{
 			Dependencies: []*coordinatorpb.CollectionVersionDependency{},
 		}, nil
 	}
 
+<<<<<<< HEAD
 	return tc.s3Store.GetLineageFile(collection.LineageFileName)
+=======
+	// Safe to deref.
+	return tc.s3Store.GetLineageFile(*lineageFileName)
+>>>>>>> 08672f5cb ([BUG]: Miscellanous fixes for forking (#4585))
 }
 
 func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.ForkCollection) (*model.Collection, []*model.Segment, error) {
@@ -880,22 +891,28 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		var err error
-		var rootCollection *model.Collection
 		var rootCollectionID types.UniqueID
 		var rootCollectionIDStr string
 		var sourceCollection *model.Collection
 		var sourceSegments []*model.Segment
 		var newLineageFileFullName string
+		var oldLineageFileName *string
+		var lineageFileTenantId string
 
 		ts := time.Now().UTC()
 
 		sourceCollectionIDStr := forkCollection.SourceCollectionID.String()
 
 		// NOTE: We need to retrieve the source collection to get root collection id, then acquire locks on source and root collections in order to avoid deadlock.
-		// This step is because root collection id is always populated when the collection is created and is never modified.
-		sourceCollectionDb, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionEntry(&sourceCollectionIDStr, nil)
+		// This step is safe because root collection id is always populated when the collection is created and is never modified.
+		// If source collection is deleted then cannot fork.
+		isDeleted := false
+		sourceCollectionDb, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionWithoutMetadata(&sourceCollectionIDStr, nil, &isDeleted)
 		if err != nil {
 			return err
+		}
+		if sourceCollectionDb == nil {
+			return common.ErrCollectionNotFound
 		}
 
 		if len(sourceCollectionDb.RootCollectionId) > 0 {
@@ -915,29 +932,47 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 			slices.Sort(collectionsToLock)
 		}
 		for _, collectionID := range collectionsToLock {
-			err = tc.metaDomain.CollectionDb(txCtx).LockCollection(collectionID)
-			if err != nil {
-				return err
+			isDeleted, e := tc.metaDomain.CollectionDb(txCtx).LockCollection(collectionID)
+			if e != nil {
+				return e
+			}
+			// It's ok for the root collection to be deleted but not for the source collection.
+			// We disable hard delete for soft deleted collections that are root.
+			if collectionID == sourceCollectionIDStr && *isDeleted {
+				return common.ErrCollectionNotFound
 			}
 		}
 
 		// Get source and root collections after they are locked
+		// They can't get deleted (both soft as well as hard) concurrently since we have the locks
 		sourceCollection, sourceSegments, err = tc.GetCollectionWithSegments(txCtx, forkCollection.SourceCollectionID, false)
 		if err != nil {
 			return err
 		}
+		// this can't happen and implies something weird in the system since
+		// we have the locks on the source collection
+		if sourceCollection == nil || sourceSegments == nil {
+			return common.ErrCollectionDeletedWithLocksHeld
+		}
 		if rootCollectionID != forkCollection.SourceCollectionID {
-			limit := int32(1)
-			collections, err := tc.GetCollections(txCtx, rootCollectionID, nil, "", "", &limit, nil)
+			// Get root collection. It is ok to get soft deleted root collection entry here.
+			collection, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionWithoutMetadata(&rootCollectionIDStr, nil, nil)
 			if err != nil {
 				return err
 			}
-			if len(collections) == 0 {
-				return common.ErrCollectionNotFound
+			// Implies a hard deleted and should not happen
+			if collection == nil {
+				return common.ErrCollectionDeletedWithLocksHeld
 			}
-			rootCollection = collections[0]
+			// Root should always have a lineage file
+			if collection.LineageFileName == nil {
+				return common.ErrMissingLineageFileName
+			}
+			lineageFileTenantId = collection.Tenant
+			oldLineageFileName = collection.LineageFileName
 		} else {
-			rootCollection = sourceCollection
+			lineageFileTenantId = sourceCollection.TenantID
+			oldLineageFileName = sourceCollection.LineageFileName
 		}
 		databases, err := tc.metaDomain.DatabaseDb(txCtx).GetDatabases(sourceCollection.TenantID, sourceCollection.DatabaseName)
 		if err != nil {
@@ -956,8 +991,11 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		// t1: User writes to source collection, compaction takes place, source collection log offset become [400, 500]
 		// t2: Fork source collection in sysdb, the latest source collection compaction offset is 400. If we add new logs, it will start after offset 300, and the data is lost after compaction.
 		latestSourceCompactionOffset := uint64(sourceCollection.LogPosition)
-		if forkCollection.SourceCollectionLogEnumerationOffset < latestSourceCompactionOffset || latestSourceCompactionOffset < forkCollection.SourceCollectionLogCompactionOffset {
+		if forkCollection.SourceCollectionLogEnumerationOffset < latestSourceCompactionOffset {
 			return common.ErrCollectionLogPositionStale
+		}
+		if latestSourceCompactionOffset < forkCollection.SourceCollectionLogCompactionOffset {
+			return common.ErrCompactionOffsetSomehowAhead
 		}
 
 		// Create the new collection with source collection information
@@ -1010,7 +1048,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		}
 
 		// Update the lineage file
-		lineageFile, err := tc.getLineageFile(txCtx, rootCollection)
+		lineageFile, err := tc.getLineageFile(txCtx, oldLineageFileName)
 		if err != nil {
 			return err
 		}
@@ -1025,12 +1063,12 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		})
 
 		newLineageFileBaseName := fmt.Sprintf("%s/%d/%s.binpb", sourceCollectionIDStr, sourceCollection.Version, forkCollection.TargetCollectionID)
-		newLineageFileFullName, err = tc.s3Store.PutLineageFile(rootCollection.TenantID, databaseID, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
+		newLineageFileFullName, err = tc.s3Store.PutLineageFile(lineageFileTenantId, databaseID, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
 		if err != nil {
 			return err
 		}
 
-		return tc.metaDomain.CollectionDb(txCtx).UpdateCollectionLineageFilePath(rootCollectionIDStr, rootCollection.LineageFileName, newLineageFileFullName)
+		return tc.metaDomain.CollectionDb(txCtx).UpdateCollectionLineageFilePath(rootCollectionIDStr, oldLineageFileName, newLineageFileFullName)
 	})
 	if err != nil {
 		return nil, nil, err
@@ -1043,7 +1081,8 @@ func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.Uniq
 	var rootCollectionID types.UniqueID
 
 	sourceCollectionIDStr := sourceCollectionID.String()
-	sourceCollectionDb, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(&sourceCollectionIDStr, nil)
+	isDeleted := false
+	sourceCollectionDb, err := tc.metaDomain.CollectionDb(ctx).GetCollectionWithoutMetadata(&sourceCollectionIDStr, nil, &isDeleted)
 	if err != nil {
 		return 0, err
 	}
@@ -1070,7 +1109,7 @@ func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.Uniq
 	}
 	rootCollection := collections[0]
 
-	lineageFile, err := tc.getLineageFile(ctx, rootCollection)
+	lineageFile, err := tc.getLineageFile(ctx, rootCollection.LineageFileName)
 	if err != nil {
 		return 0, err
 	}
@@ -1398,7 +1437,8 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 	includeMarkedForDeletion bool,
 ) ([]*coordinatorpb.CollectionVersionInfo, error) {
 	// Get collection entry to get version file name
-	collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(types.FromUniqueID(collectionID), nil)
+	isDeleted := false
+	collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionWithoutMetadata(types.FromUniqueID(collectionID), nil, &isDeleted)
 	if err != nil {
 		log.Error("error getting collection entry", zap.Error(err))
 		return nil, err
@@ -1521,7 +1561,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if collection exists.
-		collection, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionEntry(types.FromUniqueID(flushCollectionCompaction.ID), nil)
+		collection, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionWithoutMetadata(types.FromUniqueID(flushCollectionCompaction.ID), nil, nil)
 		if err != nil {
 			return err
 		}
@@ -1859,7 +1899,8 @@ func (tc *Catalog) markVersionForDeletionInSingleCollection(
 
 		// Read the existing version file.
 		collectionIDPtr := &collectionID
-		collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(collectionIDPtr, nil)
+		isDeleted := false
+		collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionWithoutMetadata(collectionIDPtr, nil, &isDeleted)
 		if err != nil {
 			return err
 		}
@@ -1984,7 +2025,8 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 
 		// Read the existing version file
 		collectionIDPtr := &collectionID
-		collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(collectionIDPtr, nil)
+		isDeleted := false
+		collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionWithoutMetadata(collectionIDPtr, nil, &isDeleted)
 		if err != nil {
 			return err
 		}
@@ -2063,7 +2105,8 @@ func (tc *Catalog) DeleteCollectionVersion(ctx context.Context, req *coordinator
 
 func (tc *Catalog) GetVersionFileNamesForCollection(ctx context.Context, tenantID string, collectionID string) (string, error) {
 	collectionIDPtr := &collectionID
-	collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionEntry(collectionIDPtr, nil)
+	isDeleted := false
+	collectionEntry, err := tc.metaDomain.CollectionDb(ctx).GetCollectionWithoutMetadata(collectionIDPtr, nil, &isDeleted)
 	if err != nil {
 		return "", err
 	}

@@ -58,6 +58,11 @@ func (s *SoftDeleteCleaner) run() {
 		}
 		numDeleted := 0
 		for _, collection := range collections {
+			// Skip root collections.
+			// Only roots have lineage file name set.
+			if collection.LineageFileName != nil && *collection.LineageFileName != "" {
+				continue
+			}
 			timeSinceDelete := time.Since(time.Unix(collection.UpdatedAt, 0))
 			if timeSinceDelete > s.maxAge {
 				log.Info("Deleting soft deleted collection", zap.String("collection_id", collection.ID.String()), zap.Duration("time_since_delete", timeSinceDelete), zap.Time("last_updated_at", time.Unix(collection.UpdatedAt, 0)))
