@@ -2263,7 +2263,7 @@ mod tests {
                     Ok(None)
                 } else if collection_id == collection_id_collected_clone {
                     Ok(Some(Witness::default_etag_with_cursor(Cursor {
-                        position: LogPosition::from_offset(100),
+                        position: LogPosition::from_offset(101),
                         epoch_us: 0,
                         writer: "TODO".to_string(),
                     })))
