@@ -362,7 +362,50 @@ impl SparseIndexReader {
         result_uuids
     }
 
-    pub(super) fn get_block_ids_range<'prefix, 'referred_data, PrefixRange>(
+    pub(super) fn get_block_ids_for_prefixes<'prefix>(
+        &self,
+        mut prefixes: Vec<&'prefix str>,
+    ) -> Vec<Uuid> {
+        prefixes.sort();
+        let mut result_uuids = Vec::new();
+        let block_start = self.data.forward.iter();
+        let block_end = block_start
+            .clone()
+            .skip(1)
+            .map(|(delim, _)| match delim {
+                SparseIndexDelimiter::Start => {
+                    unreachable!("The start delimiter should only appear in the first block")
+                }
+                SparseIndexDelimiter::Key(composite_key) => Some(composite_key.prefix.as_str()),
+            })
+            .chain([None]);
+        let mut prefix_iter = prefixes.into_iter().peekable();
+        for ((start_delim, block), end_prefix) in block_start.zip(block_end) {
+            if let SparseIndexDelimiter::Key(CompositeKey {
+                prefix: start_prefix,
+                key: _,
+            }) = start_delim
+            {
+                while let Some(&prefix) = prefix_iter.peek() {
+                    if start_prefix.as_str() <= prefix {
+                        break;
+                    }
+                    prefix_iter.next();
+                }
+            }
+            if let Some(&prefix) = prefix_iter.peek() {
+                if end_prefix.is_none() || end_prefix.is_some_and(|end_prefix| prefix <= end_prefix)
+                {
+                    result_uuids.push(block.id);
+                }
+            } else {
+                break;
+            }
+        }
+        result_uuids
+    }
+
+    pub(super) fn get_block_ids_range<'prefix, PrefixRange>(
         &self,
         prefix_range: PrefixRange,
     ) -> Vec<Uuid>
