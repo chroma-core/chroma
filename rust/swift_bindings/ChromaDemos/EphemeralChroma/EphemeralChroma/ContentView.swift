@@ -39,7 +39,7 @@ struct ContentView: View {
             collections = try listCollections()
             addLog("Found \(collections.count) collections:")
             collections.forEach { collection in
-                addLog("  - \(collection)")
+                addLog("\(collection)")
             }
         } catch {
             addLog("Failed to list collections: \(error)")
@@ -127,10 +127,6 @@ struct ContentView: View {
             Text("Ephemeral Chroma Demo")
                 .font(.title)
                 .bold()
-            
-            Text("In-memory vector database for semantic search")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding()
