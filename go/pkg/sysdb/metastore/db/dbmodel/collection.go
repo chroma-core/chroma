@@ -63,10 +63,10 @@ type ICollectionDb interface {
 	UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string) (int32, error)
 	UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFilePath string, newCollectionVersion int32, newVersionFilePath string, totalRecordsPostCompaction uint64,
 		sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64) (int64, error)
-	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
+	GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*Collection, error)
 	GetCollectionSize(collectionID string) (uint64, error)
 	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*CollectionToGc, error)
 	UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error)
-	LockCollection(collectionID string) error
+	LockCollection(collectionID string) (*bool, error)
 	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath string, newLineageFilePath string) error
 }
