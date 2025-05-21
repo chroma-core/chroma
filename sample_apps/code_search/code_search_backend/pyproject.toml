@@ -1,0 +1,13 @@
+[project]
+name = "code-search"
+version = "0.1.0"
+description = "A Github-inspired code search utility"
+authors = [{ name = "Kyle Diaz" }]
+readme = "README.md"
+requires-python = ">=3.13,<4.0.0"
+dependencies = ["chromadb (>=1.0.9,<2.0.0)", "sentence-transformers (>=4.1.0,<5.0.0)", "transformers (>=4.51.3,<5.0.0)", "uuid (>=1.30,<2.0)", "flask (>=3.1.1,<4.0.0)", "flask-cors (>=6.0.0)", "tree-sitter (>=0.24.0,<0.25.0)", "tree-sitter-language-pack (>=0.7.3,<0.8.0)", "python-dotenv (>=1.1.0,<2.0.0)"]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
