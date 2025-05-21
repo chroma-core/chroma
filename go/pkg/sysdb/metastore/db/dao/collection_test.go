@@ -48,7 +48,7 @@ func (suite *CollectionDbTestSuite) TearDownSuite() {
 func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	collectionName := "test_collection_get_collections"
 	dim := int32(128)
-	collectionID, err := CreateTestCollection(suite.db, collectionName, dim, suite.databaseId)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, dim, suite.databaseId, nil)
 	suite.NoError(err)
 
 	testKey := "test"
@@ -103,7 +103,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
 
-	collectionID2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId)
+	collectionID2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId, nil)
 	suite.NoError(err)
 
 	// Test order by. Collections are ordered by create time so collectionID2 should be second
@@ -137,10 +137,10 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.NoError(err)
 
 	// Create two collections in the new database.
-	collectionID3, err := CreateTestCollection(suite.db, "test_collection_get_collections3", 128, DbId)
+	collectionID3, err := CreateTestCollection(suite.db, "test_collection_get_collections3", 128, DbId, nil)
 	suite.NoError(err)
 
-	collectionID4, err := CreateTestCollection(suite.db, "test_collection_get_collections4", 128, DbId)
+	collectionID4, err := CreateTestCollection(suite.db, "test_collection_get_collections4", 128, DbId, nil)
 	suite.NoError(err)
 
 	// Test count collections
@@ -174,7 +174,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionTotalRecordsAndLogicalSize() {
 	collectionName := "test_collection_get_collections"
-	collectionID, _ := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, _ := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
 	// verify default values
 	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
 	suite.NoError(err)
@@ -227,9 +227,9 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 	// Create 2 collections.
 	collectionName1 := "test_collection_soft_delete1"
 	collectionName2 := "test_collection_soft_delete2"
-	collectionID1, err := CreateTestCollection(suite.db, collectionName1, 128, suite.databaseId)
+	collectionID1, err := CreateTestCollection(suite.db, collectionName1, 128, suite.databaseId, nil)
 	suite.NoError(err)
-	collectionID2, err := CreateTestCollection(suite.db, collectionName2, 128, suite.databaseId)
+	collectionID2, err := CreateTestCollection(suite.db, collectionName2, 128, suite.databaseId, nil)
 	suite.NoError(err)
 
 	// Soft delete collection 1 by Updating the is_deleted column
@@ -264,7 +264,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollectionSize() {
 	collectionName := "test_collection_get_collection_size"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
 	suite.NoError(err)
 
 	total_records_post_compaction, err := suite.collectionDb.GetCollectionSize(collectionID)

@@ -634,7 +634,7 @@ impl ServiceBasedFrontend {
             .when(|e| {
                 matches!(
                     e.code(),
-                    ErrorCodes::FailedPrecondition | ErrorCodes::NotFound | ErrorCodes::Unknown
+                    ErrorCodes::FailedPrecondition | ErrorCodes::Unknown
                 )
             })
             .notify(|_, _| {
