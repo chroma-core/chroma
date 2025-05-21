@@ -117,7 +117,6 @@ jobs:
         with:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.os == 'linux' && '--zig' || '' }} --release --out dist
-          sccache: "true"
           container: "off"
 
       - name: Upload wheels

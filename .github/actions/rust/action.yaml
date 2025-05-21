@@ -35,12 +35,7 @@ runs:
       uses: arduino/setup-protoc@v3
       with:
         repo-token: ${{ inputs.github-token }}
-    - name: Use sccache
-      uses: mozilla-actions/sccache-action@v0.0.9
-    - name: Enable sccache
-      shell: bash
-      run: |
-        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+    - name: Set up cache
+      uses: useblacksmith/rust-cache@v3
     - name: Setup Nextest
       uses: taiki-e/install-action@nextest
