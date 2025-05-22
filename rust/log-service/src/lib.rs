@@ -398,9 +398,10 @@ impl DirtyMarker {
             let num_records = rollup_pc.limit_log_position - rollup_pc.start_log_position;
             let reinsert_count = rollup_pc.reinsert_count;
             let initial_insertion_epoch_us = rollup_pc.initial_insertion_epoch_us;
-            let to_compact = num_records >= record_count_threshold
+            let to_compact = true/*
+                || num_records >= record_count_threshold
                 || now_us - initial_insertion_epoch_us >= timeout_us
-                || reinsert_count >= reinsert_threshold;
+                || reinsert_count >= reinsert_threshold*/;
             if to_compact {
                 compactable.push(collection_id);
             }
