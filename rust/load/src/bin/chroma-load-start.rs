@@ -1,7 +1,10 @@
 //! Start a workload on the chroma-load server.
 
+use std::sync::Arc;
+
 use clap::Parser;
 
+use chroma_load::data_sets::{all_data_sets, References};
 use chroma_load::rest::StartRequest;
 use chroma_load::{humanize_expires, Connection, Throughput, Workload};
 
@@ -18,7 +21,13 @@ struct Args {
     #[arg(long)]
     workload: String,
     #[arg(long)]
-    data_set: String,
+    data_set: Option<String>,
+    #[arg(long)]
+    references_data_set: Option<String>,
+    #[arg(long)]
+    operates_on_data_set: Option<String>,
+    #[arg(long)]
+    operates_on_cardinality: Option<usize>,
     #[arg(long)]
     url: String,
     #[arg(long)]
@@ -103,11 +112,47 @@ async fn main() {
             wrap: Box::new(workload),
         };
     }
+    let (data_set, custom_data_set) = match (
+        args.data_set,
+        args.references_data_set,
+        args.operates_on_data_set,
+        args.operates_on_cardinality,
+    ) {
+        (Some(data_set), None, None, None) => (Some(data_set.clone()), None),
+        (None, Some(references), Some(operates_on), Some(cardinality)) => {
+            let Some(referred_to) = all_data_sets()
+                .iter()
+                .find(|ds| ds.name() == references)
+                .map(Arc::clone)
+            else {
+                eprintln!("Could not find a data set to reference named {references}");
+                std::process::exit(13);
+            };
+            let to_start = References {
+                references: referred_to.json(),
+                operates_on,
+                cardinality,
+            };
+            let to_start = match serde_json::to_value(&to_start) {
+                Ok(to_start) => to_start,
+                Err(err) => {
+                    eprintln!("could not serialize referencing data set: {err:?}");
+                    std::process::exit(13);
+                }
+            };
+            (None, Some(to_start))
+        }
+        _ => {
+            eprintln!("must provide data_set XOR (references_data_set, operates_on_data_set, operates_on_cardinality)");
+            std::process::exit(13);
+        }
+    };
     let req = StartRequest {
         name: args.name,
         expires: humanize_expires(&args.expires).unwrap_or(args.expires),
         workload,
-        data_set: args.data_set,
+        data_set,
+        custom_data_set,
         connection: Connection {
             url: args.url,
             api_key,

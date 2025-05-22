@@ -9,6 +9,7 @@ import {
   ChromaError,
   createErrorByType,
   ChromaUniqueError,
+  ChromaQuotaExceededError,
 } from "./Errors";
 import { FetchAPI } from "./generated";
 
@@ -74,6 +75,14 @@ export const chromaFetch: FetchAPI = async (
           );
         case 409:
           throw new ChromaUniqueError("The resource already exists");
+        case 422:
+          if (
+            respBody?.message &&
+            respBody?.message.startsWith("Quota exceeded")
+          ) {
+            throw new ChromaQuotaExceededError(respBody?.message);
+          }
+          break;
         case 500:
           throw parseServerError(respBody?.error);
         case 502:

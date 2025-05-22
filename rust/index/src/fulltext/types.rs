@@ -196,7 +196,7 @@ impl FullTextIndexWriter {
                 Some(offset) => {
                     let this_key = encoded_instance.omit_position();
                     if last_key != this_key {
-                        if last_key != TokenInstance::MAX {
+                        if last_key != TokenInstance::MAX && !posting_list.is_empty() {
                             let token = last_key.get_token();
                             let document_id = last_key.get_offset_id();
                             self.posting_lists_blockfile_writer
@@ -211,7 +211,7 @@ impl FullTextIndexWriter {
                     posting_list.push(offset);
                 }
                 None => {
-                    if last_key != TokenInstance::MAX {
+                    if last_key != TokenInstance::MAX && !posting_list.is_empty() {
                         let token = last_key.get_token();
                         let document_id = last_key.get_offset_id();
                         self.posting_lists_blockfile_writer
@@ -234,7 +234,7 @@ impl FullTextIndexWriter {
             }
         }
 
-        if last_key != TokenInstance::MAX {
+        if last_key != TokenInstance::MAX && !posting_list.is_empty() {
             let token = last_key.get_token();
             let document_id = last_key.get_offset_id();
             self.posting_lists_blockfile_writer

@@ -17,6 +17,7 @@ var (
 	// Collection errors
 	ErrCollectionNotFound                    = errors.New("collection not found")
 	ErrCollectionSoftDeleted                 = errors.New("collection soft deleted")
+	ErrConcurrentDeleteCollection            = errors.New("a concurrent operation deleted the collection")
 	ErrCollectionIDFormat                    = errors.New("collection id format error")
 	ErrCollectionNameEmpty                   = errors.New("collection name is empty")
 	ErrCollectionUniqueConstraintViolation   = errors.New("collection unique constraint violation")
@@ -27,6 +28,8 @@ var (
 	ErrCollectionVersionFileNameStale        = errors.New("collection version file name stale")
 	ErrCollectionEntryIsStale                = errors.New("collection entry is stale - one of version, version_file_name, or log_position is stale")
 	ErrCollectionTooManyFork                 = errors.New("collection entry has too many forks")
+	ErrCollectionDeletedWithLocksHeld        = errors.New("collection got deleted concurrently even though select for update locks were held. Not possible unless corruption somehow")
+	ErrMissingLineageFileName                = errors.New("missing lineage file name in root collection entry")
 
 	// Collection metadata errors
 	ErrUnknownCollectionMetadataType = errors.New("collection metadata value type not supported")
@@ -42,4 +45,7 @@ var (
 
 	// Segment metadata errors
 	ErrUnknownSegmentMetadataType = errors.New("segment metadata value type not supported")
+
+	// Others
+	ErrCompactionOffsetSomehowAhead = errors.New("system invariant was violated. Compaction offset in sysdb should always be behind or equal to offset in log")
 )

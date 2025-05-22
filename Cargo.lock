@@ -1443,7 +1443,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-cli"
-version = "1.1.1"
+version = "1.1.2"
 dependencies = [
  "arboard",
  "axum 0.8.1",
@@ -1525,6 +1525,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.1",
  "backon",
+ "bytes",
  "chroma-cache",
  "chroma-config",
  "chroma-distance",
@@ -1539,6 +1540,7 @@ dependencies = [
  "chroma-types",
  "figment",
  "futures",
+ "http-body-util",
  "lazy_static",
  "mdac",
  "ndarray",
@@ -1695,6 +1697,7 @@ dependencies = [
  "figment",
  "futures",
  "opentelemetry",
+ "parking_lot",
  "parquet",
  "proptest",
  "prost 0.13.5",
@@ -3681,12 +3684,12 @@ dependencies = [
 
 [[package]]
 name = "http-body-util"
-version = "0.1.2"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "793429d76616a256bcb62c2a2ec2bed781c8307e797e2598c50010f2bee2544f"
+checksum = "b021d93e26becf5dc7e1b75b1bed1fd93124b374ceb73f43d4d4eafec896a64a"
 dependencies = [
  "bytes",
- "futures-util",
+ "futures-core",
  "http 1.1.0",
  "http-body 1.0.1",
  "pin-project-lite",
@@ -4507,7 +4510,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -7043,9 +7046,9 @@ dependencies = [
 
 [[package]]
 name = "serde_path_to_error"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af99884400da37c88f5e9146b7f1fd0fbcae8f6eec4e9da38b67d05486f814a6"
+checksum = "59fab13f937fa393d08645bf3a84bdfe86e296747b506ada67bb15f10f218b2a"
 dependencies = [
  "itoa",
  "serde",
@@ -7307,7 +7310,7 @@ version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "03c3c6b7927ffe7ecaa769ee0e3994da3b8cafc8f444578982c83ecb161af917"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2 1.0.92",
  "quote 1.0.37",
  "syn 2.0.101",

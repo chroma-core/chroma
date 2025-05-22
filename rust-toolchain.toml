@@ -5,4 +5,4 @@
 # - rust/log/Dockerfile
 # - rust/worker/Dockerfile
 channel = "1.81.0"
-components = ["rustfmt", "clippy"]
+components = ["rustfmt", "clippy", "llvm-tools-preview"]

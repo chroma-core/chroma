@@ -30,22 +30,6 @@ pub enum LiteralExpr {
     Alternation(Vec<LiteralExpr>),
 }
 
-impl LiteralExpr {
-    pub fn contains_ngram_literal(&self, n: usize, max_literal_width: usize) -> bool {
-        match self {
-            LiteralExpr::Literal(literals) => literals
-                .split(|lit| lit.width() > max_literal_width)
-                .any(|chunk| chunk.len() >= n),
-            LiteralExpr::Concat(literal_exprs) => literal_exprs
-                .iter()
-                .any(|expr| expr.contains_ngram_literal(n, max_literal_width)),
-            LiteralExpr::Alternation(literal_exprs) => literal_exprs
-                .iter()
-                .all(|expr| expr.contains_ngram_literal(n, max_literal_width)),
-        }
-    }
-}
-
 impl From<ChromaHir> for LiteralExpr {
     fn from(value: ChromaHir) -> Self {
         match value {
@@ -149,6 +133,9 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
 
             let suffix = ngram[1..].to_vec();
             for (_, doc_id, pos) in ngram_doc_pos {
+                if pos.is_empty() {
+                    continue;
+                }
                 if mask.is_none() || mask.is_some_and(|m| m.contains(&doc_id)) {
                     suffix_doc_pos
                         .entry(suffix.clone())

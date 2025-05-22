@@ -276,7 +276,7 @@ impl Snapshot {
             },
             (Some(f), None) => f,
             (None, Some(s)) => s,
-            (None, None) => LogPosition::default(),
+            (None, None) => LogPosition::from_offset(1),
         }
     }
 

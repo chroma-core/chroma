@@ -257,6 +257,9 @@ impl SysDb {
                     total_records_post_compaction: 0,
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
+                    version_file_path: None,
+                    root_collection_id: None,
+                    lineage_file_path: None,
                 };
 
                 test_sysdb.add_collection(collection.clone());
@@ -854,6 +857,7 @@ impl GrpcSysDb {
             .await
             .map_err(|err| match err.code() {
                 Code::AlreadyExists => CreateCollectionError::AlreadyExists(name),
+                Code::Aborted => CreateCollectionError::Aborted(err.message().to_string()),
                 _ => CreateCollectionError::Internal(err.into()),
             })?;
 

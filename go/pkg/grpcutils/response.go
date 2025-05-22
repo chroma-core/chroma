@@ -43,6 +43,10 @@ func BuildNotFoundGrpcError(msg string) error {
 	return status.Error(codes.NotFound, msg)
 }
 
+func BuildAbortedGrpcError(msg string) error {
+	return status.Error(codes.Aborted, msg)
+}
+
 func BuildErrorForUUID(ID types.UniqueID, name string, err error) error {
 	if err != nil || ID == types.NilUniqueID() {
 		log.Error(name+"id format error", zap.String(name+".id", ID.String()))
