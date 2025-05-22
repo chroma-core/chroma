@@ -5,6 +5,7 @@ use chroma_system::{
     TaskResult,
 };
 use tokio::sync::oneshot::Sender;
+use tracing::Span;
 
 use crate::execution::operators::{
     knn::{KnnOperator, RecordDistance},
@@ -172,7 +173,7 @@ impl KnnOrchestrator {
                 },
                 ctx.receiver(),
             );
-            self.send(task, ctx).await;
+            self.send(task, ctx, Some(Span::current())).await;
         }
     }
 }
@@ -186,7 +187,10 @@ impl Orchestrator for KnnOrchestrator {
         self.dispatcher.clone()
     }
 
-    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+    async fn initial_tasks(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+    ) -> Vec<(TaskMessage, Option<Span>)> {
         let mut tasks = Vec::new();
 
         let knn_log_task = wrap(
@@ -200,7 +204,7 @@ impl Orchestrator for KnnOrchestrator {
             },
             ctx.receiver(),
         );
-        tasks.push(knn_log_task);
+        tasks.push((knn_log_task, Some(Span::current())));
 
         if let Some(hnsw_reader) = self.knn_filter_output.hnsw_reader.as_ref().cloned() {
             let knn_segment_task = wrap(
@@ -216,7 +220,7 @@ impl Orchestrator for KnnOrchestrator {
                 },
                 ctx.receiver(),
             );
-            tasks.push(knn_segment_task);
+            tasks.push((knn_segment_task, Some(Span::current())));
         }
 
         tasks
@@ -302,7 +306,9 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
             },
             ctx.receiver(),
         );
-        self.send(prefetch_task, ctx).await;
+        // Prefetch span is detached from the orchestrator.
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch_record", num_records = output.record_distances.len());
+        self.send(prefetch_task, ctx, Some(prefetch_span)).await;
 
         let projection_task = wrap(
             Box::new(self.knn_projection.clone()),
@@ -314,7 +320,7 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
             },
             ctx.receiver(),
         );
-        self.send(projection_task, ctx).await;
+        self.send(projection_task, ctx, Some(Span::current())).await;
     }
 }
 

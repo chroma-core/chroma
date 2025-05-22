@@ -10,6 +10,7 @@ use chroma_system::{
 };
 use chroma_types::Collection;
 use tokio::sync::oneshot::Sender;
+use tracing::Span;
 
 use crate::execution::operators::{
     knn::{KnnOperator, RecordDistance},
@@ -131,7 +132,7 @@ impl SpannKnnOrchestrator {
                 SpannKnnMergeInput { records },
                 ctx.receiver(),
             );
-            self.send(task, ctx).await;
+            self.send(task, ctx, Some(Span::current())).await;
         }
     }
 }
@@ -145,7 +146,10 @@ impl Orchestrator for SpannKnnOrchestrator {
         self.dispatcher.clone()
     }
 
-    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+    async fn initial_tasks(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+    ) -> Vec<(TaskMessage, Option<Span>)> {
         let mut tasks = Vec::new();
 
         let knn_log_task = wrap(
@@ -159,7 +163,7 @@ impl Orchestrator for SpannKnnOrchestrator {
             },
             ctx.receiver(),
         );
-        tasks.push(knn_log_task);
+        tasks.push((knn_log_task, Some(Span::current())));
         let reader_res = SpannSegmentReader::from_segment(
             &self.collection,
             &self.knn_filter_output.vector_segment,
@@ -180,7 +184,7 @@ impl Orchestrator for SpannKnnOrchestrator {
                     },
                     ctx.receiver(),
                 );
-                tasks.push(head_search_task);
+                tasks.push((head_search_task, Some(Span::current())));
             }
             Err(e) => match e {
                 // Segment uninited means no compaction yet.
@@ -197,6 +201,7 @@ impl Orchestrator for SpannKnnOrchestrator {
             },
         }
 
+        // prefetch spann segment
         let prefetch_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
             PrefetchSegmentInput::new(
@@ -205,8 +210,11 @@ impl Orchestrator for SpannKnnOrchestrator {
             ),
             ctx.receiver(),
         );
-        tasks.push(prefetch_task);
+        // Prefetch task is detached from the orchestrator
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.knn_filter_output.vector_segment.id);
+        tasks.push((prefetch_task, Some(prefetch_span)));
 
+        // prefetch record segment
         let prefetch_record_segment_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
             PrefetchSegmentInput::new(
@@ -215,7 +223,9 @@ impl Orchestrator for SpannKnnOrchestrator {
             ),
             ctx.receiver(),
         );
-        tasks.push(prefetch_record_segment_task);
+        // Prefetch task is detached from the orchestrator
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.knn_filter_output.record_segment.id);
+        tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
 
         tasks
     }
@@ -297,7 +307,7 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
                 ctx.receiver(),
             );
 
-            self.send(fetch_pl_task, ctx).await;
+            self.send(fetch_pl_task, ctx, Some(Span::current())).await;
         }
     }
 }
@@ -332,7 +342,7 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
             ctx.receiver(),
         );
 
-        self.send(bf_pl_task, ctx).await;
+        self.send(bf_pl_task, ctx, Some(Span::current())).await;
     }
 }
 
@@ -386,7 +396,9 @@ impl Handler<TaskResult<SpannKnnMergeOutput, SpannKnnMergeError>> for SpannKnnOr
             },
             ctx.receiver(),
         );
-        self.send(prefetch_task, ctx).await;
+        // Prefetch span is detached from the orchestrator.
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch_record", num_records = output.merged_records.len());
+        self.send(prefetch_task, ctx, Some(prefetch_span)).await;
 
         let projection_task = wrap(
             Box::new(self.knn_projection.clone()),
@@ -398,7 +410,7 @@ impl Handler<TaskResult<SpannKnnMergeOutput, SpannKnnMergeError>> for SpannKnnOr
             },
             ctx.receiver(),
         );
-        self.send(projection_task, ctx).await;
+        self.send(projection_task, ctx, Some(Span::current())).await;
     }
 }
 
