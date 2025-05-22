@@ -14,7 +14,6 @@ final class ChromaState {
     var errorMessage: String? = nil
     var logs: [String] = []
     var docCounter: Int = 0
-    var showingSuccess: Bool = false
     var persistentCollectionName: String = "persistent_collection"
     var collections: [String] = []
     var isPersistentInitialized: Bool = false

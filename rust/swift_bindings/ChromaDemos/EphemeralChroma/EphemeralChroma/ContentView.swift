@@ -8,10 +8,45 @@
 import SwiftUI
 import Chroma
 
+#if canImport(UIKit)
+import UIKit
+extension View {
+    func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+// Helper for iOS platform check
+func isIPad() -> Bool {
+    UIDevice.current.userInterfaceIdiom == .pad
+}
+
+func isIPhone() -> Bool {
+    UIDevice.current.userInterfaceIdiom == .phone
+}
+#else
+extension View {
+    func dismissKeyboard() {
+        // No-op for macOS
+    }
+}
+
+// Helper for iOS platform check
+func isIPad() -> Bool {
+    false
+}
+
+func isIPhone() -> Bool {
+    false
+}
+#endif
 
 struct ContentView: View {
     
     @State var state: ChromaState = .init()
+    @Environment(\.horizontalSizeClass) var horizontalSizeClass
+    @State private var lastLogMessage: String?
+    @State private var showingLogToast = false
     
     var body: some View {
         GeometryReader { geometry in
@@ -27,7 +62,6 @@ struct ContentView: View {
                             }
                             .padding(.vertical)
                         }
-                        // Great solution for smaller Mac windows
                         .frame(width: min(500, geometry.size.width * 0.5))
                         logsView
                     }
@@ -41,12 +75,17 @@ struct ContentView: View {
                                 querySection
                             }
                             .padding(.horizontal)
-                            logsView
+                            if isIPad() {
+                                logsView
+                            } else {
+                                logsView
+                                    .frame(height: 400)
+                            }
                         }
                     }
                 }
             }
-        } // GeometryReader
+        }
         .onAppear {
             do {
                 if !state.isInitialized {
@@ -54,7 +93,23 @@ struct ContentView: View {
                     state.refreshCollections()
                 }
             } catch {
+                // Just add to logs without showing alert
                 state.addLog("Failed to initialize: \(error)")
+            }
+        }
+        .onChange(of: state.logs) { oldLogs, newLogs in
+            if isIPhone() {
+                // Skip first log message
+                if oldLogs.isEmpty && !newLogs.isEmpty {
+                    return
+                }
+                if let lastLog = newLogs.last {
+                    lastLogMessage = lastLog
+                    showingLogToast = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        showingLogToast = false
+                    }
+                }
             }
         }
         .overlay {
@@ -62,8 +117,14 @@ struct ContentView: View {
                 SuccessToast()
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
+            
+            if showingLogToast, let message = lastLogMessage {
+                LogToast(message: message)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
         .animation(.easeInOut, value: state.showingSuccess)
+        .animation(.easeInOut, value: showingLogToast)
     }
     
     var headerView: some View {

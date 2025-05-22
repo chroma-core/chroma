@@ -9,6 +9,7 @@ import SwiftUI
 import Chroma
 
 #if canImport(UIKit)
+import UIKit
 extension View {
     func dismissKeyboard() {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -25,6 +26,9 @@ extension View {
 struct ContentView: View {
     
     @State var state: ChromaState = .init()
+    @Environment(\.horizontalSizeClass) var horizontalSizeClass
+    @State private var lastLogMessage: String?
+    @State private var showingLogToast = false
     
     var body: some View {
         GeometryReader { geometry in
@@ -53,7 +57,12 @@ struct ContentView: View {
                                 querySection
                             }
                             .padding(.horizontal)
-                            logsView
+                            if UIDevice.current.userInterfaceIdiom == .pad {
+                                logsView
+                            } else {
+                                logsView
+                                    .frame(height: 200)
+                            }
                         }
                     }
                 }
@@ -77,13 +86,28 @@ struct ContentView: View {
                 state.addLog("Failed to initialize: \(error)")
             }
         }
+        .onChange(of: state.logs) { oldLogs, newLogs in
+            if UIDevice.current.userInterfaceIdiom == .phone {
+                // Skip first log message
+                if oldLogs.isEmpty && !newLogs.isEmpty {
+                    return
+                }
+                if let lastLog = newLogs.last {
+                    lastLogMessage = lastLog
+                    showingLogToast = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        showingLogToast = false
+                    }
+                }
+            }
+        }
         .overlay {
-            if state.showingSuccess {
-                SuccessToast()
+            if showingLogToast, let message = lastLogMessage {
+                LogToast(message: message)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.easeInOut, value: state.showingSuccess)
+        .animation(.easeInOut, value: showingLogToast)
     }
     
     private var headerView: some View {
@@ -124,26 +148,4 @@ func parseEmbedding(_ text: String) -> [Float]? {
     let values = parts.compactMap { Float($0) }
     guard values.count == parts.count, !values.isEmpty else { return nil }
     return values
-}
-
-
-// Toast shown when an operation succeeds
-struct SuccessToast: View {
-    var body: some View {
-        HStack {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
-            Text("Success!")
-                .foregroundColor(.white)
-                .font(.subheadline)
-                .bold()
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 30)
-                .fill(Color.black.opacity(0.8))
-        )
-        .padding(.top, 20)
-    }
 }
