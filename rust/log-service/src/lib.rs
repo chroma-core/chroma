@@ -1080,6 +1080,9 @@ impl LogService for LogServer {
                     });
                 }
             }
+            if !records.is_empty() && records[0].log_offset != pull_logs.start_from_offset {
+                return Err(Status::not_found("Some entries have been purged"));
+            }
             tracing::info!("pulled {} records", records.len());
             Ok(Response::new(PullLogsResponse { records }))
         }
