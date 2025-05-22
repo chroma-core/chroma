@@ -337,7 +337,7 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
         };
         let pl_span = self
             .pl_spans
-            .remove(&(output.head_id as u32))
+            .remove(&output.head_id)
             .unwrap_or_else(Span::current);
         // Spawn brute force posting list task.
         let bf_pl_task = wrap(
