@@ -267,7 +267,7 @@ impl CompactOrchestrator {
         tracing::info!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, ctx.receiver());
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 
     async fn materialize_log(
@@ -299,7 +299,7 @@ impl CompactOrchestrator {
                 next_max_offset_id.clone(),
             );
             let task = wrap(operator, input, ctx.receiver());
-            self.send(task, ctx).await;
+            self.send(task, ctx, Some(Span::current())).await;
         }
     }
 
@@ -450,7 +450,7 @@ impl CompactOrchestrator {
         );
 
         let task = wrap(operator, input, ctx.receiver());
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 
     fn get_segment_writers(&self) -> Result<CompactWriters, CompactionError> {
@@ -526,14 +526,20 @@ impl Orchestrator for CompactOrchestrator {
         self.dispatcher.clone()
     }
 
-    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
-        vec![wrap(
-            Box::new(GetCollectionAndSegmentsOperator {
-                sysdb: self.sysdb.clone(),
-                collection_id: self.collection_id,
-            }),
-            (),
-            ctx.receiver(),
+    async fn initial_tasks(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+    ) -> Vec<(TaskMessage, Option<Span>)> {
+        vec![(
+            wrap(
+                Box::new(GetCollectionAndSegmentsOperator {
+                    sysdb: self.sysdb.clone(),
+                    collection_id: self.collection_id,
+                }),
+                (),
+                ctx.receiver(),
+            ),
+            Some(Span::current()),
         )]
     }
 
@@ -638,7 +644,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => {
                 // Collection is not yet initialized, there is no need to initialize the writers
                 // Future handlers should return early on empty materialized logs without using writers
-                self.send(log_task, ctx).await;
+                self.send(log_task, ctx, Some(Span::current())).await;
                 return;
             }
         };
@@ -747,15 +753,19 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             }
         };
         for segment in prefetch_segments {
+            let segment_id = segment.id;
             let prefetch_task = wrap(
                 Box::new(PrefetchSegmentOperator::new()),
                 PrefetchSegmentInput::new(segment, self.blockfile_provider.clone()),
                 ctx.receiver(),
             );
-            self.send(prefetch_task, ctx).await;
+            // Prefetch task is detached from the orchestrator
+            let prefetch_span =
+                tracing::info_span!(parent: None, "Prefetch segment", segment_id = %segment_id);
+            self.send(prefetch_task, ctx, Some(prefetch_span)).await;
         }
 
-        self.send(log_task, ctx).await;
+        self.send(log_task, ctx, Some(Span::current())).await;
     }
 }
 
