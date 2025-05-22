@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_segment::{
@@ -65,6 +67,7 @@ pub struct SpannKnnOrchestrator {
     heads_searched: bool,
     num_outstanding_bf_pl: usize,
     bruteforce_log_done: bool,
+    pl_spans: HashMap<u32, Span>,
 
     // Knn output
     records: Vec<Vec<RecordDistance>>,
@@ -114,6 +117,7 @@ impl SpannKnnOrchestrator {
             heads_searched: false,
             num_outstanding_bf_pl: 0,
             bruteforce_log_done: false,
+            pl_spans: HashMap::new(),
             records: Vec::new(),
             merge: SpannKnnMergeOperator { k: k as u32 },
             knn_projection,
@@ -297,6 +301,12 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
         self.num_outstanding_bf_pl = output.center_ids.len();
         // Spawn fetch posting list tasks for the centers.
         for head_id in output.center_ids {
+            let pl_span = tracing::info_span!(
+                parent: Span::current(),
+                "Fetch posting list",
+                head_id = head_id,
+            );
+            self.pl_spans.insert(head_id as u32, pl_span.clone());
             // Invoke Head search operator.
             let fetch_pl_task = wrap(
                 Box::new(self.fetch_pl.clone()),
@@ -307,7 +317,7 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
                 ctx.receiver(),
             );
 
-            self.send(fetch_pl_task, ctx, Some(Span::current())).await;
+            self.send(fetch_pl_task, ctx, Some(pl_span)).await;
         }
     }
 }
@@ -325,6 +335,10 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
             Some(output) => output,
             None => return,
         };
+        let pl_span = self
+            .pl_spans
+            .remove(&(output.head_id as u32))
+            .unwrap_or_else(Span::current);
         // Spawn brute force posting list task.
         let bf_pl_task = wrap(
             Box::new(self.bf_pl.clone()),
@@ -342,7 +356,7 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
             ctx.receiver(),
         );
 
-        self.send(bf_pl_task, ctx, Some(Span::current())).await;
+        self.send(bf_pl_task, ctx, Some(pl_span)).await;
     }
 }
 
