@@ -64,6 +64,8 @@ pub struct FrontendConfig {
     pub executor: ExecutorConfig,
     #[serde(default = "default_default_knn_index")]
     pub default_knn_index: KnnIndex,
+    #[serde(default = "Default::default")]
+    pub tenants_to_migrate_immediately: Vec<String>,
 }
 
 impl FrontendConfig {
@@ -80,6 +82,7 @@ impl FrontendConfig {
             log: default_log_config(),
             executor: default_executor_config(),
             default_knn_index: default_default_knn_index(),
+            tenants_to_migrate_immediately: vec![],
         }
     }
 }
