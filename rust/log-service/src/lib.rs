@@ -480,7 +480,7 @@ impl DirtyMarker {
                 };
                 let maximum_log_position = manifest.maximum_log_position();
                 let record_enumeration_position = maximum_log_position.offset() as i64 - 1;
-                let record_compaction_position = cursor.position.offset() as i64;
+                let record_compaction_position = cursor.position.offset() as i64 - 1;
                 match record_enumeration_position.cmp(&record_compaction_position) {
                     Ordering::Equal => {
                         // Same as above.
@@ -1338,12 +1338,13 @@ impl LogService for LogServer {
         request: Request<UpdateCollectionLogOffsetRequest>,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
         let request = request.into_inner();
+        let adjusted_log_offset = request.log_offset + 1;
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         tracing::info!(
             "update_collection_log_offset for {collection_id} to {}",
-            request.log_offset
+            adjusted_log_offset
         );
         let storage_prefix = storage_prefix_for_log(collection_id);
         let log_reader = LogReader::new(
@@ -1372,11 +1373,15 @@ impl LogService for LogServer {
         })?;
         let default = Cursor::default();
         let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
-        if cursor.position.offset() > request.log_offset as u64 {
-            return Err(Status::aborted("Invalid offset"));
+        if cursor.position.offset() > adjusted_log_offset as u64 {
+            return Err(Status::aborted(format!(
+                "Invalid offset: {} > {}",
+                cursor.position.offset(),
+                adjusted_log_offset as u64
+            )));
         }
         let cursor = Cursor {
-            position: LogPosition::from_offset(request.log_offset as u64),
+            position: LogPosition::from_offset(adjusted_log_offset as u64),
             epoch_us: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map_err(|_| wal3::Error::Internal)
@@ -2258,7 +2263,7 @@ mod tests {
                     Ok(None)
                 } else if collection_id == collection_id_collected_clone {
                     Ok(Some(Witness::default_etag_with_cursor(Cursor {
-                        position: LogPosition::from_offset(100),
+                        position: LogPosition::from_offset(101),
                         epoch_us: 0,
                         writer: "TODO".to_string(),
                     })))

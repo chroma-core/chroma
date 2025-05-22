@@ -30,6 +30,8 @@ message ScoutLogsResponse {
 
 message PullLogsRequest {
   string collection_id = 1;
+  // The offset of the first record to be returned.  This should match
+  // PullLogsResponse.records[0].log_offset.
   int64 start_from_offset = 2;
   int32 batch_size = 3;
   int64 end_timestamp = 4;
@@ -51,7 +53,9 @@ message ForkLogsRequest {
 }
 
 message ForkLogsResponse {
+  // The offset of the last record that was compacted.
   uint64 compaction_offset = 1;
+  // The offset of the last record that was inserted.
   uint64 enumeration_offset = 2;
 }
 
@@ -75,6 +79,7 @@ message GetAllCollectionInfoToCompactResponse {
 
 message UpdateCollectionLogOffsetRequest {
   string collection_id = 1;
+  // The offset of the last record that was compacted.
   int64 log_offset = 2;
 }
 
