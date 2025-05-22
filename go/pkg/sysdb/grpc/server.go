@@ -140,9 +140,15 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 
 		// Create memberlist manager for garbage collection service
 		garbageCollectionMemberlistManager, err := createMemberlistManager(namespace, config.GarbageCollectionServiceMemberlistName, config.GarbageCollectionServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
+		if err != nil {
+			return nil, err
+		}
 
 		// Create memberlist manager for log service
 		logServiceMemberlistManager, err := createMemberlistManager(namespace, config.LogServiceMemberlistName, config.LogServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
+		if err != nil {
+			return nil, err
+		}
 
 		// Start the memberlist manager for query service
 		err = queryMemberlistManager.Start()
