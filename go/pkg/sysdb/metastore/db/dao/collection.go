@@ -575,3 +575,20 @@ func (s *collectionDb) BatchGetCollectionVersionFilePaths(collectionIDs []string
 	}
 	return result, nil
 }
+
+func (s *collectionDb) BatchGetCollectionSoftDeleteStatus(collectionIDs []string) (map[string]bool, error) {
+	var collections []dbmodel.Collection
+	err := s.read_db.Model(&dbmodel.Collection{}).
+		Select("id, is_deleted").
+		Where("id IN ?", collectionIDs).
+		Find(&collections).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]bool)
+	for _, collection := range collections {
+		result[collection.ID] = collection.IsDeleted
+	}
+	return result, nil
+}

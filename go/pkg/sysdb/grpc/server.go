@@ -57,12 +57,6 @@ type Config struct {
 	LogServiceMemberlistName string
 	LogServicePodLabel       string
 
-	// Config for soft deletes.
-	SoftDeleteEnabled          bool
-	SoftDeleteCleanupInterval  time.Duration
-	SoftDeleteMaxAge           time.Duration
-	SoftDeleteCleanupBatchSize uint
-
 	// Config for testing
 	Testing bool
 
@@ -78,10 +72,9 @@ type Config struct {
 // convenient for end-to-end property based testing.
 type Server struct {
 	coordinatorpb.UnimplementedSysDBServer
-	coordinator       coordinator.Coordinator
-	grpcServer        grpcutils.GrpcServer
-	healthServer      *health.Server
-	softDeleteCleaner *SoftDeleteCleaner
+	coordinator  coordinator.Coordinator
+	grpcServer   grpcutils.GrpcServer
+	healthServer *health.Server
 }
 
 func New(config Config) (*Server, error) {
@@ -106,24 +99,16 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		healthServer: health.NewServer(),
 	}
 
-	var deleteMode coordinator.DeleteMode
-	if config.SoftDeleteEnabled {
-		deleteMode = coordinator.SoftDelete
-	} else {
-		deleteMode = coordinator.HardDelete
-	}
-
 	s3MetaStore, err := s3metastore.NewS3MetaStore(config.MetaStoreConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	coordinator, err := coordinator.NewCoordinator(ctx, deleteMode, s3MetaStore, config.VersionFileEnabled)
+	coordinator, err := coordinator.NewCoordinator(ctx, s3MetaStore, config.VersionFileEnabled)
 	if err != nil {
 		return nil, err
 	}
 	s.coordinator = *coordinator
-	s.softDeleteCleaner = NewSoftDeleteCleaner(*coordinator, config.SoftDeleteCleanupInterval, config.SoftDeleteMaxAge, config.SoftDeleteCleanupBatchSize)
 	if !config.Testing {
 		namespace := config.KubernetesNamespace
 		// Create memberlist manager for query service
@@ -172,9 +157,6 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		if err != nil {
 			return nil, err
 		}
-
-		log.Info("Starting soft delete cleaner", zap.Duration("cleanup_interval", s.softDeleteCleaner.cleanupInterval), zap.Duration("max_age", s.softDeleteCleaner.maxAge), zap.Uint("limit_per_check", s.softDeleteCleaner.limitPerCheck))
-		s.softDeleteCleaner.Start()
 
 		log.Info("Starting GRPC server")
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {

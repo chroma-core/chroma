@@ -146,6 +146,14 @@ message DeleteCollectionResponse {
   reserved "status";
 }
 
+message FinishCollectionDeletionRequest {
+  string id = 1;
+  string tenant = 2;
+  string database = 3;
+}
+
+message FinishCollectionDeletionResponse {}
+
 // Request to get a single collection.
 message GetCollectionRequest {
   string id = 1;
@@ -475,6 +483,14 @@ message BatchGetCollectionVersionFilePathsResponse {
   map<string, string> collection_id_to_version_file_path = 1;
 }
 
+message BatchGetCollectionSoftDeleteStatusRequest {
+  repeated string collection_ids = 1;
+}
+
+message BatchGetCollectionSoftDeleteStatusResponse {
+  map<string, bool> collection_id_to_is_soft_deleted = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -488,6 +504,7 @@ service SysDB {
   rpc UpdateSegment(UpdateSegmentRequest) returns (UpdateSegmentResponse) {}
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
+  rpc FinishCollectionDeletion(FinishCollectionDeletionRequest) returns (FinishCollectionDeletionResponse) {}
   rpc GetCollection(GetCollectionRequest) returns (GetCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
   rpc CountCollections(CountCollectionsRequest) returns (CountCollectionsResponse) {}
@@ -507,4 +524,5 @@ service SysDB {
   rpc MarkVersionForDeletion(MarkVersionForDeletionRequest) returns (MarkVersionForDeletionResponse) {}
   rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
   rpc BatchGetCollectionVersionFilePaths(BatchGetCollectionVersionFilePathsRequest) returns (BatchGetCollectionVersionFilePathsResponse) {}
+  rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
 }
