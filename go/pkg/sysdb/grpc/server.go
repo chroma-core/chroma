@@ -53,6 +53,10 @@ type Config struct {
 	GarbageCollectionServiceMemberlistName string
 	GarbageCollectionServicePodLabel       string
 
+	// Log service memberlist config
+	LogServiceMemberlistName string
+	LogServicePodLabel       string
+
 	// Config for soft deletes.
 	SoftDeleteEnabled          bool
 	SoftDeleteCleanupInterval  time.Duration
@@ -137,6 +141,9 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		// Create memberlist manager for garbage collection service
 		garbageCollectionMemberlistManager, err := createMemberlistManager(namespace, config.GarbageCollectionServiceMemberlistName, config.GarbageCollectionServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
 
+		// Create memberlist manager for log service
+		logServiceMemberlistManager, err := createMemberlistManager(namespace, config.LogServiceMemberlistName, config.LogServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
+
 		// Start the memberlist manager for query service
 		err = queryMemberlistManager.Start()
 		if err != nil {
@@ -150,6 +157,12 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 
 		// Start the memberlist manager for garbage collection service
 		err = garbageCollectionMemberlistManager.Start()
+		if err != nil {
+			return nil, err
+		}
+
+		// Start the memberlist manager for log service
+		err = logServiceMemberlistManager.Start()
 		if err != nil {
 			return nil, err
 		}
