@@ -60,7 +60,7 @@ struct DocumentInputsSectionView: View {
                             }
                             
                             await MainActor.run {
-                                state.addLog("Document added to persistent collection '\(state.persistentCollectionName)': \(state.docText)")
+                                state.addLog("[Add] Document text: \(state.docText)")
                             }
                         } catch {
                             await MainActor.run {
