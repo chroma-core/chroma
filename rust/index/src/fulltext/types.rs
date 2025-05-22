@@ -1,11 +1,14 @@
 use super::util::TokenInstance;
+use super::util::TokenInstanceEncodeError;
 use chroma_blockstore::{BlockfileFlusher, BlockfileReader, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::regex::literal_expr::NgramLiteralProvider;
 use futures::StreamExt;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use roaring::RoaringBitmap;
 use std::collections::HashSet;
+use std::ops::RangeBounds;
 use std::sync::Arc;
 use tantivy::tokenizer::NgramTokenizer;
 use tantivy::tokenizer::TokenStream;
@@ -19,8 +22,8 @@ pub enum FullTextIndexError {
     EmptyValueInPositionalPostingList,
     #[error("Invariant violation")]
     InvariantViolation,
-    #[error("Blockfile write error: {0}")]
-    BlockfileWriteError(#[from] Box<dyn ChromaError>),
+    #[error("Blockfile error: {0}")]
+    BlockfileError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for FullTextIndexError {
@@ -85,11 +88,16 @@ impl FullTextIndexWriter {
                         .clone()
                         .token_stream(new_document)
                         .process(&mut |token| {
-                            token_instances.push(TokenInstance::encode(
+                            match TokenInstance::encode(
                                 token.text.as_str(),
                                 offset_id,
                                 Some(token.offset_from as u32),
-                            ));
+                            ) {
+                                Ok(encoded) => token_instances.push(encoded),
+                                Err(TokenInstanceEncodeError::NullTerminator) => {
+                                    // ignore
+                                }
+                            }
                         });
                 }
 
@@ -104,11 +112,14 @@ impl FullTextIndexWriter {
                         .clone()
                         .token_stream(old_document)
                         .process(&mut |token| {
-                            trigrams_to_delete.insert(TokenInstance::encode(
-                                token.text.as_str(),
-                                offset_id,
-                                None,
-                            ));
+                            match TokenInstance::encode(token.text.as_str(), offset_id, None) {
+                                Ok(encoded) => {
+                                    trigrams_to_delete.insert(encoded);
+                                }
+                                Err(TokenInstanceEncodeError::NullTerminator) => {
+                                    // ignore
+                                }
+                            }
                         });
 
                     // Add doc
@@ -116,17 +127,27 @@ impl FullTextIndexWriter {
                         .clone()
                         .token_stream(new_document)
                         .process(&mut |token| {
-                            trigrams_to_delete.remove(&TokenInstance::encode(
-                                token.text.as_str(),
-                                offset_id,
-                                None,
-                            ));
+                            match TokenInstance::encode(token.text.as_str(), offset_id, None) {
+                                Ok(encoded) => {
+                                    trigrams_to_delete.remove(&encoded);
+                                }
+                                Err(TokenInstanceEncodeError::NullTerminator) => {
+                                    // ignore
+                                }
+                            }
 
-                            token_instances.push(TokenInstance::encode(
+                            match TokenInstance::encode(
                                 token.text.as_str(),
                                 offset_id,
                                 Some(token.offset_from as u32),
-                            ));
+                            ) {
+                                Ok(encoded) => {
+                                    token_instances.push(encoded);
+                                }
+                                Err(TokenInstanceEncodeError::NullTerminator) => {
+                                    // ignore
+                                }
+                            }
                         });
 
                     token_instances.extend(trigrams_to_delete.into_iter());
@@ -143,11 +164,14 @@ impl FullTextIndexWriter {
                         .clone()
                         .token_stream(old_document)
                         .process(&mut |token| {
-                            trigrams_to_delete.insert(TokenInstance::encode(
-                                token.text.as_str(),
-                                offset_id,
-                                None,
-                            ));
+                            match TokenInstance::encode(token.text.as_str(), offset_id, None) {
+                                Ok(encoded) => {
+                                    trigrams_to_delete.insert(encoded);
+                                }
+                                Err(TokenInstanceEncodeError::NullTerminator) => {
+                                    // ignore
+                                }
+                            }
                         });
 
                     token_instances.extend(trigrams_to_delete.into_iter());
@@ -172,7 +196,7 @@ impl FullTextIndexWriter {
                 Some(offset) => {
                     let this_key = encoded_instance.omit_position();
                     if last_key != this_key {
-                        if last_key != TokenInstance::MAX {
+                        if last_key != TokenInstance::MAX && !posting_list.is_empty() {
                             let token = last_key.get_token();
                             let document_id = last_key.get_offset_id();
                             self.posting_lists_blockfile_writer
@@ -187,7 +211,7 @@ impl FullTextIndexWriter {
                     posting_list.push(offset);
                 }
                 None => {
-                    if last_key != TokenInstance::MAX {
+                    if last_key != TokenInstance::MAX && !posting_list.is_empty() {
                         let token = last_key.get_token();
                         let document_id = last_key.get_offset_id();
                         self.posting_lists_blockfile_writer
@@ -210,7 +234,7 @@ impl FullTextIndexWriter {
             }
         }
 
-        if last_key != TokenInstance::MAX {
+        if last_key != TokenInstance::MAX && !posting_list.is_empty() {
             let token = last_key.get_token();
             let document_id = last_key.get_offset_id();
             self.posting_lists_blockfile_writer
@@ -246,7 +270,7 @@ impl FullTextIndexFlusher {
         {
             Ok(_) => {}
             Err(e) => {
-                return Err(FullTextIndexError::BlockfileWriteError(e));
+                return Err(FullTextIndexError::BlockfileError(e));
             }
         };
 
@@ -289,7 +313,7 @@ impl<'me> FullTextIndexReader<'me> {
         }
 
         // Retrieve posting lists for each token.
-        let posting_lists = futures::stream::iter(tokens)
+        let posting_lists = futures::stream::iter(&tokens)
             .then(|token| async move {
                 let positional_posting_list = self
                     .posting_lists_blockfile_reader
@@ -313,7 +337,7 @@ impl<'me> FullTextIndexReader<'me> {
                 .enumerate()
                 .map(|(i, posting_list)| {
                     if pointers[i] < posting_list.len() {
-                        Some(posting_list[pointers[i]].0)
+                        Some(posting_list[pointers[i]].1)
                     } else {
                         None
                     }
@@ -331,39 +355,37 @@ impl<'me> FullTextIndexReader<'me> {
 
             if min_doc_id == max_doc_id {
                 // All tokens appear in the same document, so check positional alignment.
-                let mut positions_per_posting_list = Vec::with_capacity(num_tokens);
-                for (i, posting_list) in posting_lists.iter().enumerate() {
-                    let (_, positions) = posting_list[pointers[i]];
-                    positions_per_posting_list.push(positions);
-                }
-
-                // Adjust positions and check for sequential alignment.
                 // Imagine you're searching for "brown fox" over the document "the quick brown fox".
                 // The positions for "brown" are {2} and for "fox" are {3}. The adjusted positions after subtracting the token's position in the query are {2} for "brown" and 3 - 1 = {2} for "fox".
                 // The intersection of these two sets is non-empty, so we know that the two tokens are adjacent.
+                // In practice, we must adjust the positions by using the byte offset of the token rather than the token's position in the query, because Unicode characters can be variable-length and the posting lists are stored as byte offsets.
+                // E.x. imagine we're using a 1-gram tokenizer and processing the string "ém". The token positions are {0, 1}, but the byte offsets are {0, 2} (because é is two bytes long).
 
                 // Seed with the positions of the first token.
-                let mut adjusted_positions = positions_per_posting_list[0]
+                let mut adjusted = posting_lists[0][pointers[0]]
+                    .2
                     .iter()
                     .copied()
                     .collect::<HashSet<_>>();
 
-                for (offset, positions_set) in positions_per_posting_list.iter().enumerate().skip(1)
-                {
-                    let positions_set = positions_set
-                        .iter()
-                        // (We can discard any positions that the token appears at before the current offset)
-                        .filter_map(|&p| p.checked_sub(offset as u32))
-                        .collect::<HashSet<_>>();
-                    adjusted_positions = &adjusted_positions & &positions_set;
+                for i in 1..num_tokens {
+                    let byte_delta_from_first_token =
+                        tokens[i].offset_from as u32 - tokens[0].offset_from as u32;
+                    let positions = &posting_lists[i][pointers[i]].2;
 
-                    if adjusted_positions.is_empty() {
+                    let shifted = positions
+                        .iter()
+                        .filter_map(|&p| p.checked_sub(byte_delta_from_first_token))
+                        .collect::<HashSet<_>>();
+
+                    adjusted = &adjusted & &shifted;
+                    if adjusted.is_empty() {
                         break;
                     }
                 }
 
                 // All tokens are sequential
-                if !adjusted_positions.is_empty() {
+                if !adjusted.is_empty() {
                     results.insert(min_doc_id);
                 }
 
@@ -396,10 +418,30 @@ impl<'me> FullTextIndexReader<'me> {
             .get_range(token..=token, ..)
             .await?;
         let mut results = vec![];
-        for (doc_id, positions) in positional_posting_list.iter() {
+        for (_, doc_id, positions) in positional_posting_list.iter() {
             results.push((*doc_id, positions.to_vec()));
         }
         Ok(results)
+    }
+}
+
+#[async_trait::async_trait]
+impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'reader> {
+    fn maximum_branching_factor(&self) -> usize {
+        6
+    }
+
+    async fn lookup_ngram_range<'me, NgramRange>(
+        &'me self,
+        ngram_range: NgramRange,
+    ) -> Result<Vec<(&'me str, u32, &'me [u32])>, FullTextIndexError>
+    where
+        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync,
+    {
+        Ok(self
+            .posting_lists_blockfile_reader
+            .get_range(ngram_range, ..)
+            .await?)
     }
 }
 
@@ -907,6 +949,85 @@ mod tests {
 
         let res = index_reader.get_all_results_for_token("l").await.unwrap();
         assert_eq!(res.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_document_with_null_terminators() {
+        let tmp_dir = tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .await
+            .unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+
+        let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer.clone());
+
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "hello \0 wor\0ld",
+            }])
+            .unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
+
+        let pl_blockfile_reader = provider
+            .read::<u32, &[u32]>(&pl_blockfile_id)
+            .await
+            .unwrap();
+        let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
+
+        let res = index_reader.search("hello").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1]));
+    }
+
+    #[tokio::test]
+    async fn test_document_with_multibyte_characters() {
+        let tmp_dir = tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .await
+            .unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+
+        let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer.clone());
+
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "pretérito",
+            }])
+            .unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
+
+        let pl_blockfile_reader = provider
+            .read::<u32, &[u32]>(&pl_blockfile_id)
+            .await
+            .unwrap();
+        let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
+
+        let res = index_reader.search("pretérito").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1]));
+
+        let res = index_reader.search("bretérito").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([]));
     }
 
     #[tokio::test]

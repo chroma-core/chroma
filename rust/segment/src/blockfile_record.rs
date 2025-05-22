@@ -822,16 +822,16 @@ impl RecordSegmentReader<'_> {
         self.id_to_data
             .get_range(""..="", ..)
             .await
-            .map(|vec| vec.into_iter().map(|(_, data)| data).collect())
+            .map(|vec| vec.into_iter().map(|(_, _, data)| data).collect())
     }
 
     pub async fn get_data_stream<'me>(
         &'me self,
         offset_range: impl RangeBounds<u32> + Clone + Send + 'me,
-    ) -> impl Stream<Item = Result<DataRecord<'me>, Box<dyn ChromaError>>> + 'me {
+    ) -> impl Stream<Item = Result<(u32, DataRecord<'me>), Box<dyn ChromaError>>> + 'me {
         self.id_to_data
             .get_range_stream(""..="", offset_range)
-            .map(|res| res.map(|(_, rec)| rec))
+            .map(|res| res.map(|(_, offset, rec)| (offset, rec)))
     }
 
     /// Get a stream of offset ids from the smallest to the largest in the given range
@@ -841,7 +841,7 @@ impl RecordSegmentReader<'_> {
     ) -> impl Stream<Item = Result<u32, Box<dyn ChromaError>>> + 'me {
         self.id_to_user_id
             .get_range_stream(""..="", offset_range)
-            .map(|res| res.map(|(offset_id, _)| offset_id))
+            .map(|res| res.map(|(_, offset_id, _)| offset_id))
     }
 
     /// Find the rank of the given offset id in the record segment
@@ -875,7 +875,7 @@ impl RecordSegmentReader<'_> {
     pub async fn get_total_logical_size_bytes(&self) -> Result<u64, Box<dyn ChromaError>> {
         self.id_to_data
             .get_range_stream(""..="", ..)
-            .map(|res| res.map(|(_, d)| d.get_size() as u64))
+            .map(|res| res.map(|(_, _, d)| d.get_size() as u64))
             .try_collect::<Vec<_>>()
             .await
             .map(|sizes| sizes.iter().sum())

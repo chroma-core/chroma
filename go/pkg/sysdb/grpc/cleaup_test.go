@@ -73,7 +73,7 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	collections := make([]string, 2)
 	for i := 0; i < 2; i++ {
 		collectionName := "cleanup_test_collection_" + strconv.Itoa(i)
-		collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+		collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
 		suite.NoError(err)
 		collections[i] = collectionID
 	}
@@ -109,7 +109,7 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 
 	// Create a test collection
 	collectionName := "cleanup_test_collection_double_delete"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
 	suite.NoError(err)
 
 	// Hard delete it once
@@ -134,6 +134,54 @@ func (suite *CleanupTestSuite) TestSoftDeleteCleanup() {
 	// Check that it returns ErrCollectionDeleteNonExistingCollection after the first deletion.
 	suite.ErrorIs(err, common.ErrCollectionDeleteNonExistingCollection)
 
+}
+
+func (suite *CleanupTestSuite) TestSoftDeleteCleanupForkedCollection() {
+	// Create 3 test collections
+	collections := make([]string, 3)
+	print("Creating collection")
+	collectionName := "cleanup_root_test_collection"
+	lineageFileName := "lineageFileName"
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, &lineageFileName)
+	suite.NoError(err)
+	collections[0] = collectionID
+
+	for i := 1; i < 3; i++ {
+		collectionName := "cleanup_non_root_test_collection_" + strconv.Itoa(i)
+		collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+		suite.NoError(err)
+		collections[i] = collectionID
+	}
+
+	// Soft delete the collections
+	for _, collectionID := range collections {
+		err := suite.s.coordinator.DeleteCollection(context.Background(), &model.DeleteCollection{
+			ID: types.MustParse(collectionID),
+		})
+		suite.NoError(err)
+	}
+
+	// Verify collections are soft deleted
+	softDeletedCollections, err := suite.s.coordinator.GetSoftDeletedCollections(context.Background(), nil, "", "", 10)
+	suite.NoError(err)
+	suite.Equal(3, len(softDeletedCollections))
+
+	// Start the cleaner.
+	suite.s.softDeleteCleaner.maxInitialJitter = 0 * time.Second
+	suite.s.softDeleteCleaner.Start()
+
+	// Wait for cleanup cycle
+	time.Sleep(3 * time.Second)
+
+	// Verify root collection is not hard deleted.
+	softDeletedCollections, err = suite.s.coordinator.GetSoftDeletedCollections(context.Background(), nil, "", "", 10)
+	suite.NoError(err)
+	log.Info("softDeletedCollections", zap.Any("softDeletedCollections", softDeletedCollections))
+	suite.Equal(1, len(softDeletedCollections))
+	suite.Equal(softDeletedCollections[0].ID, types.MustParse(collections[0]))
+
+	// Stop the cleaner.
+	suite.s.softDeleteCleaner.Stop()
 }
 
 func TestCleanupTestSuite(t *testing.T) {

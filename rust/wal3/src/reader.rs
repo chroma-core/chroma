@@ -18,7 +18,7 @@ use crate::{
 };
 
 /// Limits allows encoding things like offset, timestamp, and byte size limits for the read.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct Limits {
     pub max_files: Option<u64>,
     pub max_bytes: Option<u64>,
@@ -28,7 +28,7 @@ pub struct Limits {
 pub struct LogReader {
     options: LogReaderOptions,
     storage: Arc<Storage>,
-    prefix: String,
+    pub(crate) prefix: String,
 }
 
 impl LogReader {

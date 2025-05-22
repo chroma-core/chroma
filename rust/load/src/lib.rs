@@ -180,7 +180,7 @@ impl ZipfCache {
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct Connection {
     pub url: String,
-    pub api_key: String,
+    pub api_key: Option<String>,
     pub database: String,
 }
 
@@ -188,12 +188,17 @@ pub struct Connection {
 
 /// Instantiate a new Chroma client.
 pub async fn client(connection: Connection) -> ChromaClient {
+    let auth = if let Some(api_key) = connection.api_key.clone() {
+        ChromaAuthMethod::TokenAuth {
+            token: api_key,
+            header: ChromaTokenHeader::XChromaToken,
+        }
+    } else {
+        ChromaAuthMethod::None
+    };
     ChromaClient::new(ChromaClientOptions {
         url: Some(connection.url.clone()),
-        auth: ChromaAuthMethod::TokenAuth {
-            token: connection.api_key.clone(),
-            header: ChromaTokenHeader::XChromaToken,
-        },
+        auth,
         database: connection.database.clone(),
     })
     .await
@@ -1026,8 +1031,16 @@ pub struct LoadHarness {
 
 impl LoadHarness {
     /// The status of the load harness.
+    /// This returns the list of running workloads with secrets redacted.
     pub fn status(&self) -> Vec<RunningWorkload> {
-        self.running.clone()
+        self.running
+            .iter()
+            .map(|w| {
+                let mut w = w.clone();
+                w.connection.api_key = Some("REDACTED".to_string());
+                w
+            })
+            .collect()
     }
 
     /// Start a workload on the load harness.
@@ -1177,7 +1190,7 @@ impl LoadService {
     pub fn start(
         &self,
         name: String,
-        mut workload: Workload,
+        workload: Workload,
         data_set: String,
         connection: Connection,
         expires: chrono::DateTime<chrono::FixedOffset>,
@@ -1186,6 +1199,20 @@ impl LoadService {
         let Some(data_set) = self.data_sets().iter().find(|ds| ds.name() == data_set) else {
             return Err(Error::NotFound("data set not found".to_string()));
         };
+        let data_set = Arc::clone(data_set);
+        self.start_struct(name, workload, data_set, connection, expires, throughput)
+    }
+
+    /// Start a workload on the load service using structs rather than resolving strings.
+    pub fn start_struct(
+        &self,
+        name: String,
+        mut workload: Workload,
+        data_set: Arc<dyn DataSet>,
+        connection: Connection,
+        expires: chrono::DateTime<chrono::FixedOffset>,
+        throughput: Throughput,
+    ) -> Result<Uuid, Error> {
         workload.resolve_by_name(self.workloads())?;
         let res = {
             // SAFETY(rescrv):  Mutex poisoning.
@@ -1193,7 +1220,7 @@ impl LoadService {
             Ok(harness.start(
                 name,
                 workload.clone(),
-                data_set,
+                &data_set,
                 connection,
                 expires,
                 throughput,
@@ -1258,13 +1285,11 @@ impl LoadService {
             for declared in declared {
                 if let Entry::Vacant(entry) = running.entry(declared.uuid) {
                     tracing::info!("spawning workload {}", declared.uuid);
-                    let root = tracing::info_span!(parent: None, "workload");
                     let this = Arc::clone(self);
                     let done = Arc::new(AtomicBool::new(false));
                     let done_p = Arc::clone(&done);
                     let inhibit = Arc::clone(&self.inhibit);
                     let task = tokio::task::spawn(async move {
-                        let _enter = root.enter();
                         this.run_one_workload(done, inhibit, declared).await
                     });
                     entry.insert((done_p, task));
@@ -1282,36 +1307,6 @@ impl LoadService {
         let client = Arc::new(client(spec.connection.clone()).await);
         let mut guac = Guacamole::new(spec.expires.timestamp_millis() as u64);
         let mut next_op = Instant::now();
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1000);
-        let _ = tx
-            .send(tokio::spawn(async move { Ok::<(), Error>(()) }))
-            .await;
-        let this = Arc::clone(&self);
-        let data_set = Arc::clone(&spec.data_set);
-        let reaper = tokio::spawn(async move {
-            while let Some(task) = rx.recv().await {
-                if let Err(err) = task.await.unwrap() {
-                    if !format!("{err:?}").contains("429") {
-                        this.metrics.failed.add(
-                            1,
-                            &[KeyValue::new(
-                                Key::from_static_str("data_set"),
-                                Value::from(data_set.name()),
-                            )],
-                        );
-                        tracing::error!("workload task failed: {err:?}");
-                    } else {
-                        this.metrics.limited.add(
-                            1,
-                            &[KeyValue::new(
-                                Key::from_static_str("data_set"),
-                                Value::from(data_set.name()),
-                            )],
-                        );
-                    }
-                }
-            }
-        });
 
         // Initialize the data set.
         let data_set = Arc::clone(&spec.data_set);
@@ -1395,9 +1390,9 @@ impl LoadService {
                         .await
                         .map_err(|err| Error::FailWorkload(err.to_string()))
                     {
-                        Ok(()) => Ok(()),
+                        Ok(()) => (),
                         Err(err) => {
-                            if err.to_string().contains("invalid request: No results") {
+                            if format!("{err:?}").contains("invalid request: No results") {
                                 this.metrics.no_results.add(
                                     1,
                                     &[KeyValue::new(
@@ -1405,20 +1400,34 @@ impl LoadService {
                                         Value::from(data_set.name()),
                                     )],
                                 );
-                                Ok(())
+                                tracing::warn!("workload step no results: {err:?}");
+                            } else if !format!("{err:?}").contains("429") {
+                                this.metrics.failed.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                tracing::error!("workload step failed: {err:?}");
                             } else {
-                                Err(err)
+                                this.metrics.limited.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                tracing::warn!("workload step rate limited: {err:?}");
                             }
                         }
-                    }
+                    };
                 };
-                tx.send(tokio::spawn(fut)).await.unwrap();
+                let span = tracing::info_span!(parent: None, "step", workload_uuid = %spec.uuid);
+                tokio::spawn(fut.instrument(span));
             }
         }
-        // Not an error, just needs to show up in stdout.
-        tracing::error!("workload done: {}/{}", spec.name, spec.description());
-        drop(tx);
-        reaper.await.unwrap();
+        tracing::info!("workload done: {}/{}", spec.name, spec.description());
     }
 
     fn load_persistent(&self) -> Result<(), Error> {
@@ -1630,15 +1639,41 @@ async fn start(
 ) -> Result<String, Error> {
     let expires = chrono::DateTime::parse_from_rfc3339(&req.expires)
         .map_err(|err| Error::InvalidRequest(format!("could not parse rfc3339: {err:?}")))?;
-    let uuid = state.load.start(
-        req.name,
-        req.workload,
-        req.data_set,
-        req.connection,
-        expires,
-        req.throughput,
-    )?;
-    Ok(uuid.to_string() + "\n")
+    match (req.data_set, req.custom_data_set) {
+        (Some(_), Some(_)) => Err(Error::InvalidRequest(
+            "provide at most one of data_set and custom_data_set".to_string(),
+        )),
+        (None, None) => Err(Error::InvalidRequest(
+            "provide at least one of data_set and custom_data_set".to_string(),
+        )),
+        (Some(data_set), None) => {
+            let uuid = state.load.start(
+                req.name,
+                req.workload,
+                data_set,
+                req.connection,
+                expires,
+                req.throughput,
+            )?;
+            Ok(uuid.to_string() + "\n")
+        }
+        (None, Some(custom_data_set)) => {
+            let Some(data_set) = data_sets::from_json(&custom_data_set) else {
+                return Err(Error::InvalidRequest(
+                    "custom data set returned nothing".to_string(),
+                ));
+            };
+            let uuid = state.load.start_struct(
+                req.name,
+                req.workload,
+                data_set,
+                req.connection,
+                expires,
+                req.throughput,
+            )?;
+            Ok(uuid.to_string() + "\n")
+        }
+    }
 }
 
 async fn stop(
@@ -1736,7 +1771,7 @@ mod tests {
             "nop".to_string(),
             Connection {
                 url: "http://localhost:8000".to_string(),
-                api_key: "".to_string(),
+                api_key: None,
                 database: "".to_string(),
             },
             (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),
@@ -1848,7 +1883,7 @@ mod tests {
             "nop".to_string(),
             Connection {
                 url: "http://localhost:8000".to_string(),
-                api_key: "".to_string(),
+                api_key: None,
                 database: "".to_string(),
             },
             (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),

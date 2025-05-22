@@ -64,6 +64,8 @@ pub struct FrontendConfig {
     pub executor: ExecutorConfig,
     #[serde(default = "default_default_knn_index")]
     pub default_knn_index: KnnIndex,
+    #[serde(default = "Default::default")]
+    pub tenants_to_migrate_immediately: Vec<String>,
 }
 
 impl FrontendConfig {
@@ -80,6 +82,7 @@ impl FrontendConfig {
             log: default_log_config(),
             executor: default_executor_config(),
             default_knn_index: default_default_knn_index(),
+            tenants_to_migrate_immediately: vec![],
         }
     }
 }
@@ -119,10 +122,6 @@ fn default_enable_span_indexing() -> bool {
     false
 }
 
-fn default_enable_set_index_params() -> bool {
-    true
-}
-
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct FrontendServerConfig {
     #[serde(flatten)]
@@ -148,8 +147,6 @@ pub struct FrontendServerConfig {
     pub cors_allow_origins: Option<Vec<String>>,
     #[serde(default = "default_enable_span_indexing")]
     pub enable_span_indexing: bool,
-    #[serde(default = "default_enable_set_index_params")]
-    pub enable_set_index_params: bool,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "sample_configs/distributed.yaml";

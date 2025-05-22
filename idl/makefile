@@ -5,7 +5,7 @@ PROTOC_GEN_GO_GRPC_BIN_PATH := $(if $(shell which protoc-gen-go-grpc),$(shell wh
 
 proto_python:
 	@echo "Generating gRPC code for python..."
-	@python -m grpc_tools.protoc -I ./ --python_out=. --pyi_out=. --grpc_python_out=. \
+	@python3 -m grpc_tools.protoc -I ./ --python_out=. --pyi_out=. --grpc_python_out=. \
 	    ./chromadb/proto/chroma.proto \
 	    ./chromadb/proto/coordinator.proto \
 	    ./chromadb/proto/logservice.proto \

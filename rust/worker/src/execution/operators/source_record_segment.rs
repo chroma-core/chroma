@@ -55,7 +55,7 @@ impl Operator<SourceRecordSegmentInput, SourceRecordSegmentOutput> for SourceRec
                     .await
                     .enumerate()
                     .map(|(offset, res)| {
-                        res.map(|rec| LogRecord {
+                        res.map(|(_, rec)| LogRecord {
                             // Log offset starts with 1
                             log_offset: offset as i64 + 1,
                             record: OperationRecord {

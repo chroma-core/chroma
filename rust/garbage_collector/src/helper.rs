@@ -25,7 +25,7 @@ impl ChromaGrpcClients {
         let sysdb_channel = Channel::from_static("http://localhost:50051")
             .connect()
             .await?;
-        let logservice_channel = Channel::from_static("http://localhost:50052")
+        let logservice_channel = Channel::from_static("http://localhost:50054")
             .connect()
             .await?;
         let queryservice_channel = Channel::from_static("http://localhost:50053")
@@ -190,6 +190,9 @@ impl ChromaGrpcClients {
                     total_records_post_compaction: 0,
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
+                    version_file_path: None,
+                    root_collection_id: None,
+                    lineage_file_path: None,
                 }),
                 knn: None,
                 metadata: None,

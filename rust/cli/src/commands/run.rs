@@ -1,4 +1,5 @@
-use crate::utils::{CliError, LOGO};
+use crate::ui_utils::LOGO;
+use crate::utils::CliError;
 use chroma_frontend::config::FrontendServerConfig;
 use chroma_frontend::frontend_service_entrypoint_with_config;
 use clap::Parser;

@@ -69,6 +69,11 @@ where
 {
     async fn insert(&self, key: K, value: V);
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError>;
+    // Returns true if the cache contains the key. This method may return a
+    // false-positive.
+    async fn may_contain(&self, key: &K) -> bool {
+        self.get(key).await.map(|v| v.is_some()).unwrap_or(false)
+    }
     async fn remove(&self, key: &K);
     async fn clear(&self) -> Result<(), CacheError>;
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError>;

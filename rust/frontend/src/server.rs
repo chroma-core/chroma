@@ -13,12 +13,11 @@ use chroma_types::{
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
     GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse,
-    HnswConfiguration, IncludeList, InternalCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
-    QueryResponse, SpannConfiguration, UpdateCollectionConfiguration,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
-    UpsertCollectionRecordsResponse,
+    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
+    InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -82,7 +81,7 @@ async fn graceful_shutdown(system: System) {
             system.stop().await;
             system.join().await;
         },
-    };
+    }
 }
 
 pub struct Metrics {
@@ -349,6 +348,22 @@ impl FrontendServer {
         Ok(self
             .auth
             .authenticate_and_authorize(headers, action, resource)
+            .await?)
+    }
+
+    // This is used to authenticate API operations that are collection-specific.
+    // We need to send additional collection info to the auth service.
+    async fn authenticate_and_authorize_collection(
+        &mut self,
+        headers: &HeaderMap,
+        action: AuthzAction,
+        resource: AuthzResource,
+        collection_id: CollectionUuid,
+    ) -> Result<(), ServerError> {
+        let collection = self.frontend.get_cached_collection(collection_id).await?;
+        Ok(self
+            .auth
+            .authenticate_and_authorize_collection(headers, action, resource, collection)
             .await?)
     }
 }
@@ -914,83 +929,15 @@ async fn create_collection(
 
     let payload_clone = payload.clone();
 
-    let configuration = if !server.config.enable_set_index_params {
-        if let Some(mut new_configuration) = payload.configuration.clone() {
-            let hnsw_config = new_configuration.hnsw.clone();
-            let spann_config = new_configuration.spann.clone();
-
-            if let Some(hnsw) = &hnsw_config {
-                let space = hnsw.space.clone();
-                if hnsw.ef_construction.is_some()
-                    || hnsw.ef_search.is_some()
-                    || hnsw.max_neighbors.is_some()
-                    || hnsw.num_threads.is_some()
-                    || hnsw.resize_factor.is_some()
-                    || hnsw.sync_threshold.is_some()
-                    || hnsw.batch_size.is_some()
-                {
-                    return Err(ValidationError::SpaceConfigurationForVectorIndexType(
-                        "HNSW".to_string(),
-                    )
-                    .into());
-                }
-                let new_hnsw = HnswConfiguration {
-                    space,
-                    ..Default::default()
-                };
-                new_configuration.hnsw = Some(new_hnsw);
-            } else if let Some(spann) = &spann_config {
-                let space = spann.space.clone();
-                if spann.search_nprobe.is_some()
-                    || spann.write_nprobe.is_some()
-                    || spann.ef_construction.is_some()
-                    || spann.ef_search.is_some()
-                    || spann.max_neighbors.is_some()
-                    || spann.reassign_neighbor_count.is_some()
-                    || spann.split_threshold.is_some()
-                    || spann.merge_threshold.is_some()
-                {
-                    return Err(ValidationError::SpaceConfigurationForVectorIndexType(
-                        "SPANN".to_string(),
-                    )
-                    .into());
-                }
-                let new_spann = SpannConfiguration {
-                    space,
-                    ..Default::default()
-                };
-                new_configuration.spann = Some(new_spann);
-            }
-
-            Some(InternalCollectionConfiguration::try_from_config(
-                new_configuration,
-                server.config.frontend.default_knn_index,
-            )?)
-        } else {
-            Some(InternalCollectionConfiguration::try_from_config(
-                CollectionConfiguration {
-                    hnsw: None,
-                    spann: None,
-                    embedding_function: None,
-                },
-                server.config.frontend.default_knn_index,
-            )?)
-        }
-    } else {
-        match payload_clone.configuration {
-            Some(c) => Some(InternalCollectionConfiguration::try_from_config(
-                c,
-                server.config.frontend.default_knn_index,
-            )?),
-            None => Some(InternalCollectionConfiguration::try_from_config(
-                CollectionConfiguration {
-                    hnsw: None,
-                    spann: None,
-                    embedding_function: None,
-                },
-                server.config.frontend.default_knn_index,
-            )?),
-        }
+    let configuration = match payload_clone.configuration {
+        Some(c) => Some(InternalCollectionConfiguration::try_from_config(
+            c,
+            server.config.frontend.default_knn_index,
+        )?),
+        None => Some(InternalCollectionConfiguration::try_from_config(
+            CollectionConfiguration::default(),
+            server.config.frontend.default_knn_index,
+        )?),
     };
 
     let request = CreateCollectionRequest::try_new(
@@ -1093,7 +1040,7 @@ async fn update_collection(
         "Updating collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::UpdateCollection,
             AuthzResource {
@@ -1101,6 +1048,7 @@ async fn update_collection(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let api_token = headers
@@ -1209,7 +1157,7 @@ pub struct ForkCollectionPayload {
     )
 )]
 async fn fork_collection(
-    _headers: HeaderMap,
+    headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<ForkCollectionPayload>,
@@ -1224,23 +1172,31 @@ async fn fork_collection(
     tracing::info!(
         "Forking collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
     );
-    // NOTE: The quota check if skipped for fork collection for now, and we rely on the scorecard to limit access to certain tenents
-    // TODO: Unify the quota and scorecard
-    // server
-    //     .authenticate_and_authorize(
-    //         &headers,
-    //         AuthzAction::ForkCollection,
-    //         AuthzResource {
-    //             tenant: Some(tenant.clone()),
-    //             database: Some(database.clone()),
-    //             collection: Some(collection_id.clone()),
-    //         },
-    //     )
-    //     .await?;
-    let _guard =
-        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::ForkCollection,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
+
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let mut quota_payload = QuotaPayload::new(Action::ForkCollection, tenant.clone(), api_token);
+    quota_payload = quota_payload.with_collection_uuid(collection_id);
+    quota_payload = quota_payload.with_collection_name(&payload.new_name);
+    server.quota_enforcer.enforce(&quota_payload).await?;
+
+    let _guard =
+        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
 
     let request = chroma_types::ForkCollectionRequest::try_new(
         tenant,
@@ -1259,6 +1215,24 @@ pub struct AddCollectionRecordsPayload {
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<Metadata>>>,
+}
+
+impl AddCollectionRecordsPayload {
+    pub fn new(
+        ids: Vec<String>,
+        embeddings: Option<Vec<Vec<f32>>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        metadatas: Option<Vec<Option<Metadata>>>,
+    ) -> Self {
+        Self {
+            ids,
+            embeddings,
+            documents,
+            uris,
+            metadatas,
+        }
+    }
 }
 
 /// Adds records to a collection.
@@ -1285,7 +1259,7 @@ async fn collection_add(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Add,
             AuthzResource {
@@ -1293,6 +1267,7 @@ async fn collection_add(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1372,7 +1347,7 @@ async fn collection_update(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Update,
             AuthzResource {
@@ -1380,6 +1355,7 @@ async fn collection_update(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1463,7 +1439,7 @@ async fn collection_upsert(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Update,
             AuthzResource {
@@ -1471,6 +1447,7 @@ async fn collection_upsert(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1553,7 +1530,7 @@ async fn collection_delete(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Delete,
             AuthzResource {
@@ -1561,6 +1538,7 @@ async fn collection_delete(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1629,7 +1607,7 @@ async fn collection_count(
         "Counting number of records in collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Count,
             AuthzResource {
@@ -1637,6 +1615,7 @@ async fn collection_count(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let _guard = server.scorecard_request(&[
@@ -1696,7 +1675,7 @@ async fn collection_get(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Get,
             AuthzResource {
@@ -1704,6 +1683,7 @@ async fn collection_get(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1790,7 +1770,7 @@ async fn collection_query(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Query,
             AuthzResource {
@@ -1798,6 +1778,7 @@ async fn collection_query(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =

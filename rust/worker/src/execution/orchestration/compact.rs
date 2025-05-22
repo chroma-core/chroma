@@ -626,6 +626,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                         .unwrap_or_default(),
                     maximum_fetch_count: Some(self.max_compaction_size as u32),
                     collection_uuid: self.collection_id,
+                    tenant: collection.tenant.clone(),
                 }),
                 (),
                 ctx.receiver(),
@@ -794,10 +795,14 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 tracing::info!("Pulled Logs Up To Offset: {:?}", self.pulled_log_offset);
             }
             None => {
+                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
+                // TODO(hammadb): We can repair the log service's understanding of the offset here, as this only happens
+                // when the log service is not up to date on the latest compacted offset, which leads it to schedule an already
+                // compacted collection.
                 self.terminate_with_result(
-                    Err(CompactionError::InvariantViolation(
-                        "Logs should be present for compaction",
-                    )),
+                    Ok(CompactionResponse {
+                        collection_id: self.collection_id,
+                    }),
                     ctx,
                 )
                 .await;
@@ -1127,6 +1132,7 @@ mod tests {
                 .unwrap_or_default(),
             maximum_fetch_count: None,
             collection_uuid: collection_id,
+            tenant: old_cas.collection.tenant.clone(),
         };
         let filter = FilterOperator {
             query_ids: None,
