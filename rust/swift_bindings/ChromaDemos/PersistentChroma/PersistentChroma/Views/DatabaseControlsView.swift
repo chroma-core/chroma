@@ -96,7 +96,6 @@ struct DatabaseControlsView: View {
                 ActionButton(title: "Reset Chroma", disabled: !state.isPersistentInitialized) {
                     self.focused = false
                     try state.reset()
-                    state.addLog("System reset complete")
                 }
                 
                 Text("Data will persist between app launches")

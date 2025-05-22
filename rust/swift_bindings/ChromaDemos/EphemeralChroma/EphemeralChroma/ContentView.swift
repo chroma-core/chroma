@@ -15,44 +15,55 @@ extension View {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
-
-// Helper for iOS platform check
-func isIPad() -> Bool {
-    UIDevice.current.userInterfaceIdiom == .pad
-}
-
-func isIPhone() -> Bool {
-    UIDevice.current.userInterfaceIdiom == .phone
-}
 #else
 extension View {
     func dismissKeyboard() {
         // No-op for macOS
     }
 }
+#endif
 
 // Helper for iOS platform check
 func isIPad() -> Bool {
-    false
+    #if canImport(UIKit)
+    return UIDevice.current.userInterfaceIdiom == .pad
+    #else
+    return false
+    #endif
 }
 
 func isIPhone() -> Bool {
-    false
+    #if canImport(UIKit)
+    return UIDevice.current.userInterfaceIdiom == .phone
+    #else
+    return false
+    #endif
 }
-#endif
 
 struct ContentView: View {
     
     @State var state: ChromaState = .init()
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
-    @State private var lastLogMessage: String?
-    @State private var showingLogToast = false
     
     var body: some View {
         GeometryReader { geometry in
-            VStack(spacing: 16) {
-                if geometry.size.width > 600 {
-                    HStack(spacing: 0) {
+            if geometry.size.width > 600 {
+                HStack(spacing: 0) {
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            headerView
+                            databaseControls
+                            documentInputSection
+                            querySection
+                        }
+                        .padding(.vertical)
+                    }
+                    .frame(width: min(500, geometry.size.width * 0.5))
+                    logsView
+                }
+            } else {
+                ZStack {
+                    VStack(spacing: 0) {
                         ScrollView {
                             VStack(spacing: 24) {
                                 headerView
@@ -60,27 +71,18 @@ struct ContentView: View {
                                 documentInputSection
                                 querySection
                             }
-                            .padding(.vertical)
-                        }
-                        .frame(width: min(500, geometry.size.width * 0.5))
-                        logsView
-                    }
-                } else {
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            VStack(spacing: 24) {
-                                headerView
-                                databaseControls
-                                documentInputSection
-                                querySection
-                            }
                             .padding(.horizontal)
-                            if isIPad() {
-                                logsView
-                            } else {
-                                logsView
-                                    .frame(height: 400)
-                            }
+                            .padding(.bottom, geometry.size.height * 0.3)
+                        }
+                    }
+                    
+                    VStack {
+                        Spacer()
+                        if isIPad() {
+                            logsView
+                        } else {
+                            logsView
+                                .frame(height: geometry.size.height * 0.3)
                         }
                     }
                 }
@@ -93,36 +95,19 @@ struct ContentView: View {
                     state.refreshCollections()
                 }
             } catch {
-                // Just add to logs without showing alert
                 state.addLog("Failed to initialize: \(error)")
             }
         }
-        .onChange(of: state.logs) { oldLogs, newLogs in
-            if isIPhone() {
-                // Skip first log message
-                if oldLogs.isEmpty && !newLogs.isEmpty {
-                    return
-                }
-                if let lastLog = newLogs.last {
-                    lastLogMessage = lastLog
-                    showingLogToast = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        showingLogToast = false
-                    }
-                }
-            }
-        }
-        .overlay {
-            if showingLogToast, let message = lastLogMessage {
-                LogToast(message: message)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut, value: showingLogToast)
     }
     
     var headerView: some View {
-        HeaderView(title: "Ephemeral Chroma Demo")
+        VStack(spacing: 8) {
+            Text("Ephemeral Chroma Demo")
+                .font(.title)
+                .bold()
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
     }
     
     var databaseControls: some View {
