@@ -558,3 +558,20 @@ func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID string, curr
 		}).Error
 
 }
+
+func (s *collectionDb) BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error) {
+	var collections []dbmodel.Collection
+	err := s.read_db.Model(&dbmodel.Collection{}).
+		Select("id, version_file_name").
+		Where("id IN ?", collectionIDs).
+		Find(&collections).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]string)
+	for _, collection := range collections {
+		result[collection.ID] = collection.VersionFileName
+	}
+	return result, nil
+}
