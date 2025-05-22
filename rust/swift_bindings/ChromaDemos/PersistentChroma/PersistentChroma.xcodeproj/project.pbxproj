@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		E4D7CDE82DDE2666002D1F4C /* Chroma in Frameworks */ = {isa = PBXBuildFile; productRef = E4D7CDE72DDE2666002D1F4C /* Chroma */; };
-		E4FEBAC72DDF6D5B00A37878 /* Chroma in Frameworks */ = {isa = PBXBuildFile; productRef = E4FEBAC62DDF6D5B00A37878 /* Chroma */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,7 +56,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E4FEBAC72DDF6D5B00A37878 /* Chroma in Frameworks */,
 				E4D7CDE82DDE2666002D1F4C /* Chroma in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -120,7 +118,6 @@
 			name = PersistentChroma;
 			packageProductDependencies = (
 				E4D7CDE72DDE2666002D1F4C /* Chroma */,
-				E4FEBAC62DDF6D5B00A37878 /* Chroma */,
 			);
 			productName = PersistentChroma;
 			productReference = E4D7CD9E2DDE25A9002D1F4C /* PersistentChroma.app */;
@@ -205,7 +202,7 @@
 			mainGroup = E4D7CD952DDE25A9002D1F4C;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				E4FEBAC52DDF6D5B00A37878 /* XCLocalSwiftPackageReference "../../Chroma" */,
+				E4D7CDE62DDE2666002D1F4C /* XCLocalSwiftPackageReference "../../Chroma" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = E4D7CD9F2DDE25A9002D1F4C /* Products */;
@@ -425,13 +422,16 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.4;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = chroma.PersistentChroma;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = chroma.PersistentChromaTest;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = chroma.PersistentChromaTest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = 1;
 				XROS_DEPLOYMENT_TARGET = 2.4;
 			};
 			name = Debug;
@@ -464,13 +464,16 @@
 				MACOSX_DEPLOYMENT_TARGET = 15.4;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = chroma.PersistentChroma;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=iphoneos*]" = chroma.PersistentChromaTest;
+				"PRODUCT_BUNDLE_IDENTIFIER[sdk=macosx*]" = chroma.PersistentChromaTest;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = 1;
 				XROS_DEPLOYMENT_TARGET = 2.4;
 			};
 			name = Release;
@@ -607,7 +610,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		E4FEBAC52DDF6D5B00A37878 /* XCLocalSwiftPackageReference "../../Chroma" */ = {
+		E4D7CDE62DDE2666002D1F4C /* XCLocalSwiftPackageReference "../../Chroma" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../Chroma;
 		};
@@ -615,10 +618,6 @@
 
 /* Begin XCSwiftPackageProductDependency section */
 		E4D7CDE72DDE2666002D1F4C /* Chroma */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = Chroma;
-		};
-		E4FEBAC62DDF6D5B00A37878 /* Chroma */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = Chroma;
 		};
