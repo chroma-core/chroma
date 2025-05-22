@@ -260,11 +260,19 @@ impl GrpcLog {
 
     fn client_for(
         &mut self,
-        _tenant: &str,
+        tenant: &str,
         collection_id: CollectionUuid,
     ) -> &mut LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>> {
         if let Some(alt) = self.alt_client.as_mut() {
-            if Self::client_is_on_alt_log(collection_id, self.config.alt_host_threshold.as_deref())
+            if self.config.use_alt_for_tenants.iter().any(|t| t == tenant)
+                || self
+                    .config
+                    .use_alt_for_collections
+                    .contains(&collection_id.to_string())
+                || Self::client_is_on_alt_log(
+                    collection_id,
+                    self.config.alt_host_threshold.as_deref(),
+                )
             {
                 tracing::info!("using alt client for {collection_id}");
                 return alt;
@@ -425,7 +433,10 @@ impl GrpcLog {
         let mut norm = self
             ._get_collections_with_new_data(false, min_compaction_size)
             .await?;
-        if self.config.alt_host_threshold.is_some() {
+        if self.config.alt_host_threshold.is_some()
+            || !self.config.use_alt_for_tenants.is_empty()
+            || !self.config.use_alt_for_collections.is_empty()
+        {
             let alt = self
                 ._get_collections_with_new_data(true, min_compaction_size)
                 .await?;

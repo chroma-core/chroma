@@ -18,8 +18,14 @@ pub struct GrpcLogConfig {
     // breaking things or having a hard cut-over.  If alt_host_threshold is specified, it will be
     // interpreted as a u128 (UUID == u128) and if the collection in question is <=
     // alt_host_threshold, it go to the alt-host first.
+    //
+    // alt tenants/collections will always initialize a new log
     #[serde(default = "Option::default")]
     pub alt_host: Option<String>,
+    #[serde(default)]
+    pub use_alt_for_tenants: Vec<String>,
+    #[serde(default)]
+    pub use_alt_for_collections: Vec<String>,
     #[serde(default = "Option::default")]
     pub alt_host_threshold: Option<String>,
 }
@@ -60,6 +66,8 @@ impl Default for GrpcLogConfig {
             max_encoding_message_size: GrpcLogConfig::default_max_encoding_message_size(),
             max_decoding_message_size: GrpcLogConfig::default_max_decoding_message_size(),
             alt_host: None,
+            use_alt_for_tenants: vec![],
+            use_alt_for_collections: vec![],
             alt_host_threshold: None,
         }
     }
