@@ -9,6 +9,7 @@ mod backoff;
 mod batch_manager;
 mod copy;
 mod cursors;
+mod gc;
 mod manifest;
 mod manifest_manager;
 mod reader;
@@ -18,6 +19,7 @@ pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
+pub use gc::Garbage;
 pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
@@ -151,6 +153,11 @@ pub enum ScrubError {
     MissingFragment { reference: Fragment },
     #[error("MissingSnapshot: {reference:?}")]
     MissingSnapshot { reference: SnapshotPointer },
+    #[error("Garbage: expected:{expected_setsum:?} != returned:{returned_setsum:?}")]
+    CorruptGarbage {
+        expected_setsum: Setsum,
+        returned_setsum: Setsum,
+    },
     #[error("OverallMismatch: {manifest:?} {observed:?}")]
     OverallMismatch {
         manifest: ScrubSuccess,
