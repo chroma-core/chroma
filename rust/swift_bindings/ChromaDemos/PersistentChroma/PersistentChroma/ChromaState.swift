@@ -55,7 +55,6 @@ extension ChromaState {
         // Re-initialize Chroma after reset
         try self.initializeWithPath(path: persistentPath, allowReset: true)
         isPersistentInitialized = true
-        self.addLog("System reset complete")
         
         DispatchQueue.main.async { [weak self] in
             self?.logs.removeAll()

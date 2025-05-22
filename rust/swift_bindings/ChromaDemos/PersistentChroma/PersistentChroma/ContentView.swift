@@ -44,14 +44,26 @@ struct ContentView: View {
     
     @State var state: ChromaState = .init()
     @Environment(\.horizontalSizeClass) var horizontalSizeClass
-    @State private var lastLogMessage: String?
-    @State private var showingLogToast = false
     
     var body: some View {
         GeometryReader { geometry in
-            VStack(spacing: 0) {
-                if geometry.size.width > 600 {
-                    HStack(spacing: 0) {
+            if geometry.size.width > 600 {
+                HStack(spacing: 0) {
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            headerView
+                            databaseControls
+                            documentInputSection
+                            querySection
+                        }
+                        .padding(.vertical)
+                    }
+                    .frame(width: min(500, geometry.size.width * 0.5))
+                    logsView
+                }
+            } else {
+                ZStack {
+                    VStack(spacing: 0) {
                         ScrollView {
                             VStack(spacing: 24) {
                                 headerView
@@ -59,27 +71,19 @@ struct ContentView: View {
                                 documentInputSection
                                 querySection
                             }
-                            .padding(.vertical)
-                        }
-                        .frame(width: min(500, geometry.size.width * 0.5))
-                        logsView
-                    }
-                } else {
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            VStack(spacing: 24) {
-                                headerView
-                                databaseControls
-                                documentInputSection
-                                querySection
-                            }
                             .padding(.horizontal)
-                            if isIPad() {
-                                logsView
-                            } else {
-                                logsView
-                                    .frame(height: 200)
-                            }
+                            .padding(.bottom, geometry.size.height * 0.3)
+                        }
+                    }
+                    
+                    VStack {
+                        Spacer()
+                        if isIPad() {
+                            logsView
+                        } else {
+                            logsView
+                                .frame(height: geometry.size.height * 0.3)
+                                .background(Color(uiColor: .systemBackground))
                         }
                     }
                 }
@@ -103,28 +107,6 @@ struct ContentView: View {
                 state.addLog("Failed to initialize: \(error)")
             }
         }
-        .onChange(of: state.logs) { oldLogs, newLogs in
-            if isIPhone() {
-                // Skip first log message
-                if oldLogs.isEmpty && !newLogs.isEmpty {
-                    return
-                }
-                if let lastLog = newLogs.last {
-                    lastLogMessage = lastLog
-                    showingLogToast = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        showingLogToast = false
-                    }
-                }
-            }
-        }
-        .overlay {
-            if showingLogToast, let message = lastLogMessage {
-                LogToast(message: message)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut, value: showingLogToast)
     }
     
     private var headerView: some View {

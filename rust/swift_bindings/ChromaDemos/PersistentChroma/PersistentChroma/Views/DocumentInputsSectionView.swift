@@ -13,6 +13,8 @@ struct DocumentInputsSectionView: View {
     
     @Bindable var state: ChromaState
     
+    @FocusState var focused: Bool
+    
     var body: some View {
         GroupBox {
             VStack(spacing: 16) {
@@ -34,8 +36,10 @@ struct DocumentInputsSectionView: View {
                 
                 TextField("Enter document text...", text: $state.docText)
                     .textFieldStyle(.roundedBorder)
+                    .focused($focused)
                 
                 ActionButton(title: "Add Document", disabled: !state.isPersistentInitialized || state.docText.isEmpty || state.collections.isEmpty) {
+                    self.focused = false
                     Task {
                         do {
                             state.docCounter += 1
