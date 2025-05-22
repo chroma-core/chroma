@@ -15,8 +15,8 @@ use chroma_storage::{
 use setsum::Setsum;
 
 use crate::{
-    Error, Fragment, FragmentSeqNo, LogPosition, LogWriterOptions, ScrubError, ScrubSuccess,
-    SnapshotOptions, ThrottleOptions,
+    Error, Fragment, FragmentSeqNo, Garbage, GarbageAction, LogPosition, LogWriterOptions,
+    ScrubError, ScrubSuccess, SnapshotOptions, ThrottleOptions,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -59,6 +59,12 @@ pub struct SnapshotPointer {
 impl SnapshotPointer {
     /// An estimate on the number of bytes required to serialize this object as JSON.
     pub const JSON_SIZE_ESTIMATE: usize = 142;
+}
+
+impl From<&Snapshot> for SnapshotPointer {
+    fn from(snap: &Snapshot) -> Self {
+        snap.to_pointer()
+    }
 }
 
 ///////////////////////////////////////////// Snapshot /////////////////////////////////////////////
@@ -301,6 +307,12 @@ pub struct Manifest {
         serialize_with = "super::serialize_setsum"
     )]
     pub setsum: Setsum,
+    #[serde(
+        default,
+        deserialize_with = "super::deserialize_setsum",
+        serialize_with = "super::serialize_setsum"
+    )]
+    pub collected: Setsum,
     pub acc_bytes: u64,
     pub writer: String,
     pub snapshots: Vec<SnapshotPointer>,
@@ -314,6 +326,7 @@ impl Manifest {
     pub fn new_empty(writer: &str) -> Self {
         Self {
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             writer: writer.to_string(),
             snapshots: vec![],
@@ -558,6 +571,7 @@ impl Manifest {
         let initial = Manifest {
             writer,
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -740,6 +754,152 @@ impl Manifest {
             (None, None) => self.initial_offset.unwrap_or(LogPosition::from_offset(1)),
         }
     }
+
+    /// Apply the destructive operation specified by the Garbage struct.
+    #[allow(clippy::result_large_err)]
+    pub fn apply_garbage(&self, garbage: Garbage) -> Result<Self, ScrubError> {
+        let Garbage {
+            dropped_setsum,
+            actions,
+            cutoff: _,
+        } = garbage;
+        let mut new = self.clone();
+        for action in actions {
+            new.apply_garbage_action(action)?;
+        }
+        if self.setsum - dropped_setsum != new.setsum {
+            Err(ScrubError::CorruptGarbage {
+                expected_setsum: self.setsum - dropped_setsum,
+                returned_setsum: new.setsum,
+            })
+        } else {
+            Ok(new)
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn apply_garbage_action(&mut self, action: GarbageAction) -> Result<(), ScrubError> {
+        match action {
+            GarbageAction::DropFragment {
+                path_to_fragment,
+                fragment_setsum,
+            } => {
+                let Some(index) = self.fragments.iter().position(|frag| {
+                    frag.path == path_to_fragment && frag.setsum == fragment_setsum
+                }) else {
+                    return Err(ScrubError::MissingFragmentBySetsumPath {
+                        path: path_to_fragment,
+                        setsum: fragment_setsum,
+                    });
+                };
+                self.fragments.remove(index);
+                self.setsum -= fragment_setsum;
+                self.collected += fragment_setsum;
+                Ok(())
+            }
+            GarbageAction::DropSnapshot {
+                path_to_snapshot,
+                snapshot_setsum,
+                children: _,
+            } => {
+                let Some(index) = self.snapshots.iter().position(|snap| {
+                    snap.path_to_snapshot == path_to_snapshot && snap.setsum == snapshot_setsum
+                }) else {
+                    return Err(ScrubError::MissingSnapshotBySetsumPath {
+                        path: path_to_snapshot,
+                        setsum: snapshot_setsum,
+                    });
+                };
+                self.snapshots.remove(index);
+                self.setsum -= snapshot_setsum;
+                self.collected += snapshot_setsum;
+                // NOTE(rescrv):  There's no action to take on the children.  Removing the snapshot
+                // cuts them from the manifest.  The actual destructive routine needs the children
+                // to know what to erase, but we're unlinking the whole shebang in one go.
+                Ok(())
+            }
+            GarbageAction::ReplaceSnapshot {
+                old_path_to_snapshot,
+                old_snapshot_setsum,
+                new_snapshot,
+                children: _,
+            } => {
+                let Some(index) = self.snapshots.iter().position(|snap| {
+                    snap.path_to_snapshot == old_path_to_snapshot
+                        && snap.setsum == old_snapshot_setsum
+                }) else {
+                    return Err(ScrubError::MissingSnapshotBySetsumPath {
+                        path: old_path_to_snapshot,
+                        setsum: old_snapshot_setsum,
+                    });
+                };
+                self.snapshots[index] = SnapshotPointer::from(&new_snapshot);
+                self.setsum -= old_snapshot_setsum;
+                self.setsum += new_snapshot.setsum;
+                self.collected += old_snapshot_setsum;
+                // NOTE(rescrv):  Ditto DropSnapshot's note.
+                Ok(())
+            }
+        }
+    }
+
+    /// The garbage has been completely collected from this manifest.  This is not a guarantee it
+    /// will apply cleanly as a partial collection (someone's doing something funky) will fail
+    /// there.  It returns false here.
+    pub fn has_collected_garbage(&self, garbage: &Garbage) -> bool {
+        let Garbage {
+            dropped_setsum: _,
+            actions,
+            cutoff,
+        } = garbage;
+        // first (cheaply) look for snapshots straddling the cutoff.
+        for snap in self.snapshots.iter() {
+            if (snap.start..snap.limit).contains(cutoff) {
+                return false;
+            }
+        }
+        // fragments are allowed to overlap because we don't rewrite or check them
+        // actions are then checked against the manifest
+        for action in actions {
+            if !self.has_collected_garbage_action(action) {
+                return false;
+            }
+        }
+        // No reason to believe we haven't collected, so we have.
+        true
+    }
+
+    fn has_collected_garbage_action(&self, action: &GarbageAction) -> bool {
+        match action {
+            GarbageAction::DropFragment {
+                path_to_fragment,
+                fragment_setsum,
+            } => !self
+                .fragments
+                .iter()
+                .any(|frag| frag.path == *path_to_fragment && frag.setsum == *fragment_setsum),
+            GarbageAction::DropSnapshot {
+                path_to_snapshot,
+                snapshot_setsum,
+                children: _,
+            } => !self.snapshots.iter().any(|snap| {
+                snap.path_to_snapshot == *path_to_snapshot && snap.setsum == *snapshot_setsum
+            }),
+            GarbageAction::ReplaceSnapshot {
+                old_path_to_snapshot,
+                old_snapshot_setsum,
+                new_snapshot,
+                children: _,
+            } => {
+                !self.snapshots.iter().any(|snap| {
+                    snap.path_to_snapshot == *old_path_to_snapshot
+                        && snap.setsum == *old_snapshot_setsum
+                }) && self.snapshots.iter().any(|snap| {
+                    snap.path_to_snapshot == new_snapshot.path && snap.setsum == new_snapshot.setsum
+                })
+            }
+        }
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -795,6 +955,7 @@ mod tests {
         let manifest = Manifest {
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
@@ -838,6 +999,7 @@ mod tests {
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
             )
             .unwrap(),
+            collected: Setsum::default(),
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
@@ -850,6 +1012,7 @@ mod tests {
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
             )
             .unwrap(),
+            collected: Setsum::default(),
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
@@ -885,6 +1048,7 @@ mod tests {
         let mut manifest = Manifest {
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -902,6 +1066,7 @@ mod tests {
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
                 )
                 .unwrap(),
+                collected: Setsum::default(),
                 acc_bytes: 83,
                 snapshots: vec![],
                 fragments: vec![
@@ -972,6 +1137,7 @@ mod tests {
         let mut manifest = Manifest {
             writer: "manifest writer 1".to_string(),
             setsum: fragment1.setsum + fragment2.setsum,
+            collected: Setsum::default(),
             acc_bytes: 83,
             snapshots: vec![SnapshotPointer {
                 path_to_snapshot: "snap.1".to_string(),
@@ -993,6 +1159,7 @@ mod tests {
                     "70ff5599703548d61cc7fa9d53d66d61be4e52ff4bf84b07ad45d6d96b174af4"
                 )
                 .unwrap(),
+                collected: Setsum::default(),
                 acc_bytes: 183,
                 snapshots: vec![SnapshotPointer {
                     path_to_snapshot: "snap.1".to_string(),

@@ -9,6 +9,7 @@ mod backoff;
 mod batch_manager;
 mod copy;
 mod cursors;
+mod gc;
 mod manifest;
 mod manifest_manager;
 mod reader;
@@ -18,6 +19,7 @@ pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
+pub use gc::{Garbage, GarbageAction};
 pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
@@ -149,8 +151,26 @@ pub enum ScrubError {
     },
     #[error("MissingFragment: {reference:?}")]
     MissingFragment { reference: Fragment },
+    #[error("MissingFragmentBySetsumPath: {setsum:?} {path:?}")]
+    MissingFragmentBySetsumPath { setsum: Setsum, path: String },
+    #[error("MissingSnapshotBySetsumPath: {setsum:?} {path:?}")]
+    MissingSnapshotBySetsumPath { setsum: Setsum, path: String },
     #[error("MissingSnapshot: {reference:?}")]
     MissingSnapshot { reference: SnapshotPointer },
+    #[error("Garbage: expected:{expected_setsum:?} != returned:{returned_setsum:?}")]
+    CorruptGarbage {
+        expected_setsum: Setsum,
+        returned_setsum: Setsum,
+    },
+    #[error("Corrupt snapshot replace")]
+    CorruptSnapshotReplace {
+        lhs_before: Setsum,
+        lhs_after: Setsum,
+        rhs_before: Setsum,
+        rhs_after: Setsum,
+    },
+    #[error("Internal error within scrubbing: {0}")]
+    Internal(String),
     #[error("OverallMismatch: {manifest:?} {observed:?}")]
     OverallMismatch {
         manifest: ScrubSuccess,

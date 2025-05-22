@@ -373,6 +373,7 @@ mod tests {
             Manifest {
                 writer: "init in test".to_string(),
                 setsum: Setsum::default(),
+                collected: Setsum::default(),
                 acc_bytes: 0,
                 snapshots: vec![],
                 fragments: vec![],
@@ -384,6 +385,7 @@ mod tests {
             Manifest {
                 writer: "manager in test".to_string(),
                 setsum: Setsum::default(),
+                collected: Setsum::default(),
                 acc_bytes: 50,
                 snapshots: vec![],
                 fragments: vec![
