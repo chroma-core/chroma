@@ -57,7 +57,7 @@ swift_package/chroma_swift_framework.xcframework
 # Xcode
 *.xcuserdatad/
 *.xcuserstate
-xcuserdata/
+**/xcuserdata/
 project.xcworkspace/xcuserdata/
 
 # Ignore generated Swift bindings
