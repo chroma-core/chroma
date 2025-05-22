@@ -125,6 +125,20 @@ impl ChromaError for GrpcPurgeDirtyForCollectionError {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum GrpcSealLogError {
+    #[error("Failed to seal collection: {0}")]
+    FailedToSeal(#[from] tonic::Status),
+}
+
+impl ChromaError for GrpcSealLogError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcSealLogError::FailedToSeal(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct GrpcLog {
     config: GrpcLogConfig,
@@ -543,6 +557,20 @@ impl GrpcLog {
         } else {
             Ok(())
         }
+    }
+
+    pub(super) async fn seal_log(
+        &mut self,
+        tenant: &str,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GrpcSealLogError> {
+        let _response = self
+            .client_for(tenant, collection_id)
+            .seal_log(chroma_proto::SealLogRequest {
+                collection_id: collection_id.to_string(),
+            })
+            .await?;
+        Ok(())
     }
 }
 
