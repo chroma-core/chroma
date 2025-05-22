@@ -69,12 +69,8 @@ struct DocumentInputSectionView: View {
                         embeddings: embeddings,
                         documents: docs
                     )
-                    state.showingSuccess = true
                     state.addLog("[Add] Document added to collection '\(collectionName)': \(docText)")
                     state.docText = ""
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak state] in
-                        state?.showingSuccess = false
-                    }
                 }
             }
             .padding()

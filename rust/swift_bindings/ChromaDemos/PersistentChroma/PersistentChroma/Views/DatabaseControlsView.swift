@@ -71,9 +71,9 @@ struct DatabaseControlsView: View {
                     state.addLog("Storage location at: \(state.persistentPath)")
                 }
                 
-                ActionButton(title: "Reset System", disabled: !state.isPersistentInitialized) {
+                ActionButton(title: "Reset Chroma", disabled: !state.isPersistentInitialized) {
                     try state.reset()
-                    state.refreshCollections()
+                    state.addLog("System reset complete")
                 }
                 
                 Text("Data will persist between app launches")

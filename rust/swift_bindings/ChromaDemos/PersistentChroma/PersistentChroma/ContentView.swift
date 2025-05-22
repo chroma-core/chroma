@@ -23,6 +23,23 @@ extension View {
 }
 #endif
 
+// Helper for iOS platform check
+func isIPad() -> Bool {
+    #if canImport(UIKit)
+    return UIDevice.current.userInterfaceIdiom == .pad
+    #else
+    return false
+    #endif
+}
+
+func isIPhone() -> Bool {
+    #if canImport(UIKit)
+    return UIDevice.current.userInterfaceIdiom == .phone
+    #else
+    return false
+    #endif
+}
+
 struct ContentView: View {
     
     @State var state: ChromaState = .init()
@@ -57,7 +74,7 @@ struct ContentView: View {
                                 querySection
                             }
                             .padding(.horizontal)
-                            if UIDevice.current.userInterfaceIdiom == .pad {
+                            if isIPad() {
                                 logsView
                             } else {
                                 logsView
@@ -87,7 +104,7 @@ struct ContentView: View {
             }
         }
         .onChange(of: state.logs) { oldLogs, newLogs in
-            if UIDevice.current.userInterfaceIdiom == .phone {
+            if isIPhone() {
                 // Skip first log message
                 if oldLogs.isEmpty && !newLogs.isEmpty {
                     return
@@ -115,10 +132,6 @@ struct ContentView: View {
             Text("Persistent Chroma Demo")
                 .font(.title)
                 .bold()
-            
-            Text("Disk-based persistent vector database for semantic search")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding()

@@ -11,13 +11,13 @@ import Chroma
 @Observable
 final class ChromaState {
     var docText: String = ""
-    var errorMessage: String? = nil
+    var queryText: String = ""
     var logs: [String] = []
     var docCounter: Int = 0
-    var showingSuccess: Bool = false
     var collectionName: String = "my_collection"
     var collections: [String] = []
     var isInitialized: Bool = false
+    var errorMessage: String? = nil
     var queryEmbeddingText: String = "0.1,0.2,0.3,0.4"
     var includeFieldsText: String = "documents"
     
@@ -64,4 +64,3 @@ final class ChromaState {
         }
     }
 }
-

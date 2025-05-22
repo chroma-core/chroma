@@ -13,6 +13,7 @@ func logInView(_ s: String) -> EmptyView {
     return EmptyView()
 }
 
+
 struct HeaderView: View {
     
     let title: String
@@ -22,29 +23,12 @@ struct HeaderView: View {
             Text(title)
                 .font(.title)
                 .bold()
+                .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
         .padding()
+        .background(Color.clear)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
-// Toast shown when an operation succeeds
-struct SuccessToast: View {
-    var body: some View {
-        HStack {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(.green)
-            Text("Success!")
-                .foregroundColor(.white)
-                .font(.subheadline)
-                .bold()
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 30)
-                .fill(Color.black.opacity(0.8))
-        )
-        .padding(.top, 20)
-    }
-}

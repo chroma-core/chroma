@@ -50,7 +50,7 @@ struct ContentView: View {
     
     var body: some View {
         GeometryReader { geometry in
-            VStack(spacing: 0) {
+            VStack(spacing: 16) {
                 if geometry.size.width > 600 {
                     HStack(spacing: 0) {
                         ScrollView {
@@ -113,17 +113,11 @@ struct ContentView: View {
             }
         }
         .overlay {
-            if state.showingSuccess {
-                SuccessToast()
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-            
             if showingLogToast, let message = lastLogMessage {
                 LogToast(message: message)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.easeInOut, value: state.showingSuccess)
         .animation(.easeInOut, value: showingLogToast)
     }
     
