@@ -70,4 +70,5 @@ type ICollectionDb interface {
 	LockCollection(collectionID string) (*bool, error)
 	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath *string, newLineageFilePath string) error
 	BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error)
+	BatchGetCollectionSoftDeleteStatus(collectionIDs []string) (map[string]bool, error)
 }
