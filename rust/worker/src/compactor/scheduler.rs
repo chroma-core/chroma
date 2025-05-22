@@ -118,7 +118,10 @@ impl Scheduler {
                             .purge_dirty_for_collection(collection_info.collection_id)
                             .await
                         {
-                            tracing::error!(
+                            // NOTE(rescrv):  This is something we ideally want to know about, but
+                            // cannot act on except to skip the collection.  Some day we'll have
+                            // something by which we can say, "Watch for this condition."
+                            tracing::warn!(
                                 "Error purging dirty records for collection: {:?}, error: {:?}",
                                 collection_info.collection_id,
                                 err

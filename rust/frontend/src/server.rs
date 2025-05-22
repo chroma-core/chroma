@@ -46,6 +46,7 @@ use crate::{
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
     tower_tracing::add_tracing_middleware,
+    traced_json::TracedJson,
     types::errors::{ErrorResponse, ServerError, ValidationError},
     Frontend,
 };
@@ -509,7 +510,7 @@ async fn create_tenant(
     Json(request): Json<CreateTenantPayload>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
     server.metrics.create_tenant.add(1, &[]);
-    tracing::info!("Creating tenant [{}]", request.name);
+    tracing::info!(name: "create_tenant", tenant_name = %request.name);
     server
         .authenticate_and_authorize(
             &headers,
@@ -545,7 +546,7 @@ async fn get_tenant(
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetTenantResponse>, ServerError> {
     server.metrics.get_tenant.add(1, &[]);
-    tracing::info!("Getting tenant [{}]", name);
+    tracing::info!(name: "get_tenant", tenant_name = %name);
     server
         .authenticate_and_authorize(
             &headers,
@@ -590,7 +591,7 @@ async fn create_database(
         .metrics
         .create_database
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Creating database [{}] for tenant [{}]", name, tenant);
+    tracing::info!(name: "create_database", tenant_name = %tenant, database_name = %name);
     server
         .authenticate_and_authorize(
             &headers,
@@ -652,7 +653,7 @@ async fn list_databases(
         .metrics
         .list_databases
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Listing database for tenant [{}]", tenant);
+    tracing::info!(name: "list_databases", tenant_name = %tenant);
     server
         .authenticate_and_authorize(
             &headers,
@@ -695,7 +696,7 @@ async fn get_database(
         .metrics
         .get_database
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Getting database [{}] for tenant [{}]", database, tenant);
+    tracing::info!(name: "get_database", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
             &headers,
@@ -738,7 +739,7 @@ async fn delete_database(
         .metrics
         .delete_database
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Deleting database [{}] for tenant [{}]", database, tenant);
+    tracing::info!(name: "delete_database", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
             &headers,
@@ -789,13 +790,7 @@ async fn list_collections(
         .metrics
         .list_collections
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!(
-        "Listing collections in database [{}] for tenant [{}] with limit [{:?}] and offset [{:?}]",
-        database,
-        tenant,
-        limit,
-        offset
-    );
+    tracing::info!(name: "list_collections", tenant_name = %tenant, database_name = %database, limit = ?limit, offset = ?offset);
     server
         .authenticate_and_authorize(
             &headers,
@@ -845,7 +840,7 @@ async fn count_collections(
         .metrics
         .count_collections
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Counting number of collections in database [{database}] for tenant [{tenant}]",);
+    tracing::info!(name: "count_collections", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
             &headers,
@@ -900,7 +895,7 @@ async fn create_collection(
         .metrics
         .create_collection
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Creating collection in database [{database}] for tenant [{tenant}]");
+    tracing::info!(name: "create_collection", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
             &headers,
@@ -978,9 +973,7 @@ async fn get_collection(
         .metrics
         .get_collection
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!(
-        "Getting collection [{collection_name}] in database [{database}] for tenant [{tenant}]"
-    );
+    tracing::info!(name: "get_collection", tenant_name = %tenant, database_name = %database, collection_name = %collection_name);
     server
         .authenticate_and_authorize(
             &headers,
@@ -1036,9 +1029,7 @@ async fn update_collection(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
-    tracing::info!(
-        "Updating collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
-    );
+    tracing::info!(name: "update_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1109,9 +1100,7 @@ async fn delete_collection(
         .metrics
         .delete_collection
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!(
-        "Deleting collection [{collection_name}] in database [{database}] for tenant [{tenant}]"
-    );
+    tracing::info!(name: "delete_collection", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
             &headers,
@@ -1169,9 +1158,7 @@ async fn fork_collection(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
-    tracing::info!(
-        "Forking collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
-    );
+    tracing::info!(name: "fork_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
     server
         .authenticate_and_authorize(
             &headers,
@@ -1249,7 +1236,7 @@ async fn collection_add(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<AddCollectionRecordsPayload>,
+    TracedJson(payload): TracedJson<AddCollectionRecordsPayload>,
 ) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
     server.metrics.collection_add.add(
         1,
@@ -1298,6 +1285,7 @@ async fn collection_add(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    tracing::info!(name: "collection_add", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
         tenant,
         database,
@@ -1385,6 +1373,7 @@ async fn collection_update(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    tracing::info!(name: "collection_update", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
         tenant,
         database,
@@ -1478,6 +1467,7 @@ async fn collection_upsert(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    tracing::info!(name: "collection_upsert", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
         tenant,
         database,
@@ -1561,7 +1551,7 @@ async fn collection_delete(
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ])?;
-
+    tracing::info!(name: "collection_delete", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.as_ref().map_or(0, |ids| ids.len()), has_where = r#where.is_some());
     let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
         tenant,
         database,
@@ -1604,7 +1594,10 @@ async fn collection_count(
         ],
     );
     tracing::info!(
-        "Counting number of records in collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
+        name: "collection_count",
+        tenant = tenant,
+        database = database,
+        collection_id = collection_id
     );
     server
         .authenticate_and_authorize_collection(
@@ -1704,14 +1697,18 @@ async fn collection_get(
         quota_payload = quota_payload.with_limit(limit);
     }
     server.quota_enforcer.enforce(&quota_payload).await?;
-    tracing::info!(
-        "Getting records from collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
-    );
     let _guard = server.scorecard_request(&[
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ])?;
+
+    tracing::info!(
+        name: "collection_get",
+        num_ids = payload.ids.as_ref().map_or(0, |ids| ids.len()),
+        include = ?payload.include,
+        has_where = parsed_where.is_some(),
+    );
     let request = GetRequest::try_new(
         tenant,
         database,
@@ -1760,7 +1757,7 @@ async fn collection_query(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<QueryRequestPayload>,
+    TracedJson(payload): TracedJson<QueryRequestPayload>,
 ) -> Result<Json<QueryResponse>, ServerError> {
     server.metrics.collection_query.add(
         1,
@@ -1803,16 +1800,19 @@ async fn collection_query(
         quota_payload = quota_payload.with_query_ids(ids);
     }
     server.quota_enforcer.enforce(&quota_payload).await?;
-    tracing::info!(
-        "Querying records from collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
-    );
-
     let _guard = server.scorecard_request(&[
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    tracing::info!(
+        name: "collection_query",
+        num_ids = payload.ids.as_ref().map_or(0, |ids| ids.len()),
+        num_embeddings = payload.query_embeddings.len(),
+        include = ?payload.include,
+        has_where = parsed_where.is_some(),
+    );
     let request = QueryRequest::try_new(
         tenant,
         database,
