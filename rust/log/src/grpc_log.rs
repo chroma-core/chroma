@@ -244,21 +244,41 @@ impl GrpcLog {
         client_for_conn_str(connection_string)
     }
 
+    fn client_is_on_alt_log(to_evaluate: CollectionUuid, alt_host_threshold: Option<&str>) -> bool {
+        if let Some(alt_host_threshold) = alt_host_threshold {
+            let Ok(alt_host_threshold) = Uuid::parse_str(alt_host_threshold) else {
+                tracing::error!("alt_host_threshold must be a valid UUID");
+                return false;
+            };
+            let to_evaluate = to_evaluate.0.as_u64_pair().0;
+            let alt_host_threshold = alt_host_threshold.as_u64_pair().0;
+            to_evaluate <= alt_host_threshold
+        } else {
+            false
+        }
+    }
+
     fn client_for(
         &mut self,
         tenant: &str,
         collection_id: CollectionUuid,
     ) -> &mut LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>> {
-        let collection_id = collection_id.to_string();
         if let Some(alt) = self.alt_client.as_mut() {
-            if self.config.use_alt_host_for_everything
-                || self.config.use_alt_for_tenants.iter().any(|t| t == tenant)
-                || self.config.use_alt_for_collections.contains(&collection_id)
+            if self.config.use_alt_for_tenants.iter().any(|t| t == tenant)
+                || self
+                    .config
+                    .use_alt_for_collections
+                    .contains(&collection_id.to_string())
+                || Self::client_is_on_alt_log(
+                    collection_id,
+                    self.config.alt_host_threshold.as_deref(),
+                )
             {
                 tracing::info!("using alt client for {collection_id}");
                 return alt;
             }
         }
+        tracing::info!("using standard client for {collection_id}");
         &mut self.client
     }
 
@@ -413,7 +433,8 @@ impl GrpcLog {
         let mut norm = self
             ._get_collections_with_new_data(false, min_compaction_size)
             .await?;
-        if self.config.use_alt_host_for_everything
+        if self.config.alt_host_threshold.is_some()
+            || !self.config.use_alt_for_tenants.is_empty()
             || !self.config.use_alt_for_collections.is_empty()
         {
             let alt = self
@@ -522,5 +543,34 @@ impl GrpcLog {
         } else {
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_is_on_alt_log() {
+        assert!(!GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
+            None
+        ));
+        assert!(!GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
+            Some("00088272-cfc4-419d-997a-baebfb25034a"),
+        ));
+        assert!(GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("00088272-cfc4-419d-997a-baebfb25034a").unwrap()),
+            Some("fffdb379-d592-41d1-8de6-412abc6e0b35"),
+        ));
+        assert!(GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
+            Some("fffdb379-d592-41d1-8de6-412abc6e0b35"),
+        ));
+        assert!(GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
+            Some("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+        ));
     }
 }
