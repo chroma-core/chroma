@@ -47,24 +47,39 @@ struct DatabaseControlsView: View {
 
                 ActionButton(title: "Get All Documents", disabled: !state.isPersistentInitialized || state.collections.isEmpty) {
                     if state.collections.isEmpty {
-                        state.addLog("No persistent collections to get documents from")
+                        state.addLog("[GetAll] No collections to get documents from")
                         return
                     }
-                    
-                    state.addLog("--- Retrieved Persistent Documents ---")
-                    for collection in state.collections {
-                        state.addLog("Collection: \(collection)")
-                        let res = try getAllDocuments(collectionName: collection)
-                        if res.ids.isEmpty {
-                            state.addLog("  (empty)")
-                        } else {
-                            let pairs = zip(res.ids, res.documents).map { id, doc in
-                                "  Document ID: \(id)\n  Content: \(doc ?? "(nil)")"
+                    state.addLog("[GetAll] --- Retrieved Documents ---")
+                    Task {
+                        for collection in state.collections {
+                            state.addLog("[GetAll] Fetching documents for collection: \(collection)")
+                            do {
+                                let res = try await withCheckedThrowingContinuation { continuation in
+                                    DispatchQueue.global(qos: .userInitiated).async {
+                                        do {
+                                            let res = try getAllDocuments(collectionName: collection)
+                                            continuation.resume(returning: res)
+                                        } catch {
+                                            continuation.resume(throwing: error)
+                                        }
+                                    }
+                                }
+                                state.addLog("[GetAll] Got \(res.ids.count) documents for collection: \(collection)")
+                                if res.ids.isEmpty {
+                                    state.addLog("[GetAll]   (empty)")
+                                } else {
+                                    let pairs = zip(res.ids, res.documents).map { id, doc in
+                                        "[GetAll]   Document ID: \(id)\n  Content: \(doc ?? "(nil)")"
+                                    }
+                                    pairs.forEach { state.addLog($0) }
+                                }
+                            } catch {
+                                state.addLog("[GetAll] Error fetching documents for collection \(collection): \(error)")
                             }
-                            pairs.forEach { state.addLog($0) }
                         }
+                        state.addLog("[GetAll] --- End of Documents ---")
                     }
-                    state.addLog("--- End of Documents ---")
                 }
                 
                 ActionButton(title: "Show Storage Location", disabled: !state.isPersistentInitialized) {
