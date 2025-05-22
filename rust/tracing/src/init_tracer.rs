@@ -38,6 +38,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "wal3",
                 "worker",
                 "garbage_collector",
+                "axum",
             ]
             .into_iter()
             .map(|s| s.to_string() + "=trace")
