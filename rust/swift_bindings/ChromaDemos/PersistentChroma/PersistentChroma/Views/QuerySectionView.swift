@@ -12,6 +12,9 @@ struct QuerySectionView: View {
     
     @Bindable var state: ChromaState
     
+    @FocusState var focused: Bool
+    @FocusState var focused2: Bool
+    
     var body: some View {
         GroupBox {
             VStack(spacing: 16) {
@@ -34,12 +37,16 @@ struct QuerySectionView: View {
                 // Query Embedding Input
                 TextField("Enter query embedding (comma-separated floats)", text: $state.persistentQueryEmbeddingText)
                     .textFieldStyle(.roundedBorder)
+                    .focused(self.$focused)
 
                 // Include fields input
                 TextField("Fields to include (comma-separated, e.g. documents,embeddings)", text: $state.persistentIncludeFieldsText)
                     .textFieldStyle(.roundedBorder)
+                    .focused(self.$focused2)
                 
                 ActionButton(title: "Query Collection", disabled: !state.isPersistentInitialized || state.collections.isEmpty) {
+                    self.focused = false
+                    self.focused2 = false
                     guard let embedding = parseEmbedding(state.persistentQueryEmbeddingText) else {
                         state.addLog("[Query] Invalid embedding format. Please enter comma-separated floats.")
                         return

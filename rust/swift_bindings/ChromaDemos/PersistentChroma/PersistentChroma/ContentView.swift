@@ -78,6 +78,7 @@ struct ContentView: View {
                                 logsView
                             } else {
                                 logsView
+                                // TODO: could maybe give more height here?
                                     .frame(height: 200)
                             }
                         }

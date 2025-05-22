@@ -12,6 +12,8 @@ struct DatabaseControlsView: View {
     
     @Bindable var state: ChromaState
     
+    @FocusState var focused: Bool
+    
     var body: some View {
         GroupBox {
             VStack(spacing: 16) {
@@ -34,18 +36,22 @@ struct DatabaseControlsView: View {
                       
                 TextField("Collection name", text: $state.persistentCollectionName)
                     .textFieldStyle(.roundedBorder)
+                    .focused($focused)
                 
                 ActionButton(title: "Create Collection", disabled: !state.isPersistentInitialized) {
+                    self.focused = false
                     let collectionId = try createCollection(name: state.persistentCollectionName)
                     state.addLog("Persistent collection created: \(collectionId)")
                     state.refreshCollections()
                 }
                 
                 ActionButton(title: "List Collections", disabled: !state.isPersistentInitialized) {
+                    self.focused = false
                     state.refreshCollections()
                 }
 
                 ActionButton(title: "Get All Documents", disabled: !state.isPersistentInitialized || state.collections.isEmpty) {
+                    self.focused = false
                     if state.collections.isEmpty {
                         state.addLog("[GetAll] No collections to get documents from")
                         return
@@ -83,10 +89,12 @@ struct DatabaseControlsView: View {
                 }
                 
                 ActionButton(title: "Show Storage Location", disabled: !state.isPersistentInitialized) {
+                    self.focused = false
                     state.addLog("Storage location at: \(state.persistentPath)")
                 }
                 
                 ActionButton(title: "Reset Chroma", disabled: !state.isPersistentInitialized) {
+                    self.focused = false
                     try state.reset()
                     state.addLog("System reset complete")
                 }

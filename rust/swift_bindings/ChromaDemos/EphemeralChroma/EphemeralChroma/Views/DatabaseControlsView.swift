@@ -23,6 +23,8 @@ struct DatabaseControlsView: View {
     var isInitialized: Bool {
         state.isInitialized
     }
+    
+    @FocusState var focused: Bool
         
     var body: some View {
         GroupBox {
@@ -33,9 +35,11 @@ struct DatabaseControlsView: View {
                 
                 TextField("Collection name", text: $state.collectionName)
                     .textFieldStyle(.roundedBorder)
+                    .focused($focused)
                 
                 ActionButton(title: "Create Collection",
                              disabled: !isInitialized) {
+                    self.focused = false
                     let collectionId = try Chroma.createCollection(name: collectionName)
                     state.addLog("Ephemeral collection created: \(collectionId)")
                     state.refreshCollections()
@@ -43,11 +47,13 @@ struct DatabaseControlsView: View {
                 
                 ActionButton(title: "List Collections",
                              disabled: !isInitialized) {
+                    self.focused = false
                     state.refreshCollections()
                 }
                 
                 ActionButton(title: "Get All Documents",
                              disabled: !isInitialized || collections.isEmpty) {
+                    self.focused = false
                     if collections.isEmpty {
                         state.addLog("[GetAll] No collections to get documents from")
                         return
@@ -85,6 +91,7 @@ struct DatabaseControlsView: View {
                 }
                 
                 ActionButton(title: "Reset Chroma") {
+                    self.focused = false
                     try state.reset()
                     state.addLog("System reset complete")
                 }

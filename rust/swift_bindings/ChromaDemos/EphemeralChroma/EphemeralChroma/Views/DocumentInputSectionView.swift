@@ -32,6 +32,8 @@ struct DocumentInputSectionView: View {
         state.docCounter
     }
     
+    @FocusState var focused: Bool
+    
     var body: some View {
         GroupBox {
             VStack(spacing: 16) {
@@ -53,9 +55,11 @@ struct DocumentInputSectionView: View {
                 
                 TextField("Enter document text...", text: $state.docText)
                     .textFieldStyle(.roundedBorder)
+                    .focused($focused)
                 
                 ActionButton(title: "Add Document",
                              disabled: !isInitialized || docText.isEmpty || collections.isEmpty) {
+                    self.focused = false
                     state.docCounter += 1
                     let ids = ["doc\(docCounter)"]
                     let embeddings: [[Float]] = [[0.1, 0.2, 0.3, 0.4]]
