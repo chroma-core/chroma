@@ -19,6 +19,10 @@ runs:
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
         cache: false # we use Blacksmith's cache package below
+    - name: Set channel in rust-toolchain.toml as default
+      shell: bash
+      run: |
+        rustup default $(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)
     - name: Install Protoc
       uses: arduino/setup-protoc@v3
       with:
