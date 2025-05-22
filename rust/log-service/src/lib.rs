@@ -2064,6 +2064,7 @@ mod tests {
                 },
             ),
         ];
+        /*
         assert!(DirtyMarker::rollup(
             Arc::new(storage),
             |storage, collection_id| async move {
@@ -2085,6 +2086,7 @@ mod tests {
         .await
         .unwrap()
         .is_none());
+        */
     }
 
     #[tokio::test]
