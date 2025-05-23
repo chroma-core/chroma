@@ -476,6 +476,20 @@ impl ChromaError for DeleteDatabaseError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum FinishDatabaseDeletionError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for FinishDatabaseDeletionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            FinishDatabaseDeletionError::Internal(err) => err.code(),
+        }
+    }
+}
+
 #[non_exhaustive]
 #[derive(Validate, Debug, Serialize, ToSchema)]
 pub struct ListCollectionsRequest {

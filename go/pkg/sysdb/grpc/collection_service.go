@@ -253,7 +253,7 @@ func (s *Server) GetCollectionWithSegments(ctx context.Context, req *coordinator
 	collection, segments, err := s.coordinator.GetCollectionWithSegments(ctx, parsedCollectionID)
 	if err != nil {
 		log.Error("GetCollectionWithSegments failed. ", zap.Error(err), zap.String("collection_id", collectionID))
-		if err == common.ErrCollectionNotFound {
+		if err == common.ErrCollectionNotFound || err == common.ErrCollectionSoftDeleted {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
@@ -404,7 +404,7 @@ func (s *Server) ForkCollection(ctx context.Context, req *coordinatorpb.ForkColl
 	collection, segments, err := s.coordinator.ForkCollection(ctx, forkCollection)
 	if err != nil {
 		log.Error("ForkCollection failed. ", zap.Error(err), zap.String("collection_id", sourceCollectionID))
-		if err == common.ErrCollectionNotFound {
+		if err == common.ErrCollectionNotFound || err == common.ErrCollectionSoftDeleted {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
 		if err == common.ErrCollectionLogPositionStale {

@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
@@ -254,4 +255,16 @@ func (s *Coordinator) BatchGetCollectionVersionFilePaths(ctx context.Context, re
 
 func (s *Coordinator) BatchGetCollectionSoftDeleteStatus(ctx context.Context, req *coordinatorpb.BatchGetCollectionSoftDeleteStatusRequest) (*coordinatorpb.BatchGetCollectionSoftDeleteStatusResponse, error) {
 	return s.catalog.BatchGetCollectionSoftDeleteStatus(ctx, req.CollectionIds)
+}
+
+func (s *Coordinator) FinishDatabaseDeletion(ctx context.Context, req *coordinatorpb.FinishDatabaseDeletionRequest) (*coordinatorpb.FinishDatabaseDeletionResponse, error) {
+	numDeleted, err := s.catalog.FinishDatabaseDeletion(ctx, time.Unix(req.CutoffTime.Seconds, int64(req.CutoffTime.Nanos)))
+	if err != nil {
+		return nil, err
+	}
+
+	res := &coordinatorpb.FinishDatabaseDeletionResponse{
+		NumDeleted: numDeleted,
+	}
+	return res, nil
 }

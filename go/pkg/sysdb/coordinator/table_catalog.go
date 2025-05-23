@@ -183,25 +183,34 @@ func (tc *Catalog) DeleteDatabase(ctx context.Context, deleteDatabase *model.Del
 		if len(databases) == 0 {
 			return common.ErrDatabaseNotFound
 		}
-		err = tc.metaDomain.DatabaseDb(txCtx).Delete(databases[0].ID)
+		err = tc.metaDomain.DatabaseDb(txCtx).SoftDelete(databases[0].ID)
 		if err != nil {
 			return err
 		}
+
+		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, nil, deleteDatabase.Tenant, deleteDatabase.Name, nil, nil)
+		if err != nil {
+			return err
+		}
+
+		for _, collection := range collections {
+			collectionID, err := types.Parse(collection.Collection.ID)
+			if err != nil {
+				return err
+			}
+
+			err = tc.softDeleteCollection(txCtx, &model.DeleteCollection{
+				ID:           collectionID,
+				TenantID:     deleteDatabase.Tenant,
+				DatabaseName: deleteDatabase.Name,
+			})
+			if err != nil {
+				return err
+			}
+		}
+
 		return nil
 	})
-}
-
-func (tc *Catalog) GetAllDatabases(ctx context.Context, ts types.Timestamp) ([]*model.Database, error) {
-	databases, err := tc.metaDomain.DatabaseDb(ctx).GetAllDatabases()
-	if err != nil {
-		log.Error("error getting all databases", zap.Error(err))
-		return nil, err
-	}
-	result := make([]*model.Database, 0, len(databases))
-	for _, database := range databases {
-		result = append(result, convertDatabaseToModel(database))
-	}
-	return result, nil
 }
 
 func (tc *Catalog) CreateTenant(ctx context.Context, createTenant *model.CreateTenant, ts types.Timestamp) (*model.Tenant, error) {
@@ -681,7 +690,7 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 
 		// Generate new name with timestamp and random number
 		oldName := *collections[0].Collection.Name
-		newName := fmt.Sprintf("_deleted_%s_%s", oldName, *types.FromUniqueID(deleteCollection.ID))
+		newName := fmt.Sprintf("_deleted_%s_%s", oldName, deleteCollection.ID.String())
 
 		dbCollection := &dbmodel.Collection{
 			ID:        deleteCollection.ID.String(),
@@ -2210,4 +2219,8 @@ func (tc *Catalog) GetVersionFileNamesForCollection(ctx context.Context, tenantI
 	}
 
 	return collectionEntry.VersionFileName, nil
+}
+
+func (tc *Catalog) FinishDatabaseDeletion(ctx context.Context, cutoffTime time.Time) (uint64, error) {
+	return tc.metaDomain.DatabaseDb(ctx).FinishDatabaseDeletion(cutoffTime)
 }

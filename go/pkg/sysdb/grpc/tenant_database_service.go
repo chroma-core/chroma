@@ -158,3 +158,11 @@ func (s *Server) GetLastCompactionTimeForTenant(ctx context.Context, req *coordi
 	}
 	return res, nil
 }
+
+func (s *Server) FinishDatabaseDeletion(ctx context.Context, req *coordinatorpb.FinishDatabaseDeletionRequest) (*coordinatorpb.FinishDatabaseDeletionResponse, error) {
+	res, err := s.coordinator.FinishDatabaseDeletion(ctx, req)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return res, nil
+}
