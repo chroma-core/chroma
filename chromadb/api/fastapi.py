@@ -54,7 +54,6 @@ logger = logging.getLogger(__name__)
 
 class FastAPI(BaseHTTPClient, ServerAPI):
     def __init__(self, system: System):
-        print("RUNNING THIS CODE MAN!")
         super().__init__(system)
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
