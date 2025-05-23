@@ -347,7 +347,10 @@ mod tests {
     ) -> Result<Uuid, Box<dyn ChromaError>> {
         // Use the test utility function to create a sparse index
         let root_id = sparse_index_test_utils::create_test_sparse_index(
-            storage, block_ids, None, // Use default "test" prefix
+            storage,
+            Uuid::new_v4(),
+            block_ids,
+            None, // Use default "test" prefix
         )
         .await?;
 
