@@ -548,3 +548,11 @@ func (s *Server) DeleteCollectionVersion(ctx context.Context, req *coordinatorpb
 	}
 	return res, nil
 }
+
+func (s *Server) BatchGetCollectionVersionFilePaths(ctx context.Context, req *coordinatorpb.BatchGetCollectionVersionFilePathsRequest) (*coordinatorpb.BatchGetCollectionVersionFilePathsResponse, error) {
+	res, err := s.coordinator.BatchGetCollectionVersionFilePaths(ctx, req)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return res, nil
+}

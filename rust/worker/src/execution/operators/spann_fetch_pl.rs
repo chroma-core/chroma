@@ -14,6 +14,7 @@ pub(crate) struct SpannFetchPlInput<'referred_data> {
 #[derive(Debug)]
 pub(crate) struct SpannFetchPlOutput {
     pub(crate) posting_list: Vec<SpannPosting>,
+    pub(crate) head_id: u32,
 }
 
 #[derive(Error, Debug)]
@@ -59,7 +60,10 @@ impl<'referred_data> Operator<SpannFetchPlInput<'referred_data>, SpannFetchPlOut
                     .fetch_posting_list(input.head_id)
                     .await
                     .map_err(|_| SpannFetchPlError::SpannSegmentReaderError)?;
-                Ok(SpannFetchPlOutput { posting_list })
+                Ok(SpannFetchPlOutput {
+                    posting_list,
+                    head_id: input.head_id,
+                })
             }
             None => {
                 return Err(SpannFetchPlError::SpannSegmentReaderCreationError);

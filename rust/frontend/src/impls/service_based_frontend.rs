@@ -66,9 +66,11 @@ pub struct ServiceBasedFrontend {
     metrics: Arc<Metrics>,
     default_knn_index: KnnIndex,
     retries_builder: ExponentialBuilder,
+    tenants_to_migrate_immediately: HashSet<String>,
 }
 
 impl ServiceBasedFrontend {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         allow_reset: bool,
         sysdb_client: SysDb,
@@ -77,6 +79,7 @@ impl ServiceBasedFrontend {
         executor: Executor,
         max_batch_size: u32,
         default_knn_index: KnnIndex,
+        tenants_to_migrate_immediately: HashSet<String>,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -119,6 +122,7 @@ impl ServiceBasedFrontend {
             metrics,
             default_knn_index,
             retries_builder,
+            tenants_to_migrate_immediately,
         }
     }
 
@@ -489,7 +493,7 @@ impl ServiceBasedFrontend {
         let collection = self
             .sysdb_client
             .create_collection(
-                tenant_id,
+                tenant_id.clone(),
                 database_name,
                 collection_id,
                 name,
@@ -505,8 +509,16 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
-
+        if self.tenant_is_on_new_log_by_default(&tenant_id) {
+            if let Err(err) = self.log_client.seal_log(&tenant_id, collection_id).await {
+                tracing::error!("could not seal collection right away: {err}");
+            }
+        }
         Ok(collection)
+    }
+
+    fn tenant_is_on_new_log_by_default(&self, tenant_id: &str) -> bool {
+        self.tenants_to_migrate_immediately.contains(tenant_id)
     }
 
     pub async fn update_collection(
@@ -1544,6 +1556,11 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone()), registry).await?;
 
+        let tenants_to_migrate_immediately = config
+            .tenants_to_migrate_immediately
+            .iter()
+            .cloned()
+            .collect::<HashSet<String>>();
         Ok(ServiceBasedFrontend::new(
             config.allow_reset,
             sysdb,
@@ -1552,6 +1569,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             executor,
             max_batch_size,
             config.default_knn_index,
+            tenants_to_migrate_immediately,
         ))
     }
 }

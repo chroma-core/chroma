@@ -1545,6 +1545,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 	if tc.versionFileEnabled {
 		return tc.FlushCollectionCompactionForVersionedCollection(ctx, flushCollectionCompaction)
 	}
+	collectionID := types.FromUniqueID(flushCollectionCompaction.ID)
 
 	flushCollectionInfo := &model.FlushCollectionInfo{
 		ID: flushCollectionCompaction.ID.String(),
@@ -1552,7 +1553,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if collection exists.
-		collection, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionWithoutMetadata(types.FromUniqueID(flushCollectionCompaction.ID), nil, nil)
+		collection, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionWithoutMetadata(collectionID, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -1589,6 +1590,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		// return nil will commit the transaction
 		return nil
 	})
+	log.Info("FlushCollectionCompaction", zap.String("collection_id", *collectionID), zap.Int64("log_position", flushCollectionCompaction.LogPosition))
 	if err != nil {
 		return nil, err
 	}
@@ -1640,6 +1642,8 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 	flushCollectionInfo := &model.FlushCollectionInfo{
 		ID: flushCollectionCompaction.ID.String(),
 	}
+
+	log.Info("FlushCollectionCompaction", zap.String("collection_id", flushCollectionInfo.ID), zap.Int64("log_position", flushCollectionCompaction.LogPosition))
 
 	// Do the operation in a loop until the CollectionEntry is updated,
 	// 		OR FAIL the operation if the version is stale
@@ -2091,6 +2095,20 @@ func (tc *Catalog) DeleteCollectionVersion(ctx context.Context, req *coordinator
 		err := tc.DeleteVersionEntriesForCollection(ctx, collectionVersionList.TenantId, collectionVersionList.CollectionId, collectionVersionList.Versions)
 		result.CollectionIdToSuccess[collectionVersionList.CollectionId] = err == nil
 	}
+	return &result, nil
+}
+
+func (tc *Catalog) BatchGetCollectionVersionFilePaths(ctx context.Context, collectionIds []string) (*coordinatorpb.BatchGetCollectionVersionFilePathsResponse, error) {
+	result := coordinatorpb.BatchGetCollectionVersionFilePathsResponse{
+		CollectionIdToVersionFilePath: make(map[string]string),
+	}
+
+	paths, err := tc.metaDomain.CollectionDb(ctx).BatchGetCollectionVersionFilePaths(collectionIds)
+	if err != nil {
+		return nil, err
+	}
+	result.CollectionIdToVersionFilePath = paths
+
 	return &result, nil
 }
 

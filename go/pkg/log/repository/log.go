@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	log "github.com/chroma-core/chroma/go/pkg/log/store/db"
@@ -215,6 +216,9 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 
 func (r *LogRepository) SealCollection(ctx context.Context, collectionID string) (err error) {
 	_, err = r.queries.SealLog(ctx, collectionID)
+	if err != nil && strings.Contains(err.Error(), "no rows in result set") {
+		_, err = r.queries.SealLogInsert(ctx, collectionID)
+	}
 	return
 }
 

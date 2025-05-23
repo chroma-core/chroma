@@ -1,4 +1,4 @@
-use crate::grpc_log::GrpcLog;
+use crate::grpc_log::{GrpcLog, GrpcSealLogError};
 use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
@@ -208,6 +208,18 @@ impl Log {
             Log::Sqlite(log) => log.reset().await,
             Log::Grpc(_) => Ok(ResetResponse {}),
             Log::InMemory(_) => Ok(ResetResponse {}),
+        }
+    }
+
+    pub async fn seal_log(
+        &mut self,
+        tenant: &str,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GrpcSealLogError> {
+        match self {
+            Log::Grpc(log) => log.seal_log(tenant, collection_id).await,
+            Log::Sqlite(_) => unimplemented!(),
+            Log::InMemory(_) => unimplemented!(),
         }
     }
 }
