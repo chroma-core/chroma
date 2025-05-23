@@ -175,8 +175,8 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 lookup_table_size += ngram_doc_pos.len();
                 ngram_doc_pos_vec.push(ngram_doc_pos);
 
-                let prefix = &ngram[..N - 1];
-                let suffix = &ngram[1..];
+                let prefix = &ngram[..ngram.char_indices().next_back().unwrap_or_default().0];
+                let suffix = &ngram[ngram.char_indices().nth(1).unwrap_or_default().0..];
                 lookup_table
                     .prefix
                     .entry(prefix)
@@ -224,7 +224,8 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 // Trace to the right of pivot
                 let mut suffix_pos_idx =
                     Vec::with_capacity(lookup_table_vec.len() - min_lookup_table_index);
-                suffix_pos_idx.push((&ngram[1..], pos + ngram[..1].len() as u32, 0));
+                let suffix_offset = ngram.char_indices().nth(1).unwrap_or_default().0;
+                suffix_pos_idx.push((&ngram[suffix_offset..], pos + suffix_offset as u32, 0));
                 while let Some((suffix, match_pos, ngram_index)) = suffix_pos_idx.pop() {
                     let focus_lookup_table = match lookup_table_vec
                         .get(min_lookup_table_index + suffix_pos_idx.len() + 1)
@@ -250,9 +251,10 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                             Err(_) => continue,
                         };
                     if pos.binary_search(&match_pos).is_ok() {
+                        let suffix_offset = focus_ngram.char_indices().nth(1).unwrap_or_default().0;
                         suffix_pos_idx.push((
-                            &focus_ngram[1..],
-                            match_pos + focus_ngram[..1].len() as u32,
+                            &focus_ngram[suffix_offset..],
+                            match_pos + suffix_offset as u32,
                             0,
                         ));
                     }
@@ -263,7 +265,8 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
 
                 // Trace to the left of pivot
                 let mut prefix_pos_idx = Vec::with_capacity(min_lookup_table_index + 1);
-                prefix_pos_idx.push((&ngram[..N - 1], pos, 0));
+                let prefix_offset = ngram.char_indices().next_back().unwrap_or_default().0;
+                prefix_pos_idx.push((&ngram[..prefix_offset], pos, 0));
                 while let Some((prefix, match_pos_with_offset, ngram_index)) = prefix_pos_idx.pop()
                 {
                     let focus_lookup_table = match min_lookup_table_index
@@ -290,13 +293,16 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                             Ok(idx) => focus_ngram_doc_pos[idx],
                             Err(_) => continue,
                         };
-                    let match_pos =
-                        match match_pos_with_offset.checked_sub(focus_ngram[..1].len() as u32) {
-                            Some(pos) => pos,
-                            None => continue,
-                        };
+                    let match_pos = match match_pos_with_offset
+                        .checked_sub(focus_ngram.char_indices().nth(1).unwrap_or_default().0 as u32)
+                    {
+                        Some(pos) => pos,
+                        None => continue,
+                    };
                     if pos.binary_search(&match_pos).is_ok() {
-                        prefix_pos_idx.push((&focus_ngram[..N - 1], match_pos, 0));
+                        let prefix_offset =
+                            focus_ngram.char_indices().next_back().unwrap_or_default().0;
+                        prefix_pos_idx.push((&focus_ngram[..prefix_offset], match_pos, 0));
                     }
                 }
                 if !prefix_pos_idx.is_empty() {
