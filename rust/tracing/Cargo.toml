@@ -7,6 +7,7 @@ edition = "2021"
 fastrace = "0.7.8"
 fastrace-opentelemetry = "0.8"
 http = { version = "1", optional = true }
+chrono = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
