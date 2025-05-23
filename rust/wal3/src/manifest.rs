@@ -15,8 +15,8 @@ use chroma_storage::{
 use setsum::Setsum;
 
 use crate::{
-    Error, Fragment, FragmentSeqNo, LogPosition, LogWriterOptions, ScrubError, ScrubSuccess,
-    SnapshotOptions, ThrottleOptions,
+    Error, Fragment, FragmentSeqNo, Garbage, GarbageAction, LogPosition, LogWriterOptions,
+    ScrubError, ScrubSuccess, SnapshotOptions, ThrottleOptions,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -59,6 +59,12 @@ pub struct SnapshotPointer {
 impl SnapshotPointer {
     /// An estimate on the number of bytes required to serialize this object as JSON.
     pub const JSON_SIZE_ESTIMATE: usize = 142;
+}
+
+impl From<&Snapshot> for SnapshotPointer {
+    fn from(snap: &Snapshot) -> Self {
+        snap.to_pointer()
+    }
 }
 
 ///////////////////////////////////////////// Snapshot /////////////////////////////////////////////
@@ -734,6 +740,89 @@ impl Manifest {
             (Some(f), None) => f,
             (None, Some(s)) => s,
             (None, None) => LogPosition::default(),
+        }
+    }
+
+    /// Apply the destructive operation specified by the Garbage struct.
+    #[allow(clippy::result_large_err)]
+    pub fn apply_garbage(&self, garbage: Garbage) -> Result<Self, ScrubError> {
+        let Garbage {
+            dropped_setsum,
+            actions,
+        } = garbage;
+        let mut new = self.clone();
+        for action in actions {
+            new.apply_garbage_action(action)?;
+        }
+        if self.setsum - dropped_setsum != new.setsum {
+            Err(ScrubError::CorruptGarbage {
+                expected_setsum: self.setsum - dropped_setsum,
+                returned_setsum: new.setsum,
+            })
+        } else {
+            Ok(new)
+        }
+    }
+
+    #[allow(clippy::result_large_err)]
+    fn apply_garbage_action(&mut self, action: GarbageAction) -> Result<(), ScrubError> {
+        match action {
+            GarbageAction::DropFragment {
+                path_to_fragment,
+                fragment_setsum,
+            } => {
+                let Some(index) = self.fragments.iter().position(|frag| {
+                    frag.path == path_to_fragment && frag.setsum == fragment_setsum
+                }) else {
+                    return Err(ScrubError::MissingFragmentBySetsumPath {
+                        path: path_to_fragment,
+                        setsum: fragment_setsum,
+                    });
+                };
+                self.fragments.remove(index);
+                self.setsum -= fragment_setsum;
+                Ok(())
+            }
+            GarbageAction::DropSnapshot {
+                path_to_snapshot,
+                snapshot_setsum,
+                children: _,
+            } => {
+                let Some(index) = self.snapshots.iter().position(|snap| {
+                    snap.path_to_snapshot == path_to_snapshot && snap.setsum == snapshot_setsum
+                }) else {
+                    return Err(ScrubError::MissingSnapshotBySetsumPath {
+                        path: path_to_snapshot,
+                        setsum: snapshot_setsum,
+                    });
+                };
+                self.snapshots.remove(index);
+                self.setsum -= snapshot_setsum;
+                // NOTE(rescrv):  There's no action to take on the children.  Removing the snapshot
+                // cuts them from the manifest.  The actual destructive routine needs the children
+                // to know what to erase, but we're unlinking the whole shebang in one go.
+                Ok(())
+            }
+            GarbageAction::ReplaceSnapshot {
+                old_path_to_snapshot,
+                old_snapshot_setsum,
+                new_snapshot,
+                children: _,
+            } => {
+                let Some(index) = self.snapshots.iter().position(|snap| {
+                    snap.path_to_snapshot == old_path_to_snapshot
+                        && snap.setsum == old_snapshot_setsum
+                }) else {
+                    return Err(ScrubError::MissingSnapshotBySetsumPath {
+                        path: old_path_to_snapshot,
+                        setsum: old_snapshot_setsum,
+                    });
+                };
+                self.snapshots[index] = SnapshotPointer::from(&new_snapshot);
+                self.setsum -= old_snapshot_setsum + new_snapshot.setsum;
+                // NOTE(rescrv):  Ditto DropSnapshot's note.
+                Ok(())
+            }
         }
     }
 }
