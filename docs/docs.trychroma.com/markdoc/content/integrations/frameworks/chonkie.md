@@ -5,9 +5,9 @@ name: Chonkie
 
 # Chonkie
 [Chonkie](https://docs.chonkie.ai) is an open source library for data ingestion. 
-Chonkie provides advanced chunkers for cleanly splitting your data, and embedding handlers to embed the resulting chunks.
+Chonkie provides advanced chunkers for cleanly splitting your data and embedding handlers to embed the resulting chunks.
 
-When building a RAG system, you can have your data chunked and embeded by Chonkie, and then pass it on to the Chroma handshake for storage and retreival from your Chroma instance.
+When building a RAG system, you can use Chonkie to chunk and embed your data, and then store the chunks in Chroma using the Chroma handshake.
 
 {% Banner type="tip" %}
 For more information on how to use Chonkie, see the [Chonkie Docs](https://docs.chonkie.ai)
@@ -16,7 +16,7 @@ For more information on how to use Chonkie, see the [Chonkie Docs](https://docs.
 
 # Chonkie Chroma Handshake
 
-Chonkie provides a Chroma handshake that can be used to embed and insert data into a Chroma collection.
+Chonkie provides a Chroma handshake that can be used to embed and insert chunks into a Chroma collection.
 
 ## Prerequisites
 
