@@ -433,7 +433,7 @@ impl Arbitrary for ChromaHir {
     type Strategy = BoxedStrategy<Self>;
 
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
-        let literal = r"[a-zA-Z0-9_]{3,}".prop_map(Self::Literal);
+        let literal = r"\w{3,}".prop_map(Self::Literal);
         let char_class = prop_oneof![
             2 => Just(Self::Class(ClassUnicode::new([
                 ClassUnicodeRange::new('a', 'z'),
