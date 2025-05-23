@@ -71,10 +71,31 @@ impl From<ChromaHir> for LiteralExpr {
     }
 }
 
+#[derive(Debug, Default)]
+struct PrefixSuffixLookupTable<'me> {
+    prefix: HashMap<&'me str, Vec<usize>>,
+    suffix: HashMap<&'me str, Vec<usize>>,
+}
+
+impl<'me> PrefixSuffixLookupTable<'me> {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            prefix: HashMap::with_capacity(capacity),
+            suffix: HashMap::with_capacity(capacity),
+        }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait NgramLiteralProvider<E, const N: usize = 3> {
     // Return the max branching factor during the search
     fn maximum_branching_factor(&self) -> usize;
+
+    async fn prefetch_ngrams<'me, Ngrams>(&'me self, _ngrams: Ngrams)
+    where
+        Ngrams: IntoIterator<Item = &'me str> + Send + Sync,
+    {
+    }
 
     // Return the (ngram, doc_id, positions) for a range of ngrams
     async fn lookup_ngram_range<'me, NgramRange>(
@@ -95,17 +116,19 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             return Ok(HashSet::new());
         }
 
-        let (initial_literals, remaining_literals) = literals.split_at(N);
-        let initial_ngrams =
-            initial_literals
-                .iter()
-                .fold(vec![Vec::with_capacity(N)], |mut acc, lit| match lit {
-                    Literal::Char(c) => {
-                        acc.iter_mut().for_each(|s| s.push(*c));
-                        acc
-                    }
-                    Literal::Class(class_unicode) => {
-                        acc.into_iter()
+        // Derive the full set of ngrams
+        let ngram_vec = literals
+            .windows(N)
+            .map(|ngram_literals| {
+                ngram_literals
+                    .iter()
+                    .fold(vec![String::with_capacity(N)], |mut acc, lit| match lit {
+                        Literal::Char(c) => {
+                            acc.iter_mut().for_each(|s| s.push(*c));
+                            acc
+                        }
+                        Literal::Class(class_unicode) => acc
+                            .into_iter()
                             .flat_map(|s| {
                                 class_unicode.iter().flat_map(|r| r.start()..=r.end()).map(
                                     move |c| {
@@ -115,95 +138,107 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                                     },
                                 )
                             })
-                            .collect()
-                    }
-                });
+                            .collect(),
+                    })
+            })
+            .collect::<Vec<_>>();
 
-        // ngram suffix -> doc_id -> position
-        let mut suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, HashSet<u32>>> = HashMap::new();
-        for ngram in initial_ngrams {
-            let ngram_string = ngram.iter().collect::<String>();
-            let ngram_doc_pos = self
-                .lookup_ngram_range(ngram_string.as_str()..=ngram_string.as_str())
-                .await?;
+        if ngram_vec.is_empty() {
+            return Ok(HashSet::new());
+        }
 
-            if ngram_doc_pos.is_empty() {
-                continue;
-            }
+        self.prefetch_ngrams(
+            ngram_vec
+                .iter()
+                .flat_map(|ngrams| ngrams.iter().map(|ngram| ngram.as_str())),
+        )
+        .await;
 
-            let suffix = ngram[1..].to_vec();
-            for (_, doc_id, pos) in ngram_doc_pos {
-                if pos.is_empty() {
+        // Retrieve all ngram posting lists
+        let mut ngram_doc_pos_vec = Vec::with_capacity(ngram_vec.iter().map(Vec::len).sum());
+        let mut lookup_table_vec = Vec::<PrefixSuffixLookupTable>::with_capacity(ngram_vec.len());
+        let mut min_lookup_table_size = usize::MAX;
+        let mut min_lookup_table_index = 0;
+        for ngrams in &ngram_vec {
+            let mut lookup_table = PrefixSuffixLookupTable::with_capacity(ngrams.len());
+            let mut lookup_table_size = 0;
+            for ngram in ngrams {
+                let ngram_doc_pos = self
+                    .lookup_ngram_range(ngram.as_str()..=ngram.as_str())
+                    .await?;
+
+                if ngram_doc_pos.is_empty() {
                     continue;
                 }
-                if mask.is_none() || mask.is_some_and(|m| m.contains(&doc_id)) {
-                    suffix_doc_pos
-                        .entry(suffix.clone())
-                        .or_default()
-                        .entry(doc_id)
-                        .or_default()
-                        .extend(pos);
-                }
+
+                let ngram_doc_pos_index = ngram_doc_pos_vec.len();
+                lookup_table_size += ngram_doc_pos.len();
+                ngram_doc_pos_vec.push(ngram_doc_pos);
+
+                let prefix = &ngram[..N - 1];
+                let suffix = &ngram[1..];
+                lookup_table
+                    .prefix
+                    .entry(prefix)
+                    .or_insert_with(|| Vec::with_capacity(ngrams.len()))
+                    .push(ngram_doc_pos_index);
+                lookup_table
+                    .suffix
+                    .entry(suffix)
+                    .or_insert_with(|| Vec::with_capacity(ngrams.len()))
+                    .push(ngram_doc_pos_index);
+            }
+            let lookup_table_index = lookup_table_vec.len();
+            lookup_table_vec.push(lookup_table);
+            if lookup_table_size < min_lookup_table_size {
+                min_lookup_table_size = lookup_table_size;
+                min_lookup_table_index = lookup_table_index;
             }
         }
 
-        for literal in remaining_literals {
-            if suffix_doc_pos.is_empty() {
-                break;
-            }
-            let mut new_suffix_doc_pos: HashMap<Vec<char>, HashMap<u32, HashSet<u32>>> =
-                HashMap::new();
-            for (mut suffix, doc_pos) in suffix_doc_pos {
-                let ngram_ranges = match literal {
-                    Literal::Char(literal_char) => {
-                        suffix.push(*literal_char);
-                        vec![(suffix.clone(), suffix)]
-                    }
-                    Literal::Class(class_unicode) => class_unicode
-                        .iter()
-                        .map(|r| {
-                            let mut min_ngram = suffix.clone();
-                            min_ngram.push(r.start());
-                            let mut max_ngram = suffix.clone();
-                            max_ngram.push(r.end());
-                            (min_ngram, max_ngram)
-                        })
-                        .collect(),
-                };
-
-                for (min_ngram, max_ngram) in ngram_ranges {
-                    let min_ngram_string = min_ngram.iter().collect::<String>();
-                    let max_ngram_string = max_ngram.iter().collect::<String>();
-                    let ngram_doc_pos = self
-                        .lookup_ngram_range(min_ngram_string.as_str()..=max_ngram_string.as_str())
-                        .await?;
-                    for (ngram, doc_id, next_pos) in ngram_doc_pos {
-                        if let Some(pos) = doc_pos.get(&doc_id) {
-                            let next_pos_set: HashSet<&u32> = HashSet::from_iter(next_pos);
-                            let mut valid_next_pos = pos
-                                .iter()
-                                .filter_map(|p| next_pos_set.contains(&(p + 1)).then_some(p + 1))
-                                .peekable();
-                            if valid_next_pos.peek().is_some() {
-                                let new_suffix = ngram.chars().skip(1).collect();
-                                new_suffix_doc_pos
-                                    .entry(new_suffix)
-                                    .or_default()
-                                    .entry(doc_id)
-                                    .or_default()
-                                    .extend(valid_next_pos);
-                            }
-                        }
-                    }
-                }
-            }
-            suffix_doc_pos = new_suffix_doc_pos;
+        // Gather candidate documents
+        let min_lookup_table = &lookup_table_vec[min_lookup_table_index];
+        let min_ngram_doc_pos_iter = min_lookup_table
+            .prefix
+            .values()
+            .flat_map(|idxs| idxs.iter().map(|idx| &ngram_doc_pos_vec[*idx]));
+        let mut candidates =
+            HashMap::<_, Vec<_>>::with_capacity(min_ngram_doc_pos_iter.clone().map(Vec::len).sum());
+        for (ngram, doc, pos) in min_ngram_doc_pos_iter.flatten() {
+            candidates
+                .entry(*doc)
+                .or_insert_with(|| Vec::with_capacity(pos.len()))
+                .extend(pos.iter().map(|p| (*ngram, p)));
         }
+        let mut candidates = candidates
+            .into_iter()
+            .map(|(doc, mut ngram_pos)| {
+                ngram_pos.sort_unstable_by_key(|(_, p)| *p);
+                (doc, ngram_pos)
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_unstable_by_key(|(d, _)| *d);
 
-        let result = suffix_doc_pos
-            .into_values()
-            .flat_map(|doc_pos| doc_pos.into_keys())
-            .collect();
+        // Find a valid trace across lookup tables
+        // let mut document_cursor = HashMap::with_capacity(ngram_doc_pos_vec.len());
+        // let mut position_cursor = HashMap::with_capacity(ngram_doc_pos_vec.len());
+        let mut result = HashSet::with_capacity(candidates.len());
+        for (doc, pivot_ngram_pos) in candidates {
+            for (ngram, pos) in pivot_ngram_pos {
+                // Trace to the right of pivot
+                let mut suffix_pos =
+                    Vec::with_capacity(lookup_table_vec.len() - min_lookup_table_index);
+                suffix_pos.push((&ngram[1..], ngram[..1].len()));
+                while let Some(suffix) = suffix_pos.last() {
+                    todo!("Trace to the right incrementally")
+                }
+                if suffix_pos.is_empty() {
+                    continue;
+                }
+                // Trace to the left of pivot
+                todo!("Trace to the left of pivot")
+            }
+        }
         Ok(result)
     }
 
