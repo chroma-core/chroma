@@ -1,8 +1,8 @@
 use chroma_types::{
-    Collection, CollectionAndSegments, CollectionUuid, CountForksError, Database,
-    FlushCompactionResponse, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetSegmentsError, ListDatabasesError, ListDatabasesResponse, Segment, SegmentFlushInfo,
-    SegmentScope, SegmentType, Tenant,
+    BatchGetCollectionVersionFilePathsError, Collection, CollectionAndSegments, CollectionUuid,
+    CountForksError, Database, FlushCompactionResponse, GetCollectionSizeError,
+    GetCollectionWithSegmentsError, GetSegmentsError, ListDatabasesError, ListDatabasesResponse,
+    Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant,
 };
 use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
@@ -91,6 +91,18 @@ impl TestSysDb {
         inner
             .tenant_last_compaction_time
             .insert(tenant, last_compaction_time);
+    }
+
+    pub fn set_collection_version_file_path(
+        &mut self,
+        collection_id: CollectionUuid,
+        version_file_path: String,
+    ) {
+        let mut inner = self.inner.lock();
+
+        inner
+            .collection_to_version_file_name
+            .insert(collection_id, version_file_path);
     }
 
     fn filter_collections(
@@ -548,5 +560,26 @@ impl TestSysDb {
         _source_collection_id: CollectionUuid,
     ) -> Result<usize, CountForksError> {
         Ok(10)
+    }
+
+    pub(crate) async fn batch_get_collection_version_file_paths(
+        &self,
+        collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
+        let inner = self.inner.lock();
+        let mut paths = HashMap::new();
+        for collection_id in collection_ids {
+            if let Some(path) = inner.collection_to_version_file_name.get(&collection_id) {
+                paths.insert(collection_id, path.clone());
+            } else {
+                return Err(BatchGetCollectionVersionFilePathsError::Grpc(
+                    tonic::Status::not_found(format!(
+                        "Version file not found for collection: {}",
+                        collection_id
+                    )),
+                ));
+            }
+        }
+        Ok(paths)
     }
 }
