@@ -7,17 +7,18 @@ use axum::{
 };
 use chroma_system::System;
 use chroma_types::{
-    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
-    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateMetadata, UpsertCollectionRecordsResponse,
+    AddCollectionRecordsError, AddCollectionRecordsResponse, ChecklistResponse, Collection,
+    CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest,
+    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionRequest,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionRecordsError, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
+    DeleteDatabaseResponse, ForkCollectionError, GetCollectionRequest, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    GetUserIdentityResponse, HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryError, QueryRequest, QueryResponse, UpdateCollectionConfiguration,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateMetadata, UpsertCollectionRecordsError, UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -25,10 +26,13 @@ use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
+use std::{str::FromStr, time::SystemTime};
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::UNIX_EPOCH,
 };
 use tokio::{select, signal};
 use tower_http::cors::CorsLayer;
@@ -1162,6 +1166,11 @@ async fn fork_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<ForkCollectionPayload>,
 ) -> Result<Json<ForkCollectionResponse>, ServerError> {
+    let request_received_at_timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(ForkCollectionError::from)?
+        .as_millis();
+
     server.metrics.fork_collection.add(
         1,
         &[
@@ -1203,6 +1212,7 @@ async fn fork_collection(
         database,
         collection_id,
         payload.new_name,
+        request_received_at_timestamp_ms,
     )?;
 
     Ok(Json(server.frontend.fork_collection(request).await?))
@@ -1251,6 +1261,11 @@ async fn collection_add(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<AddCollectionRecordsPayload>,
 ) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
+    let request_received_at_timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(AddCollectionRecordsError::from)?
+        .as_millis();
+
     server.metrics.collection_add.add(
         1,
         &[
@@ -1307,6 +1322,7 @@ async fn collection_add(
         payload.documents,
         payload.uris,
         payload.metadatas,
+        request_received_at_timestamp_ms,
     )?;
 
     let res = server.frontend.add(request).await?;
@@ -1339,6 +1355,11 @@ async fn collection_update(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
+    let request_received_at_timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(UpdateCollectionRecordsError::from)?
+        .as_millis();
+
     server.metrics.collection_update.add(
         1,
         &[
@@ -1394,6 +1415,7 @@ async fn collection_update(
         payload.documents,
         payload.uris,
         payload.metadatas,
+        request_received_at_timestamp_ms,
     )?;
 
     Ok(Json(server.frontend.update(request).await?))
@@ -1431,6 +1453,11 @@ async fn collection_upsert(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
+    let request_received_at_timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(UpsertCollectionRecordsError::from)?
+        .as_millis();
+
     server.metrics.collection_upsert.add(
         1,
         &[
@@ -1487,6 +1514,7 @@ async fn collection_upsert(
         payload.documents,
         payload.uris,
         payload.metadatas,
+        request_received_at_timestamp_ms,
     )?;
 
     Ok(Json(server.frontend.upsert(request).await?))
@@ -1522,6 +1550,11 @@ async fn collection_delete(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<DeleteCollectionRecordsPayload>,
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
+    let request_received_at_timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(DeleteCollectionRecordsError::from)?
+        .as_millis();
+
     server.metrics.collection_delete.add(
         1,
         &[
@@ -1568,6 +1601,7 @@ async fn collection_delete(
         collection_id,
         payload.ids,
         r#where,
+        request_received_at_timestamp_ms,
     )?;
 
     server.frontend.delete(request).await?;
@@ -1596,6 +1630,13 @@ async fn collection_count(
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
+    let request_received_at_timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        // We use a `QueryError` here because by convention in the service implementations
+        // of the frontend, we return `QueryError` on both `count` and `get` failures.
+        .map_err(QueryError::from)?
+        .as_millis();
+
     server.metrics.collection_count.add(
         1,
         &[
@@ -1628,6 +1669,7 @@ async fn collection_count(
         tenant,
         database,
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
+        request_received_at_timestamp_ms,
     )?;
 
     Ok(Json(server.frontend.count(request).await?))
@@ -1667,6 +1709,11 @@ async fn collection_get(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<GetRequestPayload>,
 ) -> Result<Json<GetResponse>, ServerError> {
+    let request_received_at_timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(QueryError::from)?
+        .as_millis();
+
     server.metrics.collection_get.add(
         1,
         &[
@@ -1721,6 +1768,7 @@ async fn collection_get(
         payload.limit,
         payload.offset.unwrap_or(0),
         payload.include,
+        request_received_at_timestamp_ms,
     )?;
     let res = server.frontend.get(request).await?;
     Ok(Json(res))
@@ -1762,6 +1810,11 @@ async fn collection_query(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<QueryRequestPayload>,
 ) -> Result<Json<QueryResponse>, ServerError> {
+    let request_received_at_timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(QueryError::from)?
+        .as_millis();
+
     server.metrics.collection_query.add(
         1,
         &[
@@ -1822,6 +1875,7 @@ async fn collection_query(
         payload.query_embeddings,
         payload.n_results.unwrap_or(10),
         payload.include,
+        request_received_at_timestamp_ms,
     )?;
 
     let res = server.frontend.query(request).await?;

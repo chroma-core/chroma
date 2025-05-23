@@ -777,6 +777,7 @@ pub struct ForkCollectionRequest {
     pub database_name: String,
     pub source_collection_id: CollectionUuid,
     pub target_collection_name: String,
+    pub received_at_timestamp_ns: u128,
 }
 
 impl ForkCollectionRequest {
@@ -785,12 +786,14 @@ impl ForkCollectionRequest {
         database_name: String,
         source_collection_id: CollectionUuid,
         target_collection_name: String,
+        received_at_timestamp_ns: u128,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             source_collection_id,
             target_collection_name,
+            received_at_timestamp_ns,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -823,6 +826,8 @@ pub enum ForkCollectionError {
     NotFound(String),
     #[error("Failed to convert proto segment")]
     SegmentConversionError(#[from] SegmentConversionError),
+    #[error("System time error: {0}")]
+    CouldNotGetTime(#[from] SystemTimeError),
 }
 
 impl ChromaError for ForkCollectionError {
@@ -840,6 +845,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::SegmentConversionError(segment_conversion_error) => {
                 segment_conversion_error.code()
             }
+            ForkCollectionError::CouldNotGetTime(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -917,6 +923,7 @@ pub struct AddCollectionRecordsRequest {
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<Metadata>>>,
+    pub received_at_timestamp_ns: u128,
 }
 
 impl AddCollectionRecordsRequest {
@@ -930,6 +937,7 @@ impl AddCollectionRecordsRequest {
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
+        received_at_timestamp_ns: u128,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -940,6 +948,7 @@ impl AddCollectionRecordsRequest {
             documents,
             uris,
             metadatas,
+            received_at_timestamp_ns,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -955,6 +964,8 @@ pub enum AddCollectionRecordsError {
     Collection(#[from] GetCollectionError),
     #[error("Backoff and retry")]
     Backoff,
+    #[error("System time error: {0}")]
+    CouldNotGetTime(#[from] SystemTimeError),
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -964,6 +975,7 @@ impl ChromaError for AddCollectionRecordsError {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
             AddCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            AddCollectionRecordsError::CouldNotGetTime(_) => ErrorCodes::Internal,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -982,6 +994,7 @@ pub struct UpdateCollectionRecordsRequest {
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+    pub received_at_timestamp_ns: u128,
 }
 
 impl UpdateCollectionRecordsRequest {
@@ -995,6 +1008,7 @@ impl UpdateCollectionRecordsRequest {
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        received_at_timestamp_ns: u128,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1005,6 +1019,7 @@ impl UpdateCollectionRecordsRequest {
             documents,
             uris,
             metadatas,
+            received_at_timestamp_ns,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1018,6 +1033,8 @@ pub struct UpdateCollectionRecordsResponse {}
 pub enum UpdateCollectionRecordsError {
     #[error("Backoff and retry")]
     Backoff,
+    #[error("System time error: {0}")]
+    CouldNotGetTime(#[from] SystemTimeError),
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1026,6 +1043,7 @@ impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpdateCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            UpdateCollectionRecordsError::CouldNotGetTime(_) => ErrorCodes::Internal,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1044,6 +1062,7 @@ pub struct UpsertCollectionRecordsRequest {
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+    pub received_at_timestamp_ns: u128,
 }
 
 impl UpsertCollectionRecordsRequest {
@@ -1057,6 +1076,7 @@ impl UpsertCollectionRecordsRequest {
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        received_at_timestamp_ns: u128,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1067,6 +1087,7 @@ impl UpsertCollectionRecordsRequest {
             documents,
             uris,
             metadatas,
+            received_at_timestamp_ns,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1080,6 +1101,8 @@ pub struct UpsertCollectionRecordsResponse {}
 pub enum UpsertCollectionRecordsError {
     #[error("Backoff and retry")]
     Backoff,
+    #[error("System time error: {0}")]
+    CouldNotGetTime(#[from] SystemTimeError),
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1088,6 +1111,7 @@ impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpsertCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
+            UpsertCollectionRecordsError::CouldNotGetTime(_) => ErrorCodes::Internal,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1103,6 +1127,7 @@ pub struct DeleteCollectionRecordsRequest {
     pub collection_id: CollectionUuid,
     pub ids: Option<Vec<String>>,
     pub r#where: Option<Where>,
+    pub received_at_timestamp_ns: u128,
 }
 
 impl DeleteCollectionRecordsRequest {
@@ -1112,6 +1137,7 @@ impl DeleteCollectionRecordsRequest {
         collection_id: CollectionUuid,
         ids: Option<Vec<String>>,
         r#where: Option<Where>,
+        received_at_timestamp_ns: u128,
     ) -> Result<Self, ChromaValidationError> {
         if ids.as_ref().map(|ids| ids.is_empty()).unwrap_or(false) && r#where.is_none() {
             return Err(ChromaValidationError::from((
@@ -1127,6 +1153,7 @@ impl DeleteCollectionRecordsRequest {
             collection_id,
             ids,
             r#where,
+            received_at_timestamp_ns,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1144,6 +1171,8 @@ pub enum DeleteCollectionRecordsError {
     Backoff,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("System time error: {0}")]
+    CouldNotGetTime(#[from] SystemTimeError),
 }
 
 impl ChromaError for DeleteCollectionRecordsError {
@@ -1152,6 +1181,7 @@ impl ChromaError for DeleteCollectionRecordsError {
             DeleteCollectionRecordsError::Get(err) => err.code(),
             DeleteCollectionRecordsError::Backoff => ErrorCodes::Unavailable,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
+            DeleteCollectionRecordsError::CouldNotGetTime(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -1253,6 +1283,7 @@ pub struct CountRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
+    pub received_at_timestamp_ns: u128,
 }
 
 impl CountRequest {
@@ -1260,11 +1291,13 @@ impl CountRequest {
         tenant_id: String,
         database_name: String,
         collection_id: CollectionUuid,
+        received_at_timestamp_ns: u128,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
+            received_at_timestamp_ns,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1286,6 +1319,7 @@ pub struct GetRequest {
     pub limit: Option<u32>,
     pub offset: u32,
     pub include: IncludeList,
+    pub received_at_timestamp_ns: u128,
 }
 
 impl GetRequest {
@@ -1299,6 +1333,7 @@ impl GetRequest {
         limit: Option<u32>,
         offset: u32,
         include: IncludeList,
+        received_at_timestamp_ns: u128,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1309,6 +1344,7 @@ impl GetRequest {
             limit,
             offset,
             include,
+            received_at_timestamp_ns,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1455,6 +1491,7 @@ pub struct QueryRequest {
     pub embeddings: Vec<Vec<f32>>,
     pub n_results: u32,
     pub include: IncludeList,
+    pub received_at_timestamp_ns: u128,
 }
 
 impl QueryRequest {
@@ -1468,6 +1505,7 @@ impl QueryRequest {
         embeddings: Vec<Vec<f32>>,
         n_results: u32,
         include: IncludeList,
+        received_at_timestamp_ns: u128,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1478,6 +1516,7 @@ impl QueryRequest {
             embeddings,
             n_results,
             include,
+            received_at_timestamp_ns,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1656,6 +1695,8 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
 pub enum QueryError {
     #[error("Error executing plan: {0}")]
     Executor(#[from] ExecutorError),
+    #[error("System time error: {0}")]
+    CouldNotGetTime(#[from] SystemTimeError),
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1664,6 +1705,7 @@ impl ChromaError for QueryError {
     fn code(&self) -> ErrorCodes {
         match self {
             QueryError::Executor(e) => e.code(),
+            QueryError::CouldNotGetTime(_) => ErrorCodes::Internal,
             QueryError::Other(err) => err.code(),
         }
     }

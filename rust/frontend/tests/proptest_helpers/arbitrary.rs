@@ -93,6 +93,7 @@ impl Arbitrary for CollectionRequest {
                             documents,
                             None,
                             metadatas,
+                            1,
                         )
                         .unwrap(),
                     )
@@ -140,6 +141,7 @@ impl Arbitrary for CollectionRequest {
                             documents,
                             None,
                             metadatas,
+                            1,
                         )
                         .unwrap(),
                     )
@@ -184,6 +186,7 @@ impl Arbitrary for CollectionRequest {
                             documents,
                             None,
                             metadatas,
+                            1,
                         )
                         .unwrap(),
                     )
@@ -214,6 +217,7 @@ impl Arbitrary for CollectionRequest {
                         collection_id,
                         ids,
                         filter.map(|filter| filter.clause),
+                        1,
                     )
                     .unwrap(),
                 )
@@ -250,6 +254,7 @@ fn arbitrary_get_request(
                 None,
                 0,
                 IncludeList(vec![Include::Metadata, Include::Document]),
+                1,
             )
             .unwrap(),
         )
@@ -320,6 +325,7 @@ fn arbitrary_get_request(
                         limit,
                         offset,
                         include_list,
+                        1,
                     )
                     .unwrap(),
                 )
@@ -345,6 +351,7 @@ fn arbitrary_query_request(
                 None,
                 0,
                 IncludeList(vec![Include::Metadata, Include::Document]),
+                1,
             )
             .unwrap(),
         )
@@ -417,6 +424,7 @@ fn arbitrary_query_request(
                         embeddings,
                         n_results,
                         include_list,
+                        1,
                     )
                     .unwrap(),
                 )

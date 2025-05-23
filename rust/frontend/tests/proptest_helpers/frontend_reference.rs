@@ -48,6 +48,7 @@ impl FrontendReferenceState {
                     None,
                     0,
                     IncludeList(vec![]),
+                    1,
                 )
                 .unwrap(),
             )
