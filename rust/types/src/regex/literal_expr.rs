@@ -219,7 +219,6 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         candidates.sort_unstable_by_key(|(d, _)| *d);
 
         // Find a valid trace across lookup tables
-        // let mut doc_pos_cursor = HashMap::with_capacity(ngram_doc_pos_vec.len());
         let mut result = HashSet::with_capacity(candidates.len());
         for (doc, pivot_ngram_pos) in candidates {
             for Reverse((pos, ngram)) in pivot_ngram_pos {
