@@ -1,5 +1,6 @@
 use std::{
-    collections::{HashMap, HashSet},
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap, HashSet},
     ops::RangeBounds,
 };
 
@@ -202,41 +203,108 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             .prefix
             .values()
             .flat_map(|idxs| idxs.iter().map(|idx| &ngram_doc_pos_vec[*idx]));
-        let mut candidates =
-            HashMap::<_, Vec<_>>::with_capacity(min_ngram_doc_pos_iter.clone().map(Vec::len).sum());
+        let mut candidates = HashMap::<_, BinaryHeap<_>>::with_capacity(
+            min_ngram_doc_pos_iter.clone().map(Vec::len).sum(),
+        );
         for (ngram, doc, pos) in min_ngram_doc_pos_iter.flatten() {
             candidates
                 .entry(*doc)
-                .or_insert_with(|| Vec::with_capacity(pos.len()))
-                .extend(pos.iter().map(|p| (*ngram, p)));
+                .or_insert_with(|| BinaryHeap::with_capacity(pos.len()))
+                .extend(pos.iter().map(|p| Reverse((*p, *ngram))));
         }
-        let mut candidates = candidates
-            .into_iter()
-            .map(|(doc, mut ngram_pos)| {
-                ngram_pos.sort_unstable_by_key(|(_, p)| *p);
-                (doc, ngram_pos)
-            })
-            .collect::<Vec<_>>();
+        let mut candidates = candidates.into_iter().collect::<Vec<_>>();
         candidates.sort_unstable_by_key(|(d, _)| *d);
 
         // Find a valid trace across lookup tables
-        // let mut document_cursor = HashMap::with_capacity(ngram_doc_pos_vec.len());
-        // let mut position_cursor = HashMap::with_capacity(ngram_doc_pos_vec.len());
+        // let mut doc_pos_cursor = HashMap::with_capacity(ngram_doc_pos_vec.len());
         let mut result = HashSet::with_capacity(candidates.len());
         for (doc, pivot_ngram_pos) in candidates {
-            for (ngram, pos) in pivot_ngram_pos {
+            for Reverse((pos, ngram)) in pivot_ngram_pos {
                 // Trace to the right of pivot
-                let mut suffix_pos =
+                let mut suffix_pos_idx =
                     Vec::with_capacity(lookup_table_vec.len() - min_lookup_table_index);
-                suffix_pos.push((&ngram[1..], ngram[..1].len()));
-                while let Some(suffix) = suffix_pos.last() {
-                    todo!("Trace to the right incrementally")
+                suffix_pos_idx.push((&ngram[1..], pos + ngram[..1].len() as u32, 0));
+                while let Some((suffix, match_pos, ngram_index)) = suffix_pos_idx.pop() {
+                    let focus_lookup_table = match lookup_table_vec
+                        .get(min_lookup_table_index + suffix_pos_idx.len() + 1)
+                    {
+                        Some(table) => table,
+                        None => {
+                            suffix_pos_idx.push((suffix, match_pos, ngram_index));
+                            break;
+                        }
+                    };
+                    let focus_ngram_doc_pos = match focus_lookup_table
+                        .prefix
+                        .get(suffix)
+                        .and_then(|idxs| idxs.get(ngram_index))
+                    {
+                        Some(idx) => &ngram_doc_pos_vec[*idx],
+                        None => continue,
+                    };
+                    suffix_pos_idx.push((suffix, match_pos, ngram_index + 1));
+                    let (focus_ngram, _, pos) =
+                        match focus_ngram_doc_pos.binary_search_by_key(&doc, |(_, d, _)| *d) {
+                            Ok(idx) => focus_ngram_doc_pos[idx],
+                            Err(_) => continue,
+                        };
+                    if pos.binary_search(&match_pos).is_ok() {
+                        suffix_pos_idx.push((
+                            &focus_ngram[1..],
+                            match_pos + focus_ngram[..1].len() as u32,
+                            0,
+                        ));
+                    }
                 }
-                if suffix_pos.is_empty() {
+                if suffix_pos_idx.is_empty() {
                     continue;
                 }
+
                 // Trace to the left of pivot
-                todo!("Trace to the left of pivot")
+                let mut prefix_pos_idx = Vec::with_capacity(min_lookup_table_index + 1);
+                prefix_pos_idx.push((&ngram[..N - 1], pos, 0));
+                while let Some((prefix, match_pos_with_offset, ngram_index)) = prefix_pos_idx.pop()
+                {
+                    let focus_lookup_table = match min_lookup_table_index
+                        .checked_sub(prefix_pos_idx.len() + 1)
+                        .and_then(|lookup_index| lookup_table_vec.get(lookup_index))
+                    {
+                        Some(table) => table,
+                        None => {
+                            prefix_pos_idx.push((prefix, match_pos_with_offset, ngram_index));
+                            break;
+                        }
+                    };
+                    let focus_ngram_doc_pos = match focus_lookup_table
+                        .suffix
+                        .get(prefix)
+                        .and_then(|idxs| idxs.get(ngram_index))
+                    {
+                        Some(idx) => &ngram_doc_pos_vec[*idx],
+                        None => continue,
+                    };
+                    prefix_pos_idx.push((prefix, match_pos_with_offset, ngram_index + 1));
+                    let (focus_ngram, _, pos) =
+                        match focus_ngram_doc_pos.binary_search_by_key(&doc, |(_, d, _)| *d) {
+                            Ok(idx) => focus_ngram_doc_pos[idx],
+                            Err(_) => continue,
+                        };
+                    if match_pos_with_offset
+                        .checked_sub(focus_ngram[..1].len() as u32)
+                        .and_then(|p| pos.binary_search(&p).ok())
+                        .is_some()
+                    {
+                        prefix_pos_idx.push((
+                            &focus_ngram[1..],
+                            match_pos_with_offset + focus_ngram[..1].len() as u32,
+                            0,
+                        ));
+                    }
+                }
+                if !prefix_pos_idx.is_empty() {
+                    result.insert(doc);
+                    break;
+                }
             }
         }
         Ok(result)
