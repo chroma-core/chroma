@@ -290,7 +290,11 @@ impl FrontendServer {
         if let Some(cors_allow_origins) = cors_allow_origins {
             let origins = cors_allow_origins
                 .into_iter()
-                .map(|origin| origin.parse().unwrap())
+                .map(|origin| {
+                    origin
+                        .parse()
+                        .unwrap_or_else(|_| panic!("Invalid origin: {}", origin))
+                })
                 .collect::<Vec<_>>();
 
             let mut cors_builder = CorsLayer::new()
