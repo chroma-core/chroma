@@ -172,7 +172,7 @@ wal3/log/Bucket=15000/FragmentSeqNo=15000.parquet
 ...
 wal3/manifest/MANIFEST.json
 wal3/snapshot/SNAPSHOT.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-wal3/garbage/GARBAGE.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+wal3/garbage/GARBAGE
 ```
 
 ## Writer Arch Diagram
@@ -258,8 +258,8 @@ like:
 3.  Read all cursors again; if changed, goto 1.
 4.  Select the minimum timestamp across all cursors as the garbage collection cutoff.
 5.  Write a list of snapshots and fragments that hold data strictly less than the cutoff to a file
-    named `gc/GARBAGE.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX` where the
-    hex digits are the setsum of the garbage.
+    named `garbage/GARBAGE`.  There can be only one gc in progress at a time, so gc is kicked off by
+    running put-if-not-exist on `garbage/GARBAGE`.
 6.  Wait until the writer writes a manifest that does not contain the garbage's fragments.
 7.  Wait a sufficiently long time so that readers cannot see the fragments.
 8.  Slow-delete the contents of the garbage file.
