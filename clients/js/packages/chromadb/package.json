@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "2.4.4",
+  "version": "2.4.7",
   "description": "A JavaScript interface for chroma with embedding functions as bundled dependencies",
   "license": "Apache-2.0",
   "type": "module",
@@ -51,11 +51,11 @@
     "typescript": "^5.0.4"
   },
   "optionalDependencies": {
-    "chromadb-js-bindings-darwin-arm64": "^0.1.2",
-    "chromadb-js-bindings-darwin-x64": "^0.1.2",
-    "chromadb-js-bindings-linux-arm64-gnu": "^0.1.2",
-    "chromadb-js-bindings-linux-x64-gnu": "^0.1.2",
-    "chromadb-js-bindings-win32-x64-msvc": "^0.1.2"
+    "chromadb-js-bindings-darwin-arm64": "^0.1.3",
+    "chromadb-js-bindings-darwin-x64": "^0.1.3",
+    "chromadb-js-bindings-linux-arm64-gnu": "^0.1.3",
+    "chromadb-js-bindings-linux-x64-gnu": "^0.1.3",
+    "chromadb-js-bindings-win32-x64-msvc": "^0.1.3"
   },
   "engines": {
     "node": ">=14.17.0"

@@ -119,6 +119,9 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		if err == common.ErrDatabaseNotFound {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
+		if err == common.ErrConcurrentDeleteCollection {
+			return res, grpcutils.BuildAbortedGrpcError(err.Error())
+		}
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Collection = convertCollectionToProto(collection)
@@ -379,7 +382,7 @@ func (s *Server) ForkCollection(ctx context.Context, req *coordinatorpb.ForkColl
 		if err == common.ErrCollectionNotFound {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
-		if err == common.ErrCollectionEntryIsStale {
+		if err == common.ErrCollectionLogPositionStale {
 			return res, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
 		}
 		if err == common.ErrCollectionUniqueConstraintViolation {
@@ -540,6 +543,14 @@ func (s *Server) MarkVersionForDeletion(ctx context.Context, req *coordinatorpb.
 // This method updates the version file which can concurrently with FlushCollectionCompaction.
 func (s *Server) DeleteCollectionVersion(ctx context.Context, req *coordinatorpb.DeleteCollectionVersionRequest) (*coordinatorpb.DeleteCollectionVersionResponse, error) {
 	res, err := s.coordinator.DeleteCollectionVersion(ctx, req)
+	if err != nil {
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return res, nil
+}
+
+func (s *Server) BatchGetCollectionVersionFilePaths(ctx context.Context, req *coordinatorpb.BatchGetCollectionVersionFilePathsRequest) (*coordinatorpb.BatchGetCollectionVersionFilePathsResponse, error) {
+	res, err := s.coordinator.BatchGetCollectionVersionFilePaths(ctx, req)
 	if err != nil {
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}

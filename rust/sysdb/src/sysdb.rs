@@ -19,9 +19,9 @@ use chroma_types::{
     UpdateCollectionConfiguration, UpdateCollectionError, VectorIndexConfiguration,
 };
 use chroma_types::{
-    Collection, CollectionConversionError, CollectionUuid, CountForksError,
-    FlushCompactionResponse, FlushCompactionResponseConversionError, ForkCollectionError, Segment,
-    SegmentConversionError, SegmentScope, Tenant,
+    BatchGetCollectionVersionFilePathsError, Collection, CollectionConversionError, CollectionUuid,
+    CountForksError, FlushCompactionResponse, FlushCompactionResponseConversionError,
+    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -257,6 +257,9 @@ impl SysDb {
                     total_records_post_compaction: 0,
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
+                    version_file_path: None,
+                    root_collection_id: None,
+                    lineage_file_path: None,
                 };
 
                 test_sysdb.add_collection(collection.clone());
@@ -392,6 +395,23 @@ impl SysDb {
             SysDb::Test(test_sys_db) => {
                 test_sys_db
                     .get_collection_with_segments(collection_id)
+                    .await
+            }
+        }
+    }
+
+    pub async fn batch_get_collection_version_file_paths(
+        &mut self,
+        collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.batch_get_collection_version_file_paths(collection_ids)
+                    .await
+            }
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(test) => {
+                test.batch_get_collection_version_file_paths(collection_ids)
                     .await
             }
         }
@@ -854,6 +874,7 @@ impl GrpcSysDb {
             .await
             .map_err(|err| match err.code() {
                 Code::AlreadyExists => CreateCollectionError::AlreadyExists(name),
+                Code::Aborted => CreateCollectionError::Aborted(err.message().to_string()),
                 _ => CreateCollectionError::Internal(err.into()),
             })?;
 
@@ -1108,6 +1129,33 @@ impl GrpcSysDb {
                 .ok_or(GetCollectionWithSegmentsError::Field("vector".to_string()))?
                 .try_into()?,
         })
+    }
+
+    async fn batch_get_collection_version_file_paths(
+        &mut self,
+        collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
+        let res = self
+            .client
+            .batch_get_collection_version_file_paths(
+                chroma_proto::BatchGetCollectionVersionFilePathsRequest {
+                    collection_ids: collection_ids
+                        .into_iter()
+                        .map(|id| id.0.to_string())
+                        .collect(),
+                },
+            )
+            .await?;
+        let collection_id_to_path = res.into_inner().collection_id_to_version_file_path;
+        let mut result = HashMap::new();
+        for (key, value) in collection_id_to_path {
+            let collection_id = CollectionUuid(
+                Uuid::try_parse(&key)
+                    .map_err(|err| BatchGetCollectionVersionFilePathsError::Uuid(err, key))?,
+            );
+            result.insert(collection_id, value);
+        }
+        Ok(result)
     }
 
     async fn get_last_compaction_time(

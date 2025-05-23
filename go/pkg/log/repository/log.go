@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	log "github.com/chroma-core/chroma/go/pkg/log/store/db"
@@ -213,6 +214,14 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 	return
 }
 
+func (r *LogRepository) SealCollection(ctx context.Context, collectionID string) (err error) {
+	_, err = r.queries.SealLog(ctx, collectionID)
+	if err != nil && strings.Contains(err.Error(), "no rows in result set") {
+		_, err = r.queries.SealLogInsert(ctx, collectionID)
+	}
+	return
+}
+
 func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCompactionSize uint64) (collectionToCompact []log.GetAllCollectionsToCompactRow, err error) {
 	collectionToCompact, err = r.queries.GetAllCollectionsToCompact(ctx, int64(minCompactionSize))
 	if collectionToCompact == nil {
@@ -223,6 +232,7 @@ func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCo
 	}
 	return
 }
+
 func (r *LogRepository) UpdateCollectionCompactionOffsetPosition(ctx context.Context, collectionId string, offsetPosition int64) (err error) {
 	err = r.queries.UpdateCollectionCompactionOffsetPosition(ctx, log.UpdateCollectionCompactionOffsetPositionParams{
 		ID:                             collectionId,

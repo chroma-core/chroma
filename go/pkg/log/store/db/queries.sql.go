@@ -80,6 +80,7 @@ with summary as (
     from record_log r, collection c
     where r.collection_id = c.id
     and (c.record_enumeration_offset_position - c.record_compaction_offset_position) >= $1
+    and not c.is_sealed
     and r.offset > c.record_compaction_offset_position
 )
 select collection_id, "offset", timestamp, rank from summary
@@ -281,6 +282,22 @@ UPDATE collection SET is_sealed = true WHERE id = $1 returning id, record_compac
 
 func (q *Queries) SealLog(ctx context.Context, id string) (Collection, error) {
 	row := q.db.QueryRow(ctx, sealLog, id)
+	var i Collection
+	err := row.Scan(
+		&i.ID,
+		&i.RecordCompactionOffsetPosition,
+		&i.RecordEnumerationOffsetPosition,
+		&i.IsSealed,
+	)
+	return i, err
+}
+
+const sealLogInsert = `-- name: SealLogInsert :one
+INSERT INTO collection(id, is_sealed, record_compaction_offset_position, record_enumeration_offset_position) VALUES ($1, true, 0, 0) returning id, record_compaction_offset_position, record_enumeration_offset_position, is_sealed
+`
+
+func (q *Queries) SealLogInsert(ctx context.Context, id string) (Collection, error) {
+	row := q.db.QueryRow(ctx, sealLogInsert, id)
 	var i Collection
 	err := row.Scan(
 		&i.ID,

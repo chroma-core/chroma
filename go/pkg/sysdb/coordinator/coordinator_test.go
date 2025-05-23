@@ -319,6 +319,7 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 	suite.True(created)
 	suite.Equal(newCollection.ID, createdCollection.ID)
 	suite.Equal(newCollection.Name, createdCollection.Name)
+	suite.NotNil(createdCollection.VersionFileName)
 	// suite.Equal(len(segments), len(createdSegments))
 
 	// Verify the collection was created
@@ -352,8 +353,8 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 	suite.ElementsMatch(expected_ids, actual_ids)
 
 	// Validate version file
-	versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(collection.TenantID, suite.databaseId, newCollection.ID.String(), "0")
-	versionFile, err := suite.s3MetaStore.GetVersionFile(versionFilePathPrefix)
+	suite.NotNil(collection.VersionFileName)
+	versionFile, err := suite.s3MetaStore.GetVersionFile(collection.VersionFileName)
 	suite.NoError(err)
 	suite.NotNil(versionFile)
 	v0 := versionFile.VersionHistory.Versions[0]
@@ -1608,8 +1609,9 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	}
 
 	// Check version file of forked collection
-	versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(collection.TenantID, suite.databaseId, forkCollection.TargetCollectionID.String(), "0")
-	versionFile, err := suite.s3MetaStore.GetVersionFile(versionFilePathPrefix)
+	suite.Equal(collection.RootCollectionID, &sourceCreateCollection.ID)
+	suite.NotNil(collection.VersionFileName)
+	versionFile, err := suite.s3MetaStore.GetVersionFile(collection.VersionFileName)
 	suite.NoError(err)
 	suite.NotNil(versionFile)
 	v0 := versionFile.VersionHistory.Versions[0]
@@ -1646,9 +1648,44 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	// ListCollectionsToGc groups by fork trees and should always return the root of the tree
 	suite.Equal(forkCollectionWithSameName.SourceCollectionID, res[0].ID)
 
-	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, *res[0].LineageFilePath)
+	// Get source collection to grab lineage path and validate it exists
+	sourceCollection, err := suite.coordinator.GetCollections(ctx, sourceCreateCollection.ID, nil, sourceCreateCollection.TenantID, sourceCreateCollection.DatabaseName, nil, nil)
+	suite.NoError(err)
+	suite.Equal(1, len(sourceCollection))
+	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, *sourceCollection[0].LineageFileName)
 	suite.NoError(err)
 	suite.True(exists, "Lineage file should exist in S3")
+}
+
+func (suite *APIsTestSuite) TestBatchGetCollectionVersionFilePaths() {
+	ctx := context.Background()
+
+	// Create a new collection
+	newCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_batch_get_collection_version_file_paths",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	newSegments := []*model.Segment{}
+
+	// Create the collection
+	suite.coordinator.catalog.versionFileEnabled = true
+	_, _, err := suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, newSegments)
+	suite.NoError(err)
+
+	// Get the version file paths for the collection
+	versionFilePaths, err := suite.coordinator.BatchGetCollectionVersionFilePaths(ctx, &coordinatorpb.BatchGetCollectionVersionFilePathsRequest{
+		CollectionIds: []string{newCollection.ID.String()},
+	})
+	suite.NoError(err)
+	suite.Len(versionFilePaths.CollectionIdToVersionFilePath, 1)
+
+	// Verify version file exists in S3
+	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, versionFilePaths.CollectionIdToVersionFilePath[newCollection.ID.String()])
+	suite.NoError(err)
+	suite.True(exists, "Version file should exist in S3")
 }
 
 func (suite *APIsTestSuite) TestCountForks() {

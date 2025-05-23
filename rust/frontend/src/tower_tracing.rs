@@ -16,8 +16,7 @@ impl<B> MakeSpan<B> for RequestTracing {
         let http_route = request
             .extensions()
             .get::<MatchedPath>()
-            .map_or_else(|| "(unknown route)", |mp| mp.as_str())
-            .to_owned();
+            .map_or_else(|| "(unknown route)", |mp| mp.as_str());
 
         let host = request
             .headers()

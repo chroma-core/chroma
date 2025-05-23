@@ -11,14 +11,18 @@ use bytes::Bytes;
 use chroma_cache::CacheConfig;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use chroma_log::{config::GrpcLogConfig, grpc_log::GrpcLog};
 use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_types::chroma_proto::{
-    log_service_server::LogService, CollectionInfo, GetAllCollectionInfoToCompactRequest,
-    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
-    LogRecord, OperationRecord, PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
+    log_service_client::LogServiceClient, log_service_server::LogService, CollectionInfo,
+    GetAllCollectionInfoToCompactRequest, GetAllCollectionInfoToCompactResponse,
+    InspectDirtyLogRequest, InspectDirtyLogResponse, InspectLogStateRequest,
+    InspectLogStateResponse, LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord,
+    PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
     PurgeDirtyForCollectionResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
-    ScoutLogsResponse, UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
+    ScoutLogsResponse, SealLogRequest, SealLogResponse, UpdateCollectionLogOffsetRequest,
+    UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
@@ -29,7 +33,7 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::signal::unix::{signal, SignalKind};
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{transport::Server, Code, Request, Response, Status};
 use tracing::Instrument;
 use uuid::Uuid;
 use wal3::{
@@ -202,8 +206,7 @@ async fn get_log_from_handle<'a>(
             _phantom: std::marker::PhantomData,
         });
     }
-    tracing::info!("Opening log at {}", prefix);
-    let opened = LogWriter::open_or_initialize(
+    let opened = LogWriter::open(
         options.clone(),
         Arc::clone(storage),
         prefix,
@@ -476,7 +479,9 @@ impl DirtyMarker {
                     }
                 };
                 let maximum_log_position = manifest.maximum_log_position();
-                match maximum_log_position.cmp(&cursor.position) {
+                let record_enumeration_position = maximum_log_position.offset() as i64 - 1;
+                let record_compaction_position = cursor.position.offset() as i64 - 1;
+                match record_enumeration_position.cmp(&record_compaction_position) {
                     Ordering::Equal => {
                         // Same as above.
                         reinsert.retain(|x| x.collection_id() != *collection_id);
@@ -493,9 +498,9 @@ impl DirtyMarker {
                     }
                     Ordering::Greater => {
                         tracing::info!(
-                            "{collection_id} has cursor={:?} manifest={:?}",
-                            cursor.position,
-                            manifest.maximum_log_position(),
+                            "{collection_id} has range ({}, {}]",
+                            record_compaction_position,
+                            record_enumeration_position,
                         );
                         uncompacted += maximum_log_position - cursor.position;
                         if maximum_log_position - cursor.position >= record_count_backpressure {
@@ -638,6 +643,8 @@ pub struct LogServer {
     storage: Arc<Storage>,
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Arc<LogWriter>,
+    #[allow(clippy::type_complexity)]
+    proxy: Option<LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>>,
     compacting: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
     cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedParquetFragment>>>,
@@ -660,6 +667,298 @@ impl LogServer {
             return Err(Status::resource_exhausted("log needs compaction; too full"));
         }
         Ok(())
+    }
+
+    #[tracing::instrument(skip(self, proxy))]
+    async fn effectuate_log_transfer(
+        &self,
+        collection_id: CollectionUuid,
+        mut proxy: LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+        ttl: usize,
+    ) -> Result<(), Status> {
+        if ttl == 0 {
+            tracing::error!("effectuate log transfer hit its recursion limit");
+            return Err(Status::new(
+                Code::Unavailable,
+                "effectuate log transfer hit its recursion limit",
+            ));
+        }
+
+        // Grab a lock on the state for this key, so that a racing initialize won't do anything.
+        let key = LogKey { collection_id };
+        let handle = self.open_logs.get_or_create_state(key);
+        let mut _active = handle.active.lock().await;
+
+        tracing::info!("log transfer to {collection_id}");
+        let scout_request = Request::new(ScoutLogsRequest {
+            collection_id: collection_id.to_string(),
+        });
+        let scout_resp = proxy.clone().scout_logs(scout_request).await?.into_inner();
+        let start = scout_resp.first_uncompacted_record_offset as u64;
+        let limit = scout_resp.first_uninserted_record_offset as u64;
+        if start == 0 || limit == 0 {
+            tracing::error!("scout logs returned {start}->{limit}");
+            return Err(Status::new(
+                Code::FailedPrecondition,
+                "effectuate logs saw invalid offset",
+            ));
+        }
+        tracing::info!("scouted {collection_id} start={start} limit={limit}");
+        const STEP: u64 = 100;
+        let num_steps = (limit.saturating_sub(start) + STEP - 1) / STEP;
+        let actual_steps = (0..num_steps)
+            .map(|x| {
+                (
+                    start + x * STEP,
+                    std::cmp::min(start + x * STEP + STEP, limit),
+                )
+            })
+            .collect::<Vec<_>>();
+        let pull_logs_reqs = actual_steps
+            .iter()
+            .cloned()
+            .map(|(start, limit)| PullLogsRequest {
+                collection_id: collection_id.to_string(),
+                start_from_offset: start as i64,
+                // SAFETY(rescrv):  STEP fits a i32.
+                batch_size: (limit - start) as i32,
+                end_timestamp: i64::MAX,
+            });
+        let mut responses = vec![];
+        for req in pull_logs_reqs {
+            let resp = match proxy.pull_logs(Request::new(req)).await {
+                Ok(resp) => resp.into_inner(),
+                Err(err) => {
+                    if err.code() == Code::NotFound {
+                        // We have no logs found, but we saw sealed.  We will converge, so call
+                        // again.
+                        tracing::warn!("pulling logs again: {err:?}");
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        return Box::pin(self.effectuate_log_transfer(
+                            collection_id,
+                            proxy,
+                            ttl.saturating_sub(1),
+                        ))
+                        .await;
+                    } else {
+                        return Err(err);
+                    }
+                }
+            };
+            responses.push(resp);
+        }
+        let mut records = vec![];
+        for ((start, limit), resp) in
+            std::iter::zip(actual_steps.into_iter(), responses.into_iter())
+        {
+            for (expect, (idx, record)) in
+                std::iter::zip(start..limit, resp.records.into_iter().enumerate())
+            {
+                if expect != start + idx as u64 {
+                    return Err(Status::data_loss(format!(
+                        "expected log position {expect} but got {} (1)",
+                        start + idx as u64
+                    )));
+                }
+                if (record.log_offset as u64) != expect {
+                    return Err(Status::data_loss(format!(
+                        "expected log position {expect} but got {} (2)",
+                        (record.log_offset as u64)
+                    )));
+                }
+                records.push(record);
+            }
+        }
+        let record_bytes = records
+            .into_iter()
+            .map(|record| -> Result<Vec<u8>, Status> {
+                let mut buf = vec![];
+                if let Some(r) = record.record.as_ref() {
+                    r.encode(&mut buf)
+                        .map_err(|err| Status::internal(err.to_string()))?;
+                    Ok(buf)
+                } else {
+                    Err(Status::data_loss("missing a record"))
+                }
+            })
+            .collect::<Result<Vec<_>, Status>>()?;
+        let prefix = storage_prefix_for_log(collection_id);
+        let mark_dirty = MarkDirty {
+            collection_id,
+            dirty_log: Arc::clone(&self.dirty_log),
+        };
+        LogWriter::bootstrap(
+            &self.config.writer,
+            &self.storage,
+            &prefix,
+            "effectuate log transfer",
+            mark_dirty,
+            LogPosition::from_offset(start),
+            record_bytes,
+        )
+        .await
+        .map_err(|err| {
+            Status::new(
+                err.code().into(),
+                format!("failed to effectuate log transfer: {err:?}"),
+            )
+        })?;
+
+        self._update_collection_log_offset(Request::new(UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id.to_string(),
+            log_offset: start as i64 - 1,
+        }))
+        .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self, request))]
+    async fn forward_push_logs(
+        &self,
+        collection_id: CollectionUuid,
+        request: Request<PushLogsRequest>,
+    ) -> Result<Response<PushLogsResponse>, Status> {
+        let request = request.into_inner();
+        if let Some(proxy) = self.proxy.as_ref() {
+            let resp = proxy
+                .clone()
+                .push_logs(Request::new(request.clone()))
+                .await?
+                .into_inner();
+            if resp.log_is_sealed {
+                self.effectuate_log_transfer(collection_id, proxy.clone(), 3)
+                    .await?;
+                self.push_logs(Request::new(request)).await
+            } else {
+                Ok(Response::new(resp))
+            }
+        } else {
+            Err(Status::failed_precondition("proxy not initialized"))
+        }
+    }
+
+    #[tracing::instrument(skip(self, request))]
+    async fn forward_scout_logs(
+        &self,
+        request: Request<ScoutLogsRequest>,
+    ) -> Result<Response<ScoutLogsResponse>, Status> {
+        if let Some(proxy) = self.proxy.as_ref() {
+            proxy.clone().scout_logs(request).await
+        } else {
+            Err(Status::failed_precondition("proxy not initialized"))
+        }
+    }
+
+    #[tracing::instrument(skip(self, request))]
+    async fn forward_pull_logs(
+        &self,
+        request: Request<PullLogsRequest>,
+    ) -> Result<Response<PullLogsResponse>, Status> {
+        if let Some(proxy) = self.proxy.as_ref() {
+            proxy.clone().pull_logs(request).await
+        } else {
+            Err(Status::failed_precondition("proxy not initialized"))
+        }
+    }
+
+    #[tracing::instrument(skip(self, request))]
+    async fn forward_update_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        if let Some(proxy) = self.proxy.as_ref() {
+            proxy.clone().update_collection_log_offset(request).await
+        } else {
+            Err(Status::failed_precondition("proxy not initialized"))
+        }
+    }
+
+    #[tracing::instrument(skip(self, request))]
+    async fn forward_fork_logs(
+        &self,
+        request: Request<ForkLogsRequest>,
+    ) -> Result<Response<ForkLogsResponse>, Status> {
+        if let Some(proxy) = self.proxy.as_ref() {
+            proxy.clone().fork_logs(request).await
+        } else {
+            Err(Status::failed_precondition("proxy not initialized"))
+        }
+    }
+
+    #[tracing::instrument(skip(self, request), err(Display))]
+    async fn _update_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        let request = request.into_inner();
+        let adjusted_log_offset = request.log_offset + 1;
+        let collection_id = Uuid::parse_str(&request.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        tracing::info!(
+            "update_collection_log_offset for {collection_id} to {}",
+            adjusted_log_offset
+        );
+        let storage_prefix = storage_prefix_for_log(collection_id);
+
+        let log_reader = LogReader::new(
+            self.config.reader.clone(),
+            Arc::clone(&self.storage),
+            storage_prefix.clone(),
+        );
+
+        let res = log_reader.maximum_log_position().await;
+        if let Err(wal3::Error::UninitializedLog) = res {
+            return self
+                .forward_update_collection_log_offset(Request::new(request))
+                .await;
+        }
+        res.map_err(|err| Status::unknown(err.to_string()))?;
+
+        let cursor_name = &COMPACTION;
+        let cursor_store = CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::clone(&self.storage),
+            storage_prefix.clone(),
+            "writer".to_string(),
+        );
+        let witness = cursor_store.load(cursor_name).await.map_err(|err| {
+            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
+        })?;
+        let default = Cursor::default();
+        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
+        if cursor.position.offset() > adjusted_log_offset as u64 {
+            return Err(Status::aborted(format!(
+                "Invalid offset: {} > {}",
+                cursor.position.offset(),
+                adjusted_log_offset as u64
+            )));
+        }
+        let cursor = Cursor {
+            position: LogPosition::from_offset(adjusted_log_offset as u64),
+            epoch_us: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_err(|_| wal3::Error::Internal)
+                .unwrap()
+                .as_micros() as u64,
+            writer: "TODO".to_string(),
+        };
+        if let Some(witness) = witness {
+            cursor_store
+                .save(cursor_name, &cursor, &witness)
+                .await
+                .map_err(|err| {
+                    Status::new(err.code().into(), format!("Failed to save cursor: {}", err))
+                })?;
+        } else {
+            cursor_store
+                .init(cursor_name, cursor)
+                .await
+                .map_err(|err| {
+                    Status::new(err.code().into(), format!("Failed to init cursor: {}", err))
+                })?;
+        }
+        Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
     }
 }
 
@@ -691,7 +990,7 @@ impl LogService for LogServer {
                 collection_id,
                 dirty_log: Arc::clone(&self.dirty_log),
             };
-            let log = get_log_from_handle(
+            let log = match get_log_from_handle(
                 &handle,
                 &self.config.writer,
                 &self.storage,
@@ -699,8 +998,18 @@ impl LogService for LogServer {
                 mark_dirty,
             )
             .await
-            // TODO(rescrv): better error handling.
-            .map_err(|err| Status::unknown(err.to_string()))?;
+            {
+                Ok(log) => log,
+                Err(wal3::Error::UninitializedLog) => {
+                    tracing::info!("forwarding because log uninitialized");
+                    return self
+                        .forward_push_logs(collection_id, Request::new(push_logs))
+                        .await;
+                }
+                Err(err) => {
+                    return Err(Status::unknown(err.to_string()));
+                }
+            };
             let mut messages = Vec::with_capacity(push_logs.records.len());
             for record in push_logs.records {
                 let mut buf = vec![];
@@ -745,18 +1054,25 @@ impl LogService for LogServer {
                 Arc::clone(&self.storage),
                 prefix,
             );
-            let limit_position = match log_reader.maximum_log_position().await {
-                Ok(limit_position) => limit_position,
+            let (start_position, limit_position) = match log_reader.manifest().await {
+                Ok(Some(manifest)) => (
+                    manifest.minimum_log_position(),
+                    manifest.maximum_log_position(),
+                ),
+                Ok(None) | Err(wal3::Error::UninitializedLog) => {
+                    return self.forward_scout_logs(Request::new(scout_logs)).await;
+                }
                 Err(err) => {
-                    if err.code() == chroma_error::ErrorCodes::FailedPrecondition {
-                        LogPosition::from_offset(1)
-                    } else {
-                        return Err(Status::new(err.code().into(), err.to_string()));
-                    }
+                    return Err(Status::new(
+                        err.code().into(),
+                        format!("could not scout logs: {err:?}"),
+                    ));
                 }
             };
+            let start_offset = start_position.offset() as i64;
             let limit_offset = limit_position.offset() as i64;
             Ok(Response::new(ScoutLogsResponse {
+                first_uncompacted_record_offset: start_offset,
                 first_uninserted_record_offset: limit_offset,
             }))
         }
@@ -797,13 +1113,11 @@ impl LogService for LogServer {
                 .await
             {
                 Ok(fragments) => fragments,
+                Err(wal3::Error::UninitializedLog) => {
+                    return self.forward_pull_logs(Request::new(pull_logs)).await;
+                }
                 Err(err) => {
-                    if let wal3::Error::UninitializedLog = err {
-                        tracing::info!("Uninitialized log for collection {}", collection_id);
-                        return Ok(Response::new(PullLogsResponse { records: vec![] }));
-                    } else {
-                        return Err(Status::new(err.code().into(), err.to_string()));
-                    }
+                    return Err(Status::new(err.code().into(), err.to_string()));
                 }
             };
             let futures = fragments
@@ -849,6 +1163,9 @@ impl LogService for LogServer {
                     });
                 }
             }
+            if !records.is_empty() && records[0].log_offset != pull_logs.start_from_offset {
+                return Err(Status::not_found("Some entries have been purged"));
+            }
             tracing::info!("pulled {} records", records.len());
             Ok(Response::new(PullLogsResponse { records }))
         }
@@ -884,6 +1201,19 @@ impl LogService for LogServer {
                 Arc::clone(&storage),
                 source_prefix.clone(),
             );
+            if let Err(err) = log_reader.maximum_log_position().await {
+                match err {
+                    wal3::Error::UninitializedLog => {
+                        return self.forward_fork_logs(Request::new(request)).await;
+                    }
+                    _ => {
+                        return Err(Status::new(
+                            err.code().into(),
+                            format!("Failed to load log: {}", err),
+                        ));
+                    }
+                }
+            }
             let cursors = CursorStore::new(
                 CursorStoreOptions::default(),
                 Arc::clone(&storage),
@@ -892,7 +1222,6 @@ impl LogService for LogServer {
             );
             let cursor_name = &COMPACTION;
             let witness = cursors.load(cursor_name).await.map_err(|err| {
-                tracing::info!("FINDME");
                 Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
             })?;
             // This is the existing compaction_offset, which is the last record that was compacted.
@@ -909,7 +1238,6 @@ impl LogService for LogServer {
             )
             .await
             .map_err(|err| {
-                tracing::info!("FINDME");
                 Status::new(err.code().into(), format!("Failed to copy log: {}", err))
             })?;
             let log_reader = LogReader::new(
@@ -919,11 +1247,9 @@ impl LogService for LogServer {
             );
             // This is the next record to insert, so we'll have to adjust downwards.
             let max_offset = log_reader.maximum_log_position().await.map_err(|err| {
-                tracing::info!("FINDME");
                 Status::new(err.code().into(), format!("Failed to copy log: {}", err))
             })?;
             if max_offset < offset {
-                tracing::info!("FINDME");
                 return Err(Status::new(
                     chroma_error::ErrorCodes::Internal.into(),
                     format!("max_offset={:?} < offset={:?}", max_offset, offset),
@@ -1101,51 +1427,13 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        tracing::info!(
-            "update_collection_log_offset for {collection_id} to {}",
-            request.log_offset
-        );
-        let storage_prefix = storage_prefix_for_log(collection_id);
-        let cursor_name = &COMPACTION;
-        let cursor_store = CursorStore::new(
-            CursorStoreOptions::default(),
-            Arc::clone(&self.storage),
-            storage_prefix.clone(),
-            "writer".to_string(),
-        );
-        let witness = cursor_store.load(cursor_name).await.map_err(|err| {
-            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
-        })?;
-        let default = Cursor::default();
-        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
-        if cursor.position.offset() > request.log_offset as u64 {
-            return Err(Status::aborted("Invalid offset"));
-        }
-        let cursor = Cursor {
-            position: LogPosition::from_offset(request.log_offset as u64),
-            epoch_us: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|_| wal3::Error::Internal)
-                .unwrap()
-                .as_micros() as u64,
-            writer: "TODO".to_string(),
-        };
-        if let Some(witness) = witness {
-            cursor_store
-                .save(cursor_name, &cursor, &witness)
-                .await
-                .map_err(|err| {
-                    Status::new(err.code().into(), format!("Failed to save cursor: {}", err))
-                })?;
-        } else {
-            cursor_store
-                .init(cursor_name, cursor)
-                .await
-                .map_err(|err| {
-                    Status::new(err.code().into(), format!("Failed to init cursor: {}", err))
-                })?;
-        }
-        Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
+
+        // Grab a lock on the state for this key, so that a racing initialize won't do anything.
+        let key = LogKey { collection_id };
+        let handle = self.open_logs.get_or_create_state(key);
+        let mut _active = handle.active.lock().await;
+        self._update_collection_log_offset(Request::new(request))
+            .await
     }
 
     #[tracing::instrument(skip(self, request), err(Display))]
@@ -1229,6 +1517,107 @@ impl LogService for LogServer {
             markers.extend(records);
         }
         Ok(Response::new(InspectDirtyLogResponse { markers }))
+    }
+
+    async fn seal_log(
+        &self,
+        _request: Request<SealLogRequest>,
+    ) -> Result<Response<SealLogResponse>, Status> {
+        Err(Status::failed_precondition(
+            "rust log service doesn't do sealing",
+        ))
+    }
+
+    async fn migrate_log(
+        &self,
+        request: Request<MigrateLogRequest>,
+    ) -> Result<Response<MigrateLogResponse>, Status> {
+        let migrate_log = request.into_inner();
+        let collection_id = Uuid::parse_str(&migrate_log.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let span = tracing::info_span!("migrate_log");
+
+        async move {
+            tracing::info!(
+                "Migrating log for collection {} to new log service",
+                collection_id
+            );
+            let prefix = storage_prefix_for_log(collection_id);
+            let key = LogKey { collection_id };
+            let handle = self.open_logs.get_or_create_state(key);
+            let mark_dirty = MarkDirty {
+                collection_id,
+                dirty_log: Arc::clone(&self.dirty_log),
+            };
+            match get_log_from_handle(
+                &handle,
+                &self.config.writer,
+                &self.storage,
+                &prefix,
+                mark_dirty,
+            )
+            .await
+            {
+                Ok(_) => {
+                    tracing::info!("{collection_id} already migrated");
+                    Ok(Response::new(MigrateLogResponse {}))
+                }
+                Err(wal3::Error::UninitializedLog) => {
+                    if let Some(proxy) = self.proxy.as_ref() {
+                        tracing::info!("effectuating transfer of {collection_id}");
+                        self.effectuate_log_transfer(collection_id, proxy.clone(), 3)
+                            .await?;
+                        Ok(Response::new(MigrateLogResponse {}))
+                    } else {
+                        tracing::info!("not effectuating transfer of {collection_id} (no proxy)");
+                        Err(Status::failed_precondition("proxy not initialized"))
+                    }
+                }
+                Err(err) => Err(Status::unknown(err.to_string())),
+            }
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn inspect_log_state(
+        &self,
+        request: Request<InspectLogStateRequest>,
+    ) -> Result<Response<InspectLogStateResponse>, Status> {
+        let request = request.into_inner();
+        let collection_id = Uuid::parse_str(&request.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        tracing::info!("inspect_log_state for {collection_id}");
+        let storage_prefix = storage_prefix_for_log(collection_id);
+        let log_reader = LogReader::new(
+            self.config.reader.clone(),
+            Arc::clone(&self.storage),
+            storage_prefix.clone(),
+        );
+        let mani = log_reader.manifest().await;
+        if let Err(wal3::Error::UninitializedLog) = mani {
+            return Ok(Response::new(InspectLogStateResponse {
+                debug: "log uninitialized\n".to_string(),
+            }));
+        }
+        let mani = mani.map_err(|err| Status::unknown(err.to_string()))?;
+
+        let cursor_name = &COMPACTION;
+        let cursor_store = CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::clone(&self.storage),
+            storage_prefix.clone(),
+            "writer".to_string(),
+        );
+        let witness = cursor_store.load(cursor_name).await.map_err(|err| {
+            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
+        })?;
+
+        Ok(Response::new(InspectLogStateResponse {
+            debug: format!("manifest: {mani:#?}\ncompaction cursor: {witness:?}"),
+        }))
     }
 }
 
@@ -1450,6 +1839,8 @@ pub struct LogServerConfig {
     pub reinsert_threshold: u64,
     #[serde(default = "LogServerConfig::default_timeout_us")]
     pub timeout_us: u64,
+    #[serde(default)]
+    pub proxy_to: Option<GrpcLogConfig>,
 }
 
 impl LogServerConfig {
@@ -1487,6 +1878,7 @@ impl Default for LogServerConfig {
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
             timeout_us: Self::default_timeout_us(),
+            proxy_to: None,
         }
     }
 }
@@ -1524,6 +1916,16 @@ impl Configurable<LogServerConfig> for LogServer {
         .await
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
         let dirty_log = Arc::new(dirty_log);
+        let proxy = if let Some(proxy_to) = config.proxy_to.as_ref() {
+            match GrpcLog::primary_client_from_config(proxy_to).await {
+                Ok(log) => Some(log),
+                Err(err) => {
+                    return Err(err);
+                }
+            }
+        } else {
+            None
+        };
         let compacting = tokio::sync::Mutex::new(());
         let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
         let backpressure = Mutex::new(Arc::new(HashSet::default()));
@@ -1532,6 +1934,7 @@ impl Configurable<LogServerConfig> for LogServer {
             open_logs: Arc::new(StateHashTable::default()),
             storage,
             dirty_log,
+            proxy,
             compacting,
             backpressure,
             cache,

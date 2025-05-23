@@ -97,6 +97,23 @@ impl ChromaError for GetCollectionWithSegmentsError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum BatchGetCollectionVersionFilePathsError {
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] Status),
+    #[error("Could not parse UUID from string {1}: {0}")]
+    Uuid(uuid::Error, String),
+}
+
+impl ChromaError for BatchGetCollectionVersionFilePathsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BatchGetCollectionVersionFilePathsError::Grpc(status) => status.code().into(),
+            BatchGetCollectionVersionFilePathsError::Uuid(_, _) => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct ResetResponse {}
 
@@ -593,6 +610,8 @@ pub enum CreateCollectionError {
     Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("The operation was aborted, {0}")]
+    Aborted(String),
     #[error("SPANN is still in development. Not allowed to created spann indexes")]
     SpannNotImplemented,
     #[error("HNSW is not supported on this platform")]
@@ -610,6 +629,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::Get(err) => err.code(),
             CreateCollectionError::Configuration(_) => ErrorCodes::Internal,
             CreateCollectionError::Internal(err) => err.code(),
+            CreateCollectionError::Aborted(_) => ErrorCodes::Aborted,
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
         }
