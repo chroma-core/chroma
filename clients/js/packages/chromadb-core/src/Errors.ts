@@ -85,6 +85,13 @@ export class ChromaUniqueError extends Error {
   }
 }
 
+export class ChromaQuotaExceededError extends Error {
+  name = "ChromaQuotaExceededError";
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+  }
+}
+
 export function createErrorByType(type: string, message: string) {
   switch (type) {
     case "InvalidCollection":

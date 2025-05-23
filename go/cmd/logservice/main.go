@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"net"
 
-	"github.com/chroma-core/chroma/go/pkg/grpcutils"
 	"github.com/chroma-core/chroma/go/pkg/log/configuration"
 	"github.com/chroma-core/chroma/go/pkg/log/leader"
 	"github.com/chroma-core/chroma/go/pkg/log/metrics"
@@ -15,6 +15,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/utils"
 	libs "github.com/chroma-core/chroma/go/shared/libs"
 	"github.com/chroma-core/chroma/go/shared/otel"
+	sharedOtel "github.com/chroma-core/chroma/go/shared/otel"
 	"github.com/pingcap/log"
 	"github.com/rs/zerolog"
 	"go.uber.org/automaxprocs/maxprocs"
@@ -23,6 +24,11 @@ import (
 	"google.golang.org/grpc/health"
 	healthgrpc "google.golang.org/grpc/health/grpc_health_v1"
 )
+
+// hard-coding this here despite it also being in pkg/grpcutils/service.go because
+// using the methods from grpcutils results in breaking our metrics collection for
+// some reason. This service is being deprecated soon, so this is just a quick fix.
+const maxGrpcFrameSize = 256 * 1024 * 1024
 
 func main() {
 	ctx := context.Background()
@@ -49,21 +55,25 @@ func main() {
 	sysDb := sysdb.NewSysDB(config.SYSDB_CONN)
 	lr := repository.NewLogRepository(conn, sysDb)
 	server := server.NewLogServer(lr)
-
-	_, err = grpcutils.Default.StartGrpcServer("log-service", &grpcutils.GrpcConfig{
-		BindAddress: ":" + config.PORT,
-	}, func(registrar grpc.ServiceRegistrar) {
-		healthcheck := health.NewServer()
-		healthgrpc.RegisterHealthServer(registrar, healthcheck)
-		logservicepb.RegisterLogServiceServer(registrar, server)
-	})
+	var listener net.Listener
+	listener, err = net.Listen("tcp", ":"+config.PORT)
 	if err != nil {
-		log.Fatal("failed to create grpc server", zap.Error(err))
+		log.Fatal("failed to listen", zap.Error(err))
 	}
+	s := grpc.NewServer(
+		grpc.MaxRecvMsgSize(maxGrpcFrameSize),
+		grpc.UnaryInterceptor(sharedOtel.ServerGrpcInterceptor),
+	)
+	healthcheck := health.NewServer()
+	healthgrpc.RegisterHealthServer(s, healthcheck)
 
-	log.Info("log service started")
+	logservicepb.RegisterLogServiceServer(s, server)
+	log.Info("log service started", zap.String("address", listener.Addr().String()))
 	go leader.AcquireLeaderLock(ctx, func(ctx context.Context) {
 		go purging.PerformPurgingLoop(ctx, lr)
 		go metrics.PerformMetricsLoop(ctx, lr)
 	})
+	if err := s.Serve(listener); err != nil {
+		log.Fatal("failed to serve", zap.Error(err))
+	}
 }

@@ -77,9 +77,9 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 	}
 
 	// Convert the request segments to create segment models
-	createSegments := []*model.CreateSegment{}
+	createSegments := []*model.Segment{}
 	for _, segment := range req.Segments {
-		createSegment, err := convertSegmentToModel(segment)
+		createSegment, err := convertProtoSegment(segment)
 		if err != nil {
 			log.Error("Error in creating segments for the collection", zap.Error(err))
 			res.Collection = nil // We don't need to set the collection in case of error
@@ -90,6 +90,12 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 			}
 			return res, grpcutils.BuildInternalGrpcError(err.Error())
 		}
+		filePaths := make(map[string][]string)
+		for key, filePath := range segment.FilePaths {
+			filePaths[key] = filePath.Paths
+		}
+		createSegment.FilePaths = filePaths
+
 		createSegments = append(createSegments, createSegment)
 	}
 
@@ -112,6 +118,9 @@ func (s *Server) CreateCollection(ctx context.Context, req *coordinatorpb.Create
 		}
 		if err == common.ErrDatabaseNotFound {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+		if err == common.ErrConcurrentDeleteCollection {
+			return res, grpcutils.BuildAbortedGrpcError(err.Error())
 		}
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
@@ -373,7 +382,7 @@ func (s *Server) ForkCollection(ctx context.Context, req *coordinatorpb.ForkColl
 		if err == common.ErrCollectionNotFound {
 			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
-		if err == common.ErrCollectionEntryIsStale {
+		if err == common.ErrCollectionLogPositionStale {
 			return res, grpcutils.BuildFailedPreconditionGrpcError(err.Error())
 		}
 		if err == common.ErrCollectionUniqueConstraintViolation {

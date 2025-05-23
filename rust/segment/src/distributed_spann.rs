@@ -634,11 +634,7 @@ mod test {
             dimension: None,
             tenant: "test".to_string(),
             database: "test".to_string(),
-            log_position: 0,
-            version: 0,
-            total_records_post_compaction: 0,
-            size_bytes_post_compaction: 0,
-            last_compaction_time_secs: 0,
+            ..Default::default()
         };
 
         let spann_writer = SpannSegmentWriter::from_segment(

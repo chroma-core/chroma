@@ -158,7 +158,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		s.softDeleteCleaner.Start()
 
 		log.Info("Starting GRPC server")
-		s.grpcServer, err = provider.StartGrpcServer("sysdb-service", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
+		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
 			healthgrpc.RegisterHealthServer(registrar, s.healthServer)
 		})

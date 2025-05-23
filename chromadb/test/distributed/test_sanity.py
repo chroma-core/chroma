@@ -67,6 +67,7 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
         name="test_add_include_all_with_compaction_delay",
         metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
     )
+    initial_version = get_collection_version(client, collection.name)
 
     ids = []
     embeddings = []
@@ -81,7 +82,7 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
             documents=[documents[-1]],
         )
 
-    wait_for_version_increase(client, collection.name, get_collection_version(client, collection.name), 120)
+    wait_for_version_increase(client, collection.name, initial_version, 120)
 
     random_query_1 = np.random.rand(1, 3)[0]
     random_query_2 = np.random.rand(1, 3)[0]

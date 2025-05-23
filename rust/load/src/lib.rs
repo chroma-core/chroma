@@ -1190,7 +1190,7 @@ impl LoadService {
     pub fn start(
         &self,
         name: String,
-        mut workload: Workload,
+        workload: Workload,
         data_set: String,
         connection: Connection,
         expires: chrono::DateTime<chrono::FixedOffset>,
@@ -1199,6 +1199,20 @@ impl LoadService {
         let Some(data_set) = self.data_sets().iter().find(|ds| ds.name() == data_set) else {
             return Err(Error::NotFound("data set not found".to_string()));
         };
+        let data_set = Arc::clone(data_set);
+        self.start_struct(name, workload, data_set, connection, expires, throughput)
+    }
+
+    /// Start a workload on the load service using structs rather than resolving strings.
+    pub fn start_struct(
+        &self,
+        name: String,
+        mut workload: Workload,
+        data_set: Arc<dyn DataSet>,
+        connection: Connection,
+        expires: chrono::DateTime<chrono::FixedOffset>,
+        throughput: Throughput,
+    ) -> Result<Uuid, Error> {
         workload.resolve_by_name(self.workloads())?;
         let res = {
             // SAFETY(rescrv):  Mutex poisoning.
@@ -1206,7 +1220,7 @@ impl LoadService {
             Ok(harness.start(
                 name,
                 workload.clone(),
-                data_set,
+                &data_set,
                 connection,
                 expires,
                 throughput,
@@ -1625,15 +1639,41 @@ async fn start(
 ) -> Result<String, Error> {
     let expires = chrono::DateTime::parse_from_rfc3339(&req.expires)
         .map_err(|err| Error::InvalidRequest(format!("could not parse rfc3339: {err:?}")))?;
-    let uuid = state.load.start(
-        req.name,
-        req.workload,
-        req.data_set,
-        req.connection,
-        expires,
-        req.throughput,
-    )?;
-    Ok(uuid.to_string() + "\n")
+    match (req.data_set, req.custom_data_set) {
+        (Some(_), Some(_)) => Err(Error::InvalidRequest(
+            "provide at most one of data_set and custom_data_set".to_string(),
+        )),
+        (None, None) => Err(Error::InvalidRequest(
+            "provide at least one of data_set and custom_data_set".to_string(),
+        )),
+        (Some(data_set), None) => {
+            let uuid = state.load.start(
+                req.name,
+                req.workload,
+                data_set,
+                req.connection,
+                expires,
+                req.throughput,
+            )?;
+            Ok(uuid.to_string() + "\n")
+        }
+        (None, Some(custom_data_set)) => {
+            let Some(data_set) = data_sets::from_json(&custom_data_set) else {
+                return Err(Error::InvalidRequest(
+                    "custom data set returned nothing".to_string(),
+                ));
+            };
+            let uuid = state.load.start_struct(
+                req.name,
+                req.workload,
+                data_set,
+                req.connection,
+                expires,
+                req.throughput,
+            )?;
+            Ok(uuid.to_string() + "\n")
+        }
+    }
 }
 
 async fn stop(
