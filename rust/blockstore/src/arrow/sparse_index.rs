@@ -362,10 +362,7 @@ impl SparseIndexReader {
         result_uuids
     }
 
-    pub(super) fn get_block_ids_for_prefixes<'prefix>(
-        &self,
-        mut prefixes: Vec<&'prefix str>,
-    ) -> Vec<Uuid> {
+    pub(super) fn get_block_ids_for_prefixes(&self, mut prefixes: Vec<&str>) -> Vec<Uuid> {
         prefixes.sort();
         let mut result_uuids = Vec::new();
         let block_start = self.data.forward.iter();
