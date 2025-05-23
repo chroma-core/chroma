@@ -37,7 +37,7 @@ We welcome pull requests to add new Integrations to the community.
 
 |                                         | Python | JS           |
 | --------------------------------------- | ------ | ------------ |
-| [Chonkie] (./frameworks/chonkie)        | ✓      | Coming Soon! |
+| [Chonkie](./frameworks/chonkie)        | ✓      | Coming Soon! |
 | [DeepEval](./frameworks/deepeval)       | ✓      | -            |
 | [Langchain](./frameworks/langchain)     | ✓      | ✓            |
 | [LlamaIndex](./frameworks/llamaindex)   | ✓      | ✓            |
