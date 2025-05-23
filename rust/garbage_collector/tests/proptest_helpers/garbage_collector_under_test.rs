@@ -284,57 +284,22 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                     .runtime
                     .block_on(
                         async {
+                            let collections = state
+                                .sysdb
+                                .get_collections_to_gc(None, None, Some(state.tenant.clone()))
+                                .await
+                                .unwrap();
+                            let collection_to_gc =
+                                collections.iter().find(|c| c.id == collection_id).expect("get_collections_to_gc() did not return a collection eligible for garbage collection");
+
                             let system = System::new();
                             let dispatcher = Dispatcher::new(DispatcherConfig::default());
                             let mut dispatcher_handle = system.start_component(dispatcher);
 
-                            let mut collections = state
-                                .sysdb
-                                .get_collections(
-                                    Some(collection_id),
-                                    None,
-                                    Some(state.tenant.clone()),
-                                    None,
-                                    None,
-                                    0,
-                                )
-                                .await
-                                .unwrap();
-                            let collection_to_gc = collections.pop().unwrap();
-                            assert_eq!(collection_to_gc.collection_id, collection_id);
-                            let version_file_path = collection_to_gc.version_file_path.unwrap();
-
-                            let mut lineage_file_path = None;
-                            if let Some(lineage_file) = collection_to_gc.lineage_file_path {
-                                lineage_file_path = Some(lineage_file);
-                            } else if let Some(root_collection_id) =
-                                collection_to_gc.root_collection_id
-                            {
-                                lineage_file_path = Some(
-                                    state
-                                        .sysdb
-                                        .get_collections(
-                                            Some(root_collection_id),
-                                            None,
-                                            Some(state.tenant.clone()),
-                                            None,
-                                            None,
-                                            0,
-                                        )
-                                        .await
-                                        .unwrap()
-                                        .first()
-                                        .unwrap()
-                                        .lineage_file_path
-                                        .clone()
-                                        .unwrap(),
-                                );
-                            }
-
                             let orchestrator = GarbageCollectorOrchestrator::new(
                                 collection_id,
-                                version_file_path,
-                                lineage_file_path,
+                                collection_to_gc.version_file_path.clone(),
+                                collection_to_gc.lineage_file_path.clone(),
                                 // This proptest does not test the cutoff time as the timestamps created by the SysDb (e.g. collection.created_at and timestamps in version files) cannot currently be faked/overridden.
                                 DateTime::from_timestamp(
                                     SystemTime::now()
@@ -371,6 +336,10 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             "Graph after transition: \n{}",
             ref_state.get_graphviz_of_graph()
         );
+        tracing::debug!(
+            "Collection statuses after transition: {:#?}",
+            ref_state.collection_status
+        );
 
         state
     }
@@ -384,12 +353,26 @@ impl StateMachineTest for GarbageCollectorUnderTest {
 
         // Check version files
         let expected_versions_by_collection = ref_state.expected_versions_by_collection();
+        let hard_deleted_collections = ref_state
+            .collection_status
+            .iter()
+            .filter_map(|(collection_id, status)| {
+                if *status == super::garbage_collector_reference::CollectionStatus::Deleted {
+                    Some(*collection_id)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
 
         ref_state.runtime.block_on({
-            let sysdb = state.sysdb.clone();
+            let mut sysdb = state.sysdb.clone();
             let storage = state.storage.clone();
 
             async move {
+                let collections_not_hard_deleted = sysdb.batch_get_collection_soft_delete_status(hard_deleted_collections).await.unwrap();
+                assert!(collections_not_hard_deleted.is_empty(), "Some collections were not hard deleted: {:#?}", collections_not_hard_deleted);
+
                 futures::stream::iter(expected_versions_by_collection)
                     .map(move |(collection_id, expected_versions)| {
                         let mut sysdb = sysdb.clone();
