@@ -125,6 +125,18 @@ impl<
         }
     }
 
+    pub async fn load_blocks_for_prefixes<'prefix>(
+        &self,
+        prefixes: impl IntoIterator<Item = &'prefix str>,
+    ) {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.load_blocks_for_prefixes(prefixes).await
+            }
+        }
+    }
+
     pub async fn rank(
         &'referred_data self,
         prefix: &'referred_data str,
