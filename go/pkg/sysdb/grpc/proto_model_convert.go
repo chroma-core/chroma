@@ -51,7 +51,15 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 		TotalRecordsPostCompaction: collection.TotalRecordsPostCompaction,
 		SizeBytesPostCompaction:    collection.SizeBytesPostCompaction,
 		LastCompactionTimeSecs:     collection.LastCompactionTimeSecs,
+		VersionFilePath:            &collection.VersionFileName,
+		LineageFilePath:            collection.LineageFileName,
 	}
+
+	if collection.RootCollectionID != nil {
+		rootCollectionId := collection.RootCollectionID.String()
+		collectionpb.RootCollectionId = &rootCollectionId
+	}
+
 	if collection.Metadata == nil {
 		return collectionpb
 	}
@@ -216,7 +224,7 @@ func convertSegmentMetadataToProto(segmentMetadata *model.SegmentMetadata[model.
 	return metadatapb
 }
 
-func convertSegmentToModel(segmentpb *coordinatorpb.Segment) (*model.CreateSegment, error) {
+func convertProtoSegment(segmentpb *coordinatorpb.Segment) (*model.Segment, error) {
 	segmentID, err := types.ToUniqueID(&segmentpb.Id)
 	if err != nil {
 		log.Error("segment id format error", zap.String("segment.id", segmentpb.Id))
@@ -236,11 +244,17 @@ func convertSegmentToModel(segmentpb *coordinatorpb.Segment) (*model.CreateSegme
 		return nil, err
 	}
 
-	return &model.CreateSegment{
+	filePaths := make(map[string][]string)
+	for t, paths := range segmentpb.FilePaths {
+		filePaths[t] = paths.Paths
+	}
+
+	return &model.Segment{
 		ID:           segmentID,
 		Type:         segmentpb.Type,
 		Scope:        segmentpb.Scope.String(),
 		CollectionID: collectionID,
 		Metadata:     metadata,
+		FilePaths:    filePaths,
 	}, nil
 }

@@ -97,7 +97,7 @@ func (s *Coordinator) GetTenant(ctx context.Context, getTenant *model.GetTenant)
 	return tenant, nil
 }
 
-func (s *Coordinator) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment) (*model.Collection, bool, error) {
+func (s *Coordinator) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.Segment) (*model.Collection, bool, error) {
 	collection, created, err := s.catalog.CreateCollectionAndSegments(ctx, createCollection, createSegments, createCollection.Ts)
 	if err != nil {
 		return nil, false, err
@@ -131,7 +131,7 @@ func (s *Coordinator) GetCollectionSize(ctx context.Context, collectionID types.
 }
 
 func (s *Coordinator) GetCollectionWithSegments(ctx context.Context, collectionID types.UniqueID) (*model.Collection, []*model.Segment, error) {
-	return s.catalog.GetCollectionWithSegments(ctx, collectionID)
+	return s.catalog.GetCollectionWithSegments(ctx, collectionID, false)
 }
 
 func (s *Coordinator) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, error) {
@@ -161,7 +161,11 @@ func (s *Coordinator) ForkCollection(ctx context.Context, forkCollection *model.
 	return s.catalog.ForkCollection(ctx, forkCollection)
 }
 
-func (s *Coordinator) CreateSegment(ctx context.Context, segment *model.CreateSegment) error {
+func (s *Coordinator) CountForks(ctx context.Context, sourceCollectionID types.UniqueID) (uint64, error) {
+	return s.catalog.CountForks(ctx, sourceCollectionID)
+}
+
+func (s *Coordinator) CreateSegment(ctx context.Context, segment *model.Segment) error {
 	if err := verifyCreateSegment(segment); err != nil {
 		return err
 	}
@@ -208,7 +212,7 @@ func verifyCollectionMetadata(metadata *model.CollectionMetadata[model.Collectio
 	return nil
 }
 
-func verifyCreateSegment(segment *model.CreateSegment) error {
+func verifyCreateSegment(segment *model.Segment) error {
 	if err := verifySegmentMetadata(segment.Metadata); err != nil {
 		return err
 	}
@@ -243,8 +247,8 @@ func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollec
 	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
 }
 
-func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64) ([]*model.CollectionToGc, error) {
-	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit)
+func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*model.CollectionToGc, error) {
+	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit, tenantID)
 }
 
 func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *int64, versionsAtOrAfter *int64, includeMarkedForDeletion bool) ([]*coordinatorpb.CollectionVersionInfo, error) {
@@ -257,6 +261,10 @@ func (s *Coordinator) MarkVersionForDeletion(ctx context.Context, req *coordinat
 
 func (s *Coordinator) DeleteCollectionVersion(ctx context.Context, req *coordinatorpb.DeleteCollectionVersionRequest) (*coordinatorpb.DeleteCollectionVersionResponse, error) {
 	return s.catalog.DeleteCollectionVersion(ctx, req)
+}
+
+func (s *Coordinator) BatchGetCollectionVersionFilePaths(ctx context.Context, req *coordinatorpb.BatchGetCollectionVersionFilePathsRequest) (*coordinatorpb.BatchGetCollectionVersionFilePathsResponse, error) {
+	return s.catalog.BatchGetCollectionVersionFilePaths(ctx, req.CollectionIds)
 }
 
 // SetDeleteMode sets the delete mode for testing

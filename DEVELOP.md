@@ -47,7 +47,7 @@ print(api.heartbeat())
 Run `chroma run --path /chroma_db_path`
 ```python
 import chromadb
-api = chromadb.HttpClient(host="localhost", port="8000")
+api = chromadb.HttpClient(host="localhost", port=8000)
 
 print(api.heartbeat())
 ```

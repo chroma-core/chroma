@@ -1,7 +1,7 @@
 {
   "name": "chromadb-root",
   "private": true,
-  "version": "2.3.0",
+  "version": "2.4.7",
   "description": "A JavaScript interface for chroma",
   "keywords": [],
   "author": "",

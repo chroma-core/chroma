@@ -26,6 +26,7 @@ def test_get_builtins_holds() -> None:
     expected_builtins = {
         "AmazonBedrockEmbeddingFunction",
         "BasetenEmbeddingFunction",
+        "CloudflareWorkersAIEmbeddingFunction",
         "CohereEmbeddingFunction",
         "VoyageAIEmbeddingFunction",
         "GoogleGenerativeAiEmbeddingFunction",
@@ -43,6 +44,7 @@ def test_get_builtins_holds() -> None:
         "SentenceTransformerEmbeddingFunction",
         "Text2VecEmbeddingFunction",
         "ChromaLangchainEmbeddingFunction",
+        "TogetherAIEmbeddingFunction",
         "DefaultEmbeddingFunction",
     }
 

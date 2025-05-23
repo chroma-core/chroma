@@ -43,7 +43,9 @@ impl ChromaError for GrpcPullLogsError {
 pub enum GrpcPushLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
-    #[error("Failed to push logs")]
+    #[error("The log is sealed.  No writes can happen.")]
+    Sealed,
+    #[error("Failed to push logs: {0}")]
     FailedToPushLogs(#[from] tonic::Status),
     #[error("Failed to convert records to proto")]
     ConversionError(#[from] RecordConversionError),
@@ -52,9 +54,10 @@ pub enum GrpcPushLogsError {
 impl ChromaError for GrpcPushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GrpcPushLogsError::Backoff => ErrorCodes::Unavailable,
+            GrpcPushLogsError::Backoff => ErrorCodes::AlreadyExists,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
+            GrpcPushLogsError::Sealed => ErrorCodes::FailedPrecondition,
         }
     }
 }
@@ -63,7 +66,7 @@ impl ChromaError for GrpcPushLogsError {
 pub enum GrpcForkLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
-    #[error("Failed to push logs")]
+    #[error("Failed to push logs: {0}")]
     FailedToForkLogs(#[from] tonic::Status),
 }
 
@@ -122,6 +125,20 @@ impl ChromaError for GrpcPurgeDirtyForCollectionError {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum GrpcSealLogError {
+    #[error("Failed to seal collection: {0}")]
+    FailedToSeal(#[from] tonic::Status),
+}
+
+impl ChromaError for GrpcSealLogError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcSealLogError::FailedToSeal(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct GrpcLog {
     config: GrpcLogConfig,
@@ -169,6 +186,7 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
         my_config: &GrpcLogConfig,
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        // NOTE(rescrv):  This code is duplicated with primary_client_from_config below.  A transient hack.
         let host = &my_config.host;
         let port = &my_config.port;
         let max_encoding_message_size = my_config.max_encoding_message_size;
@@ -206,34 +224,98 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
 }
 
 impl GrpcLog {
+    // NOTE(rescrv) This is a transient hack, so the code duplication is not worth eliminating.
+    pub async fn primary_client_from_config(
+        my_config: &GrpcLogConfig,
+    ) -> Result<
+        LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+        Box<dyn ChromaError>,
+    > {
+        let host = &my_config.host;
+        let port = &my_config.port;
+        let max_encoding_message_size = my_config.max_encoding_message_size;
+        let max_decoding_message_size = my_config.max_decoding_message_size;
+        let connection_string = format!("http://{}:{}", host, port);
+        let client_for_conn_str =
+            |connection_string: String| -> Result<LogServiceClient<_>, Box<dyn ChromaError>> {
+                tracing::info!("Connecting to log service at {}", connection_string);
+                let endpoint_res = match Endpoint::from_shared(connection_string) {
+                    Ok(endpoint) => endpoint,
+                    Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
+                };
+                let endpoint_res = endpoint_res
+                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
+                let channel = endpoint_res.connect_lazy();
+                let channel = ServiceBuilder::new()
+                    .layer(chroma_tracing::GrpcTraceLayer)
+                    .service(channel);
+                let client = LogServiceClient::new(channel)
+                    .max_encoding_message_size(max_encoding_message_size)
+                    .max_decoding_message_size(max_decoding_message_size);
+                Ok(client)
+            };
+        client_for_conn_str(connection_string)
+    }
+
+    fn client_is_on_alt_log(to_evaluate: CollectionUuid, alt_host_threshold: Option<&str>) -> bool {
+        if let Some(alt_host_threshold) = alt_host_threshold {
+            let Ok(alt_host_threshold) = Uuid::parse_str(alt_host_threshold) else {
+                tracing::error!("alt_host_threshold must be a valid UUID");
+                return false;
+            };
+            let to_evaluate = to_evaluate.0.as_u64_pair().0;
+            let alt_host_threshold = alt_host_threshold.as_u64_pair().0;
+            to_evaluate <= alt_host_threshold
+        } else {
+            false
+        }
+    }
+
     fn client_for(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
     ) -> &mut LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>> {
-        let collection_id = collection_id.to_string();
         if let Some(alt) = self.alt_client.as_mut() {
-            if self.config.use_alt_host_for_everything
-                || self.config.use_alt_for_collections.contains(&collection_id)
+            if self.config.use_alt_for_tenants.iter().any(|t| t == tenant)
+                || self
+                    .config
+                    .use_alt_for_collections
+                    .contains(&collection_id.to_string())
+                || Self::client_is_on_alt_log(
+                    collection_id,
+                    self.config.alt_host_threshold.as_deref(),
+                )
             {
                 tracing::info!("using alt client for {collection_id}");
                 return alt;
             }
         }
+        tracing::info!("using standard client for {collection_id}");
         &mut self.client
+    }
+
+    fn client_for_purge(
+        &mut self,
+    ) -> Option<&mut LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>>
+    {
+        self.alt_client.as_mut()
     }
 
     // ScoutLogs returns the offset of the next record to be inserted into the log.
     #[tracing::instrument(skip(self), ret)]
     pub(super) async fn scout_logs(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         start_from: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
-        let request = self
-            .client_for(collection_id)
-            .scout_logs(chroma_proto::ScoutLogsRequest {
-                collection_id: collection_id.0.to_string(),
-            });
+        let request =
+            self.client_for(tenant, collection_id)
+                .scout_logs(chroma_proto::ScoutLogsRequest {
+                    collection_id: collection_id.0.to_string(),
+                });
         let response = request.await;
         let response = match response {
             Ok(response) => response,
@@ -249,6 +331,7 @@ impl GrpcLog {
     #[tracing::instrument(skip(self))]
     pub(super) async fn read(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
@@ -258,15 +341,15 @@ impl GrpcLog {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
         };
-        let request = self
-            .client_for(collection_id)
-            .pull_logs(chroma_proto::PullLogsRequest {
-                // NOTE(rescrv):  Use the untyped string representation of the collection ID.
-                collection_id: collection_id.0.to_string(),
-                start_from_offset: offset,
-                batch_size,
-                end_timestamp,
-            });
+        let request =
+            self.client_for(tenant, collection_id)
+                .pull_logs(chroma_proto::PullLogsRequest {
+                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                    collection_id: collection_id.0.to_string(),
+                    start_from_offset: offset,
+                    batch_size,
+                    end_timestamp,
+                });
         let response = request.await;
         match response {
             Ok(response) => {
@@ -298,6 +381,7 @@ impl GrpcLog {
 
     pub(super) async fn push_logs(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
     ) -> Result<(), GrpcPushLogsError> {
@@ -311,27 +395,35 @@ impl GrpcLog {
                 >>()?,
         };
 
-        self.client_for(collection_id)
+        let resp = self
+            .client_for(tenant, collection_id)
             .push_logs(request)
             .await
             .map_err(|err| {
-                if err.code() == ErrorCodes::Unavailable.into() {
+                if err.code() == ErrorCodes::Unavailable.into()
+                    || err.code() == ErrorCodes::AlreadyExists.into()
+                {
                     GrpcPushLogsError::Backoff
                 } else {
                     err.into()
                 }
             })?;
-
-        Ok(())
+        let resp = resp.into_inner();
+        if resp.log_is_sealed {
+            Err(GrpcPushLogsError::Sealed)
+        } else {
+            Ok(())
+        }
     }
 
     pub(super) async fn fork_logs(
         &mut self,
+        tenant: &str,
         source_collection_id: CollectionUuid,
         target_collection_id: CollectionUuid,
     ) -> Result<ForkLogsResponse, GrpcForkLogsError> {
         let response = self
-            .client_for(source_collection_id)
+            .client_for(tenant, source_collection_id)
             .fork_logs(chroma_proto::ForkLogsRequest {
                 source_collection_id: source_collection_id.to_string(),
                 target_collection_id: target_collection_id.to_string(),
@@ -355,7 +447,8 @@ impl GrpcLog {
         let mut norm = self
             ._get_collections_with_new_data(false, min_compaction_size)
             .await?;
-        if self.config.use_alt_host_for_everything
+        if self.config.alt_host_threshold.is_some()
+            || !self.config.use_alt_for_tenants.is_empty()
             || !self.config.use_alt_for_collections.is_empty()
         {
             let alt = self
@@ -363,6 +456,8 @@ impl GrpcLog {
                 .await?;
             norm.extend(alt)
         }
+        norm.sort_by_key(|n| n.collection_id);
+        norm.dedup_by_key(|n| n.collection_id);
         Ok(norm)
     }
 
@@ -426,16 +521,17 @@ impl GrpcLog {
 
     pub(super) async fn update_collection_log_offset(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), GrpcUpdateCollectionLogOffsetError> {
-        let request = self.client_for(collection_id).update_collection_log_offset(
-            chroma_proto::UpdateCollectionLogOffsetRequest {
+        let request = self
+            .client_for(tenant, collection_id)
+            .update_collection_log_offset(chroma_proto::UpdateCollectionLogOffsetRequest {
                 // NOTE(rescrv):  Use the untyped string representation of the collection ID.
                 collection_id: collection_id.0.to_string(),
                 log_offset: new_offset,
-            },
-        );
+            });
         let response = request.await;
         match response {
             Ok(_) => Ok(()),
@@ -447,16 +543,62 @@ impl GrpcLog {
         &mut self,
         collection_id: CollectionUuid,
     ) -> Result<(), GrpcPurgeDirtyForCollectionError> {
-        let request = self.client_for(collection_id).purge_dirty_for_collection(
-            chroma_proto::PurgeDirtyForCollectionRequest {
-                // NOTE(rescrv):  Use the untyped string representation of the collection ID.
-                collection_id: collection_id.0.to_string(),
-            },
-        );
-        let response = request.await;
-        match response {
-            Ok(_) => Ok(()),
-            Err(e) => Err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty(e)),
+        if let Some(client) = self.client_for_purge() {
+            let request =
+                client.purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
+                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                    collection_id: collection_id.0.to_string(),
+                });
+            let response = request.await;
+            match response {
+                Ok(_) => Ok(()),
+                Err(e) => Err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty(e)),
+            }
+        } else {
+            Ok(())
         }
+    }
+
+    pub(super) async fn seal_log(
+        &mut self,
+        tenant: &str,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GrpcSealLogError> {
+        let _response = self
+            .client_for(tenant, collection_id)
+            .seal_log(chroma_proto::SealLogRequest {
+                collection_id: collection_id.to_string(),
+            })
+            .await?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_is_on_alt_log() {
+        assert!(!GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
+            None
+        ));
+        assert!(!GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
+            Some("00088272-cfc4-419d-997a-baebfb25034a"),
+        ));
+        assert!(GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("00088272-cfc4-419d-997a-baebfb25034a").unwrap()),
+            Some("fffdb379-d592-41d1-8de6-412abc6e0b35"),
+        ));
+        assert!(GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
+            Some("fffdb379-d592-41d1-8de6-412abc6e0b35"),
+        ));
+        assert!(GrpcLog::client_is_on_alt_log(
+            CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
+            Some("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+        ));
     }
 }

@@ -294,6 +294,7 @@ class CollectionCommon(Generic[ClientT]):
         query_texts: Optional[OneOrMany[Document]],
         query_images: Optional[OneOrMany[Image]],
         query_uris: Optional[OneOrMany[URI]],
+        ids: Optional[OneOrMany[ID]],
         n_results: int,
         where: Optional[Where],
         where_document: Optional[WhereDocument],
@@ -306,6 +307,8 @@ class CollectionCommon(Generic[ClientT]):
             images=query_images,
             uris=query_uris,
         )
+
+        filter_ids = maybe_cast_one_to_many(ids)
 
         filters = FilterSet(
             where=where,
@@ -335,6 +338,7 @@ class CollectionCommon(Generic[ClientT]):
 
         return QueryRequest(
             embeddings=request_embeddings,
+            ids=filter_ids,
             where=request_where,
             where_document=request_where_document,
             include=request_include,

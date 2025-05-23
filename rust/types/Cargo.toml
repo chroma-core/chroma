@@ -7,6 +7,7 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
+async-trait = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 roaring = { workspace = true }
@@ -19,6 +20,7 @@ tokio = { workspace = true }
 pyo3 = { workspace = true, optional = true }
 validator = { workspace = true }
 regex = { workspace = true }
+regex-syntax = { workspace = true }
 utoipa = { workspace = true }
 
 # (Cross-crate testing dependencies)

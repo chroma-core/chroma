@@ -228,6 +228,12 @@ export class ChromaClient {
     configuration,
   }: CreateCollectionParams): Promise<Collection> {
     await this.init();
+    if (!configuration) {
+      configuration = {};
+    }
+    if (embeddingFunction && !configuration.embedding_function) {
+      configuration.embedding_function = embeddingFunction;
+    }
     let collectionConfiguration: Api.CollectionConfiguration | undefined =
       undefined;
     if (configuration) {
@@ -293,10 +299,14 @@ export class ChromaClient {
     configuration,
   }: GetOrCreateCollectionParams): Promise<Collection> {
     await this.init();
-
+    if (!configuration) {
+      configuration = {};
+    }
+    if (embeddingFunction && !configuration.embedding_function) {
+      configuration.embedding_function = embeddingFunction;
+    }
     let collectionConfiguration: Api.CollectionConfiguration | undefined =
       undefined;
-
     if (configuration) {
       collectionConfiguration =
         loadApiCollectionConfigurationFromCreateCollectionConfiguration(

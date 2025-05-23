@@ -20,57 +20,49 @@ If you're machine does not allow for global `pip` installs, you can get the Chro
 pipx install chromadb
 ```
 
-[//]: # (## JavaScript)
+## JavaScript
 
-[//]: # ()
-[//]: # ({% TabbedUseCaseCodeBlock language="Terminal" %})
 
-[//]: # ()
-[//]: # ({% Tab label="yarn" %})
+{% TabbedUseCaseCodeBlock language="Terminal" %}
 
-[//]: # (```terminal)
 
-[//]: # (yarn global add chromadb )
+{% Tab label="yarn" %}
 
-[//]: # (```)
+```terminal
+yarn global add chromadb 
+```
 
-[//]: # ({% /Tab %})
+{% /Tab %}
 
-[//]: # ()
-[//]: # ({% Tab label="npm" %})
 
-[//]: # (```terminal)
+{% Tab label="npm" %}
 
-[//]: # (npm install -g chromadb)
+```terminal
+npm install -g chromadb
+```
 
-[//]: # (```)
+{% /Tab %}
 
-[//]: # ({% /Tab %})
 
-[//]: # ()
-[//]: # ({% Tab label="pnpm" %})
+{% Tab label="pnpm" %}
 
-[//]: # (```terminal)
+```terminal
+pnpm add -g chromadb 
+```
 
-[//]: # (pnpm add -g chromadb )
+{% /Tab %}
 
-[//]: # (```)
 
-[//]: # ({% /Tab %})
+{% Tab label="bun" %}
 
-[//]: # ()
-[//]: # ({% Tab label="bun" %})
+```terminal
+bun add -g chromadb 
+```
 
-[//]: # (```terminal)
+{% /Tab %}
 
-[//]: # (bun add -g chromadb )
 
-[//]: # (```)
-
-[//]: # ({% /Tab %})
-
-[//]: # ()
-[//]: # ({% /TabbedUseCaseCodeBlock %})
+{% /TabbedUseCaseCodeBlock %}
 
 ## Install Globally
 

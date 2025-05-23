@@ -189,4 +189,6 @@ error_types: Dict[str, Type[ChromaError]] = {
     "UniqueConstraintError": UniqueConstraintError,
     "QuotaError": QuotaError,
     "InternalError": InternalError,
+    # Catch-all for any other errors
+    "ChromaError": ChromaError,
 }

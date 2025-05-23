@@ -9,7 +9,8 @@ services:
     image: server
     build:
       context: .
-      dockerfile: rust/cli/Dockerfile
+      dockerfile: rust/Dockerfile
+      target: cli
       # Uncomment below to build in release mode
       # args:
       #   RELEASE_MODE: "1"

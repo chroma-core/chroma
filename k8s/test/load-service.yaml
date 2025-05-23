@@ -1,0 +1,81 @@
+---
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chroma-load
+
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-service
+  namespace: chroma-load
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: load-service
+  template:
+    metadata:
+      namespace: chroma-load
+      labels:
+        app: load-service
+    spec:
+      containers:
+        - name: load-service
+          image: load-service
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3001
+              name: http
+          env:
+            - name: CONFIG_PATH
+              value: /config/config.yaml
+            - name: RUST_LOG
+              value: "info"
+          volumeMounts:
+            - name: load-service-config
+              mountPath: /config/
+            - name: load-service-persistent-state
+              mountPath: /state/
+      volumes:
+        - name: load-service-config
+          configMap:
+            name: load-service-config
+        - name: load-service-persistent-state
+          hostPath:
+            path: /tmp/chroma/load-service
+            type: DirectoryOrCreate
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: load-service-config
+  namespace: chroma-load
+data:
+  config.yaml: |
+    load_service:
+      service_name: "chroma-load"
+      otel_endpoint: "http://otel-collector.chroma:4317"
+      port: 3001
+      persistent_state_path: "/state/load-service.json"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: load-service
+  namespace: chroma-load
+spec:
+  ports:
+    - name: http
+      port: 3001
+      targetPort: 3001
+  selector:
+    app: load-service
+  type: ClusterIP

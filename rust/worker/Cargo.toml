@@ -22,8 +22,7 @@ opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 chroma-tracing = { workspace = true }
-
-regex = "1.11.1"
+regex = { workspace = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.6"
@@ -95,6 +94,10 @@ harness = false
 
 [[bench]]
 name = "query"
+harness = false
+
+[[bench]]
+name = "regex"
 harness = false
 
 [[bench]]

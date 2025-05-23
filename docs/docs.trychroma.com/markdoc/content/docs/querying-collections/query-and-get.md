@@ -12,7 +12,8 @@ collection.query(
     query_embeddings=[[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
     n_results=10,
     where={"metadata_field": "is_equal_to_this"},
-    where_document={"$contains":"search_string"}
+    where_document={"$contains":"search_string"},
+    ids=["id1", "id2", ...]
 )
 ```
 {% /Tab %}
@@ -23,6 +24,8 @@ const result = await collection.query({
     queryEmbeddings: [[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
     nResults: 10,
     where: {"metadata_field": "is_equal_to_this"},
+    whereDocument: {"$contains": "search_string"},
+    ids: ["id1", "id2", ...]
 })
 ```
 {% /Tab %}
@@ -32,6 +35,7 @@ const result = await collection.query({
 The query will return the `n results` closest matches to each `query embedding`, in order.
 An optional `where` filter dictionary can be supplied to filter by the `metadata` associated with each document.
 Additionally, an optional `where document` filter dictionary can be supplied to filter by contents of the document.
+An optional `ids` list can be provided to filter results to only include documents with those specific IDs before performing the query.
 
 If the supplied `query embeddings` are not the same dimension as the collection, an exception will be raised.
 
@@ -45,7 +49,8 @@ collection.query(
     query_texts=["doc10", "thus spake zarathustra", ...],
     n_results=10,
     where={"metadata_field": "is_equal_to_this"},
-    where_document={"$contains":"search_string"}
+    where_document={"$contains":"search_string"},
+    ids=["id1", "id2", ...]
 )
 ```
 {% /Tab %}
@@ -56,7 +61,8 @@ await collection.query({
     queryTexts: ["doc10", "thus spake zarathustra", ...],
     nResults: 10,
     where: {"metadata_field": "is_equal_to_this"},
-    whereDocument: {"$contains": "search_string"}
+    whereDocument: {"$contains": "search_string"},
+    ids: ["id1", "id2", ...]
 })
 ```
 {% /Tab %}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/pingcap/log"
@@ -79,7 +80,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, SoftDelete, suite.s3MetaStore, false)
+	c, err := NewCoordinator(ctx, SoftDelete, suite.s3MetaStore, true)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -179,8 +180,8 @@ func testSegment(t *rapid.T) {
 
 	t.Repeat(map[string]func(*rapid.T){
 		"create_segment": func(t *rapid.T) {
-			segment := rapid.Custom[*model.CreateSegment](func(t *rapid.T) *model.CreateSegment {
-				return &model.CreateSegment{
+			segment := rapid.Custom[*model.Segment](func(t *rapid.T) *model.Segment {
+				return &model.Segment{
 					ID:           types.MustParse(rapid.StringMatching(`[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}`).Draw(t, "segment_id")),
 					Type:         "test-segment-type",
 					Scope:        "test-segment-scope",
@@ -294,7 +295,7 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 		DatabaseName: suite.databaseName,
 	}
 
-	segments := []*model.CreateSegment{
+	segments := []*model.Segment{
 		{
 			ID:           types.NewUniqueID(),
 			Type:         "test_type",
@@ -306,6 +307,9 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 			Type:         "test_type",
 			Scope:        "VECTOR",
 			CollectionID: newCollection.ID,
+			FilePaths: map[string][]string{
+				"test_path": {"test_file1"},
+			},
 		},
 	}
 
@@ -315,6 +319,7 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 	suite.True(created)
 	suite.Equal(newCollection.ID, createdCollection.ID)
 	suite.Equal(newCollection.Name, createdCollection.Name)
+	suite.NotNil(createdCollection.VersionFileName)
 	// suite.Equal(len(segments), len(createdSegments))
 
 	// Verify the collection was created
@@ -346,6 +351,22 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 		actual_ids = append(actual_ids, segment.ID)
 	}
 	suite.ElementsMatch(expected_ids, actual_ids)
+
+	// Validate version file
+	suite.NotNil(collection.VersionFileName)
+	versionFile, err := suite.s3MetaStore.GetVersionFile(collection.VersionFileName)
+	suite.NoError(err)
+	suite.NotNil(versionFile)
+	v0 := versionFile.VersionHistory.Versions[0]
+	suite.NotNil(v0)
+
+	// Validate file paths of segments
+	suite.NotNil(v0.SegmentInfo)
+	suite.NotNil(v0.SegmentInfo.SegmentCompactionInfo)
+	suite.Equal(len(v0.SegmentInfo.SegmentCompactionInfo), 2)
+	for _, segment := range segments {
+		assertExpectedSegmentInfoExist(suite, segment, v0.SegmentInfo.SegmentCompactionInfo)
+	}
 
 	// Attempt to create a duplicate collection (should fail)
 	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, segments)
@@ -387,7 +408,15 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Name < results[j].Name
 	})
-	suite.Equal(suite.sampleCollections, results)
+	suite.Len(results, len(suite.sampleCollections))
+	for i, collection := range results {
+		suite.Equal(suite.sampleCollections[i].ID, collection.ID)
+		suite.Equal(suite.sampleCollections[i].Name, collection.Name)
+		suite.Equal(suite.sampleCollections[i].TenantID, collection.TenantID)
+		suite.Equal(suite.sampleCollections[i].DatabaseName, collection.DatabaseName)
+		suite.Equal(suite.sampleCollections[i].Dimension, collection.Dimension)
+		suite.Equal(suite.sampleCollections[i].Metadata, collection.Metadata)
+	}
 
 	// Duplicate create fails
 	_, _, err = suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
@@ -428,14 +457,26 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	for _, collection := range suite.sampleCollections {
 		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &collection.Name, suite.tenantName, suite.databaseName, nil, nil)
 		suite.NoError(err)
-		suite.Equal([]*model.Collection{collection}, result)
+		suite.Equal(len(result), 1)
+		suite.Equal(collection.ID, result[0].ID)
+		suite.Equal(collection.Name, result[0].Name)
+		suite.Equal(collection.TenantID, result[0].TenantID)
+		suite.Equal(collection.DatabaseName, result[0].DatabaseName)
+		suite.Equal(collection.Dimension, result[0].Dimension)
+		suite.Equal(collection.Metadata, result[0].Metadata)
 	}
 
 	// Find by id
 	for _, collection := range suite.sampleCollections {
 		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 		suite.NoError(err)
-		suite.Equal([]*model.Collection{collection}, result)
+		suite.Equal(len(result), 1)
+		suite.Equal(collection.ID, result[0].ID)
+		suite.Equal(collection.Name, result[0].Name)
+		suite.Equal(collection.TenantID, result[0].TenantID)
+		suite.Equal(collection.DatabaseName, result[0].DatabaseName)
+		suite.Equal(collection.Dimension, result[0].Dimension)
+		suite.Equal(collection.Metadata, result[0].Metadata)
 	}
 
 	// Delete
@@ -450,10 +491,18 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 
 	results, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
+	result_ids := make([]types.UniqueID, len(results))
+	for i, result := range results {
+		result_ids[i] = result.ID
+	}
 
-	suite.NotContains(results, c1)
+	sample_ids := make([]types.UniqueID, len(suite.sampleCollections))
+	for i, collection := range suite.sampleCollections {
+		sample_ids[i] = collection.ID
+	}
+	suite.NotContains(result_ids, c1.ID)
 	suite.Len(results, len(suite.sampleCollections)-1)
-	suite.ElementsMatch(results, suite.sampleCollections[1:])
+	suite.ElementsMatch(result_ids, sample_ids[1:])
 	byIDResult, err := suite.coordinator.GetCollections(ctx, c1.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(byIDResult)
@@ -486,7 +535,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	suite.Equal(createCollection.Metadata, results[0].Metadata)
 
 	// Create segments associated with collection
-	segment := &model.CreateSegment{
+	segment := &model.Segment{
 		ID:           types.MustParse("00000000-0000-0000-0000-000000000001"),
 		CollectionID: createCollection.ID,
 		Type:         "test_segment",
@@ -612,20 +661,44 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	coll.Name = "new_name"
 	result, err := suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Name: &coll.Name})
 	suite.NoError(err)
-	suite.Equal(coll, result)
+	suite.Equal(coll.ID, result.ID)
+	suite.Equal(coll.Name, result.Name)
+	suite.Equal(coll.TenantID, result.TenantID)
+	suite.Equal(coll.DatabaseName, result.DatabaseName)
+	suite.Equal(coll.Dimension, result.Dimension)
+	suite.Equal(coll.Metadata, result.Metadata)
+
 	resultList, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &coll.Name, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Equal([]*model.Collection{coll}, resultList)
+	suite.Equal(len(resultList), 1)
+	suite.Equal(coll.ID, resultList[0].ID)
+	suite.Equal(coll.Name, resultList[0].Name)
+	suite.Equal(coll.TenantID, resultList[0].TenantID)
+	suite.Equal(coll.DatabaseName, resultList[0].DatabaseName)
+	suite.Equal(coll.Dimension, resultList[0].Dimension)
+	suite.Equal(coll.Metadata, resultList[0].Metadata)
 
 	// Update dimension
 	newDimension := int32(128)
 	coll.Dimension = &newDimension
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Dimension: coll.Dimension})
 	suite.NoError(err)
-	suite.Equal(coll, result)
+	suite.Equal(coll.ID, result.ID)
+	suite.Equal(coll.Name, result.Name)
+	suite.Equal(coll.TenantID, result.TenantID)
+	suite.Equal(coll.DatabaseName, result.DatabaseName)
+	suite.Equal(coll.Dimension, result.Dimension)
+	suite.Equal(coll.Metadata, result.Metadata)
+
 	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Equal([]*model.Collection{coll}, resultList)
+	suite.Equal(len(resultList), 1)
+	suite.Equal(coll.ID, resultList[0].ID)
+	suite.Equal(coll.Name, resultList[0].Name)
+	suite.Equal(coll.TenantID, resultList[0].TenantID)
+	suite.Equal(coll.DatabaseName, resultList[0].DatabaseName)
+	suite.Equal(coll.Dimension, resultList[0].Dimension)
+	suite.Equal(coll.Metadata, resultList[0].Metadata)
 
 	// Reset the metadata
 	newMetadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
@@ -633,19 +706,43 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	coll.Metadata = newMetadata
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata})
 	suite.NoError(err)
-	suite.Equal(coll, result)
+	suite.Equal(coll.ID, result.ID)
+	suite.Equal(coll.Name, result.Name)
+	suite.Equal(coll.TenantID, result.TenantID)
+	suite.Equal(coll.DatabaseName, result.DatabaseName)
+	suite.Equal(coll.Dimension, result.Dimension)
+	suite.Equal(coll.Metadata, result.Metadata)
+
 	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Equal([]*model.Collection{coll}, resultList)
+	suite.Equal(len(resultList), 1)
+	suite.Equal(coll.ID, resultList[0].ID)
+	suite.Equal(coll.Name, resultList[0].Name)
+	suite.Equal(coll.TenantID, resultList[0].TenantID)
+	suite.Equal(coll.DatabaseName, resultList[0].DatabaseName)
+	suite.Equal(coll.Dimension, resultList[0].Dimension)
+	suite.Equal(coll.Metadata, resultList[0].Metadata)
 
 	// Delete all metadata keys
 	coll.Metadata = nil
 	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata, ResetMetadata: true})
 	suite.NoError(err)
-	suite.Equal(coll, result)
+	suite.Equal(coll.ID, result.ID)
+	suite.Equal(coll.Name, result.Name)
+	suite.Equal(coll.TenantID, result.TenantID)
+	suite.Equal(coll.DatabaseName, result.DatabaseName)
+	suite.Equal(coll.Dimension, result.Dimension)
+	suite.Equal(coll.Metadata, result.Metadata)
+
 	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
-	suite.Equal([]*model.Collection{coll}, resultList)
+	suite.Equal(len(resultList), 1)
+	suite.Equal(coll.ID, resultList[0].ID)
+	suite.Equal(coll.Name, resultList[0].Name)
+	suite.Equal(coll.TenantID, resultList[0].TenantID)
+	suite.Equal(coll.DatabaseName, resultList[0].DatabaseName)
+	suite.Equal(coll.Dimension, resultList[0].Dimension)
+	suite.Equal(coll.Metadata, resultList[0].Metadata)
 }
 
 func (suite *APIsTestSuite) TestGetOrCreateCollectionsTwice() {
@@ -774,7 +871,14 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].Name < result[j].Name
 	})
-	suite.Equal(suite.sampleCollections, result)
+	for index, collection := range result {
+		suite.Equal(suite.sampleCollections[index].ID, collection.ID)
+		suite.Equal(suite.sampleCollections[index].Name, collection.Name)
+		suite.Equal(suite.sampleCollections[index].TenantID, collection.TenantID)
+		suite.Equal(suite.sampleCollections[index].DatabaseName, collection.DatabaseName)
+		suite.Equal(suite.sampleCollections[index].Dimension, collection.Dimension)
+		suite.Equal(suite.sampleCollections[index].Metadata, collection.Metadata)
+	}
 
 	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
@@ -856,7 +960,12 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, newDatabaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(result, 1)
-	suite.Equal(expected[0], result[0])
+	suite.Equal(expected[0].ID, result[0].ID)
+	suite.Equal(expected[0].Name, result[0].Name)
+	suite.Equal(expected[0].TenantID, result[0].TenantID)
+	suite.Equal(expected[0].DatabaseName, result[0].DatabaseName)
+	suite.Equal(expected[0].Dimension, result[0].Dimension)
+	suite.Equal(expected[0].Metadata, result[0].Metadata)
 
 	expected = []*model.Collection{suite.sampleCollections[1]}
 	expected[0].TenantID = suite.tenantName
@@ -864,7 +973,12 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, newDatabaseName, nil, nil)
 	suite.NoError(err)
 	suite.Len(result, 1)
-	suite.Equal(expected[0], result[0])
+	suite.Equal(expected[0].ID, result[0].ID)
+	suite.Equal(expected[0].Name, result[0].Name)
+	suite.Equal(expected[0].TenantID, result[0].TenantID)
+	suite.Equal(expected[0].DatabaseName, result[0].DatabaseName)
+	suite.Equal(expected[0].Dimension, result[0].Dimension)
+	suite.Equal(expected[0].Metadata, result[0].Metadata)
 
 	// A new tenant DOES NOT have a default database. This does not error, instead 0
 	// results are returned
@@ -993,7 +1107,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 
 	sampleSegments := SampleSegments(suite.sampleCollections)
 	for _, segment := range sampleSegments {
-		errSegmentCreation := c.CreateSegment(ctx, &model.CreateSegment{
+		errSegmentCreation := c.CreateSegment(ctx, &model.Segment{
 			ID:           segment.ID,
 			Type:         segment.Type,
 			Scope:        segment.Scope,
@@ -1003,7 +1117,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 		suite.NoError(errSegmentCreation)
 
 		// Create segment with empty collection id fails
-		errSegmentCreation = c.CreateSegment(ctx, &model.CreateSegment{
+		errSegmentCreation = c.CreateSegment(ctx, &model.Segment{
 			ID:           segment.ID,
 			Type:         segment.Type,
 			Scope:        segment.Scope,
@@ -1014,7 +1128,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 
 		// Create segment to test unique constraint violation on segment.id.
 		// This should fail because the id is already taken.
-		errSegmentCreation = c.CreateSegment(ctx, &model.CreateSegment{
+		errSegmentCreation = c.CreateSegment(ctx, &model.Segment{
 			ID:           segment.ID,
 			Type:         segment.Type,
 			Scope:        segment.Scope,
@@ -1037,7 +1151,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteSegments() {
 	suite.Equal(sampleSegments, results)
 
 	// Duplicate create fails
-	err := c.CreateSegment(ctx, &model.CreateSegment{
+	err := c.CreateSegment(ctx, &model.Segment{
 		ID:           sampleSegments[0].ID,
 		Type:         sampleSegments[0].Type,
 		Scope:        sampleSegments[0].Scope,
@@ -1108,7 +1222,7 @@ func (suite *APIsTestSuite) TestUpdateSegment() {
 	}
 
 	ctx := context.Background()
-	errSegmentCreation := suite.coordinator.CreateSegment(ctx, &model.CreateSegment{
+	errSegmentCreation := suite.coordinator.CreateSegment(ctx, &model.Segment{
 		ID:           segment.ID,
 		Type:         segment.Type,
 		Scope:        segment.Scope,
@@ -1313,7 +1427,7 @@ func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 		DatabaseName: suite.databaseName,
 	}
 
-	segments := []*model.CreateSegment{
+	segments := []*model.Segment{
 		{
 			ID:           types.NewUniqueID(),
 			Type:         "test_type_a",
@@ -1353,6 +1467,33 @@ func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 	// suite.True(exists, "Version file should exist in S3")
 }
 
+func findSegmentInfo(segmentID types.UniqueID, segmentInfos []*coordinatorpb.FlushSegmentCompactionInfo) *coordinatorpb.FlushSegmentCompactionInfo {
+	for _, segmentInfo := range segmentInfos {
+		if segmentInfo.SegmentId == segmentID.String() {
+			return segmentInfo
+		}
+	}
+	return nil
+}
+
+func assertExpectedSegmentInfoExist(suite *APIsTestSuite, expectedSegment *model.Segment, segmentInfos []*coordinatorpb.FlushSegmentCompactionInfo) {
+	segmentInfo := findSegmentInfo(expectedSegment.ID, segmentInfos)
+	suite.NotNil(segmentInfo)
+
+	if expectedSegment.FilePaths == nil {
+		suite.Nil(segmentInfo.FilePaths)
+		return
+	}
+
+	suite.NotNil(segmentInfo.FilePaths)
+
+	filePaths := map[string][]string{}
+	for key, filePath := range segmentInfo.FilePaths {
+		filePaths[key] = filePath.Paths
+	}
+	suite.Equal(filePaths, expectedSegment.FilePaths)
+}
+
 func (suite *APIsTestSuite) TestForkCollection() {
 	ctx := context.Background()
 
@@ -1363,28 +1504,28 @@ func (suite *APIsTestSuite) TestForkCollection() {
 		DatabaseName: suite.databaseName,
 	}
 
-	sourceCreateMetadataSegment := &model.CreateSegment{
+	sourceCreateMetadataSegment := &model.Segment{
 		ID:           types.NewUniqueID(),
 		Type:         "test_blockfile",
 		Scope:        "METADATA",
 		CollectionID: sourceCreateCollection.ID,
 	}
 
-	sourceCreateRecordSegment := &model.CreateSegment{
+	sourceCreateRecordSegment := &model.Segment{
 		ID:           types.NewUniqueID(),
 		Type:         "test_blockfile",
 		Scope:        "RECORD",
 		CollectionID: sourceCreateCollection.ID,
 	}
 
-	sourceCreateVectorSegment := &model.CreateSegment{
+	sourceCreateVectorSegment := &model.Segment{
 		ID:           types.NewUniqueID(),
 		Type:         "test_hnsw",
 		Scope:        "VECTOR",
 		CollectionID: sourceCreateCollection.ID,
 	}
 
-	segments := []*model.CreateSegment{
+	segments := []*model.Segment{
 		sourceCreateMetadataSegment,
 		sourceCreateRecordSegment,
 		sourceCreateVectorSegment,
@@ -1467,6 +1608,23 @@ func (suite *APIsTestSuite) TestForkCollection() {
 		}
 	}
 
+	// Check version file of forked collection
+	suite.Equal(collection.RootCollectionID, &sourceCreateCollection.ID)
+	suite.NotNil(collection.VersionFileName)
+	versionFile, err := suite.s3MetaStore.GetVersionFile(collection.VersionFileName)
+	suite.NoError(err)
+	suite.NotNil(versionFile)
+	v0 := versionFile.VersionHistory.Versions[0]
+	suite.NotNil(v0)
+	// Validate file paths of segments
+	suite.NotNil(v0.SegmentInfo)
+	suite.NotNil(v0.SegmentInfo.SegmentCompactionInfo)
+	suite.Equal(len(v0.SegmentInfo.SegmentCompactionInfo), 3)
+
+	for _, segment := range collection_segments {
+		assertExpectedSegmentInfoExist(suite, segment, v0.SegmentInfo.SegmentCompactionInfo)
+	}
+
 	// Attempt to fork a collcetion with same name (should fail)
 	forkCollectionWithSameName := &model.ForkCollection{
 		SourceCollectionID:                   sourceCreateCollection.ID,
@@ -1482,6 +1640,173 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	collections, err := suite.coordinator.GetCollections(ctx, forkCollectionWithSameName.TargetCollectionID, nil, suite.tenantName, suite.databaseName, nil, nil)
 	suite.NoError(err)
 	suite.Empty(collections)
+
+	res, err := suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil)
+	suite.NoError(err)
+	suite.NotEmpty(res)
+	suite.Equal(1, len(res))
+	// ListCollectionsToGc groups by fork trees and should always return the root of the tree
+	suite.Equal(forkCollectionWithSameName.SourceCollectionID, res[0].ID)
+
+	// Get source collection to grab lineage path and validate it exists
+	sourceCollection, err := suite.coordinator.GetCollections(ctx, sourceCreateCollection.ID, nil, sourceCreateCollection.TenantID, sourceCreateCollection.DatabaseName, nil, nil)
+	suite.NoError(err)
+	suite.Equal(1, len(sourceCollection))
+	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, *sourceCollection[0].LineageFileName)
+	suite.NoError(err)
+	suite.True(exists, "Lineage file should exist in S3")
+}
+
+func (suite *APIsTestSuite) TestBatchGetCollectionVersionFilePaths() {
+	ctx := context.Background()
+
+	// Create a new collection
+	newCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_batch_get_collection_version_file_paths",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	newSegments := []*model.Segment{}
+
+	// Create the collection
+	suite.coordinator.catalog.versionFileEnabled = true
+	_, _, err := suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, newSegments)
+	suite.NoError(err)
+
+	// Get the version file paths for the collection
+	versionFilePaths, err := suite.coordinator.BatchGetCollectionVersionFilePaths(ctx, &coordinatorpb.BatchGetCollectionVersionFilePathsRequest{
+		CollectionIds: []string{newCollection.ID.String()},
+	})
+	suite.NoError(err)
+	suite.Len(versionFilePaths.CollectionIdToVersionFilePath, 1)
+
+	// Verify version file exists in S3
+	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, versionFilePaths.CollectionIdToVersionFilePath[newCollection.ID.String()])
+	suite.NoError(err)
+	suite.True(exists, "Version file should exist in S3")
+}
+
+func (suite *APIsTestSuite) TestCountForks() {
+	ctx := context.Background()
+
+	sourceCreateCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_fork_collection_source",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	sourceCreateMetadataSegment := &model.Segment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_blockfile",
+		Scope:        "METADATA",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	sourceCreateRecordSegment := &model.Segment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_blockfile",
+		Scope:        "RECORD",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	sourceCreateVectorSegment := &model.Segment{
+		ID:           types.NewUniqueID(),
+		Type:         "test_hnsw",
+		Scope:        "VECTOR",
+		CollectionID: sourceCreateCollection.ID,
+	}
+
+	segments := []*model.Segment{
+		sourceCreateMetadataSegment,
+		sourceCreateRecordSegment,
+		sourceCreateVectorSegment,
+	}
+
+	_, _, err := suite.coordinator.CreateCollectionAndSegments(ctx, sourceCreateCollection, segments)
+	suite.NoError(err)
+
+	sourceFlushMetadataSegment := &model.FlushSegmentCompaction{
+		ID: sourceCreateMetadataSegment.ID,
+		FilePaths: map[string][]string{
+			"fts_index": {"metadata_sparse_index_file"},
+		},
+	}
+
+	sourceFlushRecordSegment := &model.FlushSegmentCompaction{
+		ID: sourceCreateRecordSegment.ID,
+		FilePaths: map[string][]string{
+			"data_record": {"record_sparse_index_file"},
+		},
+	}
+
+	sourceFlushVectorSegment := &model.FlushSegmentCompaction{
+		ID: sourceCreateVectorSegment.ID,
+		FilePaths: map[string][]string{
+			"hnsw_index": {"hnsw_source_layer_file"},
+		},
+	}
+
+	sourceFlushCollectionCompaction := &model.FlushCollectionCompaction{
+		ID:                       sourceCreateCollection.ID,
+		TenantID:                 sourceCreateCollection.TenantID,
+		LogPosition:              1000,
+		CurrentCollectionVersion: 0,
+		FlushSegmentCompactions: []*model.FlushSegmentCompaction{
+			sourceFlushMetadataSegment,
+			sourceFlushRecordSegment,
+			sourceFlushVectorSegment,
+		},
+		TotalRecordsPostCompaction: 1000,
+		SizeBytesPostCompaction:    65536,
+	}
+
+	// Flush some data to sourceo collection
+	_, err = suite.coordinator.FlushCollectionCompaction(ctx, sourceFlushCollectionCompaction)
+	suite.NoError(err)
+
+	var forkedCollectionIDs []types.UniqueID
+
+	// Create 5 forks from the source collection
+	for i := 0; i < 5; i++ {
+		forkCollection := &model.ForkCollection{
+			SourceCollectionID:                   sourceCreateCollection.ID,
+			SourceCollectionLogCompactionOffset:  800,
+			SourceCollectionLogEnumerationOffset: 1200,
+			TargetCollectionID:                   types.NewUniqueID(),
+			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_source%d", i),
+		}
+		forkedCollection, _, err := suite.coordinator.ForkCollection(ctx, forkCollection)
+		suite.NoError(err)
+		forkedCollectionIDs = append(forkedCollectionIDs, forkedCollection.ID)
+	}
+
+	// Create 5 forks from one of the forked collections
+	for i := 0; i < 5; i++ {
+		forkCollection := &model.ForkCollection{
+			SourceCollectionID:                   forkedCollectionIDs[0],
+			SourceCollectionLogCompactionOffset:  800,
+			SourceCollectionLogEnumerationOffset: 1200,
+			TargetCollectionID:                   types.NewUniqueID(),
+			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_forked%d", i),
+		}
+		forkedCollection, _, err := suite.coordinator.ForkCollection(ctx, forkCollection)
+		suite.NoError(err)
+		forkedCollectionIDs = append(forkedCollectionIDs, forkedCollection.ID)
+	}
+
+	count, err := suite.coordinator.CountForks(ctx, sourceCreateCollection.ID)
+	suite.NoError(err)
+	suite.Equal(uint64(10), count)
+
+	// Check that each forked collection has 10 forks as well
+	for _, forkedCollectionID := range forkedCollectionIDs {
+		count, err := suite.coordinator.CountForks(ctx, forkedCollectionID)
+		suite.NoError(err)
+		suite.Equal(uint64(10), count)
+	}
 }
 
 func TestAPIsTestSuite(t *testing.T) {
