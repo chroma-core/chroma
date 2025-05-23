@@ -49,11 +49,12 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
 }
 
 pub fn init_otel_layer(
-    service_name: &String,
-    otel_endpoint: &String,
+    service_name: &str,
+    otel_endpoint: &str,
 ) -> Box<dyn Layer<Registry> + Send + Sync> {
-    let final_otel_endpoint = std::env::var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-        .unwrap_or(std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or(otel_endpoint.clone()));
+    let final_otel_endpoint = std::env::var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").unwrap_or(
+        std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or(otel_endpoint.to_string()),
+    );
     if final_otel_endpoint.is_empty() {
         tracing::info!(
         "open_telemetry.endpoint and OTEL_EXPORTER_OTLP_ENDPOINT is empty, not initializing OpenTelemetry",
@@ -67,7 +68,7 @@ pub fn init_otel_layer(
     );
     let resource = opentelemetry_sdk::Resource::new(vec![opentelemetry::KeyValue::new(
         "service.name",
-        service_name.clone(),
+        service_name.to_string(),
     )]);
 
     // Prepare tracer.
@@ -81,7 +82,7 @@ pub fn init_otel_layer(
         .with_batch_exporter(tracing_span_exporter, opentelemetry_sdk::runtime::Tokio)
         .with_config(trace_config)
         .build();
-    let tracer = tracer_provider.tracer(service_name.clone());
+    let tracer = tracer_provider.tracer(service_name.to_string());
     let fastrace_span_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .with_endpoint(final_otel_endpoint.clone())
@@ -192,7 +193,7 @@ pub fn init_panic_tracing_hook() {
     }));
 }
 
-pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
+pub fn init_otel_tracing(service_name: &str, otel_endpoint: &str) {
     let layers = vec![
         init_global_filter_layer(),
         init_otel_layer(service_name, otel_endpoint),
