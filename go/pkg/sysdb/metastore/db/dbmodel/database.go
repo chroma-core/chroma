@@ -22,10 +22,10 @@ func (v Database) TableName() string {
 
 //go:generate mockery --name=IDatabaseDb
 type IDatabaseDb interface {
-	GetAllDatabases() ([]*Database, error)
 	GetDatabases(tenantID string, databaseName string) ([]*Database, error)
 	ListDatabases(limit *int32, offset *int32, tenantID string) ([]*Database, error)
 	Insert(in *Database) error
 	DeleteAll() error
-	Delete(databaseID string) error
+	SoftDelete(databaseID string) error
+	FinishDatabaseDeletion(cutoffTime time.Time) (uint64, error)
 }
