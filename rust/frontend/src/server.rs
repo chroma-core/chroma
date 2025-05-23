@@ -1979,6 +1979,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_cors_wildcard() {
+        let registry = Registry::new();
+        let system = System::new();
+
+        let port = random_port::PortPicker::new().pick().unwrap();
+
+        let mut config = FrontendServerConfig::single_node_default();
+        config.port = port;
+        config.cors_allow_origins = Some(vec!["*".to_string()]);
+
+        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
+            .await
+            .unwrap();
+        let app = FrontendServer::new(
+            config,
+            frontend,
+            vec![],
+            Arc::new(()),
+            Arc::new(()),
+            System::new(),
+        );
+        tokio::task::spawn(async move {
+            app.run().await;
+        });
+
+        let client = reqwest::Client::new();
+        let res = client
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("http://localhost:{}/api/v2/heartbeat", port),
+            )
+            .header("Origin", "http://localhost:3000")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        let allow_origin = res.headers().get("Access-Control-Allow-Origin");
+        assert_eq!(allow_origin.unwrap(), "*");
+
+        let allow_methods = res.headers().get("Access-Control-Allow-Methods");
+        assert_eq!(allow_methods.unwrap(), "*");
+
+        let allow_headers = res.headers().get("Access-Control-Allow-Headers");
+        assert_eq!(allow_headers.unwrap(), "*");
+    }
+
+    #[tokio::test]
     async fn test_defaults_to_json_content_type() {
         let port = test_server().await;
 
