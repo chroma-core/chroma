@@ -1538,6 +1538,7 @@ dependencies = [
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
+ "chrono",
  "figment",
  "futures",
  "http-body-util",
@@ -1880,6 +1881,7 @@ name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
  "chroma-system",
+ "chrono",
  "fastrace",
  "fastrace-opentelemetry",
  "http 1.1.0",
@@ -1904,6 +1906,7 @@ dependencies = [
  "async-trait",
  "chroma-config",
  "chroma-error",
+ "chrono",
  "proptest",
  "proptest-derive 0.5.1",
  "prost 0.13.5",
@@ -1964,6 +1967,7 @@ dependencies = [
  "chroma-sysdb",
  "chroma-system",
  "chroma-types",
+ "chrono",
  "mdac",
  "numpy",
  "pyo3",
