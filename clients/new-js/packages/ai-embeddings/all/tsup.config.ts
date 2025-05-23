@@ -4,7 +4,7 @@ import * as fs from "fs";
 export default defineConfig((options: Options) => {
   const commonOptions: Partial<Options> = {
     entry: {
-      voyage: "src/index.ts",
+      index: "src/index.ts",
     },
     sourcemap: true,
     dts: {
@@ -25,7 +25,7 @@ export default defineConfig((options: Options) => {
       clean: true,
       async onSuccess() {
         // Support Webpack 4 by pointing `"module"` to a file with a `.js` extension
-        fs.copyFileSync("dist/voyage.mjs", "dist/voyage.legacy-esm.js");
+        fs.copyFileSync("dist/index.mjs", "dist/index.legacy-esm.js");
       },
     },
     {

@@ -35,86 +35,195 @@ import {
 import { createClient } from "@hey-api/client-fetch";
 import { ChromaValueError } from "./errors";
 
+/**
+ * Interface for collection operations using collection ID.
+ * Provides methods for adding, querying, updating, and deleting records.
+ */
 export interface CollectionAPI {
+  /** Unique identifier for the collection */
   id: string;
+  /** Optional embedding function. Must match the one used to create the collection. */
   embeddingFunction?: EmbeddingFunction;
+  /** Gets the total number of records in the collection */
   count(): Promise<number>;
+  /**
+   * Adds new records to the collection.
+   * @param args - Record data to add
+   */
   add(args: {
+    /** Unique identifiers for the records */
     ids: string[];
+    /** Optional pre-computed embeddings */
     embeddings?: number[][];
+    /** Optional metadata for each record */
     metadatas?: Metadata[];
+    /** Optional document text (will be embedded if embeddings not provided) */
     documents?: string[];
+    /** Optional URIs for the records */
     uris?: string[];
   }): Promise<void>;
+  /**
+   * Retrieves records from the collection based on filters.
+   * @template TMeta - Type of metadata for type safety
+   * @param args - Query parameters for filtering records
+   * @returns Promise resolving to matching records
+   */
   get<TMeta extends Metadata = Metadata>(args?: {
+    /** Specific record IDs to retrieve */
     ids?: string[];
+    /** Metadata-based filtering conditions */
     where?: Where;
+    /** Maximum number of records to return */
     limit?: number;
+    /** Number of records to skip */
     offset?: number;
+    /** Document content-based filtering conditions */
     whereDocument?: WhereDocument;
+    /** Fields to include in the response */
     include?: Include[];
   }): Promise<GetResult<TMeta>>;
+  /**
+   * Retrieves a preview of records from the collection.
+   * @param args - Preview options
+   * @returns Promise resolving to a sample of records
+   */
   peek(args: { limit?: number }): Promise<GetResult>;
+  /**
+   * Performs similarity search on the collection.
+   * @template TMeta - Type of metadata for type safety
+   * @param args - Query parameters for similarity search
+   * @returns Promise resolving to similar records ranked by distance
+   */
   query<TMeta extends Metadata = Metadata>(args: {
+    /** Pre-computed query embedding vectors */
     queryEmbeddings?: number[][];
+    /** Query text to be embedded and searched */
     queryTexts?: string[];
+    /** Query URIs to be processed */
     queryURIs?: string[];
+    /** Filter to specific record IDs */
     ids?: string[];
+    /** Maximum number of results per query (default: 10) */
     nResults?: number;
+    /** Metadata-based filtering conditions */
     where?: Where;
+    /** Full-text search conditions */
     whereDocument?: WhereDocument;
+    /** Fields to include in the response */
     include?: Include[];
   }): Promise<QueryResult<TMeta>>;
+  /**
+   * Modifies collection properties like name, metadata, or configuration.
+   * @param args - Properties to update
+   */
   modify(args: {
+    /** New name for the collection */
     name?: string;
+    /** New metadata for the collection */
     metadata?: CollectionMetadata;
+    /** New configuration settings */
     configuration?: UpdateCollectionConfiguration;
   }): Promise<void>;
+  /**
+   * Creates a copy of the collection with a new name.
+   * @param args - Fork options
+   * @returns Promise resolving to the new Collection instance
+   */
   fork({ name }: { name: string }): Promise<Collection>;
+  /**
+   * Updates existing records in the collection.
+   * @param args - Record data to update
+   */
   update(args: {
+    /** IDs of records to update */
     ids: string[];
+    /** New embedding vectors */
     embeddings?: number[][];
+    /** New metadata */
     metadatas?: Metadata[];
+    /** New document text */
     documents?: string[];
+    /** New URIs */
     uris?: string[];
   }): Promise<void>;
+  /**
+   * Inserts new records or updates existing ones (upsert operation).
+   * @param args - Record data to upsert
+   */
   upsert(args: {
+    /** IDs of records to upsert */
     ids: string[];
+    /** Embedding vectors */
     embeddings?: number[][];
+    /** Metadata */
     metadatas?: Metadata[];
+    /** Document text */
     documents?: string[];
+    /** URIs */
     uris?: string[];
   }): Promise<void>;
+  /**
+   * Deletes records from the collection based on filters.
+   * @param args - Deletion criteria
+   */
   delete(args: {
+    /** Specific record IDs to delete */
     ids?: string[];
+    /** Metadata-based filtering for deletion */
     where?: Where;
+    /** Document content-based filtering for deletion */
     whereDocument?: WhereDocument;
   }): Promise<void>;
 }
 
+/**
+ * A Chroma collection retrieved by name, with its metadata and configuration.
+ */
 export interface Collection extends CollectionAPI {
+  /** Human-readable name of the collection */
   name: string;
+  /** Embedding function used by this collection */
   embeddingFunction: EmbeddingFunction;
+  /** Collection-level metadata */
   metadata: CollectionMetadata | undefined;
+  /** Collection configuration settings */
   configuration: CollectionConfiguration;
 }
 
+/**
+ * Arguments for creating a Collection instance.
+ */
 export interface CollectionArgs {
+  /** ChromaDB client instance */
   chromaClient: ChromaClient;
+  /** HTTP API client */
   apiClient: ReturnType<typeof createClient>;
+  /** Collection name */
   name: string;
+  /** Collection ID */
   id: string;
+  /** Embedding function for the collection */
   embeddingFunction: EmbeddingFunction;
+  /** Collection configuration */
   configuration: CollectionConfiguration;
+  /** Optional collection metadata */
   metadata?: CollectionMetadata;
 }
 
+/**
+ * Implementation of CollectionAPI for ID-based collection operations.
+ * Provides core functionality for interacting with collections using their ID.
+ */
 export class CollectionAPIImpl implements CollectionAPI {
   protected readonly chromaClient: ChromaClient;
   protected readonly apiClient: ReturnType<typeof createClient>;
   public readonly id: string;
   protected _embeddingFunction: EmbeddingFunction | undefined;
 
+  /**
+   * Creates a new CollectionAPIImpl instance.
+   * @param options - Configuration for the collection API
+   */
   constructor({
     chromaClient,
     apiClient,
@@ -531,12 +640,20 @@ export class CollectionAPIImpl implements CollectionAPI {
   }
 }
 
+/**
+ * Full implementation of Collection interface with name and metadata.
+ * Extends CollectionAPIImpl with additional properties for named collections.
+ */
 export class CollectionImpl extends CollectionAPIImpl implements Collection {
   private _name: string;
   override _embeddingFunction: EmbeddingFunction;
   private _metadata: CollectionMetadata | undefined;
   private _configuration: CollectionConfiguration;
 
+  /**
+   * Creates a new CollectionImpl instance.
+   * @param args - Collection configuration arguments
+   */
   constructor({
     chromaClient,
     apiClient,

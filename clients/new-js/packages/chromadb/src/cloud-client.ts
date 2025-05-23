@@ -3,12 +3,24 @@ import * as process from "node:process";
 import { AdminClient } from "./admin-client";
 import { ChromaValueError } from "./errors";
 
+/**
+ * ChromaDB cloud client for connecting to hosted Chroma instances.
+ * Extends ChromaClient with cloud-specific authentication and configuration.
+ */
 export class CloudClient extends ChromaClient {
+  /**
+   * Creates a new CloudClient instance for Chroma Cloud.
+   * @param args - Cloud client configuration options
+   */
   constructor(
     args: Partial<{
+      /** API key for authentication (or set CHROMA_API_KEY env var) */
       apiKey?: string;
+      /** Tenant name for multi-tenant deployments */
       tenant?: string;
+      /** Database name to connect to */
       database?: string;
+      /** Additional fetch options for HTTP requests */
       fetchOptions?: RequestInit;
     }> = {},
   ) {
@@ -38,9 +50,22 @@ export class CloudClient extends ChromaClient {
   }
 }
 
+/**
+ * Admin client for Chroma Cloud administrative operations.
+ * Extends AdminClient with cloud-specific authentication.
+ */
 export class AdminCloudClient extends AdminClient {
+  /**
+   * Creates a new AdminCloudClient instance for cloud admin operations.
+   * @param args - Admin cloud client configuration options
+   */
   constructor(
-    args: Partial<{ apiKey?: string; fetchOptions?: RequestInit }> = {},
+    args: Partial<{
+      /** API key for authentication (or set CHROMA_API_KEY env var) */
+      apiKey?: string;
+      /** Additional fetch options for HTTP requests */
+      fetchOptions?: RequestInit;
+    }> = {},
   ) {
     const apiKey = args.apiKey || process.env.CHROMA_API_KEY;
     if (!apiKey) {

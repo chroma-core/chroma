@@ -5,9 +5,7 @@
     "rootDir": "./src",
     "baseUrl": "./src",
     "stripInternal": true,
-    "composite": true,
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext"
+    "composite": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "test", "**/*.test.ts"],

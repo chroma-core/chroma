@@ -1,3 +1,8 @@
+/**
+ * @fileoverview ChromaDB JavaScript client library entry point.
+ * Provides access to all public APIs for interacting with ChromaDB.
+ */
+
 export { Collection, CollectionAPI } from "./collection";
 export { withChroma } from "./next";
 export * from "./admin-client";
