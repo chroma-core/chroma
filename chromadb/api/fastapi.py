@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 class FastAPI(BaseHTTPClient, ServerAPI):
     def __init__(self, system: System):
+        print("RUNNING THIS CODE MAN!")
         super().__init__(system)
         system.settings.require("chroma_server_host")
         system.settings.require("chroma_server_http_port")
@@ -69,7 +70,8 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
-        self._session = httpx.Client(timeout=None)
+        limits = httpx.Limits(max_keepalive_connections=self.keepalive_secs)
+        self._session = httpx.Client(timeout=None, limits=limits)
 
         self._header = system.settings.chroma_server_headers or {}
         self._header["Content-Type"] = "application/json"
