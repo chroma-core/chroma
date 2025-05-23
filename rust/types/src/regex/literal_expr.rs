@@ -206,7 +206,10 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         let mut candidates = HashMap::<_, BinaryHeap<_>>::with_capacity(
             min_ngram_doc_pos_iter.clone().map(Vec::len).sum(),
         );
-        for (ngram, doc, pos) in min_ngram_doc_pos_iter.flatten() {
+        for (ngram, doc, pos) in min_ngram_doc_pos_iter
+            .flatten()
+            .filter(|(_, d, _)| mask.is_none() || mask.is_some_and(|m| m.contains(d)))
+        {
             candidates
                 .entry(*doc)
                 .or_insert_with(|| BinaryHeap::with_capacity(pos.len()))
@@ -289,16 +292,13 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                             Ok(idx) => focus_ngram_doc_pos[idx],
                             Err(_) => continue,
                         };
-                    if match_pos_with_offset
-                        .checked_sub(focus_ngram[..1].len() as u32)
-                        .and_then(|p| pos.binary_search(&p).ok())
-                        .is_some()
-                    {
-                        prefix_pos_idx.push((
-                            &focus_ngram[1..],
-                            match_pos_with_offset + focus_ngram[..1].len() as u32,
-                            0,
-                        ));
+                    let match_pos =
+                        match match_pos_with_offset.checked_sub(focus_ngram[..1].len() as u32) {
+                            Some(pos) => pos,
+                            None => continue,
+                        };
+                    if pos.binary_search(&match_pos).is_ok() {
+                        prefix_pos_idx.push((&focus_ngram[..N - 1], match_pos, 0));
                     }
                 }
                 if !prefix_pos_idx.is_empty() {
