@@ -11,6 +11,7 @@ async-trait = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 roaring = { workspace = true }
+chrono = { workspace = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
 uuid = { workspace = true }

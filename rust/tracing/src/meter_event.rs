@@ -31,11 +31,11 @@ pub enum MeterEvent {
         database: String,
         collection_id: Uuid,
         latest_collection_logical_size_bytes: u64,
-        // This field is optional because in some cases,
-        // requests involve the execution of more than one query,
-        // and customers are only interested in the end-to-end
-        // execution time. This is also why the field is prefixed with
-        // `request_` instead of being called `execution_time_ms`
+        // This field is optional because in the case of a Delete,
+        // requests involve the execution both a read and a write,
+        // but customers are only interested in the end-to-end
+        // execution time of their request. This is also why the field is
+        // prefixed with `request_`.
         request_execution_time_ns: Option<u128>,
     },
     CollectionRead {

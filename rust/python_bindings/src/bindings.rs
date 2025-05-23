@@ -15,17 +15,17 @@ use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::{SqliteSysDbConfig, SysDbConfig};
 use chroma_system::System;
 use chroma_types::{
-    AddCollectionRecordsError, Collection, CollectionConfiguration, CollectionMetadataUpdate,
-    CountCollectionsRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateTenantRequest, Database, DeleteCollectionRecordsError, DeleteCollectionRequest,
-    DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest,
-    GetTenantResponse, HeartbeatError, IncludeList, InternalCollectionConfiguration, KnnIndex,
-    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryError, QueryResponse,
-    UpdateCollectionConfiguration, UpdateCollectionRecordsError, UpdateCollectionRequest,
-    UpdateMetadata, UpsertCollectionRecordsError, WrappedSerdeJsonError,
+    Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
+    CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
+    DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
+    GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
+    InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListDatabasesRequest,
+    Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest,
+    UpdateMetadata, WrappedSerdeJsonError,
 };
+use chrono::Utc;
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 const DEFAULT_DATABASE: &str = "default_database";
 const DEFAULT_TENANT: &str = "default_tenant";
 
@@ -386,10 +386,7 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        let request_received_at_timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(AddCollectionRecordsError::from)?
-            .as_millis();
+        let request_received_at_timestamp = Utc::now();
 
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
@@ -413,7 +410,7 @@ impl Bindings {
             documents,
             uris,
             metadatas,
-            request_received_at_timestamp_ms,
+            request_received_at_timestamp,
         )?;
 
         let mut frontend_clone = self.frontend.clone();
@@ -437,10 +434,7 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        let request_received_at_timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(UpdateCollectionRecordsError::from)?
-            .as_millis();
+        let request_received_at_timestamp = Utc::now();
 
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
@@ -466,7 +460,7 @@ impl Bindings {
             documents,
             uris,
             metadatas,
-            request_received_at_timestamp_ms,
+            request_received_at_timestamp,
         )?;
 
         self.runtime
@@ -490,10 +484,7 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<bool> {
-        let request_received_at_timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(UpsertCollectionRecordsError::from)?
-            .as_millis();
+        let request_received_at_timestamp = Utc::now();
 
         if self.get_max_batch_size() < ids.len() as u32 {
             return Err(WrappedPyErr::from(PyValueError::new_err(format!(
@@ -519,7 +510,7 @@ impl Bindings {
             documents,
             uris,
             metadatas,
-            request_received_at_timestamp_ms,
+            request_received_at_timestamp,
         )?;
 
         self.runtime
@@ -540,10 +531,7 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<()> {
-        let request_received_at_timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(DeleteCollectionRecordsError::from)?
-            .as_millis();
+        let request_received_at_timestamp = Utc::now();
 
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
@@ -561,7 +549,7 @@ impl Bindings {
             collection_id,
             ids,
             r#where,
-            request_received_at_timestamp_ms,
+            request_received_at_timestamp,
         )?;
 
         let mut frontend_clone = self.frontend.clone();
@@ -579,12 +567,7 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<CountResponse> {
-        let request_received_at_timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            // We use a `QueryError` here because by convention in the service implementations
-            // of the frontend, we return `QueryError` on both `count` and `get` failures.
-            .map_err(QueryError::from)?
-            .as_millis();
+        let request_received_at_timestamp = Utc::now();
 
         let collection_id = chroma_types::CollectionUuid(
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
@@ -594,7 +577,7 @@ impl Bindings {
             tenant,
             database,
             collection_id,
-            request_received_at_timestamp_ms,
+            request_received_at_timestamp,
         )?;
 
         let mut frontend_clone = self.frontend.clone();
@@ -621,12 +604,7 @@ impl Bindings {
         database: String,
         py: Python<'_>,
     ) -> ChromaPyResult<GetResponse> {
-        let request_received_at_timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            // We use a `QueryError` here because by convention in the service implementations
-            // of the frontend, we return `QueryError` on both `count` and `get` failures.
-            .map_err(QueryError::from)?
-            .as_millis();
+        let request_received_at_timestamp = Utc::now();
 
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
@@ -649,7 +627,7 @@ impl Bindings {
             limit,
             offset,
             include,
-            request_received_at_timestamp_ms,
+            request_received_at_timestamp,
         )?;
 
         let mut frontend_clone = self.frontend.clone();
@@ -677,12 +655,7 @@ impl Bindings {
         database: String,
         py: Python<'_>,
     ) -> ChromaPyResult<QueryResponse> {
-        let request_received_at_timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            // We use a `QueryError` here because by convention in the service implementations
-            // of the frontend, we return `QueryError` on both `count` and `get` failures.
-            .map_err(QueryError::from)?
-            .as_millis();
+        let request_received_at_timestamp = Utc::now();
 
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
@@ -705,7 +678,7 @@ impl Bindings {
             query_embeddings,
             n_results,
             include,
-            request_received_at_timestamp_ms,
+            request_received_at_timestamp,
         )?;
 
         let mut frontend_clone = self.frontend.clone();

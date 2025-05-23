@@ -48,7 +48,7 @@ impl FrontendReferenceState {
                     None,
                     0,
                     IncludeList(vec![]),
-                    1,
+                    chrono::Utc::now(),
                 )
                 .unwrap(),
             )

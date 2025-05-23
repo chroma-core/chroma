@@ -452,7 +452,7 @@ impl InMemoryFrontend {
                     None,
                     0,
                     IncludeList::empty(),
-                    request.received_at_timestamp_ns,
+                    request.received_at_timestamp,
                 )
                 .unwrap(),
             )
@@ -734,7 +734,7 @@ mod tests {
             Some(documents),
             None,
             Some(metadatas),
-            1,
+            chrono::Utc::now(),
         )
         .unwrap();
         frontend.add(request).unwrap();
@@ -746,7 +746,7 @@ mod tests {
                     collection.tenant.clone(),
                     collection.database.clone(),
                     collection.collection_id,
-                    1,
+                    chrono::Utc::now(),
                 )
                 .unwrap(),
             )
@@ -769,7 +769,7 @@ mod tests {
             None,
             0,
             IncludeList::default_get(),
-            1,
+            chrono::Utc::now(),
         )
         .unwrap();
         let response = frontend.get(request).unwrap();
@@ -789,7 +789,7 @@ mod tests {
             None,
             0,
             IncludeList::default_get(),
-            1,
+            chrono::Utc::now(),
         )
         .unwrap();
         let response = frontend.get(request).unwrap();
@@ -806,7 +806,7 @@ mod tests {
             vec![vec![0.5, 0.5, 0.5]],
             10,
             IncludeList::default_query(),
-            1,
+            chrono::Utc::now(),
         )
         .unwrap();
         let response = frontend.query(request).unwrap();

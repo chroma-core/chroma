@@ -122,7 +122,7 @@ impl StateMachineTest for FrontendUnderTest {
                                         None,
                                         0,
                                         IncludeList(vec![]),
-                                        1,
+                                        chrono::Utc::now(),
                                     )
                                     .unwrap(),
                                 )
@@ -167,7 +167,7 @@ impl StateMachineTest for FrontendUnderTest {
                                     collection.tenant,
                                     collection.database,
                                     collection.collection_id,
-                                    1,
+                                    chrono::Utc::now(),
                                 )
                                 .unwrap(),
                             )
@@ -231,7 +231,7 @@ impl StateMachineTest for FrontendUnderTest {
                                     collection.tenant,
                                     collection.database,
                                     collection.collection_id,
-                                    1,
+                                    chrono::Utc::now(),
                                 )
                                 .unwrap(),
                             )
@@ -297,7 +297,7 @@ impl StateMachineTest for FrontendUnderTest {
                         reference_collection.tenant.clone(),
                         reference_collection.database.clone(),
                         reference_collection.collection_id,
-                        1,
+                        chrono::Utc::now(),
                     )
                     .unwrap(),
                 )
@@ -308,7 +308,7 @@ impl StateMachineTest for FrontendUnderTest {
                         collection_under_test.tenant.clone(),
                         collection_under_test.database.clone(),
                         collection_under_test.collection_id,
-                        1,
+                        chrono::Utc::now(),
                     )
                     .unwrap(),
                 )
@@ -331,7 +331,7 @@ impl StateMachineTest for FrontendUnderTest {
                         None,
                         0,
                         IncludeList::default_get(),
-                        1,
+                        chrono::Utc::now(),
                     )
                     .unwrap(),
                 )
@@ -348,7 +348,7 @@ impl StateMachineTest for FrontendUnderTest {
                         None,
                         0,
                         IncludeList::default_get(),
-                        1,
+                        chrono::Utc::now(),
                     )
                     .unwrap(),
                 )
