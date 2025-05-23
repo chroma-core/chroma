@@ -86,7 +86,6 @@ impl MeterEvent {
 
 #[cfg(test)]
 mod tests {
-    use chrono;
     use uuid::Uuid;
 
     use crate::meter_event::WriteAction;
