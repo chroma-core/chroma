@@ -68,14 +68,6 @@ pub struct ServiceBasedFrontend {
     retries_builder: ExponentialBuilder,
 }
 
-/*
-READ
--get_default_knn_index
--get_max_batch_size
--get_cached_collection
--get_collection_dimension
-*/
-
 impl ServiceBasedFrontend {
     pub fn new(
         allow_reset: bool,
