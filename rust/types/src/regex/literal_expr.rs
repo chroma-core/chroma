@@ -1,6 +1,5 @@
 use std::{
-    cmp::Reverse,
-    collections::{BinaryHeap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     ops::RangeBounds,
 };
 
@@ -203,25 +202,25 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
             .prefix
             .values()
             .flat_map(|idxs| idxs.iter().map(|idx| &ngram_doc_pos_vec[*idx]));
-        let mut candidates = HashMap::<_, BinaryHeap<_>>::with_capacity(
-            min_ngram_doc_pos_iter.clone().map(Vec::len).sum(),
-        );
+        let mut candidates =
+            HashMap::<_, Vec<_>>::with_capacity(min_ngram_doc_pos_iter.clone().map(Vec::len).sum());
         for (ngram, doc, pos) in min_ngram_doc_pos_iter
             .flatten()
             .filter(|(_, d, _)| mask.is_none() || mask.is_some_and(|m| m.contains(d)))
         {
             candidates
                 .entry(*doc)
-                .or_insert_with(|| BinaryHeap::with_capacity(pos.len()))
-                .extend(pos.iter().map(|p| Reverse((*p, *ngram))));
+                .or_insert_with(|| Vec::with_capacity(min_lookup_table.prefix.len()))
+                .push((*ngram, *pos));
         }
-        let mut candidates = candidates.into_iter().collect::<Vec<_>>();
-        candidates.sort_unstable_by_key(|(d, _)| *d);
 
         // Find a valid trace across lookup tables
         let mut result = HashSet::with_capacity(candidates.len());
         for (doc, pivot_ngram_pos) in candidates {
-            for Reverse((pos, ngram)) in pivot_ngram_pos {
+            for (ngram, pos) in pivot_ngram_pos
+                .into_iter()
+                .flat_map(|(n, ps)| ps.iter().map(move |p| (n, *p)))
+            {
                 // Trace to the right of pivot
                 let mut suffix_pos_idx =
                     Vec::with_capacity(lookup_table_vec.len() - min_lookup_table_index);
