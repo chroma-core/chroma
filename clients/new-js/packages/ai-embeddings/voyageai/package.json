@@ -1,21 +1,21 @@
 {
-  "name": "@chroma-core/voyage",
+  "name": "@chroma-core/voyageai",
   "version": "0.1.5",
   "private": false,
-  "description": "Voyage embedding provider for Chroma",
-  "main": "dist/cjs/voyage.cjs",
-  "types": "dist/voyage.d.ts",
-  "module": "dist/voyage.legacy-esm.js",
+  "description": "Voyage AI embedding provider for Chroma",
+  "main": "dist/cjs/voyageai.cjs",
+  "types": "dist/voyageai.d.ts",
+  "module": "dist/voyageai.legacy-esm.js",
   "type": "module",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/voyage.d.ts",
-        "default": "./dist/voyage.mjs"
+        "types": "./dist/voyageai.d.ts",
+        "default": "./dist/voyageai.mjs"
       },
       "require": {
-        "types": "./dist/cjs/voyage.d.cts",
-        "default": "./dist/cjs/voyage.cjs"
+        "types": "./dist/cjs/voyageai.d.cts",
+        "default": "./dist/cjs/voyageai.cjs"
       }
     }
   },
@@ -43,7 +43,8 @@
     "chromadb": "workspace:^"
   },
   "dependencies": {
-    "@chroma-core/ai-embeddings-common": "workspace:^"
+    "@chroma-core/ai-embeddings-common": "workspace:^",
+    "voyageai": "^0.0.4"
   },
   "engines": {
     "node": ">=14.17.0"

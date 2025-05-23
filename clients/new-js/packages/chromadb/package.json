@@ -72,11 +72,11 @@
     "@chroma-core/default-embed": "workspace:^"
   },
   "optionalDependencies": {
-    "chromadb-js-bindings-darwin-arm64": "^0.1.1",
-    "chromadb-js-bindings-darwin-x64": "^0.1.1",
-    "chromadb-js-bindings-linux-arm64-gnu": "^0.1.1",
-    "chromadb-js-bindings-linux-x64-gnu": "^0.1.1",
-    "chromadb-js-bindings-win32-x64-msvc": "^0.1.1"
+    "chromadb-js-bindings-darwin-arm64": "^0.1.3",
+    "chromadb-js-bindings-darwin-x64": "^0.1.3",
+    "chromadb-js-bindings-linux-arm64-gnu": "^0.1.3",
+    "chromadb-js-bindings-linux-x64-gnu": "^0.1.3",
+    "chromadb-js-bindings-win32-x64-msvc": "^0.1.3"
   },
   "engines": {
     "node": ">=14.17.0"

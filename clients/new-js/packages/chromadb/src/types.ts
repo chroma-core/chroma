@@ -1,15 +1,33 @@
 import { GetUserIdentityResponse, Include } from "./api";
 
+/**
+ * User identity information including tenant and database access.
+ */
 export type UserIdentity = GetUserIdentityResponse;
 
+/**
+ * Metadata that can be associated with a collection.
+ * Values must be boolean, number, or string types.
+ */
 export type CollectionMetadata = Record<string, boolean | number | string>;
 
+/**
+ * Metadata that can be associated with individual records.
+ * Values must be boolean, number, or string types.
+ */
 export type Metadata = Record<string, boolean | number | string>;
 
+/**
+ * Base interface for record sets containing optional fields.
+ */
 export interface BaseRecordSet {
+  /** Array of embedding vectors */
   embeddings?: number[][];
+  /** Array of metadata objects */
   metadatas?: Metadata[];
+  /** Array of document text content */
   documents?: string[];
+  /** Array of URIs/URLs */
   uris?: string[];
 }
 
@@ -21,14 +39,23 @@ export const baseRecordSetFields = [
   "uris",
 ];
 
+/**
+ * Complete record set with required IDs for operations like add/update.
+ */
 export interface RecordSet extends BaseRecordSet {
+  /** Array of unique record identifiers */
   ids: string[];
 }
 
 export const recordSetFields = [...baseRecordSetFields, "ids"];
 
+/**
+ * Record set for query operations with required embeddings.
+ */
 export interface QueryRecordSet extends BaseRecordSet {
+  /** Optional array of record IDs to filter by */
   ids?: string[];
+  /** Array of query embedding vectors (required for queries) */
   embeddings: number[][];
 }
 
@@ -52,6 +79,10 @@ type OperatorExpression =
   | { $in: LiteralValue[] }
   | { $nin: LiteralValue[] };
 
+/**
+ * Where clause for filtering records based on metadata.
+ * Supports field equality, comparison operators, and logical operators.
+ */
 export type Where =
   | { [key: string]: LiteralValue | OperatorExpression }
   | { $and: Where[] }
@@ -64,6 +95,10 @@ type WhereDocumentOperator =
   | "$not_matches"
   | LogicalOperator;
 
+/**
+ * Where clause for filtering based on document content.
+ * Supports text search operators and logical combinations.
+ */
 export type WhereDocument =
   | { $contains: string }
   | { $not_contains: string }
@@ -72,14 +107,26 @@ export type WhereDocument =
   | { $and: WhereDocument[] }
   | { $or: WhereDocument[] };
 
+/**
+ * Enum specifying which fields to include in query results.
+ */
 export enum IncludeEnum {
+  /** Include similarity distances in results */
   distances = "distances",
+  /** Include document text content in results */
   documents = "documents",
+  /** Include embedding vectors in results */
   embeddings = "embeddings",
+  /** Include metadata objects in results */
   metadatas = "metadatas",
+  /** Include URIs in results */
   uris = "uris",
 }
 
+/**
+ * Result class for get operations, containing retrieved records.
+ * @template TMeta - The type of metadata associated with records
+ */
 export class GetResult<TMeta extends Metadata = Metadata> {
   public readonly documents: (string | null)[];
   public readonly embeddings: number[][];
@@ -88,6 +135,10 @@ export class GetResult<TMeta extends Metadata = Metadata> {
   public readonly metadatas: (TMeta | null)[];
   public readonly uris: (string | null)[];
 
+  /**
+   * Creates a new GetResult instance.
+   * @param data - The result data containing all fields
+   */
   constructor({
     documents,
     embeddings,
@@ -111,6 +162,10 @@ export class GetResult<TMeta extends Metadata = Metadata> {
     this.uris = uris;
   }
 
+  /**
+   * Converts the result to a row-based format for easier iteration.
+   * @returns Object containing include fields and array of record objects
+   */
   public rows() {
     return {
       include: this.include,
@@ -133,18 +188,34 @@ export class GetResult<TMeta extends Metadata = Metadata> {
   }
 }
 
+/**
+ * Interface for query results in row format.
+ * @template TMeta - The type of metadata associated with records
+ */
 export interface QueryRowResult<TMeta extends Metadata = Metadata> {
+  /** Fields included in the query results */
   include: Include[];
+  /** Array of query results, with each query returning an array of matches */
   queries: {
+    /** Similarity distance to the query (if included) */
     distance?: number | null;
+    /** Document text content (if included) */
     document?: string | null;
+    /** Embedding vector (if included) */
     embedding?: number[] | null;
+    /** Unique record identifier */
     id: string;
+    /** Record metadata (if included) */
     metadata?: TMeta | null;
+    /** Record URI (if included) */
     uri?: string | null;
   }[][];
 }
 
+/**
+ * Result class for query operations, containing search results.
+ * @template TMeta - The type of metadata associated with records
+ */
 export class QueryResult<TMeta extends Metadata = Metadata> {
   public readonly distances: (number | null)[][];
   public readonly documents: (string | null)[][];
@@ -154,6 +225,10 @@ export class QueryResult<TMeta extends Metadata = Metadata> {
   public readonly metadatas: (TMeta | null)[][];
   public readonly uris: (string | null)[][];
 
+  /**
+   * Creates a new QueryResult instance.
+   * @param data - The query result data containing all fields
+   */
   constructor({
     distances,
     documents,
@@ -180,6 +255,10 @@ export class QueryResult<TMeta extends Metadata = Metadata> {
     this.uris = uris;
   }
 
+  /**
+   * Converts the query result to a row-based format for easier iteration.
+   * @returns Object containing include fields and structured query results
+   */
   public rows(): QueryRowResult<TMeta> {
     const queries: {
       distance?: number | null;

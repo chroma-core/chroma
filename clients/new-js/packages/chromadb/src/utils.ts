@@ -14,21 +14,28 @@ import { Include } from "./api";
 import { a, b } from "@hey-api/openapi-ts/dist/types.d-C5lgdIHG";
 import { ChromaValueError } from "./errors";
 
+/** Default tenant name used when none is specified */
 export const DEFAULT_TENANT = "default_tenant";
+/** Default database name used when none is specified */
 export const DEFAULT_DATABASE = "default_database";
 
+/** Default configuration for AdminClient connections */
 export const defaultAdminClientArgs: AdminClientArgs = {
   host: "localhost",
   port: 8000,
   ssl: false,
 };
 
+/** Default configuration for ChromaClient connections */
 export const defaultChromaClientArgs: ChromaClientArgs = {
   ...defaultAdminClientArgs,
   tenant: DEFAULT_TENANT,
   database: DEFAULT_DATABASE,
 };
 
+/**
+ * Supported HTTP methods for API requests.
+ */
 export type HttpMethod =
   | "GET"
   | "POST"
@@ -41,6 +48,11 @@ export type HttpMethod =
   | "TRACE"
   | undefined;
 
+/**
+ * Normalizes HTTP method strings to standard uppercase format.
+ * @param method - HTTP method string to normalize
+ * @returns Normalized HttpMethod or undefined if invalid
+ */
 export const normalizeMethod = (method?: string): HttpMethod => {
   if (method) {
     switch (method.toUpperCase()) {
@@ -69,6 +81,11 @@ export const normalizeMethod = (method?: string): HttpMethod => {
   return undefined;
 };
 
+/**
+ * Validates that all arrays in a RecordSet have consistent lengths.
+ * @param recordSet - The record set to validate
+ * @throws ChromaValueError if arrays have inconsistent lengths or are empty
+ */
 export const validateRecordSetLengthConsistency = (recordSet: RecordSet) => {
   const lengths: [string, number][] = Object.entries(recordSet)
     .filter(
@@ -165,6 +182,11 @@ const validateDocuments = ({
   });
 };
 
+/**
+ * Validates an array of IDs for type correctness and uniqueness.
+ * @param ids - Array of ID strings to validate
+ * @throws ChromaValueError if IDs are not strings, empty, or contain duplicates
+ */
 export const validateIDs = (ids: string[]) => {
   if (!Array.isArray(ids)) {
     throw new ChromaValueError(
@@ -207,6 +229,11 @@ export const validateIDs = (ids: string[]) => {
   }
 };
 
+/**
+ * Validates metadata object for correct types and non-emptiness.
+ * @param metadata - Metadata object to validate
+ * @throws ChromaValueError if metadata is invalid
+ */
 export const validateMetadata = (metadata?: Metadata) => {
   if (!metadata) {
     return;
@@ -242,6 +269,15 @@ const validateMetadatas = (metadatas: Metadata[]) => {
   metadatas.forEach((metadata) => validateMetadata(metadata));
 };
 
+/**
+ * Validates a base record set for required fields and data consistency.
+ * @param options - Validation options
+ * @param options.recordSet - The record set to validate
+ * @param options.update - Whether this is for an update operation (relaxes requirements)
+ * @param options.embeddingsField - Name of the embeddings field for error messages
+ * @param options.documentsField - Name of the documents field for error messages
+ * @throws ChromaValueError if validation fails
+ */
 export const validateBaseRecordSet = ({
   recordSet,
   update = false,
@@ -278,6 +314,11 @@ export const validateBaseRecordSet = ({
   }
 };
 
+/**
+ * Validates a where clause for metadata filtering.
+ * @param where - Where clause object to validate
+ * @throws ChromaValueError if the where clause is malformed
+ */
 export const validateWhere = (where: Where) => {
   if (typeof where !== "object") {
     throw new ChromaValueError("Expected where to be a non-empty object");
@@ -370,6 +411,11 @@ export const validateWhere = (where: Where) => {
   });
 };
 
+/**
+ * Validates a where document clause for document content filtering.
+ * @param whereDocument - Where document clause to validate
+ * @throws ChromaValueError if the clause is malformed
+ */
 export const validateWhereDocument = (whereDocument: WhereDocument) => {
   if (typeof whereDocument !== "object") {
     throw new ChromaValueError(
@@ -425,6 +471,13 @@ export const validateWhereDocument = (whereDocument: WhereDocument) => {
   }
 };
 
+/**
+ * Validates include fields for query operations.
+ * @param options - Validation options
+ * @param options.include - Array of fields to include in results
+ * @param options.exclude - Optional array of fields that should not be included
+ * @throws ChromaValueError if include fields are invalid
+ */
 export const validateInclude = ({
   include,
   exclude,
@@ -456,6 +509,11 @@ export const validateInclude = ({
   });
 };
 
+/**
+ * Validates the number of results parameter for queries.
+ * @param nResults - Number of results to validate
+ * @throws ChromaValueError if nResults is not a positive number
+ */
 export const validateNResults = (nResults: number) => {
   if (typeof (nResults as any) !== "number") {
     throw new ChromaValueError(

@@ -27,6 +27,49 @@ importers:
         specifier: ^5.0.4
         version: 5.8.3
 
+  packages/ai-embeddings/all:
+    dependencies:
+      '@chroma-core/ai-embeddings-common':
+        specifier: workspace:^
+        version: link:../common
+      '@chroma-core/cloudflare-worker-ai':
+        specifier: workspace:^
+        version: link:../cloudflare-worker-ai
+      '@chroma-core/cohere':
+        specifier: workspace:^
+        version: link:../cohere
+      '@chroma-core/default-embed':
+        specifier: workspace:^
+        version: link:../default-embed
+      '@chroma-core/google-gemini':
+        specifier: workspace:^
+        version: link:../google-gemini
+      '@chroma-core/huggingface-server':
+        specifier: workspace:^
+        version: link:../huggingface-server
+      '@chroma-core/jina':
+        specifier: workspace:^
+        version: link:../jina
+      '@chroma-core/ollama':
+        specifier: workspace:^
+        version: link:../ollama
+      '@chroma-core/openai':
+        specifier: workspace:^
+        version: link:../openai
+      '@chroma-core/together-ai':
+        specifier: workspace:^
+        version: link:../together-ai
+      '@chroma-core/voyageai':
+        specifier: workspace:^
+        version: link:../voyageai
+    devDependencies:
+      rimraf:
+        specifier: ^5.0.0
+        version: 5.0.10
+      tsup:
+        specifier: ^8.3.5
+        version: 8.4.0(jiti@2.4.2)(postcss@8.5.3)(tsx@4.19.4)(typescript@5.8.3)(yaml@2.7.1)
+
   packages/ai-embeddings/cloudflare-worker-ai:
     dependencies:
       '@chroma-core/ai-embeddings-common':
@@ -331,7 +374,7 @@ importers:
         specifier: ^8.3.5
         version: 8.4.0(jiti@2.4.2)(postcss@8.5.3)(tsx@4.19.4)(typescript@5.8.3)(yaml@2.7.1)
 
-  packages/ai-embeddings/voyage:
+  packages/ai-embeddings/voyageai:
     dependencies:
       '@chroma-core/ai-embeddings-common':
         specifier: workspace:^
@@ -339,6 +382,9 @@ importers:
       chromadb:
         specifier: workspace:^
         version: link:../../chromadb
+      voyageai:
+        specifier: ^0.0.4
+        version: 0.0.4
     devDependencies:
       '@jest/globals':
         specifier: ^29.7.0
@@ -4211,6 +4257,9 @@ packages:
 
   varint@5.0.2:
     resolution: {integrity: sha512-lKxKYG6H03yCZUpAGOPOsMcGxd1RHCu1iKvEHYDPmTyq2HueGhD73ssNBqqQWfvYs04G9iUFRvmAVLW20Jw6ow==}
+
+  voyageai@0.0.4:
+    resolution: {integrity: sha512-eHSwflQdhByXpudW49LNEjJr1cpz9GmTFADiGr+b5TgwNgewiRjJrgDS3X/s1wExCdAUXW+az1DrF9pfHrPyyA==}
 
   wait-on@8.0.3:
     resolution: {integrity: sha512-nQFqAFzZDeRxsu7S3C7LbuxslHhk+gnJZHyethuGKAn2IVleIbTB9I3vJSQiSR+DifUqmdzfPMoMPJfLqMF2vw==}
@@ -9039,6 +9088,18 @@ snapshots:
       spdx-expression-parse: 3.0.1
 
   varint@5.0.2: {}
+
+  voyageai@0.0.4:
+    dependencies:
+      form-data: 4.0.2
+      formdata-node: 6.0.3
+      js-base64: 3.7.2
+      node-fetch: 2.7.0
+      qs: 6.11.2
+      readable-stream: 4.7.0
+      url-join: 4.0.1
+    transitivePeerDependencies:
+      - encoding
 
   wait-on@8.0.3:
     dependencies:
