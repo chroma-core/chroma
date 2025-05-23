@@ -637,7 +637,6 @@ impl ServiceBasedFrontend {
             database: database_name,
             collection_id: source_collection_id.0,
             latest_collection_logical_size_bytes,
-            request_received_at_timestamp,
             request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
                 .to_std()
                 .ok()
@@ -755,7 +754,6 @@ impl ServiceBasedFrontend {
             collection_id: collection_id.0,
             action: WriteAction::Add,
             log_size_bytes,
-            request_received_at_timestamp,
             request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
                 .to_std()
                 .ok()
@@ -839,7 +837,6 @@ impl ServiceBasedFrontend {
             collection_id: collection_id.0,
             action: WriteAction::Update,
             log_size_bytes,
-            request_received_at_timestamp,
             request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
                 .to_std()
                 .ok()
@@ -925,7 +922,6 @@ impl ServiceBasedFrontend {
             collection_id: collection_id.0,
             action: WriteAction::Upsert,
             log_size_bytes,
-            request_received_at_timestamp,
             request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
                 .to_std()
                 .ok()
@@ -1020,17 +1016,6 @@ impl ServiceBasedFrontend {
                 pulled_log_size_bytes: get_result.pulled_log_bytes,
                 latest_collection_logical_size_bytes,
                 return_bytes,
-                // NOTE(c-gamble): The reason we include the `request_received_at_timestamp`
-                // but not the `request_execution_time_ns` is because even though this
-                // event won't result in an execution time being inserted into an array
-                // in object storage, the event was still triggered by _a_ request,
-                // meaning that a timestamp _must_ exist for the time at which that
-                // request was received. This may result in a case during a failed delete operation
-                // in which the read portion succeeds but the write potion fails, in which there is an
-                // entry in object storage with `num_events = 1` and a
-                // `{min/max}_request_received_at_timestamp``equal to the time at which the delete
-                // request was received, but an empty execution time array.
-                request_received_at_timestamp,
                 request_execution_time_ns: None,
             })
         } else if let Some(user_ids) = ids {
@@ -1075,7 +1060,6 @@ impl ServiceBasedFrontend {
             collection_id: collection_id.0,
             action: WriteAction::Delete,
             log_size_bytes,
-            request_received_at_timestamp,
             request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
                 .to_std()
                 .ok()
@@ -1175,7 +1159,6 @@ impl ServiceBasedFrontend {
             pulled_log_size_bytes: count_result.pulled_log_bytes,
             latest_collection_logical_size_bytes,
             return_bytes,
-            request_received_at_timestamp,
             request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
                 .to_std()
                 .ok()
@@ -1299,7 +1282,6 @@ impl ServiceBasedFrontend {
             pulled_log_size_bytes: get_result.pulled_log_bytes,
             latest_collection_logical_size_bytes,
             return_bytes,
-            request_received_at_timestamp,
             request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
                 .to_std()
                 .ok()
@@ -1427,7 +1409,6 @@ impl ServiceBasedFrontend {
             pulled_log_size_bytes: query_result.pulled_log_bytes,
             latest_collection_logical_size_bytes,
             return_bytes,
-            request_received_at_timestamp,
             request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
                 .to_std()
                 .ok()
