@@ -1,7 +1,6 @@
-use std::sync::OnceLock;
-
 use chroma_system::ReceiverForMessage;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use tracing::Span;
 use uuid::Uuid;
 
@@ -36,6 +35,11 @@ pub enum MeterEvent {
         // but customers are only interested in the end-to-end
         // execution time of their request. This is also why the field is
         // prefixed with `request_`.
+        #[serde(
+            with = "chroma_types::u128::optional_u128_as_hex",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
         request_execution_time_ns: Option<u128>,
     },
     CollectionRead {
@@ -51,6 +55,11 @@ pub enum MeterEvent {
         latest_collection_logical_size_bytes: u64,
         return_bytes: u64,
         // See comment above in `CollectionFork`
+        #[serde(
+            with = "chroma_types::u128::optional_u128_as_hex",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
         request_execution_time_ns: Option<u128>,
     },
     CollectionWrite {
@@ -61,6 +70,11 @@ pub enum MeterEvent {
         action: WriteAction,
         log_size_bytes: u64,
         // See comment above in `CollectionFork`
+        #[serde(
+            with = "chroma_types::u128::optional_u128_as_hex",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
         request_execution_time_ns: Option<u128>,
     },
 }
@@ -105,7 +119,11 @@ mod tests {
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");
         let json_event =
             serde_json::from_str::<MeterEvent>(&json_str).expect("Json should be deserializable");
-        assert_eq!(json_event, event);
+        assert_eq!(
+            json_event, event,
+            "Deserialized value doesn't match original:\nOriginal: {:?}\nDeserialized: {:?}",
+            event, json_event
+        );
     }
 
     #[test]
