@@ -301,7 +301,6 @@ impl FrontendServer {
                 .allow_headers(tower_http::cors::Any)
                 .allow_methods(tower_http::cors::Any);
             if origins.len() == 1 && origins[0] == "*" {
-                println!("\x1b[38;5;203mWARNING:\x1b[0m CORS wildcard '*' is not recommended in production");
                 cors_builder = cors_builder.allow_origin(tower_http::cors::Any);
             } else {
                 cors_builder = cors_builder.allow_origin(origins);
