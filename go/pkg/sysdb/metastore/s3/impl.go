@@ -211,13 +211,15 @@ func (store *S3MetaStore) GetVersionFile(versionFileName string) (*coordinatorpb
 	}
 
 	numVersions := len(versionFile.VersionHistory.Versions)
-	lastVersion := versionFile.VersionHistory.Versions[numVersions-1]
-	lastVersionSegmentInfo := lastVersion.GetSegmentInfo()
-	if lastVersionSegmentInfo == nil {
-		log.Info("Last version segment info is nil")
-	} else {
-		lastVersionSegmentCompactionInfo := lastVersionSegmentInfo.SegmentCompactionInfo
-		log.Info("Last version segment compaction info", zap.Any("lastVersionSegmentCompactionInfo", lastVersionSegmentCompactionInfo))
+	if numVersions > 0 {
+		lastVersion := versionFile.VersionHistory.Versions[numVersions-1]
+		lastVersionSegmentInfo := lastVersion.GetSegmentInfo()
+		if lastVersionSegmentInfo == nil {
+			log.Info("Last version segment info is nil")
+		} else {
+			lastVersionSegmentCompactionInfo := lastVersionSegmentInfo.SegmentCompactionInfo
+			log.Info("Last version segment compaction info", zap.Any("lastVersionSegmentCompactionInfo", lastVersionSegmentCompactionInfo))
+		}
 	}
 
 	return versionFile, nil
@@ -234,13 +236,15 @@ func (store *S3MetaStore) PutVersionFile(tenantID, databaseID, collectionID stri
 
 	log.Info("putting version file", zap.String("path", path))
 	numVersions := len(versionFile.VersionHistory.Versions)
-	lastVersion := versionFile.VersionHistory.Versions[numVersions-1]
-	lastVersionSegmentInfo := lastVersion.GetSegmentInfo()
-	if lastVersionSegmentInfo == nil {
-		log.Info("Current version segment info is nil")
-	} else {
-		lastVersionSegmentCompactionInfo := lastVersionSegmentInfo.SegmentCompactionInfo
-		log.Info("Current version segment compaction info", zap.Any("lastVersionSegmentCompactionInfo", lastVersionSegmentCompactionInfo))
+	if numVersions > 0 {
+		lastVersion := versionFile.VersionHistory.Versions[numVersions-1]
+		lastVersionSegmentInfo := lastVersion.GetSegmentInfo()
+		if lastVersionSegmentInfo == nil {
+			log.Info("Current version segment info is nil")
+		} else {
+			lastVersionSegmentCompactionInfo := lastVersionSegmentInfo.SegmentCompactionInfo
+			log.Info("Current version segment compaction info", zap.Any("lastVersionSegmentCompactionInfo", lastVersionSegmentCompactionInfo))
+		}
 	}
 
 	input := &s3.PutObjectInput{
