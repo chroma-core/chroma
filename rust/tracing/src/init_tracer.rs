@@ -9,6 +9,7 @@ use opentelemetry::{global, InstrumentationScope};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_subscriber::fmt;
+use tracing_subscriber::layer::Identity;
 use tracing_subscriber::Registry;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
@@ -51,10 +52,18 @@ pub fn init_otel_layer(
     service_name: &String,
     otel_endpoint: &String,
 ) -> Box<dyn Layer<Registry> + Send + Sync> {
+    let final_otel_endpoint = std::env::var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+        .unwrap_or(std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").unwrap_or(otel_endpoint.clone()));
+    if final_otel_endpoint.is_empty() {
+        tracing::info!(
+        "open_telemetry.endpoint and OTEL_EXPORTER_OTLP_ENDPOINT is empty, not initializing OpenTelemetry",
+        );
+        return Box::new(Identity::new());
+    }
     tracing::info!(
         "Registering jaeger subscriber for {} at endpoint {}",
         service_name,
-        otel_endpoint
+        final_otel_endpoint
     );
     let resource = opentelemetry_sdk::Resource::new(vec![opentelemetry::KeyValue::new(
         "service.name",
@@ -64,7 +73,7 @@ pub fn init_otel_layer(
     // Prepare tracer.
     let tracing_span_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
-        .with_endpoint(otel_endpoint)
+        .with_endpoint(final_otel_endpoint.clone())
         .build()
         .expect("could not build span exporter for tracing");
     let trace_config = opentelemetry_sdk::trace::Config::default().with_resource(resource.clone());
@@ -75,7 +84,7 @@ pub fn init_otel_layer(
     let tracer = tracer_provider.tracer(service_name.clone());
     let fastrace_span_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
-        .with_endpoint(otel_endpoint)
+        .with_endpoint(final_otel_endpoint.clone())
         .build()
         .expect("could not build span exporter for fastrace");
     fastrace::set_reporter(
@@ -92,7 +101,8 @@ pub fn init_otel_layer(
     let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .with_endpoint(
-            std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT").unwrap_or(otel_endpoint.clone()),
+            std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+                .unwrap_or(final_otel_endpoint.clone()),
         )
         .build()
         .expect("could not build metric exporter");
