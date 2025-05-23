@@ -92,6 +92,8 @@ reqwest = { version = "0.12.9",  features = ["rustls-tls-native-roots", "http2"]
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
 humantime = { version = "2.2.0" }
+petgraph = { version = "0.8.1" }
+base64 = "0.22"
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
