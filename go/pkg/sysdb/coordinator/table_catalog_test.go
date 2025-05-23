@@ -759,7 +759,7 @@ func TestCatalog_DeleteCollectionVersion_CollectionNotFound(t *testing.T) {
 	resp, err := catalog.DeleteCollectionVersion(context.Background(), req)
 
 	// Verify results
-	assert.NoError(t, err)
+	assert.Error(t, err)
 	assert.NotNil(t, resp)
 	assert.False(t, resp.CollectionIdToSuccess[collectionID])
 
