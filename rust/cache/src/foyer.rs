@@ -303,7 +303,7 @@ where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
-    cache: foyer::HybridCache<K, V>,
+    cache: foyer::HybridCache<K, V, RandomState>,
     cache_hit: opentelemetry::metrics::Counter<u64>,
     cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
@@ -376,7 +376,7 @@ where
                 );
                 builder.with_hash_builder(rs)
             }
-            false => builder,
+            false => builder.with_hash_builder(RandomState::new()),
         };
 
         let Some(dir) = config.dir.as_ref() else {
