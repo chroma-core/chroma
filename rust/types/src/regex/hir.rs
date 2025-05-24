@@ -1,4 +1,4 @@
-use regex_syntax::hir::{self, Class, ClassUnicode, HirKind};
+use regex_syntax::hir::{self, Class, ClassUnicode, HirKind, Repetition};
 
 use super::ChromaRegexError;
 
@@ -72,5 +72,33 @@ impl TryFrom<hir::Hir> for ChromaHir {
                 .collect::<Result<_, _>>()
                 .map(Self::Alternation),
         }
+    }
+}
+
+impl From<ChromaHir> for hir::Hir {
+    fn from(value: ChromaHir) -> Self {
+        match value {
+            ChromaHir::Empty => Self::empty(),
+            ChromaHir::Literal(literal) => Self::literal(literal.into_bytes()),
+            ChromaHir::Class(class_unicode) => Self::class(Class::Unicode(class_unicode)),
+            ChromaHir::Repetition { min, max, sub } => Self::repetition(Repetition {
+                min,
+                max,
+                greedy: false,
+                sub: Box::new((*sub).into()),
+            }),
+            ChromaHir::Concat(chroma_hirs) => {
+                Self::concat(chroma_hirs.into_iter().map(Into::into).collect())
+            }
+            ChromaHir::Alternation(chroma_hirs) => {
+                Self::alternation(chroma_hirs.into_iter().map(Into::into).collect())
+            }
+        }
+    }
+}
+
+impl From<ChromaHir> for String {
+    fn from(value: ChromaHir) -> Self {
+        format!("{}", hir::Hir::from(value))
     }
 }
