@@ -82,7 +82,7 @@ impl ClientManager {
                     Ok(_) => {}
                     Err(e) => {
                         // There is no one to return the error to, so just log it
-                        tracing::info!(
+                        tracing::debug!(
                             "Failed to remove ip from client manager: {:?}",
                             e.to_string()
                         );

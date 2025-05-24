@@ -31,7 +31,7 @@ impl<B> MakeSpan<B> for RequestTracing {
         let name = format!("{} {}", request.method(), http_route);
 
         tracing::span!(
-            tracing::Level::DEBUG,
+            tracing::Level::INFO,
             "HTTP request",
             http.method = %request.method(),
             http.uri = %request.uri(),
