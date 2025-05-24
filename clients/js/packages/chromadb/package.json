@@ -37,7 +37,7 @@
     "prebuild": "rimraf dist",
     "build": "tsup",
     "watch": "tsup --watch",
-    "genapi": "node --loader ts-node/esm scripts/gen-api.ts",
+    "genapi": "tsx scripts/gen-api.ts",
     "prettier": "prettier --write .",
     "release": "run-s build test && npm publish",
     "release_alpha": "run-s build test && npm publish --tag alpha",
@@ -67,6 +67,7 @@
     "ts-node": "^10.9.1",
     "tsd": "^0.28.1",
     "tsup": "^8.3.5",
+    "tsx": "^4.19.4",
     "typescript": "^5.0.4",
     "wait-on": "^8.0.3"
   },

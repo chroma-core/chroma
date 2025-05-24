@@ -9,8 +9,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 export const startServer = () => {
-  const tsNodePath = join(process.cwd(), "node_modules", ".bin", "ts-node");
-  const serverProcess = spawn(tsNodePath, [join(__dirname, "run-server.ts")], {
+  const tsxPath = join(process.cwd(), "node_modules", ".bin", "tsx");
+  const serverProcess = spawn(tsxPath, [join(__dirname, "run-server.ts")], {
     stdio: "inherit",
   });
 
