@@ -18,7 +18,10 @@ import type {
   UserIdentity,
 } from "./types";
 import { validateTenantDatabase, wrapCollection } from "./utils";
-import { loadApiCollectionConfigurationFromCreateCollectionConfiguration } from "./CollectionConfiguration";
+import {
+  loadApiCollectionConfigurationFromCreateCollectionConfiguration,
+  loadCollectionConfigurationFromJson,
+} from "./CollectionConfiguration";
 import { warn } from "console";
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
@@ -231,6 +234,22 @@ export class ChromaClient {
     if (!configuration) {
       configuration = {};
     }
+    if (
+      embeddingFunction &&
+      embeddingFunction.name != "default" &&
+      configuration.embedding_function
+    ) {
+      const efConfig = embeddingFunction.getConfig!();
+      const collConfigEfConfig = configuration.embedding_function.getConfig!();
+      if (
+        embeddingFunction.name !== configuration.embedding_function.name ||
+        efConfig !== collConfigEfConfig
+      ) {
+        throw new Error(
+          "Multiple embedding functions provided. Please provide only one.",
+        );
+      }
+    }
     if (embeddingFunction && !configuration.embedding_function) {
       configuration.embedding_function = embeddingFunction;
     }
@@ -301,6 +320,22 @@ export class ChromaClient {
     await this.init();
     if (!configuration) {
       configuration = {};
+    }
+    if (
+      embeddingFunction &&
+      embeddingFunction.name != "default" &&
+      configuration.embedding_function
+    ) {
+      const efConfig = embeddingFunction.getConfig!();
+      const collConfigEfConfig = configuration.embedding_function.getConfig!();
+      if (
+        embeddingFunction.name !== configuration.embedding_function.name ||
+        efConfig !== collConfigEfConfig
+      ) {
+        throw new Error(
+          "Multiple embedding functions provided. Please provide only one.",
+        );
+      }
     }
     if (embeddingFunction && !configuration.embedding_function) {
       configuration.embedding_function = embeddingFunction;
@@ -471,14 +506,31 @@ export class ChromaClient {
       );
     }
 
+    const configObj = loadCollectionConfigurationFromJson(config);
+    if (
+      embeddingFunction &&
+      embeddingFunction.name != "default" &&
+      configObj.embedding_function
+    ) {
+      const efConfig = embeddingFunction.getConfig!();
+      const collConfigEfConfig = configObj.embedding_function.getConfig!();
+      if (
+        embeddingFunction.name !== configObj.embedding_function.name ||
+        efConfig !== collConfigEfConfig
+      ) {
+        throw new Error(
+          "Multiple embedding functions provided. Please provide only one.",
+        );
+      }
+    }
+
+    const ef = configObj.embedding_function ?? embeddingFunction;
+
     return wrapCollection(this, {
       id: response.id,
       name: response.name,
       metadata: response.metadata as CollectionMetadata | undefined,
-      embeddingFunction:
-        embeddingFunction !== undefined
-          ? embeddingFunction
-          : new DefaultEmbeddingFunction(),
+      embeddingFunction: ef ?? new DefaultEmbeddingFunction(),
       configuration: config,
     });
   }
