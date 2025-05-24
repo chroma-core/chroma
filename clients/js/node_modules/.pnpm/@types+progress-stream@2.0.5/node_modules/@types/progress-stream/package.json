@@ -1,0 +1,27 @@
+{
+    "name": "@types/progress-stream",
+    "version": "2.0.5",
+    "description": "TypeScript definitions for progress-stream",
+    "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/progress-stream",
+    "license": "MIT",
+    "contributors": [
+        {
+            "name": "Mick Dekkers",
+            "githubUsername": "mickdekkers",
+            "url": "https://github.com/mickdekkers"
+        }
+    ],
+    "main": "",
+    "types": "index.d.ts",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
+        "directory": "types/progress-stream"
+    },
+    "scripts": {},
+    "dependencies": {
+        "@types/node": "*"
+    },
+    "typesPublisherContentHash": "6b5a75e226d262dc1b33dd8217e8096339329ab012f49bb9b4253701a97b86b3",
+    "typeScriptVersion": "4.5"
+}

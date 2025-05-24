@@ -1,0 +1,10 @@
+language: node_js
+node_js:
+- 8
+deploy:
+  provider: npm
+  email: npm@ironsrc.com
+  api_key:
+    secure: HK/tFvgj/TtYTJ3s2Bszc1/yJWvbSkLcfY3ki3GEuudMpfzcq134/2fbdZLb+B7Ukg31rdRVFCrSg8k6a1KhztkRr9SnMts5WO2ZGulmzNQ+XsBwdd0Bf7KYamAtqft5qBnSvh+ypBloQJQqq5qazb31971Fwvg5pdkYTQgCQxyIfZlH8nUbOxcYyl4w6Mvz5zsQp2c4OKOdq0FgeU3OqJ05i5lWL/CZWRO9L7+f0Uih5Jr9CuRzBUcVVxIopn1uOX1czug+OudIuUMLxbJwJt69ZpWdTbywLg6wVvA58ozbyialuEx8S1UaehsqHFj29JJWcOw+6TCi5+512DrBZMguiyTkjq5I5kmRcPNPY8dcqJUZUD6eDpKYQemFeg+6vKIvT3spK53VXNoEOIqAAiNTpmfY6JQ17S31gy1TqZldMtWr1HXf95LGlLC+czgMHPi1m6YiUgdDx5N7MFXumdOxiyHNdoitQFyyyS57RS7BG8/5ZMeKIXEfhQ9KU/D5L3KpgNCBmwVR72vF3nb89aVETrvNIbZEgc/cTdYWquezfPibGoGjWVJ4c38nd30s6rmoMBwoDwznaDg87ameoHUKSCSMx3uVXRZ5uR2C4SmTqVbWNKLXszL4iIW54EaLf3M+AYjoAb+EupaPMuEonJukdzkalp03RekYVeIY23U=
+  on:
+    tags: true

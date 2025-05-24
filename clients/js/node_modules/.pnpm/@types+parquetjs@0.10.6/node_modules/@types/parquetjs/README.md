@@ -1,0 +1,15 @@
+# Installation
+> `npm install --save @types/parquetjs`
+
+# Summary
+This package contains type definitions for parquetjs (https://github.com/ironSource/parquetjs).
+
+# Details
+Files were exported from https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/parquetjs.
+
+### Additional Details
+ * Last updated: Tue, 07 Nov 2023 09:09:39 GMT
+ * Dependencies: [@types/node-int64](https://npmjs.com/package/@types/node-int64)
+
+# Credits
+These definitions were written by [jon-fearer](https://github.com/jon-fearer).

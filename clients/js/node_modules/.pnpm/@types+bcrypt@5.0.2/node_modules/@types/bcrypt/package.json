@@ -1,0 +1,42 @@
+{
+    "name": "@types/bcrypt",
+    "version": "5.0.2",
+    "description": "TypeScript definitions for bcrypt",
+    "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/bcrypt",
+    "license": "MIT",
+    "contributors": [
+        {
+            "name": " Peter Harris",
+            "githubUsername": "codeanimal",
+            "url": "https://github.com/codeanimal"
+        },
+        {
+            "name": "Ayman Nedjmeddine",
+            "githubUsername": "IOAyman",
+            "url": "https://github.com/IOAyman"
+        },
+        {
+            "name": "David Stapleton",
+            "githubUsername": "dstapleton92",
+            "url": "https://github.com/dstapleton92"
+        },
+        {
+            "name": "BendingBender",
+            "githubUsername": "BendingBender",
+            "url": "https://github.com/BendingBender"
+        }
+    ],
+    "main": "",
+    "types": "index.d.ts",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
+        "directory": "types/bcrypt"
+    },
+    "scripts": {},
+    "dependencies": {
+        "@types/node": "*"
+    },
+    "typesPublisherContentHash": "5e03020f90d381638a232132c89634669c5a9c41450b2c3ed99615d0fc6251ee",
+    "typeScriptVersion": "4.5"
+}

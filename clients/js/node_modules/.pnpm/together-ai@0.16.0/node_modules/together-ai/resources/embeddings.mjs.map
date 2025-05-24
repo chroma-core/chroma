@@ -1,0 +1,1 @@
+{"version":3,"file":"embeddings.mjs","sourceRoot":"","sources":["../src/resources/embeddings.ts"],"names":[],"mappings":"AAAA,sFAAsF;OAE/E,EAAE,WAAW,EAAE;AAGtB,MAAM,OAAO,UAAW,SAAQ,WAAW;IACzC;;OAEG;IACH,MAAM,CAAC,IAA2B,EAAE,OAA6B;QAC/D,OAAO,IAAI,CAAC,OAAO,CAAC,IAAI,CAAC,aAAa,EAAE,EAAE,IAAI,EAAE,GAAG,OAAO,EAAE,CAAC,CAAC;IAChE,CAAC;CACF"}

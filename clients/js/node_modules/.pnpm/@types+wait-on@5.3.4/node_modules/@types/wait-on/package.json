@@ -1,0 +1,32 @@
+{
+    "name": "@types/wait-on",
+    "version": "5.3.4",
+    "description": "TypeScript definitions for wait-on",
+    "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/wait-on",
+    "license": "MIT",
+    "contributors": [
+        {
+            "name": "Ifiok Jr.",
+            "githubUsername": "ifiokjr",
+            "url": "https://github.com/ifiokjr"
+        },
+        {
+            "name": "Andrew Leedham",
+            "githubUsername": "AndrewLeedham",
+            "url": "https://github.com/AndrewLeedham"
+        }
+    ],
+    "main": "",
+    "types": "index.d.ts",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
+        "directory": "types/wait-on"
+    },
+    "scripts": {},
+    "dependencies": {
+        "@types/node": "*"
+    },
+    "typesPublisherContentHash": "511a934c2a14efadc89348b572655a0b236e175823f7e6d9ed75bf26552023ed",
+    "typeScriptVersion": "4.5"
+}

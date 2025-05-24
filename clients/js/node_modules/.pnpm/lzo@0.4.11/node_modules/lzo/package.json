@@ -1,0 +1,28 @@
+{
+  "name": "lzo",
+  "version": "0.4.11",
+  "description": "node.js bindings for lzo compression",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/schroffl/node-lzo.git"
+  },
+  "scripts": {
+    "test": "mocha test",
+    "configure": "node-gyp configure",
+    "build": "node-gyp build",
+    "clean": "node-gyp clean",
+    "rebuild": "node-gyp rebuild"
+  },
+  "author": "schroffl",
+  "license": "MIT",
+  "gypfile": true,
+  "dependencies": {
+    "bindings": "~1.2.1"
+  },
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "mocha": "^5.2.0",
+    "node-gyp": "^4.0.0"
+  }
+}

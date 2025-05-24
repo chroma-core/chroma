@@ -1,0 +1,74 @@
+{
+  "name": "@hey-api/client-fetch",
+  "version": "0.10.0",
+  "description": "🚀 Fetch API client for `@hey-api/openapi-ts` codegen.",
+  "homepage": "https://heyapi.dev/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hey-api/openapi-ts.git"
+  },
+  "bugs": {
+    "url": "https://github.com/hey-api/openapi-ts/issues"
+  },
+  "license": "MIT",
+  "author": {
+    "email": "lubos@heyapi.dev",
+    "name": "Hey API",
+    "url": "https://heyapi.dev"
+  },
+  "funding": "https://github.com/sponsors/hey-api",
+  "keywords": [
+    "client",
+    "codegen",
+    "fetch",
+    "http",
+    "javascript",
+    "openapi",
+    "react",
+    "rest",
+    "svelte",
+    "swagger",
+    "typescript",
+    "vue"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "LICENSE.md",
+    "src"
+  ],
+  "peerDependencies": {
+    "@hey-api/openapi-ts": "< 2"
+  },
+  "devDependencies": {
+    "@hey-api/client-core": "0.1.4",
+    "@hey-api/openapi-ts": "0.66.0"
+  },
+  "scripts": {
+    "build": "tsup && rollup -c && pnpm check-exports",
+    "check-exports": "attw --pack .",
+    "dev": "tsup --watch",
+    "test:coverage": "vitest run --coverage",
+    "test:update": "vitest watch --update",
+    "test:watch": "vitest watch",
+    "test": "vitest run",
+    "typecheck": "vitest --typecheck --watch=false"
+  }
+}

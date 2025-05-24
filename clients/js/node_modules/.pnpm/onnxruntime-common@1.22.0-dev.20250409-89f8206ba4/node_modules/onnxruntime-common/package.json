@@ -1,0 +1,35 @@
+{
+  "license": "MIT",
+  "type": "module",
+  "name": "onnxruntime-common",
+  "version": "1.22.0-dev.20250409-89f8206ba4",
+  "repository": {
+    "url": "https://github.com/Microsoft/onnxruntime.git",
+    "type": "git"
+  },
+  "author": "fs-eire",
+  "scripts": {
+    "build:cjs": "tsc --module commonjs --moduleResolution node10 --outDir ./dist/cjs",
+    "build:esm": "tsc",
+    "build:bundles": "webpack",
+    "build": "node ./build.js",
+    "prepare": "npm run build",
+    "pretest": "tsc --build ./test",
+    "test": "mocha \"./test/**/*.js\" --timeout 30000",
+    "test:f16": "mocha -n js-float16array \"./test/**/*.js\" --timeout 30000"
+  },
+  "devDependencies": {
+    "typedoc": "^0.25.7"
+  },
+  "main": "dist/cjs/index.js",
+  "exports": {
+    "require": "./dist/cjs/index.js",
+    "import": "./dist/esm/index.js"
+  },
+  "keywords": [
+    "ONNX",
+    "ONNXRuntime",
+    "ONNX Runtime"
+  ],
+  "description": "ONNXRuntime JavaScript API library"
+}

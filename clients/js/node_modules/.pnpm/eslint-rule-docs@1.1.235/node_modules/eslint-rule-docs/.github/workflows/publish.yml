@@ -1,0 +1,31 @@
+name: Publish
+on:
+  workflow_dispatch:
+  push:
+  schedule:
+    - cron:  '0 0 * * 0'
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 16
+          registry-url: https://registry.npmjs.org/
+      - run: npm ci
+      - run: npm run update-plugins
+      - run: npm test
+      - run: npm version patch --no-git-tag-version
+      - run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.NPM_AUTH_TOKEN}}
+      - name: Commit changes back
+        shell: bash
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com" && \
+          git config --global user.name "github-actions[bot]" && \
+          git add plugins.json README.md && \
+          git diff-index --quiet HEAD || \
+          git commit -m 'New release' && \
+          git push origin master

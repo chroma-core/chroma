@@ -1,0 +1,15 @@
+# Installation
+> `npm install --save @types/progress-stream`
+
+# Summary
+This package contains type definitions for progress-stream (https://github.com/freeall/progress-stream).
+
+# Details
+Files were exported from https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/progress-stream.
+
+### Additional Details
+ * Last updated: Mon, 20 Nov 2023 23:36:24 GMT
+ * Dependencies: [@types/node](https://npmjs.com/package/@types/node)
+
+# Credits
+These definitions were written by [Mick Dekkers](https://github.com/mickdekkers).

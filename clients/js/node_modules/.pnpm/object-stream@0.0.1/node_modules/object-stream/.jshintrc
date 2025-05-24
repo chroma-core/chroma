@@ -1,0 +1,9 @@
+{
+  "browser": false,
+  "node": true,
+  "curly": false,
+  "strict": false,
+  "expr": true,
+  "undef": true,
+  "unused": "vars"
+}

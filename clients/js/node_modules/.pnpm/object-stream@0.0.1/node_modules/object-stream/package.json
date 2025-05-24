@@ -1,0 +1,28 @@
+{
+  "name": "object-stream",
+  "version": "0.0.1",
+  "author": {
+    "name": "Nicolas Mercier"
+  },
+  "description": "Simplified streams of objects",
+  "keywords": [
+    "stream",
+    "streams2"
+  ],
+  "engines" : {
+    "node": ">=0.10"
+  },
+  "scripts": {
+    "test": "mocha test/**/test-*.js -R spec"
+  },
+  "devDependencies": {
+    "mocha": "^1.18.2",
+    "should": "^3.3.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://github.com/extrabacon/object-stream"
+  },
+  "homepage": "http://github.com/extrabacon/object-stream",
+  "bugs": "http://github.com/extrabacon/object-stream/issues"
+}

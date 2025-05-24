@@ -1,0 +1,98 @@
+{
+  "name": "tsup",
+  "version": "8.4.0",
+  "description": "Bundle your TypeScript library with no config, powered by esbuild",
+  "license": "MIT",
+  "homepage": "https://tsup.egoist.dev/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/egoist/tsup.git"
+  },
+  "author": "EGOIST",
+  "files": [
+    "/assets",
+    "/dist",
+    "/schema.json"
+  ],
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "tsup": "dist/cli-default.js",
+    "tsup-node": "dist/cli-node.js"
+  },
+  "peerDependencies": {
+    "@microsoft/api-extractor": "^7.36.0",
+    "@swc/core": "^1",
+    "postcss": "^8.4.12",
+    "typescript": ">=4.5.0"
+  },
+  "peerDependenciesMeta": {
+    "@microsoft/api-extractor": {
+      "optional": true
+    },
+    "@swc/core": {
+      "optional": true
+    },
+    "postcss": {
+      "optional": true
+    },
+    "typescript": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "bundle-require": "^5.1.0",
+    "cac": "^6.7.14",
+    "chokidar": "^4.0.3",
+    "consola": "^3.4.0",
+    "debug": "^4.4.0",
+    "esbuild": "^0.25.0",
+    "joycon": "^3.1.1",
+    "picocolors": "^1.1.1",
+    "postcss-load-config": "^6.0.1",
+    "resolve-from": "^5.0.0",
+    "rollup": "^4.34.8",
+    "source-map": "0.8.0-beta.0",
+    "sucrase": "^3.35.0",
+    "tinyexec": "^0.3.2",
+    "tinyglobby": "^0.2.11",
+    "tree-kill": "^1.2.2"
+  },
+  "devDependencies": {
+    "@microsoft/api-extractor": "^7.50.0",
+    "@rollup/plugin-json": "6.1.0",
+    "@swc/core": "1.10.18",
+    "@types/debug": "4.1.12",
+    "@types/node": "22.13.4",
+    "@types/resolve": "1.20.6",
+    "bumpp": "^10.0.3",
+    "flat": "6.0.1",
+    "postcss": "8.5.2",
+    "postcss-simple-vars": "7.0.1",
+    "prettier": "3.5.1",
+    "resolve": "1.22.10",
+    "rollup-plugin-dts": "6.1.1",
+    "sass": "1.85.0",
+    "strip-json-comments": "5.0.1",
+    "svelte": "5.19.9",
+    "svelte-preprocess": "6.0.3",
+    "terser": "^5.39.0",
+    "ts-essentials": "10.0.4",
+    "tsup": "8.3.6",
+    "typescript": "5.7.3",
+    "vitest": "3.0.6",
+    "wait-for-expect": "3.0.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "pnpm run build-fast --watch",
+    "build": "tsup src/cli-*.ts src/index.ts src/rollup.ts --clean --splitting",
+    "test": "pnpm run build && pnpm run test-only",
+    "format": "prettier --write .",
+    "test-only": "vitest run",
+    "build-fast": "pnpm run build --no-dts",
+    "release": "bumpp"
+  }
+}

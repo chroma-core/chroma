@@ -1,0 +1,36 @@
+{
+  "name": "progress-stream",
+  "version": "2.0.0",
+  "description": "Read the progress of a stream",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:freeall/progress-stream.git"
+  },
+  "keywords": [
+    "stream",
+    "progress",
+    "percentage",
+    "percent",
+    "download",
+    "upload",
+    "file",
+    "streaming",
+    "request",
+    "http"
+  ],
+  "main": "index.js",
+  "dependencies": {
+    "speedometer": "~1.0.0",
+    "through2": "~2.0.3"
+  },
+  "devDependencies": {
+    "request": "~2.29.0",
+    "single-line-log": "~1.0.0",
+    "numeral": "~1.5.2"
+  },
+  "scripts": {
+    "test": "node test/http.js && node test/request.js"
+  },
+  "author": "freeall <freeall@gmail.com>",
+  "license": "BSD-2-Clause"
+}

@@ -1,0 +1,97 @@
+Usage: wait-on {OPTIONS} resource [...resource]
+
+Description:
+
+     wait-on is a command line utility which will wait for files, ports,
+     sockets, and http(s) resources to become available (or not available
+     using reverse flag). Exits with  success code (0) when all resources
+     are ready. Non-zero exit code if interrupted or timed out.
+
+     Options may also be specified in a config file (js or json). For
+     example --config configFile.js would result in configFile.js being
+     required and the resulting object will be merged with any
+     command line options before wait-on is called. See exampleConfig.js
+
+     In shell combine with && to conditionally run another command
+     once resources are available. ex: wait-on f1 && NEXT_CMD
+
+     resources types are defined by their prefix, if no prefix is
+     present, the resource is assumed to be of type 'file'
+
+     resource prefixes are:
+
+       file:      - regular file (also default type). ex: file:/path/to/file
+       http:      - HTTP HEAD returns 2XX response. ex: http://m.com:90/foo
+       https:     - HTTPS HEAD returns 2XX response. ex: https://my/bar
+       http-get:  - HTTP GET returns 2XX response. ex: http-get://m.com:90/foo
+       https-get: - HTTPS GET returns 2XX response. ex: https-get://my/bar
+       tcp:       - TCP port is listening. ex: tcp:1.2.3.4:9000 or tcp:foo.com:700
+       socket:    - Domain Socket is listening. ex: socket:/path/to/sock
+                    For http over socket, use http://unix:SOCK_PATH:URL_PATH
+                    like http://unix:/path/to/sock:http://server/foo/bar or
+                         http-get://unix:/path/to/sock:http://server/foo/bar
+
+Standard Options:
+
+ -c, --config
+
+  js or json config file, useful for http(s) options
+
+ -d, --delay
+
+  Initial delay before checking for resources in ms, default 0
+
+ --httpTimeout
+
+  Maximum time in ms to wait for an HTTP HEAD/GET request, default 0
+  which results in using the OS default
+
+ -i, --interval
+
+  Interval to poll resources in ms, default 250ms
+
+ -l, --log
+
+  Log resources begin waited on and when complete or errored
+
+ -r, --reverse
+
+  Reverse operation, wait for resources to NOT be available
+
+ -s, --simultaneous
+
+  Simultaneous / Concurrent connections to a resource, default Infinity
+  Setting this to 1 would delay new requests until previous one has completed.
+  Used to limit the number of connections attempted to a resource at a time.
+
+ -t, --timeout
+
+  Maximum time in ms to wait before exiting with failure (1) code,
+  default Infinity
+  Use postfix 'ms', 's', 'm' or 'h' to change the unit.
+
+  --tcpTimeout
+
+  Maximum time in ms for tcp connect, default 300ms
+  Use postfix 'ms', 's', 'm' or 'h' to change the unit.
+
+  --httpTimeout
+
+  Maximum time to wait for the HTTP request, default Infinity
+  Use postfix 'ms', 's', 'm' or 'h' to change the unit.
+
+ -v, --verbose
+
+  Enable debug output to stdout
+
+ -w, --window
+
+  Stability window, the time in ms defining the window of time that
+  resource needs to have not changed (file size/availability) before
+  signaling success, default 750ms. If less than interval, it will be
+  reset to the value of interval. This is only used for files, other
+  resources are considered available on first detection.
+
+ -h, --help
+
+  Show this message

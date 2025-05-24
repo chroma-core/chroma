@@ -1,0 +1,11 @@
+{
+  "schemas": {
+    "Foo": {
+      "$ref": "#/schemas/Bar"
+    },
+    "Bar": {
+      "description": "ok",
+      "$ref": "#/schemas/Foo"
+    }
+  }
+}

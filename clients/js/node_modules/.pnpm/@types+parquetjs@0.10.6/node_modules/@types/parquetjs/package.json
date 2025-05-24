@@ -1,0 +1,27 @@
+{
+    "name": "@types/parquetjs",
+    "version": "0.10.6",
+    "description": "TypeScript definitions for parquetjs",
+    "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/parquetjs",
+    "license": "MIT",
+    "contributors": [
+        {
+            "name": "jon-fearer",
+            "githubUsername": "jon-fearer",
+            "url": "https://github.com/jon-fearer"
+        }
+    ],
+    "main": "",
+    "types": "index.d.ts",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/DefinitelyTyped/DefinitelyTyped.git",
+        "directory": "types/parquetjs"
+    },
+    "scripts": {},
+    "dependencies": {
+        "@types/node-int64": "*"
+    },
+    "typesPublisherContentHash": "9ae922006c1ba7dcf1ea76fdf4e085d9e41b816e6f61c97770afe82dd1cdc6a8",
+    "typeScriptVersion": "4.5"
+}

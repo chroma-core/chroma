@@ -1,8 +1,0 @@
-
-node_modules
-.DS_Store
-.env
-
-# parcel related
-.parcel-cache
-dist

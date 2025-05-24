@@ -1,0 +1,16 @@
+const toNumber = require("strnum");
+
+
+class numParser{
+    constructor(options){
+        this.options = options;
+    }
+    parse(val){
+        if (typeof val === 'string') {
+            val = toNumber(val,this.options);
+        }
+        return val;
+    }
+}
+
+module.exports = numParser;

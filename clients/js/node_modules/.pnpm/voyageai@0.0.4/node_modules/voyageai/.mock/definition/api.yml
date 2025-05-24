@@ -1,0 +1,14 @@
+name: api
+error-discrimination:
+  strategy: status-code
+display-name: Voyage API
+environments:
+  Default: https://api.voyageai.com/v1
+default-environment: Default
+auth-schemes:
+  BearerAuthScheme:
+    scheme: bearer
+    token:
+      name: apiKey
+      env: VOYAGE_API_KEY
+auth: BearerAuthScheme
