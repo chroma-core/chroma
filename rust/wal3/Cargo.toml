@@ -25,3 +25,5 @@ chroma-config.workspace = true
 
 [dev-dependencies]
 guacamole = { version = "0.11", default-features = false }
+proptest.workspace = true
+rand.workspace = true
