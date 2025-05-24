@@ -97,7 +97,7 @@ func (s *Coordinator) GetTenant(ctx context.Context, getTenant *model.GetTenant)
 	return tenant, nil
 }
 
-func (s *Coordinator) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.Segment) (*model.Collection, bool, error) {
+func (s *Coordinator) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment) (*model.Collection, bool, error) {
 	collection, created, err := s.catalog.CreateCollectionAndSegments(ctx, createCollection, createSegments, createCollection.Ts)
 	if err != nil {
 		return nil, false, err
@@ -165,7 +165,7 @@ func (s *Coordinator) CountForks(ctx context.Context, sourceCollectionID types.U
 	return s.catalog.CountForks(ctx, sourceCollectionID)
 }
 
-func (s *Coordinator) CreateSegment(ctx context.Context, segment *model.Segment) error {
+func (s *Coordinator) CreateSegment(ctx context.Context, segment *model.CreateSegment) error {
 	if err := verifyCreateSegment(segment); err != nil {
 		return err
 	}
@@ -212,7 +212,7 @@ func verifyCollectionMetadata(metadata *model.CollectionMetadata[model.Collectio
 	return nil
 }
 
-func verifyCreateSegment(segment *model.Segment) error {
+func verifyCreateSegment(segment *model.CreateSegment) error {
 	if err := verifySegmentMetadata(segment.Metadata); err != nil {
 		return err
 	}
