@@ -377,6 +377,7 @@ mod tests {
                     None,
                     None,
                     None,
+                    chrono::Utc::now(),
                 )
                 .unwrap(),
             )
@@ -395,6 +396,7 @@ mod tests {
                     vec![vec![0.5, 0.5]],
                     10,
                     IncludeList::default_query(),
+                    chrono::Utc::now(),
                 )
                 .unwrap(),
             )
@@ -414,6 +416,7 @@ mod tests {
                     vec![vec![0.5, 0.5]],
                     10,
                     IncludeList::default_query(),
+                    chrono::Utc::now(),
                 )
                 .unwrap(),
             )

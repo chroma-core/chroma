@@ -1,3 +1,5 @@
+use std::time::SystemTimeError;
+
 use crate::collection_configuration::InternalCollectionConfiguration;
 use crate::collection_configuration::UpdateCollectionConfiguration;
 use crate::error::QueryConversionError;
@@ -23,9 +25,9 @@ use crate::Where;
 use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde::Serialize;
-use std::time::SystemTimeError;
 use thiserror::Error;
 use tonic::Status;
 use utoipa::ToSchema;
@@ -155,6 +157,12 @@ pub enum HeartbeatError {
     CouldNotGetTime(String),
 }
 
+// NOTE(c-gamble): We are continuing to use std::time for the heartbeat
+// instead of chrono because our current implementation of the request timing
+// may change as we introduce a more robust metering pattern. This means that
+// although we are forced to use chrono for compatibiltiy with utoipa right now,
+// this compatibility issue may no longer be present in the long-term metering
+// solution.
 impl From<SystemTimeError> for HeartbeatError {
     fn from(err: SystemTimeError) -> Self {
         HeartbeatError::CouldNotGetTime(err.to_string())
@@ -794,6 +802,7 @@ pub struct ForkCollectionRequest {
     pub database_name: String,
     pub source_collection_id: CollectionUuid,
     pub target_collection_name: String,
+    pub received_at_timestamp: DateTime<Utc>,
 }
 
 impl ForkCollectionRequest {
@@ -802,12 +811,14 @@ impl ForkCollectionRequest {
         database_name: String,
         source_collection_id: CollectionUuid,
         target_collection_name: String,
+        received_at_timestamp: DateTime<Utc>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             source_collection_id,
             target_collection_name,
+            received_at_timestamp,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -934,6 +945,7 @@ pub struct AddCollectionRecordsRequest {
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<Metadata>>>,
+    pub received_at_timestamp: DateTime<Utc>,
 }
 
 impl AddCollectionRecordsRequest {
@@ -947,6 +959,7 @@ impl AddCollectionRecordsRequest {
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
+        received_at_timestamp: DateTime<Utc>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -957,6 +970,7 @@ impl AddCollectionRecordsRequest {
             documents,
             uris,
             metadatas,
+            received_at_timestamp,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -999,6 +1013,7 @@ pub struct UpdateCollectionRecordsRequest {
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+    pub received_at_timestamp: DateTime<Utc>,
 }
 
 impl UpdateCollectionRecordsRequest {
@@ -1012,6 +1027,7 @@ impl UpdateCollectionRecordsRequest {
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        received_at_timestamp: DateTime<Utc>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1022,6 +1038,7 @@ impl UpdateCollectionRecordsRequest {
             documents,
             uris,
             metadatas,
+            received_at_timestamp,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1061,6 +1078,7 @@ pub struct UpsertCollectionRecordsRequest {
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+    pub received_at_timestamp: DateTime<Utc>,
 }
 
 impl UpsertCollectionRecordsRequest {
@@ -1074,6 +1092,7 @@ impl UpsertCollectionRecordsRequest {
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
+        received_at_timestamp: DateTime<Utc>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1084,6 +1103,7 @@ impl UpsertCollectionRecordsRequest {
             documents,
             uris,
             metadatas,
+            received_at_timestamp,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1120,6 +1140,7 @@ pub struct DeleteCollectionRecordsRequest {
     pub collection_id: CollectionUuid,
     pub ids: Option<Vec<String>>,
     pub r#where: Option<Where>,
+    pub received_at_timestamp: DateTime<Utc>,
 }
 
 impl DeleteCollectionRecordsRequest {
@@ -1129,6 +1150,7 @@ impl DeleteCollectionRecordsRequest {
         collection_id: CollectionUuid,
         ids: Option<Vec<String>>,
         r#where: Option<Where>,
+        received_at_timestamp: DateTime<Utc>,
     ) -> Result<Self, ChromaValidationError> {
         if ids.as_ref().map(|ids| ids.is_empty()).unwrap_or(false) && r#where.is_none() {
             return Err(ChromaValidationError::from((
@@ -1144,6 +1166,7 @@ impl DeleteCollectionRecordsRequest {
             collection_id,
             ids,
             r#where,
+            received_at_timestamp,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1270,6 +1293,7 @@ pub struct CountRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
+    pub received_at_timestamp: DateTime<Utc>,
 }
 
 impl CountRequest {
@@ -1277,11 +1301,13 @@ impl CountRequest {
         tenant_id: String,
         database_name: String,
         collection_id: CollectionUuid,
+        received_at_timestamp: DateTime<Utc>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
+            received_at_timestamp,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1303,6 +1329,7 @@ pub struct GetRequest {
     pub limit: Option<u32>,
     pub offset: u32,
     pub include: IncludeList,
+    pub received_at_timestamp: DateTime<Utc>,
 }
 
 impl GetRequest {
@@ -1316,6 +1343,7 @@ impl GetRequest {
         limit: Option<u32>,
         offset: u32,
         include: IncludeList,
+        received_at_timestamp: DateTime<Utc>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1326,6 +1354,7 @@ impl GetRequest {
             limit,
             offset,
             include,
+            received_at_timestamp,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1472,6 +1501,7 @@ pub struct QueryRequest {
     pub embeddings: Vec<Vec<f32>>,
     pub n_results: u32,
     pub include: IncludeList,
+    pub received_at_timestamp: DateTime<Utc>,
 }
 
 impl QueryRequest {
@@ -1485,6 +1515,7 @@ impl QueryRequest {
         embeddings: Vec<Vec<f32>>,
         n_results: u32,
         include: IncludeList,
+        received_at_timestamp: DateTime<Utc>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1495,6 +1526,7 @@ impl QueryRequest {
             embeddings,
             n_results,
             include,
+            received_at_timestamp,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)

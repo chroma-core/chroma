@@ -1,7 +1,6 @@
-use std::sync::OnceLock;
-
 use chroma_system::ReceiverForMessage;
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
 use tracing::Span;
 use uuid::Uuid;
 
@@ -31,6 +30,17 @@ pub enum MeterEvent {
         database: String,
         collection_id: Uuid,
         latest_collection_logical_size_bytes: u64,
+        // This field is optional because in the case of a Delete,
+        // requests involve the execution both a read and a write,
+        // but customers are only interested in the end-to-end
+        // execution time of their request. This is also why the field is
+        // prefixed with `request_`.
+        #[serde(
+            with = "chroma_types::u128::optional_u128_as_hex",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        request_execution_time_ns: Option<u128>,
     },
     CollectionRead {
         tenant: String,
@@ -44,6 +54,13 @@ pub enum MeterEvent {
         pulled_log_size_bytes: u64,
         latest_collection_logical_size_bytes: u64,
         return_bytes: u64,
+        // See comment above in `CollectionFork`
+        #[serde(
+            with = "chroma_types::u128::optional_u128_as_hex",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        request_execution_time_ns: Option<u128>,
     },
     CollectionWrite {
         tenant: String,
@@ -52,6 +69,13 @@ pub enum MeterEvent {
         #[serde(flatten)]
         action: WriteAction,
         log_size_bytes: u64,
+        // See comment above in `CollectionFork`
+        #[serde(
+            with = "chroma_types::u128::optional_u128_as_hex",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        request_execution_time_ns: Option<u128>,
     },
 }
 
@@ -83,13 +107,34 @@ mod tests {
     use super::MeterEvent;
 
     #[test]
-    fn test_event_serialization() {
+    fn test_event_serialization_with_execution_time() {
         let event = MeterEvent::CollectionWrite {
             tenant: "test_tenant".to_string(),
             database: "test_database".to_string(),
             collection_id: Uuid::new_v4(),
             action: WriteAction::Add,
             log_size_bytes: 1000,
+            request_execution_time_ns: Some(1000),
+        };
+        let json_str = serde_json::to_string(&event).expect("The event should be serializable");
+        let json_event =
+            serde_json::from_str::<MeterEvent>(&json_str).expect("Json should be deserializable");
+        assert_eq!(
+            json_event, event,
+            "Deserialized value doesn't match original:\nOriginal: {:?}\nDeserialized: {:?}",
+            event, json_event
+        );
+    }
+
+    #[test]
+    fn test_event_serialization_without_execution_time() {
+        let event = MeterEvent::CollectionWrite {
+            tenant: "test_tenant".to_string(),
+            database: "test_database".to_string(),
+            collection_id: Uuid::new_v4(),
+            action: WriteAction::Add,
+            log_size_bytes: 1000,
+            request_execution_time_ns: None,
         };
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");
         let json_event =

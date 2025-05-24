@@ -34,6 +34,7 @@ use chroma_types::{
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
     Where,
 };
+use chrono::Utc;
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -101,8 +102,8 @@ impl ServiceBasedFrontend {
             upsert_retries_counter,
         });
         // factor: 2.0,
-        // min_delay_ms: 100,
-        // max_delay_ms: 5000,
+        // min_delay_ns: 100,
+        // max_delay_ns: 5000,
         // max_attempts: 5,
         // jitter: true,
         // TODO(Sanket): Ideally config for this.
@@ -601,6 +602,7 @@ impl ServiceBasedFrontend {
             database_name,
             source_collection_id,
             target_collection_name,
+            received_at_timestamp: request_received_at_timestamp,
             ..
         }: ForkCollectionRequest,
     ) -> Result<ForkCollectionResponse, ForkCollectionError> {
@@ -635,6 +637,10 @@ impl ServiceBasedFrontend {
             database: database_name,
             collection_id: source_collection_id.0,
             latest_collection_logical_size_bytes,
+            request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
+                .to_std()
+                .ok()
+                .map(|duration| duration.as_nanos()),
         }
         .submit()
         .await;
@@ -700,6 +706,7 @@ impl ServiceBasedFrontend {
             documents,
             uris,
             metadatas,
+            received_at_timestamp: request_received_at_timestamp,
             ..
         }: AddCollectionRecordsRequest,
     ) -> Result<AddCollectionRecordsResponse, AddCollectionRecordsError> {
@@ -747,6 +754,10 @@ impl ServiceBasedFrontend {
             collection_id: collection_id.0,
             action: WriteAction::Add,
             log_size_bytes,
+            request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
+                .to_std()
+                .ok()
+                .map(|duration| duration.as_nanos()),
         }
         .submit()
         .await;
@@ -774,6 +785,7 @@ impl ServiceBasedFrontend {
             documents,
             uris,
             metadatas,
+            received_at_timestamp: request_received_at_timestamp,
             ..
         }: UpdateCollectionRecordsRequest,
     ) -> Result<UpdateCollectionRecordsResponse, UpdateCollectionRecordsError> {
@@ -825,6 +837,10 @@ impl ServiceBasedFrontend {
             collection_id: collection_id.0,
             action: WriteAction::Update,
             log_size_bytes,
+            request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
+                .to_std()
+                .ok()
+                .map(|duration| duration.as_nanos()),
         }
         .submit()
         .await;
@@ -852,6 +868,7 @@ impl ServiceBasedFrontend {
             documents,
             uris,
             metadatas,
+            received_at_timestamp: request_received_at_timestamp,
             ..
         }: UpsertCollectionRecordsRequest,
     ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
@@ -905,6 +922,10 @@ impl ServiceBasedFrontend {
             collection_id: collection_id.0,
             action: WriteAction::Upsert,
             log_size_bytes,
+            request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
+                .to_std()
+                .ok()
+                .map(|duration| duration.as_nanos()),
         }
         .submit()
         .await;
@@ -929,6 +950,7 @@ impl ServiceBasedFrontend {
             collection_id,
             ids,
             r#where,
+            received_at_timestamp: request_received_at_timestamp,
             ..
         }: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
@@ -994,6 +1016,7 @@ impl ServiceBasedFrontend {
                 pulled_log_size_bytes: get_result.pulled_log_bytes,
                 latest_collection_logical_size_bytes,
                 return_bytes,
+                request_execution_time_ns: None,
             })
         } else if let Some(user_ids) = ids {
             records.extend(user_ids.into_iter().map(|id| OperationRecord {
@@ -1037,6 +1060,10 @@ impl ServiceBasedFrontend {
             collection_id: collection_id.0,
             action: WriteAction::Delete,
             log_size_bytes,
+            request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
+                .to_std()
+                .ok()
+                .map(|duration| duration.as_nanos()),
         }
         .submit()
         .await;
@@ -1099,6 +1126,7 @@ impl ServiceBasedFrontend {
             tenant_id,
             database_name,
             collection_id,
+            received_at_timestamp: request_received_at_timestamp,
             ..
         }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
@@ -1131,6 +1159,10 @@ impl ServiceBasedFrontend {
             pulled_log_size_bytes: count_result.pulled_log_bytes,
             latest_collection_logical_size_bytes,
             return_bytes,
+            request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
+                .to_std()
+                .ok()
+                .map(|duration| duration.as_nanos()),
         }
         .submit()
         .await;
@@ -1194,6 +1226,7 @@ impl ServiceBasedFrontend {
             limit,
             offset,
             include,
+            received_at_timestamp: request_received_at_timestamp,
             ..
         }: GetRequest,
     ) -> Result<GetResponse, QueryError> {
@@ -1249,6 +1282,10 @@ impl ServiceBasedFrontend {
             pulled_log_size_bytes: get_result.pulled_log_bytes,
             latest_collection_logical_size_bytes,
             return_bytes,
+            request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
+                .to_std()
+                .ok()
+                .map(|duration| duration.as_nanos()),
         }
         .submit()
         .await;
@@ -1312,6 +1349,7 @@ impl ServiceBasedFrontend {
             embeddings,
             n_results,
             include,
+            received_at_timestamp: request_received_at_timestamp,
             ..
         }: QueryRequest,
     ) -> Result<QueryResponse, QueryError> {
@@ -1371,6 +1409,10 @@ impl ServiceBasedFrontend {
             pulled_log_size_bytes: query_result.pulled_log_bytes,
             latest_collection_logical_size_bytes,
             return_bytes,
+            request_execution_time_ns: (Utc::now() - request_received_at_timestamp)
+                .to_std()
+                .ok()
+                .map(|duration| duration.as_nanos()),
         }
         .submit()
         .await;
