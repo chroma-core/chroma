@@ -5,7 +5,7 @@ const config: Config = {
   testEnvironment: "node",
   testMatch: ["**/*.test.ts"],
   transform: {
-    "^.+\.tsx?$": [
+    "^.+.tsx?$": [
       "ts-jest",
       {
         useESM: true,
@@ -14,7 +14,7 @@ const config: Config = {
   },
   extensionsToTreatAsEsm: [".ts"],
   moduleNameMapper: {
-    "^(\.{1,2}/.*)\.js$": "$1",
+    "^(.{1,2}/.*).js$": "$1",
   },
   setupFiles: ["./jest.setup.ts"],
 };

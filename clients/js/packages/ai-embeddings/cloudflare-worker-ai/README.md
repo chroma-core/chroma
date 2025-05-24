@@ -11,26 +11,26 @@ npm install @chroma-core/cloudflare-worker-ai
 ## Usage
 
 ```javascript
-import { ChromaClient } from 'chromadb';
-import { CloudflareWorkerAIEmbeddingFunction } from '@chroma-core/cloudflare-worker-ai';
+import { ChromaClient } from "chromadb";
+import { CloudflareWorkerAIEmbeddingFunction } from "@chroma-core/cloudflare-worker-ai";
 
 // Initialize the embedding function
 const embedder = new CloudflareWorkerAIEmbeddingFunction({
   // Optional: Provide API key directly (recommended to use environment variables instead)
   // apiKey: 'your-cloudflare-api-token',
-  
+
   // Optional: Provide Account ID directly (recommended to use environment variables instead)
   // accountId: 'your-cloudflare-account-id',
-  
+
   // Optional: Specify environment variable names (defaults shown)
-  apiKeyEnvVar: 'CLOUDFLARE_API_TOKEN',
-  accountIdEnvVar: 'CLOUDFLARE_ACCOUNT_ID',
-  
+  apiKeyEnvVar: "CLOUDFLARE_API_TOKEN",
+  accountIdEnvVar: "CLOUDFLARE_ACCOUNT_ID",
+
   // Optional: Specify model (default shown)
-  model: '@cf/baai/bge-large-en-v1.5',
-  
+  model: "@cf/baai/bge-large-en-v1.5",
+
   // Optional: Specify dimensions for the embeddings
-  dimensions: 1024
+  dimensions: 1024,
 });
 
 // Initialize Chroma client
@@ -38,22 +38,22 @@ const client = new ChromaClient();
 
 // Create or get a collection with the embedding function
 const collection = await client.getOrCreateCollection({
-  name: 'my-collection',
-  embeddingFunction: embedder
+  name: "my-collection",
+  embeddingFunction: embedder,
 });
 
 // Add documents
-const ids = ['id1', 'id2'];
-const documents = ['First document', 'Second document'];
+const ids = ["id1", "id2"];
+const documents = ["First document", "Second document"];
 await collection.add({
   ids,
-  documents
+  documents,
 });
 
 // Query for similar documents
 const results = await collection.query({
-  queryTexts: ['Sample query text'],
-  nResults: 2
+  queryTexts: ["Sample query text"],
+  nResults: 2,
 });
 
 console.log(results);

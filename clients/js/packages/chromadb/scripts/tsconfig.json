@@ -6,10 +6,8 @@
     "noEmit": true,
     "composite": false,
     "declaration": false,
-    "declarationMap": false,
+    "declarationMap": false
   },
-  "include": [
-    "./**/*"
-  ],
-   "exclude": ["node_modules"]
+  "include": ["./**/*"],
+  "exclude": ["node_modules"]
 }

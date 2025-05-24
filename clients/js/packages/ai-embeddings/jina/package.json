@@ -42,9 +42,7 @@
     "ts-node": "^10.9.2",
     "tsup": "^8.3.5"
   },
-  "peerDependencies": {
-
-  },
+  "peerDependencies": {},
   "dependencies": {
     "@chroma-core/ai-embeddings-common": "workspace:^"
   },
