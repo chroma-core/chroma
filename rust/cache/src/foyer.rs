@@ -5,8 +5,8 @@ use chroma_tracing::util::Stopwatch;
 use clap::Parser;
 use foyer::{
     CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
-    InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
-    StorageKey, StorageValue, TracingOptions,
+    InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, S3FifoConfig, StorageKey,
+    StorageValue, Throttle, TracingOptions,
 };
 use opentelemetry::global;
 use serde::{Deserialize, Serialize};
@@ -303,7 +303,7 @@ where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
-    cache: foyer::HybridCache<K, V>,
+    cache: foyer::HybridCache<K, V, RandomState>,
     cache_hit: opentelemetry::metrics::Counter<u64>,
     cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
@@ -376,7 +376,7 @@ where
                 );
                 builder.with_hash_builder(rs)
             }
-            false => builder,
+            false => builder.with_hash_builder(RandomState::new()),
         };
 
         let Some(dir) = config.dir.as_ref() else {
@@ -385,14 +385,19 @@ where
             )));
         };
 
-        let mut builder = builder
+        let mut device_options = DirectFsDeviceOptions::new(dir)
+            .with_capacity(config.disk * MIB)
+            .with_file_size(config.file_size * MIB);
+        if config.admission_rate_limit > 0 {
+            device_options = device_options.with_throttle(
+                Throttle::new().with_write_throughput(config.admission_rate_limit * MIB),
+            );
+        }
+
+        let builder = builder
             .with_weighter(|_, v| v.weight())
             .storage(Engine::Large)
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(config.disk * MIB)
-                    .with_file_size(config.file_size * MIB),
-            )
+            .with_device_options(device_options)
             .with_flush(config.flush)
             .with_recover_mode(foyer::RecoverMode::Strict)
             .with_large_object_disk_cache_options(
@@ -408,11 +413,6 @@ where
                     ]),
             );
 
-        if config.admission_rate_limit > 0 {
-            builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
-                config.admission_rate_limit * MIB,
-            )));
-        }
         let cache = builder.build().await.map_err(|e| {
             CacheError::InvalidCacheConfig(format!("builder failed: {:?}", e)).boxed()
         })?;
