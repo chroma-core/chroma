@@ -48,7 +48,7 @@ cd clients/js
 
 # Generate the JS client
 echo "Generating JS client..."
-pnpm genapi
+pnpm genapi:chromadb
 
 # Cleanup: kill the server process
 kill $SERVER_PID
@@ -57,9 +57,9 @@ pnpm prettier
 
 # run git diff and check if packages/chromadb-core/src/generated/ has changed
 echo "Checking for changes in generated client..."
-if ! git diff --quiet --exit-code packages/chromadb-core/src/generated/; then
+if ! git diff --quiet --exit-code packages/chromadb/src/api/; then
     echo "Error: Generated JS client has changed. Please commit the changes."
-    git diff packages/chromadb-core/src/generated/ | cat
+    git diff packages/chromadb/src/api/ | cat
     exit 1
 fi
 echo "No changes detected in generated client."

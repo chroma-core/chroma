@@ -17,6 +17,9 @@ importers:
       npm-run-all:
         specifier: ^4.1.5
         version: 4.1.5
+      prettier:
+        specifier: 2.8.7
+        version: 2.8.7
       rimraf:
         specifier: ^5.0.0
         version: 5.0.10
