@@ -290,14 +290,23 @@ impl FrontendServer {
         if let Some(cors_allow_origins) = cors_allow_origins {
             let origins = cors_allow_origins
                 .into_iter()
-                .map(|origin| origin.parse().unwrap())
+                .map(|origin| {
+                    origin
+                        .parse()
+                        .unwrap_or_else(|_| panic!("Invalid origin: {}", origin))
+                })
                 .collect::<Vec<_>>();
 
-            let cors = CorsLayer::new()
-                .allow_origin(origins)
+            let mut cors_builder = CorsLayer::new()
                 .allow_headers(tower_http::cors::Any)
                 .allow_methods(tower_http::cors::Any);
-            app = app.layer(cors);
+            if origins.len() == 1 && origins[0] == "*" {
+                cors_builder = cors_builder.allow_origin(tower_http::cors::Any);
+            } else {
+                cors_builder = cors_builder.allow_origin(origins);
+            }
+
+            app = app.layer(cors_builder);
         }
 
         // TODO: tracing
@@ -1964,6 +1973,54 @@ mod tests {
 
         let allow_origin = res.headers().get("Access-Control-Allow-Origin");
         assert_eq!(allow_origin.unwrap(), "http://localhost:3000");
+
+        let allow_methods = res.headers().get("Access-Control-Allow-Methods");
+        assert_eq!(allow_methods.unwrap(), "*");
+
+        let allow_headers = res.headers().get("Access-Control-Allow-Headers");
+        assert_eq!(allow_headers.unwrap(), "*");
+    }
+
+    #[tokio::test]
+    async fn test_cors_wildcard() {
+        let registry = Registry::new();
+        let system = System::new();
+
+        let port = random_port::PortPicker::new().pick().unwrap();
+
+        let mut config = FrontendServerConfig::single_node_default();
+        config.port = port;
+        config.cors_allow_origins = Some(vec!["*".to_string()]);
+
+        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
+            .await
+            .unwrap();
+        let app = FrontendServer::new(
+            config,
+            frontend,
+            vec![],
+            Arc::new(()),
+            Arc::new(()),
+            System::new(),
+        );
+        tokio::task::spawn(async move {
+            app.run().await;
+        });
+
+        let client = reqwest::Client::new();
+        let res = client
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("http://localhost:{}/api/v2/heartbeat", port),
+            )
+            .header("Origin", "http://localhost:3000")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        let allow_origin = res.headers().get("Access-Control-Allow-Origin");
+        assert_eq!(allow_origin.unwrap(), "*");
 
         let allow_methods = res.headers().get("Access-Control-Allow-Methods");
         assert_eq!(allow_methods.unwrap(), "*");
