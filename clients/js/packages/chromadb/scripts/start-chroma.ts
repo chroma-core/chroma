@@ -4,6 +4,7 @@ import { ChildProcess, execSync, spawn } from "node:child_process";
 import chalk from "chalk";
 import waitOn from "wait-on";
 import { fileURLToPath } from "url";
+import { Readable } from "node:stream";
 
 const CHROMADB_PORT = 8000;
 
@@ -49,7 +50,7 @@ export const startContainer = async (verbose?: boolean) => {
       .withEnvironment({
         CHROMA_API_IMPL: "chromadb.api.segment.SegmentAPI",
       })
-      .withLogConsumer((stream) => {
+      .withLogConsumer((stream: Readable) => {
         stream.on("data", (line: Buffer) => {
           console.log(
             chalk.blue("🐳 chromadb: ") + line.toString("utf-8").trimEnd(),
@@ -71,9 +72,9 @@ export const startContainer = async (verbose?: boolean) => {
     .withEnvironment(env);
 
   if (verbose) {
-    container = container.withLogConsumer((stream) => {
-      stream.on("data", (line) => console.log(line));
-      stream.on("err", (line) => console.error(line));
+    container = container.withLogConsumer((stream: Readable) => {
+      stream.on("data", (line: Buffer) => console.log(line.toString()));
+      stream.on("err", (line: Buffer) => console.error(line.toString()));
       stream.on("end", () => console.log("Stream closed"));
     });
   }
@@ -93,7 +94,7 @@ export const startContainer = async (verbose?: boolean) => {
 };
 
 export const startChromaServer = async () => {
-  const host = "localhost";
+  const host = "127.0.0.1";
   const port = CHROMADB_PORT;
   const url = `http://${host}:${port}`;
   const heartbeatUrl = `${url}/api/v2/heartbeat`;
@@ -126,11 +127,11 @@ export const startChromaServer = async () => {
     },
   );
 
-  serverProcess.stdout?.on("data", (data) => {
+  serverProcess.stdout?.on("data", (data: Buffer) => {
     console.log(chalk.magenta(`🔧 rust-server: ${data.toString().trim()}`));
   });
 
-  serverProcess.stderr?.on("data", (data) => {
+  serverProcess.stderr?.on("data", (data: Buffer) => {
     console.error(chalk.red(`🔧 rust-server-error: ${data.toString().trim()}`));
   });
 
@@ -139,7 +140,11 @@ export const startChromaServer = async () => {
   try {
     await waitOn({
       resources: [heartbeatUrl],
-      timeout: 30_000,
+      timeout: 120_000,
+      interval: 2000,
+      delay: 1000,
+      verbose: true,
+      httpTimeout: 10000,
     });
   } catch (err) {
     console.error("Server failed to start in time:", err);
