@@ -53,9 +53,9 @@ jobs:
         run: pnpm install --no-frozen-lockfile
         working-directory: ./clients/js/
 
-      - name: Build packages
+      - name: Build package
         run: pnpm build
-        working-directory: ./clients/js/
+        working-directory: ./clients/js/packages/chromadb
 
       - name: Generate Dev Version
         id: dev-version
@@ -66,40 +66,33 @@ jobs:
           DEV_TAG="dev.${COMMIT_SHA}-${GITHUB_RUN_ID}"
           echo "DEV_TAG=${DEV_TAG}" >> "$GITHUB_ENV"
 
-          # Update each package's version with dev tag
-          for PKG_DIR in packages/chromadb packages/chromadb-client; do
-            PKG_PATH="./${PKG_DIR}/package.json"
-            # Get current version
-            CURRENT_VERSION=$(node -p "require('${PKG_PATH}').version")
-            # Create full version with dev tag
-            BASE_VERSION=$(echo $CURRENT_VERSION | cut -f1,2 -d.)
-            PATCH_VERSION=$(echo $CURRENT_VERSION | cut -f3 -d.)
-            # bump patch version
-            NEW_PATCH_VERSION=$((PATCH_VERSION + 1))
-            NEW_VERSION="${BASE_VERSION}.${NEW_PATCH_VERSION}-${DEV_TAG}"
+          # Update package's version with dev tag
+          PKG_PATH="./package.json"
+          # Get current version
+          CURRENT_VERSION=$(node -p "require('${PKG_PATH}').version")
+          # Create full version with dev tag
+          BASE_VERSION=$(echo $CURRENT_VERSION | cut -f1,2 -d.)
+          PATCH_VERSION=$(echo $CURRENT_VERSION | cut -f3 -d.)
+          # bump patch version
+          NEW_PATCH_VERSION=$((PATCH_VERSION + 1))
+          NEW_VERSION="${BASE_VERSION}.${NEW_PATCH_VERSION}-${DEV_TAG}"
 
-            # Update package.json with new version
-            jq --arg version "$NEW_VERSION" '.version = $version' $PKG_PATH > tmp.$$.json && mv tmp.$$.json $PKG_PATH
-            echo "Updated ${PKG_DIR} to version ${NEW_VERSION}"
-          done
-        working-directory: ./clients/js/
+          # Update package.json with new version
+          jq --arg version "$NEW_VERSION" '.version = $version' $PKG_PATH > tmp.$$.json && mv tmp.$$.json $PKG_PATH
+          echo "Updated ${PKG_DIR} to version ${NEW_VERSION}"
+        working-directory: ./clients/js/packages/chromadb
 
       - name: Update package.json with organization scope
         run: |
           ORG_NAME="@chroma-core"
           # Update chromadb package
-          CHROMADB_PKG="./packages/chromadb/package.json"
+          CHROMADB_PKG="./package.json"
           PACKAGE_NAME=$(jq -r '.name' $CHROMADB_PKG)
           jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CHROMADB_PKG > tmp.$$.json && mv tmp.$$.json $CHROMADB_PKG
-
-          # Update chromadb-client package
-          CLIENT_PKG="./packages/chromadb-client/package.json"
-          PACKAGE_NAME=$(jq -r '.name' $CLIENT_PKG)
-          jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CLIENT_PKG > tmp.$$.json && mv tmp.$$.json $CLIENT_PKG
-        working-directory: ./clients/js/
+        working-directory: ./clients/js/packages/chromadb
 
       - name: Publish dev packages
         run: pnpm publish -r --access public --no-git-checks --tag dev
-        working-directory: ./clients/js/
+        working-directory: ./clients/js/packages/chromadb
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

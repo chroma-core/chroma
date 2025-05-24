@@ -1,0 +1,55 @@
+{
+  "name": "@chroma-core/voyageai",
+  "version": "0.1.5",
+  "private": false,
+  "description": "Voyage AI embedding provider for Chroma",
+  "main": "dist/cjs/voyageai.cjs",
+  "types": "dist/voyageai.d.ts",
+  "module": "dist/voyageai.legacy-esm.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/voyageai.d.ts",
+        "default": "./dist/voyageai.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/voyageai.d.cts",
+        "default": "./dist/cjs/voyageai.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "dotenv": "^16.3.1",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.3.5"
+  },
+  "peerDependencies": {
+    "chromadb": "workspace:^"
+  },
+  "dependencies": {
+    "@chroma-core/ai-embeddings-common": "workspace:^",
+    "voyageai": "^0.0.4"
+  },
+  "engines": {
+    "node": ">=14.17.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

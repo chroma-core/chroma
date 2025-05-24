@@ -13,7 +13,12 @@ on:
 env:
   PNPM_CACHE_FOLDER: .cache/pnpm
 jobs:
+  build-bindings:
+    uses: ./.github/workflows/_build_js_bindings.yml
+    secrets: inherit
+  
   release:
+    needs: build-bindings
     strategy:
       fail-fast: false
       matrix:
@@ -65,26 +70,21 @@ jobs:
         cache-dependency-path: 'clients/js/pnpm-lock.yaml'
     - name: Install dependencies
       run: pnpm install --no-frozen-lockfile
-      working-directory: ./clients/js/
+      working-directory: ./clients/js/packages/chromadb
     - name: Build packages
       run: pnpm build
-      working-directory: ./clients/js/
+      working-directory: ./clients/js/packages/chromadb
     - name: Update package.json with organization scope for GitHub packages
       if: matrix.registry == 'https://npm.pkg.github.com'
       run: |
         # Update chromadb package
-        CHROMADB_PKG="./packages/chromadb/package.json"
+        CHROMADB_PKG="./package.json"
         ORG_NAME="@chroma-core"
         PACKAGE_NAME=$(jq -r '.name' $CHROMADB_PKG)
         jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CHROMADB_PKG > tmp.$$.json && mv tmp.$$.json $CHROMADB_PKG
-
-        # Update chromadb-client package
-        CLIENT_PKG="./packages/chromadb-client/package.json"
-        PACKAGE_NAME=$(jq -r '.name' $CLIENT_PKG)
-        jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CLIENT_PKG > tmp.$$.json && mv tmp.$$.json $CLIENT_PKG
-      working-directory: ./clients/js/
+      working-directory: ./clients/js/packages/chromadb
     - name: Publish packages
       run: pnpm publish -r --access public --no-git-checks
-      working-directory: ./clients/js/
+      working-directory: ./clients/js/packages/chromadb
       env:
         NODE_AUTH_TOKEN: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
