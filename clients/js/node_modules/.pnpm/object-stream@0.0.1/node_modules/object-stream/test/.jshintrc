@@ -1,9 +1,0 @@
-{
-  "predef": ["describe", "it", "before", "after", "beforeEach", "afterEach"],
-  "browser": false,
-  "node": true,
-  "curly": false,
-  "strict": false,
-  "expr": true,
-  "unused": "vars"
-}
