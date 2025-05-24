@@ -44,6 +44,7 @@
     "release_dev": "run-s build test && npm version ${NEW_VERSION} --no-git-tag-version && npm publish"
   },
   "dependencies": {
+    "glob": "^11.0.2",
     "semver": "^7.7.1"
   },
   "devDependencies": {

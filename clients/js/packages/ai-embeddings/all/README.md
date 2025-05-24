@@ -19,19 +19,19 @@ import {
   JinaEmbeddingFunction,
   GoogleGeminiEmbeddingFunction,
   // ... and all other providers
-} from '@chroma-core/all';
+} from "@chroma-core/all";
 
 // Use any embedding function
 const openAIEF = new OpenAIEmbeddingFunction({
-  apiKey: 'your-api-key',
-  modelName: 'text-embedding-3-small'
+  apiKey: "your-api-key",
+  modelName: "text-embedding-3-small",
 });
 ```
 
 ## Included Providers
 
 - OpenAI
-- Cohere  
+- Cohere
 - Jina
 - Google Gemini
 - Hugging Face Server

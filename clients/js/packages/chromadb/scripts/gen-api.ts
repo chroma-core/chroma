@@ -1,6 +1,7 @@
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { rm } from "node:fs/promises";
+import { rm, readFile, writeFile } from "node:fs/promises";
+import { glob } from "glob";
 import { createClient } from "@hey-api/openapi-ts";
 import { startChromaServer } from "./start-chroma.js";
 
@@ -9,7 +10,7 @@ const __dirname = dirname(__filename);
 
 const main = async () => {
   console.log("Starting Chroma server via Rust binary...");
-  
+
   const server = await startChromaServer();
   console.log(`Server started at ${server.url}`);
 
@@ -18,13 +19,28 @@ const main = async () => {
       input: `${server.url}/openapi.json`,
       output: join(__dirname, "../src/api"),
       plugins: [
-        { name: "@hey-api/client-fetch", throwOnError: true },
+        { 
+          name: "@hey-api/client-fetch", 
+          throwOnError: true,
+          baseUrl: "http://localhost:8000"
+        },
         { name: "@hey-api/sdk", asClass: true },
         "@hey-api/typescript",
       ],
     });
 
-    console.log("✅ API client generated!");
+    // Post-process generated files to normalize URLs
+    const apiDir = join(__dirname, "../src/api");
+    const generatedFiles = await glob("*.ts", { cwd: apiDir });
+    
+    for (const file of generatedFiles) {
+      const filePath = join(apiDir, file);
+      const content = await readFile(filePath, "utf-8");
+      const normalizedContent = content.replace(/http:\/\/127\.0\.0\.1:8000/g, "http://localhost:8000");
+      await writeFile(filePath, normalizedContent, "utf-8");
+    }
+
+    console.log("✅ API client generated and normalized!");
   } finally {
     server.stop();
     console.log("Server stopped");

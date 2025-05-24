@@ -12,19 +12,19 @@ jest.mock("@huggingface/transformers", () => {
       .fill(0)
       .map((_, i) => (i + 100) / 1000),
   ];
-  
+
   // Create the pipeline mock that returns a function
   const pipelineFunction = jest.fn().mockImplementation(() => {
     // When the pipeline result is called with text, it returns this object with tolist
-    return function(texts: string[], options: any) {
+    return function (texts: string[], options: any) {
       return {
-        tolist: () => mockEmbeddings
+        tolist: () => mockEmbeddings,
       };
     };
   });
-  
+
   return {
-    pipeline: pipelineFunction
+    pipeline: pipelineFunction,
   };
 });
 
