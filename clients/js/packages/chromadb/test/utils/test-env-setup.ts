@@ -1,4 +1,4 @@
-import { startChromaServer } from "./start-chroma";
+import { startChromaServer } from "../../scripts/start-chroma.js";
 import { execSync } from "child_process";
 import { startOllamaContainer } from "./start-ollama";
 

@@ -3,10 +3,13 @@ import path from "node:path";
 import { ChildProcess, execSync, spawn } from "node:child_process";
 import chalk from "chalk";
 import waitOn from "wait-on";
+import { fileURLToPath } from "url";
 
 const CHROMADB_PORT = 8000;
 
-const BUILD_CONTEXT_DIR = path.join(__dirname, "../../../../../..");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const BUILD_CONTEXT_DIR = path.join(__dirname, "../../../../..");
 
 const buildDockerImage = async (
   dockerfilePath: string,
