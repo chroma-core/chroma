@@ -16,14 +16,17 @@ from chromadb.api.collection_configuration import (
     UpdateHNSWConfiguration,
     CreateSpannConfiguration,
     UpdateSpannConfiguration,
-    load_update_collection_configuration_from_json,
     SpannConfiguration,
     overwrite_spann_configuration,
+    overwrite_collection_configuration,
 )
 import json
 import os
 from chromadb.utils.embedding_functions import register_embedding_function
 from chromadb.test.conftest import ClientFactories
+from chromadb.utils.embedding_functions.malformed_embedding_function import (
+    MalformedEmbeddingFunction,
+)
 
 
 # Check if we are running in a mode where SPANN is disabled
@@ -709,19 +712,11 @@ def test_spann_update_from_json(client: ClientAPI) -> None:
         configuration={"spann": initial_spann},
     )
 
-    # Create JSON for update
-    update_json = """
-    {
-        "spann": {
-            "search_nprobe": 15,
-            "ef_search": 200
-        }
-    }
-    """
-
-    # Parse JSON and create update configuration
-    update_config = load_update_collection_configuration_from_json(
-        json.loads(update_json)
+    update_config = UpdateCollectionConfiguration(
+        spann=UpdateSpannConfiguration(
+            search_nprobe=15,
+            ef_search=200,
+        )
     )
 
     # Apply the update
@@ -830,3 +825,68 @@ def test_default_collection_creation(client: ClientAPI) -> None:
     ef = config.get("embedding_function")
     assert ef is not None
     assert ef.name() == "default"
+
+
+def test_malformed_embedding_function() -> None:
+    """Test that on an invalid configuration, the embedding function is a MalformedEmbeddingFunction"""
+    invalid_config: Dict[str, Any] = {
+        "hnsw": {
+            "space": "l2",
+            "ef_construction": 100,
+            "ef_search": 100,
+            "max_neighbors": 16,
+            "resize_factor": 1.2,
+            "sync_threshold": 1000,
+        },
+        "spann": None,
+        "embedding_function": {
+            "name": "custom_ef",
+            "type": "known",
+            "config": {},
+        },
+    }
+    loaded_config = load_collection_configuration_from_json(invalid_config)
+    assert loaded_config is not None
+    loaded_ef = loaded_config.get("embedding_function")
+    assert loaded_ef is not None
+    assert isinstance(loaded_ef, MalformedEmbeddingFunction)
+    assert loaded_ef.malformed_ef_name == "custom_ef"
+
+    assert isinstance(invalid_config["embedding_function"], dict)
+    assert isinstance(invalid_config["embedding_function"]["config"], dict)
+    assert loaded_ef.config == invalid_config["embedding_function"]["config"]
+
+
+def test_update_ef_when_malformed() -> None:
+    invalid_config: Dict[str, Any] = {
+        "hnsw": {
+            "space": "l2",
+            "ef_construction": 100,
+            "ef_search": 100,
+            "max_neighbors": 16,
+            "resize_factor": 1.2,
+            "sync_threshold": 1000,
+        },
+        "spann": None,
+        "embedding_function": {
+            "name": "custom_ef",
+            "type": "known",
+            "config": {},
+        },
+    }
+    loaded_config = load_collection_configuration_from_json(invalid_config)
+    assert loaded_config is not None
+    assert isinstance(
+        loaded_config.get("embedding_function"), MalformedEmbeddingFunction
+    )
+
+    overwrite_config: UpdateCollectionConfiguration = {
+        "embedding_function": CustomEmbeddingFunction(dim=10),
+    }
+
+    new_config = overwrite_collection_configuration(loaded_config, overwrite_config)
+    assert new_config is not None
+    ef = new_config.get("embedding_function")
+    assert ef is not None
+    assert isinstance(ef, CustomEmbeddingFunction)
+    assert ef.get_config() == {"dim": 10}

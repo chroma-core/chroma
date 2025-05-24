@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 import os
 import numpy as np
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
+import warnings
 
 
 class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -33,6 +34,12 @@ class HuggingFaceEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
 
+        if api_key is not None:
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
+            )
         self.api_key_env_var = api_key_env_var
         self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
@@ -141,6 +148,13 @@ class HuggingFaceEmbeddingServer(EmbeddingFunction[Documents]):
         except ImportError:
             raise ValueError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
+            )
+
+        if api_key is not None:
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
             )
 
         self.url = url

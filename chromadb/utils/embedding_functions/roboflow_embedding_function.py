@@ -15,6 +15,7 @@ import importlib
 import base64
 from io import BytesIO
 import numpy as np
+import warnings
 
 
 class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
@@ -38,6 +39,12 @@ class RoboflowEmbeddingFunction(EmbeddingFunction[Embeddable]):
                 Defaults to "https://infer.roboflow.com".
         """
 
+        if api_key is not None:
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
+            )
         self.api_key_env_var = api_key_env_var
         self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:

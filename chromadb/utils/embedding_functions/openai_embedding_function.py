@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 import os
 import numpy as np
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
+import warnings
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -47,6 +48,13 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         except ImportError:
             raise ValueError(
                 "The openai python package is not installed. Please install it with `pip install openai`"
+            )
+
+        if api_key is not None:
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
             )
 
         self.api_key_env_var = api_key_env_var
