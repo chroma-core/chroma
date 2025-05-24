@@ -36,6 +36,7 @@ use chroma_types::{
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -363,11 +364,12 @@ impl ServiceBasedFrontend {
             ..
         }: GetCollectionRequest,
     ) -> Result<GetCollectionResponse, GetCollectionError> {
+        let cid: Option<CollectionUuid> = CollectionUuid::from_str(collection_name.as_str()).ok();
         let mut collections = self
             .sysdb_client
             .get_collections(
-                None,
-                Some(collection_name.clone()),
+                cid,
+                cid.is_none().then(|| collection_name.clone()),
                 Some(tenant_id),
                 Some(database_name),
                 None,

@@ -1075,14 +1075,14 @@ export const ApiApiFetchParamCreator = function (
      * @summary Retrieves a collection by ID or name.
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Database name</p>
-     * @param {string} collectionId <p>UUID of the collection</p>
+     * @param {string} collectionIdOrName <p>ID or Name of the collection</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
     getCollection(
       tenant: string,
       database: string,
-      collectionId: string,
+      collectionIdOrName: string,
       options: RequestInit = {},
     ): FetchArgs {
       // verify required parameter 'tenant' is not null or undefined
@@ -1099,18 +1099,21 @@ export const ApiApiFetchParamCreator = function (
           "Required parameter database was null or undefined when calling getCollection.",
         );
       }
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
+      // verify required parameter 'collectionIdOrName' is not null or undefined
+      if (collectionIdOrName === null || collectionIdOrName === undefined) {
         throw new RequiredError(
-          "collectionId",
-          "Required parameter collectionId was null or undefined when calling getCollection.",
+          "collectionIdOrName",
+          "Required parameter collectionIdOrName was null or undefined when calling getCollection.",
         );
       }
       let localVarPath =
-        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}`
+        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id_or_name}`
           .replace("{tenant}", encodeURIComponent(String(tenant)))
           .replace("{database}", encodeURIComponent(String(database)))
-          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
+          .replace(
+            "{collection_id_or_name}",
+            encodeURIComponent(String(collectionIdOrName)),
+          );
       const localVarPathQueryStart = localVarPath.indexOf("?");
       const localVarRequestOptions: RequestInit = Object.assign(
         { method: "GET" },
@@ -2435,19 +2438,19 @@ export const ApiApiFp = function (configuration?: Configuration) {
      * @summary Retrieves a collection by ID or name.
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Database name</p>
-     * @param {string} collectionId <p>UUID of the collection</p>
+     * @param {string} collectionIdOrName <p>ID or Name of the collection</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
     getCollection(
       tenant: string,
       database: string,
-      collectionId: string,
+      collectionIdOrName: string,
       options?: RequestInit,
     ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Collection> {
       const localVarFetchArgs = ApiApiFetchParamCreator(
         configuration,
-      ).getCollection(tenant, database, collectionId, options);
+      ).getCollection(tenant, database, collectionIdOrName, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
         return fetch(
           basePath + localVarFetchArgs.url,
@@ -3312,20 +3315,20 @@ export class ApiApi extends BaseAPI {
    * @summary Retrieves a collection by ID or name.
    * @param {string} tenant <p>Tenant ID</p>
    * @param {string} database <p>Database name</p>
-   * @param {string} collectionId <p>UUID of the collection</p>
+   * @param {string} collectionIdOrName <p>ID or Name of the collection</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
   public getCollection(
     tenant: string,
     database: string,
-    collectionId: string,
+    collectionIdOrName: string,
     options?: RequestInit,
   ) {
     return ApiApiFp(this.configuration).getCollection(
       tenant,
       database,
-      collectionId,
+      collectionIdOrName,
       options,
     )(this.fetch, this.basePath);
   }

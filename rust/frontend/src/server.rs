@@ -960,7 +960,7 @@ async fn create_collection(
 /// Retrieves a collection by ID or name.
 #[utoipa::path(
     get,
-    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id_or_name}",
     responses(
         (status = 200, description = "Collection found", body = Collection),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -970,7 +970,7 @@ async fn create_collection(
     params(
         ("tenant" = String, Path, description = "Tenant ID"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "UUID of the collection")
+        ("collection_id_or_name" = String, Path, description = "ID or Name of the collection")
     )
 )]
 async fn get_collection(
@@ -2068,5 +2068,137 @@ mod tests {
             response_json["error"],
             serde_json::Value::String("InvalidArgumentError".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_get_collection_by_id() {
+        let port = test_server().await;
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("http://localhost:{}/api/v2/tenants/default_tenant/databases/default_database/collections", port))
+            .header("content-type", "application/json")
+            .body(serde_json::to_string(&serde_json::json!({ "name": "test" })).unwrap())
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(res.status(), 200);
+
+        // Should have returned JSON
+        assert_eq!(
+            res.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        let collection_id = response_json["id"].as_str().unwrap();
+        assert_eq!(response_json["name"].as_str().unwrap(), "test");
+        let res = client
+            .get(format!(
+                "http://localhost:{}/api/v2/tenants/default_tenant/databases/default_database/collections/{}",
+                port, collection_id
+            ))
+            .header("content-type", "application/json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().clone(), 200);
+        // Should have returned JSON
+        assert_eq!(
+            res.headers().get("content-type").unwrap(),
+            "application/json"
+        );
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(response_json["name"].as_str().unwrap(), "test");
+        assert_eq!(response_json["id"].as_str().unwrap(), collection_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_collection_with_name_validation() {
+        let port = test_server().await;
+        let client = reqwest::Client::new();
+        let res = client
+            .get(format!(
+                "http://localhost:{}/api/v2/tenants/default_tenant/databases/default_database/collections/{}",
+                port, "i"
+            ))
+            .header("content-type", "application/json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().clone(), 400);
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string())
+        );
+        assert!(response_json["message"]
+            .as_str()
+            .expect("error message to be present")
+            .contains("Expected a name containing 3-512 characters"));
+
+        let res = client
+            .get(format!(
+                "http://localhost:{}/api/v2/tenants/default_tenant/databases/default_database/collections/{}",
+                port, "_invalid_name"
+            ))
+            .header("content-type", "application/json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().clone(), 400);
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string())
+        );
+        assert!(response_json["message"]
+            .as_str()
+            .expect("error message to be present")
+            .contains("starting and ending with an alphanumeric character in"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_collection_with_name_validation() {
+        let port = test_server().await;
+        let client = reqwest::Client::new();
+        let res = client
+            .delete(format!(
+                "http://localhost:{}/api/v2/tenants/default_tenant/databases/default_database/collections/{}",
+                port, "i"
+            ))
+            .header("content-type", "application/json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().clone(), 400);
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string())
+        );
+        assert!(response_json["message"]
+            .as_str()
+            .expect("error message to be present")
+            .contains("Expected a name containing 3-512 characters"));
+
+        let res = client
+            .delete(format!(
+                "http://localhost:{}/api/v2/tenants/default_tenant/databases/default_database/collections/{}",
+                port, "_invalid_name"
+            ))
+            .header("content-type", "application/json")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status().clone(), 400);
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string())
+        );
+        assert!(response_json["message"]
+            .as_str()
+            .expect("error message to be present")
+            .contains("starting and ending with an alphanumeric character in"));
     }
 }
