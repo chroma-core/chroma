@@ -44,7 +44,7 @@ const CloudSignUp: React.FC = () => {
   return (
     open && (
       <div
-        className={`absolute bottom-4 z-20 right-4 bg-white border border-black h-48 w-[400px] flex flex-col gap-0 sm:rounded-none p-0 dark:border-white dark:border dark:bg-gray-950 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+        className={`absolute bottom-4 z-20 right-4 bg-white border border-black h-48 overflow-hidden max-w-[400px] ml-4 flex flex-col gap-0 sm:rounded-none p-0 dark:border-white dark:border dark:bg-gray-950 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
       >
         <Header84 title="NEW">
           <CloseButton84 onClick={handleDialogClose} />
@@ -53,10 +53,10 @@ const CloudSignUp: React.FC = () => {
           <div className="flex flex-col gap-3 pt-4 pl-5 ">
             <div className="flex items-center gap-2 select-none">
               <ChromaIcon className="w-10 h-10" />
-              <p className="text-lg font-bold">Chroma Cloud</p>
+              <p className="text-md sm:text-lg font-bold whitespace-nowrap">Chroma Cloud</p>
             </div>
 
-            <div className="flex flex-col gap-2 text-sm">
+            <div className="flex flex-col gap-2 text-sm text-balance">
               <p>
                 Our fully managed hosted service,{" "}
                 <span className="font-bold">Chroma Cloud</span> is here.
@@ -66,7 +66,7 @@ const CloudSignUp: React.FC = () => {
               </p>
             </div>
           </div>
-          <div className="h-full flex items-start justify-end flex-shrink-0 ">
+          <div className="h-full flex items-start justify-end flex-shrink-0">
             <Image
               src="/cloud-art.jpg"
               alt="Cloud Art"
