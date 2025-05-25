@@ -2,15 +2,16 @@ import React from "react";
 import Link from "next/link";
 import { AppSection } from "@/lib/content";
 
-const MenuItem: React.FC<{ section: AppSection; active: boolean }> = ({
-  section,
-  active,
-}) => {
+const MenuItem: React.FC<{
+  section: AppSection;
+  active: boolean;
+  onClick?: () => void;
+}> = ({ section, active, onClick }) => {
   const Icon = section.icon!;
 
   return (
     <Link
-     className={`border-b-4 h-12 px-3 pt-3 pr-5 text-gray-700/80 ${active ? "border-chroma-orange " : "border-transparent hover:border-gray-100"} ${!section.disable && "hover:text-gray-800"} dark:text-gray-400/80 dark:hover:text-gray-300`}
+      className={`border-b-4 h-12 px-3 pt-3 pr-5 text-gray-700/80 ${active ? "border-chroma-orange " : "border-transparent hover:border-gray-100"} ${!section.disable && "hover:text-gray-800"} dark:text-gray-400/80 dark:hover:text-gray-300`}
       href={
         section.disable
           ? ""
@@ -18,6 +19,7 @@ const MenuItem: React.FC<{ section: AppSection; active: boolean }> = ({
       }
     >
       <div
+        onClick={onClick}
         className={` flex ${section.tag ? "items-start" : "items-center"} gap-2  cursor-pointer `}
       >
         <div
