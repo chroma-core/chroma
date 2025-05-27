@@ -846,13 +846,22 @@ impl Manifest {
         let Garbage {
             dropped_setsum: _,
             actions,
-            cutoff: _,
+            cutoff,
         } = garbage;
+        // first (cheaply) look for snapshots straddling the cutoff.
+        for snap in self.snapshots.iter() {
+            if (snap.start..snap.limit).contains(cutoff) {
+                return false;
+            }
+        }
+        // fragments are allowed to overlap because we don't rewrite or check them
+        // actions are then checked against the manifest
         for action in actions {
             if !self.has_collected_garbage_action(action) {
                 return false;
             }
         }
+        // No reason to believe we haven't collected, so we have.
         true
     }
 
