@@ -1,5 +1,5 @@
-use super::client_manager::NodeNameToClient;
-use super::{client_manager::ClientManager, config};
+use super::generic_client_manager::{ClientFactory, ClientOptions, NodeNameToClient};
+use super::{config, generic_client_manager::GenericClientManager};
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
 use backon::Retryable;
@@ -11,6 +11,7 @@ use chroma_memberlist::{
     memberlist_provider::{CustomResourceMemberlistProvider, MemberlistProvider},
 };
 use chroma_system::System;
+use chroma_tracing::GrpcTraceService;
 use chroma_types::SegmentType;
 use chroma_types::{
     chroma_proto::query_executor_client::QueryExecutorClient,
@@ -20,9 +21,10 @@ use chroma_types::{
 };
 use rand::seq::SliceRandom;
 use std::cmp::min;
+use tonic::transport::Channel;
 use tonic::Request;
 
-type Client = QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
+type QueryClient = QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
 
 /// A distributed executor that routes requests to the appropriate node based on the assignment policy
 /// # Fields
@@ -36,7 +38,7 @@ type Client = QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transp
 /// outside.
 #[derive(Clone, Debug)]
 pub struct DistributedExecutor {
-    node_name_to_client: NodeNameToClient,
+    node_name_to_client: NodeNameToClient<QueryClient>,
     assignment_policy: Box<dyn AssignmentPolicy>,
     replication_factor: usize,
     backoff: ExponentialBuilder,
@@ -51,12 +53,12 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment, registry).await?;
         let node_name_to_client = NodeNameToClient::default();
-        let client_manager = ClientManager::new(
+        let client_manager = GenericClientManager::new(
             node_name_to_client.clone(),
             config.connections_per_node,
             config.connect_timeout_ms,
             config.request_timeout_ms,
-            config.max_query_service_response_size_bytes,
+            ClientOptions::new(Some(config.max_query_service_response_size_bytes)),
         );
         let client_manager_handle = system.start_component(client_manager);
 
@@ -150,7 +152,10 @@ impl DistributedExecutor {
     /// # Errors
     /// - If no client is found for the given collection id
     /// - If the assignment policy fails to assign the collection id
-    fn clients(&mut self, collection_id: CollectionUuid) -> Result<Vec<Client>, ExecutorError> {
+    fn clients(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<QueryClient>, ExecutorError> {
         let node_name_to_client_guard = self.node_name_to_client.read();
         let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
         let target_replication_factor = min(self.replication_factor, members.len());
@@ -171,6 +176,22 @@ impl DistributedExecutor {
     }
 }
 
+impl ClientFactory for QueryExecutorClient<GrpcTraceService<Channel>> {
+    fn new_from_channel(channel: GrpcTraceService<Channel>) -> Self {
+        QueryExecutorClient::new(channel)
+    }
+    fn max_decoding_message_size(self, max_size: usize) -> Self {
+        self.max_decoding_message_size(max_size)
+    }
+}
+
+fn choose_client(clients: &[QueryClient]) -> Result<QueryClient, tonic::Status> {
+    Ok(clients
+        .choose(&mut rand::thread_rng())
+        .ok_or(no_clients_found_status())?
+        .clone())
+}
+
 fn is_retryable_error(e: &tonic::Status) -> bool {
     e.code() == tonic::Code::Unavailable
         || e.code() == tonic::Code::DeadlineExceeded
@@ -180,11 +201,4 @@ fn is_retryable_error(e: &tonic::Status) -> bool {
 
 fn no_clients_found_status() -> tonic::Status {
     tonic::Status::internal("No clients found")
-}
-
-fn choose_client(clients: &[Client]) -> Result<Client, tonic::Status> {
-    Ok(clients
-        .choose(&mut rand::thread_rng())
-        .ok_or(no_clients_found_status())?
-        .clone())
 }

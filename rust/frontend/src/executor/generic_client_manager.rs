@@ -12,7 +12,32 @@ use tonic::transport::{Channel, Endpoint};
 use tower::{discover::Change, ServiceBuilder};
 
 pub(super) type NodeNameToClient<T> = Arc<RwLock<HashMap<String, T>>>;
-pub(super) type ClientConstructor<T> = fn(channel: GrpcTraceService<Channel>) -> T;
+pub(super) trait ClientFactory {
+    fn new_from_channel(channel: GrpcTraceService<Channel>) -> Self;
+    // TODO: Exposing/Proxy'ing each property manually like this is not ideal, if this bloats
+    // we can consider better alternatives
+    fn max_decoding_message_size(self, max_size: usize) -> Self;
+}
+#[derive(Debug)]
+pub(super) struct ClientOptions {
+    max_response_size_bytes: Option<usize>,
+}
+
+impl ClientOptions {
+    pub fn new(max_response_size_bytes: Option<usize>) -> Self {
+        Self {
+            max_response_size_bytes,
+        }
+    }
+}
+
+impl Default for ClientOptions {
+    fn default() -> Self {
+        Self {
+            max_response_size_bytes: Some(1024 * 1024 * 4), // 4 MB
+        }
+    }
+}
 
 /// A component that manages the gRPC clients for the query executors
 /// # Fields
@@ -34,16 +59,19 @@ pub(super) struct GenericClientManager<T> {
     connect_timeout_ms: u64,
     request_timeout_ms: u64,
     old_memberlist: Memberlist,
-    client_constructor: ClientConstructor<T>,
+    options: ClientOptions,
 }
 
-impl<T> GenericClientManager<T> {
+impl<T> GenericClientManager<T>
+where
+    T: ClientFactory,
+{
     pub(super) fn new(
         node_name_to_client: NodeNameToClient<T>,
         connections_per_node: usize,
         connect_timeout_ms: u64,
         request_timeout_ms: u64,
-        client_constructor: ClientConstructor<T>,
+        options: ClientOptions,
     ) -> Self {
         Self {
             node_name_to_client,
@@ -52,7 +80,7 @@ impl<T> GenericClientManager<T> {
             connect_timeout_ms,
             request_timeout_ms,
             old_memberlist: Memberlist::new(),
-            client_constructor,
+            options,
         }
     }
 
@@ -114,7 +142,11 @@ impl<T> GenericClientManager<T> {
                     .layer(chroma_tracing::GrpcTraceLayer)
                     .service(channel);
 
-                let client = (self.client_constructor)(channel);
+                let client = T::new_from_channel(channel);
+                let client = match self.options.max_response_size_bytes {
+                    Some(max_size) => client.max_decoding_message_size(max_size),
+                    None => client,
+                };
 
                 let mut node_name_to_client_guard = self.node_name_to_client.write();
                 node_name_to_client_guard.insert(node.to_string(), client);
@@ -237,7 +269,7 @@ where
 #[async_trait]
 impl<T> Handler<Memberlist> for GenericClientManager<T>
 where
-    T: Debug + Send + Sync + 'static,
+    T: ClientFactory + Debug + Send + Sync + 'static,
 {
     type Result = ();
 
@@ -264,14 +296,12 @@ mod test {
         NodeNameToClient<QueryClient>,
     ) {
         let node_name_to_client = Arc::new(RwLock::new(HashMap::new()));
-        let client_constructor =
-            |channel: GrpcTraceService<Channel>| QueryExecutorClient::new(channel);
         let client_manager = GenericClientManager::new(
             node_name_to_client.clone(),
             1,
             1000,
             1000,
-            client_constructor,
+            ClientOptions::default(),
         );
         (client_manager, node_name_to_client)
     }
