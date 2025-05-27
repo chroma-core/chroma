@@ -1,5 +1,5 @@
 use crate::construct_version_graph_orchestrator::{
-    ConstructVersionGraphError, ConstructVersionGraphOrchestrator,
+    ConstructVersionGraphError, ConstructVersionGraphOrchestrator, VersionGraph,
 };
 use crate::operators::compute_versions_to_delete_from_graph::{
     CollectionVersionAction, ComputeVersionsToDeleteError, ComputeVersionsToDeleteInput,
@@ -60,6 +60,7 @@ pub struct GarbageCollectorOrchestrator {
     file_ref_counts: HashMap<String, u32>,
     num_pending_tasks: usize,
     min_versions_to_keep: u32,
+    graph: Option<VersionGraph>,
 
     num_files_deleted: u32,
     num_versions_deleted: u32,
@@ -105,6 +106,7 @@ impl GarbageCollectorOrchestrator {
             pending_list_files_at_version_tasks: HashSet::new(),
             num_pending_tasks: 0,
             min_versions_to_keep,
+            graph: None,
 
             num_files_deleted: 0,
             num_versions_deleted: 0,
@@ -215,6 +217,7 @@ impl GarbageCollectorOrchestrator {
         );
         let output = orchestrator.run(self.system.clone()).await?;
         self.version_files = output.version_files;
+        self.graph = Some(output.graph.clone());
 
         let task = wrap(
             Box::new(ComputeVersionsToDeleteOperator {}),
@@ -374,6 +377,63 @@ impl GarbageCollectorOrchestrator {
             version_action,
             output.file_paths,
         );
+
+        if output.file_paths.is_empty() {
+            // We only allow empty file paths if the version is 0 and all ancestors are also at v0. Otherwise, compaction should have flushed new file paths. This check is defensive and should never fail.
+            let graph = self
+                .graph
+                .as_ref()
+                .ok_or(GarbageCollectorError::InvariantViolation(
+                    "Expected graph to be set".to_string(),
+                ))?;
+
+            let this_node = graph
+                .node_indices()
+                .find(|&n| {
+                    let node = graph.node_weight(n).expect("Node should exist");
+                    node.collection_id == output.collection_id && node.version == output.version
+                })
+                .ok_or(GarbageCollectorError::InvariantViolation(format!(
+                    "Expected to find node for collection {} at version {}",
+                    output.collection_id, output.version
+                )))?;
+
+            let root = graph
+                .node_indices()
+                .find(|&n| {
+                    graph
+                        .neighbors_directed(n, petgraph::Direction::Incoming)
+                        .next()
+                        .is_none()
+                })
+                .ok_or(GarbageCollectorError::InvariantViolation(
+                    "Expected to find root node".to_string(),
+                ))?;
+
+            let versions_from_root_to_this_node =
+                petgraph::algo::astar(graph, root, |finish| finish == this_node, |_| 1, |_| 0)
+                    .ok_or(GarbageCollectorError::InvariantViolation(format!(
+                        "Expected to find path from root to node for {}@v{}",
+                        output.collection_id, output.version
+                    )))?
+                    .1
+                    .into_iter()
+                    .map(|i| {
+                        let node = graph.node_weight(i).expect("Node should exist");
+                        node.version
+                    })
+                    .collect::<Vec<_>>();
+            let are_all_versions_v0 = versions_from_root_to_this_node
+                .iter()
+                .all(|&version| version == 0);
+
+            if !are_all_versions_v0 {
+                return Err(GarbageCollectorError::InvariantViolation(format!(
+                    "Version {} of collection {} has no file paths, but has non-v0 ancestors. This should never happen.",
+                    output.version, output.collection_id
+                )));
+            }
+        }
 
         // Update the file ref counts. Counts in the map should:
         // - be 0 if we know about the file but it is unused
@@ -726,5 +786,109 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
 
             self.terminate_with_result(Ok(response), ctx).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GarbageCollectorOrchestrator;
+    use chroma_blockstore::RootManager;
+    use chroma_cache::nop::NopCache;
+    use chroma_storage::test_storage;
+    use chroma_sysdb::TestSysDb;
+    use chroma_system::{Dispatcher, Orchestrator, System};
+    use chroma_types::{
+        CollectionUuid, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
+    };
+    use chrono::DateTime;
+    use std::{collections::HashMap, sync::Arc, time::SystemTime};
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn errors_on_empty_file_paths() {
+        let storage = test_storage();
+        let mut test_sysdb = TestSysDb::new();
+        test_sysdb.set_storage(Some(storage.clone()));
+        let mut sysdb = chroma_sysdb::SysDb::Test(test_sysdb);
+
+        let system = System::new();
+        let dispatcher = Dispatcher::new(Default::default());
+        let dispatcher_handle = system.start_component(dispatcher);
+        let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
+
+        let tenant = "test_tenant".to_string();
+        let database = "test_database".to_string();
+
+        let root_collection_id = CollectionUuid::new();
+        let segment_id = SegmentUuid::new();
+        let segment = Segment {
+            id: segment_id,
+            r#type: SegmentType::BlockfileMetadata,
+            scope: SegmentScope::METADATA,
+            collection: root_collection_id,
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        sysdb
+            .create_collection(
+                tenant.clone(),
+                database,
+                root_collection_id,
+                "Root Collection".to_string(),
+                vec![segment],
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+
+        // Create v1 with no file paths
+        sysdb
+            .flush_compaction(
+                tenant,
+                root_collection_id,
+                0,
+                0,
+                Arc::new([SegmentFlushInfo {
+                    segment_id,
+                    file_paths: HashMap::new(),
+                }]),
+                0,
+                0,
+            )
+            .await
+            .unwrap();
+
+        // Should fail
+        let mut collections = sysdb
+            .get_collections(Some(root_collection_id), None, None, None, None, 0)
+            .await
+            .unwrap();
+        let root_collection = collections.pop().unwrap();
+        let orchestrator = GarbageCollectorOrchestrator::new(
+            root_collection_id,
+            root_collection.version_file_path.unwrap(),
+            None,
+            DateTime::from_timestamp(
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64,
+                0,
+            )
+            .unwrap(),
+            sysdb,
+            dispatcher_handle,
+            system.clone(),
+            storage,
+            root_manager,
+            crate::types::CleanupMode::Delete,
+            1,
+        );
+        let result = orchestrator.run(system).await;
+        assert!(result.is_err());
+        assert!(format!("{:?}", result).contains("no file paths"));
     }
 }

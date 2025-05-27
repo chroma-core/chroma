@@ -1211,6 +1211,14 @@ mod tests {
 
         let mut expected_new_collection = old_cas.collection.clone();
         expected_new_collection.version += 1;
+        expected_new_collection.version_file_path = Some(
+            old_cas
+                .collection
+                .version_file_path
+                .clone()
+                .unwrap()
+                .replace("/1", "/2"),
+        );
         assert_eq!(new_cas.collection, expected_new_collection);
         assert_eq!(new_cas.metadata_segment.id, old_cas.metadata_segment.id);
         assert_eq!(new_cas.record_segment.id, old_cas.record_segment.id);
