@@ -109,7 +109,11 @@ impl Garbage {
                 &mut Setsum::default(),
             )?);
         }
-        todo!();
+        Ok(GarbageAction::DropSnapshot {
+            path_to_snapshot: snapshot.path.clone(),
+            snapshot_setsum: snapshot.setsum,
+            children,
+        })
     }
 
     #[allow(clippy::result_large_err)]

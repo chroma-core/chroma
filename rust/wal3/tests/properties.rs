@@ -121,3 +121,47 @@ proptest::proptest! {
         }
     }
 }
+
+proptest::proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 1, .. ProptestConfig::default()
+    })]
+
+    #[test]
+    fn manifests_with_snapshots_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1000), snapshot_rollover_threshold in 2..20usize, fragment_rollover_threshold in 2..20usize) {
+        let mut manifest = Manifest::new_empty("test");
+        println!("deltas = {deltas:#?}");
+        let fragments = deltas_to_fragment_sequence(&deltas);
+        println!("fragments = {fragments:#?}");
+        let mut snapshots = vec![];
+        for fragment in fragments.into_iter() {
+            assert!(manifest.can_apply_fragment(&fragment));
+            manifest.apply_fragment(fragment);
+            if let Some(snapshot) = manifest.generate_snapshot(SnapshotOptions {
+                snapshot_rollover_threshold,
+                fragment_rollover_threshold,
+            }, "test") {
+                assert!(manifest.apply_snapshot(&snapshot).is_ok());
+                snapshots.push(snapshot);
+            }
+        }
+        eprintln!("starting manifest = {manifest:#?}");
+        let start = manifest.oldest_timestamp().unwrap();
+        let limit = manifest.newest_timestamp().unwrap();
+        for offset in start.offset()..limit.offset() {
+            let position = LogPosition::from_offset(offset);
+            let garbage = Garbage::new(&manifest, &snapshots, position).unwrap();
+            eprintln!("garbage = {garbage:#?}");
+            let dropped = garbage.scrub().unwrap();
+            assert!(garbage.is_empty() || !manifest.has_collected_garbage(&garbage));
+            let new_manifest = manifest.apply_garbage(garbage.clone()).unwrap();
+            assert!(new_manifest.has_collected_garbage(&garbage));
+            eprintln!("manifest.setsum = {}", manifest.setsum.hexdigest());
+            eprintln!("new_manifest.setsum = {}", new_manifest.setsum.hexdigest());
+            eprintln!("dropped = {}", dropped.hexdigest());
+            assert_eq!(manifest.setsum - dropped, new_manifest.setsum, "manifest.setsum mismatch");
+            assert_eq!(manifest.collected + dropped, new_manifest.collected, "manifest.collected mismatch");
+            assert!(new_manifest.scrub().is_ok(), "scrub error");
+        }
+    }
+}
