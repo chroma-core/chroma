@@ -49,7 +49,7 @@ impl Default for ClientOptions {
 /// The client manager is responsible for creating and maintaining the gRPC clients for the query nodes.
 /// It responds to changes to the memberlist and updates the clients accordingly.
 #[derive(Debug)]
-pub(super) struct GenericClientManager<T> {
+pub(super) struct ClientManager<T> {
     // The name of the node to the grpc client
     node_name_to_client: NodeNameToClient<T>,
     // The name of the node to the sender to the channel to add / remove the ip
@@ -62,7 +62,7 @@ pub(super) struct GenericClientManager<T> {
     options: ClientOptions,
 }
 
-impl<T> GenericClientManager<T>
+impl<T> ClientManager<T>
 where
     T: ClientFactory,
 {
@@ -253,7 +253,7 @@ where
 
 ///////////////////////// Component Impl /////////////////////////
 
-impl<T> Component for GenericClientManager<T>
+impl<T> Component for ClientManager<T>
 where
     T: Debug + Send + Sync + 'static,
 {
@@ -267,17 +267,13 @@ where
 }
 
 #[async_trait]
-impl<T> Handler<Memberlist> for GenericClientManager<T>
+impl<T> Handler<Memberlist> for ClientManager<T>
 where
     T: ClientFactory + Debug + Send + Sync + 'static,
 {
     type Result = ();
 
-    async fn handle(
-        &mut self,
-        new_members: Memberlist,
-        _ctx: &ComponentContext<GenericClientManager<T>>,
-    ) {
+    async fn handle(&mut self, new_members: Memberlist, _ctx: &ComponentContext<ClientManager<T>>) {
         self.process_new_members(new_members).await;
     }
 }
@@ -291,12 +287,9 @@ mod test {
     type QueryClient =
         QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
 
-    fn test_client_manager() -> (
-        GenericClientManager<QueryClient>,
-        NodeNameToClient<QueryClient>,
-    ) {
+    fn test_client_manager() -> (ClientManager<QueryClient>, NodeNameToClient<QueryClient>) {
         let node_name_to_client = Arc::new(RwLock::new(HashMap::new()));
-        let client_manager = GenericClientManager::new(
+        let client_manager = ClientManager::new(
             node_name_to_client.clone(),
             1,
             1000,

@@ -1,5 +1,5 @@
 use super::generic_client_manager::{ClientFactory, ClientOptions, NodeNameToClient};
-use super::{config, generic_client_manager::GenericClientManager};
+use super::{config, generic_client_manager::ClientManager};
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
 use backon::Retryable;
@@ -53,7 +53,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment, registry).await?;
         let node_name_to_client = NodeNameToClient::default();
-        let client_manager = GenericClientManager::new(
+        let client_manager = ClientManager::new(
             node_name_to_client.clone(),
             config.connections_per_node,
             config.connect_timeout_ms,
