@@ -415,20 +415,20 @@ importers:
         version: 7.7.1
     optionalDependencies:
       chromadb-js-bindings-darwin-arm64:
-        specifier: ^0.1.1
-        version: 0.1.1
+        specifier: ^0.1.3
+        version: 0.1.3
       chromadb-js-bindings-darwin-x64:
-        specifier: ^0.1.1
-        version: 0.1.1
+        specifier: ^0.1.3
+        version: 0.1.3
       chromadb-js-bindings-linux-arm64-gnu:
-        specifier: ^0.1.1
-        version: 0.1.1
+        specifier: ^0.1.3
+        version: 0.1.3
       chromadb-js-bindings-linux-x64-gnu:
-        specifier: ^0.1.1
-        version: 0.1.1
+        specifier: ^0.1.3
+        version: 0.1.3
       chromadb-js-bindings-win32-x64-msvc:
-        specifier: ^0.1.1
-        version: 0.1.1
+        specifier: ^0.1.3
+        version: 0.1.3
     devDependencies:
       '@chroma-core/default-embed':
         specifier: workspace:^
@@ -2064,32 +2064,32 @@ packages:
     resolution: {integrity: sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g==}
     engines: {node: '>=18'}
 
-  chromadb-js-bindings-darwin-arm64@0.1.1:
-    resolution: {integrity: sha512-R/cISK+P+2LvLmwVUA+w9aOkeI7dZP/E0OvM9W/ee34hPQPYDxgvW7Y8lkieu5AYrecThYy+XG4IOlQwRzrzRg==}
+  chromadb-js-bindings-darwin-arm64@0.1.3:
+    resolution: {integrity: sha512-TZq90O3QuVSfMZcYXWP8juP9q7O7ebSz7PsewW2deVJd3aihOnVxpZtxfwlFKYEDiWz5XwArL6xLBbKNYZGnLA==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [darwin]
 
-  chromadb-js-bindings-darwin-x64@0.1.1:
-    resolution: {integrity: sha512-ZmwQ5CUCqGDfR/4ap9yms/q5EB/jeDhATuNcTY1bxwIN7PouacPqNpfS3/OZHe2XLsoWQX9s2w41if5hatenow==}
+  chromadb-js-bindings-darwin-x64@0.1.3:
+    resolution: {integrity: sha512-ynIKTgcJ89YAhuGjp5E39E/gsjJ4IgRpGzVrsYSYfx4K449LaIx0yUdFsxx/QoY0Q5/AJDgUH6dG5DXgYg5LxA==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [darwin]
 
-  chromadb-js-bindings-linux-arm64-gnu@0.1.1:
-    resolution: {integrity: sha512-dqSyba92Ig2FxyVA03s8oqRga06guX3cjD6t3VMPcx+RHY5tNogSNMQgeHDg5D12fnphLB5G1xZEUfQ8E69Ajg==}
+  chromadb-js-bindings-linux-arm64-gnu@0.1.3:
+    resolution: {integrity: sha512-RLReKrGYygGbKWgh3Y9nGevl2/8/QXr6QHB8f03CbfogKwk7NGPjblO6O1P4gQMxU+b9kRldDWBOZbsvIlJt9g==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
 
-  chromadb-js-bindings-linux-x64-gnu@0.1.1:
-    resolution: {integrity: sha512-foxLol1kTzuXSEqXe+mJZcN3GxK1RgQ/DNAZ9t4u4doiScHrkSQdpS3i90A9SsRWCbOBk2PjWWCnS2FWzvypUQ==}
+  chromadb-js-bindings-linux-x64-gnu@0.1.3:
+    resolution: {integrity: sha512-YMY4A0tYbmsiyV7ASS+aL7cp+QdoFpC6Q4AjBgpA9+Lh131eli0xIqrnwe3/YF5SkcAKK/1GcNXqSzx8P3eVLQ==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
 
-  chromadb-js-bindings-win32-x64-msvc@0.1.1:
-    resolution: {integrity: sha512-K8A5TWeYHnYRIkJWO0+qjbgzIpNtzul0zHswzXLzklki0VtHBCLIZgSieMuVr71OGeC3r6GJKunHcOEIXn+1FQ==}
+  chromadb-js-bindings-win32-x64-msvc@0.1.3:
+    resolution: {integrity: sha512-smVxJRVhUPPTW2G8mu4GizCvrcii3F1ZPp8CbNMvgWJhYi98CWN9KV3df3b12xRt76tIWIF/Lp5TgZfPnk4pmQ==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [win32]
@@ -6449,19 +6449,19 @@ snapshots:
 
   chownr@3.0.0: {}
 
-  chromadb-js-bindings-darwin-arm64@0.1.1:
+  chromadb-js-bindings-darwin-arm64@0.1.3:
     optional: true
 
-  chromadb-js-bindings-darwin-x64@0.1.1:
+  chromadb-js-bindings-darwin-x64@0.1.3:
     optional: true
 
-  chromadb-js-bindings-linux-arm64-gnu@0.1.1:
+  chromadb-js-bindings-linux-arm64-gnu@0.1.3:
     optional: true
 
-  chromadb-js-bindings-linux-x64-gnu@0.1.1:
+  chromadb-js-bindings-linux-x64-gnu@0.1.3:
     optional: true
 
-  chromadb-js-bindings-win32-x64-msvc@0.1.1:
+  chromadb-js-bindings-win32-x64-msvc@0.1.3:
     optional: true
 
   ci-info@3.9.0: {}

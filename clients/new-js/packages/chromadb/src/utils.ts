@@ -401,7 +401,7 @@ export const validateWhere = (where: Where) => {
       if (
         Array.isArray(operand) &&
         (operand.length === 0 ||
-          !operand.every((item) => typeof item !== typeof operand[0]))
+          !operand.every((item) => typeof item === typeof operand[0]))
       ) {
         throw new ChromaValueError(
           "Expected 'where' operand value to be a non-empty list and all values to be of the same type",
