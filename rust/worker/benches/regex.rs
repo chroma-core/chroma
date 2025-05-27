@@ -24,14 +24,20 @@ const LOG_CHUNK_SIZE: usize = 10000;
 const DOCUMENT_SIZE: usize = 100000;
 const REGEX_PATTERNS: &[&str] = &[
     r"wikipedia",
-    r"wikipedia.*",
+    // r"wikipedia.*",
     r"(?i)wikipedia",
-    r"(?i)wikipedia.*",
-    r"20\d\d",
-    r".*wiki.*",
-    r"May|June",
-    r"(March|April) 19\d\d",
-    r"\w{6}",
+    r"united states",
+    r"(?i)united states",
+    r"definition",
+    r"(?i)definition",
+    r"reference",
+    r"(?i)reference",
+    // r"(?i)wikipedia.*",
+    // r"20\d\d",
+    // r".*wiki.*",
+    // r"May|June",
+    // r"(March|April) 19\d\d",
+    // r"\w{6}",
 ];
 
 fn bench_regex(criterion: &mut Criterion) {
