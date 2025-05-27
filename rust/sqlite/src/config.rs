@@ -104,7 +104,8 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
             // we turn it off
             .pragma("foreign_keys", "OFF")
             .pragma("case_sensitive_like", "ON")
-            .busy_timeout(Duration::from_secs(1000));
+            .busy_timeout(Duration::from_secs(1000))
+            .with_regexp();
         let conn = if let Some(url) = &config.url {
             let path = Path::new(url);
             if let Some(parent) = path.parent() {
