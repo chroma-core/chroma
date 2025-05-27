@@ -1,5 +1,5 @@
-use super::generic_client_manager::{ClientFactory, ClientOptions, NodeNameToClient};
-use super::{config, generic_client_manager::ClientManager};
+use super::client_manager::{ClientFactory, ClientOptions, NodeNameToClient};
+use super::{client_manager::ClientManager, config};
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
 use backon::Retryable;
