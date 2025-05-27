@@ -757,6 +757,7 @@ impl Manifest {
         let Garbage {
             dropped_setsum,
             actions,
+            cutoff: _,
         } = garbage;
         let mut new = self.clone();
         for action in actions {
@@ -845,6 +846,7 @@ impl Manifest {
         let Garbage {
             dropped_setsum: _,
             actions,
+            cutoff: _,
         } = garbage;
         for action in actions {
             if !self.has_collected_garbage_action(action) {

@@ -13,6 +13,7 @@ use crate::{
 pub struct Garbage {
     pub dropped_setsum: Setsum,
     pub actions: Vec<GarbageAction>,
+    pub cutoff: LogPosition,
 }
 
 impl Garbage {
@@ -53,9 +54,11 @@ impl Garbage {
                 &mut drop_acc,
             )?);
         }
+        let cutoff = first_to_keep;
         let garbage = Garbage {
             dropped_setsum: drop_acc,
             actions,
+            cutoff,
         };
         garbage.scrub()?;
         Ok(garbage)
