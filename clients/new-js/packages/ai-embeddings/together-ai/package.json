@@ -1,0 +1,55 @@
+{
+  "name": "@chroma-core/together-ai",
+  "version": "0.1.5",
+  "private": false,
+  "description": "TogetherAI embedding provider for Chroma",
+  "main": "dist/cjs/together-ai.cjs",
+  "types": "dist/together-ai.d.ts",
+  "module": "dist/together-ai.legacy-esm.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/together-ai.d.ts",
+        "default": "./dist/together-ai.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/together-ai.d.cts",
+        "default": "./dist/cjs/together-ai.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "dotenv": "^16.3.1",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.3.5"
+  },
+  "peerDependencies": {
+    "chromadb": "workspace:^"
+  },
+  "dependencies": {
+    "@chroma-core/ai-embeddings-common": "workspace:^",
+    "together-ai": "^0.16.0"
+  },
+  "engines": {
+    "node": ">=14.17.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

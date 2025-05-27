@@ -1,0 +1,55 @@
+{
+  "name": "@chroma-core/cohere",
+  "version": "0.1.5",
+  "private": false,
+  "description": "Cohere embedding provider for Chroma",
+  "main": "dist/cjs/cohere.cjs",
+  "types": "dist/cohere.d.ts",
+  "module": "dist/cohere.legacy-esm.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/cohere.d.ts",
+        "default": "./dist/cohere.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/cohere.d.cts",
+        "default": "./dist/cjs/cohere.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "dotenv": "^16.3.1",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.3.5"
+  },
+  "peerDependencies": {
+    "chromadb": "workspace:^"
+  },
+  "dependencies": {
+    "@chroma-core/ai-embeddings-common": "workspace:^",
+    "cohere-ai": "^7.17.1"
+  },
+  "engines": {
+    "node": ">=14.17.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

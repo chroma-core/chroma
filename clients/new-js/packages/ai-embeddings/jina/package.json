@@ -1,0 +1,54 @@
+{
+  "name": "@chroma-core/jina",
+  "version": "0.1.5",
+  "private": false,
+  "description": "Jina embedding provider for Chroma",
+  "main": "dist/cjs/jina.cjs",
+  "types": "dist/jina.d.ts",
+  "module": "dist/jina.legacy-esm.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/jina.d.ts",
+        "default": "./dist/jina.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/jina.d.cts",
+        "default": "./dist/cjs/jina.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "dotenv": "^16.3.1",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.3.5"
+  },
+  "peerDependencies": {
+    "chromadb": "workspace:^"
+  },
+  "dependencies": {
+    "@chroma-core/ai-embeddings-common": "workspace:^"
+  },
+  "engines": {
+    "node": ">=14.17.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
