@@ -1,4 +1,4 @@
-import { startChromaServer } from "./start-chroma";
+import { startChromaServer } from "../../scripts/start-chroma";
 
 const testEnvSetup = async () => {
   const { url, stop } = await startChromaServer();

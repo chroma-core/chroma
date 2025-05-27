@@ -3,10 +3,11 @@ import path from "node:path";
 import { ChildProcess, execSync, spawn } from "node:child_process";
 import chalk from "chalk";
 import waitOn from "wait-on";
+import { Readable } from "node:stream";
 
 const CHROMADB_PORT = 8000;
 
-const BUILD_CONTEXT_DIR = path.join(__dirname, "../../../../../..");
+const BUILD_CONTEXT_DIR = path.join(__dirname, "../../../../..");
 
 const buildDockerImage = async (
   dockerfilePath: string,
@@ -46,7 +47,7 @@ export const startContainer = async (verbose?: boolean) => {
       .withEnvironment({
         CHROMA_API_IMPL: "chromadb.api.segment.SegmentAPI",
       })
-      .withLogConsumer((stream) => {
+      .withLogConsumer((stream: Readable) => {
         stream.on("data", (line: Buffer) => {
           console.log(
             chalk.blue("🐳 chromadb: ") + line.toString("utf-8").trimEnd(),
@@ -68,7 +69,7 @@ export const startContainer = async (verbose?: boolean) => {
     .withEnvironment(env);
 
   if (verbose) {
-    container = container.withLogConsumer((stream) => {
+    container = container.withLogConsumer((stream: Readable) => {
       stream.on("data", (line) => console.log(line));
       stream.on("err", (line) => console.error(line));
       stream.on("end", () => console.log("Stream closed"));

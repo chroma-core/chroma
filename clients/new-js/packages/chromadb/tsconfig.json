@@ -7,6 +7,6 @@
     "stripInternal": true,
     "composite": true,
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "test", "**/*.test.ts", "scripts"]
+  "include": ["src/**/*", "scripts/**/*"],
+  "exclude": ["node_modules", "dist", "test", "**/*.test.ts"]
 }
