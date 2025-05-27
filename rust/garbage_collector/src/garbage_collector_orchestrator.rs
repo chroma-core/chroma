@@ -527,6 +527,7 @@ mod tests {
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
+    use chroma_storage::GetOptions;
     use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
     use chroma_system::System;
     use std::str::FromStr;
@@ -751,7 +752,7 @@ mod tests {
 
     async fn get_hnsw_index_ids(storage: &Storage) -> Vec<Uuid> {
         storage
-            .list_prefix("hnsw")
+            .list_prefix("hnsw", GetOptions::default())
             .await
             .unwrap()
             .into_iter()
@@ -935,7 +936,7 @@ mod tests {
             .unwrap();
 
         let deleted_hnsw_files_before_test: Vec<_> = storage
-            .list_prefix("gc")
+            .list_prefix("gc", GetOptions::default())
             .await
             .unwrap()
             .into_iter()
@@ -1060,7 +1061,7 @@ mod tests {
 
         // Verify that "deleted" files are renamed with the "gc" prefix
         let deleted_hnsw_files: Vec<_> = storage
-            .list_prefix("gc")
+            .list_prefix("gc", GetOptions::default())
             .await
             .unwrap()
             .into_iter()

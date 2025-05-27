@@ -311,16 +311,16 @@ impl Storage {
         }
     }
 
-    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
+    pub async fn list_prefix(
+        &self,
+        prefix: &str,
+        options: GetOptions,
+    ) -> Result<Vec<String>, StorageError> {
         match self {
             Storage::Local(local) => local.list_prefix(prefix).await,
-            Storage::S3(_) => {
-                unimplemented!("list_prefix not implemented for S3")
-            }
+            Storage::S3(s3) => s3.list_prefix(prefix).await,
             Storage::ObjectStore(object_store) => object_store.list_prefix(prefix).await,
-            Storage::AdmissionControlledS3(_) => {
-                unimplemented!("list_prefix not implemented for AdmissionControlledS3")
-            }
+            Storage::AdmissionControlledS3(acs3) => acs3.list_prefix(prefix, options).await,
         }
     }
 }

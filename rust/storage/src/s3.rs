@@ -682,6 +682,33 @@ impl S3Storage {
             }
         }
     }
+
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
+        let mut outs = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .set_max_keys(Some(1000))
+            .prefix(prefix)
+            .into_paginator()
+            .send();
+        let mut paths = vec![];
+        while let Some(result) = outs.next().await {
+            let output = result.map_err(|err| StorageError::Generic {
+                source: Arc::new(err),
+            })?;
+            for object in output.contents() {
+                if let Some(key) = object.key() {
+                    paths.push(key.to_string());
+                } else {
+                    return Err(StorageError::Message {
+                        message: format!("list on prefix {:?} led to empty key", prefix),
+                    });
+                }
+            }
+        }
+        Ok(paths)
+    }
 }
 
 #[async_trait]
@@ -1105,5 +1132,33 @@ mod tests {
         assert!(!default.if_not_exists);
         assert_eq!(default.if_match, None);
         assert_eq!(default.priority, StorageRequestPriority::P0);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_list_prefix() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+        for i in 0..16 {
+            storage
+                .oneshot_upload(
+                    &format!("test/{:02x}", i),
+                    0,
+                    |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
+                    PutOptions {
+                        if_not_exists: true,
+                        if_match: None,
+                        priority: StorageRequestPriority::P0,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        let mut results = storage.list_prefix("test/").await.unwrap();
+        results.sort();
+        eprintln!("Results of listing (should be 0x00..0xff inclusive): {results:#?}");
+        assert_eq!(16, results.len());
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(format!("test/{:02x}", i), *result, "index = {}", i);
+        }
     }
 }

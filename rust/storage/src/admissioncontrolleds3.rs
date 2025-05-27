@@ -477,6 +477,16 @@ impl AdmissionControlledS3Storage {
         )
         .await
     }
+
+    pub async fn list_prefix(
+        &self,
+        prefix: &str,
+        options: GetOptions,
+    ) -> Result<Vec<String>, StorageError> {
+        let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+        let _permit = self.rate_limiter.enter(atomic_priority, None).await;
+        self.storage.list_prefix(prefix).await
+    }
 }
 
 #[async_trait]
