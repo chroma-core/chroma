@@ -837,6 +837,54 @@ impl Manifest {
             }
         }
     }
+
+    /// The garbage has been completely collected from this manifest.  This is not a guarantee it
+    /// will apply cleanly as a partial collection (someone's doing something funky) will fail
+    /// there.  It returns false here.
+    pub fn has_collected_garbage(&self, garbage: &Garbage) -> bool {
+        let Garbage {
+            dropped_setsum: _,
+            actions,
+        } = garbage;
+        for action in actions {
+            if !self.has_collected_garbage_action(action) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn has_collected_garbage_action(&self, action: &GarbageAction) -> bool {
+        match action {
+            GarbageAction::DropFragment {
+                path_to_fragment,
+                fragment_setsum,
+            } => !self
+                .fragments
+                .iter()
+                .any(|frag| frag.path == *path_to_fragment && frag.setsum == *fragment_setsum),
+            GarbageAction::DropSnapshot {
+                path_to_snapshot,
+                snapshot_setsum,
+                children: _,
+            } => !self.snapshots.iter().any(|snap| {
+                snap.path_to_snapshot == *path_to_snapshot && snap.setsum == *snapshot_setsum
+            }),
+            GarbageAction::ReplaceSnapshot {
+                old_path_to_snapshot,
+                old_snapshot_setsum,
+                new_snapshot,
+                children: _,
+            } => {
+                !self.snapshots.iter().any(|snap| {
+                    snap.path_to_snapshot == *old_path_to_snapshot
+                        && snap.setsum == *old_snapshot_setsum
+                }) && self.snapshots.iter().any(|snap| {
+                    snap.path_to_snapshot == new_snapshot.path && snap.setsum == new_snapshot.setsum
+                })
+            }
+        }
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////

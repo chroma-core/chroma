@@ -109,7 +109,9 @@ proptest::proptest! {
             let garbage = Garbage::new(&manifest, &[], position).unwrap();
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.scrub().unwrap();
-            let new_manifest = manifest.apply_garbage(garbage).unwrap();
+            assert!(garbage.is_empty() || !manifest.has_collected_garbage(&garbage));
+            let new_manifest = manifest.apply_garbage(garbage.clone()).unwrap();
+            assert!(new_manifest.has_collected_garbage(&garbage));
             eprintln!("manifest.setsum = {}", manifest.setsum.hexdigest());
             eprintln!("new_manifest.setsum = {}", new_manifest.setsum.hexdigest());
             eprintln!("dropped = {}", dropped.hexdigest());

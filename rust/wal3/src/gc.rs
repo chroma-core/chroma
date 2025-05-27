@@ -61,6 +61,10 @@ impl Garbage {
         Ok(garbage)
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.actions.is_empty()
+    }
+
     #[allow(clippy::result_large_err)]
     pub fn scrub(&self) -> Result<Setsum, ScrubError> {
         scrub(&self.actions, self.dropped_setsum)
