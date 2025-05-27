@@ -2,6 +2,11 @@
 Use this script to upload your local data to a Chroma collection
 Each line in this file is an entry in the dataset
 Look at data/chroma_docs.txt for an example of the format
+
+Run using:
+    python load_data.py
+    poetry run python load_data.py
+    conda run python load_data.py
 """
 
 import os
