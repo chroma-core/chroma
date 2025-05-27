@@ -307,6 +307,12 @@ pub struct Manifest {
         serialize_with = "super::serialize_setsum"
     )]
     pub setsum: Setsum,
+    #[serde(
+        default,
+        deserialize_with = "super::deserialize_setsum",
+        serialize_with = "super::serialize_setsum"
+    )]
+    pub collected: Setsum,
     pub acc_bytes: u64,
     pub writer: String,
     pub snapshots: Vec<SnapshotPointer>,
@@ -318,6 +324,7 @@ impl Manifest {
     pub fn new_empty(writer: &str) -> Self {
         Self {
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             writer: writer.to_string(),
             snapshots: vec![],
@@ -561,6 +568,7 @@ impl Manifest {
         let initial = Manifest {
             writer,
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -781,6 +789,7 @@ impl Manifest {
                 };
                 self.fragments.remove(index);
                 self.setsum -= fragment_setsum;
+                self.collected += fragment_setsum;
                 Ok(())
             }
             GarbageAction::DropSnapshot {
@@ -798,6 +807,7 @@ impl Manifest {
                 };
                 self.snapshots.remove(index);
                 self.setsum -= snapshot_setsum;
+                self.collected += snapshot_setsum;
                 // NOTE(rescrv):  There's no action to take on the children.  Removing the snapshot
                 // cuts them from the manifest.  The actual destructive routine needs the children
                 // to know what to erase, but we're unlinking the whole shebang in one go.
@@ -819,7 +829,9 @@ impl Manifest {
                     });
                 };
                 self.snapshots[index] = SnapshotPointer::from(&new_snapshot);
-                self.setsum -= old_snapshot_setsum + new_snapshot.setsum;
+                self.setsum -= old_snapshot_setsum;
+                self.setsum += new_snapshot.setsum;
+                self.collected += old_snapshot_setsum;
                 // NOTE(rescrv):  Ditto DropSnapshot's note.
                 Ok(())
             }
@@ -880,6 +892,7 @@ mod tests {
         let manifest = Manifest {
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
@@ -922,6 +935,7 @@ mod tests {
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
             )
             .unwrap(),
+            collected: Setsum::default(),
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
@@ -933,6 +947,7 @@ mod tests {
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
             )
             .unwrap(),
+            collected: Setsum::default(),
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
@@ -967,6 +982,7 @@ mod tests {
         let mut manifest = Manifest {
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -983,6 +999,7 @@ mod tests {
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
                 )
                 .unwrap(),
+                collected: Setsum::default(),
                 acc_bytes: 83,
                 snapshots: vec![],
                 fragments: vec![
@@ -1052,6 +1069,7 @@ mod tests {
         let mut manifest = Manifest {
             writer: "manifest writer 1".to_string(),
             setsum: fragment1.setsum + fragment2.setsum,
+            collected: Setsum::default(),
             acc_bytes: 83,
             snapshots: vec![SnapshotPointer {
                 path_to_snapshot: "snap.1".to_string(),
@@ -1072,6 +1090,7 @@ mod tests {
                     "70ff5599703548d61cc7fa9d53d66d61be4e52ff4bf84b07ad45d6d96b174af4"
                 )
                 .unwrap(),
+                collected: Setsum::default(),
                 acc_bytes: 183,
                 snapshots: vec![SnapshotPointer {
                     path_to_snapshot: "snap.1".to_string(),

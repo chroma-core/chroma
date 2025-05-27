@@ -116,10 +116,12 @@ pub async fn copy(
             .iter()
             .map(|x| x.setsum)
             .fold(Setsum::default(), |x, y| x + y);
+    let collected = Setsum::default();
     let acc_bytes = snapshots.iter().map(|x| x.num_bytes).sum::<u64>()
         + fragments.iter().map(|x| x.num_bytes).sum::<u64>();
     let manifest = Manifest {
         setsum,
+        collected,
         acc_bytes,
         writer: "copy task".to_string(),
         snapshots,

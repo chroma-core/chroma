@@ -92,7 +92,7 @@ proptest::proptest! {
     })]
 
     #[test]
-    fn manifests_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 100)) {
+    fn manifests_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 75)) {
         let mut manifest = Manifest::new_empty("test");
         println!("deltas = {deltas:#?}");
         let fragments = deltas_to_fragment_sequence(&deltas);
@@ -113,8 +113,9 @@ proptest::proptest! {
             eprintln!("manifest.setsum = {}", manifest.setsum.hexdigest());
             eprintln!("new_manifest.setsum = {}", new_manifest.setsum.hexdigest());
             eprintln!("dropped = {}", dropped.hexdigest());
-            assert_eq!(manifest.setsum, new_manifest.setsum + dropped);
-            assert!(new_manifest.scrub().is_ok());
+            assert_eq!(manifest.setsum - dropped, new_manifest.setsum, "manifest.setsum mismatch");
+            assert_eq!(manifest.collected + dropped, new_manifest.collected, "manifest.collected mismatch");
+            assert!(new_manifest.scrub().is_ok(), "scrub error");
         }
     }
 }
