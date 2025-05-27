@@ -48,7 +48,11 @@ impl Drop for GarbageCollectorUnderTest {
         self.runtime.block_on(async {
             self.sysdb.reset().await.unwrap();
 
-            let files = self.storage.list_prefix("").await.unwrap();
+            let files = self
+                .storage
+                .list_prefix("", GetOptions::default())
+                .await
+                .unwrap();
             if files.is_empty() {
                 return;
             }
@@ -472,7 +476,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
         let file_ref_counts = ref_state.get_file_ref_counts();
         let files_on_disk = ref_state
             .runtime
-            .block_on(state.storage.list_prefix(""))
+            .block_on(state.storage.list_prefix("", GetOptions::default()))
             .unwrap()
             .into_iter()
             .collect::<HashSet<_>>();
