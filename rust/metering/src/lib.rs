@@ -17,8 +17,17 @@ use uuid::Uuid;
 /// Types implementing this trait can carry arbitrary structured data
 /// which will be serialized and sent when the event is submitted.
 #[typetag::serde(tag = "type")]
-pub trait MeterEventData: Any + Debug + Send + Sync + 'static {
-    /// Convert this data to a dynamic reference for downcasting.
+pub trait MeterEventData: Debug + Send + Sync + 'static {
+    /// Convert to `Any` for downcasting.
+    ///
+    /// Each implementor must override this method to return `self`:
+    ///
+    /// ```ignore
+    /// fn as_any(&mut self) -> &mut dyn Any { self }
+    /// ```
+    ///
+    /// Trait-object upcasting coercion is currently unstable
+    /// (see https://github.com/rust-lang/rust/issues/65991), so this boilerplate is required.
     fn as_any(&mut self) -> &mut dyn Any;
 
     // NOTE(c-gamble): We have to define setters for every field in structs that implement
