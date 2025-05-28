@@ -47,14 +47,14 @@ pub async fn query_service_entrypoint() {
             }
         };
     let mut dispatcher_handle = system.start_component(dispatcher);
-    let mut worker_server = match server::WorkerServer::try_from_config(&config, &registry).await {
-        Ok(worker_server) => worker_server,
-        Err(err) => {
-            println!("Failed to create worker server component: {:?}", err);
-            return;
-        }
-    };
-    worker_server.set_system(system.clone());
+    let mut worker_server =
+        match server::WorkerServer::try_from_config(&(config, system.clone()), &registry).await {
+            Ok(worker_server) => worker_server,
+            Err(err) => {
+                println!("Failed to create worker server component: {:?}", err);
+                return;
+            }
+        };
     worker_server.set_dispatcher(dispatcher_handle.clone());
 
     let server_join_handle = tokio::spawn(async move {
@@ -126,16 +126,19 @@ pub async fn compaction_service_entrypoint() {
             }
         };
     let mut dispatcher_handle = system.start_component(dispatcher);
-    let mut compaction_manager =
-        match crate::compactor::CompactionManager::try_from_config(&config, &registry).await {
-            Ok(compaction_manager) => compaction_manager,
-            Err(err) => {
-                println!("Failed to create compaction manager component: {:?}", err);
-                return;
-            }
-        };
+    let mut compaction_manager = match crate::compactor::CompactionManager::try_from_config(
+        &(config.clone(), system.clone()),
+        &registry,
+    )
+    .await
+    {
+        Ok(compaction_manager) => compaction_manager,
+        Err(err) => {
+            println!("Failed to create compaction manager component: {:?}", err);
+            return;
+        }
+    };
     compaction_manager.set_dispatcher(dispatcher_handle.clone());
-    compaction_manager.set_system(system.clone());
 
     let mut compaction_manager_handle = system.start_component(compaction_manager);
     memberlist.subscribe(compaction_manager_handle.receiver());

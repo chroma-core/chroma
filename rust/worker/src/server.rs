@@ -1,5 +1,3 @@
-use std::iter::once;
-
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
@@ -20,6 +18,7 @@ use chroma_types::{
     CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
+use std::iter::once;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -39,7 +38,7 @@ use crate::{
 #[derive(Clone)]
 pub struct WorkerServer {
     // System
-    system: Option<System>,
+    system: System,
     // Component dependencies
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Service dependencies
@@ -53,13 +52,14 @@ pub struct WorkerServer {
 }
 
 #[async_trait]
-impl Configurable<QueryServiceConfig> for WorkerServer {
+impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
     async fn try_from_config(
-        config: &QueryServiceConfig,
+        config: &(QueryServiceConfig, System),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let (config, system) = config;
         let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
-        let log = Log::try_from_config(&config.log, registry).await?;
+        let log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let blockfile_provider = BlockfileProvider::try_from_config(
             &(config.blockfile_provider.clone(), storage.clone()),
@@ -73,7 +73,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         .await?;
         Ok(WorkerServer {
             dispatcher: None,
-            system: None,
+            system: system.clone(),
             _sysdb: sysdb,
             log,
             hnsw_index_provider,
@@ -124,10 +124,6 @@ impl WorkerServer {
         self.dispatcher = Some(dispatcher);
     }
 
-    pub(crate) fn set_system(&mut self, system: System) {
-        self.system = Some(system);
-    }
-
     fn fetch_log(
         &self,
         collection_and_segments: &CollectionAndSegments,
@@ -167,7 +163,7 @@ impl WorkerServer {
             fetch_log,
         );
 
-        match count_orchestrator.run(self.clone_system()?).await {
+        match count_orchestrator.run(self.system.clone()).await {
             Ok((count, pulled_log_bytes)) => Ok(Response::new(CountResult {
                 count,
                 pulled_log_bytes,
@@ -209,7 +205,7 @@ impl WorkerServer {
             projection.into(),
         );
 
-        match get_orchestrator.run(self.clone_system()?).await {
+        match get_orchestrator.run(self.system.clone()).await {
             Ok((result, pulled_log_bytes)) => Ok(Response::new(GetResult {
                 records: result
                     .records
@@ -227,7 +223,7 @@ impl WorkerServer {
         knn: Request<KnnPlan>,
     ) -> Result<Response<KnnBatchResult>, Status> {
         let dispatcher = self.clone_dispatcher()?;
-        let system = self.clone_system()?;
+        let system = self.system.clone();
 
         let knn_inner = knn.into_inner();
 
@@ -362,13 +358,6 @@ impl WorkerServer {
             .ok_or(Status::internal("Dispatcher is not initialized"))
             .cloned()
     }
-
-    fn clone_system(&self) -> Result<System, Status> {
-        self.system
-            .as_ref()
-            .ok_or(Status::internal("System is not initialized"))
-            .cloned()
-    }
 }
 
 #[async_trait]
@@ -455,13 +444,14 @@ mod tests {
 
     fn run_server() -> String {
         let sysdb = TestSysDb::new();
+        let system = System::new();
         let log = InMemoryLog::new();
         let segments = TestDistributedSegment::default();
         let port = random_port::PortPicker::new().random(true).pick().unwrap();
 
         let mut server = WorkerServer {
             dispatcher: None,
-            system: None,
+            system: system.clone(),
             _sysdb: SysDb::Test(sysdb),
             log: Log::InMemory(log),
             hnsw_index_provider: test_hnsw_index_provider(),
@@ -470,7 +460,6 @@ mod tests {
             fetch_log_batch_size: 100,
         };
 
-        let system: system::System = system::System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 4,
             task_queue_limit: 10,
@@ -479,8 +468,6 @@ mod tests {
             active_io_tasks: 10,
         });
         let dispatcher_handle = system.start_component(dispatcher);
-
-        server.set_system(system);
         server.set_dispatcher(dispatcher_handle);
 
         tokio::spawn(async move {
