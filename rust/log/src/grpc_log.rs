@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self};
 use chroma_types::{
@@ -183,12 +184,13 @@ impl ChromaError for GrpcLogError {
 }
 
 #[async_trait]
-impl Configurable<GrpcLogConfig> for GrpcLog {
+impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
     async fn try_from_config(
-        my_config: &GrpcLogConfig,
+        my_config: &(GrpcLogConfig, System),
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         // NOTE(rescrv):  This code is duplicated with primary_client_from_config below.  A transient hack.
+        let (my_config, system) = my_config;
         let host = &my_config.host;
         let port = &my_config.port;
         let max_encoding_message_size = my_config.max_encoding_message_size;
@@ -214,6 +216,7 @@ impl Configurable<GrpcLogConfig> for GrpcLog {
                 Ok(client)
             };
         let client = client_for_conn_str(connection_string)?;
+
         let alt_client = if let Some(alt_host) = my_config.alt_host.as_ref() {
             let connection_string = format!("http://{}:{}", alt_host, port);
             tracing::info!("connecting to alt host {connection_string}");
