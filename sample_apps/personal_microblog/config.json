@@ -1,0 +1,9 @@
+{
+	"required_env_variables": [
+		{ "name": "OPENAI_API_KEY", "secret": true }
+	],
+    "startup_commands": {
+    	"npm": "cd personal_microblog\nnpm install\nnpm run dev",
+    	"pnpm": "cd personal_microblog\npnpm install\npnpm dev"
+    }
+}
