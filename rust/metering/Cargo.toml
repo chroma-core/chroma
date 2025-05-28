@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 serde = { workspace = true }
-uuid = { workspace = true } 
 typetag = { workspace = true }
 tracing = { workspace = true }
 chroma-system = { workspace = true }

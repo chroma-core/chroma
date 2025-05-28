@@ -10,7 +10,6 @@ use std::{
 };
 use tokio::time::{sleep, Duration};
 use tracing::Span;
-use uuid::Uuid;
 
 use crate::{attach_all, attach_top, close_all, close_top, open, MeterEvent, MeterEventData};
 
@@ -112,7 +111,7 @@ async fn test_guard_drop_submits_event() {
         let _event_guard = open(
             "tenant1".into(),
             "database1".into(),
-            Uuid::new_v4(),
+            "collection_uuid".into(),
             ReceivedAndCompleted {
                 request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
                 request_completed_at_timestamp: Some(
@@ -152,7 +151,7 @@ async fn test_close_top_only_submits_most_recent_event() {
     let first_event_guard = open(
         "tenant2".into(),
         "database2".into(),
-        Uuid::new_v4(),
+        "collection_uuid".into(),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(1).unwrap(),
             request_completed_at_timestamp: Some(
@@ -163,7 +162,7 @@ async fn test_close_top_only_submits_most_recent_event() {
     let _second_event_guard = open(
         "tenant2".into(),
         "database2".into(),
-        Uuid::new_v4(),
+        "collection_uuid".into(),
         CompletedOnly {
             request_completed_at_timestamp: Some(
                 DateTime::<Utc>::from_timestamp_millis(2).unwrap(),
@@ -209,7 +208,7 @@ async fn test_close_all_submits_events_in_lifo_order() {
     let _first_guard = open(
         "tenant3".into(),
         "database3".into(),
-        Uuid::new_v4(),
+        "collection_uuid".into(),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(10).unwrap(),
             request_completed_at_timestamp: Some(
@@ -220,7 +219,7 @@ async fn test_close_all_submits_events_in_lifo_order() {
     let _second_guard = open(
         "tenant3".into(),
         "database3".into(),
-        Uuid::new_v4(),
+        "collection_uuid".into(),
         CompletedOnly {
             request_completed_at_timestamp: Some(
                 DateTime::<Utc>::from_timestamp_millis(20).unwrap(),
@@ -256,7 +255,7 @@ async fn test_attach_all_increments_all_completion_timestamps() {
     let first_event_guard = open(
         "tenant4".into(),
         "database4".into(),
-        Uuid::new_v4(),
+        "collection_uuid".into(),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
             request_completed_at_timestamp: Some(
@@ -267,7 +266,7 @@ async fn test_attach_all_increments_all_completion_timestamps() {
     let _second_event_guard = open(
         "tenant4".into(),
         "database4".into(),
-        Uuid::new_v4(),
+        "collection_uuid".into(),
         CompletedOnly {
             request_completed_at_timestamp: Some(
                 DateTime::<Utc>::from_timestamp_millis(7).unwrap(),
@@ -334,7 +333,7 @@ async fn test_attach_top_and_attach_all_affect_received_timestamp_correctly() {
     let first_event_guard = open(
         "tenant5".into(),
         "database5".into(),
-        Uuid::new_v4(),
+        "collection_uuid".into(),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
             request_completed_at_timestamp: Some(
@@ -345,7 +344,7 @@ async fn test_attach_top_and_attach_all_affect_received_timestamp_correctly() {
     let _second_event_guard = open(
         "tenant5".into(),
         "database5".into(),
-        Uuid::new_v4(),
+        "collection_uuid".into(),
         CompletedOnly {
             request_completed_at_timestamp: Some(
                 DateTime::<Utc>::from_timestamp_millis(0).unwrap(),

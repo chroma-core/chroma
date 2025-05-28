@@ -10,7 +10,6 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 use tracing::Span;
-use uuid::Uuid;
 
 /// Trait representing the payload data for a metering event.
 ///
@@ -57,7 +56,7 @@ pub struct MeterEvent {
     /// Identifier for the database.
     pub database: String,
     /// UUID of the collection to which this event pertains.
-    pub collection_id: Uuid,
+    pub collection_id: String,
     /// User-defined payload data for this event.
     #[serde(flatten)]
     pub data: Box<dyn MeterEventData>,
@@ -112,7 +111,7 @@ impl MeterEventGuard {
     pub fn open<T: MeterEventData>(
         tenant: String,
         database: String,
-        collection_id: Uuid,
+        collection_id: String,
         data: T,
     ) -> Self {
         let meter_event = MeterEvent {
@@ -177,7 +176,7 @@ impl Drop for MeterEventGuard {
 pub fn open<T: MeterEventData>(
     tenant: String,
     database: String,
-    collection_id: Uuid,
+    collection_id: String,
     data: T,
 ) -> MeterEventGuard {
     MeterEventGuard::open(tenant, database, collection_id, data)
