@@ -1,15 +1,11 @@
 use async_trait::async_trait;
 
 use chroma_system::Operator;
+use chroma_types::operator::{KnnMerge, KnnMergeInput, KnnOutput, RecordDistance};
 use thiserror::Error;
-
-use super::knn::RecordDistance;
 
 /// The `KnnMergeOperator` selects the records nearest to target from the two vectors of records
 /// which are both sorted by distance in ascending order
-///
-/// # Parameters
-/// - `fetch`: The total number of records to fetch
 ///
 /// # Inputs
 /// - `first_distances`: The first vector of records, sorted by distance in ascending order
@@ -20,20 +16,11 @@ use super::knn::RecordDistance;
 ///
 /// # Usage
 /// It can be used to merge the nearest results from the log and the vector segment
-#[derive(Clone, Debug)]
-pub struct KnnMergeOperator {
-    pub fetch: u32,
-}
 
 #[derive(Debug)]
-pub struct KnnMergeInput {
+pub struct KnnBinaryMergeInput {
     pub first_distances: Vec<RecordDistance>,
     pub second_distances: Vec<RecordDistance>,
-}
-
-#[derive(Debug)]
-pub struct KnnMergeOutput {
-    pub record_distances: Vec<RecordDistance>,
 }
 
 #[derive(Error, Debug)]
@@ -41,46 +28,16 @@ pub struct KnnMergeOutput {
 pub struct KnnMergeError;
 
 #[async_trait]
-impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
+impl Operator<KnnBinaryMergeInput, KnnOutput> for KnnMerge {
     type Error = KnnMergeError;
 
-    async fn run(&self, input: &KnnMergeInput) -> Result<KnnMergeOutput, KnnMergeError> {
-        let mut fetch = self.fetch;
-        let mut first_index = 0;
-        let mut second_index = 0;
-
-        let mut merged_distance = Vec::new();
-
-        while fetch > 0 {
-            let first_dist = input.first_distances.get(first_index);
-            let second_dist = input.second_distances.get(second_index);
-
-            match (first_dist, second_dist) {
-                (Some(fdist), Some(sdist)) => {
-                    if fdist.measure < sdist.measure {
-                        merged_distance.push(fdist.clone());
-                        first_index += 1;
-                    } else {
-                        merged_distance.push(sdist.clone());
-                        second_index += 1;
-                    }
-                }
-                (None, Some(dist)) => {
-                    merged_distance.push(dist.clone());
-                    second_index += 1;
-                }
-                (Some(dist), None) => {
-                    merged_distance.push(dist.clone());
-                    first_index += 1;
-                }
-                _ => break,
-            }
-            fetch -= 1;
-        }
-
-        Ok(KnnMergeOutput {
-            record_distances: merged_distance,
-        })
+    async fn run(&self, input: &KnnBinaryMergeInput) -> Result<KnnOutput, KnnMergeError> {
+        Ok(self.merge(KnnMergeInput {
+            batch_distances: vec![
+                input.first_distances.clone(),
+                input.second_distances.clone(),
+            ],
+        }))
     }
 }
 
@@ -89,14 +46,14 @@ mod tests {
     use crate::execution::operators::{knn::RecordDistance, knn_merge::KnnMergeOperator};
     use chroma_system::Operator;
 
-    use super::KnnMergeInput;
+    use super::KnnBinaryMergeInput;
 
     /// The unit tests for `KnnMergeOperator` uses the following test data
     /// It generates records where the distance to target is the same as value of offset
     /// - First: 4, 8, ..., 100
     /// - Second: 1, 3, ..., 99
-    fn setup_knn_merge_input() -> KnnMergeInput {
-        KnnMergeInput {
+    fn setup_knn_merge_input() -> KnnBinaryMergeInput {
+        KnnBinaryMergeInput {
             first_distances: (1..=100)
                 .filter_map(|offset_id| {
                     (offset_id % 4 == 0).then_some(RecordDistance {
