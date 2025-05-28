@@ -1,0 +1,13 @@
+[package]
+name = "chroma-metering"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+uuid = { workspace = true } 
+typetag = "0.2.20"
+tracing = { workspace = true }
+chroma-system = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }

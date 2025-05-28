@@ -1152,7 +1152,8 @@ async fn fork_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<ForkCollectionPayload>,
 ) -> Result<Json<ForkCollectionResponse>, ServerError> {
-    let request_received_at_timestamp = Utc::now();
+    metering::begin(RequestType::ForkCollection); // similar to tracing::span(Level::INFO)
+    metering::attach(request_received_at_timestamp = Utc::now()); // under the hood performs some validation to ensure that request_received_at_timestamp is a valid field on RequestType::ForkCollection
 
     server.metrics.fork_collection.add(
         1,

@@ -16,6 +16,7 @@ members = [
     "rust/log",
     "rust/log-service",
     "rust/memberlist",
+    "rust/metering",
     "rust/storage",
     "rust/system",
     "rust/sysdb",
