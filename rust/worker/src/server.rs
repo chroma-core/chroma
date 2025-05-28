@@ -434,7 +434,6 @@ mod tests {
     use chroma_log::in_memory_log::InMemoryLog;
     use chroma_segment::test::TestDistributedSegment;
     use chroma_sysdb::TestSysDb;
-    use chroma_system::system;
     use chroma_system::DispatcherConfig;
     use chroma_types::chroma_proto;
     #[cfg(debug_assertions)]
