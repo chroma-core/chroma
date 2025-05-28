@@ -624,7 +624,7 @@ mod tests {
     }
 
     #[test]
-    fn three_rules() {
+    fn three_patterns() {
         // Test an exact pattern-based override.
         let metrics = TestMetrics::default();
         let sc = Scorecard::new(
