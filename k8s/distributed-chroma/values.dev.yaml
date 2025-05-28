@@ -33,3 +33,6 @@ compactionService:
       value: 'value: "1"'
     - name: CONFIG_PATH
       value: 'value: "/tilt_config.yaml"'
+
+rustLogService:
+  replicaCount: 2
