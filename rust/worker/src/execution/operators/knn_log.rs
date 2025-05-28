@@ -9,13 +9,13 @@ use chroma_segment::{
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
-use chroma_types::{MaterializedLogOperation, Segment, SignedRoaringBitmap};
+use chroma_types::{
+    operator::{Knn, KnnOutput, RecordDistance},
+    MaterializedLogOperation, Segment, SignedRoaringBitmap,
+};
 use thiserror::Error;
 
-use super::{
-    fetch_log::{FetchLogError, FetchLogOutput},
-    knn::{KnnOperator, RecordDistance},
-};
+use super::fetch_log::{FetchLogError, FetchLogOutput};
 
 #[derive(Clone, Debug)]
 pub struct KnnLogInput {
@@ -24,11 +24,6 @@ pub struct KnnLogInput {
     pub record_segment: Segment,
     pub log_offset_ids: SignedRoaringBitmap,
     pub distance_function: DistanceFunction,
-}
-
-#[derive(Debug)]
-pub struct KnnLogOutput {
-    pub record_distances: Vec<RecordDistance>,
 }
 
 #[derive(Error, Debug)]
@@ -52,10 +47,10 @@ impl ChromaError for KnnLogError {
 }
 
 #[async_trait]
-impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
+impl Operator<KnnLogInput, KnnOutput> for Knn {
     type Error = KnnLogError;
 
-    async fn run(&self, input: &KnnLogInput) -> Result<KnnLogOutput, KnnLogError> {
+    async fn run(&self, input: &KnnLogInput) -> Result<KnnOutput, KnnLogError> {
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
@@ -118,8 +113,8 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
                 }
             }
         }
-        Ok(KnnLogOutput {
-            record_distances: max_heap.into_sorted_vec(),
+        Ok(KnnOutput {
+            distances: max_heap.into_sorted_vec(),
         })
     }
 }

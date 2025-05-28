@@ -11,7 +11,7 @@ use crate::execution::operators::{
     knn::{KnnOperator, RecordDistance},
     knn_hnsw::{KnnHnswError, KnnHnswInput, KnnHnswOutput},
     knn_log::{KnnLogError, KnnLogInput, KnnLogOutput},
-    knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOperator, KnnMergeOutput},
+    knn_merge::{KnnBinaryMergeInput, KnnMergeError, KnnMergeOperator, KnnMergeOutput},
     knn_projection::{
         KnnProjectionError, KnnProjectionInput, KnnProjectionOperator, KnnProjectionOutput,
     },
@@ -167,7 +167,7 @@ impl KnnOrchestrator {
         ) {
             let task = wrap(
                 Box::new(self.merge.clone()),
-                KnnMergeInput {
+                KnnBinaryMergeInput {
                     first_distances: log_distances.clone(),
                     second_distances: segment_distances.clone(),
                 },

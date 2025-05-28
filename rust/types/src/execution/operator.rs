@@ -301,13 +301,13 @@ pub struct KnnMergeInput {
     pub batch_distances: Vec<Vec<RecordDistance>>,
 }
 
-#[derive(Debug)]
-pub struct KnnMergeOutput {
+#[derive(Debug, Default)]
+pub struct KnnOutput {
     pub distances: Vec<RecordDistance>,
 }
 
 impl KnnMerge {
-    pub fn merge(&self, input: KnnMergeInput) -> KnnMergeOutput {
+    pub fn merge(&self, input: KnnMergeInput) -> KnnOutput {
         let mut batch_iters = input
             .batch_distances
             .into_iter()
@@ -336,7 +336,7 @@ impl KnnMerge {
                 break;
             }
         }
-        KnnMergeOutput { distances }
+        KnnOutput { distances }
     }
 }
 

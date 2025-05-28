@@ -8,17 +8,15 @@ use chroma_segment::{
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
-use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap};
+use chroma_types::{
+    operator::Limit, Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap,
+};
 use futures::StreamExt;
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
 /// The `LimitOperator` selects a range or records sorted by their offset ids
-///
-/// # Parameters
-/// - `skip`: The number of records to skip in the beginning
-/// - `fetch`: The number of records to fetch after `skip`
 ///
 /// # Inputs
 /// - `logs`: The latest logs of the collection
@@ -32,11 +30,6 @@ use tracing::{Instrument, Span};
 ///
 /// # Usage
 /// It can be used to derive the range of offset ids that should be used by the next operator
-#[derive(Clone, Debug)]
-pub struct LimitOperator {
-    pub skip: u32,
-    pub fetch: Option<u32>,
-}
 
 #[derive(Clone, Debug)]
 pub struct LimitInput {
@@ -184,7 +177,7 @@ impl SeekScanner<'_> {
 }
 
 #[async_trait]
-impl Operator<LimitInput, LimitOutput> for LimitOperator {
+impl Operator<LimitInput, LimitOutput> for Limit {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
