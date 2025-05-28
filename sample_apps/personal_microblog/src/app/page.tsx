@@ -53,7 +53,7 @@ export default function Home() {
   );
 
   return (
-    <div className="flex flex-row justify-center py-20 bg-white  mb-48">
+    <div className="flex flex-row justify-center py-20 bg-white text-sm mb-48">
       <div className="flex flex-col justify-between items-stretch gap-4 w-[500px] max-w-[calc(100dvw-32px)]">
         <TweetPrompt
           onSubmit={(input) => {

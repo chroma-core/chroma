@@ -52,16 +52,23 @@ export default function TweetPrompt(props: TweetPromptProps) {
       }
     }
   }
-
   const outlineVariants = {
     outlineWidth: glow ? 2 : 0,
-    boxShadow: glow ? "0 0 0 4px #ffb4b4" : "none",
+    boxShadow: glow ? "0 0 0 6px #ffb4b4" : "none",
+    y: glow ? -4 : 0, // Add vertical movement when glowing
   };
 
   return (
     <motion.div
       animate={outlineVariants}
-      transition={{ duration: 0.2 }}
+      transition={{
+        duration: 0.2,
+        y: {
+          type: "spring",
+          stiffness: 300,
+          damping: 15,
+        },
+      }}
       className={`flex flex-col gap-2 relative items-end w-full bg-zinc-100 rounded-md px-2 py-1.5 w-full outline-none text-zinc-800`}
     >
       <span
