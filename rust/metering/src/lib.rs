@@ -35,14 +35,15 @@ pub trait MeterEventData: Debug + Send + Sync + 'static {
     // functions information about the nature of their callers.
     fn set_request_received_at_timestamp(
         &mut self,
-        _applicator: &mut dyn FnMut(&mut DateTime<Utc>),
+        _setter_fn: &mut dyn FnMut(&mut DateTime<Utc>),
     ) {
     }
     fn set_request_completed_at_timestamp(
         &mut self,
-        _applicator: &mut dyn FnMut(&mut DateTime<Utc>),
+        _setter_fn: &mut dyn FnMut(&mut Option<DateTime<Utc>>),
     ) {
     }
+    fn set_request_execution_time_ns(&mut self, _setter_fn: &mut dyn FnMut(&mut Option<u128>)) {}
 }
 
 /// Core structure representing a single metering event.
@@ -112,13 +113,13 @@ impl MeterEventGuard {
         tenant: String,
         database: String,
         collection_id: Uuid,
-        payload_data: T,
+        data: T,
     ) -> Self {
         let meter_event = MeterEvent {
             tenant,
             database,
             collection_id,
-            data: Box::new(payload_data),
+            data: Box::new(data),
         };
         let meter_event_handle = Arc::new(Mutex::new(meter_event));
 
@@ -177,9 +178,9 @@ pub fn open<T: MeterEventData>(
     tenant: String,
     database: String,
     collection_id: Uuid,
-    payload_data: T,
+    data: T,
 ) -> MeterEventGuard {
-    MeterEventGuard::open(tenant, database, collection_id, payload_data)
+    MeterEventGuard::open(tenant, database, collection_id, data)
 }
 
 /// Apply a mutation to the payload of the most recently opened event, if any.

@@ -18,7 +18,7 @@ use crate::{attach_all, attach_top, close_all, close_top, open, MeterEvent, Mete
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct ReceivedAndCompleted {
     pub request_received_at_timestamp: DateTime<Utc>,
-    pub request_completed_at_timestamp: DateTime<Utc>,
+    pub request_completed_at_timestamp: Option<DateTime<Utc>>,
 }
 
 #[typetag::serde]
@@ -26,18 +26,21 @@ impl MeterEventData for ReceivedAndCompleted {
     fn as_any(&mut self) -> &mut dyn Any {
         self
     }
-    fn set_request_received_at_timestamp(&mut self, adjuster: &mut dyn FnMut(&mut DateTime<Utc>)) {
-        adjuster(&mut self.request_received_at_timestamp);
+    fn set_request_received_at_timestamp(&mut self, setter_fn: &mut dyn FnMut(&mut DateTime<Utc>)) {
+        setter_fn(&mut self.request_received_at_timestamp);
     }
-    fn set_request_completed_at_timestamp(&mut self, adjuster: &mut dyn FnMut(&mut DateTime<Utc>)) {
-        adjuster(&mut self.request_completed_at_timestamp);
+    fn set_request_completed_at_timestamp(
+        &mut self,
+        setter_fn: &mut dyn FnMut(&mut Option<DateTime<Utc>>),
+    ) {
+        setter_fn(&mut self.request_completed_at_timestamp);
     }
 }
 
 /// Payload containing only the request-completed timestamp.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct CompletedOnly {
-    pub request_completed_at_timestamp: DateTime<Utc>,
+    pub request_completed_at_timestamp: Option<DateTime<Utc>>,
 }
 
 #[typetag::serde]
@@ -45,8 +48,11 @@ impl MeterEventData for CompletedOnly {
     fn as_any(&mut self) -> &mut dyn Any {
         self
     }
-    fn set_request_completed_at_timestamp(&mut self, adjuster: &mut dyn FnMut(&mut DateTime<Utc>)) {
-        adjuster(&mut self.request_completed_at_timestamp);
+    fn set_request_completed_at_timestamp(
+        &mut self,
+        setter_fn: &mut dyn FnMut(&mut Option<DateTime<Utc>>),
+    ) {
+        setter_fn(&mut self.request_completed_at_timestamp);
     }
 }
 
@@ -109,7 +115,9 @@ async fn test_guard_drop_submits_event() {
             Uuid::new_v4(),
             ReceivedAndCompleted {
                 request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
-                request_completed_at_timestamp: DateTime::<Utc>::from_timestamp_millis(1).unwrap(),
+                request_completed_at_timestamp: Some(
+                    DateTime::<Utc>::from_timestamp_millis(1).unwrap(),
+                ),
             },
         );
     }
@@ -131,7 +139,7 @@ async fn test_guard_drop_submits_event() {
     );
     assert_eq!(
         data.request_completed_at_timestamp,
-        DateTime::<Utc>::from_timestamp_millis(1).unwrap()
+        Some(DateTime::<Utc>::from_timestamp_millis(1).unwrap())
     );
 }
 
@@ -147,7 +155,9 @@ async fn test_close_top_only_submits_most_recent_event() {
         Uuid::new_v4(),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(1).unwrap(),
-            request_completed_at_timestamp: DateTime::<Utc>::from_timestamp_millis(1).unwrap(),
+            request_completed_at_timestamp: Some(
+                DateTime::<Utc>::from_timestamp_millis(1).unwrap(),
+            ),
         },
     );
     let _second_event_guard = open(
@@ -155,7 +165,9 @@ async fn test_close_top_only_submits_most_recent_event() {
         "database2".into(),
         Uuid::new_v4(),
         CompletedOnly {
-            request_completed_at_timestamp: DateTime::<Utc>::from_timestamp_millis(2).unwrap(),
+            request_completed_at_timestamp: Some(
+                DateTime::<Utc>::from_timestamp_millis(2).unwrap(),
+            ),
         },
     );
 
@@ -200,7 +212,9 @@ async fn test_close_all_submits_events_in_lifo_order() {
         Uuid::new_v4(),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(10).unwrap(),
-            request_completed_at_timestamp: DateTime::<Utc>::from_timestamp_millis(30).unwrap(),
+            request_completed_at_timestamp: Some(
+                DateTime::<Utc>::from_timestamp_millis(30).unwrap(),
+            ),
         },
     );
     let _second_guard = open(
@@ -208,7 +222,9 @@ async fn test_close_all_submits_events_in_lifo_order() {
         "database3".into(),
         Uuid::new_v4(),
         CompletedOnly {
-            request_completed_at_timestamp: DateTime::<Utc>::from_timestamp_millis(20).unwrap(),
+            request_completed_at_timestamp: Some(
+                DateTime::<Utc>::from_timestamp_millis(20).unwrap(),
+            ),
         },
     );
 
@@ -243,7 +259,9 @@ async fn test_attach_all_increments_all_completion_timestamps() {
         Uuid::new_v4(),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
-            request_completed_at_timestamp: DateTime::<Utc>::from_timestamp_millis(5).unwrap(),
+            request_completed_at_timestamp: Some(
+                DateTime::<Utc>::from_timestamp_millis(5).unwrap(),
+            ),
         },
     );
     let _second_event_guard = open(
@@ -251,14 +269,20 @@ async fn test_attach_all_increments_all_completion_timestamps() {
         "database4".into(),
         Uuid::new_v4(),
         CompletedOnly {
-            request_completed_at_timestamp: DateTime::<Utc>::from_timestamp_millis(7).unwrap(),
+            request_completed_at_timestamp: Some(
+                DateTime::<Utc>::from_timestamp_millis(7).unwrap(),
+            ),
         },
     );
 
     // Increment completion timestamps on every open event by one day.
     attach_all(|data| {
         data.set_request_completed_at_timestamp(&mut |timestamp| {
-            *timestamp = timestamp.checked_add_days(Days::new(1)).unwrap()
+            *timestamp = if let Some(timestamp) = timestamp {
+                Some(timestamp.checked_add_days(Days::new(1)).unwrap())
+            } else {
+                None
+            }
         });
     });
 
@@ -276,10 +300,12 @@ async fn test_attach_all_increments_all_completion_timestamps() {
         .unwrap();
     assert_eq!(
         completed_only_data.request_completed_at_timestamp,
-        DateTime::<Utc>::from_timestamp_millis(7)
-            .unwrap()
-            .checked_add_days(Days::new(1))
-            .unwrap()
+        Some(
+            DateTime::<Utc>::from_timestamp_millis(7)
+                .unwrap()
+                .checked_add_days(Days::new(1))
+                .unwrap()
+        )
     );
     // Then the ReceivedAndCompleted payload with +1 day on completion.
     let received_and_completed_data = submitted_events[1]
@@ -289,10 +315,12 @@ async fn test_attach_all_increments_all_completion_timestamps() {
         .unwrap();
     assert_eq!(
         received_and_completed_data.request_completed_at_timestamp,
-        DateTime::<Utc>::from_timestamp_millis(5)
-            .unwrap()
-            .checked_add_days(Days::new(1))
-            .unwrap()
+        Some(
+            DateTime::<Utc>::from_timestamp_millis(5)
+                .unwrap()
+                .checked_add_days(Days::new(1))
+                .unwrap()
+        )
     );
 }
 
@@ -309,7 +337,9 @@ async fn test_attach_top_and_attach_all_affect_received_timestamp_correctly() {
         Uuid::new_v4(),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
-            request_completed_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
+            request_completed_at_timestamp: Some(
+                DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
+            ),
         },
     );
     let _second_event_guard = open(
@@ -317,7 +347,9 @@ async fn test_attach_top_and_attach_all_affect_received_timestamp_correctly() {
         "database5".into(),
         Uuid::new_v4(),
         CompletedOnly {
-            request_completed_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
+            request_completed_at_timestamp: Some(
+                DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
+            ),
         },
     );
 
