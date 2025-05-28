@@ -9,7 +9,6 @@ uuid = { workspace = true }
 typetag = { workspace = true }
 tracing = { workspace = true }
 chroma-system = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 chrono = { workspace = true }
 

@@ -1,3 +1,6 @@
+pub mod errors;
+
+use crate::errors::MeteringError;
 use chroma_system::ReceiverForMessage;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -39,11 +42,11 @@ pub trait MeterEventData: Debug + Send + Sync + 'static {
 /// and the payload data implementing `MeterEventData`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MeterEvent {
-    /// Identifier for the tenant or namespace.
+    /// Identifier for the tenant.
     pub tenant: String,
-    /// Identifier for the database associated with this event.
+    /// Identifier for the database.
     pub database: String,
-    /// UUID of the collection this event pertains to.
+    /// UUID of the collection to which this event pertains.
     pub collection_id: Uuid,
     /// User-defined payload data for this event.
     #[serde(flatten)]
@@ -60,17 +63,23 @@ pub static METER_EVENT_RECEIVER: OnceLock<Box<dyn ReceiverForMessage<MeterEvent>
 impl MeterEvent {
     /// Initialize the global receiver for meter events.
     ///
-    /// Calling this more than once has no effect.
+    /// If called more than once, logs an error.
     pub fn init_receiver(receiver: Box<dyn ReceiverForMessage<MeterEvent>>) {
-        let _ = METER_EVENT_RECEIVER.set(receiver);
+        if let Err(_) = METER_EVENT_RECEIVER.set(receiver) {
+            tracing::error!("{}", MeteringError::ReceiverAlreadyInitialized);
+        }
     }
 
     /// Submit this event to the configured receiver.
     ///
-    /// If no receiver has been initialized, this is a no-op.
+    /// Logs an error if no receiver is set or if sending fails.
     pub async fn submit(self) {
-        if let Some(meter_event_receiver) = METER_EVENT_RECEIVER.get() {
-            let _ = meter_event_receiver.send(self, Some(Span::current())).await;
+        if let Some(event_receiver) = METER_EVENT_RECEIVER.get() {
+            if let Err(send_error) = event_receiver.send(self, Some(Span::current())).await {
+                tracing::error!("Failed to send MeterEvent: {:?}", send_error);
+            }
+        } else {
+            tracing::error!("{}", MeteringError::ReceiverNotInitialized);
         }
     }
 }
@@ -96,17 +105,25 @@ impl MeterEventGuard {
         collection_id: Uuid,
         payload_data: T,
     ) -> Self {
-        let new_event = MeterEvent {
+        let meter_event = MeterEvent {
             tenant,
             database,
             collection_id,
             data: Box::new(payload_data),
         };
-        let meter_event_handle = Arc::new(Mutex::new(new_event));
+        let meter_event_handle = Arc::new(Mutex::new(meter_event));
+
         METER_EVENT_STACK.with(|meter_event_stack| {
-            let mut meter_event_stack_locked = meter_event_stack.lock().unwrap();
+            let mut meter_event_stack_locked = match meter_event_stack.lock() {
+                Ok(meter_event_stack_locked) => meter_event_stack_locked,
+                Err(err) => {
+                    tracing::error!("{}", MeteringError::MutexLockError(err.to_string()));
+                    return;
+                }
+            };
             meter_event_stack_locked.push(meter_event_handle.clone());
         });
+
         MeterEventGuard
     }
 }
@@ -114,17 +131,31 @@ impl MeterEventGuard {
 impl Drop for MeterEventGuard {
     fn drop(&mut self) {
         // Pop the most recent event from the stack and submit it.
-        if let Some(meter_event_handle) =
-            METER_EVENT_STACK.with(|meter_event_stack| meter_event_stack.lock().unwrap().pop())
-        {
-            if let Ok(meter_event) = Arc::try_unwrap(meter_event_handle)
-                .map_err(|_| ())
-                .and_then(|meter_event_guard| meter_event_guard.into_inner().map_err(|_| ()))
-            {
-                // Spawn an async task to submit without blocking.
-                tokio::spawn(async move {
-                    meter_event.submit().await;
-                });
+        let maybe_meter_event_handle =
+            METER_EVENT_STACK.with(|meter_event_stack| match meter_event_stack.lock() {
+                Ok(mut meter_event_stack_locked) => meter_event_stack_locked.pop(),
+                Err(err) => {
+                    tracing::error!("{}", MeteringError::MutexLockError(err.to_string()));
+                    None
+                }
+            });
+
+        if let Some(meter_event_handle) = maybe_meter_event_handle {
+            match Arc::try_unwrap(meter_event_handle)
+                .map_err(|_| MeteringError::ArcUnwrapError)
+                .and_then(|meter_event_guard| {
+                    meter_event_guard
+                        .into_inner()
+                        .map_err(|err| MeteringError::MutexLockError(err.to_string()))
+                }) {
+                Ok(event) => {
+                    tokio::spawn(async move {
+                        event.submit().await;
+                    });
+                }
+                Err(err) => {
+                    tracing::error!("Failed to unwrap MeterEvent: {}", err);
+                }
             }
         }
     }
@@ -145,10 +176,19 @@ pub fn open<T: MeterEventData>(
 /// Apply a mutation to the payload of the most recently opened event, if any.
 pub fn attach_top(mutator: impl FnOnce(&mut dyn MeterEventData)) {
     METER_EVENT_STACK.with(|meter_event_stack| {
-        let meter_event_stack_locked = meter_event_stack.lock().unwrap();
+        let meter_event_stack_locked = match meter_event_stack.lock() {
+            Ok(meter_event_stack_locked) => meter_event_stack_locked,
+            Err(err) => {
+                tracing::error!("{}", MeteringError::MutexLockError(err.to_string()));
+                return;
+            }
+        };
         if let Some(meter_event_handle) = meter_event_stack_locked.last() {
-            if let Ok(mut meter_event_locked) = meter_event_handle.lock() {
-                mutator(&mut *meter_event_locked.data);
+            match meter_event_handle.lock() {
+                Ok(mut meter_event) => mutator(&mut *meter_event.data),
+                Err(err) => {
+                    tracing::error!("{}", MeteringError::MutexLockError(err.to_string()));
+                }
             }
         }
     });
@@ -157,10 +197,19 @@ pub fn attach_top(mutator: impl FnOnce(&mut dyn MeterEventData)) {
 /// Apply a mutation to the payload of all currently open events on the stack.
 pub fn attach_all(mutator: impl Fn(&mut dyn MeterEventData)) {
     METER_EVENT_STACK.with(|meter_event_stack| {
-        let meter_event_stack_locked = meter_event_stack.lock().unwrap();
+        let meter_event_stack_locked = match meter_event_stack.lock() {
+            Ok(meter_event_stack_locked) => meter_event_stack_locked,
+            Err(err) => {
+                tracing::error!("{}", MeteringError::MutexLockError(err.to_string()));
+                return;
+            }
+        };
         for meter_event_handle in meter_event_stack_locked.iter() {
-            if let Ok(mut meter_event_locked) = meter_event_handle.lock() {
-                mutator(&mut *meter_event_locked.data);
+            match meter_event_handle.lock() {
+                Ok(mut meter_event) => mutator(&mut *meter_event.data),
+                Err(err) => {
+                    tracing::error!("{}", MeteringError::MutexLockError(err.to_string()));
+                }
             }
         }
     });
@@ -170,14 +219,25 @@ pub fn attach_all(mutator: impl Fn(&mut dyn MeterEventData)) {
 ///
 /// Runs the submission immediately in the current async context.
 pub async fn close_top() {
-    if let Some(meter_event_handle) =
-        METER_EVENT_STACK.with(|meter_event_stack| meter_event_stack.lock().unwrap().pop())
-    {
-        if let Ok(meter_event) = Arc::try_unwrap(meter_event_handle)
-            .map_err(|_| ())
-            .and_then(|meter_event_guard| meter_event_guard.into_inner().map_err(|_| ()))
-        {
-            meter_event.submit().await;
+    let maybe_top_meter_event_handle =
+        METER_EVENT_STACK.with(|meter_event_stack| match meter_event_stack.lock() {
+            Ok(mut meter_event_stack_locked) => meter_event_stack_locked.pop(),
+            Err(err) => {
+                tracing::error!("{}", MeteringError::MutexLockError(err.to_string()));
+                None
+            }
+        });
+
+    if let Some(top_meter_event_handle) = maybe_top_meter_event_handle {
+        match Arc::try_unwrap(top_meter_event_handle)
+            .map_err(|_| MeteringError::ArcUnwrapError)
+            .and_then(|meter_event_guard| {
+                meter_event_guard
+                    .into_inner()
+                    .map_err(|err| MeteringError::MutexLockError(err.to_string()))
+            }) {
+            Ok(meter_event) => meter_event.submit().await,
+            Err(err) => tracing::error!("Failed to close top MeterEvent: {}", err),
         }
     }
 }
@@ -186,22 +246,33 @@ pub async fn close_top() {
 ///
 /// Each submission runs sequentially in this async context.
 pub async fn close_all() {
-    // Drain the thread-local stack into a vector.
-    let mut meter_event_handles_to_submit = Vec::new();
-    METER_EVENT_STACK.with(|meter_event_stack| {
-        let mut meter_event_stack_locked = meter_event_stack.lock().unwrap();
-        while let Some(meter_event_handle) = meter_event_stack_locked.pop() {
-            meter_event_handles_to_submit.push(meter_event_handle);
-        }
-    });
+    // Pop all events into a vector in LIFO order.
+    let meter_event_handles =
+        METER_EVENT_STACK.with(|meter_event_stack| match meter_event_stack.lock() {
+            Ok(mut meter_event_stack_locked) => {
+                let mut meter_event_stack_owned = Vec::new();
+                while let Some(meter_event_handle) = meter_event_stack_locked.pop() {
+                    meter_event_stack_owned.push(meter_event_handle);
+                }
+                meter_event_stack_owned
+            }
+            Err(err) => {
+                tracing::error!("{}", MeteringError::MutexLockError(err.to_string()));
+                Vec::new()
+            }
+        });
 
-    // Submit each event one by one.
-    for meter_event_handle in meter_event_handles_to_submit {
-        if let Ok(meter_event) = Arc::try_unwrap(meter_event_handle)
-            .map_err(|_| ())
-            .and_then(|meter_event_guard| meter_event_guard.into_inner().map_err(|_| ()))
-        {
-            meter_event.submit().await;
+    // Submit each event one by one in that order.
+    for meter_event_handle in meter_event_handles {
+        match Arc::try_unwrap(meter_event_handle)
+            .map_err(|_| MeteringError::ArcUnwrapError)
+            .and_then(|meter_event_guard| {
+                meter_event_guard
+                    .into_inner()
+                    .map_err(|err| MeteringError::MutexLockError(err.to_string()))
+            }) {
+            Ok(meter_event) => meter_event.submit().await,
+            Err(err) => tracing::error!("Failed to close MeterEvent: {}", err),
         }
     }
 }
