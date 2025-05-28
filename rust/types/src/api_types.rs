@@ -82,7 +82,7 @@ impl ChromaError for GetCollectionWithSegmentsError {
             GetCollectionWithSegmentsError::CollectionConversionError(
                 collection_conversion_error,
             ) => collection_conversion_error.code(),
-            GetCollectionWithSegmentsError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            GetCollectionWithSegmentsError::DuplicateSegment => ErrorCodes::Internal,
             GetCollectionWithSegmentsError::Field(_) => ErrorCodes::FailedPrecondition,
             GetCollectionWithSegmentsError::SegmentConversionError(segment_conversion_error) => {
                 segment_conversion_error.code()
@@ -832,7 +832,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::CollectionConversionError(collection_conversion_error) => {
                 collection_conversion_error.code()
             }
-            ForkCollectionError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::DuplicateSegment => ErrorCodes::Internal,
             ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
             ForkCollectionError::Internal(chroma_error) => chroma_error.code(),
