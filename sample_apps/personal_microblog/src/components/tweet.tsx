@@ -12,6 +12,9 @@ import remarkHtml from "remark-html";
 
 import styles from "./tweet.module.css";
 import { useAnimatedText } from "./animated-text";
+import { randomBytes, randomInt } from "crypto";
+
+const iconSize = 20;
 
 interface TweetProps {
   tweet: PostModel;
@@ -49,7 +52,7 @@ export function Tweet({ tweet }: TweetProps) {
                 ? "Remembering..."
                 : reply.status == "error"
                 ? "[Error]"
-                : animatedText
+                : animatedText ?? ""
             }
           />
         </div>
@@ -69,9 +72,9 @@ function TweetInner({
   body: string;
   className?: string;
 }) {
+  const [rendering, setRendering] = useState(true);
   const [htmlBody, setHtmlBody] = useState(body);
 
-  const iconSize = 20;
   const icon =
     role === "user" ? (
       <AiOutlineUser size={iconSize} />
@@ -85,6 +88,7 @@ function TweetInner({
       .use(remarkCustom)
       .process(body)
       .then((result) => {
+        setRendering(false);
         setHtmlBody(result.toString());
       });
   }, [body]);
@@ -92,23 +96,31 @@ function TweetInner({
   return (
     <div className="w-full flex flex-row gap-4">
       <div className="pt-[.1em]">{icon}</div>
-      <div
-        className={`w-full ${styles.tweetBody} ${className}`}
-        dangerouslySetInnerHTML={{ __html: htmlBody }}
-      ></div>
+      {rendering ? (
+        <div className="flex flex-col w-full items-stretch gap-2">
+          <div className="h-4 bg-gray-300 rounded-full animate-pulse"></div>
+          <div className="h-4 bg-gray-300 rounded-full animate-pulse mr-5"></div>
+        </div>
+      ) : (
+        <div
+          className={`w-full ${styles.tweetBody} ${className}`}
+          dangerouslySetInnerHTML={{ __html: htmlBody }}
+        ></div>
+      )}
     </div>
   );
 }
-
 export function TweetSkeleton() {
   return (
     <div className="w-full flex flex-row gap-4">
       <div className="pt-[.2em]">
-        <AiOutlineUser />
+        <AiOutlineUser size={iconSize} />
       </div>
       <div className="flex flex-col w-full items-stretch gap-2">
-        <div className="h-4 bg-gray-300 rounded-full animate-pulse"></div>
-        <div className="h-4 bg-gray-300 rounded-full animate-pulse mr-5"></div>
+        <div className={`h-4 bg-gray-300 rounded-full animate-pulse mr-1`} />
+        <div className={`h-4 bg-gray-300 rounded-full animate-pulse mr-2`} />
+        <div className={`h-4 bg-gray-300 rounded-full animate-pulse mr-4`} />
+        <div className={`h-4 bg-gray-300 rounded-full animate-pulse mr-1`} />
       </div>
     </div>
   );

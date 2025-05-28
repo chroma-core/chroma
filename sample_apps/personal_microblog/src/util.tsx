@@ -28,7 +28,7 @@ export function remarkCustom() {
    * @param {Root} tree
    * @return {undefined}
    */
-  function visit(tree: { children: any; type: string; value?: string }) {
+  function visit(tree: { children: any; type: string; value: string }) {
     console.log(tree);
     if (tree.type == "code") {
       tree.value = tree.value.trim();
