@@ -22,6 +22,7 @@ pyo3 = { workspace = true, optional = true }
 validator = { workspace = true }
 regex = { workspace = true }
 regex-syntax = { workspace = true }
+typetag = { workspace = true }
 utoipa = { workspace = true }
 
 # (Cross-crate testing dependencies)
@@ -30,6 +31,7 @@ proptest-derive = { workspace = true, optional = true }
 
 chroma-error = { workspace = true, features = ["tonic", "validator"] }
 chroma-config = { workspace = true }
+chroma-metering = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.10"

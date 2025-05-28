@@ -76,6 +76,7 @@ tracing = { version = "0.1" }
 tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+typetag = "0.2.20"
 uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
 utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid", "chrono"] }
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite"] }
@@ -105,6 +106,7 @@ chroma-error = { path = "rust/error" }
 chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
+chroma-metering = { path = "rust/metering" }
 chroma-memberlist = { path = "rust/memberlist" }
 chroma-segment = { path = "rust/segment" }
 chroma-storage = { path = "rust/storage" }

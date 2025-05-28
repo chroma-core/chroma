@@ -602,7 +602,6 @@ impl ServiceBasedFrontend {
             database_name,
             source_collection_id,
             target_collection_name,
-            received_at_timestamp: request_received_at_timestamp,
             ..
         }: ForkCollectionRequest,
     ) -> Result<ForkCollectionResponse, ForkCollectionError> {

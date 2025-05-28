@@ -12,12 +12,13 @@ use chroma_types::{
     CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateMetadata, UpsertCollectionRecordsResponse,
+    ForkCollectionRecordsMeterEventData, GetCollectionRequest, GetDatabaseRequest,
+    GetDatabaseResponse, GetRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    GetUserIdentityResponse, HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    Metadata, QueryRequest, QueryResponse, UpdateCollectionConfiguration,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata,
+    UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use chrono::Utc;
@@ -1152,8 +1153,16 @@ async fn fork_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<ForkCollectionPayload>,
 ) -> Result<Json<ForkCollectionResponse>, ServerError> {
-    metering::begin(RequestType::ForkCollection); // similar to tracing::span(Level::INFO)
-    metering::attach(request_received_at_timestamp = Utc::now()); // under the hood performs some validation to ensure that request_received_at_timestamp is a valid field on RequestType::ForkCollection
+    let _meter_event_guard = chroma_metering::open(
+        tenant.clone(),
+        database.clone(),
+        collection_id.clone(),
+        ForkCollectionRecordsMeterEventData {
+            request_received_at_timestamp: Utc::now(),
+            request_completed_at_timestamp: None,
+            request_execution_time_ns: None,
+        },
+    );
 
     server.metrics.fork_collection.add(
         1,
@@ -1186,7 +1195,7 @@ async fn fork_collection(
     quota_payload = quota_payload.with_collection_name(&payload.new_name);
     server.quota_enforcer.enforce(&quota_payload).await?;
 
-    let _guard =
+    let _scorecard_guard =
         server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
 
     let request = chroma_types::ForkCollectionRequest::try_new(
@@ -1194,7 +1203,6 @@ async fn fork_collection(
         database,
         collection_id,
         payload.new_name,
-        request_received_at_timestamp,
     )?;
 
     Ok(Json(server.frontend.fork_collection(request).await?))
