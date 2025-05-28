@@ -28,7 +28,7 @@ use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
-/// The `FilterOperator` filters the collection with specified criteria
+/// The `Filter` operator filters the collection with specified criteria
 ///
 /// # Inputs
 /// - `logs`: The latest log of the collection
@@ -615,18 +615,17 @@ mod tests {
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_system::Operator;
     use chroma_types::{
-        BooleanOperator, Chunk, CollectionUuid, CompositeExpression, DocumentExpression, LogRecord,
-        MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue, Operation,
-        OperationRecord, PrimitiveOperator, SegmentUuid, SetOperator, SignedRoaringBitmap, Where,
+        operator::Filter, BooleanOperator, Chunk, CollectionUuid, CompositeExpression,
+        DocumentExpression, LogRecord, MetadataComparison, MetadataExpression, MetadataSetValue,
+        MetadataValue, Operation, OperationRecord, PrimitiveOperator, SegmentUuid, SetOperator,
+        SignedRoaringBitmap, Where,
     };
 
-    use crate::execution::operators::filter::{
-        FilterOperator, MetadataLogReader, MetadataProvider,
-    };
+    use crate::execution::operators::filter::{MetadataLogReader, MetadataProvider};
 
     use super::FilterInput;
 
-    /// The unit tests for `FilterOperator` uses the following test data
+    /// The unit tests for `Filter` operator uses the following test data
     /// It generates 120 log records, where the first 60 is compacted:
     /// - Log: Delete [11..=20], add [51..=100]
     /// - Compacted: Delete [1..=10] deletion, add [11..=50]
@@ -653,7 +652,7 @@ mod tests {
     async fn test_trivial_filter() {
         let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: None,
         };
@@ -661,7 +660,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(filter_output.log_offset_ids, SignedRoaringBitmap::full());
         assert_eq!(
@@ -674,7 +673,7 @@ mod tests {
     async fn test_simple_user_allowed_ids() {
         let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: Some((0..30).map(int_as_id).collect()),
             where_clause: None,
         };
@@ -682,7 +681,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(filter_output.log_offset_ids, SignedRoaringBitmap::empty());
         assert_eq!(
@@ -703,7 +702,7 @@ mod tests {
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -711,7 +710,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -735,7 +734,7 @@ mod tests {
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -743,7 +742,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -772,7 +771,7 @@ mod tests {
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -780,7 +779,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -804,7 +803,7 @@ mod tests {
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -812,7 +811,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -841,7 +840,7 @@ mod tests {
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -849,7 +848,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -870,7 +869,7 @@ mod tests {
             pattern: "<cat>".to_string(),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -878,7 +877,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -899,7 +898,7 @@ mod tests {
             pattern: "<dog>".to_string(),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -907,7 +906,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -949,7 +948,7 @@ mod tests {
             children: vec![where_sub_clause_1, where_sub_clause_2],
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -957,7 +956,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -994,7 +993,7 @@ mod tests {
             children: vec![where_sub_clause_1, where_sub_clause_2],
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -1002,7 +1001,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -1050,7 +1049,7 @@ mod tests {
             ],
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: Some((0..96).map(int_as_id).collect()),
             where_clause: Some(where_clause),
         };
@@ -1058,7 +1057,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
