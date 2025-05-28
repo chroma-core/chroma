@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -6,80 +5,101 @@ use tokio::sync::Mutex;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
-use wal3::{Error, LogWriter, LogWriterOptions, Manifest};
+use wal3::{
+    Cursor, CursorName, CursorStoreOptions, Error, GarbageCollectionOptions, LogWriter,
+    LogWriterOptions, Manifest,
+};
 
 pub mod common;
 
 async fn writer_thread(
     writer: Arc<LogWriter>,
     mutex: Arc<Mutex<()>>,
-    running: Arc<AtomicUsize>,
-    thread_id: usize,
+    wait: Arc<tokio::sync::Notify>,
+    notify: Arc<tokio::sync::Notify>,
     iterations: usize,
 ) -> (usize, usize) {
+    let cursors = writer.cursors(CursorStoreOptions::default()).unwrap();
+    let mut witness = cursors
+        .load(&CursorName::new("my_cursor").unwrap())
+        .await
+        .unwrap()
+        .expect("test initialized a cursor so witness must be Some(_)");
     let mut successful_writes = 0;
     let mut contention_errors = 0;
-    println!(
-        "writer {thread_id} also known as {:?}",
-        &*writer as *const LogWriter
-    );
-
     for i in 0..iterations {
-        let message = format!("Message from writer{}: {}", thread_id, i).into_bytes();
-
-        // Acquire the mutex, do a write, release the mutex
+        let message = format!("Message from writer: {}", i).into_bytes();
+        wait.notified().await;
+        let _guard = mutex.lock().await;
         loop {
-            // Using tokio::sync::Mutex which is safe to use with .await
-            let _guard = mutex.lock().await;
-            println!("writer {thread_id} grabs lock in iteration {i}");
-            // We have the lock, do a write
             match writer.append(message.clone()).await {
-                Ok(_) => {
-                    println!("writer {thread_id} succeeds in iteration {i}");
+                Ok(position) => {
+                    println!("writer succeeds in iteration {i}");
                     successful_writes += 1;
-                    // Release mutex (implicit) and break
+                    witness = cursors
+                        .save(
+                            &CursorName::new("my_cursor").unwrap(),
+                            &Cursor {
+                                position,
+                                epoch_us: position.offset(),
+                                writer: "Test Writer".to_string(),
+                            },
+                            &witness,
+                        )
+                        .await
+                        .unwrap();
                     break;
                 }
                 Err(Error::LogContention) => {
-                    println!("writer {thread_id} sees contention preventing {i}");
+                    println!("writer sees contention preventing {i}");
                     contention_errors += 1;
+                    continue;
                 }
                 Err(e) => panic!("Unexpected error: {:?}", e),
             }
         }
-
-        println!("writer {thread_id} goes for contention {i}");
-
-        // Now write until we hit LogContention
-        while i + 1 < iterations && running.load(Ordering::Relaxed) > 1 {
-            // NOTE(rescrv):
-            // Default batching interval is 100ms.
-            // This must be at least that to prevent waste.
-            tokio::time::sleep(Duration::from_millis(150)).await;
-            match writer.append(message.clone()).await {
-                Ok(_) => {
-                    successful_writes += 1;
-                }
-                Err(Error::LogContention) => {
-                    println!("writer {thread_id} contends without lock in iteration {i}");
-                    contention_errors += 1;
-                    // Got contention, now we go back to the top and wait for mutex
-                    break;
-                }
-                Err(e) => panic!("Unexpected error: {:?}", e),
-            }
-        }
+        notify.notify_one();
     }
-
-    running.fetch_sub(1, Ordering::Relaxed);
     (successful_writes, contention_errors)
 }
 
+async fn garbage_collector_thread(
+    writer: Arc<LogWriter>,
+    mutex: Arc<Mutex<()>>,
+    wait: Arc<tokio::sync::Notify>,
+    notify: Arc<tokio::sync::Notify>,
+    iterations: usize,
+) -> (usize, usize) {
+    println!("gc {:?}", &*writer as *const LogWriter);
+    for i in 0..iterations {
+        wait.notified().await;
+        // Using tokio::sync::Mutex which is safe to use with .await
+        let _guard = mutex.lock().await;
+        println!("gc grabs lock in iteration {i}");
+        loop {
+            match writer
+                .garbage_collect(&GarbageCollectionOptions::default())
+                .await
+            {
+                Ok(()) => break,
+                Err(Error::LogContention) => {
+                    println!("gc sees contention preventing {i}");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+                Err(e) => panic!("unexpected error: {:?}", e),
+            }
+        }
+        notify.notify_one();
+    }
+    (0, 0)
+}
+
 #[tokio::test]
-async fn test_k8s_integration_99_ping_pong_contention() {
+async fn test_k8s_integration_98_garbage_alternate() {
     // Create a shared storage for both threads to use
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-    let prefix = "test_k8s_integration_99_ping_pong_contention";
+    let prefix = "test_k8s_integration_98_garbage_alternate";
     let writer_name = "init";
 
     // Initialize the log
@@ -102,6 +122,11 @@ async fn test_k8s_integration_99_ping_pong_contention() {
         .await
         .unwrap(),
     );
+    let cursors = writer1.cursors(CursorStoreOptions::default()).unwrap();
+    cursors
+        .init(&CursorName::new("my_cursor").unwrap(), Cursor::default())
+        .await
+        .unwrap();
 
     let writer2 = Arc::new(
         LogWriter::open(
@@ -122,22 +147,24 @@ async fn test_k8s_integration_99_ping_pong_contention() {
         std::process::exit(13);
     });
 
-    let running = Arc::new(AtomicUsize::new(2));
+    let notify_writer = Arc::new(tokio::sync::Notify::new());
+    let notify_gcer = Arc::new(tokio::sync::Notify::new());
+    notify_writer.notify_one();
 
     // Launch both threads using the same writer_thread function
     let handle1 = tokio::spawn(writer_thread(
         Arc::clone(&writer1),
         Arc::clone(&mutex),
-        Arc::clone(&running),
-        1,
+        Arc::clone(&notify_writer),
+        Arc::clone(&notify_gcer),
         20,
     ));
 
-    let handle2 = tokio::spawn(writer_thread(
+    let handle2 = tokio::spawn(garbage_collector_thread(
         Arc::clone(&writer2),
         Arc::clone(&mutex),
-        Arc::clone(&running),
-        2,
+        Arc::clone(&notify_gcer),
+        Arc::clone(&notify_writer),
         20,
     ));
 
@@ -162,17 +189,5 @@ async fn test_k8s_integration_99_ping_pong_contention() {
     assert!(
         writer1_successes > 0,
         "Writer 1 should have some successful writes"
-    );
-    assert!(
-        writer2_successes > 0,
-        "Writer 2 should have some successful writes"
-    );
-    assert!(
-        writer1_contentions > 0,
-        "Writer 1 should encounter contention"
-    );
-    assert!(
-        writer2_contentions > 0,
-        "Writer 2 should encounter contention"
     );
 }
