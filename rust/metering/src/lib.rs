@@ -183,7 +183,7 @@ pub fn open<T: MeterEventData>(
 }
 
 /// Apply a mutation to the payload of the most recently opened event, if any.
-pub fn attach_top(mutator: impl FnOnce(&mut dyn MeterEventData)) {
+pub fn apply_top(mutator: impl FnOnce(&mut dyn MeterEventData)) {
     METER_EVENT_STACK.with(|meter_event_stack| {
         let meter_event_stack_locked = match meter_event_stack.lock() {
             Ok(meter_event_stack_locked) => meter_event_stack_locked,
@@ -204,7 +204,7 @@ pub fn attach_top(mutator: impl FnOnce(&mut dyn MeterEventData)) {
 }
 
 /// Apply a mutation to the payload of all currently open events on the stack.
-pub fn attach_all(mutator: impl Fn(&mut dyn MeterEventData)) {
+pub fn apply_all(mutator: impl Fn(&mut dyn MeterEventData)) {
     METER_EVENT_STACK.with(|meter_event_stack| {
         let meter_event_stack_locked = match meter_event_stack.lock() {
             Ok(meter_event_stack_locked) => meter_event_stack_locked,

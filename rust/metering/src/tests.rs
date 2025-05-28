@@ -11,7 +11,7 @@ use std::{
 use tokio::time::{sleep, Duration};
 use tracing::Span;
 
-use crate::{attach_all, attach_top, close_all, close_top, open, MeterEvent, MeterEventData};
+use crate::{apply_all, apply_top, close_all, close_top, open, MeterEvent, MeterEventData};
 
 /// Payload containing both request-received and request-completed timestamps.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -248,8 +248,8 @@ async fn test_close_all_submits_events_in_lifo_order() {
 
 #[tokio::test]
 #[serial]
-/// `attach_all()` should mutate the "request-completed" timestamp on all open events.
-async fn test_attach_all_increments_all_completion_timestamps() {
+/// `apply_all()` should mutate the "request-completed" timestamp on all open events.
+async fn test_apply_all_increments_all_completion_timestamps() {
     let event_buffer_handle = reset_and_get_event_buffer_handle();
 
     let first_event_guard = open(
@@ -275,7 +275,7 @@ async fn test_attach_all_increments_all_completion_timestamps() {
     );
 
     // Increment completion timestamps on every open event by one day.
-    attach_all(|data| {
+    apply_all(|data| {
         data.set_request_completed_at_timestamp(&mut |timestamp| {
             *timestamp = if let Some(timestamp) = timestamp {
                 Some(timestamp.checked_add_days(Days::new(1)).unwrap())
@@ -325,9 +325,9 @@ async fn test_attach_all_increments_all_completion_timestamps() {
 
 #[tokio::test]
 #[serial]
-/// `attach_top()` should mutate only the most recently opened event’s received timestamp,
-/// and then `attach_all()` applies to the new top as well.
-async fn test_attach_top_and_attach_all_affect_received_timestamp_correctly() {
+/// `apply_top()` should mutate only the most recently opened event’s received timestamp,
+/// and then `apply_all()` applies to the new top as well.
+async fn test_apply_top_and_apply_all_affect_received_timestamp_correctly() {
     let event_buffer_handle = reset_and_get_event_buffer_handle();
 
     let first_event_guard = open(
@@ -353,13 +353,13 @@ async fn test_attach_top_and_attach_all_affect_received_timestamp_correctly() {
     );
 
     // Set received timestamp on top only by +42 days.
-    attach_top(|data| {
+    apply_top(|data| {
         data.set_request_received_at_timestamp(&mut |timestamp| {
             *timestamp = timestamp.checked_add_days(Days::new(42)).unwrap()
         });
     });
     // Then apply +99 days to all open events (now the ReceivedAndCompleted is on top).
-    attach_all(|data| {
+    apply_all(|data| {
         data.set_request_received_at_timestamp(&mut |timestamp| {
             *timestamp = timestamp.checked_add_days(Days::new(99)).unwrap()
         });
