@@ -104,7 +104,10 @@ impl chroma_cache::Weighted for HnswIndexRef {
         }
         // M * node size * number of elements is space taken by the
         // L0 graph.
-        let graph_bytes = 64 * std::mem::size_of::<u32>() * index.len_with_deleted();
+        // As of 28 May 2025, getting the value of M from hnswlib requires plumbing
+        // so for now we use 64 as the value which is on the higher end.
+        let m = 64;
+        let graph_bytes = m * std::mem::size_of::<u32>() * index.len_with_deleted();
         // Space taken by the L0 embeddings.
         let embedding_bytes =
             index.len_with_deleted() * std::mem::size_of::<f32>() * index.dimensionality() as usize;
