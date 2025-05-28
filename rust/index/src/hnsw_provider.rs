@@ -99,11 +99,18 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
 impl chroma_cache::Weighted for HnswIndexRef {
     fn weight(&self) -> usize {
         let index = self.inner.read();
-        if index.len() == 0 {
+        if index.len_with_deleted() == 0 {
             return 1;
         }
-        let bytes = index.len() * std::mem::size_of::<f32>() * index.dimensionality() as usize;
-        let as_mb = bytes / 1024 / 1024;
+        // M * node size * number of elements is space taken by the
+        // L0 graph.
+        let graph_bytes = 64 * std::mem::size_of::<u32>() * index.len_with_deleted();
+        // Space taken by the L0 embeddings.
+        let embedding_bytes =
+            index.len_with_deleted() * std::mem::size_of::<f32>() * index.dimensionality() as usize;
+        // Multiply by some constant to account for levels other than L0.
+        let total_bytes = 2 * (graph_bytes + embedding_bytes);
+        let as_mb = total_bytes / 1024 / 1024;
         if as_mb == 0 {
             1
         } else {
