@@ -1,29 +1,28 @@
-use super::client_manager::{ClientFactory, ClientOptions, NodeNameToClient};
-use super::{client_manager::ClientManager, config};
+use super::config;
 use async_trait::async_trait;
 use backon::ExponentialBuilder;
 use backon::Retryable;
 use chroma_config::registry;
 use chroma_config::{assignment::assignment_policy::AssignmentPolicy, Configurable};
 use chroma_error::ChromaError;
+use chroma_memberlist::client_manager::{ClientManager, ClientOptions, NodeNameToClient};
 use chroma_memberlist::{
     config::MemberlistProviderConfig,
     memberlist_provider::{CustomResourceMemberlistProvider, MemberlistProvider},
 };
 use chroma_system::System;
-use chroma_tracing::GrpcTraceService;
+use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 use chroma_types::SegmentType;
 use chroma_types::{
-    chroma_proto::query_executor_client::QueryExecutorClient,
     operator::{CountResult, GetResult, KnnBatchResult},
     plan::{Count, Get, Knn},
     CollectionUuid, ExecutorError,
 };
 use rand::seq::SliceRandom;
 use std::cmp::min;
-use tonic::transport::Channel;
 use tonic::Request;
 
+// Convenience type alias for the gRPC query client used by the DistributedExecutor
 type QueryClient = QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
 
 /// A distributed executor that routes requests to the appropriate node based on the assignment policy
@@ -173,15 +172,6 @@ impl DistributedExecutor {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(clients)
-    }
-}
-
-impl ClientFactory for QueryExecutorClient<GrpcTraceService<Channel>> {
-    fn new_from_channel(channel: GrpcTraceService<Channel>) -> Self {
-        QueryExecutorClient::new(channel)
-    }
-    fn max_decoding_message_size(self, max_size: usize) -> Self {
-        self.max_decoding_message_size(max_size)
     }
 }
 

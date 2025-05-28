@@ -1,7 +1,8 @@
+use super::memberlist_provider::Memberlist;
 use async_trait::async_trait;
-use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_system::{Component, ComponentContext, Handler};
 use chroma_tracing::GrpcTraceService;
+use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 use parking_lot::RwLock;
 use std::{
     collections::{HashMap, HashSet},
@@ -11,15 +12,15 @@ use std::{
 use tonic::transport::{Channel, Endpoint};
 use tower::{discover::Change, ServiceBuilder};
 
-pub(super) type NodeNameToClient<T> = Arc<RwLock<HashMap<String, T>>>;
-pub(super) trait ClientFactory {
+pub type NodeNameToClient<T> = Arc<RwLock<HashMap<String, T>>>;
+pub trait ClientFactory {
     fn new_from_channel(channel: GrpcTraceService<Channel>) -> Self;
     // TODO: Exposing/Proxy'ing each property manually like this is not ideal, if this bloats
     // we can consider better alternatives
     fn max_decoding_message_size(self, max_size: usize) -> Self;
 }
 #[derive(Debug)]
-pub(super) struct ClientOptions {
+pub struct ClientOptions {
     max_response_size_bytes: Option<usize>,
 }
 
@@ -39,7 +40,7 @@ impl Default for ClientOptions {
     }
 }
 
-/// A component that manages the gRPC clients for the query executors
+/// A component that manages the gRPC clients for with a memberlist
 /// # Fields
 /// - `node_name_to_client` - A map from the node name to the gRPC client
 /// - `node_name_to_change_sender` - A map from the node name to the sender to the channel to add / remove the ip
@@ -49,7 +50,7 @@ impl Default for ClientOptions {
 /// The client manager is responsible for creating and maintaining the gRPC clients for the query nodes.
 /// It responds to changes to the memberlist and updates the clients accordingly.
 #[derive(Debug)]
-pub(super) struct ClientManager<T> {
+pub struct ClientManager<T> {
     // The name of the node to the grpc client
     node_name_to_client: NodeNameToClient<T>,
     // The name of the node to the sender to the channel to add / remove the ip
@@ -66,7 +67,7 @@ impl<T> ClientManager<T>
 where
     T: ClientFactory,
 {
-    pub(super) fn new(
+    pub fn new(
         node_name_to_client: NodeNameToClient<T>,
         connections_per_node: usize,
         connect_timeout_ms: u64,
@@ -278,10 +279,24 @@ where
     }
 }
 
+/////////////////////////// Client Factory Impls /////////////////////////
+
+// Impl this trait on grpc client
+impl ClientFactory
+    for QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>
+{
+    fn new_from_channel(channel: GrpcTraceService<Channel>) -> Self {
+        QueryExecutorClient::new(channel)
+    }
+    fn max_decoding_message_size(self, max_size: usize) -> Self {
+        self.max_decoding_message_size(max_size)
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use super::super::memberlist_provider::Member;
     use super::*;
-    use chroma_memberlist::memberlist_provider::Member;
     use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 
     type QueryClient =

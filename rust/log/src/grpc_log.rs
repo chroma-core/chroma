@@ -16,6 +16,8 @@ use tonic::transport::Endpoint;
 use tower::ServiceBuilder;
 use uuid::Uuid;
 
+//////////////// Errors ////////////////
+
 #[derive(Error, Debug)]
 pub enum GrpcPullLogsError {
     #[error("Please backoff exponentially and retry")]
