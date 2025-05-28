@@ -32,17 +32,9 @@ const collection = await client.getOrCreateCollection({
   name: "test-collection",
   embeddingFunction: new OpenAIEmbeddingFunction({
     apiKey: OPENAI_API_KEY ?? "",
-    modelName: "text-embedding-ada-002",
+    modelName: "text-embedding-3-small",
   }),
 });
-
-if ((await collection.count()) == 0) {
-  const introTweet = makeTweetEntry(
-    "assistant",
-    "Hey! I'm your personal assistant! If you ever need my help remembering something, just mention me with @assistant"
-  );
-  addPostModelToChromaCollection(introTweet, collection).catch(console.error);
-}
 
 const openAIClient = new OpenAI({ apiKey: OPENAI_API_KEY });
 

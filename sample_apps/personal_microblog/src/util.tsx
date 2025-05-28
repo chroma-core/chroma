@@ -7,7 +7,10 @@ export function groupPostsByMonthAndYear(
   const groupedPosts: { [key: string]: PostModel[] } = {};
   posts.forEach((post) => {
     const date = new Date(post.date);
-    const monthYear = `${date.getMonth() + 1}-${date.getFullYear()}`;
+    const monthYear = `${String(date.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}/${date.getFullYear()}`;
     if (!groupedPosts[monthYear]) {
       groupedPosts[monthYear] = [];
     }

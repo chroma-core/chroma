@@ -7,7 +7,7 @@
 	},
 	{
 		"name": "personal_microblog",
-		"description": "A simple note app with a build-in AI assistant",
+		"description": "A simple note app with a built-in AI assistant",
 		"version": "1.0.0",
 		"cli_version": "1.0.0"
 	}

@@ -8,6 +8,14 @@ import { PostModel, Role } from "@/types";
 import { getPosts, publishNewPost } from "@/actions";
 import { groupPostsByMonthAndYear } from "@/util";
 
+const introTweet = {
+  id: crypto.randomUUID(),
+  role: "assistant" as Role,
+  body: "Hey! I'm your personal assistant. If you ever need help remember anything, just mention me using @assistant",
+  date: new Date().toISOString(),
+  status: "done",
+} as PostModel;
+
 export default function Home() {
   const [madePost, setMadePost] = useState<boolean>(false);
   const [loadingMessages, setLoadingMessages] = useState<boolean>(true);
@@ -28,6 +36,14 @@ export default function Home() {
     Array.from(new Array(4), (x, i) => <TweetSkeleton key={i} />)
   ) : (
     <>
+      {!madePost ? (
+        <motion.li
+          animate={{ opacity: 1, height: "auto" }}
+          exit={{ opacity: 0, height: 0 }}
+        >
+          <Tweet key={introTweet.id} tweet={introTweet} animate={true} />
+        </motion.li>
+      ) : null}
       {newMessages.map((m, i) => (
         <motion.li
           key={m.id}
