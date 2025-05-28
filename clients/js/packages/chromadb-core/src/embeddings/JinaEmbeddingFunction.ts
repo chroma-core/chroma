@@ -39,7 +39,7 @@ export class JinaEmbeddingFunction implements IEmbeddingFunction {
   constructor({
     jinaai_api_key,
     model_name = "jina-embeddings-v2-base-en",
-    api_key_env_var = "JINAAI_API_KEY",
+    api_key_env_var = "CHROMA_JINA_API_KEY",
     task,
     late_chunking,
     truncate,

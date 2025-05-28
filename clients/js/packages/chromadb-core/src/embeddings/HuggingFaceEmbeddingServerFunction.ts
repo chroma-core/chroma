@@ -15,7 +15,7 @@ export class HuggingFaceEmbeddingServerFunction implements IEmbeddingFunction {
   constructor({
     api_key,
     url,
-    api_key_env_var,
+    api_key_env_var = "CHROMA_HUGGINGFACE_API_KEY",
   }: {
     url: string;
     api_key?: string;

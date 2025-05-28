@@ -15,6 +15,7 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          |
 | [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai.md)    | ✓      | ✓          |
 | [Together AI](../../integrations/embedding-models/together-ai.md)                        | ✓      | ✓          |
+| [Mistral](../../integrations/embedding-models/mistral.md)                                | ✓      | -          |
 
 We welcome pull requests to add new Embedding Functions to the community.
 
