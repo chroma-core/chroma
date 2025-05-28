@@ -91,12 +91,6 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                 .rev()
                 .skip(input.min_versions_to_keep as usize)
             {
-                // Always keep version 0
-                if *version == 0 {
-                    tracing::debug!("Keeping version 0");
-                    continue;
-                }
-
                 if *created_at < input.cutoff_time {
                     *mode = CollectionVersionAction::Delete;
                 } else {
@@ -204,7 +198,7 @@ mod tests {
         assert_eq!(
             versions,
             vec![
-                (0, CollectionVersionAction::Keep),
+                (0, CollectionVersionAction::Delete),
                 (1, CollectionVersionAction::Delete),
                 (2, CollectionVersionAction::Delete),
                 (3, CollectionVersionAction::Keep),
@@ -315,7 +309,7 @@ mod tests {
         assert_eq!(
             a_versions,
             vec![
-                (0, CollectionVersionAction::Keep),
+                (0, CollectionVersionAction::Delete),
                 (1, CollectionVersionAction::Delete),
                 (2, CollectionVersionAction::Delete),
                 (3, CollectionVersionAction::Keep),
@@ -330,7 +324,7 @@ mod tests {
         assert_eq!(
             b_versions,
             vec![
-                (0, CollectionVersionAction::Keep),
+                (0, CollectionVersionAction::Delete),
                 (1, CollectionVersionAction::Delete),
                 (2, CollectionVersionAction::Keep)
             ]

@@ -523,16 +523,27 @@ impl IntoSqliteExpr for DocumentExpression {
         let subq = Query::select()
             .column(EmbeddingFulltextSearch::Rowid)
             .from(EmbeddingFulltextSearch::Table)
-            .and_where(
-                Expr::col(EmbeddingFulltextSearch::StringValue)
-                    .like(format!("%{}%", self.pattern.replace("%", ""))),
-            )
+            .and_where(match self.operator {
+                DocumentOperator::Contains | DocumentOperator::NotContains => {
+                    Expr::col(EmbeddingFulltextSearch::StringValue)
+                        .like(format!("%{}%", self.pattern.replace("%", "")))
+                }
+                DocumentOperator::Regex | DocumentOperator::NotRegex => Expr::cust_with_exprs(
+                    "? REGEXP ?",
+                    [
+                        Expr::col(EmbeddingFulltextSearch::StringValue).into(),
+                        Expr::value(&self.pattern),
+                    ],
+                ),
+            })
             .to_owned();
         match self.operator {
-            DocumentOperator::Contains => Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq),
-            DocumentOperator::NotContains => Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq),
-            DocumentOperator::Regex => todo!("Implement Regex matching. The result must be a not-nullable boolean (use `<expr>.is(true)`)"),
-            DocumentOperator::NotRegex => todo!("Implement negated Regex matching. This must be exact opposite of Regex matching (use `<expr>.not()`)"),
+            DocumentOperator::Contains | DocumentOperator::Regex => {
+                Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
+            }
+            DocumentOperator::NotContains | DocumentOperator::NotRegex => {
+                Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
+            }
         }
     }
 }

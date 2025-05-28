@@ -177,7 +177,7 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        tracing::info!(
+        tracing::debug!(
             path = %self.version_file_path,
             "Creating initial fetch version file task"
         );
@@ -616,6 +616,28 @@ mod tests {
         let collection_id_b = CollectionUuid::new();
         let collection_id_c = CollectionUuid::new();
         let collection_id_d = CollectionUuid::new();
+
+        for collection_id in [
+            collection_id_a,
+            collection_id_b,
+            collection_id_c,
+            collection_id_d,
+        ] {
+            sysdb
+                .create_collection(
+                    "test_tenant".to_string(),
+                    "test_database".to_string(),
+                    collection_id,
+                    format!("test_collection_{}", collection_id),
+                    vec![],
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .await
+                .unwrap();
+        }
 
         let version_file_a_path =
             create_version_file(collection_id_a, vec![0, 1], storage.clone()).await;

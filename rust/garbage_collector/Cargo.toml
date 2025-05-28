@@ -56,3 +56,4 @@ tokio-test = "0.4"
 rand = { workspace = true }
 itertools = { workspace = true }
 tracing-test = { version = "0.2.5" }
+tracing-subscriber = { workspace = true }

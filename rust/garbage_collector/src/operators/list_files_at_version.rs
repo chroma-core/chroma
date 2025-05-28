@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use chroma_blockstore::{arrow::provider::RootManagerError, RootManager};
+use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid, HNSW_PATH};
 use std::{collections::HashSet, str::FromStr};
@@ -136,8 +137,19 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
         let mut block_id_tasks = JoinSet::new();
         for sparse_index_id in sparse_index_ids {
             let root_manager = input.root_manager.clone();
-            block_id_tasks
-                .spawn(async move { root_manager.get_all_block_ids(&sparse_index_id).await });
+            block_id_tasks.spawn(async move {
+                match root_manager.get_all_block_ids(&sparse_index_id).await {
+                    Ok(block_ids) => Ok(block_ids),
+                    Err(RootManagerError::StorageGetError(StorageError::NotFound { .. })) => {
+                        tracing::debug!(
+                            "Sparse index {} not found in storage. Assuming it was previously deleted.",
+                            sparse_index_id
+                        );
+                        Ok(vec![])
+                    }
+                    Err(e) => Err(e),
+                }
+            });
         }
 
         while let Some(res) = block_id_tasks.join_next().await {

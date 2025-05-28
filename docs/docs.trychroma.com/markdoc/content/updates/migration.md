@@ -26,6 +26,8 @@ In this release, we've rewritten much of Chroma in Rust. Performance has signifi
 
 Chroma no longer provides built-in authentication implementations.
 
+`list_collections` now reverts back to returning `Collection` objects.
+
 **Chroma in-process changes**
 
 This section is applicable to you if you use Chroma via

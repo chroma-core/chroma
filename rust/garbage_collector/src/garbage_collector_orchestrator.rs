@@ -406,7 +406,6 @@ impl Handler<TaskResult<ComputeUnusedFilesOutput, ComputeUnusedFilesError>>
             )),
             DeleteUnusedFilesInput {
                 unused_s3_files: output.unused_block_ids.into_iter().collect(),
-                epoch_id: 0,
                 hnsw_prefixes_for_deletion: output.unused_hnsw_prefixes,
             },
             ctx.receiver(),
