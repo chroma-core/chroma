@@ -61,7 +61,6 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use tracing_test::traced_test;
 use uuid::Uuid;
 
 // SegmentBlockIdInfo is used to keep track of the segment block ids for a version.
@@ -597,6 +596,7 @@ impl GcTest {
         // Create sparse index for record segment
         let sparse_index_id = create_test_sparse_index(
             &self.storage,
+            Uuid::new_v4(),
             record_segment_info.block_ids.clone(),
             Some("test_si_rec_".to_string()),
         )
@@ -624,6 +624,7 @@ impl GcTest {
             .clone();
         let sparse_index_id_metadata = create_test_sparse_index(
             &self.storage,
+            Uuid::new_v4(),
             metadata_segment_info.block_ids.clone(),
             Some("test_si_meta_".to_string()),
         )
@@ -957,8 +958,11 @@ prop_state_machine! {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[traced_test]
 async fn run_gc_test_ext() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
     INVARIANT_CHECK_COUNT.store(0, Ordering::SeqCst);
     run_gc_test();
     let checks = INVARIANT_CHECK_COUNT.load(Ordering::SeqCst);

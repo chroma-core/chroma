@@ -1,6 +1,8 @@
 package grpc
 
 import (
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
@@ -131,6 +133,7 @@ func convertToCreateCollectionModel(req *coordinatorpb.CreateCollectionRequest) 
 		GetOrCreate:          req.GetGetOrCreate(),
 		TenantID:             req.GetTenant(),
 		DatabaseName:         req.GetDatabase(),
+		Ts:                   time.Now().Unix(),
 	}, nil
 }
 

@@ -202,6 +202,7 @@ k8s_resource(
     'query-service-memberlist:MemberList',
     'compaction-service-memberlist:MemberList',
     'garbage-collection-service-memberlist:MemberList',
+    'rust-log-service-memberlist:MemberList',
 
     'sysdb-serviceaccount:serviceaccount',
     'sysdb-serviceaccount-rolebinding:RoleBinding',

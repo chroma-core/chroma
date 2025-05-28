@@ -1657,6 +1657,37 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	suite.True(exists, "Lineage file should exist in S3")
 }
 
+func (suite *APIsTestSuite) TestBatchGetCollectionVersionFilePaths() {
+	ctx := context.Background()
+
+	// Create a new collection
+	newCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_batch_get_collection_version_file_paths",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	newSegments := []*model.Segment{}
+
+	// Create the collection
+	suite.coordinator.catalog.versionFileEnabled = true
+	_, _, err := suite.coordinator.CreateCollectionAndSegments(ctx, newCollection, newSegments)
+	suite.NoError(err)
+
+	// Get the version file paths for the collection
+	versionFilePaths, err := suite.coordinator.BatchGetCollectionVersionFilePaths(ctx, &coordinatorpb.BatchGetCollectionVersionFilePathsRequest{
+		CollectionIds: []string{newCollection.ID.String()},
+	})
+	suite.NoError(err)
+	suite.Len(versionFilePaths.CollectionIdToVersionFilePath, 1)
+
+	// Verify version file exists in S3
+	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, versionFilePaths.CollectionIdToVersionFilePath[newCollection.ID.String()])
+	suite.NoError(err)
+	suite.True(exists, "Version file should exist in S3")
+}
+
 func (suite *APIsTestSuite) TestCountForks() {
 	ctx := context.Background()
 

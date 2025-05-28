@@ -1138,6 +1138,7 @@ func (tc *Catalog) createSegmentImpl(txCtx context.Context, createSegment *model
 		Type:         createSegment.Type,
 		Scope:        createSegment.Scope,
 		Ts:           ts,
+		FilePaths:    createSegment.FilePaths,
 	}
 	err := tc.metaDomain.SegmentDb(txCtx).Insert(dbSegment)
 	if err != nil {
@@ -2000,11 +2001,11 @@ func (tc *Catalog) getNumberOfActiveVersions(versionFilePb *coordinatorpb.Collec
 }
 
 func (tc *Catalog) getOldestVersionTs(versionFilePb *coordinatorpb.CollectionVersionFile) time.Time {
-	if versionFilePb.GetVersionHistory() == nil || len(versionFilePb.GetVersionHistory().Versions) <= 1 {
+	if versionFilePb.GetVersionHistory() == nil || len(versionFilePb.GetVersionHistory().Versions) == 0 {
 		// Returning a zero timestamp that represents an unset value.
 		return time.Time{}
 	}
-	oldestVersionTs := versionFilePb.GetVersionHistory().Versions[1].CreatedAtSecs
+	oldestVersionTs := versionFilePb.GetVersionHistory().Versions[0].CreatedAtSecs
 
 	return time.Unix(oldestVersionTs, 0)
 }
@@ -2041,7 +2042,7 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 		}
 
 		numActiveVersions := tc.getNumberOfActiveVersions(versionFilePb)
-		if numActiveVersions <= 1 {
+		if numActiveVersions < 1 {
 			// No remaining valid versions after GC.
 			return errors.New("no valid versions after gc")
 		}
@@ -2091,10 +2092,28 @@ func (tc *Catalog) DeleteCollectionVersion(ctx context.Context, req *coordinator
 	result := coordinatorpb.DeleteCollectionVersionResponse{
 		CollectionIdToSuccess: make(map[string]bool),
 	}
+	var firstErr error
 	for _, collectionVersionList := range req.Versions {
 		err := tc.DeleteVersionEntriesForCollection(ctx, collectionVersionList.TenantId, collectionVersionList.CollectionId, collectionVersionList.Versions)
 		result.CollectionIdToSuccess[collectionVersionList.CollectionId] = err == nil
+		if firstErr == nil && err != nil {
+			firstErr = err
+		}
 	}
+	return &result, firstErr
+}
+
+func (tc *Catalog) BatchGetCollectionVersionFilePaths(ctx context.Context, collectionIds []string) (*coordinatorpb.BatchGetCollectionVersionFilePathsResponse, error) {
+	result := coordinatorpb.BatchGetCollectionVersionFilePathsResponse{
+		CollectionIdToVersionFilePath: make(map[string]string),
+	}
+
+	paths, err := tc.metaDomain.CollectionDb(ctx).BatchGetCollectionVersionFilePaths(collectionIds)
+	if err != nil {
+		return nil, err
+	}
+	result.CollectionIdToVersionFilePath = paths
+
 	return &result, nil
 }
 

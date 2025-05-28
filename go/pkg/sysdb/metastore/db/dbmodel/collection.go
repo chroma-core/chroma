@@ -69,4 +69,5 @@ type ICollectionDb interface {
 	UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error)
 	LockCollection(collectionID string) (*bool, error)
 	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath *string, newLineageFilePath string) error
+	BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error)
 }

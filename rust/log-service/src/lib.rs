@@ -683,6 +683,12 @@ impl LogServer {
                 "effectuate log transfer hit its recursion limit",
             ));
         }
+
+        // Grab a lock on the state for this key, so that a racing initialize won't do anything.
+        let key = LogKey { collection_id };
+        let handle = self.open_logs.get_or_create_state(key);
+        let mut _active = handle.active.lock().await;
+
         tracing::info!("log transfer to {collection_id}");
         let scout_request = Request::new(ScoutLogsRequest {
             collection_id: collection_id.to_string(),
@@ -797,7 +803,8 @@ impl LogServer {
                 format!("failed to effectuate log transfer: {err:?}"),
             )
         })?;
-        self.update_collection_log_offset(Request::new(UpdateCollectionLogOffsetRequest {
+
+        self._update_collection_log_offset(Request::new(UpdateCollectionLogOffsetRequest {
             collection_id: collection_id.to_string(),
             log_offset: start as i64 - 1,
         }))
@@ -876,6 +883,82 @@ impl LogServer {
         } else {
             Err(Status::failed_precondition("proxy not initialized"))
         }
+    }
+
+    #[tracing::instrument(skip(self, request), err(Display))]
+    async fn _update_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        let request = request.into_inner();
+        let adjusted_log_offset = request.log_offset + 1;
+        let collection_id = Uuid::parse_str(&request.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        tracing::info!(
+            "update_collection_log_offset for {collection_id} to {}",
+            adjusted_log_offset
+        );
+        let storage_prefix = storage_prefix_for_log(collection_id);
+
+        let log_reader = LogReader::new(
+            self.config.reader.clone(),
+            Arc::clone(&self.storage),
+            storage_prefix.clone(),
+        );
+
+        let res = log_reader.maximum_log_position().await;
+        if let Err(wal3::Error::UninitializedLog) = res {
+            return self
+                .forward_update_collection_log_offset(Request::new(request))
+                .await;
+        }
+        res.map_err(|err| Status::unknown(err.to_string()))?;
+
+        let cursor_name = &COMPACTION;
+        let cursor_store = CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::clone(&self.storage),
+            storage_prefix.clone(),
+            "writer".to_string(),
+        );
+        let witness = cursor_store.load(cursor_name).await.map_err(|err| {
+            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
+        })?;
+        let default = Cursor::default();
+        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
+        if cursor.position.offset() > adjusted_log_offset as u64 {
+            return Err(Status::aborted(format!(
+                "Invalid offset: {} > {}",
+                cursor.position.offset(),
+                adjusted_log_offset as u64
+            )));
+        }
+        let cursor = Cursor {
+            position: LogPosition::from_offset(adjusted_log_offset as u64),
+            epoch_us: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map_err(|_| wal3::Error::Internal)
+                .unwrap()
+                .as_micros() as u64,
+            writer: "TODO".to_string(),
+        };
+        if let Some(witness) = witness {
+            cursor_store
+                .save(cursor_name, &cursor, &witness)
+                .await
+                .map_err(|err| {
+                    Status::new(err.code().into(), format!("Failed to save cursor: {}", err))
+                })?;
+        } else {
+            cursor_store
+                .init(cursor_name, cursor)
+                .await
+                .map_err(|err| {
+                    Status::new(err.code().into(), format!("Failed to init cursor: {}", err))
+                })?;
+        }
+        Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
     }
 }
 
@@ -1341,73 +1424,16 @@ impl LogService for LogServer {
         request: Request<UpdateCollectionLogOffsetRequest>,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
         let request = request.into_inner();
-        let adjusted_log_offset = request.log_offset + 1;
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        tracing::info!(
-            "update_collection_log_offset for {collection_id} to {}",
-            adjusted_log_offset
-        );
-        let storage_prefix = storage_prefix_for_log(collection_id);
-        let log_reader = LogReader::new(
-            self.config.reader.clone(),
-            Arc::clone(&self.storage),
-            storage_prefix.clone(),
-        );
 
-        let res = log_reader.maximum_log_position().await;
-        if let Err(wal3::Error::UninitializedLog) = res {
-            return self
-                .forward_update_collection_log_offset(Request::new(request))
-                .await;
-        }
-        res.map_err(|err| Status::unknown(err.to_string()))?;
-
-        let cursor_name = &COMPACTION;
-        let cursor_store = CursorStore::new(
-            CursorStoreOptions::default(),
-            Arc::clone(&self.storage),
-            storage_prefix.clone(),
-            "writer".to_string(),
-        );
-        let witness = cursor_store.load(cursor_name).await.map_err(|err| {
-            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
-        })?;
-        let default = Cursor::default();
-        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
-        if cursor.position.offset() > adjusted_log_offset as u64 {
-            return Err(Status::aborted(format!(
-                "Invalid offset: {} > {}",
-                cursor.position.offset(),
-                adjusted_log_offset as u64
-            )));
-        }
-        let cursor = Cursor {
-            position: LogPosition::from_offset(adjusted_log_offset as u64),
-            epoch_us: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|_| wal3::Error::Internal)
-                .unwrap()
-                .as_micros() as u64,
-            writer: "TODO".to_string(),
-        };
-        if let Some(witness) = witness {
-            cursor_store
-                .save(cursor_name, &cursor, &witness)
-                .await
-                .map_err(|err| {
-                    Status::new(err.code().into(), format!("Failed to save cursor: {}", err))
-                })?;
-        } else {
-            cursor_store
-                .init(cursor_name, cursor)
-                .await
-                .map_err(|err| {
-                    Status::new(err.code().into(), format!("Failed to init cursor: {}", err))
-                })?;
-        }
-        Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
+        // Grab a lock on the state for this key, so that a racing initialize won't do anything.
+        let key = LogKey { collection_id };
+        let handle = self.open_logs.get_or_create_state(key);
+        let mut _active = handle.active.lock().await;
+        self._update_collection_log_offset(Request::new(request))
+            .await
     }
 
     #[tracing::instrument(skip(self, request), err(Display))]
@@ -1795,6 +1821,8 @@ pub struct OpenTelemetryConfig {
 pub struct LogServerConfig {
     #[serde(default = "default_port")]
     pub port: u16,
+    #[serde(default = "LogServerConfig::default_my_member_id")]
+    pub my_member_id: String,
     #[serde(default)]
     pub opentelemetry: Option<OpenTelemetryConfig>,
     #[serde(default)]
@@ -1823,6 +1851,10 @@ impl LogServerConfig {
         100
     }
 
+    fn default_my_member_id() -> String {
+        "rust-log-service-0".to_string()
+    }
+
     /// one million records on the log.
     fn default_num_records_before_backpressure() -> u64 {
         1_000_000
@@ -1843,6 +1875,7 @@ impl Default for LogServerConfig {
     fn default() -> Self {
         Self {
             port: default_port(),
+            my_member_id: LogServerConfig::default_my_member_id(),
             opentelemetry: None,
             storage: StorageConfig::default(),
             writer: LogWriterOptions::default(),
@@ -1883,7 +1916,7 @@ impl Configurable<LogServerConfig> for LogServer {
         let dirty_log = LogWriter::open_or_initialize(
             config.writer.clone(),
             Arc::clone(&storage),
-            "dirty",
+            &format!("dirty-{}", config.my_member_id),
             "dirty log writer",
             (),
         )
@@ -1926,6 +1959,7 @@ pub async fn log_entrypoint() {
         Err(_) => RootConfig::load(),
     };
     let config = config.log_service;
+    eprintln!("my_member_id: {}", config.my_member_id);
     let registry = chroma_config::registry::Registry::new();
     if let Some(otel_config) = &config.opentelemetry {
         eprintln!("enabling tracing");

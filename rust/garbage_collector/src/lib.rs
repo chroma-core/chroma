@@ -12,8 +12,11 @@ use tokio::signal::unix::{signal, SignalKind};
 use tracing::{debug, error, info};
 
 mod config;
+mod construct_version_graph_orchestrator;
 mod garbage_collector_component;
 pub mod garbage_collector_orchestrator;
+pub mod garbage_collector_orchestrator_v2;
+
 #[cfg(test)]
 pub(crate) mod helper;
 pub mod operators;

@@ -82,7 +82,7 @@ impl ChromaError for GetCollectionWithSegmentsError {
             GetCollectionWithSegmentsError::CollectionConversionError(
                 collection_conversion_error,
             ) => collection_conversion_error.code(),
-            GetCollectionWithSegmentsError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            GetCollectionWithSegmentsError::DuplicateSegment => ErrorCodes::Internal,
             GetCollectionWithSegmentsError::Field(_) => ErrorCodes::FailedPrecondition,
             GetCollectionWithSegmentsError::SegmentConversionError(segment_conversion_error) => {
                 segment_conversion_error.code()
@@ -93,6 +93,23 @@ impl ChromaError for GetCollectionWithSegmentsError {
             }
             GetCollectionWithSegmentsError::NotFound(_) => ErrorCodes::NotFound,
             GetCollectionWithSegmentsError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum BatchGetCollectionVersionFilePathsError {
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] Status),
+    #[error("Could not parse UUID from string {1}: {0}")]
+    Uuid(uuid::Error, String),
+}
+
+impl ChromaError for BatchGetCollectionVersionFilePathsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BatchGetCollectionVersionFilePathsError::Grpc(status) => status.code().into(),
+            BatchGetCollectionVersionFilePathsError::Uuid(_, _) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -832,7 +849,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::CollectionConversionError(collection_conversion_error) => {
                 collection_conversion_error.code()
             }
-            ForkCollectionError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::DuplicateSegment => ErrorCodes::Internal,
             ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
             ForkCollectionError::Internal(chroma_error) => chroma_error.code(),
