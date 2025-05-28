@@ -7,21 +7,6 @@ import TweetPrompt from "@/components/tweet-prompt";
 import { PostModel, Role } from "@/types";
 import { getPosts, publishNewPost } from "@/actions";
 
-function makeTweetEntry(role: Role, body: string): PostModel {
-  return {
-    id: crypto.randomUUID(),
-    role: role,
-    body: body,
-    date: new Date().toISOString(),
-    status: "done",
-  };
-}
-
-const introTweet = makeTweetEntry(
-  "assistant",
-  "Hey! I'm your personal assistant! If you ever need my help remembering something, just mention me with @assistant"
-);
-
 export default function Home() {
   const [madePost, setMadePost] = useState<boolean>(false);
   const [loadingMessages, setLoadingMessages] = useState<boolean>(true);
@@ -29,7 +14,7 @@ export default function Home() {
 
   useEffect(() => {
     getPosts().then((posts) => {
-      setMessages((tweets) => [introTweet, ...posts]);
+      setMessages((_) => [...posts]);
       setLoadingMessages(false);
     });
   }, []);

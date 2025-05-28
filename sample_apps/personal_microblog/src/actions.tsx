@@ -2,7 +2,13 @@
 
 import { PostModel, PostStatus, Role } from "@/types";
 import { ChromaClient } from "chromadb";
+import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 import OpenAI from "openai";
+import {
+  addPostModelToChromaCollection,
+  chromaResultsToPostModels,
+  makeTweetEntry,
+} from "./util";
 
 const CHROMA_HOST = process.env.CHROMA_HOST;
 const CHROMA_CLOUD_API_KEY = process.env.CHROMA_CLOUD_API_KEY;
@@ -10,63 +16,53 @@ const CHROMA_TENANT = process.env.CHROMA_TENANT;
 const CHROMA_DB = process.env.CHROMA_DB;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
-/*
-const chromaClient = new ChromaClient({
-  path: process.env.CHROMA_HOST,
-  auth: {
-    provider: "token",
-    credentials: process.env.CHROMA_CLOUD_API_KEY,
-    tokenHeaderType: "X_CHROMA_TOKEN"
+const usingChromaLocal = CHROMA_HOST === "localhost";
+
+const client = new ChromaClient({
+  ssl: !usingChromaLocal,
+  host: CHROMA_HOST,
+  database: CHROMA_DB,
+  tenant: CHROMA_TENANT,
+  headers: {
+    "x-chroma-token": CHROMA_CLOUD_API_KEY ?? "",
   },
-  tenant: process.env.CHROMA_TENANT,
-  database: process.env.CHROMA_DB_NAME
 });
-const chromaCollection = await chromaClient.getCollection({ name: "posts" });
-*/
+
+const collection = await client.getOrCreateCollection({
+  name: "test-collection",
+  embeddingFunction: new OpenAIEmbeddingFunction({
+    apiKey: OPENAI_API_KEY ?? "",
+    modelName: "text-embedding-ada-002",
+  }),
+});
+
+if ((await collection.count()) == 0) {
+  const introTweet = makeTweetEntry(
+    "assistant",
+    "Hey! I'm your personal assistant! If you ever need my help remembering something, just mention me with @assistant"
+  );
+  addPostModelToChromaCollection(introTweet, collection).catch(console.error);
+}
 
 const openAIClient = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-const posts: PostModel[] = [
-  {
-    id: "ai-resp",
-    role: "assistant",
-    body: "Hello, AI world!",
-    date: new Date().toISOString(),
-    status: "done",
-  },
-  {
-    id: "1",
-    role: "user",
-    body: "Hello, world!",
-    date: new Date().toISOString(),
-    replyId: "ai-resp",
-    status: "done",
-  },
-  {
-    id: "2",
-    role: "user",
-    body: "# Markdown Header 1\n\n## Markdown Header 2\n\nMarkdown *emphasis* **strong** `code` [link](https://trychroma.com)\n\n---\nhorizontal rule\n\n---\n\n",
-    date: new Date().toISOString(),
-    status: "done",
-  },
-  {
-    id: "4",
-    role: "user",
-    body: "Hello, <b>world!!</b>",
-    date: new Date().toISOString(),
-    status: "done",
-  },
-];
+export async function getPosts(): Promise<PostModel[]> {
+  var posts = await collection.get({
+    where: { role: "user" },
+    include: ["documents", "metadatas"],
+  });
+  return chromaResultsToPostModels(posts).reverse();
+}
 
-const idToPost: { [key: string]: PostModel } = {};
-posts.forEach((post) => {
+const idToPost: { [id: string]: PostModel } = {};
+var assistantPosts = await collection.get({
+  where: { role: "assistant" },
+  include: ["documents", "metadatas"],
+});
+var assistantPostModels = chromaResultsToPostModels(assistantPosts);
+assistantPostModels.forEach((post) => {
   idToPost[post.id] = post;
 });
-
-export async function getPosts(): Promise<PostModel[]> {
-  await new Promise((resolve) => setTimeout(resolve, 200)); // Wait 2 seconds
-  return posts.filter((post) => post.role === "user").toReversed();
-}
 
 export async function getPostById(id: string): Promise<PostModel | null> {
   /**
@@ -76,8 +72,8 @@ export async function getPostById(id: string): Promise<PostModel | null> {
   const POLL_INTERVAL_MS = 200;
 
   const start = Date.now();
-  let post = idToPost[id];
 
+  var post = idToPost[id];
   while (Date.now() - start < MAX_WAIT_MS) {
     post = idToPost[id];
     if (!post) return null;
@@ -105,7 +101,7 @@ export async function publishNewPost(newPostBody: string): Promise<PostModel> {
     const assistanceResponseId = getAssistantReponse(newPostBody);
     newPost.replyId = assistanceResponseId;
   }
-  posts.push(newPost);
+  addPostModelToChromaCollection(newPost, collection).catch(console.error);
   return newPost;
 }
 
@@ -118,15 +114,28 @@ function getAssistantReponse(userInput: string): string {
     date: new Date().toISOString(),
     status: "processing" as PostStatus,
   };
-  posts.push(assistantPost);
+  addPostModelToChromaCollection(assistantPost, collection).catch(
+    console.error
+  );
   idToPost[id] = assistantPost;
   processAssistantResponse(userInput, assistantPost).catch(console.error); // Run in background
   return id;
 }
 
 async function processAssistantResponse(userInput: string, post: PostModel) {
+  const context = await collection.query({
+    queryTexts: [userInput],
+    nResults: 5,
+  });
+  const formattedContext = context.documents[0].map((doc, i) => {
+    return `
+    ${i + 1}. ${doc}
+    `;
+  });
+  const contextString = formattedContext.join("\n");
   const prompt = `
   You are an AI assistant that helps users with their questions.
+  ${contextString}
   1. Keep your responses short and to the point.
   2. Use markdown for formatting.
   User: ${userInput}
@@ -142,4 +151,5 @@ async function processAssistantResponse(userInput: string, post: PostModel) {
   } else {
     post.status = "done";
   }
+  addPostModelToChromaCollection(post, collection).catch(console.error);
 }

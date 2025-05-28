@@ -9,8 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "chromadb": "^2.4.6",
-    "chromadb-default-embed": "^2.14.0",
+    "@chroma-core/openai": "^0.1.5",
+    "chromadb": "^3.0.0",
     "framer-motion": "^12.12.2",
     "next": "15.1.8",
     "openai": "^4.103.0",

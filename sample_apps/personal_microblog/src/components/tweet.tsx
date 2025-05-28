@@ -23,7 +23,7 @@ interface TweetProps {
 export function Tweet({ tweet }: TweetProps) {
   const [reply, setReply] = useState<PostModel | null>(null);
 
-  const hasReply = tweet.replyId !== undefined;
+  const hasReply = tweet.replyId !== undefined && tweet.replyId !== "";
 
   useEffect(() => {
     if (tweet.replyId !== undefined) {

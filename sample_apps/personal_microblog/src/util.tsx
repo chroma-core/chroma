@@ -1,4 +1,5 @@
-import { PostModel } from "./types";
+import { Collection } from "chromadb";
+import { PostModel, Role } from "./types";
 
 function groupPostsByMonthAndYear(
   posts: PostModel[]
@@ -92,4 +93,45 @@ function replaceMentions(body: string): any[] {
   }
 
   return parts;
+}
+
+export function chromaResultsToPostModels(posts: any): PostModel[] {
+  var postModels = posts.ids.map(function (id: string, i: number) {
+    return {
+      id: id,
+      body: posts.documents[i],
+      date: posts.metadatas[i]?.date,
+      status: posts.metadatas[i]?.status,
+      replyId: posts.metadatas[i]?.replyId,
+    } as PostModel;
+  });
+  return postModels;
+}
+
+export async function addPostModelToChromaCollection(
+  post: PostModel,
+  collection: Collection
+) {
+  await collection.add({
+    documents: [post.body],
+    metadatas: [
+      {
+        date: post.date,
+        status: post.status,
+        role: post.role,
+        replyId: post.replyId ?? "",
+      },
+    ],
+    ids: [post.id],
+  });
+}
+
+export function makeTweetEntry(role: Role, body: string): PostModel {
+  return {
+    id: crypto.randomUUID(),
+    role: role,
+    body: body,
+    date: new Date().toISOString(),
+    status: "done",
+  };
 }
