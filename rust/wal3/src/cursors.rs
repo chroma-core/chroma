@@ -181,6 +181,29 @@ impl CursorStore {
         };
         Ok(Witness(e_tag, cursor))
     }
+
+    pub async fn list(&self) -> Result<Vec<CursorName<'_>>, Error> {
+        let curdir = format!("{}/cursor/", self.prefix);
+        let paths = self
+            .storage
+            .list_prefix(&curdir, GetOptions::default())
+            .await
+            .map_err(Arc::new)?;
+        let mut cursors = vec![];
+        for path in paths {
+            if let Some(mut cursor) = path.strip_prefix(&self.prefix) {
+                cursor = cursor.trim_start_matches('/');
+                if let Some(cursor_name) = CursorName::from_path(cursor) {
+                    cursors.push(cursor_name)
+                } else {
+                    return Err(Error::CorruptCursor(format!(
+                        "do not understand cursor at {path}"
+                    )));
+                }
+            }
+        }
+        Ok(cursors)
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
