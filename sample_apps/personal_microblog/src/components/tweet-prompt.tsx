@@ -19,7 +19,7 @@ export default function TweetPrompt(props: TweetPromptProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setGlow(input.match("@assistant($|\s)") != null);
+    setGlow(input.match("@assistant($|s)") != null);
   }, [input]);
 
   return (
@@ -28,6 +28,9 @@ export default function TweetPrompt(props: TweetPromptProps) {
         className={`flex flex-col gap-2 relative items-center w-full`}
         onSubmit={async (event) => {
           event.preventDefault();
+          if (input.trim() === "") {
+            return;
+          }
           props.onSubmit(input);
           setInput("");
         }}

@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Tweet, TweetSkeleton } from "@/components/tweet";
 import TweetPrompt from "@/components/tweet-prompt";
 import { PostModel, Role } from "@/types";
-import { getPosts } from "@/actions/posts";
+import { getPosts, publishNewPost } from "@/actions";
 
 function makeTweetEntry(role: Role, body: string): PostModel {
   return {
@@ -13,6 +13,7 @@ function makeTweetEntry(role: Role, body: string): PostModel {
     role: role,
     body: body,
     date: new Date().toISOString(),
+    status: "done",
   };
 }
 
@@ -22,6 +23,7 @@ const introTweet = makeTweetEntry(
 );
 
 export default function Home() {
+  const [madePost, setMadePost] = useState<boolean>(false);
   const [loadingMessages, setLoadingMessages] = useState<boolean>(true);
   const [messages, setMessages] = useState<Array<PostModel>>([]);
 
@@ -39,7 +41,11 @@ export default function Home() {
       {messages.map((m, i) => (
         <motion.li
           key={m.id}
-          initial={{ opacity: 0, height: 0 }}
+          initial={
+            madePost
+              ? { opacity: 0, height: 0 }
+              : { opacity: 1, height: "auto" }
+          }
           animate={{ opacity: 1, height: "auto" }}
         >
           <Tweet tweet={m} />
@@ -53,8 +59,10 @@ export default function Home() {
       <div className="flex flex-col justify-between items-stretch gap-4 w-[500px] max-w-[calc(100dvw-32px)]">
         <TweetPrompt
           onSubmit={(input) => {
-            const newTweet = makeTweetEntry("user", input);
-            setMessages((tweets) => [newTweet, ...tweets]);
+            setMadePost(true);
+            publishNewPost(input).then((newTweet) => {
+              setMessages((tweets) => [newTweet, ...tweets]);
+            });
           }}
         />
         <ul className="flex flex-col items-stretch gap-3 h-full items-center overflow-y-scroll">

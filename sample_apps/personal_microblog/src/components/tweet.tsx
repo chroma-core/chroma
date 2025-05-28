@@ -3,25 +3,51 @@ import { AiOutlineUser } from "react-icons/ai";
 import { AiOutlineRobot } from "react-icons/ai";
 
 import { Mention } from "./markup";
-import { JSX } from "react";
+import { JSX, useEffect, useState } from "react";
 import { PostModel, Role } from "@/types";
+import { getPostById } from "@/actions";
 
 interface TweetProps {
   tweet: PostModel;
 }
 
 export function Tweet({ tweet }: TweetProps) {
+  const [reply, setReply] = useState<PostModel | null>(null);
+
+  const hasReply = tweet.replyId !== undefined;
+
+  useEffect(() => {
+    if (tweet.replyId !== undefined) {
+      getPostById(tweet.replyId).then((post) => {
+        setReply((_) => post);
+      });
+    }
+  }, []);
+
   return (
-    <div className="flex flex-col gap-3">
+    <motion.div
+      className={`flex flex-col gap-3 ${
+        hasReply ? "border rounded-lg border-zinc-300 my-1 p-4" : ""
+      }`}
+    >
       <TweetInner role={tweet.role} body={tweet.body} />
       <div className="pl-8">
-        {tweet.reply ? (
-          <TweetInner role={"assistant"} body={tweet.reply} />
+        {hasReply ? (
+          <TweetInner
+            role={"assistant"}
+            body={
+              !reply
+                ? "Remembering..."
+                : reply.status == "error"
+                ? "[Error]"
+                : reply.body
+            }
+          />
         ) : (
           ""
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -70,8 +96,8 @@ export function TweetSkeleton() {
         <AiOutlineUser />
       </div>
       <div className="flex flex-col w-full items-stretch gap-2">
-        <div className="w-full h-4 bg-gray-300 rounded-full animate-pulse"></div>
-        <div className="w-full h-4 bg-gray-300 rounded-full animate-pulse"></div>
+        <div className="h-4 bg-gray-300 rounded-full animate-pulse"></div>
+        <div className="h-4 bg-gray-300 rounded-full animate-pulse mr-5"></div>
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+export type PostStatus = "processing" | "done" | "error";
+
 export type Role = "user" | "assistant";
 
 export interface PostModel {
@@ -5,5 +7,6 @@ export interface PostModel {
   role: Role;
   body: string;
   date: string;
-  reply?: string;
+  replyId?: string;
+  status: PostStatus;
 }
