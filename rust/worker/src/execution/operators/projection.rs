@@ -15,7 +15,7 @@ use chroma_types::{
 use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
 
-/// The `ProjectionOperator` retrieves record content by offset ids
+/// The `Projection` operator retrieves record content by offset ids
 ///
 /// # Inputs
 /// - `logs`: The latest logs of the collection
@@ -159,12 +159,11 @@ mod tests {
     use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator, LogGenerator};
     use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
-
-    use crate::execution::operators::projection::ProjectionOperator;
+    use chroma_types::operator::Projection;
 
     use super::ProjectionInput;
 
-    /// The unit tests for `ProjectionOperator` uses the following test data
+    /// The unit tests for `Projection` operator uses the following test data
     /// It first generates 100 log records and compact them,
     /// then generate 20 log records that overwrite the compacted data,
     /// and finally generate 20 log records of new data:
@@ -195,7 +194,7 @@ mod tests {
     async fn test_trivial_projection() {
         let (_test_segment, projection_input) = setup_projection_input((1..=120).collect()).await;
 
-        let projection_operator = ProjectionOperator {
+        let projection_operator = Projection {
             document: false,
             embedding: false,
             metadata: false,
@@ -219,7 +218,7 @@ mod tests {
     async fn test_full_projection() {
         let (_test_segment, projection_input) = setup_projection_input((1..=120).collect()).await;
 
-        let projection_operator = ProjectionOperator {
+        let projection_operator = Projection {
             document: true,
             embedding: true,
             metadata: true,
