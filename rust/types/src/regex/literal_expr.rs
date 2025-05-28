@@ -106,7 +106,54 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         NgramRange: Clone + RangeBounds<&'me str> + Send + Sync;
 
     // Return the documents containing the literals. The search space is restricted to the documents in the mask if specified
-    // The literal slice must not be shorter than N, else `[...].split_at(N)` will panic
+    //
+    // The literal slice should not be shorter than N, or an empty set will be returned to indicate no document contains a
+    // ngram sequence that match the literal sequence
+    //
+    // The high level algorithm can be separated into the following phases:
+    // - Calculate all ngrams that could present in the match
+    // - Prefetch all relevant blocks for these ngrams
+    // - For each sliding window of size N in the literal sequence:
+    //   - Fetch all (ngram, doc, pos) tuples from the index where the ngram can match the window of N literals
+    //   - Track the sliding window with minimum number of candidate (ngram, doc, pos) tuples
+    //   - Reorganize the ngrams by prefix and suffix into a lookup table
+    // - Taking the sliding window with minimum number of candidate (ngram, doc, pos) tuples as the pivot:
+    //   - Group the (ngram, doc, pos) tuples by document
+    //   - For each document, iterate over the candidate (ngram, pos) tuples:
+    //     - Repeatedly use the suffix of the ngram and the prefix lookup table to see if there exists a sequence of ngrams
+    //       and positions that aligns all the way to the last sliding window
+    //     - Repeatedly use the prefix of the ngram and the suffix lookup table to see if there exists a sequence of ngrams
+    //       and positions that aligns all the way to the first sliding window
+    //     - If there is such an alignment from the start to the end, add the document to the result and skip to the next document
+    //
+    // An illustrative example (N=3) for one successful iteration of the final step is presented below (irrelevant info is hidden):
+    //                ┌─────┐        ┌─────┐
+    //                │ ijk │        │ jkl │
+    //                │     │        │     │        ┌─────┐
+    //                │ 42──┼────────┼►43  │        │ klm │
+    // ┌─────┐        │     │        │     │        │     │
+    // │ hij │        │ 54──┼────────┼►55──┼────────┼►56  │
+    // │     │        │     │        └─────┘        └─────┘
+    // │ 71◄─┼────────┼─72──┼────┐
+    // │     │        │     │    │   ┌─────┐        ┌─────┐
+    // │ 107 │        │ 108 │    │   │ jkL │        │ kLm │
+    // └─────┘        └─────┘    │   │     │        │     │
+    //                 pivot     └───┼►73──┼────────┼►74  │
+    //                               │     │        │     │
+    //                               │ 109 │        │ 110 │
+    //                               └─────┘        └─────┘
+    // In this iteration, we inspect a document that contains the ngrams at the positions specified above. Starting at the pivot:
+    // - We check if position `42` could be part of a match. We check the window at right, which contains `jkl` and `jkL` as potential
+    //   candidates. Position `43` is present in ngram `jkl` and aligns with `42`, so we proceed to check further to the right. The
+    //   next window contains `klm` and `kLm` as potential candidates but there is no aligned position in either. Thus `42` cannot be
+    //   part of a match.
+    // - We then check if position `54` could be part of a match. `jkl` contains position `55` and `klm` contains position `56`, thus
+    //   we successfully find an aligned sequence of ngrams to the last sliding window. However there is no match to the left of the
+    //   pivot, thus `54` cannot be part of a match.
+    // - We finally check position `72`, and successfully find an alignment to the last and first sliding window. Thus position `72`
+    //   is part of a match, indicating this document matches the literal sequence. We proceed to the next document, even if there
+    //   could be another match at position `108`.
+
     async fn match_literal_with_mask(
         &self,
         literals: &[Literal],
