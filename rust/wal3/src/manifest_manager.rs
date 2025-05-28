@@ -2,14 +2,14 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use chroma_storage::{ETag, Storage};
-use setsum::Setsum;
 
+use crate::gc::Garbage;
 use crate::manifest::{Manifest, Snapshot};
 use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
-    unprefixed_fragment_path, Error, Fragment, FragmentSeqNo, LogPosition, SnapshotOptions,
-    ThrottleOptions,
+    unprefixed_fragment_path, Error, Fragment, FragmentSeqNo, GarbageCollectionOptions,
+    LogPosition, SnapshotOptions, ThrottleOptions,
 };
 
 ////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
@@ -35,6 +35,9 @@ struct Staging {
     next_seq_no_to_assign: FragmentSeqNo,
     /// The next fragment sequence number to look for when applying fragments.
     next_seq_no_to_apply: FragmentSeqNo,
+    /// A prefix of the log to be garbage collected.  This is added to the manager from somewhere
+    /// else and the manager will apply the garbage to the next manifest that gets written.
+    garbage: Option<Garbage>,
     /// The instant at which the last batch was generated.
     last_batch: Instant,
 }
@@ -58,7 +61,7 @@ impl Staging {
     )> {
         // No fragment, no work.
         if self.fragments.is_empty() {
-            return None;
+            return self.pull_gc_work_only();
         }
         // Iterate the fragments that are queued up and apply them to the manifest in order of
         // sequence_number, making sure to never leave gaps.
@@ -83,22 +86,38 @@ impl Staging {
         self.fragments = postpone;
         // No-one to notify, no work.
         if notifiers.is_empty() {
-            return None;
+            return self.pull_gc_work_only();
         }
         self.last_batch = Instant::now();
-        // If the manifest can create a snapshot based upon the options.
-        let snapshot = new_manifest.generate_snapshot(manager.snapshot, &manager.writer);
-        if let Some(s) = snapshot.as_ref() {
-            if let Err(err) = new_manifest.apply_snapshot(s) {
-                // It failed to apply, so error everyone waiting.  The backoff/retry/reseat
-                // logic has to accommodate this use case.
-                tracing::error!("Failed to apply snapshot: {:?}", err);
-                for notifier in notifiers {
-                    let _ = notifier.send(Some(err.clone()));
+        let garbage = self.garbage.take();
+        let snapshot = if let Some(garbage) = garbage.as_ref() {
+            new_manifest = match new_manifest.apply_garbage(garbage.clone()) {
+                Ok(manifest) => manifest,
+                Err(err) => {
+                    tracing::error!("could not apply garabage: {err:?}");
+                    for notifier in notifiers {
+                        let _ = notifier.send(Some(Box::new(err.clone()).into()));
+                    }
+                    return None;
                 }
-                return None;
+            };
+            None
+        } else {
+            // If the manifest can create a snapshot based upon the options.
+            let snapshot = new_manifest.generate_snapshot(manager.snapshot, &manager.writer);
+            if let Some(s) = snapshot.as_ref() {
+                if let Err(err) = new_manifest.apply_snapshot(s) {
+                    // It failed to apply, so error everyone waiting.  The backoff/retry/reseat
+                    // logic has to accommodate this use case.
+                    tracing::error!("Failed to apply snapshot: {:?}", err);
+                    for notifier in notifiers {
+                        let _ = notifier.send(Some(err.clone()));
+                    }
+                    return None;
+                }
             }
-        }
+            snapshot
+        };
         self.next_seq_no_to_apply = next_seq_no_to_apply;
         Some((
             self.stable.manifest.clone(),
@@ -108,6 +127,33 @@ impl Staging {
             snapshot,
             notifiers,
         ))
+    }
+
+    /// Pull work from the staging area, focusing solely on garbage collection.
+    #[allow(clippy::type_complexity)]
+    fn pull_gc_work_only(
+        &mut self,
+    ) -> Option<(
+        Manifest,
+        ETag,
+        Manifest,
+        FragmentSeqNo,
+        Option<Snapshot>,
+        Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
+    )> {
+        if let Some(garbage) = self.garbage.take() {
+            let new_manifest = self.stable.manifest.apply_garbage(garbage).ok()?;
+            Some((
+                self.stable.manifest.clone(),
+                self.stable.e_tag.clone(),
+                new_manifest,
+                self.next_seq_no_to_apply,
+                None,
+                vec![],
+            ))
+        } else {
+            None
+        }
     }
 }
 
@@ -156,6 +202,7 @@ impl ManifestManager {
             next_log_position,
             next_seq_no_to_assign,
             next_seq_no_to_apply,
+            garbage: None,
             last_batch: Instant::now(),
         }));
         Ok(Self {
@@ -231,9 +278,33 @@ impl ManifestManager {
     /// Given a fragment, add it to the manifest, batch its application and wait for it to apply.
     #[tracing::instrument(skip(self, fragment))]
     pub async fn publish_fragment(&self, fragment: Fragment) -> Result<(), Error> {
-        assert_ne!(fragment.setsum, Setsum::default(), "TODO(rescrv): remove");
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.push_work(fragment, tx);
+        self.do_work().await?;
+        match rx.await {
+            Ok(None) => Ok(()),
+            Ok(Some(err)) => Err(err),
+            Err(_) => Err(Error::Internal),
+        }
+    }
+
+    // Given garbage that has already been written to S3, apply the garbage collection to this
+    // manifest.
+    pub async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        {
+            let mut staging = self.staging.lock().unwrap();
+            if staging.garbage.is_some() {
+                return Err(Error::GarbageCollection(
+                    "tried collecting garbage twice".to_string(),
+                ));
+            }
+            staging.garbage = Some(garbage);
+        }
+        self.do_work().await
+    }
+
+    async fn do_work(&self) -> Result<(), Error> {
         loop {
             let work = {
                 // SAFETY(rescrv):  Mutex poisoning.
@@ -283,14 +354,59 @@ impl ManifestManager {
                     }
                 }
             } else {
-                break;
+                break Ok(());
             }
         }
-        match rx.await {
-            Ok(None) => Ok(()),
-            Ok(Some(err)) => Err(err),
-            Err(_) => Err(Error::Internal),
+    }
+
+    pub async fn compute_garbage(
+        &self,
+        _: &GarbageCollectionOptions,
+        first_to_keep: LogPosition,
+    ) -> Result<Garbage, Error> {
+        let snapshots = self.fetch_snapshots().await?;
+        // SAFETY(rescrv):  Mutex poisoning.
+        let staging = self.staging.lock().unwrap();
+        Ok(Garbage::new(&staging.stable.manifest, &snapshots, first_to_keep).map_err(Box::new)?)
+    }
+
+    async fn fetch_snapshots(&self) -> Result<Vec<Snapshot>, Error> {
+        // TODO(rescrv):  Snapshots embed a setsum in their path, so every Snapshot::load is
+        // cacheable.
+
+        // SAFETY(rescrv):  Mutex poisoning.
+        let manifest = {
+            let staging = self.staging.lock().unwrap();
+            staging.stable.manifest.clone()
+        };
+        let mut pointers = manifest.snapshots.clone();
+        let mut snapshots = vec![];
+        while !pointers.is_empty() {
+            // In parallel resolve this level of the tree.
+            let futures = pointers
+                .iter()
+                .map(|s| {
+                    let storage = Arc::clone(&self.storage);
+                    async move { Snapshot::load(&self.throttle, &storage, &self.prefix, s).await }
+                })
+                .collect::<Vec<_>>();
+            let resolved = futures::future::try_join_all(futures).await?;
+            // NOTE(rescrv):  This empties snapshots before the first loop so we can fill it
+            // incrementally as we find snapshots that reference snapshots.
+            for (r, s) in std::iter::zip(resolved.iter(), std::mem::take(&mut pointers).into_iter())
+            {
+                if let Some(r) = r {
+                    pointers.extend(r.snapshots.iter().cloned());
+                    snapshots.push(r.clone())
+                } else {
+                    return Err(Error::CorruptManifest(format!(
+                        "snapshot {} is missing",
+                        s.path_to_snapshot
+                    )));
+                }
+            }
         }
+        Ok(snapshots)
     }
 }
 

@@ -61,8 +61,12 @@ pub enum Error {
     CorruptFragment(String),
     #[error("corrupt cursor: {0}")]
     CorruptCursor(String),
+    #[error("corrupt garbage: {0}")]
+    CorruptGarbage(String),
     #[error("missing cursor: {0}")]
     NoSuchCursor(String),
+    #[error("missing cursor: {0}")]
+    GarbageCollection(String),
     #[error("scrub error: {0}")]
     ScrubError(#[from] Box<ScrubError>),
     #[error("parquet error: {0}")]
@@ -88,7 +92,9 @@ impl chroma_error::ChromaError for Error {
             Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptFragment(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptCursor(_) => chroma_error::ErrorCodes::DataLoss,
+            Self::CorruptGarbage(_) => chroma_error::ErrorCodes::Internal,
             Self::NoSuchCursor(_) => chroma_error::ErrorCodes::Unknown,
+            Self::GarbageCollection(_) => chroma_error::ErrorCodes::Unknown,
             Self::ScrubError(_) => chroma_error::ErrorCodes::DataLoss,
             Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
             Self::StorageError(storage) => storage.code(),
@@ -414,6 +420,16 @@ impl Default for CursorStoreOptions {
             concurrency: Self::default_concurrency(),
         }
     }
+}
+
+///////////////////////////////////// GarbageCollectionOptions /////////////////////////////////////
+
+/// GarbageCollectionOptions control the behavior of garbage collection.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct GarbageCollectionOptions {
+    /// Default throttling options for deletes.
+    #[serde(default)]
+    pub throttle: ThrottleOptions,
 }
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////

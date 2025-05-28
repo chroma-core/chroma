@@ -1,7 +1,13 @@
 use std::ops::Add;
+use std::sync::Arc;
+use std::time::Duration;
 
 use chroma_storage::Storage;
 use setsum::Setsum;
+
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
+};
 
 use crate::{
     deserialize_setsum, serialize_setsum, Error, Fragment, LogPosition, Manifest, ScrubError,
@@ -10,8 +16,12 @@ use crate::{
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct Garbage {
+    #[serde(
+        deserialize_with = "super::deserialize_setsum",
+        serialize_with = "super::serialize_setsum"
+    )]
     pub dropped_setsum: Setsum,
     pub actions: Vec<GarbageAction>,
     pub cutoff: LogPosition,
@@ -75,6 +85,89 @@ impl Garbage {
         };
         garbage.scrub()?;
         Ok(garbage)
+    }
+
+    pub fn path(prefix: &str) -> String {
+        format!("{}/gc/GARBAGE", prefix)
+    }
+
+    #[tracing::instrument(skip(storage), err(Display))]
+    pub async fn load(
+        options: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+    ) -> Result<Option<Garbage>, Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        let mut retries = 0;
+        let path = Self::path(prefix);
+        loop {
+            match storage
+                .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
+                .await
+                .map_err(Arc::new)
+            {
+                Ok((ref garbage, _)) => {
+                    let garbage: Garbage = serde_json::from_slice(garbage).map_err(|e| {
+                        Error::CorruptGarbage(format!("could not decode JSON garbage: {e:?}"))
+                    })?;
+                    return Ok(Some(garbage));
+                }
+                Err(err) => match &*err {
+                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
+                    err => {
+                        let backoff = exp_backoff.next();
+                        tokio::time::sleep(backoff).await;
+                        if retries >= 3 {
+                            return Err(Error::StorageError(Arc::new(err.clone())));
+                        }
+                        retries += 1;
+                    }
+                },
+            }
+        }
+    }
+
+    #[tracing::instrument(skip(self, storage), err(Display))]
+    pub async fn install(
+        &self,
+        options: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+    ) -> Result<(), Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        loop {
+            let path = Self::path(prefix);
+            let payload = serde_json::to_string(&self)
+                .map_err(|e| {
+                    Error::CorruptManifest(format!("could not encode JSON garbage: {e:?}"))
+                })?
+                .into_bytes();
+            let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
+            match storage.put_bytes(&path, payload, options).await {
+                Ok(_) => return Ok(()),
+                Err(StorageError::Precondition { path: _, source: _ }) => {
+                    // NOTE(rescrv):  We know that someone put the file before us, and therefore we
+                    // know this write failed.  Because the garbage file is created and deleted
+                    // we cannot just overwrite, so fail with log contention and let higher level
+                    // protocol decide.
+                    return Err(Error::LogContention);
+                }
+                Err(e) => {
+                    tracing::error!("error uploading manifest: {e:?}");
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(3_600) {
+                        backoff = Duration::from_secs(3_600);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -233,6 +326,48 @@ impl Garbage {
             new_snapshot: ret_snapshot,
             children: ret_children,
         })
+    }
+
+    pub fn prefixed_paths(&self, prefix: &str) -> impl Iterator<Item = String> {
+        fn prefixed_paths_for_action(
+            prefix: &str,
+            action: &GarbageAction,
+        ) -> impl Iterator<Item = String> {
+            let mut paths = vec![];
+            match action {
+                GarbageAction::DropFragment {
+                    path_to_fragment,
+                    fragment_setsum: _,
+                } => paths.push(format!("{prefix}/{path_to_fragment}")),
+                GarbageAction::DropSnapshot {
+                    path_to_snapshot,
+                    snapshot_setsum: _,
+                    children,
+                } => {
+                    paths.push(format!("{prefix}/{path_to_snapshot}"));
+                    for child in children {
+                        paths.extend(prefixed_paths_for_action(prefix, child));
+                    }
+                }
+                GarbageAction::ReplaceSnapshot {
+                    old_path_to_snapshot,
+                    old_snapshot_setsum: _,
+                    new_snapshot: _,
+                    children,
+                } => {
+                    paths.push(format!("{prefix}/{old_path_to_snapshot}"));
+                    for child in children {
+                        paths.extend(prefixed_paths_for_action(prefix, child));
+                    }
+                }
+            };
+            paths.into_iter()
+        }
+        let mut paths = vec![];
+        for action in self.actions.iter() {
+            paths.extend(prefixed_paths_for_action(prefix, action));
+        }
+        paths.into_iter()
     }
 }
 
