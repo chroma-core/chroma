@@ -19,8 +19,13 @@ export default function TweetPrompt(props: TweetPromptProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    setGlow(input.match("@assistant($|s)") != null);
+    setGlow(input.match(/(^|\s)@assistant($|\s)/) != null);
   }, [input]);
+
+  const outlineVariants = {
+    outlineWidth: glow ? 2 : 0,
+    boxShadow: glow ? "0 0 0 4px #ffb4b4" : "none",
+  };
 
   return (
     <div>
@@ -35,13 +40,11 @@ export default function TweetPrompt(props: TweetPromptProps) {
           setInput("");
         }}
       >
-        <input
+        <motion.input
           ref={inputRef}
-          className={`bg-zinc-100 rounded-md px-2 py-1.5 w-full outline-none text-zinc-800 ${
-            glow
-              ? "outline outline-2 outline-blue-400 outline-offset-2 shadow-lg shadow-blue-200"
-              : ""
-          }`}
+          animate={outlineVariants}
+          transition={{ duration: 0.2 }}
+          className={`bg-zinc-100 rounded-md px-2 py-1.5 w-full outline-none text-zinc-800`}
           placeholder="What's happening?"
           value={input}
           onChange={(event) => {
