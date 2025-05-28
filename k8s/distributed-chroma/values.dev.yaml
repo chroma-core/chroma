@@ -35,4 +35,4 @@ compactionService:
       value: 'value: "/tilt_config.yaml"'
 
 rustLogService:
-  replicaCount: 2
+  replicaCount: 1

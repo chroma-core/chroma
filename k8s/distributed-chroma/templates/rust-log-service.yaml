@@ -82,7 +82,7 @@ spec:
           env:
             - name: CONFIG_PATH
               value: "/config/config.yaml"
-            - name: CHROMA_QUERY_SERVICE__MY_MEMBER_ID
+            - name: CHROMA_LOG_SERVICE__MY_MEMBER_ID
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name

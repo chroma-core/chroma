@@ -622,4 +622,56 @@ mod tests {
         assert_eq!(metrics.successful_untrack.load(Ordering::SeqCst), 0);
         assert_eq!(metrics.failed_track.load(Ordering::SeqCst), 1);
     }
+
+    #[test]
+    fn three_patterns() {
+        // Test an exact pattern-based override.
+        let metrics = TestMetrics::default();
+        let sc = Scorecard::new(
+            &metrics,
+            vec![
+                Rule::new(
+                    vec![
+                        Pattern::must("op:*"),
+                        Pattern::must("tenant:me"),
+                        Pattern::must("collection:*"),
+                    ],
+                    20,
+                ),
+                Rule::new(
+                    vec![
+                        Pattern::must("op:*"),
+                        Pattern::must("tenant:*"),
+                        Pattern::must("collection:*"),
+                    ],
+                    10,
+                ),
+            ],
+            1.try_into().unwrap(),
+        );
+        let mut saved_tickets = vec![];
+        // Fill to the limit specified in the first rule.
+        for _ in 0..20 {
+            let t = sc.track(&["op:read", "tenant:me", "collection:foo"]);
+            assert!(t.is_some());
+            saved_tickets.push(t);
+        }
+        // Reject
+        let t = sc.track(&["op:read", "tenant:me", "collection:foo"]);
+        assert!(t.is_none());
+        // Fill to the limit specified in the second rule.
+        for _ in 0..10 {
+            let t = sc.track(&["op:read", "tenant:you", "collection:foo"]);
+            assert!(t.is_some());
+            saved_tickets.push(t);
+        }
+        // Reject
+        let t = sc.track(&["op:read", "tenant:you", "collection:foo"]);
+        assert!(t.is_none());
+
+        assert_eq!(metrics.new_scorecard.load(Ordering::SeqCst), 1);
+        assert_eq!(metrics.successful_track.load(Ordering::SeqCst), 30);
+        assert_eq!(metrics.successful_untrack.load(Ordering::SeqCst), 0);
+        assert_eq!(metrics.failed_track.load(Ordering::SeqCst), 2);
+    }
 }
