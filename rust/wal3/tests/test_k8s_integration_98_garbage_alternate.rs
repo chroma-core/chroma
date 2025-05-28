@@ -31,28 +31,32 @@ async fn writer_thread(
         let message = format!("Message from writer: {}", i).into_bytes();
         wait.notified().await;
         let _guard = mutex.lock().await;
-        match writer.append(message).await {
-            Ok(position) => {
-                println!("writer succeeds in iteration {i}");
-                successful_writes += 1;
-                witness = cursors
-                    .save(
-                        &CursorName::new("my_cursor").unwrap(),
-                        &Cursor {
-                            position,
-                            epoch_us: position.offset(),
-                            writer: "Test Writer".to_string(),
-                        },
-                        &witness,
-                    )
-                    .await
-                    .unwrap();
+        loop {
+            match writer.append(message.clone()).await {
+                Ok(position) => {
+                    println!("writer succeeds in iteration {i}");
+                    successful_writes += 1;
+                    witness = cursors
+                        .save(
+                            &CursorName::new("my_cursor").unwrap(),
+                            &Cursor {
+                                position,
+                                epoch_us: position.offset(),
+                                writer: "Test Writer".to_string(),
+                            },
+                            &witness,
+                        )
+                        .await
+                        .unwrap();
+                    break;
+                }
+                Err(Error::LogContention) => {
+                    println!("writer sees contention preventing {i}");
+                    contention_errors += 1;
+                    continue;
+                }
+                Err(e) => panic!("Unexpected error: {:?}", e),
             }
-            Err(Error::LogContention) => {
-                println!("writer sees contention preventing {i}");
-                contention_errors += 1;
-            }
-            Err(e) => panic!("Unexpected error: {:?}", e),
         }
         notify.notify_one();
     }
@@ -78,7 +82,11 @@ async fn garbage_collector_thread(
                 .await
             {
                 Ok(()) => break,
-                Err(Error::LogContention) => tokio::time::sleep(Duration::from_millis(100)).await,
+                Err(Error::LogContention) => {
+                    println!("gc sees contention preventing {i}");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
                 Err(e) => panic!("unexpected error: {:?}", e),
             }
         }

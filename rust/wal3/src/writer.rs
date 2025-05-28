@@ -326,13 +326,42 @@ impl LogWriter {
     }
 
     pub async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = { self.inner.lock().unwrap().clone() };
-        if let Some(epoch_writer) = inner {
-            epoch_writer.writer.garbage_collect(options).await
-        } else {
-            // This should never happen, so just be polite with an error.
-            Err(Error::LogClosed)
+        loop {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let inner = { self.inner.lock().unwrap().clone() };
+            let Some(epoch_writer) = inner else {
+                // This should never happen, so just be polite with an error.
+                return Err(Error::LogClosed);
+            };
+            match epoch_writer.writer.garbage_collect(options).await {
+                Ok(()) => return Ok(()),
+                Err(Error::LogContention) => {
+                    let writer = OnceLogWriter::open(
+                        epoch_writer.writer.options.clone(),
+                        epoch_writer.writer.storage.clone(),
+                        epoch_writer.writer.prefix.clone(),
+                        self.writer.clone(),
+                        Arc::clone(&self.mark_dirty),
+                    )
+                    .await?;
+                    // SAFETY(rescrv):  Mutex poisoning.
+                    let mut inner = self.inner.lock().unwrap();
+                    if let Some(second) = inner.as_mut() {
+                        if second.epoch == epoch_writer.epoch {
+                            second.epoch += 1;
+                            second.writer.shutdown();
+                            second.writer = writer;
+                        }
+                        // fall through the loop to retry.
+                    } else {
+                        // This should never happen, so just be polite with an error.
+                        return Err(Error::LogClosed);
+                    }
+                }
+                Err(err) => {
+                    return Err(err);
+                }
+            }
         }
     }
 }
@@ -551,6 +580,7 @@ impl OnceLogWriter {
     #[tracing::instrument(skip(self))]
     async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
         let cutoff = self.garbage_collection_cutoff().await?;
+        self.manifest_manager.heartbeat().await?;
         let garbage = self
             .manifest_manager
             .compute_garbage(options, cutoff)
