@@ -58,23 +58,6 @@ export interface EmbeddingFunctionClass {
 }
 
 /**
- * Error wrapper for embedding functions that failed to load or configure.
- * Used as a fallback to provide meaningful error messages.
- */
-class MalformedEmbeddingFunction implements EmbeddingFunction {
-  public readonly name: string;
-
-  constructor(collectionName: string, message: string) {
-    this.name = `Failed to build embedding function for collection ${collectionName}: ${message}`;
-    console.error(this.name);
-  }
-
-  generate(texts: string[]): Promise<number[][]> {
-    throw new ChromaValueError(this.name);
-  }
-}
-
-/**
  * Registry of available embedding functions.
  * Maps function names to their constructor classes.
  */
@@ -112,23 +95,27 @@ export const getEmbeddingFunction = async (
   efConfig?: EmbeddingFunctionConfiguration,
 ) => {
   if (!efConfig) {
-    efConfig = { type: "legacy" };
+    console.warn(
+      `No embedding function configuration found for collection ${collectionName}. 'add' and 'query' will fail unless you provide them embeddings directly.`,
+    );
+    return undefined;
   }
 
-  let name: string;
   if (efConfig.type === "legacy") {
-    efConfig = await getDefaultEFConfig();
-    name = "default";
-  } else {
-    name = efConfig.name;
+    console.warn(
+      `No embedding function configuration found for collection ${collectionName}. 'add' and 'query' will fail unless you provide them embeddings directly.`,
+    );
+    return undefined;
   }
+
+  const name = efConfig.name;
 
   const embeddingFunction = knownEmbeddingFunctions.get(name);
   if (!embeddingFunction) {
-    return new MalformedEmbeddingFunction(
-      collectionName,
-      `Embedding function ${name} is not registered. Make sure that the @chroma-core/${name} package is installed`,
+    console.warn(
+      `Collection ${collectionName} was created with the ${embeddingFunction} embedding function. However, the @chroma-core/${embeddingFunction} package is not install. 'add' and 'query' will fail unless you provide them embeddings directly, or install the @chroma-core/${embeddingFunction} package.`,
     );
+    return undefined;
   }
 
   let constructorConfig: Record<string, any> =
@@ -138,26 +125,43 @@ export const getEmbeddingFunction = async (
     if (embeddingFunction.buildFromConfig) {
       return embeddingFunction.buildFromConfig(constructorConfig);
     }
-    return new MalformedEmbeddingFunction(
-      collectionName,
-      `Embedding function ${name} does not define a 'buildFromConfig' function'`,
+
+    console.warn(
+      `Embedding function ${name} does not define a 'buildFromConfig' function. 'add' and 'query' will fail unless you provide them embeddings directly.`,
     );
+    return undefined;
   } catch (e) {
-    return new MalformedEmbeddingFunction(
-      collectionName,
-      `Embedding function ${name} failed to build with config: ${constructorConfig}. Error: ${e}`,
+    console.warn(
+      `Embedding function ${name} failed to build with config: ${constructorConfig}. 'add' and 'query' will fail unless you provide them embeddings directly. Error: ${e}`,
     );
+    return undefined;
   }
 };
 
 /**
  * Serializes an embedding function to configuration format.
- * @param ef - Embedding function to serialize
+ * @param embeddingFunction - User provided embedding function
+ * @param configEmbeddingFunction - Collection config embedding function
  * @returns Configuration object that can recreate the function
  */
-export const serializeEmbeddingFunction = (
-  ef: EmbeddingFunction,
-): EmbeddingFunctionConfiguration => {
+export const serializeEmbeddingFunction = ({
+  embeddingFunction,
+  configEmbeddingFunction,
+}: {
+  embeddingFunction?: EmbeddingFunction;
+  configEmbeddingFunction?: EmbeddingFunction;
+}): EmbeddingFunctionConfiguration | undefined => {
+  if (embeddingFunction && configEmbeddingFunction) {
+    throw new ChromaValueError(
+      "Embedding function provided when already defined in the collection configuration",
+    );
+  }
+
+  if (!embeddingFunction && !configEmbeddingFunction) {
+    return undefined;
+  }
+
+  const ef = embeddingFunction || configEmbeddingFunction!;
   if (
     !ef.getConfig ||
     !ef.name ||

@@ -3,6 +3,8 @@ import { ChromaClientArgs } from "./chroma-client";
 import {
   BaseRecordSet,
   baseRecordSetFields,
+  CollectionConfiguration,
+  CreateCollectionConfiguration,
   IncludeEnum,
   Metadata,
   RecordSet,
@@ -13,6 +15,11 @@ import {
 import { Include } from "./api";
 import { a, b } from "@hey-api/openapi-ts/dist/types.d-C5lgdIHG";
 import { ChromaValueError } from "./errors";
+import {
+  EmbeddingFunction,
+  getDefaultEFConfig,
+  serializeEmbeddingFunction,
+} from "./embedding-function";
 
 /** Default tenant name used when none is specified */
 export const DEFAULT_TENANT = "default_tenant";
@@ -524,4 +531,32 @@ export const validateNResults = (nResults: number) => {
   if (nResults <= 0) {
     throw new ChromaValueError("Number of requested results has to positive");
   }
+};
+
+/**
+ *
+ */
+export const processCreateCollectionConfig = async ({
+  configuration,
+  embeddingFunction,
+}: {
+  configuration?: CreateCollectionConfiguration;
+  embeddingFunction?: EmbeddingFunction;
+}) => {
+  if (configuration?.hnsw && configuration?.spann) {
+    throw new ChromaValueError(
+      "Cannot specify both HNSW and SPANN configurations",
+    );
+  }
+
+  const embeddingFunctionConfiguration =
+    serializeEmbeddingFunction({
+      embeddingFunction,
+      configEmbeddingFunction: configuration?.embeddingFunction,
+    }) || (await getDefaultEFConfig());
+
+  return {
+    ...(configuration || {}),
+    embedding_function: embeddingFunctionConfiguration,
+  } as CollectionConfiguration;
 };

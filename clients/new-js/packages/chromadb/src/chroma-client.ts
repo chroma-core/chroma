@@ -3,23 +3,22 @@ import {
   defaultChromaClientArgs as defaultArgs,
   HttpMethod,
   normalizeMethod,
+  processCreateCollectionConfig,
 } from "./utils";
-import { CollectionConfiguration, DefaultService as Api } from "./api";
-import { CollectionMetadata, UserIdentity } from "./types";
+import { DefaultService as Api } from "./api";
+import {
+  CollectionMetadata,
+  CreateCollectionConfiguration,
+  UserIdentity,
+} from "./types";
 import {
   Collection,
   CollectionAPI,
   CollectionAPIImpl,
   CollectionImpl,
 } from "./collection";
-import {
-  EmbeddingFunction,
-  getDefaultEFConfig,
-  getEmbeddingFunction,
-  serializeEmbeddingFunction,
-} from "./embedding-function";
+import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
 import { chromaFetch } from "./chroma-fetch";
-import { d } from "@hey-api/openapi-ts/dist/types.d-C5lgdIHG";
 import * as process from "node:process";
 import { ChromaUnauthorizedError, ChromaValueError } from "./errors";
 
@@ -219,16 +218,14 @@ export class ChromaClient {
     embeddingFunction,
   }: {
     name: string;
-    configuration?: CollectionConfiguration;
+    configuration?: CreateCollectionConfiguration;
     metadata?: CollectionMetadata;
     embeddingFunction?: EmbeddingFunction;
   }): Promise<Collection> {
-    const collectionConfig: CollectionConfiguration = {
-      ...(configuration || {}),
-      embedding_function: embeddingFunction
-        ? serializeEmbeddingFunction(embeddingFunction)
-        : await getDefaultEFConfig(),
-    };
+    const collectionConfig = await processCreateCollectionConfig({
+      configuration,
+      embeddingFunction,
+    });
 
     const { data } = await Api.createCollection({
       client: this.apiClient,
@@ -338,16 +335,14 @@ export class ChromaClient {
     embeddingFunction,
   }: {
     name: string;
-    configuration?: CollectionConfiguration;
+    configuration?: CreateCollectionConfiguration;
     metadata?: CollectionMetadata;
     embeddingFunction?: EmbeddingFunction;
   }): Promise<Collection> {
-    const collectionConfig: CollectionConfiguration = {
-      ...(configuration || {}),
-      embedding_function: embeddingFunction
-        ? serializeEmbeddingFunction(embeddingFunction)
-        : undefined,
-    };
+    const collectionConfig = await processCreateCollectionConfig({
+      configuration,
+      embeddingFunction,
+    });
 
     const { data } = await Api.createCollection({
       client: this.apiClient,

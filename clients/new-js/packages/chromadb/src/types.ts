@@ -1,4 +1,13 @@
-import { GetUserIdentityResponse, Include } from "./api";
+import {
+  CollectionConfiguration,
+  GetUserIdentityResponse,
+  Include,
+  UpdateCollectionConfiguration as GenUpdateCollectionConfiguration,
+} from "./api";
+import { EmbeddingFunction } from "./embedding-function";
+
+// Re-exporting generated CollectionConfiguration
+export type { CollectionConfiguration };
 
 /**
  * User identity information including tenant and database access.
@@ -122,6 +131,22 @@ export enum IncludeEnum {
   /** Include URIs in results */
   uris = "uris",
 }
+
+/**
+ * Configuration for creating collection
+ */
+export type CreateCollectionConfiguration = Omit<
+  CollectionConfiguration,
+  "embedding_function"
+> & { embeddingFunction?: EmbeddingFunction };
+
+/**
+ * Configuration for updating a collection
+ */
+export type UpdateCollectionConfiguration = Omit<
+  GenUpdateCollectionConfiguration,
+  "embedding_function"
+> & { embeddingFunction?: EmbeddingFunction };
 
 /**
  * Result class for get operations, containing retrieved records.

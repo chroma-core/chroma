@@ -1,10 +1,5 @@
 import { ChromaClient } from "./chroma-client";
-import {
-  EmbeddingFunction,
-  getDefaultEFConfig,
-  getEmbeddingFunction,
-  knownEmbeddingFunctions,
-} from "./embedding-function";
+import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
 import {
   BaseRecordSet,
   CollectionMetadata,
@@ -15,12 +10,9 @@ import {
   RecordSet,
   Where,
   WhereDocument,
-} from "./types";
-import {
-  CollectionConfiguration,
-  Include,
   UpdateCollectionConfiguration,
-} from "./api";
+} from "./types";
+import { CollectionConfiguration, Include } from "./api";
 import { DefaultService as Api } from "./api";
 import {
   validateRecordSetLengthConsistency,
@@ -182,8 +174,6 @@ export interface CollectionAPI {
 export interface Collection extends CollectionAPI {
   /** Human-readable name of the collection */
   name: string;
-  /** Embedding function used by this collection */
-  embeddingFunction: EmbeddingFunction;
   /** Collection-level metadata */
   metadata: CollectionMetadata | undefined;
   /** Collection configuration settings */
@@ -203,7 +193,7 @@ export interface CollectionArgs {
   /** Collection ID */
   id: string;
   /** Embedding function for the collection */
-  embeddingFunction: EmbeddingFunction;
+  embeddingFunction?: EmbeddingFunction;
   /** Collection configuration */
   configuration: CollectionConfiguration;
   /** Optional collection metadata */
@@ -262,14 +252,6 @@ export class CollectionAPIImpl implements CollectionAPI {
       throw new ChromaValueError(
         "Embedding function must be defined for operations requiring embeddings.",
       );
-    }
-
-    if (
-      this._embeddingFunction &&
-      this._embeddingFunction.name === "default" &&
-      !knownEmbeddingFunctions.has("default")
-    ) {
-      await getDefaultEFConfig();
     }
 
     return await this._embeddingFunction.generate(documents);
@@ -511,6 +493,9 @@ export class CollectionAPIImpl implements CollectionAPI {
       validateMetadata(metadata);
     }
 
+    if (configuration?.embedding_function) {
+    }
+
     await Api.updateCollection({
       client: this.apiClient,
       path: await this.path(),
@@ -646,7 +631,6 @@ export class CollectionAPIImpl implements CollectionAPI {
  */
 export class CollectionImpl extends CollectionAPIImpl implements Collection {
   private _name: string;
-  override _embeddingFunction: EmbeddingFunction;
   private _metadata: CollectionMetadata | undefined;
   private _configuration: CollectionConfiguration;
 
@@ -692,14 +676,6 @@ export class CollectionImpl extends CollectionAPIImpl implements Collection {
 
   private set metadata(metadata: CollectionMetadata | undefined) {
     this._metadata = metadata;
-  }
-
-  override get embeddingFunction(): EmbeddingFunction {
-    return this._embeddingFunction;
-  }
-
-  private set embeddingFunction(embeddingFunction: EmbeddingFunction) {
-    this._embeddingFunction = embeddingFunction;
   }
 
   override async modify({

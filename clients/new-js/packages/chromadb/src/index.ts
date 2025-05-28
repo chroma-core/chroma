@@ -5,6 +5,7 @@
 
 export { Collection, CollectionAPI } from "./collection";
 export { withChroma } from "./next";
+export * from "./types";
 export * from "./admin-client";
 export * from "./chroma-client";
 export * from "./embedding-function";
