@@ -4,7 +4,7 @@ use chroma_system::Operator;
 use chroma_types::operator::{KnnMerge, RecordDistance};
 use thiserror::Error;
 
-/// The `KnnMergeOperator` selects the records nearest to target from the two vectors of records
+/// The `KnnMerge` operator selects the records nearest to target from the two vectors of records
 /// which are both sorted by distance in ascending order
 ///
 /// # Inputs
@@ -43,12 +43,12 @@ impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMerge {
 
 #[cfg(test)]
 mod tests {
-    use crate::execution::operators::{knn::RecordDistance, knn_merge::KnnMergeOperator};
     use chroma_system::Operator;
+    use chroma_types::operator::{KnnMerge, RecordDistance};
 
     use super::KnnMergeInput;
 
-    /// The unit tests for `KnnMergeOperator` uses the following test data
+    /// The unit tests for `KnnMerge` operator uses the following test data
     /// It generates records where the distance to target is the same as value of offset
     /// - First: 4, 8, ..., 100
     /// - Second: 1, 3, ..., 99
@@ -87,7 +87,7 @@ mod tests {
     async fn test_simple_merge() {
         let knn_merge_input = setup_knn_merge_input();
 
-        let knn_merge_operator = KnnMergeOperator { fetch: 10 };
+        let knn_merge_operator = KnnMerge { fetch: 10 };
 
         let knn_merge_output = knn_merge_operator
             .run(&knn_merge_input)
@@ -96,7 +96,7 @@ mod tests {
 
         assert_eq!(
             knn_merge_output
-                .record_distances
+                .distances
                 .iter()
                 .map(|record| record.offset_id)
                 .collect::<Vec<_>>(),

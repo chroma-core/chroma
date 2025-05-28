@@ -16,7 +16,7 @@ use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
-/// The `LimitOperator` selects a range or records sorted by their offset ids
+/// The `Limit` operator selects a range or records sorted by their offset ids
 ///
 /// # Inputs
 /// - `logs`: The latest logs of the collection
@@ -276,14 +276,12 @@ mod tests {
     use chroma_log::test::{upsert_generator, LoadFromGenerator, LogGenerator};
     use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
-    use chroma_types::SignedRoaringBitmap;
+    use chroma_types::{operator::Limit, SignedRoaringBitmap};
     use roaring::RoaringBitmap;
-
-    use crate::execution::operators::limit::LimitOperator;
 
     use super::LimitInput;
 
-    /// The unit tests for `LimitOperator` uses the following test data
+    /// The unit tests for `Limit` operator uses the following test data
     /// It first generates 100 log records and compact them,
     /// then generate 30 log records that overwrite the compacted data
     /// - Log: Upsert [31..=60]
@@ -313,7 +311,7 @@ mod tests {
         )
         .await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 0,
             fetch: None,
         };
@@ -321,7 +319,7 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(limit_output.offset_ids, (1..=100).collect());
     }
@@ -334,7 +332,7 @@ mod tests {
         )
         .await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 100,
             fetch: None,
         };
@@ -342,7 +340,7 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(limit_output.offset_ids, RoaringBitmap::new());
     }
@@ -355,7 +353,7 @@ mod tests {
         )
         .await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 0,
             fetch: Some(1000),
         };
@@ -363,7 +361,7 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(limit_output.offset_ids, (1..=100).collect());
     }
@@ -376,7 +374,7 @@ mod tests {
         )
         .await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 60,
             fetch: Some(30),
         };
@@ -384,7 +382,7 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(limit_output.offset_ids, (61..=90).collect());
     }
@@ -397,7 +395,7 @@ mod tests {
         )
         .await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 30,
             fetch: Some(20),
         };
@@ -405,7 +403,7 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(
             limit_output.offset_ids,
@@ -421,7 +419,7 @@ mod tests {
         let limit_input =
             setup_limit_input(SignedRoaringBitmap::empty(), SignedRoaringBitmap::full()).await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 99,
             fetch: Some(1),
         };
@@ -429,7 +427,7 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(limit_output.offset_ids, (100..=100).collect());
     }

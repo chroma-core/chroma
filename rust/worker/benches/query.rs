@@ -8,6 +8,7 @@ use chroma_benchmark::{
 use chroma_config::{registry::Registry, Configurable};
 use chroma_segment::test::TestDistributedSegment;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
+use chroma_types::operator::{Knn, KnnProjection};
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{stream, StreamExt, TryStreamExt};
 use load::{
@@ -17,12 +18,9 @@ use load::{
 use rand::{seq::SliceRandom, thread_rng};
 use worker::{
     config::RootConfig,
-    execution::{
-        operators::{knn::KnnOperator, knn_projection::KnnProjectionOperator},
-        orchestration::{
-            knn::KnnOrchestrator,
-            knn_filter::{KnnFilterOrchestrator, KnnFilterOutput},
-        },
+    execution::orchestration::{
+        knn::KnnOrchestrator,
+        knn_filter::{KnnFilterOrchestrator, KnnFilterOutput},
     },
 };
 
@@ -91,11 +89,11 @@ fn knn(
         dispatcher_handle.clone(),
         1000,
         knn_filter_output.clone(),
-        KnnOperator {
+        Knn {
             embedding: query,
             fetch: Sift1MData::k() as u32,
         },
-        KnnProjectionOperator {
+        KnnProjection {
             projection: all_projection(),
             distance: true,
         },
