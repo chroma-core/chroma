@@ -277,6 +277,11 @@ impl PartialOrd for RecordDistance {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct KnnOutput {
+    pub distances: Vec<RecordDistance>,
+}
+
 /// The `KnnMerge` operator selects the records nearest to target from the batch vectors of records
 /// which are all sorted by distance in ascending order
 ///
@@ -296,23 +301,9 @@ pub struct KnnMerge {
     pub fetch: u32,
 }
 
-#[derive(Debug)]
-pub struct KnnMergeInput {
-    pub batch_distances: Vec<Vec<RecordDistance>>,
-}
-
-#[derive(Debug, Default)]
-pub struct KnnOutput {
-    pub distances: Vec<RecordDistance>,
-}
-
 impl KnnMerge {
-    pub fn merge(&self, input: KnnMergeInput) -> KnnOutput {
-        let mut batch_iters = input
-            .batch_distances
-            .into_iter()
-            .map(Vec::into_iter)
-            .collect::<Vec<_>>();
+    pub fn merge(&self, input: Vec<Vec<RecordDistance>>) -> Vec<RecordDistance> {
+        let mut batch_iters = input.into_iter().map(Vec::into_iter).collect::<Vec<_>>();
 
         // NOTE: `BinaryHeap<_>` is a max-heap, so we use `Reverse` to convert it into a min-heap
         let mut heap_dist = batch_iters
@@ -336,7 +327,7 @@ impl KnnMerge {
                 break;
             }
         }
-        KnnOutput { distances }
+        distances
     }
 }
 

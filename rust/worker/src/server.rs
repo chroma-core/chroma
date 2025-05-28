@@ -11,14 +11,13 @@ use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::{
     chroma_proto::{
+        self,
         query_executor_server::{QueryExecutor, QueryExecutorServer},
-        CountPlan, CountResult, GetPlan, GetResult, KnnBatchResult, KnnPlan,
     },
-    operator::Scan,
+    operator::{GetResult, KnnBatch, KnnBatchResult, KnnProjection, Scan},
     CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
-use std::iter::once;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -26,13 +25,12 @@ use tracing::{trace_span, Instrument};
 use crate::{
     config::QueryServiceConfig,
     execution::{
-        operators::{fetch_log::FetchLogOperator, knn_projection::KnnProjectionOperator},
+        operators::fetch_log::FetchLogOperator,
         orchestration::{
             get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
             spann_knn::SpannKnnOrchestrator, CountOrchestrator,
         },
     },
-    utils::convert::{from_proto_knn, to_proto_knn_batch_result},
 };
 
 #[derive(Clone)]
@@ -144,8 +142,8 @@ impl WorkerServer {
 
     async fn orchestrate_count(
         &self,
-        count: Request<CountPlan>,
-    ) -> Result<Response<CountResult>, Status> {
+        count: Request<chroma_proto::CountPlan>,
+    ) -> Result<Response<chroma_proto::CountResult>, Status> {
         let scan = count
             .into_inner()
             .scan
@@ -164,7 +162,7 @@ impl WorkerServer {
         );
 
         match count_orchestrator.run(self.system.clone()).await {
-            Ok((count, pulled_log_bytes)) => Ok(Response::new(CountResult {
+            Ok((count, pulled_log_bytes)) => Ok(Response::new(chroma_proto::CountResult {
                 count,
                 pulled_log_bytes,
             })),
@@ -172,7 +170,10 @@ impl WorkerServer {
         }
     }
 
-    async fn orchestrate_get(&self, get: Request<GetPlan>) -> Result<Response<GetResult>, Status> {
+    async fn orchestrate_get(
+        &self,
+        get: Request<chroma_proto::GetPlan>,
+    ) -> Result<Response<chroma_proto::GetResult>, Status> {
         let get_inner = get.into_inner();
         let scan = get_inner
             .scan
@@ -206,7 +207,10 @@ impl WorkerServer {
         );
 
         match get_orchestrator.run(self.system.clone()).await {
-            Ok((result, pulled_log_bytes)) => Ok(Response::new(GetResult {
+            Ok(GetResult {
+                pulled_log_bytes,
+                result,
+            }) => Ok(Response::new(chroma_proto::GetResult {
                 records: result
                     .records
                     .into_iter()
@@ -220,8 +224,8 @@ impl WorkerServer {
 
     async fn orchestrate_knn(
         &self,
-        knn: Request<KnnPlan>,
-    ) -> Result<Response<KnnBatchResult>, Status> {
+        knn: Request<chroma_proto::KnnPlan>,
+    ) -> Result<Response<chroma_proto::KnnBatchResult>, Status> {
         let dispatcher = self.clone_dispatcher()?;
         let system = self.system.clone();
 
@@ -246,11 +250,11 @@ impl WorkerServer {
         let projection = knn_inner
             .projection
             .ok_or(Status::invalid_argument("Invalid Projection Operator"))?;
-        let knn_projection = KnnProjectionOperator::try_from(projection)
+        let knn_projection = KnnProjection::try_from(projection)
             .map_err(|e| Status::invalid_argument(format!("Invalid Projection Operator: {}", e)))?;
 
         if knn.embeddings.is_empty() {
-            return Ok(Response::new(to_proto_knn_batch_result(0, Vec::new())?));
+            return Ok(Response::new(KnnBatchResult::default().try_into()?));
         }
 
         // If dimension is not set and segment is uninitialized, we assume
@@ -258,13 +262,13 @@ impl WorkerServer {
         if collection_and_segments.collection.dimension.is_none()
             && collection_and_segments.vector_segment.file_path.is_empty()
         {
-            return Ok(Response::new(to_proto_knn_batch_result(
-                0,
-                once(Default::default())
-                    .cycle()
-                    .take(knn.embeddings.len())
-                    .collect(),
-            )?));
+            return Ok(Response::new(
+                KnnBatchResult {
+                    pulled_log_bytes: 0,
+                    results: vec![Default::default(); knn.embeddings.len()],
+                }
+                .try_into()?,
+            ));
         }
 
         let vector_segment_type = collection_and_segments.vector_segment.r#type;
@@ -296,7 +300,7 @@ impl WorkerServer {
                 garbage_collection_context: None,
                 metrics: SpannMetrics::default(),
             };
-            let knn_orchestrator_futures = from_proto_knn(knn)?
+            let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
                 .into_iter()
                 .map(|knn| {
                     SpannKnnOrchestrator::new(
@@ -316,14 +320,17 @@ impl WorkerServer {
                 .try_collect::<Vec<_>>()
                 .await
             {
-                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(
-                    pulled_log_bytes,
-                    results,
-                )?)),
+                Ok(results) => Ok(Response::new(
+                    KnnBatchResult {
+                        pulled_log_bytes,
+                        results,
+                    }
+                    .try_into()?,
+                )),
                 Err(err) => Err(Status::new(err.code().into(), err.to_string())),
             }
         } else {
-            let knn_orchestrator_futures = from_proto_knn(knn)?
+            let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
                 .into_iter()
                 .map(|knn| {
                     KnnOrchestrator::new(
@@ -343,10 +350,13 @@ impl WorkerServer {
                 .try_collect::<Vec<_>>()
                 .await
             {
-                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(
-                    pulled_log_bytes,
-                    results,
-                )?)),
+                Ok(results) => Ok(Response::new(
+                    KnnBatchResult {
+                        pulled_log_bytes,
+                        results,
+                    }
+                    .try_into()?,
+                )),
                 Err(err) => Err(Status::new(err.code().into(), err.to_string())),
             }
         }
@@ -362,7 +372,10 @@ impl WorkerServer {
 
 #[async_trait]
 impl QueryExecutor for WorkerServer {
-    async fn count(&self, count: Request<CountPlan>) -> Result<Response<CountResult>, Status> {
+    async fn count(
+        &self,
+        count: Request<chroma_proto::CountPlan>,
+    ) -> Result<Response<chroma_proto::CountResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
         let count_span = trace_span!("CountPlan",);
@@ -372,7 +385,10 @@ impl QueryExecutor for WorkerServer {
             .await
     }
 
-    async fn get(&self, get: Request<GetPlan>) -> Result<Response<GetResult>, Status> {
+    async fn get(
+        &self,
+        get: Request<chroma_proto::GetPlan>,
+    ) -> Result<Response<chroma_proto::GetResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
         let get_span = trace_span!("GetPlan",);
@@ -382,7 +398,10 @@ impl QueryExecutor for WorkerServer {
             .await
     }
 
-    async fn knn(&self, knn: Request<KnnPlan>) -> Result<Response<KnnBatchResult>, Status> {
+    async fn knn(
+        &self,
+        knn: Request<chroma_proto::KnnPlan>,
+    ) -> Result<Response<chroma_proto::KnnBatchResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
         let knn_span = trace_span!("KnnPlan",);
