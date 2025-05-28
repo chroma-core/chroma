@@ -102,6 +102,7 @@ export function chromaResultsToPostModels(posts: any): PostModel[] {
       body: posts.documents[i],
       date: posts.metadatas[i]?.date,
       status: posts.metadatas[i]?.status,
+      role: posts.metadatas[i]?.role,
       replyId: posts.metadatas[i]?.replyId,
     } as PostModel;
   });
