@@ -1,0 +1,7 @@
+.divInput:empty::before {
+    color: gray;
+    content: "What's happening?";
+    pointer-events: none;
+    display: block;
+    /* For Firefox */
+}

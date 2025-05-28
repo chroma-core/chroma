@@ -55,7 +55,7 @@ export default function Home() {
   );
 
   return (
-    <div className="flex flex-row justify-center py-20 h-dvh bg-white dark:bg-zinc-900">
+    <div className="flex flex-row justify-center py-20 bg-white  mb-48">
       <div className="flex flex-col justify-between items-stretch gap-4 w-[500px] max-w-[calc(100dvw-32px)]">
         <TweetPrompt
           onSubmit={(input) => {
@@ -65,7 +65,7 @@ export default function Home() {
             });
           }}
         />
-        <ul className="flex flex-col items-stretch gap-3 h-full items-center overflow-y-scroll">
+        <ul className="flex flex-col items-stretch gap-3 h-full items-center">
           <AnimatePresence initial={false}>{tweets}</AnimatePresence>
         </ul>
       </div>
