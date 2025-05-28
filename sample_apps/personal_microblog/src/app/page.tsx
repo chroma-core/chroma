@@ -65,7 +65,7 @@ export default function Home() {
             });
           }}
         />
-        <ul className="flex flex-col items-stretch gap-3 h-full items-center">
+        <ul className="flex flex-col items-stretch gap-6 h-full items-center">
           <AnimatePresence initial={false}>{tweets}</AnimatePresence>
         </ul>
       </div>

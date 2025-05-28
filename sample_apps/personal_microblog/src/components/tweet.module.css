@@ -1,0 +1,37 @@
+.tweetBody {
+  font-family: var(--font-geist-mono);
+}
+
+.tweetBody a {
+  color: #0a69da;
+}
+
+.tweetBody h1 {
+  margin-bottom: 0.25em;
+  color: var(--accent);
+}
+
+.tweetBody h1::before {
+  content: "# ";
+}
+
+.tweetBody h2 {
+  margin-bottom: 0.25em;
+  color: var(--accent);
+}
+
+.tweetBody h2::before {
+  content: "## ";
+}
+
+.tweetBody hr {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  width: 100%;
+}
+
+.tweetBody code {
+  background-color: #f6f8fa;
+  padding: 0.2em 0.4em;
+  border-radius: 6px;
+}

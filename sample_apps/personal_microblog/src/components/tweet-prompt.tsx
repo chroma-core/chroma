@@ -12,7 +12,7 @@ function CharLimitIndicator(props: { count: number; max: number }) {
 }
 
 function normalizeInput(input: string) {
-  return input.replace("<br>", "\n").replace("&nbsp;", " ");
+  return input.replace("<br>", "\n\n").replace("&nbsp;", " ");
 }
 
 interface TweetPromptProps {
@@ -62,7 +62,7 @@ export default function TweetPrompt(props: TweetPromptProps) {
     <motion.div
       animate={outlineVariants}
       transition={{ duration: 0.2 }}
-      className={`flex flex-col gap-2 relative items-center w-full bg-zinc-100 rounded-md px-2 py-1.5 w-full outline-none text-zinc-800`}
+      className={`flex flex-col gap-2 relative items-end w-full bg-zinc-100 rounded-md px-2 py-1.5 w-full outline-none text-zinc-800`}
     >
       <span
         ref={inputRef}

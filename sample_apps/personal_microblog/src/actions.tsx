@@ -45,14 +45,14 @@ const posts: PostModel[] = [
   {
     id: "2",
     role: "user",
-    body: "Hello, world!",
+    body: "# Markdown Header 1\n\n## Markdown Header 2\n\nMarkdown *emphasis* **strong** `code`\n\n---\nhorizontal rule\n\n---\n\n",
     date: new Date().toISOString(),
     status: "done",
   },
   {
     id: "4",
     role: "user",
-    body: "Hello, world!",
+    body: "Hello, <b>world!!</b>",
     date: new Date().toISOString(),
     status: "done",
   },
@@ -125,9 +125,15 @@ function getAssistantReponse(userInput: string): string {
 }
 
 async function processAssistantResponse(userInput: string, post: PostModel) {
+  const prompt = `
+  You are an AI assistant that helps users with their questions.
+  1. Keep your responses short and to the point.
+  User: ${userInput}
+  Assistant:
+  `;
   const response = await openAIClient.responses.create({
     model: "gpt-4.1",
-    input: userInput,
+    input: prompt,
   });
   post.body = response.output_text;
   if (response.error) {

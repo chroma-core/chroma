@@ -2,10 +2,15 @@ import { motion } from "framer-motion";
 import { AiOutlineUser } from "react-icons/ai";
 import { AiOutlineRobot } from "react-icons/ai";
 
-import { Mention } from "./markup";
+import { remark } from "remark";
+
 import { JSX, useEffect, useState } from "react";
 import { PostModel, Role } from "@/types";
 import { getPostById } from "@/actions";
+import { remarkMentions } from "@/util";
+import remarkHtml from "remark-html";
+
+import styles from "./tweet.module.css";
 
 interface TweetProps {
   tweet: PostModel;
@@ -31,9 +36,10 @@ export function Tweet({ tweet }: TweetProps) {
       }`}
     >
       <TweetInner role={tweet.role} body={tweet.body} />
-      <div className="pl-8">
-        {hasReply ? (
+      {hasReply ? (
+        <div className="pl-8">
           <TweetInner
+            className="text-[90%]"
             role={"assistant"}
             body={
               !reply
@@ -43,50 +49,52 @@ export function Tweet({ tweet }: TweetProps) {
                 : reply.body
             }
           />
-        ) : (
-          ""
-        )}
-      </div>
+        </div>
+      ) : (
+        ""
+      )}
     </motion.div>
   );
 }
 
-function TweetInner({ role, body }: { role: Role; body: string }) {
-  const icon = role === "user" ? <AiOutlineUser /> : <AiOutlineRobot />;
+function TweetInner({
+  role,
+  body,
+  className,
+}: {
+  role: Role;
+  body: string;
+  className?: string;
+}) {
+  const [htmlBody, setHtmlBody] = useState(body);
+
+  const iconSize = 20;
+  const icon =
+    role === "user" ? (
+      <AiOutlineUser size={iconSize} />
+    ) : (
+      <AiOutlineRobot size={iconSize} />
+    );
+
+  useEffect(() => {
+    remark()
+      .use(remarkHtml)
+      .use(remarkMentions)
+      .process(body)
+      .then((result) => {
+        setHtmlBody(result.toString());
+      });
+  }, [body]);
+
   return (
     <div className="w-full flex flex-row gap-4">
-      <div className="pt-[.2em]">{icon}</div>
-      <div>
-        <MarkedUpTweetBody body={body} />
-      </div>
+      <div className="pt-[.1em]">{icon}</div>
+      <div
+        className={`w-full ${styles.tweetBody} ${className}`}
+        dangerouslySetInnerHTML={{ __html: htmlBody }}
+      ></div>
     </div>
   );
-}
-
-function MarkedUpTweetBody({ body }: { body: string }): JSX.Element[] {
-  const parts: JSX.Element[] = [];
-  const mentionRegex = /(@\w+)/g;
-  let lastIndex = 0;
-
-  body.replace(mentionRegex, (match, mention, offset) => {
-    // Push text before the mention
-    if (lastIndex < offset) {
-      const content = body.slice(lastIndex, offset);
-      parts.push(<span key={`${lastIndex}-${offset}`}>{content}</span>);
-    }
-    // Push the mention
-    parts.push(<Mention key={offset} text={mention} />);
-    lastIndex = offset + match.length;
-    return "";
-  });
-
-  // Push any remaining text
-  if (lastIndex < body.length) {
-    const content = body.slice(lastIndex);
-    parts.push(<span key={lastIndex}>{content}</span>);
-  }
-
-  return parts;
 }
 
 export function TweetSkeleton() {
