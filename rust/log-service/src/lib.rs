@@ -497,11 +497,6 @@ impl DirtyMarker {
                         None
                     }
                     Ordering::Greater => {
-                        tracing::info!(
-                            "{collection_id} has range ({}, {}]",
-                            record_compaction_position,
-                            record_enumeration_position,
-                        );
                         uncompacted += maximum_log_position - cursor.position;
                         if maximum_log_position - cursor.position >= record_count_backpressure {
                             backpressure.push(*collection_id);
