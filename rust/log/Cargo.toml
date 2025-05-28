@@ -35,6 +35,7 @@ chroma-system = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
 chroma-sqlite = { workspace = true }
+chroma-memberlist = { workspace = true }
 wal3 = { workspace = true }
 figment.workspace = true
 

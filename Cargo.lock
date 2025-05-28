@@ -1647,6 +1647,7 @@ dependencies = [
  "bytes",
  "chroma-config",
  "chroma-error",
+ "chroma-memberlist",
  "chroma-segment",
  "chroma-sqlite",
  "chroma-storage",

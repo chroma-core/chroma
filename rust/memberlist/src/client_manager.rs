@@ -1,18 +1,99 @@
 use super::memberlist_provider::Memberlist;
 use async_trait::async_trait;
+use chroma_config::assignment::{
+    assignment_policy::AssignmentPolicy, rendezvous_hash::AssignmentError,
+};
+use chroma_error::ChromaError;
 use chroma_system::{Component, ComponentContext, Handler};
 use chroma_tracing::GrpcTraceService;
-use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
+use chroma_types::chroma_proto::{
+    log_service_client::LogServiceClient, query_executor_client::QueryExecutorClient,
+};
 use parking_lot::RwLock;
 use std::{
+    cmp::min,
     collections::{HashMap, HashSet},
     fmt::Debug,
     sync::Arc,
 };
+use thiserror::Error;
 use tonic::transport::{Channel, Endpoint};
 use tower::{discover::Change, ServiceBuilder};
 
-pub type NodeNameToClient<T> = Arc<RwLock<HashMap<String, T>>>;
+#[derive(Debug, Clone)]
+pub struct ClientAssigner<T> {
+    node_name_to_client: Arc<RwLock<HashMap<String, T>>>,
+    assignment_policy: Box<dyn AssignmentPolicy>,
+    replication_factor: usize,
+}
+
+#[derive(Error, Debug)]
+pub enum ClientAssignmentError {
+    #[error("No client found for node: {0}")]
+    NoClientFound(String),
+    #[error("Assignment error: {0}")]
+    AssignmentError(#[from] AssignmentError),
+}
+
+impl ChromaError for ClientAssignmentError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            ClientAssignmentError::NoClientFound(_) => chroma_error::ErrorCodes::Internal,
+            ClientAssignmentError::AssignmentError(_) => chroma_error::ErrorCodes::Internal,
+        }
+    }
+}
+
+impl<T> ClientAssigner<T>
+where
+    T: Clone,
+{
+    pub fn new(assignment_policy: Box<dyn AssignmentPolicy>, replication_factor: usize) -> Self {
+        Self {
+            node_name_to_client: Arc::new(RwLock::new(HashMap::new())),
+            assignment_policy,
+            replication_factor,
+        }
+    }
+
+    /// Get the gRPC clients for the given key by performing the assignment policy
+    /// # Arguments
+    /// - `assignment_key` - The key for which the client is to be fetched
+    /// # Returns
+    /// - The gRPC clients for the given key in the order of the assignment policy with the target replication factor
+    /// # Errors
+    /// - If no client is found for the given key
+    /// - If the assignment policy fails to assign the key
+    pub fn clients(&mut self, assignment_key: &str) -> Result<Vec<T>, ClientAssignmentError> {
+        let node_name_to_client_guard = self.node_name_to_client.read();
+        let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
+        let target_replication_factor = min(self.replication_factor, members.len());
+        self.assignment_policy.set_members(members);
+        let assigned = self
+            .assignment_policy
+            .assign(assignment_key, target_replication_factor)?;
+        let clients = assigned
+            .iter()
+            .map(|node_name| {
+                node_name_to_client_guard
+                    .get(node_name)
+                    .ok_or_else(|| ClientAssignmentError::NoClientFound(node_name.clone()))
+                    .cloned()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(clients)
+    }
+
+    pub fn all(&self) -> Vec<T> {
+        let node_name_to_client_guard = self.node_name_to_client.read();
+        node_name_to_client_guard.values().cloned().collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.node_name_to_client.read().is_empty()
+    }
+}
+
 pub trait ClientFactory {
     fn new_from_channel(channel: GrpcTraceService<Channel>) -> Self;
     // TODO: Exposing/Proxy'ing each property manually like this is not ideal, if this bloats
@@ -51,8 +132,7 @@ impl Default for ClientOptions {
 /// It responds to changes to the memberlist and updates the clients accordingly.
 #[derive(Debug)]
 pub struct ClientManager<T> {
-    // The name of the node to the grpc client
-    node_name_to_client: NodeNameToClient<T>,
+    client_assigner: ClientAssigner<T>,
     // The name of the node to the sender to the channel to add / remove the ip
     node_name_to_change_sender:
         HashMap<String, tokio::sync::mpsc::Sender<Change<String, Endpoint>>>,
@@ -68,14 +148,14 @@ where
     T: ClientFactory,
 {
     pub fn new(
-        node_name_to_client: NodeNameToClient<T>,
+        client_assigner: ClientAssigner<T>,
         connections_per_node: usize,
         connect_timeout_ms: u64,
         request_timeout_ms: u64,
         options: ClientOptions,
     ) -> Self {
         Self {
-            node_name_to_client,
+            client_assigner,
             node_name_to_change_sender: HashMap::new(),
             connections_per_node,
             connect_timeout_ms,
@@ -115,7 +195,7 @@ where
             });
         }
 
-        let mut node_name_to_client_guard = self.node_name_to_client.write();
+        let mut node_name_to_client_guard = self.client_assigner.node_name_to_client.write();
         node_name_to_client_guard.remove(node);
         self.node_name_to_change_sender.remove(node);
     }
@@ -149,7 +229,8 @@ where
                     None => client,
                 };
 
-                let mut node_name_to_client_guard = self.node_name_to_client.write();
+                let mut node_name_to_client_guard =
+                    self.client_assigner.node_name_to_client.write();
                 node_name_to_client_guard.insert(node.to_string(), client);
                 self.node_name_to_change_sender
                     .insert(node.to_string(), channel_change_sender.clone());
@@ -293,6 +374,17 @@ impl ClientFactory
     }
 }
 
+impl ClientFactory
+    for LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>
+{
+    fn new_from_channel(channel: GrpcTraceService<Channel>) -> Self {
+        LogServiceClient::new(channel)
+    }
+    fn max_decoding_message_size(self, max_size: usize) -> Self {
+        self.max_decoding_message_size(max_size)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::super::memberlist_provider::Member;
@@ -302,16 +394,19 @@ mod test {
     type QueryClient =
         QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
 
-    fn test_client_manager() -> (ClientManager<QueryClient>, NodeNameToClient<QueryClient>) {
-        let node_name_to_client = Arc::new(RwLock::new(HashMap::new()));
+    fn test_client_manager() -> (ClientManager<QueryClient>, ClientAssigner<QueryClient>) {
+        let client_assigner = ClientAssigner::new(
+            Box::new(chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy::default()),
+            1,
+        );
         let client_manager = ClientManager::new(
-            node_name_to_client.clone(),
+            client_assigner.clone(),
             1,
             1000,
             1000,
             ClientOptions::default(),
         );
-        (client_manager, node_name_to_client)
+        (client_manager, client_assigner)
     }
 
     fn get_memberlist_of_size(size: usize) -> Memberlist {
@@ -329,11 +424,11 @@ mod test {
 
     #[tokio::test]
     async fn test_initialize_memberlist() {
-        let (mut client_manager, node_name_to_client) = test_client_manager();
+        let (mut client_manager, client_assigner) = test_client_manager();
         let memberlist = get_memberlist_of_size(5);
         client_manager.process_new_members(memberlist.clone()).await;
 
-        let node_name_to_client_guard = node_name_to_client.read();
+        let node_name_to_client_guard = client_assigner.node_name_to_client.read();
         for member in memberlist.iter() {
             let node = member.member_node_name.as_str();
             node_name_to_client_guard
@@ -344,7 +439,7 @@ mod test {
 
     #[tokio::test]
     async fn test_add_new_node() {
-        let (mut client_manager, node_name_to_client) = test_client_manager();
+        let (mut client_manager, client_assigner) = test_client_manager();
         let memberlist = get_memberlist_of_size(5);
         client_manager.process_new_members(memberlist.clone()).await;
 
@@ -353,7 +448,7 @@ mod test {
             .process_new_members(memberlist_grown_by_one.clone())
             .await;
 
-        let node_name_to_client_guard = node_name_to_client.read();
+        let node_name_to_client_guard = client_assigner.node_name_to_client.read();
         for member in memberlist_grown_by_one.iter() {
             let node = member.member_node_name.as_str();
             node_name_to_client_guard
@@ -364,7 +459,7 @@ mod test {
 
     #[tokio::test]
     async fn test_remove_node_add_new() {
-        let (mut client_manager, node_name_to_client) = test_client_manager();
+        let (mut client_manager, client_assigner) = test_client_manager();
         let memberlist = get_memberlist_of_size(5);
         client_manager.process_new_members(memberlist.clone()).await;
 
@@ -376,7 +471,7 @@ mod test {
             .await;
 
         {
-            let node_name_to_client_guard = node_name_to_client.read();
+            let node_name_to_client_guard = client_assigner.node_name_to_client.read();
             for member in memberlist_shrunk_by_one.iter() {
                 let node = member.member_node_name.as_str();
                 node_name_to_client_guard
@@ -394,7 +489,7 @@ mod test {
             .process_new_members(memberlist_grown_by_one.clone())
             .await;
 
-        let node_name_to_client_guard = node_name_to_client.read();
+        let node_name_to_client_guard = client_assigner.node_name_to_client.read();
         for member in memberlist_grown_by_one.iter() {
             let node = member.member_node_name.as_str();
             node_name_to_client_guard

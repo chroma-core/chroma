@@ -5,7 +5,8 @@ use backon::Retryable;
 use chroma_config::registry;
 use chroma_config::{assignment::assignment_policy::AssignmentPolicy, Configurable};
 use chroma_error::ChromaError;
-use chroma_memberlist::client_manager::{ClientManager, ClientOptions, NodeNameToClient};
+use chroma_memberlist::client_manager::ClientAssigner;
+use chroma_memberlist::client_manager::{ClientManager, ClientOptions};
 use chroma_memberlist::{
     config::MemberlistProviderConfig,
     memberlist_provider::{CustomResourceMemberlistProvider, MemberlistProvider},
@@ -16,10 +17,9 @@ use chroma_types::SegmentType;
 use chroma_types::{
     operator::{CountResult, GetResult, KnnBatchResult},
     plan::{Count, Get, Knn},
-    CollectionUuid, ExecutorError,
+    ExecutorError,
 };
 use rand::seq::SliceRandom;
-use std::cmp::min;
 use tonic::Request;
 
 // Convenience type alias for the gRPC query client used by the DistributedExecutor
@@ -37,8 +37,7 @@ type QueryClient = QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::t
 /// outside.
 #[derive(Clone, Debug)]
 pub struct DistributedExecutor {
-    node_name_to_client: NodeNameToClient<QueryClient>,
-    assignment_policy: Box<dyn AssignmentPolicy>,
+    client_assigner: ClientAssigner<QueryClient>,
     replication_factor: usize,
     backoff: ExponentialBuilder,
 }
@@ -51,9 +50,9 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
     ) -> Result<Self, Box<dyn ChromaError>> {
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment, registry).await?;
-        let node_name_to_client = NodeNameToClient::default();
+        let client_assigner = ClientAssigner::new(assignment_policy, config.replication_factor);
         let client_manager = ClientManager::new(
-            node_name_to_client.clone(),
+            client_assigner.clone(),
             config.connections_per_node,
             config.connect_timeout_ms,
             config.request_timeout_ms,
@@ -76,8 +75,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         let retry_config = &config.retry;
         let backoff = retry_config.into();
         Ok(Self {
-            node_name_to_client,
-            assignment_policy,
+            client_assigner,
             replication_factor: config.replication_factor,
             backoff,
         })
@@ -98,7 +96,17 @@ impl DistributedExecutor {
 impl DistributedExecutor {
     ///////////////////////// Plan Operations /////////////////////////
     pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
-        let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
+        let clients = self
+            .client_assigner
+            .clients(
+                &plan
+                    .scan
+                    .collection_and_segments
+                    .collection
+                    .collection_id
+                    .to_string(),
+            )
+            .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let plan: chroma_types::chroma_proto::CountPlan = plan.clone().try_into()?;
         let res = (|| async {
             choose_client(clients.as_slice())?
@@ -112,7 +120,17 @@ impl DistributedExecutor {
     }
 
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
-        let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
+        let clients = self
+            .client_assigner
+            .clients(
+                &plan
+                    .scan
+                    .collection_and_segments
+                    .collection
+                    .collection_id
+                    .to_string(),
+            )
+            .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let res = (|| async {
             choose_client(clients.as_slice())?
                 .get(Request::new(plan.clone().try_into()?))
@@ -125,7 +143,17 @@ impl DistributedExecutor {
     }
 
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
-        let clients = self.clients(plan.scan.collection_and_segments.collection.collection_id)?;
+        let clients = self
+            .client_assigner
+            .clients(
+                &plan
+                    .scan
+                    .collection_and_segments
+                    .collection
+                    .collection_id
+                    .to_string(),
+            )
+            .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let res = (|| async {
             choose_client(clients.as_slice())?
                 .knn(Request::new(plan.clone().try_into()?))
@@ -138,40 +166,7 @@ impl DistributedExecutor {
     }
 
     pub async fn is_ready(&self) -> bool {
-        !self.node_name_to_client.read().is_empty()
-    }
-
-    ///////////////////////// Helpers /////////////////////////
-
-    /// Get the gRPC clients for the given collection id by performing the assignment policy
-    /// # Arguments
-    /// - `collection_id` - The collection id for which the client is to be fetched
-    /// # Returns
-    /// - The gRPC clients for the given collection id in the order of the assignment policy
-    /// # Errors
-    /// - If no client is found for the given collection id
-    /// - If the assignment policy fails to assign the collection id
-    fn clients(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<Vec<QueryClient>, ExecutorError> {
-        let node_name_to_client_guard = self.node_name_to_client.read();
-        let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
-        let target_replication_factor = min(self.replication_factor, members.len());
-        self.assignment_policy.set_members(members);
-        let assigned = self
-            .assignment_policy
-            .assign(&collection_id.to_string(), target_replication_factor)?;
-        let clients = assigned
-            .iter()
-            .map(|node_name| {
-                node_name_to_client_guard
-                    .get(node_name)
-                    .ok_or_else(|| ExecutorError::NoClientFound(node_name.clone()))
-                    .cloned()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(clients)
+        !self.client_assigner.is_empty()
     }
 }
 

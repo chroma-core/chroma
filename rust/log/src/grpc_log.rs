@@ -1,9 +1,15 @@
 use crate::config::GrpcLogConfig;
 use crate::types::CollectionInfo;
 use async_trait::async_trait;
+use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_memberlist::client_manager::{ClientAssigner, ClientManager, ClientOptions};
+use chroma_memberlist::config::MemberlistProviderConfig;
+use chroma_memberlist::memberlist_provider::{
+    CustomResourceMemberlistProvider, MemberlistProvider,
+};
 use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self};
@@ -142,29 +148,26 @@ impl ChromaError for GrpcSealLogError {
     }
 }
 
+type LogClient = LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
+
 #[derive(Clone, Debug)]
 pub struct GrpcLog {
     config: GrpcLogConfig,
-    #[allow(clippy::type_complexity)]
-    client: LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
-    #[allow(clippy::type_complexity)]
-    alt_client:
-        Option<LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>>,
+    client: LogClient,
+    alt_client_assigner: Option<ClientAssigner<LogClient>>,
 }
 
 impl GrpcLog {
     #[allow(clippy::type_complexity)]
     pub(crate) fn new(
         config: GrpcLogConfig,
-        client: LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
-        alt_client: Option<
-            LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
-        >,
+        client: LogClient,
+        alt_client_assigner: Option<ClientAssigner<LogClient>>,
     ) -> Self {
         Self {
             config,
             client,
-            alt_client,
+            alt_client_assigner,
         }
     }
 }
@@ -187,7 +190,7 @@ impl ChromaError for GrpcLogError {
 impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
     async fn try_from_config(
         my_config: &(GrpcLogConfig, System),
-        _registry: &Registry,
+        registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         // NOTE(rescrv):  This code is duplicated with primary_client_from_config below.  A transient hack.
         let (my_config, system) = my_config;
@@ -217,14 +220,43 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
             };
         let client = client_for_conn_str(connection_string)?;
 
-        let alt_client = if let Some(alt_host) = my_config.alt_host.as_ref() {
-            let connection_string = format!("http://{}:{}", alt_host, port);
-            tracing::info!("connecting to alt host {connection_string}");
-            Some(client_for_conn_str(connection_string)?)
-        } else {
-            None
+        // Alt client manager setup
+        let assignment_policy =
+            Box::<dyn AssignmentPolicy>::try_from_config(&my_config.assignment, registry).await?;
+        let client_assigner = ClientAssigner::new(assignment_policy, 1);
+        let client_manager = ClientManager::new(
+            client_assigner.clone(),
+            1,
+            my_config.connect_timeout_ms,
+            my_config.request_timeout_ms,
+            ClientOptions::new(Some(my_config.max_decoding_message_size)),
+        );
+        let client_manager_handle = system.start_component(client_manager);
+
+        let mut memberlist_provider = match &my_config.memberlist_provider {
+            MemberlistProviderConfig::CustomResource(_memberlist_provider_config) => {
+                CustomResourceMemberlistProvider::try_from_config(
+                    &my_config.memberlist_provider,
+                    registry,
+                )
+                .await?
+            }
         };
-        return Ok(GrpcLog::new(my_config.clone(), client, alt_client));
+        memberlist_provider.subscribe(client_manager_handle.receiver());
+        let _memberlist_provider_handle = system.start_component(memberlist_provider);
+
+        // let alt_client = if let Some(alt_host) = my_config.alt_host.as_ref() {
+        //     let connection_string = format!("http://{}:{}", alt_host, port);
+        //     tracing::info!("connecting to alt host {connection_string}");
+        //     Some(client_for_conn_str(connection_string)?)
+        // } else {
+        //     None
+        // };
+        return Ok(GrpcLog::new(
+            my_config.clone(),
+            client,
+            Some(client_assigner),
+        ));
     }
 }
 
@@ -281,8 +313,8 @@ impl GrpcLog {
         &mut self,
         tenant: &str,
         collection_id: CollectionUuid,
-    ) -> &mut LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>> {
-        if let Some(alt) = self.alt_client.as_mut() {
+    ) -> LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>> {
+        if let Some(client_assigner) = self.alt_client_assigner.as_mut() {
             if self.config.use_alt_for_tenants.iter().any(|t| t == tenant)
                 || self
                     .config
@@ -294,18 +326,32 @@ impl GrpcLog {
                 )
             {
                 tracing::info!("using alt client for {collection_id}");
-                return alt;
+                return client_assigner
+                    .clients(&collection_id.to_string())
+                    .unwrap_or_default()
+                    .drain(..)
+                    .next()
+                    // fallback to the standard client if no alt client is available,
+                    // which prevents issues in case the memberlist system is not up to date
+                    .unwrap_or_else(|| self.client.clone());
             }
         }
         tracing::info!("using standard client for {collection_id}");
-        &mut self.client
+        self.client.clone()
     }
 
     fn client_for_purge(
         &mut self,
-    ) -> Option<&mut LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>>
-    {
-        self.alt_client.as_mut()
+        collection_id: CollectionUuid,
+    ) -> Option<LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>> {
+        match &mut self.alt_client_assigner {
+            Some(assigner) => assigner
+                .clients(&collection_id.to_string())
+                .unwrap_or_default()
+                .first()
+                .cloned(),
+            None => None,
+        }
     }
 
     // ScoutLogs returns the offset of the next record to be inserted into the log.
@@ -316,11 +362,10 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         start_from: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
-        let request =
-            self.client_for(tenant, collection_id)
-                .scout_logs(chroma_proto::ScoutLogsRequest {
-                    collection_id: collection_id.0.to_string(),
-                });
+        let mut client = self.client_for(tenant, collection_id);
+        let request = client.scout_logs(chroma_proto::ScoutLogsRequest {
+            collection_id: collection_id.0.to_string(),
+        });
         let response = request.await;
         let response = match response {
             Ok(response) => response,
@@ -346,15 +391,14 @@ impl GrpcLog {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
         };
-        let request =
-            self.client_for(tenant, collection_id)
-                .pull_logs(chroma_proto::PullLogsRequest {
-                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
-                    collection_id: collection_id.0.to_string(),
-                    start_from_offset: offset,
-                    batch_size,
-                    end_timestamp,
-                });
+        let mut client = self.client_for(tenant, collection_id);
+        let request = client.pull_logs(chroma_proto::PullLogsRequest {
+            // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+            collection_id: collection_id.0.to_string(),
+            start_from_offset: offset,
+            batch_size,
+            end_timestamp,
+        });
         let response = request.await;
         match response {
             Ok(response) => {
@@ -471,57 +515,70 @@ impl GrpcLog {
         use_alt_log: bool,
         min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
-        let response = if use_alt_log {
-            if let Some(alt_client) = self.alt_client.as_mut() {
-                alt_client
-                    .get_all_collection_info_to_compact(
-                        chroma_proto::GetAllCollectionInfoToCompactRequest {
-                            min_compaction_size,
-                        },
-                    )
-                    .await
+        let mut combined_response = Vec::new();
+
+        if use_alt_log {
+            // Iterate over all alt clients and gather collections
+            if let Some(alt_client_assigner) = self.alt_client_assigner.as_ref() {
+                let mut all_alt_clients = alt_client_assigner.all();
+                if all_alt_clients.is_empty() {
+                    tracing::error!(
+                        "No alt clients available for getting collections with new data"
+                    );
+                    return Ok(vec![]);
+                }
+                for mut alt_client in all_alt_clients.drain(..) {
+                    // We error if any subrequest errors
+                    let response = alt_client
+                        .get_all_collection_info_to_compact(
+                            chroma_proto::GetAllCollectionInfoToCompactRequest {
+                                min_compaction_size,
+                            },
+                        )
+                        .await?;
+                    combined_response.push(response.into_inner());
+                }
             } else {
+                tracing::warn!(
+                    "No alt client assigner available for getting collections with new data"
+                );
                 return Ok(vec![]);
             }
         } else {
-            self.client
+            let response = self
+                .client
                 .get_all_collection_info_to_compact(
                     chroma_proto::GetAllCollectionInfoToCompactRequest {
                         min_compaction_size,
                     },
                 )
-                .await
+                .await?;
+            combined_response.push(response.into_inner());
         };
 
-        match response {
-            Ok(response) => {
-                let collections = response.into_inner().all_collection_info;
-                let mut result = Vec::new();
-                for collection in collections {
-                    let collection_uuid = match Uuid::parse_str(&collection.collection_id) {
-                        Ok(uuid) => uuid,
-                        Err(_) => {
-                            tracing::error!(
-                                "Failed to parse collection id: {}",
-                                collection.collection_id
-                            );
-                            continue;
-                        }
-                    };
-                    let collection_id = CollectionUuid(collection_uuid);
-                    result.push(CollectionInfo {
-                        collection_id,
-                        first_log_offset: collection.first_log_offset,
-                        first_log_ts: collection.first_log_ts,
-                    });
-                }
-                Ok(result)
-            }
-            Err(e) => {
-                tracing::error!("Failed to get collections: {}", e);
-                Err(GrpcGetCollectionsWithNewDataError::FailedGetCollectionsWithNewData(e))
+        let mut all_collections = Vec::new();
+        for response in combined_response {
+            let collections = response.all_collection_info;
+            for collection in collections {
+                let collection_uuid = match Uuid::parse_str(&collection.collection_id) {
+                    Ok(uuid) => uuid,
+                    Err(_) => {
+                        tracing::error!(
+                            "Failed to parse collection id: {}",
+                            collection.collection_id
+                        );
+                        continue;
+                    }
+                };
+                let collection_id = CollectionUuid(collection_uuid);
+                all_collections.push(CollectionInfo {
+                    collection_id,
+                    first_log_offset: collection.first_log_offset,
+                    first_log_ts: collection.first_log_ts,
+                });
             }
         }
+        Ok(all_collections)
     }
 
     pub(super) async fn update_collection_log_offset(
@@ -530,9 +587,9 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), GrpcUpdateCollectionLogOffsetError> {
-        let request = self
-            .client_for(tenant, collection_id)
-            .update_collection_log_offset(chroma_proto::UpdateCollectionLogOffsetRequest {
+        let mut client = self.client_for(tenant, collection_id);
+        let request =
+            client.update_collection_log_offset(chroma_proto::UpdateCollectionLogOffsetRequest {
                 // NOTE(rescrv):  Use the untyped string representation of the collection ID.
                 collection_id: collection_id.0.to_string(),
                 log_offset: new_offset,
@@ -548,7 +605,7 @@ impl GrpcLog {
         &mut self,
         collection_id: CollectionUuid,
     ) -> Result<(), GrpcPurgeDirtyForCollectionError> {
-        if let Some(client) = self.client_for_purge() {
+        if let Some(mut client) = self.client_for_purge(collection_id) {
             let request =
                 client.purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
                     // NOTE(rescrv):  Use the untyped string representation of the collection ID.
