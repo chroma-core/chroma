@@ -34,6 +34,7 @@ pub struct FetchLogOperator {
     pub start_log_offset_id: u64,
     pub maximum_fetch_count: Option<u32>,
     pub collection_uuid: CollectionUuid,
+    pub tenant: String,
 }
 
 type FetchLogInput = ();
@@ -77,7 +78,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
 
         let mut log_client = self.log_client.clone();
         let limit_offset = log_client
-            .scout_logs(self.collection_uuid, self.start_log_offset_id)
+            .scout_logs(&self.tenant, self.collection_uuid, self.start_log_offset_id)
             .await
             .ok();
         let mut fetched = Vec::new();
@@ -112,7 +113,13 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                     async move {
                         let _permit = sema.acquire().await.unwrap();
                         log_client
-                            .read(collection_uuid, start, num_records, Some(timestamp))
+                            .read(
+                                &self.tenant,
+                                collection_uuid,
+                                start,
+                                num_records,
+                                Some(timestamp),
+                            )
                             .await
                     }
                 })
@@ -134,6 +141,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
             loop {
                 let mut log_batch = log_client
                     .read(
+                        &self.tenant,
                         self.collection_uuid,
                         offset,
                         self.batch_size as i32,
@@ -209,6 +217,7 @@ mod tests {
             start_log_offset_id: 0,
             maximum_fetch_count: None,
             collection_uuid,
+            tenant: "test-tenant".to_string(),
         };
 
         let logs = fetch_log_operator
@@ -233,6 +242,7 @@ mod tests {
             start_log_offset_id: 3,
             maximum_fetch_count: Some(3),
             collection_uuid,
+            tenant: "test-tenant".to_string(),
         };
 
         let logs = fetch_log_operator

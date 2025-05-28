@@ -780,7 +780,7 @@ mod tests {
             None,
             Some(Where::Document(DocumentExpression {
                 operator: chroma_types::DocumentOperator::Contains,
-                text: "doc2".to_string(),
+                pattern: "doc2".to_string(),
             })),
             None,
             0,

@@ -171,13 +171,13 @@ impl ManifestManager {
     /// Recover from a fault in writing.  It is possible that fragments have been written that are
     /// not referenced by the manifest.  Scout ahead until an empty slot is observed.  Then write
     /// the manifest that includes the new fragments.
-    pub async fn recover(&mut self, mark_dirty: &dyn MarkDirty) -> Result<(), Error> {
-        let mut next_seq_no_to_apply = {
-            // SAFETY(rescrv):  Mutex poisoning.
-            let staging = self.staging.lock().unwrap();
-            staging.next_seq_no_to_apply
-        };
+    pub async fn recover(&self, mark_dirty: &dyn MarkDirty) -> Result<(), Error> {
         loop {
+            let next_seq_no_to_apply = {
+                // SAFETY(rescrv):  Mutex poisoning.
+                let staging = self.staging.lock().unwrap();
+                staging.next_seq_no_to_apply
+            };
             let next_fragment = read_fragment(
                 &self.storage,
                 &self.prefix,
@@ -189,15 +189,9 @@ impl ManifestManager {
                     .mark_dirty(fragment.start, (fragment.limit - fragment.start) as usize)
                     .await?;
                 self.publish_fragment(fragment).await?;
-                next_seq_no_to_apply += 1;
             } else {
                 break;
             }
-        }
-        {
-            // SAFETY(rescrv):  Mutex poisoning.
-            let mut staging = self.staging.lock().unwrap();
-            staging.next_seq_no_to_apply = next_seq_no_to_apply;
         }
         Ok(())
     }
@@ -222,15 +216,18 @@ impl ManifestManager {
         }
     }
 
+    fn push_work(&self, fragment: Fragment, tx: tokio::sync::oneshot::Sender<Option<Error>>) {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let mut staging = self.staging.lock().unwrap();
+        staging.fragments.push((fragment, tx));
+    }
+
     /// Given a fragment, add it to the manifest, batch its application and wait for it to apply.
+    #[tracing::instrument(skip(self, fragment))]
     pub async fn publish_fragment(&self, fragment: Fragment) -> Result<(), Error> {
         assert_ne!(fragment.setsum, Setsum::default(), "TODO(rescrv): remove");
         let (tx, rx) = tokio::sync::oneshot::channel();
-        {
-            // SAFETY(rescrv):  Mutex poisoning.
-            let mut staging = self.staging.lock().unwrap();
-            staging.fragments.push((fragment, tx));
-        }
+        self.push_work(fragment, tx);
         loop {
             let work = {
                 // SAFETY(rescrv):  Mutex poisoning.
@@ -293,16 +290,14 @@ impl ManifestManager {
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
-/*
 #[cfg(test)]
 mod tests {
     use chroma_storage::s3_client_for_test_with_new_bucket;
 
     use crate::*;
 
-    // This test kills the background thread and tests the pull_work function.
     #[tokio::test]
-    async fn test_k8s_integration_manager_staging_no_background() {
+    async fn test_k8s_integration_manager_staging() {
         // NOTE(rescrv):  This stest doesn't check writes to storage.  It just tracks the logic of
         // the manager.
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
@@ -314,7 +309,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let mut manager = ManifestManager::new(
+        let manager = ManifestManager::new(
             ThrottleOptions::default(),
             SnapshotOptions::default(),
             storage,
@@ -324,44 +319,40 @@ mod tests {
         .await
         .unwrap();
         let (d1_tx, mut d1_rx) = tokio::sync::oneshot::channel();
-        manager
-            .push_fragment(
-                Fragment {
-                    path: "path2".to_string(),
-                    seq_no: FragmentSeqNo(2),
-                    num_bytes: 20,
-                    start: LogPosition::from_offset(22),
-                    limit: LogPosition::from_offset(42),
-                    setsum: Setsum::default(),
-                },
-                d1_tx,
-            )
-            .unwrap();
+        manager.push_work(
+            Fragment {
+                path: "path2".to_string(),
+                seq_no: FragmentSeqNo(2),
+                num_bytes: 20,
+                start: LogPosition::from_offset(22),
+                limit: LogPosition::from_offset(42),
+                setsum: Setsum::default(),
+            },
+            d1_tx,
+        );
         let work = {
             // SAFETY(rescrv):  Mutex poisoning.
             let mut staging = manager.staging.lock().unwrap();
-            staging.pull_work()
+            staging.pull_work(&manager)
         };
         assert!(work.is_none());
         assert!(d1_rx.try_recv().is_err());
         let (d2_tx, mut d2_rx) = tokio::sync::oneshot::channel();
-        manager
-            .push_fragment(
-                Fragment {
-                    path: "path1".to_string(),
-                    seq_no: FragmentSeqNo(1),
-                    num_bytes: 30,
-                    start: LogPosition::from_offset(1),
-                    limit: LogPosition::from_offset(22),
-                    setsum: Setsum::default(),
-                },
-                d2_tx,
-            )
-            .unwrap();
+        manager.push_work(
+            Fragment {
+                path: "path1".to_string(),
+                seq_no: FragmentSeqNo(1),
+                num_bytes: 30,
+                start: LogPosition::from_offset(1),
+                limit: LogPosition::from_offset(22),
+                setsum: Setsum::default(),
+            },
+            d2_tx,
+        );
         let work = {
             // SAFETY(rescrv):  Mutex poisoning.
             let mut staging = manager.staging.lock().unwrap();
-            staging.pull_work().unwrap()
+            staging.pull_work(&manager).unwrap()
         };
         // pretend to install the manifest....
         // now finish work
@@ -411,96 +402,4 @@ mod tests {
         );
         assert_eq!(None, work.4);
     }
-
-    /// This does an end-to-end test against storage.  Equivalent to test_k8s_integration_manager_staging_no_background
-    #[tokio::test]
-    async fn test_k8s_integration_manager_staging_with_background() {
-        // NOTE(rescrv):  This stest doesn't check writes to storage.  It just tracks the logic of
-        // the manager.
-        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-        Manifest::initialize(
-            &LogWriterOptions::default(),
-            &storage,
-            "prefix",
-            "init in test",
-        )
-        .await
-        .unwrap();
-        let manager = ManifestManager::new(
-            ThrottleOptions::default(),
-            SnapshotOptions::default(),
-            storage,
-            "prefix".to_string(),
-            "manager in test".to_string(),
-        )
-        .await
-        .unwrap();
-        let (d1_tx, mut d1_rx) = tokio::sync::oneshot::channel();
-        manager
-            .push_fragment(
-                Fragment {
-                    path: "path2".to_string(),
-                    seq_no: FragmentSeqNo(2),
-                    num_bytes: 20,
-                    start: LogPosition::from_offset(22),
-                    limit: LogPosition::from_offset(42),
-                    setsum: Setsum::default(),
-                },
-                d1_tx,
-            )
-            .unwrap();
-        let work = {
-            // SAFETY(rescrv):  Mutex poisoning.
-            let mut staging = manager.staging.lock().unwrap();
-            staging.pull_work()
-        };
-        assert!(work.is_none());
-        assert!(d1_rx.try_recv().is_err());
-        let (d2_tx, d2_rx) = tokio::sync::oneshot::channel();
-        manager
-            .push_fragment(
-                Fragment {
-                    path: "path1".to_string(),
-                    seq_no: FragmentSeqNo(1),
-                    num_bytes: 30,
-                    start: LogPosition::from_offset(1),
-                    limit: LogPosition::from_offset(22),
-                    setsum: Setsum::default(),
-                },
-                d2_tx,
-            )
-            .unwrap();
-        d1_rx.await.unwrap();
-        d2_rx.await.unwrap();
-        let staging = manager.staging.lock().unwrap();
-        assert!(staging.fragments.is_empty());
-        assert_eq!(
-            Manifest {
-                writer: "manager in test".to_string(),
-                setsum: Setsum::default(),
-                acc_bytes: 50,
-                snapshots: vec![],
-                fragments: vec![
-                    Fragment {
-                        path: "path1".to_string(),
-                        seq_no: FragmentSeqNo(1),
-                        num_bytes: 30,
-                        start: LogPosition::from_offset(1),
-                        limit: LogPosition::from_offset(22),
-                        setsum: Setsum::default(),
-                    },
-                    Fragment {
-                        path: "path2".to_string(),
-                        seq_no: FragmentSeqNo(2),
-                        num_bytes: 20,
-                        start: LogPosition::from_offset(22),
-                        limit: LogPosition::from_offset(42),
-                        setsum: Setsum::default(),
-                    }
-                ],
-            },
-            staging.stable.manifest,
-        );
-    }
 }
-*/

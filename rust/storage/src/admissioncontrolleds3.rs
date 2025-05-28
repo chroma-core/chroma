@@ -206,10 +206,10 @@ impl AdmissionControlledS3Storage {
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
         priority: Arc<AtomicUsize>,
-        channel_receiver: tokio::sync::mpsc::Receiver<()>,
+        channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         // Acquire permit.
-        let _permit = rate_limiter.enter(priority, Some(channel_receiver)).await;
+        let _permit = rate_limiter.enter(priority, channel_receiver).await;
         storage
             .get_with_e_tag(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get"))
@@ -277,6 +277,9 @@ impl AdmissionControlledS3Storage {
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        if options.requires_strong_consistency {
+            return self.strongly_consistent_get_with_e_tag(key, options).await;
+        }
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.
@@ -298,7 +301,7 @@ impl AdmissionControlledS3Storage {
                         self.rate_limiter.clone(),
                         key.to_string(),
                         atomic_priority.clone(),
-                        rx,
+                        Some(rx),
                     )
                     .boxed()
                     .shared();
@@ -321,6 +324,22 @@ impl AdmissionControlledS3Storage {
             requests.remove(key);
         }
         res
+    }
+
+    pub async fn strongly_consistent_get_with_e_tag(
+        &self,
+        key: &str,
+        options: GetOptions,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+        AdmissionControlledS3Storage::read_from_storage(
+            self.storage.clone(),
+            self.rate_limiter.clone(),
+            key.to_string(),
+            atomic_priority,
+            None,
+        )
+        .await
     }
 
     async fn oneshot_upload(
@@ -548,9 +567,19 @@ impl CountBasedPolicy {
             match &mut channel_receiver {
                 Some(rx) => {
                     select! {
-                        _ = rx.recv() => {
+                        did_recv = rx.recv() => {
                             // Reevaluate priority if we got a notification.
-                            continue;
+                            match did_recv {
+                                Some(_) => {
+                                    // If we got a notification, continue to acquire.
+                                    continue;
+                                }
+                                None => {
+                                    // If the channel was closed, break out of the loop.
+                                    channel_receiver = None;
+                                    continue;
+                                }
+                            }
                         }
                         token = self.remaining_tokens[current_priority.as_usize()].acquire() => {
                             match token {

@@ -123,10 +123,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 + " (https://github.com/chroma-core/chroma)"
             )
 
+            limits = httpx.Limits(max_keepalive_connections=self.keepalive_secs)
             self._clients[loop_hash] = httpx.AsyncClient(
                 timeout=None,
                 headers=headers,
                 verify=self._settings.chroma_server_ssl_verify or False,
+                limits=limits,
             )
 
         return self._clients[loop_hash]
@@ -617,6 +619,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -631,6 +634,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
             json={
+                "ids": ids,
                 "query_embeddings": convert_np_embeddings_to_list(query_embeddings)
                 if query_embeddings is not None
                 else None,

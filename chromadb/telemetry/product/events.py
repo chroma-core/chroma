@@ -137,6 +137,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
     batch_size: int
     collection_uuid: str
     query_amount: int
+    filtered_ids_amount: int
     with_metadata_filter: int
     with_document_filter: int
     n_results: int
@@ -149,6 +150,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
         self,
         collection_uuid: str,
         query_amount: int,
+        filtered_ids_amount: int,
         with_metadata_filter: int,
         with_document_filter: int,
         n_results: int,
@@ -161,6 +163,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
         super().__init__()
         self.collection_uuid = collection_uuid
         self.query_amount = query_amount
+        self.filtered_ids_amount = filtered_ids_amount
         self.with_metadata_filter = with_metadata_filter
         self.with_document_filter = with_document_filter
         self.n_results = n_results
@@ -182,6 +185,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
         return CollectionQueryEvent(
             collection_uuid=self.collection_uuid,
             query_amount=total_amount,
+            filtered_ids_amount=self.filtered_ids_amount + other.filtered_ids_amount,
             with_metadata_filter=self.with_metadata_filter + other.with_metadata_filter,
             with_document_filter=self.with_document_filter + other.with_document_filter,
             n_results=self.n_results + other.n_results,

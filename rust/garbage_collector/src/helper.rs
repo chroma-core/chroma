@@ -8,6 +8,7 @@ use chroma_types::chroma_proto::{
     ListCollectionVersionsResponse, OperationRecord, ProjectionOperator, PushLogsRequest,
     ScanOperator, Segment, SegmentScope, Vector,
 };
+use chroma_types::InternalCollectionConfiguration;
 use std::collections::HashMap;
 use tonic::transport::Channel;
 use uuid::Uuid;
@@ -24,7 +25,7 @@ impl ChromaGrpcClients {
         let sysdb_channel = Channel::from_static("http://localhost:50051")
             .connect()
             .await?;
-        let logservice_channel = Channel::from_static("http://localhost:50052")
+        let logservice_channel = Channel::from_static("http://localhost:50054")
             .connect()
             .await?;
         let queryservice_channel = Channel::from_static("http://localhost:50053")
@@ -43,6 +44,7 @@ impl ChromaGrpcClients {
         tenant_id: &str,
         database_name: &str,
         collection_name: &str,
+        enable_spann: bool,
     ) -> Result<String, Box<dyn std::error::Error>> {
         // Create tenant first
         let tenant_req = CreateTenantRequest {
@@ -64,7 +66,11 @@ impl ChromaGrpcClients {
             // Vector segment
             Segment {
                 id: Uuid::new_v4().to_string(),
-                r#type: "urn:chroma:segment/vector/hnsw-distributed".to_string(),
+                r#type: if enable_spann {
+                    "urn:chroma:segment/vector/spann".to_string()
+                } else {
+                    "urn:chroma:segment/vector/hnsw-distributed".to_string()
+                },
                 scope: SegmentScope::Vector as i32,
                 collection: collection_id.clone(),
                 metadata: None,
@@ -90,6 +96,12 @@ impl ChromaGrpcClients {
             },
         ];
 
+        let config_str = if enable_spann {
+            serde_json::to_string(&InternalCollectionConfiguration::default_spann())?
+        } else {
+            "{}".to_string()
+        };
+
         // Create collection with segments
         let coll_req = CreateCollectionRequest {
             id: collection_id.clone(),
@@ -97,7 +109,7 @@ impl ChromaGrpcClients {
             tenant: tenant_id.to_string(),
             database: database_name.to_string(),
             dimension: Some(3),
-            configuration_json_str: "{}".to_string(),
+            configuration_json_str: config_str,
             get_or_create: Some(true),
             metadata: None,
             segments,
@@ -178,6 +190,9 @@ impl ChromaGrpcClients {
                     total_records_post_compaction: 0,
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
+                    version_file_path: None,
+                    root_collection_id: None,
+                    lineage_file_path: None,
                 }),
                 knn: None,
                 metadata: None,

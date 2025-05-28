@@ -582,7 +582,7 @@ impl<'me> MetadataIndexReader<'me> {
                 KeyWrapper::Uint32(k) => blockfile_reader
                     .get_range_stream(metadata_key..=metadata_key, ..*k)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
-                        Ok(result.bitor(&record.1))
+                        Ok(result.bitor(&record.2))
                     })
                     .await
                     .map_err(MetadataIndexError::BlockfileError),
@@ -592,7 +592,7 @@ impl<'me> MetadataIndexReader<'me> {
                 KeyWrapper::Float32(k) => blockfile_reader
                     .get_range_stream(metadata_key..=metadata_key, ..*k)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
-                        Ok(result.bitor(&record.1))
+                        Ok(result.bitor(&record.2))
                     })
                     .await
                     .map_err(MetadataIndexError::BlockfileError),
@@ -612,7 +612,7 @@ impl<'me> MetadataIndexReader<'me> {
                 KeyWrapper::Uint32(k) => blockfile_reader
                     .get_range_stream(metadata_key..=metadata_key, ..=*k)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
-                        Ok(result.bitor(&record.1))
+                        Ok(result.bitor(&record.2))
                     })
                     .await
                     .map_err(MetadataIndexError::BlockfileError),
@@ -622,7 +622,7 @@ impl<'me> MetadataIndexReader<'me> {
                 KeyWrapper::Float32(k) => blockfile_reader
                     .get_range_stream(metadata_key..=metadata_key, ..=*k)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
-                        Ok(result.bitor(&record.1))
+                        Ok(result.bitor(&record.2))
                     })
                     .await
                     .map_err(MetadataIndexError::BlockfileError),
@@ -645,7 +645,7 @@ impl<'me> MetadataIndexReader<'me> {
                         (Bound::Excluded(*k), Bound::Unbounded),
                     )
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
-                        Ok(result.bitor(&record.1))
+                        Ok(result.bitor(&record.2))
                     })
                     .await
                     .map_err(MetadataIndexError::BlockfileError),
@@ -658,7 +658,7 @@ impl<'me> MetadataIndexReader<'me> {
                         (Bound::Excluded(*k), Bound::Unbounded),
                     )
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
-                        Ok(result.bitor(&record.1))
+                        Ok(result.bitor(&record.2))
                     })
                     .await
                     .map_err(MetadataIndexError::BlockfileError),
@@ -678,7 +678,7 @@ impl<'me> MetadataIndexReader<'me> {
                 KeyWrapper::Uint32(k) => blockfile_reader
                     .get_range_stream(metadata_key..=metadata_key, *k..)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
-                        Ok(result.bitor(&record.1))
+                        Ok(result.bitor(&record.2))
                     })
                     .await
                     .map_err(MetadataIndexError::BlockfileError),
@@ -688,7 +688,7 @@ impl<'me> MetadataIndexReader<'me> {
                 KeyWrapper::Float32(k) => blockfile_reader
                     .get_range_stream(metadata_key..=metadata_key, *k..)
                     .try_fold(RoaringBitmap::new(), |result, record| async move {
-                        Ok(result.bitor(&record.1))
+                        Ok(result.bitor(&record.2))
                     })
                     .await
                     .map_err(MetadataIndexError::BlockfileError),

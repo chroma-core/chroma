@@ -219,6 +219,7 @@ export type ForkCollectionParams = {
 };
 
 export type BaseQueryParams = {
+  ids?: ID | IDs;
   nResults?: PositiveInteger;
   where?: Where;
   queryTexts?: string | string[];

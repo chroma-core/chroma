@@ -250,6 +250,7 @@ export class Collection {
    * @param {string | string[]} [params.queryTexts] - Optional query text(s) to search for in the collection.
    * @param {WhereDocument} [params.whereDocument] - Optional query condition to filter results based on document content.
    * @param {IncludeEnum[]} [params.include] - Optional array of fields to include in the result, such as "metadata" and "document".
+   * @param {IDs} [params.ids] - Optional IDs to filter on before querying.
    *
    * @returns {Promise<QueryResponse>} A promise that resolves to the query results.
    * @throws {Error} If there is an issue executing the query.
@@ -280,6 +281,7 @@ export class Collection {
     include,
     queryTexts,
     queryEmbeddings,
+    ids,
   }: QueryRecordsParams): Promise<MultiQueryResponse> {
     await this.client.init();
 
@@ -300,6 +302,11 @@ export class Collection {
       );
     }
 
+    let filter_ids: string[] | null = null;
+    if (ids) {
+      filter_ids = toArray(ids);
+    }
+
     const resp = await this.client.api.collectionQuery(
       this.client.tenant,
       this.client.database,
@@ -308,6 +315,7 @@ export class Collection {
       undefined,
       {
         query_embeddings: embeddings,
+        ids: filter_ids,
         n_results: nResults,
         where,
         where_document: whereDocument,

@@ -58,6 +58,9 @@ message Collection {
   uint64 total_records_post_compaction = 10;
   uint64 size_bytes_post_compaction = 11;
   uint64 last_compaction_time_secs = 12;
+  optional string version_file_path = 13;
+  optional string root_collection_id = 14;
+  optional string lineage_file_path = 15;
 }
 
 message Database {
@@ -155,7 +158,7 @@ message WhereDocument {
 
 // A leaf-node `WhereDocument` clause may compare a document to a single value.
 message DirectWhereDocument {
-    string document = 1;
+    string pattern = 1;
     WhereDocumentOperator operator = 2;
 }
 
@@ -165,6 +168,8 @@ message DirectWhereDocument {
 enum WhereDocumentOperator {
     CONTAINS = 0;
     NOT_CONTAINS = 1;
+    REGEX = 2;
+    NOT_REGEX = 3;
 }
 
 // A branch-node `WhereDocument` node has a list of children.

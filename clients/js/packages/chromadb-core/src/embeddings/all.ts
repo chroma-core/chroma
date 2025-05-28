@@ -7,3 +7,5 @@ export { OllamaEmbeddingFunction } from "./OllamaEmbeddingFunction";
 export { OpenAIEmbeddingFunction } from "./OpenAIEmbeddingFunction";
 export { TransformersEmbeddingFunction } from "./TransformersEmbeddingFunction";
 export { VoyageAIEmbeddingFunction } from "./VoyageAIEmbeddingFunction";
+export { CloudflareWorkersAIEmbeddingFunction } from "./CloudflareWorkersAIEmbeddingFunction";
+export { TogetherAIEmbeddingFunction } from "./TogetherAIEmbeddingFunction";

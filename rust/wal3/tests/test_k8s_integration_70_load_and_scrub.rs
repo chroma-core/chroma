@@ -5,14 +5,14 @@ use chroma_storage::s3_client_for_test_with_new_bucket;
 use wal3::{LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest, SnapshotOptions};
 
 #[tokio::test]
-async fn test_k8s_integration_99_load_and_scrub() {
+async fn test_k8s_integration_70_load_and_scrub() {
     // Appending to a log that has failed to write its manifest fails with log contention.
     // Subsequent writes will repair the log and continue to make progress.
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     Manifest::initialize(
         &LogWriterOptions::default(),
         &storage,
-        "test_k8s_integration_99_load_and_scrub",
+        "test_k8s_integration_70_load_and_scrub",
         "init",
     )
     .await
@@ -26,7 +26,7 @@ async fn test_k8s_integration_99_load_and_scrub() {
             ..LogWriterOptions::default()
         },
         Arc::clone(&storage),
-        "test_k8s_integration_99_load_and_scrub",
+        "test_k8s_integration_70_load_and_scrub",
         "load and scrub writer",
         (),
     )
@@ -42,7 +42,7 @@ async fn test_k8s_integration_99_load_and_scrub() {
     let log = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_99_load_and_scrub".to_string(),
+        "test_k8s_integration_70_load_and_scrub".to_string(),
     )
     .await
     .unwrap();

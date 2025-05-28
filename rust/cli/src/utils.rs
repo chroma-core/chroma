@@ -1,4 +1,9 @@
-use crate::client::ChromaClientError;
+use crate::client::admin_client::{AdminClient, AdminClientError};
+use crate::client::chroma_client::ChromaClientError;
+use crate::client::collection::CollectionAPIError;
+use crate::client::dashboard_client::DashboardClientError;
+use crate::commands::browse::BrowseError;
+use crate::commands::copy::CopyError;
 use crate::commands::db::DbError;
 use crate::commands::install::InstallError;
 use crate::commands::login::LoginError;
@@ -6,40 +11,24 @@ use crate::commands::profile::ProfileError;
 use crate::commands::run::RunError;
 use crate::commands::update::UpdateError;
 use crate::commands::vacuum::VacuumError;
-use crate::dashboard_client::DashboardClientError;
-use arboard::Clipboard;
-use colored::Colorize;
-use crossterm::{
-    cursor,
-    event::{self, Event, KeyCode, KeyEvent},
-    terminal::{disable_raw_mode, enable_raw_mode},
-    ExecutableCommand,
-};
-use regex::Regex;
-use reqwest::header::HeaderMap;
-use reqwest::{Client, Method};
-use serde::de::DeserializeOwned;
+use crate::commands::webpage::WebPageError;
+use crate::ui_utils::Theme;
+use chroma_frontend::config::FrontendServerConfig;
+use chroma_frontend::frontend_service_entrypoint_with_config;
+use clap::Parser;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::error::Error;
-use std::io::{stdout, Write};
-use std::path::PathBuf;
-use std::{fs, io};
+use std::fmt::Display;
+use std::fs;
+use std::net::TcpListener;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use thiserror::Error;
-
-pub const LOGO: &str = "
-                \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####
-             \x1b[38;5;069m(((((((((((((\x1b[38;5;203m(((((((((\x1b[38;5;220m#########
-           \x1b[38;5;069m(((((((((((((\x1b[38;5;203m(((((((((((\x1b[38;5;220m###########
-         \x1b[38;5;069m((((((((((((((\x1b[38;5;203m((((((((((((\x1b[38;5;220m############
-        \x1b[38;5;069m(((((((((((((\x1b[38;5;203m((((((((((((((\x1b[38;5;220m#############
-        \x1b[38;5;069m(((((((((((((\x1b[38;5;203m((((((((((((((\x1b[38;5;220m#############
-         \x1b[38;5;069m((((((((((((\x1b[38;5;203m(((((((((((((\x1b[38;5;220m##############
-         \x1b[38;5;069m((((((((((((\x1b[38;5;203m((((((((((((\x1b[38;5;220m##############
-           \x1b[38;5;069m((((((((((\x1b[38;5;203m(((((((((((\x1b[38;5;220m#############
-             \x1b[38;5;069m((((((((\x1b[38;5;203m((((((((\x1b[38;5;220m##############
-                \x1b[38;5;069m(((((\x1b[38;5;203m((((    \x1b[38;5;220m#########\x1b[0m
-";
+use tokio::spawn;
+use tokio::task::JoinHandle;
 
 pub const CHROMA_DIR: &str = ".chroma";
 pub const CREDENTIALS_FILE: &str = "credentials";
@@ -68,6 +57,16 @@ pub enum CliError {
     DashboardClient(#[from] DashboardClientError),
     #[error("{0}")]
     Install(#[from] InstallError),
+    #[error("{0}")]
+    AdminClient(#[from] AdminClientError),
+    #[error("{0}")]
+    Browse(#[from] BrowseError),
+    #[error("{0}")]
+    Copy(#[from] CopyError),
+    #[error("{0}")]
+    Collection(#[from] CollectionAPIError),
+    #[error("{0}")]
+    WebPage(#[from] WebPageError),
 }
 
 #[derive(Debug, Error)]
@@ -94,14 +93,41 @@ pub enum UtilsError {
     ConfigFileWriteFailed,
     #[error("Failed to get user input")]
     UserInputFailed,
-    #[error("Failed to open browser. {0}")]
-    BrowserOpenFailed(String),
     #[error("Failed to copy to clipboard")]
     CopyToClipboardFailed,
     #[error("Input validation failed")]
     NameValidationFailed,
     #[error("name cannot be empty and must only contain alphanumerics, underscores, or hyphens")]
     InvalidName,
+    #[error("Failed to find an available port")]
+    PortSearch,
+    #[error("Failed to connect to a local Chroma server")]
+    LocalConnect,
+    #[error("Not a Chroma path")]
+    NotChromaPath,
+    #[error("Quota Error: {0}")]
+    Quota(String),
+}
+
+#[derive(Parser, Debug, Clone)]
+pub struct LocalChromaArgs {
+    #[clap(long, conflicts_with_all = ["host"], help = "The data path for your local Chroma server")]
+    pub path: Option<String>,
+    #[clap(long, conflicts_with_all = ["path"], help = "The hostname for your local Chroma server")]
+    pub host: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ErrorResponse {
+    pub(crate) message: String,
+}
+
+impl Default for ErrorResponse {
+    fn default() -> Self {
+        Self {
+            message: "".to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -141,6 +167,8 @@ impl Default for SampleAppsConfig {
 pub struct CliConfig {
     pub current_profile: String,
     pub sample_apps: SampleAppsConfig,
+    #[serde(default)]
+    pub theme: Theme,
 }
 
 #[derive(Debug, Deserialize)]
@@ -194,6 +222,15 @@ impl Environment {
     }
 }
 
+impl Display for Environment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Environment::Local => write!(f, "Local"),
+            Environment::Cloud => write!(f, "Cloud"),
+        }
+    }
+}
+
 pub type Profiles = HashMap<String, Profile>;
 
 fn get_chroma_dir() -> Result<PathBuf, CliError> {
@@ -218,6 +255,7 @@ fn create_config_file(config_path: &PathBuf) -> Result<(), Box<dyn Error>> {
     let default_config = CliConfig {
         current_profile: String::new(),
         sample_apps: SampleAppsConfig::default(),
+        theme: Theme::default(),
     };
     let json_str = serde_json::to_string_pretty(&default_config)?;
     fs::write(config_path, json_str)?;
@@ -292,94 +330,71 @@ pub fn get_current_profile() -> Result<(String, Profile), CliError> {
     Ok((profile_name, profile))
 }
 
-pub fn copy_to_clipboard(copy_string: &str) -> Result<(), CliError> {
-    let mut clipboard = Clipboard::new().map_err(|_| UtilsError::CopyToClipboardFailed)?;
-    clipboard
-        .set_text(copy_string)
-        .map_err(|_| UtilsError::CopyToClipboardFailed)?;
-    println!("\n{}", "Copied to clipboard!".blue().bold());
-    Ok(())
-}
+pub fn find_available_port(min: u16, max: u16) -> Result<u16, CliError> {
+    let mut rng = rand::thread_rng();
 
-pub fn validate_uri(input: String) -> Result<String, UtilsError> {
-    if input.is_empty() {
-        return Err(UtilsError::InvalidName);
-    }
+    for _ in 0..100 {
+        let port = rng.gen_range(min..=max);
+        let addr = format!("127.0.0.1:{}", port);
 
-    let re = Regex::new(r"^[a-zA-Z0-9_-]+$")
-        .map_err(|e| e.to_string())
-        .map_err(|_| UtilsError::NameValidationFailed)?;
-    if !re.is_match(&input) {
-        return Err(UtilsError::InvalidName);
-    }
-
-    Ok(input)
-}
-
-pub async fn send_request<T, R>(
-    url: &String,
-    method: Method,
-    route: &str,
-    headers: Option<HeaderMap>,
-    body: Option<&T>,
-) -> Result<R, Box<dyn Error>>
-where
-    T: Serialize,
-    R: DeserializeOwned + Default,
-{
-    let url = format!("{}{}", url, route);
-
-    let client = Client::new();
-    let mut request_builder = client.request(method, url);
-
-    if let Some(headers) = headers {
-        request_builder = request_builder.headers(headers);
-    }
-
-    if let Some(b) = body {
-        request_builder = request_builder.json(b);
-    }
-
-    let response = request_builder.send().await?.error_for_status()?;
-    let parsed_response = response.json::<R>().await?;
-    Ok(parsed_response)
-}
-
-pub fn read_secret(prompt: &str) -> io::Result<String> {
-    let mut stdout = stdout();
-    let mut password = String::new();
-
-    stdout.write_all(prompt.as_bytes())?;
-    stdout.write_all(b": ")?;
-    stdout.flush()?;
-
-    enable_raw_mode()?;
-
-    loop {
-        if let Event::Key(KeyEvent { code, .. }) = event::read()? {
-            match code {
-                KeyCode::Enter => break,
-                KeyCode::Char(c) => {
-                    password.push(c);
-                    stdout.write_all(b"*")?;
-                }
-                KeyCode::Backspace => {
-                    if !password.is_empty() {
-                        password.pop();
-                        stdout.execute(cursor::MoveLeft(1))?;
-                        stdout.write_all(b" ")?;
-                        stdout.execute(cursor::MoveLeft(1))?;
-                    }
-                }
-                _ => {}
-            }
-            stdout.flush()?;
+        if TcpListener::bind(&addr).is_ok() {
+            return Ok(port);
         }
     }
 
-    disable_raw_mode()?;
-    stdout.write_all(b"\n")?;
-    stdout.flush()?;
+    Err(UtilsError::PortSearch.into())
+}
 
-    Ok(password)
+pub async fn parse_host(host: String) -> Result<AdminClient, CliError> {
+    let admin_client = AdminClient::local(host);
+    admin_client.healthcheck().await?;
+    Ok(admin_client)
+}
+
+pub async fn standup_local_chroma(
+    config: FrontendServerConfig,
+) -> Result<(AdminClient, JoinHandle<()>), CliError> {
+    let host = format!("http://localhost:{}", config.port);
+    let handle = spawn(async move {
+        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config).await;
+    });
+    let admin_client = AdminClient::local(host);
+    admin_client
+        .healthcheck()
+        .await
+        .map_err(|_| UtilsError::LocalConnect)?;
+    Ok((admin_client, handle))
+}
+
+pub async fn parse_path(path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
+    if !is_chroma_path(&path) {
+        return Err(UtilsError::NotChromaPath.into());
+    }
+    let mut config = FrontendServerConfig::single_node_default();
+    config.persist_path = path;
+    config.port = find_available_port(8000, 9000)?;
+    standup_local_chroma(config).await
+}
+
+pub async fn parse_local() -> Result<AdminClient, CliError> {
+    let default_host = AddressBook::local().frontend_url;
+    parse_host(default_host).await
+}
+
+pub fn is_chroma_path<P: AsRef<Path>>(dir: P) -> bool {
+    let config = FrontendServerConfig::single_node_default();
+    let db_path = dir.as_ref().join(config.sqlite_filename);
+    db_path.is_file()
+}
+
+pub fn parse_value(s: &str) -> Value {
+    if let Ok(n) = s.parse::<i64>() {
+        Value::Number(n.into())
+    } else if let Ok(f) = s.parse::<f64>() {
+        Value::Number(serde_json::Number::from_f64(f).unwrap())
+    } else if let Ok(b) = s.parse::<bool>() {
+        Value::Bool(b)
+    } else {
+        Value::String(s.to_string())
+    }
 }

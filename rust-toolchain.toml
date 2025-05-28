@@ -1,8 +1,4 @@
 [toolchain]
-# Keep this version in sync with:
-# - rust/cli/Dockerfile
-# - rust/load/Dockerfile
-# - rust/log/Dockerfile
-# - rust/worker/Dockerfile
+# Keep this version in sync with rust/Dockerfile.
 channel = "1.81.0"
-components = ["rustfmt", "clippy"]
+components = ["rustfmt", "clippy", "llvm-tools-preview"]

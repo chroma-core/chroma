@@ -381,10 +381,6 @@ trait IntoSqliteExpr {
     /// We need to use `Min` and `Max` as a workaround
     /// In SQLite, boolean can be implicitly treated as binary integer
     fn eval(&self) -> SimpleExpr;
-
-    fn one() -> SimpleExpr {
-        Expr::value(1)
-    }
 }
 
 impl IntoSqliteExpr for Where {
@@ -395,32 +391,6 @@ impl IntoSqliteExpr for Where {
             Where::Metadata(expr) => {
                 // Local chroma is mixing the usage of int and float
                 match &expr.comparison {
-                    MetadataComparison::Primitive(op, MetadataValue::Int(i)) => {
-                        let alt = MetadataExpression {
-                            key: expr.key.clone(),
-                            comparison: MetadataComparison::Primitive(
-                                op.clone(),
-                                MetadataValue::Float(*i as f64),
-                            ),
-                        };
-                        match op {
-                            PrimitiveOperator::NotEqual => expr.eval().and(alt.eval()),
-                            _ => expr.eval().or(alt.eval()),
-                        }
-                    }
-                    MetadataComparison::Primitive(op, MetadataValue::Float(f)) => {
-                        let alt = MetadataExpression {
-                            key: expr.key.clone(),
-                            comparison: MetadataComparison::Primitive(
-                                op.clone(),
-                                MetadataValue::Int(*f as i64),
-                            ),
-                        };
-                        match op {
-                            PrimitiveOperator::NotEqual => expr.eval().and(alt.eval()),
-                            _ => expr.eval().or(alt.eval()),
-                        }
-                    }
                     MetadataComparison::Set(op, MetadataSetValue::Int(is)) => {
                         let alt = MetadataExpression {
                             key: expr.key.clone(),
@@ -451,6 +421,7 @@ impl IntoSqliteExpr for Where {
                             SetOperator::NotIn => expr.eval().and(alt.eval()),
                         }
                     }
+                    // since the metadata expr eval handles the union in case of int and float, we can just pass through
                     _ => expr.eval(),
                 }
             }
@@ -458,43 +429,132 @@ impl IntoSqliteExpr for Where {
     }
 }
 
+// this function creates a union subquery for int and float queries
+// this utilizes index on int and float columns separately and combines results after
+// for better performance
+
+// then on Where::eval(), directly eval the subquery instead of using the OR logic
+fn create_union_subquery_for_int_float_ops(
+    key: String,
+    op: PrimitiveOperator,
+    val: MetadataValue,
+) -> sea_query::SelectStatement {
+    let key_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key));
+    let key_cond = key_col.clone().eq(key).and(key_col.is_not_null());
+
+    let mut subq1 = Query::select()
+        .column(EmbeddingMetadata::Id)
+        .from(EmbeddingMetadata::Table)
+        .and_where(key_cond.clone())
+        .to_owned();
+
+    let mut subq2 = Query::select()
+        .column(EmbeddingMetadata::Id)
+        .from(EmbeddingMetadata::Table)
+        .and_where(key_cond)
+        .to_owned();
+
+    // if val is int or float, create two variables, i and f and based on which one convert it to the other type
+    let (i, f) = match val {
+        MetadataValue::Int(i) => (i, i as f64),
+        MetadataValue::Float(f) => (f as i64, f),
+        // if val is not int or float, return the subquery as is, no union necessary
+        _ => return subq1,
+    };
+
+    let int_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::IntValue));
+    let float_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::FloatValue));
+
+    match op {
+        PrimitiveOperator::Equal => {
+            subq1.and_where(int_col.eq(i));
+            subq2.and_where(float_col.eq(f));
+        }
+        PrimitiveOperator::NotEqual => {
+            subq1.and_where(int_col.eq(i));
+            subq2.and_where(float_col.eq(f));
+        }
+        PrimitiveOperator::GreaterThan => {
+            subq1.and_where(int_col.gt(i));
+            subq2.and_where(float_col.gt(f));
+        }
+        PrimitiveOperator::GreaterThanOrEqual => {
+            subq1.and_where(int_col.gte(i));
+            subq2.and_where(float_col.gte(f));
+        }
+        PrimitiveOperator::LessThan => {
+            subq1.and_where(int_col.lt(i));
+            subq2.and_where(float_col.lt(f));
+        }
+        PrimitiveOperator::LessThanOrEqual => {
+            subq1.and_where(int_col.lte(i));
+            subq2.and_where(float_col.lte(f));
+        }
+    }
+
+    subq1.union(sea_query::UnionType::Distinct, subq2);
+
+    subq1
+}
+
 impl IntoSqliteExpr for CompositeExpression {
     fn eval(&self) -> SimpleExpr {
-        let mut expr = Self::one();
-        for child in &self.children {
-            expr = expr.mul(match self.operator {
-                BooleanOperator::And => child.eval(),
-                BooleanOperator::Or => Self::one().sub(child.eval()),
-            })
-        }
         match self.operator {
-            BooleanOperator::And => expr,
-            BooleanOperator::Or => Self::one().sub(expr),
+            BooleanOperator::And => {
+                let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(true)));
+                for child in &self.children {
+                    expr = Expr::expr(expr).and(child.eval());
+                }
+                expr
+            }
+            BooleanOperator::Or => {
+                let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(false)));
+                for child in &self.children {
+                    expr = Expr::expr(expr).or(child.eval());
+                }
+                expr
+            }
         }
     }
 }
 
 impl IntoSqliteExpr for DocumentExpression {
     fn eval(&self) -> SimpleExpr {
-        let doc_col = Expr::col((
-            EmbeddingFulltextSearch::Table,
-            EmbeddingFulltextSearch::StringValue,
-        ));
-        let doc_contains = doc_col
-            .like(format!("%{}%", self.text.replace("%", "")))
-            .is(true);
+        let subq = Query::select()
+            .column(EmbeddingFulltextSearch::Rowid)
+            .from(EmbeddingFulltextSearch::Table)
+            .and_where(match self.operator {
+                DocumentOperator::Contains | DocumentOperator::NotContains => {
+                    Expr::col(EmbeddingFulltextSearch::StringValue)
+                        .like(format!("%{}%", self.pattern.replace("%", "")))
+                }
+                DocumentOperator::Regex | DocumentOperator::NotRegex => Expr::cust_with_exprs(
+                    "? REGEXP ?",
+                    [
+                        Expr::col(EmbeddingFulltextSearch::StringValue).into(),
+                        Expr::value(&self.pattern),
+                    ],
+                ),
+            })
+            .to_owned();
         match self.operator {
-            DocumentOperator::Contains => doc_contains,
-            DocumentOperator::NotContains => doc_contains.not(),
+            DocumentOperator::Contains | DocumentOperator::Regex => {
+                Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
+            }
+            DocumentOperator::NotContains | DocumentOperator::NotRegex => {
+                Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
+            }
         }
     }
 }
 
 impl IntoSqliteExpr for MetadataExpression {
     fn eval(&self) -> SimpleExpr {
-        let key_cond = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key))
+        let key_col = Expr::col((EmbeddingMetadata::Table, EmbeddingMetadata::Key));
+        let key_cond = key_col
+            .clone()
             .eq(self.key.to_string())
-            .is(true);
+            .and(key_col.is_not_null());
         match &self.comparison {
             MetadataComparison::Primitive(op, val) => {
                 let (col, sval) = match val {
@@ -504,24 +564,84 @@ impl IntoSqliteExpr for MetadataExpression {
                     MetadataValue::Str(s) => (EmbeddingMetadata::StringValue, Expr::val(s)),
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
+                let mut subq = Query::select()
+                    .column(EmbeddingMetadata::Id)
+                    .from(EmbeddingMetadata::Table)
+                    .and_where(key_cond.clone())
+                    .to_owned();
+
                 match op {
                     PrimitiveOperator::Equal => {
-                        Expr::expr(key_cond.and(scol.eq(sval).is(true))).max()
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_)) {
+                            subq = create_union_subquery_for_int_float_ops(
+                                self.key.clone(),
+                                op.clone(),
+                                val.clone(),
+                            );
+                        } else {
+                            subq.and_where(scol.eq(sval));
+                        }
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::NotEqual => {
-                        Expr::expr(key_cond.and(scol.eq(sval).is(true)).not()).min()
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_)) {
+                            subq = create_union_subquery_for_int_float_ops(
+                                self.key.clone(),
+                                op.clone(),
+                                val.clone(),
+                            );
+                        } else {
+                            subq.and_where(scol.eq(sval));
+                        }
+                        Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
                     }
                     PrimitiveOperator::GreaterThan => {
-                        Expr::expr(key_cond.and(scol.gt(sval).is(true))).max()
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_)) {
+                            subq = create_union_subquery_for_int_float_ops(
+                                self.key.clone(),
+                                op.clone(),
+                                val.clone(),
+                            );
+                        } else {
+                            subq.and_where(scol.gt(sval));
+                        }
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::GreaterThanOrEqual => {
-                        Expr::expr(key_cond.and(scol.gte(sval).is(true))).max()
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_)) {
+                            subq = create_union_subquery_for_int_float_ops(
+                                self.key.clone(),
+                                op.clone(),
+                                val.clone(),
+                            );
+                        } else {
+                            subq.and_where(scol.gte(sval));
+                        }
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::LessThan => {
-                        Expr::expr(key_cond.and(scol.lt(sval).is(true))).max()
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_)) {
+                            subq = create_union_subquery_for_int_float_ops(
+                                self.key.clone(),
+                                op.clone(),
+                                val.clone(),
+                            );
+                        } else {
+                            subq.and_where(scol.lt(sval));
+                        }
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                     PrimitiveOperator::LessThanOrEqual => {
-                        Expr::expr(key_cond.and(scol.lte(sval).is(true))).max()
+                        if matches!(val, MetadataValue::Int(_) | MetadataValue::Float(_)) {
+                            subq = create_union_subquery_for_int_float_ops(
+                                self.key.clone(),
+                                op.clone(),
+                                val.clone(),
+                            );
+                        } else {
+                            subq.and_where(scol.lte(sval));
+                        }
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
                     }
                 }
             }
@@ -545,10 +665,20 @@ impl IntoSqliteExpr for MetadataExpression {
                     ),
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
-                let val_in = key_cond.and(scol.is_in(svals).is(true));
+                let subq = Query::select()
+                    .column(EmbeddingMetadata::Id)
+                    .from(EmbeddingMetadata::Table)
+                    .and_where(key_cond.clone())
+                    .and_where(scol.is_in(svals))
+                    .to_owned();
+
                 match op {
-                    SetOperator::In => Expr::expr(val_in).max(),
-                    SetOperator::NotIn => Expr::expr(val_in.not()).min(),
+                    SetOperator::In => {
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
+                    }
+                    SetOperator::NotIn => {
+                        Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
+                    }
                 }
             }
         }
@@ -643,28 +773,7 @@ impl SqliteMetadataReader {
         }
 
         if let Some(whr) = &where_clause {
-            filter_limit_query
-                .left_join(
-                    EmbeddingMetadata::Table,
-                    Expr::col((Embeddings::Table, Embeddings::Id))
-                        .equals((EmbeddingMetadata::Table, EmbeddingMetadata::Id)),
-                )
-                .left_join(
-                    EmbeddingFulltextSearch::Table,
-                    Expr::col((Embeddings::Table, Embeddings::Id)).equals((
-                        EmbeddingFulltextSearch::Table,
-                        EmbeddingFulltextSearch::Rowid,
-                    )),
-                )
-                .add_group_by([
-                    Expr::col((Embeddings::Table, Embeddings::Id)).into(),
-                    Expr::col((
-                        EmbeddingFulltextSearch::Table,
-                        EmbeddingFulltextSearch::StringValue,
-                    ))
-                    .into(),
-                ])
-                .cond_having(whr.eval());
+            filter_limit_query.distinct().cond_where(whr.eval());
         }
 
         filter_limit_query
@@ -760,19 +869,20 @@ impl SqliteMetadataReader {
 
 #[cfg(test)]
 mod tests {
+    use super::{SqliteMetadataReader, SqliteMetadataWriter};
+    use crate::test::TestReferenceSegment;
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
     use chroma_types::{
         operator::{Filter, Limit, Projection, Scan},
         plan::{Count, Get},
         strategies::{any_collection_data_and_where_filter, TestCollectionData},
-        Chunk, LogRecord,
+        Chunk, CollectionAndSegments, DocumentOperator, LogRecord, MetadataComparison,
+        MetadataExpression, MetadataValue, Operation, OperationRecord, PrimitiveOperator,
+        UpdateMetadataValue, Where,
     };
     use proptest::prelude::*;
+    use std::collections::HashMap;
     use tokio::runtime::Runtime;
-
-    use crate::test::TestReferenceSegment;
-
-    use super::{SqliteMetadataReader, SqliteMetadataWriter};
 
     proptest! {
         #[test]
@@ -846,5 +956,305 @@ mod tests {
             let sqlite_get = runtime.block_on(sqlite_seg_reader.get(plan)).expect("Get should not fail");
             assert_eq!(sqlite_get, ref_get);
         }
+    }
+
+    #[tokio::test]
+    async fn test_metadata_key_null_edge_case() {
+        let mut ref_seg = TestReferenceSegment::default();
+        let sqlite_seg_writer = SqliteMetadataWriter {
+            db: get_new_sqlite_db().await,
+        };
+
+        let mut logs = Vec::new();
+        let mut metadata1 = HashMap::new();
+        metadata1.insert(
+            "test_key".to_string(),
+            UpdateMetadataValue::Str("test_value".to_string()),
+        );
+
+        let mut metadata2 = HashMap::new();
+        metadata2.insert("test_key".to_string(), UpdateMetadataValue::None);
+
+        logs.push(LogRecord {
+            log_offset: 0,
+            record: OperationRecord {
+                id: "id1".to_string(),
+                metadata: Some(metadata1),
+                document: None,
+                operation: Operation::Add,
+                embedding: None,
+                encoding: None,
+            },
+        });
+
+        logs.push(LogRecord {
+            log_offset: 1,
+            record: OperationRecord {
+                id: "id2".to_string(),
+                metadata: Some(metadata2),
+                document: None,
+                operation: Operation::Add,
+                embedding: None,
+                encoding: None,
+            },
+        });
+
+        let collection_and_segments = CollectionAndSegments::test(3);
+        let metadata_seg_id = collection_and_segments.metadata_segment.id;
+
+        ref_seg.apply_logs(logs.clone(), metadata_seg_id);
+        let mut tx = sqlite_seg_writer
+            .begin()
+            .await
+            .expect("Should be able to start transaction");
+        let data: Chunk<LogRecord> = Chunk::new(logs.into());
+        sqlite_seg_writer
+            .apply_logs(data, metadata_seg_id, &mut *tx)
+            .await
+            .expect("Should be able to apply logs");
+        tx.commit().await.expect("Should be able to commit log");
+
+        let sqlite_seg_reader = SqliteMetadataReader {
+            db: sqlite_seg_writer.db,
+        };
+
+        let where_clause = Where::Metadata(MetadataExpression {
+            key: "test_key".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("test_value".to_string()),
+            ),
+        });
+
+        let plan = Get {
+            scan: Scan {
+                collection_and_segments: collection_and_segments.clone(),
+            },
+            filter: Filter {
+                query_ids: None,
+                where_clause: Some(where_clause),
+            },
+            limit: Limit {
+                skip: 0,
+                fetch: None,
+            },
+            proj: Projection {
+                document: false,
+                embedding: false,
+                metadata: true,
+            },
+        };
+
+        let ref_get = ref_seg.get(plan.clone()).expect("Get should not fail");
+        let sqlite_get = sqlite_seg_reader
+            .get(plan)
+            .await
+            .expect("Get should not fail");
+        assert_eq!(sqlite_get, ref_get);
+        assert_eq!(ref_get.result.records.len(), 1);
+        assert_eq!(ref_get.result.records[0].id, "id1");
+
+        // Test not equal, to ensure null metadata is also returned for key
+        let where_clause2 = Where::Metadata(MetadataExpression {
+            key: "test_key".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::NotEqual,
+                MetadataValue::Str("failing_value".to_string()),
+            ),
+        });
+
+        let plan2 = Get {
+            scan: Scan {
+                collection_and_segments: collection_and_segments.clone(),
+            },
+            filter: Filter {
+                query_ids: None,
+                where_clause: Some(where_clause2),
+            },
+            limit: Limit {
+                skip: 0,
+                fetch: None,
+            },
+            proj: Projection {
+                document: false,
+                embedding: false,
+                metadata: true,
+            },
+        };
+
+        let ref_get2 = ref_seg.get(plan2.clone()).expect("Get should not fail");
+        let sqlite_get2 = sqlite_seg_reader
+            .get(plan2)
+            .await
+            .expect("Get should not fail");
+        assert_eq!(sqlite_get2, ref_get2);
+        assert_eq!(ref_get2.result.records.len(), 2);
+        assert_eq!(ref_get2.result.records[0].id, "id1");
+        assert_eq!(ref_get2.result.records[1].id, "id2");
+    }
+
+    #[tokio::test]
+    async fn test_fts_match_no_metadata_match() {
+        let mut ref_seg = TestReferenceSegment::default();
+        let sqlite_seg_writer = SqliteMetadataWriter {
+            db: get_new_sqlite_db().await,
+        };
+
+        let mut logs = Vec::new();
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "test_key".to_string(),
+            UpdateMetadataValue::Str("different_value".to_string()),
+        );
+
+        logs.push(LogRecord {
+            log_offset: 0,
+            record: OperationRecord {
+                id: "id1".to_string(),
+                metadata: Some(metadata),
+                document: Some("test document content".to_string()),
+                operation: Operation::Add,
+                embedding: None,
+                encoding: None,
+            },
+        });
+
+        let collection_and_segments = CollectionAndSegments::test(3);
+        let metadata_seg_id = collection_and_segments.metadata_segment.id;
+
+        ref_seg.apply_logs(logs.clone(), metadata_seg_id);
+        let mut tx = sqlite_seg_writer
+            .begin()
+            .await
+            .expect("Should be able to start transaction");
+        let data: Chunk<LogRecord> = Chunk::new(logs.into());
+        sqlite_seg_writer
+            .apply_logs(data, metadata_seg_id, &mut *tx)
+            .await
+            .expect("Should be able to apply logs");
+        tx.commit().await.expect("Should be able to commit log");
+
+        let sqlite_seg_reader = SqliteMetadataReader {
+            db: sqlite_seg_writer.db,
+        };
+
+        let fts_where_clause = Where::Document(chroma_types::DocumentExpression {
+            pattern: "test document".to_string(),
+            operator: DocumentOperator::Contains,
+        });
+
+        let metadata_where_clause = Where::Metadata(MetadataExpression {
+            key: "test_key".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("test_value".to_string()),
+            ),
+        });
+
+        let hybrid_where_clause = Where::Composite(chroma_types::CompositeExpression {
+            operator: chroma_types::BooleanOperator::And,
+            children: vec![
+                Where::Document(chroma_types::DocumentExpression {
+                    pattern: "test document".to_string(),
+                    operator: DocumentOperator::Contains,
+                }),
+                Where::Metadata(MetadataExpression {
+                    key: "test_key".to_string(),
+                    comparison: MetadataComparison::Primitive(
+                        PrimitiveOperator::Equal,
+                        MetadataValue::Str("test_value".to_string()),
+                    ),
+                }),
+            ],
+        });
+
+        let fts_plan = Get {
+            scan: Scan {
+                collection_and_segments: collection_and_segments.clone(),
+            },
+            filter: Filter {
+                query_ids: None,
+                where_clause: Some(fts_where_clause),
+            },
+            limit: Limit {
+                skip: 0,
+                fetch: None,
+            },
+            proj: Projection {
+                document: true,
+                embedding: false,
+                metadata: true,
+            },
+        };
+
+        let ref_get = ref_seg.get(fts_plan.clone()).expect("Get should not fail");
+        let sqlite_get = sqlite_seg_reader
+            .get(fts_plan)
+            .await
+            .expect("Get should not fail");
+        assert_eq!(sqlite_get, ref_get);
+        assert_eq!(ref_get.result.records.len(), 1);
+        assert_eq!(ref_get.result.records[0].id, "id1");
+
+        // Test metadata where clause
+        let metadata_plan = Get {
+            scan: Scan {
+                collection_and_segments: collection_and_segments.clone(),
+            },
+            filter: Filter {
+                query_ids: None,
+                where_clause: Some(metadata_where_clause),
+            },
+            limit: Limit {
+                skip: 0,
+                fetch: None,
+            },
+            proj: Projection {
+                document: false,
+                embedding: false,
+                metadata: true,
+            },
+        };
+
+        let ref_get2 = ref_seg
+            .get(metadata_plan.clone())
+            .expect("Get should not fail");
+        let sqlite_get2 = sqlite_seg_reader
+            .get(metadata_plan)
+            .await
+            .expect("Get should not fail");
+        assert_eq!(sqlite_get2, ref_get2);
+        assert_eq!(ref_get2.result.records.len(), 0);
+
+        let hybrid_plan = Get {
+            scan: Scan {
+                collection_and_segments: collection_and_segments.clone(),
+            },
+            filter: Filter {
+                query_ids: None,
+                where_clause: Some(hybrid_where_clause),
+            },
+            limit: Limit {
+                skip: 0,
+                fetch: None,
+            },
+            proj: Projection {
+                document: true,
+                embedding: false,
+                metadata: true,
+            },
+        };
+
+        let ref_get = ref_seg
+            .get(hybrid_plan.clone())
+            .expect("Get should not fail");
+        let sqlite_get = sqlite_seg_reader
+            .get(hybrid_plan)
+            .await
+            .expect("Get should not fail");
+        assert_eq!(sqlite_get, ref_get);
+
+        // no results bc fts matches but metadata does not
+        assert_eq!(ref_get.result.records.len(), 0);
     }
 }

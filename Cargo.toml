@@ -43,7 +43,9 @@ figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 flatbuffers = "24.3.25"
 futures = "0.3"
 futures-core = "0.3"
+http-body-util = "0.1.3"
 lazy_static = { version = "1.4" }
+lexical-core = "1.0"
 num_cpus = "1.16.0"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
@@ -53,6 +55,8 @@ parking_lot = { version = "0.12.3", features = ["serde"] }
 parquet = "52"
 prost = "0.13"
 prost-types = "0.13.5"
+regex = "1.11.1"
+regex-syntax = "0.8.5"
 roaring = "0.10.6"
 sea-query = "0.32"
 sea-query-binder = "0.7"
@@ -76,8 +80,7 @@ utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uui
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite"] }
 sha2 = "0.10.8"
 md5 = "0.7.0"
-regex = "1.11.1"
-pyo3 = { version = "0.23.3", features = ["abi3-py39"] }
+pyo3 = { version = "0.24.1", features = ["abi3-py39"] }
 http = "1.1.0"
 tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 bytemuck = "1.21.0"
@@ -89,6 +92,8 @@ reqwest = { version = "0.12.9",  features = ["rustls-tls-native-roots", "http2"]
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
 humantime = { version = "2.2.0" }
+petgraph = { version = "0.8.1" }
+base64 = "0.22"
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
@@ -124,6 +129,11 @@ shuttle = "0.7.1"
 tempfile = "3.14.0"
 itertools = "0.13.0"
 serial_test = "3.2.0"
+zip = "2.3.0"
+
+[profile.dev]
+# Significantly reduces compile times
+split-debuginfo = "unpacked"
 
 [profile.release]
 debug = 2

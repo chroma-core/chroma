@@ -23,7 +23,7 @@ const update = async (): Promise<void> => {
     const installedVersion = process.env.CHROMADB_VERSION || "0.0.0";
     const latestVersion = await getLatestVersion("chromadb");
 
-    if (semver.lte(installedVersion, latestVersion)) {
+    if (semver.lt(installedVersion, latestVersion)) {
       console.log(`\nA new chromadb version (${latestVersion}) is available!`);
       console.log("\n\x1b[4mUpdat with npm\x1b[0m");
       console.log("npm install chromadb@latest");

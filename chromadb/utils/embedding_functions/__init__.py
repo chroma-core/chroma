@@ -58,6 +58,9 @@ from chromadb.utils.embedding_functions.baseten_embedding_function import (
 from chromadb.utils.embedding_functions.cloudflare_workers_ai_embedding_function import (
     CloudflareWorkersAIEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.together_ai_embedding_function import (
+    TogetherAIEmbeddingFunction,
+)
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -86,6 +89,7 @@ _all_classes: Set[str] = {
     "ChromaLangchainEmbeddingFunction",
     "BasetenEmbeddingFunction",
     "CloudflareWorkersAIEmbeddingFunction",
+    "TogetherAIEmbeddingFunction",
     "DefaultEmbeddingFunction",
 }
 
@@ -146,6 +150,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "baseten": BasetenEmbeddingFunction,
     "default": DefaultEmbeddingFunction,
     "cloudflare_workers_ai": CloudflareWorkersAIEmbeddingFunction,
+    "together_ai": TogetherAIEmbeddingFunction,
 }
 
 
@@ -229,6 +234,7 @@ __all__ = [
     "Text2VecEmbeddingFunction",
     "AmazonBedrockEmbeddingFunction",
     "ChromaLangchainEmbeddingFunction",
+    "TogetherAIEmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",

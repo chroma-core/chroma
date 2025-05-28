@@ -22,6 +22,7 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Roboflow](./embedding-models/roboflow)                                 | ✓      | -          |
 | [Ollama Embeddings](./embedding-models/ollama)                          | ✓      | ✓          |
 | [Cloudflare Workers AI](./embedding-models/cloudflare-workers-ai.md)    | ✓      | ✓          |
+| [Together AI](./embedding-models/together-ai.md)                        | ✓      | ✓          |
 
 ---
 

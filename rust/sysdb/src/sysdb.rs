@@ -19,9 +19,9 @@ use chroma_types::{
     UpdateCollectionConfiguration, UpdateCollectionError, VectorIndexConfiguration,
 };
 use chroma_types::{
-    Collection, CollectionConversionError, CollectionUuid, FlushCompactionResponse,
-    FlushCompactionResponseConversionError, ForkCollectionError, Segment, SegmentConversionError,
-    SegmentScope, Tenant,
+    BatchGetCollectionVersionFilePathsError, Collection, CollectionConversionError, CollectionUuid,
+    CountForksError, FlushCompactionResponse, FlushCompactionResponseConversionError,
+    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -257,6 +257,9 @@ impl SysDb {
                     total_records_post_compaction: 0,
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
+                    version_file_path: None,
+                    root_collection_id: None,
+                    lineage_file_path: None,
                 };
 
                 test_sysdb.add_collection(collection.clone());
@@ -340,13 +343,25 @@ impl SysDb {
         }
     }
 
+    pub async fn count_forks(
+        &mut self,
+        source_collection_id: CollectionUuid,
+    ) -> Result<usize, CountForksError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.count_forks(source_collection_id).await,
+            SysDb::Sqlite(_) => Err(CountForksError::Local),
+            SysDb::Test(test) => test.count_forks(source_collection_id).await,
+        }
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
+        tenant: Option<String>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit).await,
+            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit, tenant).await,
             SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
@@ -380,6 +395,23 @@ impl SysDb {
             SysDb::Test(test_sys_db) => {
                 test_sys_db
                     .get_collection_with_segments(collection_id)
+                    .await
+            }
+        }
+    }
+
+    pub async fn batch_get_collection_version_file_paths(
+        &mut self,
+        collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.batch_get_collection_version_file_paths(collection_ids)
+                    .await
+            }
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(test) => {
+                test.batch_get_collection_version_file_paths(collection_ids)
                     .await
             }
         }
@@ -553,7 +585,7 @@ pub struct CollectionToGcInfo {
     pub tenant: String,
     pub name: String,
     pub version_file_path: String,
-    pub latest_version: i64,
+    pub lineage_file_path: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -587,7 +619,7 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
             tenant: value.tenant_id,
             name: value.name,
             version_file_path: value.version_file_path,
-            latest_version: value.latest_version,
+            lineage_file_path: value.lineage_file_path,
         })
     }
 }
@@ -842,6 +874,7 @@ impl GrpcSysDb {
             .await
             .map_err(|err| match err.code() {
                 Code::AlreadyExists => CreateCollectionError::AlreadyExists(name),
+                Code::Aborted => CreateCollectionError::Aborted(err.message().to_string()),
                 _ => CreateCollectionError::Internal(err.into()),
             })?;
 
@@ -975,16 +1008,37 @@ impl GrpcSysDb {
         })
     }
 
+    pub async fn count_forks(
+        &mut self,
+        source_collection_id: CollectionUuid,
+    ) -> Result<usize, CountForksError> {
+        let res = self
+            .client
+            .count_forks(chroma_proto::CountForksRequest {
+                source_collection_id: source_collection_id.0.to_string(),
+            })
+            .await
+            .map_err(|err| match err.code() {
+                Code::NotFound => CountForksError::NotFound(source_collection_id.0.to_string()),
+                _ => CountForksError::Internal(err.into()),
+            })?
+            .into_inner();
+
+        Ok(res.count as usize)
+    }
+
     pub async fn get_collections_to_gc(
         &mut self,
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
+        tenant: Option<String>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
             .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {
                 cutoff_time: cutoff_time.map(|t| t.into()),
                 limit,
+                tenant_id: tenant,
             })
             .await;
 
@@ -1075,6 +1129,33 @@ impl GrpcSysDb {
                 .ok_or(GetCollectionWithSegmentsError::Field("vector".to_string()))?
                 .try_into()?,
         })
+    }
+
+    async fn batch_get_collection_version_file_paths(
+        &mut self,
+        collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
+        let res = self
+            .client
+            .batch_get_collection_version_file_paths(
+                chroma_proto::BatchGetCollectionVersionFilePathsRequest {
+                    collection_ids: collection_ids
+                        .into_iter()
+                        .map(|id| id.0.to_string())
+                        .collect(),
+                },
+            )
+            .await?;
+        let collection_id_to_path = res.into_inner().collection_id_to_version_file_path;
+        let mut result = HashMap::new();
+        for (key, value) in collection_id_to_path {
+            let collection_id = CollectionUuid(
+                Uuid::try_parse(&key)
+                    .map_err(|err| BatchGetCollectionVersionFilePathsError::Uuid(err, key))?,
+            );
+            result.insert(collection_id, value);
+        }
+        Ok(result)
     }
 
     async fn get_last_compaction_time(
@@ -1250,14 +1331,14 @@ impl ChromaError for MarkVersionForDeletionError {
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionVersionError {
-    #[error("Failed to delete version")]
+    #[error("Failed to delete version: {0}")]
     FailedToDeleteVersion(#[from] tonic::Status),
 }
 
 impl ChromaError for DeleteCollectionVersionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            DeleteCollectionVersionError::FailedToDeleteVersion(_) => ErrorCodes::Internal,
+            DeleteCollectionVersionError::FailedToDeleteVersion(e) => e.code().into(),
         }
     }
 }

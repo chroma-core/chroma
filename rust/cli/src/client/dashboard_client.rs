@@ -1,4 +1,5 @@
-use crate::utils::{get_address_book, send_request};
+use crate::client::utils::send_request;
+use crate::utils::get_address_book;
 use reqwest::header::{HeaderMap, HeaderValue, COOKIE};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};

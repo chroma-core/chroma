@@ -785,6 +785,7 @@ class SegmentAPI(ServerAPI):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -801,10 +802,12 @@ class SegmentAPI(ServerAPI):
         )
 
         query_amount = len(query_embeddings)
+        ids_amount = len(ids) if ids else 0
         self._product_telemetry_client.capture(
             CollectionQueryEvent(
                 collection_uuid=str(collection_id),
                 query_amount=query_amount,
+                filtered_ids_amount=ids_amount,
                 n_results=n_results,
                 with_metadata_filter=query_amount if where is not None else 0,
                 with_document_filter=query_amount if where_document is not None else 0,

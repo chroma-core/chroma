@@ -40,7 +40,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-log-service',
-    'docker buildx build --load -t $EXPECTED_REF -f ./rust/log-service/Dockerfile .',
+    'docker buildx build --load -t $EXPECTED_REF --target=log_service -f ./rust/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -48,7 +48,8 @@ else:
     'rust-log-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/log-service/Dockerfile',
+    dockerfile='./rust/Dockerfile',
+    target='log_service'
   )
 
 if config.tilt_subcommand == "ci":
@@ -81,26 +82,10 @@ else:
     target='sysdb-migration'
   )
 
-
-if config.tilt_subcommand == "ci":
-  custom_build(
-    'frontend-service',
-    'docker buildx build --load -t $EXPECTED_REF -f ./Dockerfile . ',
-    ['chromadb/', 'idl/', 'requirements.txt', 'bin/']
-  )
-else:
-  docker_build(
-    'frontend-service',
-    '.',
-    only=['chromadb/', 'idl/', 'requirements.txt', 'bin/'],
-    dockerfile='./Dockerfile',
-    ignore=['**/*.pyc', 'chromadb/test/'],
-  )
-
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-frontend-service',
-    'docker buildx build --load -t $EXPECTED_REF -f ./rust/cli/Dockerfile . ',
+    'docker buildx build --load -t $EXPECTED_REF -f ./rust/Dockerfile --target cli . ',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -108,13 +93,14 @@ else:
     'rust-frontend-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/cli/Dockerfile',
+    dockerfile='./rust/Dockerfile',
+    target='cli'
   )
 
 if config.tilt_subcommand == "ci":
   custom_build(
     'query-service',
-    'docker buildx build --load -t $EXPECTED_REF --target query_service -f ./rust/worker/Dockerfile .',
+    'docker buildx build --load -t $EXPECTED_REF --target query_service -f ./rust/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -122,14 +108,14 @@ else:
     'query-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/worker/Dockerfile',
+    dockerfile='./rust/Dockerfile',
     target='query_service'
   )
 
 if config.tilt_subcommand == "ci":
   custom_build(
     'compaction-service',
-    'docker buildx build --load -t $EXPECTED_REF --target compaction_service -f ./rust/worker/Dockerfile .',
+    'docker buildx build --load -t $EXPECTED_REF --target compaction_service -f ./rust/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -137,14 +123,14 @@ else:
     'compaction-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/worker/Dockerfile',
+    dockerfile='./rust/Dockerfile',
     target='compaction_service'
   )
 
 if config.tilt_subcommand == "ci":
   custom_build(
     'garbage-collector',
-    'docker buildx build --load -t $EXPECTED_REF --target garbage_collector -f ./rust/garbage_collector/Dockerfile .',
+    'docker buildx build --load -t $EXPECTED_REF --target garbage_collector -f ./rust/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -152,8 +138,23 @@ else:
     'garbage-collector',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/garbage_collector/Dockerfile',
+    dockerfile='./rust/Dockerfile',
     target='garbage_collector'
+  )
+
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'load-service',
+    'docker buildx build --load -t $EXPECTED_REF --target load_service -f ./rust/load/Dockerfile .',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+  )
+else:
+  docker_build(
+    'load-service',
+    '.',
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    dockerfile='./rust/load/Dockerfile',
+    target='load_service'
   )
 
 
@@ -185,6 +186,7 @@ k8s_yaml([
   'k8s/test/grafana.yaml',
   'k8s/test/jaeger-service.yaml',
   'k8s/test/jaeger.yaml',
+  'k8s/test/load-service.yaml',
   'k8s/test/minio.yaml',
   'k8s/test/prometheus.yaml',
   'k8s/test/test-memberlist-cr.yaml',
@@ -239,10 +241,10 @@ k8s_resource('logservice-migration-latest', resource_deps=['postgres'], labels=[
 k8s_resource('logservice', resource_deps=['sysdb-migration-latest'], labels=["chroma"], port_forwards='50052:50051')
 k8s_resource('rust-log-service', labels=["chroma"], port_forwards='50054:50051')
 k8s_resource('sysdb', resource_deps=['sysdb-migration-latest'], labels=["chroma"], port_forwards='50051:50051')
-k8s_resource('frontend-service', resource_deps=['sysdb', 'logservice'],labels=["chroma"], port_forwards='8000:8000')
 k8s_resource('rust-frontend-service', resource_deps=['sysdb', 'logservice', 'rust-log-service'], labels=["chroma"], port_forwards='3000:8000')
 k8s_resource('query-service', resource_deps=['sysdb'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service', resource_deps=['sysdb'], labels=["chroma"])
+k8s_resource('load-service', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards='3001:3001')
 k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('grafana', resource_deps=['k8s_setup'], labels=["observability"])
 k8s_resource('prometheus', resource_deps=['k8s_setup'], labels=["observability"])

@@ -69,7 +69,7 @@ pub enum GetCollectionWithSegmentsError {
     #[error("Failed to get segments")]
     GetSegmentsError(#[from] GetSegmentsError),
     #[error("Grpc error: {0}")]
-    Grpc(#[from] tonic::Status),
+    Grpc(#[from] Status),
     #[error("Collection [{0}] does not exists.")]
     NotFound(String),
     #[error(transparent)]
@@ -93,6 +93,23 @@ impl ChromaError for GetCollectionWithSegmentsError {
             }
             GetCollectionWithSegmentsError::NotFound(_) => ErrorCodes::NotFound,
             GetCollectionWithSegmentsError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum BatchGetCollectionVersionFilePathsError {
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] Status),
+    #[error("Could not parse UUID from string {1}: {0}")]
+    Uuid(uuid::Error, String),
+}
+
+impl ChromaError for BatchGetCollectionVersionFilePathsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BatchGetCollectionVersionFilePathsError::Grpc(status) => status.code().into(),
+            BatchGetCollectionVersionFilePathsError::Uuid(_, _) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -283,7 +300,7 @@ impl ChromaError for CreateDatabaseError {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, ToSchema, Clone)]
+#[derive(Serialize, Deserialize, Debug, ToSchema, Clone, Default)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
@@ -593,6 +610,8 @@ pub enum CreateCollectionError {
     Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("The operation was aborted, {0}")]
+    Aborted(String),
     #[error("SPANN is still in development. Not allowed to created spann indexes")]
     SpannNotImplemented,
     #[error("HNSW is not supported on this platform")]
@@ -610,6 +629,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::Get(err) => err.code(),
             CreateCollectionError::Configuration(_) => ErrorCodes::Internal,
             CreateCollectionError::Internal(err) => err.code(),
+            CreateCollectionError::Aborted(_) => ErrorCodes::Aborted,
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
         }
@@ -842,6 +862,26 @@ impl ChromaError for ForkCollectionError {
 }
 
 #[derive(Debug, Error)]
+pub enum CountForksError {
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Count forks is unsupported for local chroma")]
+    Local,
+}
+
+impl ChromaError for CountForksError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            CountForksError::NotFound(_) => ErrorCodes::NotFound,
+            CountForksError::Internal(chroma_error) => chroma_error.code(),
+            CountForksError::Local => ErrorCodes::Unimplemented,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
 pub enum GetCollectionSizeError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
@@ -923,7 +963,7 @@ impl AddCollectionRecordsRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, Default, Deserialize)]
 pub struct AddCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -1292,7 +1332,7 @@ impl GetRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
+#[derive(Clone, Deserialize, Serialize, Debug, ToSchema, Default)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
     pub ids: Vec<String>,

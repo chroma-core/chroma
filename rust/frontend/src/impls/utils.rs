@@ -8,6 +8,8 @@ use chroma_types::{
 pub(crate) enum ToRecordsError {
     #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
     InconsistentLength,
+    #[error("Empty ID, ID must have at least one character")]
+    EmptyId,
 }
 
 impl ChromaError for ToRecordsError {
@@ -47,6 +49,9 @@ pub(crate) fn to_records<
     let mut records = Vec::with_capacity(len);
 
     for id in ids {
+        if id.is_empty() {
+            return Err(ToRecordsError::EmptyId);
+        }
         let embedding = embeddings_iter.next().flatten();
         let document = documents_iter.next().flatten();
         let uri = uris_iter.next().flatten();
@@ -86,4 +91,60 @@ pub(crate) fn to_records<
     }
 
     Ok((records, total_bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use chroma_types::Operation;
+
+    use super::*;
+
+    #[test]
+    fn test_to_records_empty_id() {
+        let ids = vec![String::from("")];
+        let embeddings = vec![Some(vec![1.0, 2.0, 3.0])];
+        let result = to_records::<
+            chroma_types::UpdateMetadataValue,
+            Vec<(String, chroma_types::UpdateMetadataValue)>,
+        >(ids, Some(embeddings), None, None, None, Operation::Add);
+        assert!(matches!(result, Err(ToRecordsError::EmptyId)));
+    }
+
+    #[test]
+    fn test_normal_ids() {
+        let ids = vec![String::from("1"), String::from("2"), String::from("3")];
+        let embeddings = vec![
+            Some(vec![1.0, 2.0, 3.0]),
+            Some(vec![4.0, 5.0, 6.0]),
+            Some(vec![7.0, 8.0, 9.0]),
+        ];
+        let documents = vec![
+            Some(String::from("document 1")),
+            Some(String::from("document 2")),
+            Some(String::from("document 3")),
+        ];
+        let result = to_records::<
+            chroma_types::UpdateMetadataValue,
+            Vec<(String, chroma_types::UpdateMetadataValue)>,
+        >(
+            ids,
+            Some(embeddings),
+            Some(documents),
+            None,
+            None,
+            Operation::Add,
+        );
+        assert!(result.is_ok());
+        let records = result.unwrap().0;
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].id, "1");
+        assert_eq!(records[1].id, "2");
+        assert_eq!(records[2].id, "3");
+        assert_eq!(records[0].embedding, Some(vec![1.0, 2.0, 3.0]));
+        assert_eq!(records[1].embedding, Some(vec![4.0, 5.0, 6.0]));
+        assert_eq!(records[2].embedding, Some(vec![7.0, 8.0, 9.0]));
+        assert_eq!(records[0].document, Some(String::from("document 1")));
+        assert_eq!(records[1].document, Some(String::from("document 2")));
+        assert_eq!(records[2].document, Some(String::from("document 3")));
+    }
 }

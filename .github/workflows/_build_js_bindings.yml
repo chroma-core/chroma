@@ -231,11 +231,17 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          path: rust/js_bindings/artifacts
+      - name: List downloads
+        run: ls -R .
+      - name: Flatten artifact directory
+        run: find artifacts -type f -name '*.node' -exec mv {} ./artifacts/ \;
+      - name: List downloads
+        run: ls -R .
       - name: Move artifacts
         run: pnpm artifacts
       - name: List packages
-        run: ls -R ./npm
+        run: ls -R .
         shell: bash
       - name: Publish
         run: |

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
-use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannMetrics};
 use chroma_log::Log;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
@@ -142,6 +142,7 @@ impl WorkerServer {
                 .unwrap_or_default(),
             maximum_fetch_count: None,
             collection_uuid: collection_and_segments.collection.collection_id,
+            tenant: collection_and_segments.collection.tenant.clone(),
         }
     }
 
@@ -297,6 +298,7 @@ impl WorkerServer {
                 hnsw_provider: self.hnsw_index_provider.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 garbage_collection_context: None,
+                metrics: SpannMetrics::default(),
             };
             let knn_orchestrator_futures = from_proto_knn(knn)?
                 .into_iter()
@@ -499,11 +501,7 @@ mod tests {
                 dimension: None,
                 tenant: "test-tenant".to_string(),
                 database: "test-database".to_string(),
-                log_position: 0,
-                version: 0,
-                total_records_post_compaction: 0,
-                size_bytes_post_compaction: 0,
-                last_compaction_time_secs: 0,
+                ..Default::default()
             }),
             knn: Some(chroma_proto::Segment {
                 id: Uuid::new_v4().to_string(),
@@ -604,11 +602,7 @@ mod tests {
             dimension: None,
             tenant: "test-tenant".to_string(),
             database: "test-database".to_string(),
-            log_position: 0,
-            version: 0,
-            total_records_post_compaction: 0,
-            size_bytes_post_compaction: 0,
-            last_compaction_time_secs: 0,
+            ..Default::default()
         });
         let request = chroma_proto::GetPlan {
             scan: Some(scan_operator.clone()),

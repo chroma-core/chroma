@@ -143,6 +143,10 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                     .module_path()
                     .unwrap_or("")
                     .starts_with("opentelemetry_sdk")
+                || metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("hosted-frontend")
         }))
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
         .boxed()

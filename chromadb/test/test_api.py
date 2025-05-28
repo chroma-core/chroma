@@ -1636,3 +1636,158 @@ def test_ssl_self_signed_without_ssl_verify(client_ssl):
     )
     client_ssl.clear_system_cache()
     assert "CERTIFICATE_VERIFY_FAILED" in "".join(stack_trace)
+
+
+def test_query_id_filtering_small_dataset(client):
+    client.reset()
+    collection = client.create_collection("test_query_id_filtering_small")
+
+    num_vectors = 100
+    dim = 512
+    small_records = np.random.rand(100, 512).astype(np.float32).tolist()
+    ids = [f"{i}" for i in range(num_vectors)]
+
+    collection.add(
+        embeddings=small_records,
+        ids=ids,
+    )
+
+    query_ids = [f"{i}" for i in range(0, num_vectors, 10)]
+    query_embedding = np.random.rand(dim).astype(np.float32).tolist()
+    results = collection.query(
+        query_embeddings=query_embedding,
+        ids=query_ids,
+        n_results=num_vectors,
+        include=[],
+    )
+
+    all_returned_ids = [item for sublist in results["ids"] for item in sublist]
+    assert all(id in query_ids for id in all_returned_ids)
+
+
+def test_query_id_filtering_medium_dataset(client):
+    client.reset()
+    collection = client.create_collection("test_query_id_filtering_medium")
+
+    num_vectors = 1000
+    dim = 512
+    medium_records = np.random.rand(num_vectors, dim).astype(np.float32).tolist()
+    ids = [f"{i}" for i in range(num_vectors)]
+
+    collection.add(
+        embeddings=medium_records,
+        ids=ids,
+    )
+
+    query_ids = [f"{i}" for i in range(0, num_vectors, 10)]
+
+    query_embedding = np.random.rand(dim).astype(np.float32).tolist()
+    results = collection.query(
+        query_embeddings=query_embedding,
+        ids=query_ids,
+        n_results=num_vectors,
+        include=[],
+    )
+
+    all_returned_ids = [item for sublist in results["ids"] for item in sublist]
+    assert all(id in query_ids for id in all_returned_ids)
+
+    multi_query_embeddings = [
+        np.random.rand(dim).astype(np.float32).tolist() for _ in range(3)
+    ]
+    multi_results = collection.query(
+        query_embeddings=multi_query_embeddings,
+        ids=query_ids,
+        n_results=10,
+        include=[],
+    )
+
+    for result_set in multi_results["ids"]:
+        assert all(id in query_ids for id in result_set)
+
+
+def test_query_id_filtering_e2e(client):
+    client.reset()
+    collection = client.create_collection("test_query_id_filtering_e2e")
+
+    dim = 512
+    num_vectors = 100
+    embeddings = np.random.rand(num_vectors, dim).astype(np.float32).tolist()
+    ids = [f"{i}" for i in range(num_vectors)]
+    metadatas = [{"index": i} for i in range(num_vectors)]
+
+    collection.add(
+        embeddings=embeddings,
+        ids=ids,
+        metadatas=metadatas,
+    )
+
+    ids_to_delete = [f"{i}" for i in range(10, 30)]
+    collection.delete(ids=ids_to_delete)
+
+    # modify some existing ids, and add some new ones to check query returns updated metadata
+    ids_to_upsert_existing = [f"{i}" for i in range(30, 50)]
+    new_num_vectors = num_vectors + 20
+    ids_to_upsert_new = [f"{i}" for i in range(num_vectors, new_num_vectors)]
+
+    upsert_embeddings = (
+        np.random.rand(len(ids_to_upsert_existing) + len(ids_to_upsert_new), dim)
+        .astype(np.float32)
+        .tolist()
+    )
+    upsert_metadatas = [
+        {"index": i, "upserted": True} for i in range(len(upsert_embeddings))
+    ]
+
+    collection.upsert(
+        embeddings=upsert_embeddings,
+        ids=ids_to_upsert_existing + ids_to_upsert_new,
+        metadatas=upsert_metadatas,
+    )
+
+    valid_query_ids = (
+        [f"{i}" for i in range(5, 10)]  # subset of existing ids
+        + [f"{i}" for i in range(35, 45)]  # subset of existing, but upserted
+        + [
+            f"{i}" for i in range(num_vectors + 5, num_vectors + 15)
+        ]  # subset of new upserted ids
+    )
+
+    includes = ["metadatas"]
+    query_embedding = np.random.rand(dim).astype(np.float32).tolist()
+    results = collection.query(
+        query_embeddings=query_embedding,
+        ids=valid_query_ids,
+        n_results=new_num_vectors,
+        include=includes,
+    )
+
+    all_returned_ids = [item for sublist in results["ids"] for item in sublist]
+    assert all(id in valid_query_ids for id in all_returned_ids)
+
+    for result_index, id_list in enumerate(results["ids"]):
+        for item_index, item_id in enumerate(id_list):
+            if item_id in ids_to_upsert_existing or item_id in ids_to_upsert_new:
+                # checks if metadata correctly has upserted flag
+                assert results["metadatas"][result_index][item_index]["upserted"]
+
+    upserted_id = ids_to_upsert_existing[0]
+    # test single id filtering
+    results = collection.query(
+        query_embeddings=query_embedding,
+        ids=upserted_id,
+        n_results=1,
+        include=includes,
+    )
+    assert results["metadatas"][0][0]["upserted"]
+
+    deleted_id = ids_to_delete[0]
+    # test deleted id filter raises
+    with pytest.raises(Exception) as error:
+        collection.query(
+            query_embeddings=query_embedding,
+            ids=deleted_id,
+            n_results=1,
+            include=includes,
+        )
+    assert "Error finding id" in str(error.value)

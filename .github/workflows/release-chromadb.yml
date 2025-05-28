@@ -61,6 +61,7 @@ jobs:
   go-tests:
     name: Go tests
     uses: ./.github/workflows/_go-tests.yml
+    secrets: inherit
 
   release-docker:
     name: Publish to DockerHub and GHCR
@@ -219,7 +220,7 @@ jobs:
                 // - This workflow finishes for A and deploys A to Chroma Cloud
                 // Chroma Cloud is now running A, but the last commit was B.
                 "environment": "staging",
-                "planes": "data,control"
+                "planes": "control,data"
               }
             })
 

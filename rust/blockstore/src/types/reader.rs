@@ -67,7 +67,9 @@ impl<
         &'referred_data self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> impl Stream<Item = Result<(K, V), Box<dyn ChromaError>>> + 'referred_data + Send
+    ) -> impl Stream<Item = Result<(&'referred_data str, K, V), Box<dyn ChromaError>>>
+           + 'referred_data
+           + Send
     where
         PrefixRange: RangeBounds<&'prefix str> + Clone + Send + 'referred_data,
         KeyRange: RangeBounds<K> + Clone + Send + 'referred_data,
@@ -92,7 +94,7 @@ impl<
         &'referred_data self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
+    ) -> Result<Vec<(&'referred_data str, K, V)>, Box<dyn ChromaError>>
     where
         PrefixRange: RangeBounds<&'prefix str> + Clone,
         KeyRange: RangeBounds<K> + Clone,

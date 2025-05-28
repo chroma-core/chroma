@@ -270,6 +270,7 @@ class BaseAPI(ABC):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -280,6 +281,7 @@ class BaseAPI(ABC):
         Args:
             collection_id: The UUID of the collection to query.
             query_embeddings: The embeddings to use as the query.
+            ids: The IDs to filter by during the query. Defaults to None.
             n_results: The number of results to return. Defaults to 10.
             where: Conditional filtering on metadata. Defaults to None.
             where_document: Conditional filtering on documents. Defaults to None.
@@ -734,6 +736,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,

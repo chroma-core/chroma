@@ -14,6 +14,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
+	"github.com/google/uuid"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/genproto/googleapis/rpc/code"
@@ -114,6 +115,8 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_TenantLastCompactionTime
 func (suite *TenantDatabaseServiceTestSuite) TestServer_DeleteDatabase() {
 	tenantName := "TestDeleteDatabase"
 	databaseName := "TestDeleteDatabase"
+	// Generate random uuid for db id
+	databaseeId := uuid.New().String()
 
 	_, err := suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
 		Name: tenantName,
@@ -124,6 +127,8 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_DeleteDatabase() {
 	_, err = suite.catalog.CreateDatabase(context.Background(), &model.CreateDatabase{
 		Tenant: tenantName,
 		Name:   databaseName,
+		ID:     databaseeId,
+		Ts:     time.Now().Unix(),
 	}, time.Now().Unix())
 	suite.NoError(err)
 

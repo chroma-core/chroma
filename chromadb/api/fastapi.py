@@ -69,7 +69,8 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             default_api_path=system.settings.chroma_server_api_default_path,
         )
 
-        self._session = httpx.Client(timeout=None)
+        limits = httpx.Limits(max_keepalive_connections=self.keepalive_secs)
+        self._session = httpx.Client(timeout=None, limits=limits)
 
         self._header = system.settings.chroma_server_headers or {}
         self._header["Content-Type"] = "application/json"
@@ -588,6 +589,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -603,6 +605,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             "post",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
             json={
+                "ids": ids,
                 "query_embeddings": convert_np_embeddings_to_list(query_embeddings)
                 if query_embeddings is not None
                 else None,

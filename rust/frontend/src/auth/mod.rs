@@ -5,7 +5,7 @@ use std::pin::Pin;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 
-use chroma_types::GetUserIdentityResponse;
+use chroma_types::{Collection, GetUserIdentityResponse};
 
 #[derive(Clone, Copy, Debug)]
 pub enum AuthzAction {
@@ -91,6 +91,14 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         resource: AuthzResource,
     ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
 
+    fn authenticate_and_authorize_collection(
+        &self,
+        _headers: &HeaderMap,
+        action: AuthzAction,
+        resource: AuthzResource,
+        _collection: Collection,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
+
     fn get_user_identity(
         &self,
         _headers: &HeaderMap,
@@ -103,6 +111,16 @@ impl AuthenticateAndAuthorize for () {
         _headers: &HeaderMap,
         _action: AuthzAction,
         _resource: AuthzResource,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
+        Box::pin(ready(Ok::<(), AuthError>(())))
+    }
+
+    fn authenticate_and_authorize_collection(
+        &self,
+        _headers: &HeaderMap,
+        _action: AuthzAction,
+        _resource: AuthzResource,
+        _collection: Collection,
     ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
         Box::pin(ready(Ok::<(), AuthError>(())))
     }

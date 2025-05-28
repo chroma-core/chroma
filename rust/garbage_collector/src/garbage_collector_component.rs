@@ -183,7 +183,7 @@ impl Component for GarbageCollector {
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         ctx.scheduler.schedule(
-            GarbageCollectMessage {},
+            GarbageCollectMessage { tenant: None },
             Duration::from_secs(self.gc_interval_mins * 60),
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled garbage collection")),
@@ -245,16 +245,26 @@ impl Handler<Memberlist> for GarbageCollector {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+struct GarbageCollectResult {
+    num_completed_jobs: u32,
+    num_failed_jobs: u32,
+    num_skipped_jobs: u32,
+}
+
 #[derive(Debug)]
-struct GarbageCollectMessage {}
+struct GarbageCollectMessage {
+    tenant: Option<String>,
+}
 
 #[async_trait]
 impl Handler<GarbageCollectMessage> for GarbageCollector {
-    type Result = ();
+    type Result = GarbageCollectResult;
 
     async fn handle(
         &mut self,
-        _message: GarbageCollectMessage,
+        message: GarbageCollectMessage,
         ctx: &ComponentContext<Self>,
     ) -> Self::Result {
         let absolute_cutoff_time =
@@ -272,6 +282,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             .get_collections_to_gc(
                 Some(absolute_cutoff_time.into()),
                 Some(self.max_collections_to_gc.into()),
+                message.tenant.clone(),
             )
             .await
             .expect("Failed to get collections to gc");
@@ -284,12 +295,23 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
 
         let mut jobs = FuturesUnordered::new();
 
+        let mut num_skipped_jobs = 0;
         for collection in collections_to_gc {
             if self.disabled_collections.contains(&collection.id) {
                 tracing::warn!(
                     "Skipping garbage collection for disabled collection: {}",
                     collection.id
                 );
+                num_skipped_jobs += 1;
+                continue;
+            }
+
+            if collection.lineage_file_path.is_some() {
+                tracing::debug!(
+                    "Skipping garbage collection for root of fork tree: {}",
+                    collection.id
+                );
+                num_skipped_jobs += 1;
                 continue;
             }
 
@@ -351,11 +373,19 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
 
         // Schedule next run
         ctx.scheduler.schedule(
-            GarbageCollectMessage {},
+            GarbageCollectMessage {
+                tenant: message.tenant.clone(),
+            },
             Duration::from_secs(self.gc_interval_mins * 60),
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled garbage collection")),
         );
+
+        return GarbageCollectResult {
+            num_completed_jobs,
+            num_failed_jobs,
+            num_skipped_jobs,
+        };
     }
 }
 
@@ -409,7 +439,7 @@ mod tests {
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
-    use chroma_sysdb::GrpcSysDbConfig;
+    use chroma_sysdb::{GrpcSysDb, GrpcSysDbConfig};
     use chroma_system::{DispatcherConfig, System};
     use tracing_test::traced_test;
 
@@ -464,7 +494,7 @@ mod tests {
         let collection_name = format!("test_collection_{}", test_uuid);
 
         let collection_id = clients
-            .create_database_and_collection(&tenant_id, &database_name, &collection_name)
+            .create_database_and_collection(&tenant_id, &database_name, &collection_name, true)
             .await
             .unwrap();
 
@@ -570,6 +600,122 @@ mod tests {
 
     #[tokio::test]
     #[traced_test]
+    async fn test_k8s_integration_ignores_forked_collections() {
+        let tenant_id = format!("tenant-{}", Uuid::new_v4());
+        let tenant_mode_overrides = HashMap::from([(tenant_id.clone(), CleanupMode::Delete)]);
+
+        let config = GarbageCollectorConfig {
+            service_name: "gc".to_string(),
+            otel_endpoint: "none".to_string(),
+            relative_cutoff_time: Duration::from_secs(1),
+            max_collections_to_gc: 100,
+            gc_interval_mins: 10,
+            disallow_collections: vec![],
+            sysdb_config: GrpcSysDbConfig {
+                host: "localhost".to_string(),
+                port: 50051,
+                connect_timeout_ms: 5000,
+                request_timeout_ms: 10000,
+                num_channels: 1,
+            },
+            dispatcher_config: DispatcherConfig::default(),
+            storage_config: StorageConfig::ObjectStore(ObjectStoreConfig {
+                bucket: ObjectStoreBucketConfig {
+                    name: "chroma-storage".to_string(),
+                    r#type: ObjectStoreType::Minio,
+                },
+                upload_part_size_bytes: 1024 * 1024,   // 1MB
+                download_part_size_bytes: 1024 * 1024, // 1MB
+                max_concurrent_requests: 10,
+            }),
+            default_mode: CleanupMode::DryRun,
+            tenant_mode_overrides: Some(tenant_mode_overrides),
+            assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
+            my_member_id: "test-gc".to_string(),
+            memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
+        };
+        let registry = Registry::new();
+
+        // Create collection
+        let mut clients = ChromaGrpcClients::new().await.unwrap();
+
+        let (collection_id, _) = create_test_collection(tenant_id.clone(), &mut clients).await;
+        let mut sysdb = SysDb::Grpc(
+            GrpcSysDb::try_from_config(&config.sysdb_config, &registry)
+                .await
+                .unwrap(),
+        );
+        let collections = sysdb
+            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .await
+            .unwrap();
+        let collection = collections.first().unwrap();
+        // Fork collection
+        sysdb
+            .fork_collection(
+                collection_id,
+                collection.log_position as u64,
+                collection.log_position as u64,
+                CollectionUuid::new(),
+                "test-fork".to_string(),
+            )
+            .await
+            .unwrap();
+
+        // Wait 1 second for cutoff time
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // Run garbage collection
+        let mut garbage_collector_component = GarbageCollector::try_from_config(&config, &registry)
+            .await
+            .unwrap();
+
+        let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config, &registry)
+            .await
+            .unwrap();
+
+        let system = System::new();
+        let dispatcher_handle = system.start_component(dispatcher);
+
+        garbage_collector_component.set_dispatcher(dispatcher_handle);
+        garbage_collector_component.set_system(system.clone());
+        let mut garbage_collector_handle = system.start_component(garbage_collector_component);
+
+        garbage_collector_handle
+            .send(
+                vec![Member {
+                    member_id: "test-gc".to_string(),
+                    member_ip: "0.0.0.0".to_string(),
+                    member_node_name: "test-gc-node".to_string(),
+                }],
+                None,
+            )
+            .await
+            .unwrap();
+
+        let result = garbage_collector_handle
+            .request(
+                GarbageCollectMessage {
+                    tenant: Some(tenant_id.clone()),
+                },
+                Some(Span::current()),
+            )
+            .await
+            .unwrap();
+
+        // Should have skipped
+        assert_eq!(
+            result,
+            GarbageCollectResult {
+                num_completed_jobs: 0,
+                num_failed_jobs: 0,
+                num_skipped_jobs: 1
+            }
+        );
+    }
+
+    #[tokio::test]
+    #[traced_test]
     async fn test_k8s_integration_tenant_mode_override() {
         // Setup
         let tenant_id_for_delete_mode = format!("tenant-delete-mode-{}", Uuid::new_v4());
@@ -657,7 +803,10 @@ mod tests {
             .unwrap();
 
         garbage_collector_handle
-            .request(GarbageCollectMessage {}, Some(Span::current()))
+            .request(
+                GarbageCollectMessage { tenant: None },
+                Some(Span::current()),
+            )
             .await
             .unwrap();
 

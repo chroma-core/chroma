@@ -308,7 +308,7 @@ impl Arbitrary for TestWhereFilter {
             (doc_string, doc_operator).prop_map(|(text, operator)| {
                 Where::Document(DocumentExpression {
                     operator,
-                    text: text.to_string(),
+                    pattern: text.to_string(),
                 })
             });
 

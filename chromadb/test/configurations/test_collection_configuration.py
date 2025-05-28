@@ -338,13 +338,25 @@ def test_empty_spann_configuration(client: ClientAPI) -> None:
     }
 
     if is_spann_disabled_mode:
-        with pytest.raises(Exception) as excinfo:
-            client.create_collection(
-                name="test_spann_config",
-                configuration=config,
-            )
+        coll = client.create_collection(
+            name="test_spann_config",
+            configuration=config,
+        )
 
-        assert "SPANN is still in development" in str(excinfo.value)
+        # Verify configuration is preserved
+        loaded_config = load_collection_configuration_from_json(
+            coll._model.configuration_json
+        )
+        if loaded_config and isinstance(loaded_config, dict):
+            hnsw_config_loaded = cast(
+                CreateHNSWConfiguration, loaded_config.get("hnsw", {})
+            )
+            ef = loaded_config.get("embedding_function")
+            assert hnsw_config_loaded.get("space") == "l2"
+            assert hnsw_config_loaded.get("ef_construction") == 100
+            assert hnsw_config_loaded.get("ef_search") == 100
+            assert hnsw_config_loaded.get("max_neighbors") == 16
+            assert ef is not None
     else:
         coll = client.create_collection(
             name="test_spann_config",
@@ -388,13 +400,25 @@ def test_spann_configuration(client: ClientAPI) -> None:
     }
 
     if is_spann_disabled_mode:
-        with pytest.raises(Exception) as excinfo:
-            client.create_collection(
-                name="test_spann_config",
-                configuration=config,
-            )
+        coll = client.create_collection(
+            name="test_spann_config",
+            configuration=config,
+        )
 
-        assert "SPANN is still in development" in str(excinfo.value)
+        # Verify configuration is preserved
+        loaded_config = load_collection_configuration_from_json(
+            coll._model.configuration_json
+        )
+        if loaded_config and isinstance(loaded_config, dict):
+            hnsw_config_loaded = cast(
+                CreateHNSWConfiguration, loaded_config.get("hnsw", {})
+            )
+            ef = loaded_config.get("embedding_function")
+            assert hnsw_config_loaded.get("space") == "cosine"
+            assert hnsw_config_loaded.get("ef_construction") == 100
+            assert hnsw_config_loaded.get("ef_search") == 100
+            assert hnsw_config_loaded.get("max_neighbors") == 16
+            assert ef is not None
     else:
         coll = client.create_collection(
             name="test_spann_config",
@@ -502,13 +526,27 @@ def test_spann_default_parameters(client: ClientAPI) -> None:
     }
 
     if is_spann_disabled_mode:
-        with pytest.raises(Exception) as excinfo:
-            client.create_collection(
-                name="test_spann_defaults",
-                configuration=config,
-            )
+        coll = client.create_collection(
+            name="test_spann_defaults",
+            configuration=config,
+        )
 
-        assert "SPANN is still in development" in str(excinfo.value)
+        # Verify configuration is preserved
+        loaded_config = load_collection_configuration_from_json(
+            coll._model.configuration_json
+        )
+        if loaded_config and isinstance(loaded_config, dict):
+            hnsw_config_loaded = cast(
+                CreateHNSWConfiguration, loaded_config.get("hnsw", {})
+            )
+            assert hnsw_config_loaded.get("space") == "cosine"
+            assert hnsw_config_loaded.get("ef_construction") == 100
+            assert hnsw_config_loaded.get("ef_search") == 100
+            assert hnsw_config_loaded.get("max_neighbors") == 16
+
+            ef = loaded_config.get("embedding_function")
+            assert ef is not None
+            assert ef.name() == "default"
     else:
         coll = client.create_collection(
             name="test_spann_defaults",
@@ -524,11 +562,15 @@ def test_spann_default_parameters(client: ClientAPI) -> None:
                 CreateSpannConfiguration, loaded_config.get("spann", {})
             )
             assert spann_config_loaded.get("space") == "cosine"
-            assert spann_config_loaded.get("ef_construction") == 200  # default
-            assert spann_config_loaded.get("max_neighbors") == 16  # default
-            assert spann_config_loaded.get("ef_search") == 200  # default
-            assert spann_config_loaded.get("search_nprobe") == 128  # default
-            assert spann_config_loaded.get("write_nprobe") == 128  # default
+            assert spann_config_loaded.get("ef_construction") == 200
+            assert spann_config_loaded.get("max_neighbors") == 16
+            assert spann_config_loaded.get("ef_search") == 200
+            assert spann_config_loaded.get("search_nprobe") == 128
+            assert spann_config_loaded.get("write_nprobe") == 128
+
+            ef = loaded_config.get("embedding_function")
+            assert ef is not None
+            assert ef.name() == "default"
 
 
 def test_spann_json_serialization(client: ClientAPI) -> None:
@@ -570,13 +612,25 @@ def test_spann_json_serialization(client: ClientAPI) -> None:
         )
 
     if is_spann_disabled_mode:
-        with pytest.raises(Exception) as excinfo:
-            client.create_collection(
-                name="test_spann_json",
-                configuration=create_config,
-            )
+        coll = client.create_collection(
+            name="test_spann_json",
+            configuration=create_config,
+        )
 
-        assert "SPANN is still in development" in str(excinfo.value)
+        # Verify configuration is preserved
+        loaded_config = load_collection_configuration_from_json(
+            coll._model.configuration_json
+        )
+        if loaded_config and isinstance(loaded_config, dict):
+            hnsw_config_loaded = cast(
+                CreateHNSWConfiguration, loaded_config.get("hnsw", {})
+            )
+            ef = loaded_config.get("embedding_function")
+            assert hnsw_config_loaded.get("space") == "cosine"
+            assert hnsw_config_loaded.get("ef_construction") == 100
+            assert hnsw_config_loaded.get("ef_search") == 100
+            assert hnsw_config_loaded.get("max_neighbors") == 16
+            assert ef is not None
     else:
         # Create collection with the converted configuration
         coll = client.create_collection(

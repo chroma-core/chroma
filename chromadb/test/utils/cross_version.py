@@ -55,7 +55,10 @@ def install(pkg: str, path: str, dep_overrides: Dict[str, str]) -> int:
     for dep, operator_version in dep_overrides.items():
         command.append(f"{dep}{operator_version}")
 
-    command.append("--no-binary=chroma-hnswlib")
+    # Only add --no-binary=chroma-hnswlib if it's in the dependencies
+    if "chroma-hnswlib" in pkg or any("chroma-hnswlib" in dep for dep in dep_overrides):
+        command.append("--no-binary=chroma-hnswlib")
+
     command.append(f"--target={path}")
 
     print(f"Installing chromadb version {pkg} to {path}")

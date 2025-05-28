@@ -3,39 +3,6 @@
 
 namespace: 'chroma'
 
-frontendService:
-  image:
-    repository: 'frontend-service'
-    tag: 'latest'
-
-  # Sometimes users (and us) want to pass values directly as flags. Sometimes, these are
-  # populated from secrets or configMaps. So we let consumers fill these directly.
-  # TODO we could maybe have mutually exclusive pieces of config, e.g. isPersistentValue
-  # and isPersistentFromConfigMap or something.
-  isPersistent: 'value: "TRUE"'
-  producerImpl: 'value: "chromadb.logservice.logservice.LogService"'
-  consumerImpl: 'value: "chromadb.logservice.logservice.LogService"'
-  segmentManagerImpl: 'value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"'
-  executorImpl: 'value: "chromadb.execution.executor.distributed.DistributedExecutor"'
-  allowReset: 'value: "TRUE"'
-  sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
-  serverGrpcPort: 'value: "50051"'
-  coordinatorHost: 'value: "sysdb.chroma"'
-  authProvider: 'value: ""'
-  authCredentialsProvider: 'value: ""'
-  authzProvider: 'value: ""'
-  authzConfigProvider: 'value: ""'
-  memberlistProviderImpl: 'value: "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"'
-  logServiceHost: 'value: "logservice.chroma"'
-  logServicePort: 'value: "50051"'
-  otherEnvConfig: |
-    - name: CHROMA_OTEL_COLLECTION_ENDPOINT
-      value: "http://jaeger:4317"
-    - name: CHROMA_OTEL_GRANULARITY
-      value: all
-  replicaCount: 2
-
-
 rustFrontendService:
   image:
     repository: 'rust-frontend-service'
@@ -84,6 +51,9 @@ rustLogService:
   image:
     repository: 'rust-log-service'
     tag: 'latest'
+  cache:
+    hostPath: '/local/cache/chroma-log-service'
+    mountPath: '/cache/'
 
 queryService:
   image:

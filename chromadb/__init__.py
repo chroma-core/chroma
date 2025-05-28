@@ -53,7 +53,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "1.0.7"
+__version__ = "1.0.11"
 
 
 # Workaround to deal with Colab's old sqlite3 version
@@ -206,7 +206,7 @@ def HttpClient(
 
     Args:
         host: The hostname of the Chroma server. Defaults to "localhost".
-        port: The port of the Chroma server. Defaults to "8000".
+        port: The port of the Chroma server. Defaults to 8000.
         ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
         headers: A dictionary of headers to send to the Chroma server. Defaults to {}.
         settings: A dictionary of settings to communicate with the chroma server.
@@ -257,7 +257,7 @@ async def AsyncHttpClient(
 
     Args:
         host: The hostname of the Chroma server. Defaults to "localhost".
-        port: The port of the Chroma server. Defaults to "8000".
+        port: The port of the Chroma server. Defaults to 8000.
         ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
         headers: A dictionary of headers to send to the Chroma server. Defaults to {}.
         settings: A dictionary of settings to communicate with the chroma server.

@@ -184,8 +184,11 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     ) -> AsyncCollection:
         if configuration is None:
             configuration = {}
-            if embedding_function is not None:
-                configuration["embedding_function"] = embedding_function
+        if (
+            embedding_function is not None
+            and configuration.get("embedding_function") is None
+        ):
+            configuration["embedding_function"] = embedding_function
         model = await self._server.create_collection(
             name=name,
             configuration=configuration,
@@ -235,8 +238,11 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     ) -> AsyncCollection:
         if configuration is None:
             configuration = {}
-            if embedding_function is not None:
-                configuration["embedding_function"] = embedding_function
+        if (
+            embedding_function is not None
+            and configuration.get("embedding_function") is None
+        ):
+            configuration["embedding_function"] = embedding_function
         model = await self._server.get_or_create_collection(
             name=name,
             configuration=configuration,
@@ -403,6 +409,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -411,6 +418,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         return await self._server._query(
             collection_id=collection_id,
             query_embeddings=query_embeddings,
+            ids=ids,
             n_results=n_results,
             where=where,
             where_document=where_document,

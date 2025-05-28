@@ -535,7 +535,7 @@ impl Where {
                 .sum(),
             // The query length is defined to be the number of trigram tokens
             Where::Document(document_expression) => {
-                document_expression.text.len().max(3) as u64 - 2
+                document_expression.pattern.len().max(3) as u64 - 2
             }
             Where::Metadata(_) => 0,
         }
@@ -668,14 +668,14 @@ impl From<BooleanOperator> for chroma_proto::BooleanOperator {
 #[derive(Clone, Debug, PartialEq, ToSchema)]
 pub struct DocumentExpression {
     pub operator: DocumentOperator,
-    pub text: String,
+    pub pattern: String,
 }
 
 impl From<chroma_proto::DirectWhereDocument> for DocumentExpression {
     fn from(value: chroma_proto::DirectWhereDocument) -> Self {
         Self {
             operator: value.operator().into(),
-            text: value.document,
+            pattern: value.pattern,
         }
     }
 }
@@ -683,7 +683,7 @@ impl From<chroma_proto::DirectWhereDocument> for DocumentExpression {
 impl From<DocumentExpression> for chroma_proto::DirectWhereDocument {
     fn from(value: DocumentExpression) -> Self {
         Self {
-            document: value.text,
+            pattern: value.pattern,
             operator: chroma_proto::WhereDocumentOperator::from(value.operator) as i32,
         }
     }
@@ -693,12 +693,16 @@ impl From<DocumentExpression> for chroma_proto::DirectWhereDocument {
 pub enum DocumentOperator {
     Contains,
     NotContains,
+    Regex,
+    NotRegex,
 }
 impl From<chroma_proto::WhereDocumentOperator> for DocumentOperator {
     fn from(value: chroma_proto::WhereDocumentOperator) -> Self {
         match value {
             chroma_proto::WhereDocumentOperator::Contains => Self::Contains,
             chroma_proto::WhereDocumentOperator::NotContains => Self::NotContains,
+            chroma_proto::WhereDocumentOperator::Regex => Self::Regex,
+            chroma_proto::WhereDocumentOperator::NotRegex => Self::NotRegex,
         }
     }
 }
@@ -708,6 +712,8 @@ impl From<DocumentOperator> for chroma_proto::WhereDocumentOperator {
         match value {
             DocumentOperator::Contains => Self::Contains,
             DocumentOperator::NotContains => Self::NotContains,
+            DocumentOperator::Regex => Self::Regex,
+            DocumentOperator::NotRegex => Self::NotRegex,
         }
     }
 }
@@ -970,7 +976,7 @@ impl TryFrom<chroma_proto::WhereDocument> for Where {
                     }
                 };
                 let comparison = DocumentExpression {
-                    text: proto_comparison.document,
+                    pattern: proto_comparison.pattern,
                     operator: operator.into(),
                 };
                 Ok(Where::Document(comparison))
@@ -1175,7 +1181,7 @@ mod tests {
         let proto_where = chroma_proto::WhereDocument {
             r#where_document: Some(chroma_proto::where_document::WhereDocument::Direct(
                 chroma_proto::DirectWhereDocument {
-                    document: "foo".to_string(),
+                    pattern: "foo".to_string(),
                     operator: chroma_proto::WhereDocumentOperator::Contains.into(),
                 },
             )),
@@ -1183,7 +1189,7 @@ mod tests {
         let where_document: Where = proto_where.try_into().unwrap();
         match where_document {
             Where::Document(comparison) => {
-                assert_eq!(comparison.text, "foo");
+                assert_eq!(comparison.pattern, "foo");
                 assert_eq!(comparison.operator, DocumentOperator::Contains);
             }
             _ => panic!("Invalid where document type"),
@@ -1200,7 +1206,7 @@ mod tests {
                             r#where_document: Some(
                                 chroma_proto::where_document::WhereDocument::Direct(
                                     chroma_proto::DirectWhereDocument {
-                                        document: "foo".to_string(),
+                                        pattern: "foo".to_string(),
                                         operator: chroma_proto::WhereDocumentOperator::Contains
                                             .into(),
                                     },
@@ -1211,7 +1217,7 @@ mod tests {
                             r#where_document: Some(
                                 chroma_proto::where_document::WhereDocument::Direct(
                                     chroma_proto::DirectWhereDocument {
-                                        document: "bar".to_string(),
+                                        pattern: "bar".to_string(),
                                         operator: chroma_proto::WhereDocumentOperator::Contains
                                             .into(),
                                     },
