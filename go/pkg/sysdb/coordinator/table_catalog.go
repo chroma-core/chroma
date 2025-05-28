@@ -374,7 +374,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		return nil, false, common.ErrConcurrentDeleteCollection
 	}
 	result := convertCollectionToModel(collectionList)[0]
-	return result, true, nil
+	return result, created, nil
 }
 
 func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model.CreateCollection, ts types.Timestamp) (*model.Collection, bool, error) {
@@ -1251,7 +1251,6 @@ func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollec
 		}
 
 		// If collection already exists, then do not create segments.
-		// TODO: Should we check to see if segments does not exist? and create them?
 		if !created {
 			return nil
 		}
