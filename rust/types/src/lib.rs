@@ -23,8 +23,8 @@ mod tenant;
 mod validators;
 mod where_parsing;
 
+pub mod optional_u128;
 pub mod regex;
-pub mod u128;
 
 // Re-export the types module, so that we can use it as a single import in other modules.
 pub use api_types::*;
