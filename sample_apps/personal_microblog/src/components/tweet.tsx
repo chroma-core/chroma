@@ -27,7 +27,7 @@ export function Tweet({ tweet, animate }: TweetProps) {
   const hasReply = tweet.replyId !== undefined && tweet.replyId !== "";
 
   useEffect(() => {
-    if (tweet.replyId !== undefined) {
+    if (tweet.replyId !== undefined && tweet.replyId != "") {
       getPostById(tweet.replyId).then((post) => {
         setReply((_) => post);
       });
@@ -96,7 +96,7 @@ function TweetInner({
 
   return (
     <div className="w-full flex flex-row gap-4">
-      <div className="pt-[.1em]">{icon}</div>
+      <div className="pt-[.05em]">{icon}</div>
       {rendering ? (
         <div className="flex flex-col w-full items-stretch gap-2">
           <div className="h-4 bg-gray-300 rounded-full animate-pulse"></div>
