@@ -6,15 +6,20 @@ import { Tweet, TweetSkeleton } from "@/components/tweet";
 import TweetPrompt from "@/components/tweet-prompt";
 import { PostModel, Role } from "@/types";
 import { getPosts, publishNewPost } from "@/actions";
+import { groupPostsByMonthAndYear } from "@/util";
 
 export default function Home() {
   const [madePost, setMadePost] = useState<boolean>(false);
   const [loadingMessages, setLoadingMessages] = useState<boolean>(true);
-  const [messages, setMessages] = useState<Array<PostModel>>([]);
+  const [oldMessages, setOldMessages] = useState<
+    { month: string; posts: PostModel[] }[]
+  >([]);
+  const [newMessages, setNewMessages] = useState<Array<PostModel>>([]);
 
   useEffect(() => {
     getPosts().then((posts) => {
-      setMessages((_) => [...posts]);
+      const postsGroupedByMonth = groupPostsByMonthAndYear(posts).reverse();
+      setOldMessages((_) => postsGroupedByMonth);
       setLoadingMessages(false);
     });
   }, []);
@@ -23,7 +28,7 @@ export default function Home() {
     Array.from(new Array(4), (x, i) => <TweetSkeleton key={i} />)
   ) : (
     <>
-      {messages.map((m, i) => (
+      {newMessages.map((m, i) => (
         <motion.li
           key={m.id}
           initial={
@@ -33,7 +38,15 @@ export default function Home() {
           }
           animate={{ opacity: 1, height: "auto" }}
         >
-          <Tweet tweet={m} />
+          <Tweet tweet={m} animate={true} />
+        </motion.li>
+      ))}
+      {oldMessages.map(({ month, posts }, i) => (
+        <motion.li key={month} className="flex flex-col gap-4">
+          <h2 className="text-xl mt-4">{month}</h2>
+          {posts.map((p, i) => (
+            <Tweet key={p.id} tweet={p} animate={false} />
+          ))}
         </motion.li>
       ))}
     </>
@@ -46,7 +59,7 @@ export default function Home() {
           onSubmit={(input) => {
             setMadePost(true);
             publishNewPost(input).then((newTweet) => {
-              setMessages((tweets) => [newTweet, ...tweets]);
+              setNewMessages((tweets) => [newTweet, ...tweets]);
             });
           }}
         />

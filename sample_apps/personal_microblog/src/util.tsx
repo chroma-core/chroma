@@ -1,13 +1,13 @@
 import { Collection } from "chromadb";
 import { PostModel, Role } from "./types";
 
-function groupPostsByMonthAndYear(
+export function groupPostsByMonthAndYear(
   posts: PostModel[]
 ): { month: string; posts: PostModel[] }[] {
   const groupedPosts: { [key: string]: PostModel[] } = {};
   posts.forEach((post) => {
     const date = new Date(post.date);
-    const monthYear = `${date.getMonth()}-${date.getFullYear()}`;
+    const monthYear = `${date.getMonth() + 1}-${date.getFullYear()}`;
     if (!groupedPosts[monthYear]) {
       groupedPosts[monthYear] = [];
     }
@@ -30,10 +30,8 @@ export function remarkCustom() {
    * @return {undefined}
    */
   function visit(tree: { children: any; type: string; value: string }) {
-    console.log(tree);
     if (tree.type == "code") {
       tree.value = tree.value.trim();
-      console.log(tree.value);
       return tree;
     }
     if (tree.type == "paragraph" && tree.children.length > 0) {

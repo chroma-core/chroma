@@ -18,9 +18,10 @@ const iconSize = 20;
 
 interface TweetProps {
   tweet: PostModel;
+  animate?: boolean;
 }
 
-export function Tweet({ tweet }: TweetProps) {
+export function Tweet({ tweet, animate }: TweetProps) {
   const [reply, setReply] = useState<PostModel | null>(null);
 
   const hasReply = tweet.replyId !== undefined && tweet.replyId !== "";
@@ -33,7 +34,7 @@ export function Tweet({ tweet }: TweetProps) {
     }
   }, []);
 
-  const animatedText = useAnimatedText(reply?.body ?? "");
+  const text = animate ? useAnimatedText(reply?.body ?? "") : reply?.body;
 
   return (
     <motion.div
@@ -52,7 +53,7 @@ export function Tweet({ tweet }: TweetProps) {
                 ? "Remembering..."
                 : reply.status == "error"
                 ? "[Error]"
-                : animatedText ?? ""
+                : text ?? ""
             }
           />
         </div>
