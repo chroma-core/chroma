@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Tweet, TweetSkeleton } from "@/components/tweet";
 import TweetPrompt from "@/components/tweet-prompt";

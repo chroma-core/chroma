@@ -1,6 +1,4 @@
-import { JSX } from "react";
 import { PostModel } from "./types";
-import { Mention } from "./components/markup";
 
 function groupPostsByMonthAndYear(
   posts: PostModel[]
@@ -25,12 +23,12 @@ function groupPostsByMonthAndYear(
   return orderedPostGroups;
 }
 
-export function remarkMentions() {
+export function remarkCustom() {
   /**
    * @param {Root} tree
    * @return {undefined}
    */
-  function visit(tree) {
+  function visit(tree: { children: any; type: string; value?: string }) {
     console.log(tree);
     if (tree.type == "code") {
       tree.value = tree.value.trim();

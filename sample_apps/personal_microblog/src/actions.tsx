@@ -45,7 +45,7 @@ const posts: PostModel[] = [
   {
     id: "2",
     role: "user",
-    body: "# Markdown Header 1\n\n## Markdown Header 2\n\nMarkdown *emphasis* **strong** `code`\n\n---\nhorizontal rule\n\n---\n\n",
+    body: "# Markdown Header 1\n\n## Markdown Header 2\n\nMarkdown *emphasis* **strong** `code` [link](https://trychroma.com)\n\n---\nhorizontal rule\n\n---\n\n",
     date: new Date().toISOString(),
     status: "done",
   },
@@ -128,6 +128,7 @@ async function processAssistantResponse(userInput: string, post: PostModel) {
   const prompt = `
   You are an AI assistant that helps users with their questions.
   1. Keep your responses short and to the point.
+  2. Use markdown for formatting.
   User: ${userInput}
   Assistant:
   `;

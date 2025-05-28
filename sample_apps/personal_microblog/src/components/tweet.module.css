@@ -3,7 +3,7 @@
 }
 
 .tweetBody a {
-  color: #0a69da;
+  color: var(--accent);
 }
 
 .tweetBody h1 {

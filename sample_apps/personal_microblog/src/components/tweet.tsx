@@ -4,13 +4,14 @@ import { AiOutlineRobot } from "react-icons/ai";
 
 import { remark } from "remark";
 
-import { JSX, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { PostModel, Role } from "@/types";
 import { getPostById } from "@/actions";
-import { remarkMentions } from "@/util";
+import { remarkCustom } from "@/util";
 import remarkHtml from "remark-html";
 
 import styles from "./tweet.module.css";
+import { useAnimatedText } from "./animated-text";
 
 interface TweetProps {
   tweet: PostModel;
@@ -29,6 +30,8 @@ export function Tweet({ tweet }: TweetProps) {
     }
   }, []);
 
+  const animatedText = useAnimatedText(reply?.body ?? "");
+
   return (
     <motion.div
       className={`flex flex-col gap-3 ${
@@ -46,7 +49,7 @@ export function Tweet({ tweet }: TweetProps) {
                 ? "Remembering..."
                 : reply.status == "error"
                 ? "[Error]"
-                : reply.body
+                : animatedText
             }
           />
         </div>
@@ -79,7 +82,7 @@ function TweetInner({
   useEffect(() => {
     remark()
       .use(remarkHtml)
-      .use(remarkMentions)
+      .use(remarkCustom)
       .process(body)
       .then((result) => {
         setHtmlBody(result.toString());
