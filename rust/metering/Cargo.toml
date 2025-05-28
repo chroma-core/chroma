@@ -1,0 +1,17 @@
+[package]
+name = "chroma-metering"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+tracing = { workspace = true }
+chroma-system = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+chrono = { workspace = true }
+typetag = "0.2.20"
+
+[dev-dependencies]
+once_cell = "1.21.3"
+async-trait = { workspace = true }
+serial_test = { workspace = true }
