@@ -14,6 +14,7 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
+    operator::Filter,
     regex::{
         literal_expr::{LiteralExpr, NgramLiteralProvider},
         ChromaRegex, ChromaRegexError,
@@ -29,10 +30,6 @@ use tracing::{Instrument, Span};
 
 /// The `FilterOperator` filters the collection with specified criteria
 ///
-/// # Parameters
-/// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
-/// - `where_clause`: The predicate on individual record
-///
 /// # Inputs
 /// - `logs`: The latest log of the collection
 /// - `blockfile_provider`: The blockfile provider
@@ -46,12 +43,6 @@ use tracing::{Instrument, Span};
 ///
 /// # Usage
 /// It can be used to derive the mask of offset ids that should be included or excluded by the next operator
-#[derive(Clone, Debug)]
-pub struct FilterOperator {
-    pub query_ids: Option<Vec<String>>,
-    pub where_clause: Option<Where>,
-}
-
 #[derive(Clone, Debug)]
 pub struct FilterInput {
     pub logs: Chunk<LogRecord>,
@@ -500,7 +491,7 @@ impl<'me> RoaringMetadataFilter<'me> for CompositeExpression {
 }
 
 #[async_trait]
-impl Operator<FilterInput, FilterOutput> for FilterOperator {
+impl Operator<FilterInput, FilterOutput> for Filter {
     type Error = FilterError;
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {

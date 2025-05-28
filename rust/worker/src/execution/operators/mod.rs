@@ -12,7 +12,6 @@ pub mod spann_knn_merge;
 pub mod fetch_log;
 pub mod filter;
 pub mod get_collection_and_segments;
-pub mod knn;
 pub mod knn_hnsw;
 pub mod knn_log;
 pub mod knn_merge;

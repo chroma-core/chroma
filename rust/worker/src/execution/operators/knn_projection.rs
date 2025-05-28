@@ -3,14 +3,13 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::ChromaError;
 use chroma_system::Operator;
-use chroma_types::Segment;
+use chroma_types::{
+    operator::{KnnProjection, KnnProjectionOutput, KnnProjectionRecord, RecordDistance},
+    Segment,
+};
 use thiserror::Error;
 
-use super::{
-    fetch_log::FetchLogOutput,
-    knn::RecordDistance,
-    projection::{ProjectionError, ProjectionOperator, ProjectionRecord},
-};
+use super::{fetch_log::FetchLogOutput, projection::ProjectionError};
 
 /// The `KnnProjectionOperator` retrieves record content by offset ids
 /// It is based on `ProjectionOperator`, and it attaches the distance
@@ -34,28 +33,11 @@ use super::{
 /// It can be used to retrieve record contents as user requested
 /// It should be run as the last step of an orchestrator
 #[derive(Clone, Debug)]
-pub struct KnnProjectionOperator {
-    pub projection: ProjectionOperator,
-    pub distance: bool,
-}
-
-#[derive(Clone, Debug)]
 pub struct KnnProjectionInput {
     pub logs: FetchLogOutput,
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
     pub record_distances: Vec<RecordDistance>,
-}
-
-#[derive(Clone, Debug)]
-pub struct KnnProjectionRecord {
-    pub record: ProjectionRecord,
-    pub distance: Option<f32>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct KnnProjectionOutput {
-    pub records: Vec<KnnProjectionRecord>,
 }
 
 #[derive(Error, Debug)]
@@ -73,7 +55,7 @@ impl ChromaError for KnnProjectionError {
 }
 
 #[async_trait]
-impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjectionOperator {
+impl Operator<KnnProjectionInput, KnnProjectionOutput> for KnnProjection {
     type Error = KnnProjectionError;
 
     async fn run(
