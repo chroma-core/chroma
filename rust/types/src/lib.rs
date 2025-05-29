@@ -48,6 +48,7 @@ pub use tenant::*;
 pub use types::*;
 pub use where_parsing::*;
 
+#[allow(clippy::all)]
 pub mod chroma_proto {
     tonic::include_proto!("chroma");
 }

@@ -38,6 +38,8 @@ pub(super) struct GarbageCollectorConfig {
     pub(super) assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig,
     pub(super) memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     pub my_member_id: String,
+    #[serde(default = "GarbageCollectorConfig::default_port")]
+    pub port: u16,
 }
 
 impl GarbageCollectorConfig {
@@ -60,6 +62,10 @@ impl GarbageCollectorConfig {
             Ok(config) => config,
             Err(e) => panic!("Error loading config: {}", e),
         }
+    }
+
+    fn default_port() -> u16 {
+        50055
     }
 }
 

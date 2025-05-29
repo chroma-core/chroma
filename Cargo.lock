@@ -3345,6 +3345,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tonic",
+ "tonic-health",
  "tracing",
  "tracing-subscriber",
  "tracing-test",

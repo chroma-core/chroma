@@ -633,6 +633,7 @@ mod tests {
             assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
             my_member_id: "test-gc".to_string(),
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
+            port: 50055,
         };
         let registry = Registry::new();
 
@@ -753,6 +754,7 @@ mod tests {
             assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
             my_member_id: "test-gc".to_string(),
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
+            port: 50055,
         };
         let registry = Registry::new();
 

@@ -40,6 +40,9 @@ spec:
       - name: garbage-collector
         image: "{{ .Values.garbageCollector.image.repository }}:{{ .Values.garbageCollector.image.tag }}"
         imagePullPolicy: IfNotPresent
+        readinessProbe:
+          grpc:
+            port: 50055
         {{ if .Values.garbageCollector.resources }}
         resources:
           limits:
