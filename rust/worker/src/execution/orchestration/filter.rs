@@ -3,9 +3,8 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
-use chroma_segment::{
-    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
-    distributed_spann::SpannSegmentReaderError,
+use chroma_segment::distributed_hnsw::{
+    DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader,
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
@@ -21,95 +20,10 @@ use tracing::Span;
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
     filter::{FilterError, FilterInput, FilterOutput},
-    knn_hnsw::KnnHnswError,
-    knn_log::KnnLogError,
-    knn_merge::KnnMergeError,
-    knn_projection::KnnProjectionError,
-    spann_bf_pl::SpannBfPlError,
-    spann_centers_search::SpannCentersSearchError,
-    spann_fetch_pl::SpannFetchPlError,
 };
 
-#[derive(Error, Debug)]
-pub enum KnnError {
-    #[error("Error sending message through channel: {0}")]
-    Channel(#[from] ChannelError),
-    #[error("Error running Fetch Log Operator: {0}")]
-    FetchLog(#[from] FetchLogError),
-    #[error("Error running Filter Operator: {0}")]
-    Filter(#[from] FilterError),
-    #[error("Error creating hnsw segment reader: {0}")]
-    HnswReader(#[from] DistributedHNSWSegmentFromSegmentError),
-    #[error("Error parsing collection config: {0}")]
-    Config(#[from] HnswParametersFromSegmentError),
-    #[error("Error running Knn Log Operator: {0}")]
-    KnnLog(#[from] KnnLogError),
-    #[error("Error running Knn Hnsw Operator: {0}")]
-    KnnHnsw(#[from] KnnHnswError),
-    #[error("Error running Knn Merge Operator")]
-    KnnMerge(#[from] KnnMergeError),
-    #[error("Error running Knn Projection Operator: {0}")]
-    KnnProjection(#[from] KnnProjectionError),
-    #[error("Error inspecting collection dimension")]
-    NoCollectionDimension,
-    #[error("Panic: {0}")]
-    Panic(#[from] PanicError),
-    #[error("Error receiving final result: {0}")]
-    Result(#[from] RecvError),
-    #[error("Error running Spann Bruteforce Postinglist Operator: {0}")]
-    SpannBfPl(#[from] SpannBfPlError),
-    #[error("Error running Spann Fetch Postinglist Operator: {0}")]
-    SpannFetchPl(#[from] SpannFetchPlError),
-    #[error("Error running Spann Head Search Operator: {0}")]
-    SpannHeadSearch(#[from] SpannCentersSearchError),
-    #[error("Error creating spann segment reader: {0}")]
-    SpannSegmentReaderCreationError(#[from] SpannSegmentReaderError),
-    #[error("Invalid distance function")]
-    InvalidDistanceFunction,
-    #[error("Operation aborted because resources exhausted")]
-    Aborted,
-}
-
-impl ChromaError for KnnError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            KnnError::Channel(e) => e.code(),
-            KnnError::FetchLog(e) => e.code(),
-            KnnError::Filter(e) => e.code(),
-            KnnError::HnswReader(e) => e.code(),
-            KnnError::Config(e) => e.code(),
-            KnnError::KnnLog(e) => e.code(),
-            KnnError::KnnHnsw(e) => e.code(),
-            KnnError::KnnMerge(_) => ErrorCodes::Internal,
-            KnnError::KnnProjection(e) => e.code(),
-            KnnError::NoCollectionDimension => ErrorCodes::InvalidArgument,
-            KnnError::Panic(_) => ErrorCodes::Aborted,
-            KnnError::Result(_) => ErrorCodes::Internal,
-            KnnError::SpannBfPl(e) => e.code(),
-            KnnError::SpannFetchPl(e) => e.code(),
-            KnnError::SpannHeadSearch(e) => e.code(),
-            KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
-            KnnError::Aborted => ErrorCodes::ResourceExhausted,
-            KnnError::SpannSegmentReaderCreationError(e) => e.code(),
-        }
-    }
-}
-
-impl<E> From<TaskError<E>> for KnnError
-where
-    E: Into<KnnError>,
-{
-    fn from(value: TaskError<E>) -> Self {
-        match value {
-            TaskError::Panic(e) => e.into(),
-            TaskError::TaskFailed(e) => e.into(),
-            TaskError::Aborted => KnnError::Aborted,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
-pub struct KnnFilterOutput {
+pub struct FilterOrchestratorOutput {
     pub logs: FetchLogOutput,
     pub distance_function: DistanceFunction,
     pub filter_output: FilterOutput,
@@ -120,10 +34,64 @@ pub struct KnnFilterOutput {
     pub fetch_log_bytes: u64,
 }
 
-type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
+#[derive(Error, Debug)]
+pub enum FilterOrchestratorError {
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
+    #[error("Error sending message through channel: {0}")]
+    Channel(#[from] ChannelError),
+    #[error("Error parsing collection config: {0}")]
+    Config(#[from] HnswParametersFromSegmentError),
+    #[error("Error running Fetch Log Operator: {0}")]
+    FetchLog(#[from] FetchLogError),
+    #[error("Error running Filter Operator: {0}")]
+    Filter(#[from] FilterError),
+    #[error("Error creating hnsw segment reader: {0}")]
+    HnswReader(#[from] DistributedHNSWSegmentFromSegmentError),
+    #[error("Invalid distance function")]
+    InvalidDistanceFunction,
+    #[error("Error inspecting collection dimension")]
+    NoCollectionDimension,
+    #[error("Panic: {0}")]
+    Panic(#[from] PanicError),
+    #[error("Error receiving operator result: {0}")]
+    Recv(#[from] RecvError),
+}
 
-/// The `KnnFilterOrchestrator` chains a sequence of operators in sequence to evaluate
-/// the first half of a `<collection>.query(...)` query from the user
+impl ChromaError for FilterOrchestratorError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            FilterOrchestratorError::Aborted => ErrorCodes::ResourceExhausted,
+            FilterOrchestratorError::Channel(e) => e.code(),
+            FilterOrchestratorError::Config(e) => e.code(),
+            FilterOrchestratorError::FetchLog(e) => e.code(),
+            FilterOrchestratorError::Filter(e) => e.code(),
+            FilterOrchestratorError::HnswReader(e) => e.code(),
+            FilterOrchestratorError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
+            FilterOrchestratorError::NoCollectionDimension => ErrorCodes::InvalidArgument,
+            FilterOrchestratorError::Panic(e) => e.code(),
+            FilterOrchestratorError::Recv(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+impl<E> From<TaskError<E>> for FilterOrchestratorError
+where
+    E: Into<FilterOrchestratorError>,
+{
+    fn from(value: TaskError<E>) -> Self {
+        match value {
+            TaskError::Aborted => FilterOrchestratorError::Aborted,
+            TaskError::Panic(e) => e.into(),
+            TaskError::TaskFailed(e) => e.into(),
+        }
+    }
+}
+
+type FilterOrchestratorResult = Result<FilterOrchestratorOutput, FilterOrchestratorError>;
+
+/// The `FilterOrchestrator` chains a sequence of operators in sequence to compute the set
+/// of collection records for further queries
 ///
 /// # Pipeline
 /// ```text
@@ -155,7 +123,7 @@ type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
 ///     └──────────────────┘
 /// ```
 #[derive(Debug)]
-pub struct KnnFilterOrchestrator {
+pub struct FilterOrchestrator {
     // Orchestrator parameters
     blockfile_provider: BlockfileProvider,
     dispatcher: ComponentHandle<Dispatcher>,
@@ -175,10 +143,10 @@ pub struct KnnFilterOrchestrator {
     filter: Filter,
 
     // Result channel
-    result_channel: Option<Sender<KnnFilterResult>>,
+    result_channel: Option<Sender<FilterOrchestratorResult>>,
 }
 
-impl KnnFilterOrchestrator {
+impl FilterOrchestrator {
     pub fn new(
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -203,9 +171,9 @@ impl KnnFilterOrchestrator {
 }
 
 #[async_trait]
-impl Orchestrator for KnnFilterOrchestrator {
-    type Output = KnnFilterOutput;
-    type Error = KnnError;
+impl Orchestrator for FilterOrchestrator {
+    type Output = FilterOrchestratorOutput;
+    type Error = FilterOrchestratorError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
         self.dispatcher.clone()
@@ -225,11 +193,11 @@ impl Orchestrator for KnnFilterOrchestrator {
         self.queue
     }
 
-    fn set_result_channel(&mut self, sender: Sender<KnnFilterResult>) {
+    fn set_result_channel(&mut self, sender: Sender<FilterOrchestratorResult>) {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<KnnFilterResult> {
+    fn take_result_channel(&mut self) -> Sender<FilterOrchestratorResult> {
         self.result_channel
             .take()
             .expect("The result channel should be set before take")
@@ -237,7 +205,7 @@ impl Orchestrator for KnnFilterOrchestrator {
 }
 
 #[async_trait]
-impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrator {
+impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for FilterOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -267,7 +235,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
 }
 
 #[async_trait]
-impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
+impl Handler<TaskResult<FilterOutput, FilterError>> for FilterOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -284,7 +252,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                 self.collection_and_segments
                     .collection
                     .dimension
-                    .ok_or(KnnError::NoCollectionDimension),
+                    .ok_or(FilterOrchestratorError::NoCollectionDimension),
                 ctx,
             )
             .await
@@ -339,7 +307,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                         .collection
                         .config
                         .get_spann_config()
-                        .ok_or(KnnError::InvalidDistanceFunction),
+                        .ok_or(FilterOrchestratorError::InvalidDistanceFunction),
                     ctx,
                 )
                 .await
@@ -357,7 +325,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
 
         let fetch_log_bytes = logs.iter().map(|(l, _)| l.size_bytes()).sum();
 
-        let output = KnnFilterOutput {
+        let output = FilterOrchestratorOutput {
             logs,
             distance_function,
             filter_output: output,
