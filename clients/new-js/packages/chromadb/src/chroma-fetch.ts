@@ -36,8 +36,15 @@ export const chromaFetch: typeof fetch = async (input, init) => {
 
   switch (response.status) {
     case 400:
+      let status = "Bad Request";
+      try {
+        const responseBody = await response.json();
+        status = responseBody.message || status;
+      } catch {}
       throw new ChromaClientError(
-        `Bad request to ${input} with status: ${response.statusText}`,
+        `Bad request to ${
+          (input as Request).url || "Chroma"
+        } with status: ${status}`,
       );
     case 401:
       throw new ChromaUnauthorizedError(`Unauthorized`);
