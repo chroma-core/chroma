@@ -981,6 +981,7 @@ mod test {
         blockfile_record::{
             RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
         },
+        test::TestDistributedSegment,
         types::materialize_logs,
     };
     use chroma_blockstore::{
@@ -990,10 +991,15 @@ mod test {
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, CollectionUuid, LogRecord, MetadataValue, Operation, OperationRecord, SegmentUuid,
-        UpdateMetadataValue,
+        regex::literal_expr::{LiteralExpr, NgramLiteralProvider},
+        strategies::{ArbitraryChromaRegexTestDocumentsParameters, ChromaRegexTestDocuments},
+        Chunk, CollectionUuid, LogRecord, MetadataValue, Operation, OperationRecord,
+        ScalarEncoding, SegmentUuid, UpdateMetadataValue,
     };
+    use proptest::prelude::any_with;
+    use roaring::RoaringBitmap;
     use std::{collections::HashMap, str::FromStr};
+    use tokio::runtime::Runtime;
 
     #[tokio::test]
     async fn empty_blocks() {
@@ -1962,5 +1968,80 @@ mod test {
             res.first().as_ref().unwrap().document,
             Some(String::from("bye").as_str())
         );
+    }
+
+    async fn run_regex_test(test_case: ChromaRegexTestDocuments) {
+        let pattern = String::from(test_case.hir.clone());
+        let regex = regex::Regex::new(&pattern).unwrap();
+        let reference_results = test_case
+            .documents
+            .iter()
+            .enumerate()
+            .filter_map(|(id, doc)| regex.is_match(doc).then_some(id as u32))
+            .collect::<RoaringBitmap>();
+        let logs = test_case
+            .documents
+            .into_iter()
+            .enumerate()
+            .map(|(id, doc)| LogRecord {
+                log_offset: id as i64,
+                record: OperationRecord {
+                    id: format!("<{id}>"),
+                    embedding: Some(vec![id as f32; 2]),
+                    encoding: Some(ScalarEncoding::FLOAT32),
+                    metadata: None,
+                    document: Some(doc),
+                    operation: Operation::Add,
+                },
+            })
+            .collect::<Vec<_>>();
+        let mut segments = TestDistributedSegment::new_with_dimension(2);
+        segments.compact_log(Chunk::new(logs.into()), 0).await;
+        let metadata_segment_reader = MetadataSegmentReader::from_segment(
+            &segments.metadata_segment,
+            &segments.blockfile_provider,
+        )
+        .await
+        .expect("Metadata segment reader should be constructable");
+        let fts_reader = metadata_segment_reader
+            .full_text_index_reader
+            .as_ref()
+            .expect("Full text index reader should be present");
+        let literal_expression = LiteralExpr::from(test_case.hir);
+        let regex_results = fts_reader
+            .match_literal_expression(&literal_expression)
+            .await
+            .expect("Literal evaluation should not fail");
+        if let Some(res) = regex_results {
+            assert_eq!(res, reference_results);
+        }
+    }
+
+    proptest::proptest! {
+        #[test]
+        fn test_simple_regex(
+            test_case in any_with::<ChromaRegexTestDocuments>(ArbitraryChromaRegexTestDocumentsParameters {
+                recursive_hir: false,
+                total_document_count: 10,
+            })
+        ) {
+            let runtime = Runtime::new().unwrap();
+            runtime.block_on(async {
+                run_regex_test(test_case).await
+            });
+        }
+
+        #[test]
+        fn test_composite_regex(
+            test_case in any_with::<ChromaRegexTestDocuments>(ArbitraryChromaRegexTestDocumentsParameters {
+                recursive_hir: true,
+                total_document_count: 50,
+            })
+        ) {
+            let runtime = Runtime::new().unwrap();
+            runtime.block_on(async {
+                run_regex_test(test_case).await
+            });
+        }
     }
 }
