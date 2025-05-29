@@ -165,6 +165,26 @@ impl ChromaError for GrpcSealLogError {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum GrpcMigrateLogError {
+    #[error("Failed to migrate collection: {0}")]
+    FailedToMigrate(#[from] tonic::Status),
+    #[error(transparent)]
+    ClientAssignerError(#[from] ClientAssignmentError),
+    #[error("not supported by this service")]
+    NotSupported,
+}
+
+impl ChromaError for GrpcMigrateLogError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcMigrateLogError::FailedToMigrate(status) => status.code().into(),
+            GrpcMigrateLogError::ClientAssignerError(e) => e.code(),
+            GrpcMigrateLogError::NotSupported => ErrorCodes::Unimplemented,
+        }
+    }
+}
+
 type LogClient = LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
 
 #[derive(Clone, Debug)]
@@ -176,7 +196,7 @@ pub struct GrpcLog {
 
 impl GrpcLog {
     #[allow(clippy::type_complexity)]
-    pub(crate) fn new(
+    pub fn new(
         config: GrpcLogConfig,
         client: LogClient,
         alt_client_assigner: Option<ClientAssigner<LogClient>>,
@@ -190,7 +210,7 @@ impl GrpcLog {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum GrpcLogError {
+pub enum GrpcLogError {
     #[error("Failed to connect to log service")]
     FailedToConnect(#[from] tonic::transport::Error),
 }
@@ -639,18 +659,42 @@ impl GrpcLog {
         }
     }
 
-    pub(super) async fn seal_log(
+    pub async fn seal_log(
         &mut self,
-        tenant: &str,
         collection_id: CollectionUuid,
     ) -> Result<(), GrpcSealLogError> {
+        // NOTE(rescrv):  Seal log only goes to the go log service, so use the classic connection.
         let _response = self
-            .client_for(tenant, collection_id)?
+            .client
             .seal_log(chroma_proto::SealLogRequest {
                 collection_id: collection_id.to_string(),
             })
             .await?;
         Ok(())
+    }
+
+    pub async fn migrate_log(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GrpcMigrateLogError> {
+        // NOTE(rescrv): Migrate log only goes to the rust log service, so use alt client assigner.
+        if let Some(client_assigner) = self.alt_client_assigner.as_mut() {
+            let mut client = client_assigner
+                .clients(&collection_id.to_string())?
+                .drain(..)
+                .next()
+                .ok_or(ClientAssignmentError::NoClientFound(
+                    "Impossible state: no client found for collection".to_string(),
+                ))?;
+            client
+                .migrate_log(chroma_proto::MigrateLogRequest {
+                    collection_id: collection_id.to_string(),
+                })
+                .await?;
+            Ok(())
+        } else {
+            Err(GrpcMigrateLogError::NotSupported)
+        }
     }
 }
 
