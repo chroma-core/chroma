@@ -11,7 +11,11 @@ use std::{
 use tokio::time::{sleep, Duration};
 use tracing::Span;
 
-use crate::{apply_all, apply_top, close_all, close_top, open, MeterEvent, MeterEventData};
+use crate::{
+    apply_all, apply_top, close_all, close_top, open,
+    types::{Action, ReadAction},
+    MeterEvent, MeterEventData,
+};
 
 /// Payload containing both request-received and request-completed timestamps.
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -112,6 +116,7 @@ async fn test_guard_drop_submits_event() {
             "tenant1".into(),
             "database1".into(),
             "collection_uuid".into(),
+            Action::Read(ReadAction::Get),
             ReceivedAndCompleted {
                 request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
                 request_completed_at_timestamp: Some(
@@ -152,6 +157,7 @@ async fn test_close_top_only_submits_most_recent_event() {
         "tenant2".into(),
         "database2".into(),
         "collection_uuid".into(),
+        Action::Read(ReadAction::Get),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(1).unwrap(),
             request_completed_at_timestamp: Some(
@@ -163,6 +169,7 @@ async fn test_close_top_only_submits_most_recent_event() {
         "tenant2".into(),
         "database2".into(),
         "collection_uuid".into(),
+        Action::Read(ReadAction::Get),
         CompletedOnly {
             request_completed_at_timestamp: Some(
                 DateTime::<Utc>::from_timestamp_millis(2).unwrap(),
@@ -209,6 +216,7 @@ async fn test_close_all_submits_events_in_lifo_order() {
         "tenant3".into(),
         "database3".into(),
         "collection_uuid".into(),
+        Action::Read(ReadAction::Get),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(10).unwrap(),
             request_completed_at_timestamp: Some(
@@ -220,6 +228,7 @@ async fn test_close_all_submits_events_in_lifo_order() {
         "tenant3".into(),
         "database3".into(),
         "collection_uuid".into(),
+        Action::Read(ReadAction::Get),
         CompletedOnly {
             request_completed_at_timestamp: Some(
                 DateTime::<Utc>::from_timestamp_millis(20).unwrap(),
@@ -256,6 +265,7 @@ async fn test_apply_all_increments_all_completion_timestamps() {
         "tenant4".into(),
         "database4".into(),
         "collection_uuid".into(),
+        Action::Read(ReadAction::Get),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
             request_completed_at_timestamp: Some(
@@ -267,6 +277,7 @@ async fn test_apply_all_increments_all_completion_timestamps() {
         "tenant4".into(),
         "database4".into(),
         "collection_uuid".into(),
+        Action::Read(ReadAction::Get),
         CompletedOnly {
             request_completed_at_timestamp: Some(
                 DateTime::<Utc>::from_timestamp_millis(7).unwrap(),
@@ -334,6 +345,7 @@ async fn test_apply_top_and_apply_all_affect_received_timestamp_correctly() {
         "tenant5".into(),
         "database5".into(),
         "collection_uuid".into(),
+        Action::Read(ReadAction::Get),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
             request_completed_at_timestamp: Some(
@@ -345,6 +357,7 @@ async fn test_apply_top_and_apply_all_affect_received_timestamp_correctly() {
         "tenant5".into(),
         "database5".into(),
         "collection_uuid".into(),
+        Action::Read(ReadAction::Get),
         CompletedOnly {
             request_completed_at_timestamp: Some(
                 DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
