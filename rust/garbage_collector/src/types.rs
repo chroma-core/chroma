@@ -15,6 +15,8 @@ pub enum CleanupMode {
     Rename,
     /// Permanently delete files
     Delete,
+    DryRunV2,
+    DeleteV2,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -60,4 +62,13 @@ pub fn version_graph_to_collection_dependency_graph(
     }
 
     collection_graph
+}
+
+#[derive(Debug, Default)]
+pub struct GarbageCollectorResponse {
+    pub collection_id: CollectionUuid,
+    pub num_versions_deleted: u32,
+    pub num_files_deleted: u32,
+    #[deprecated = "only used by gc v1"]
+    pub deletion_list: Vec<String>,
 }
