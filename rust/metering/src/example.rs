@@ -1,28 +1,29 @@
 use std::any::Any;
 
-// Example of auxillary data you may want to attach to an event
-trait SomeDataMutationYouWant {
-    fn mutate_data(&mut self, string_data: &str);
-}
-
 // Example of an event that can be mutated and has a request start time
 trait AddRequestStartTime {
     fn add_request_start_time(&mut self, start_time: std::time::Instant);
 }
 
-// Placeholder marker trait
-trait IsAnEvent: Any {
+// Badly named trait to represent an event that can be any'ed
+trait AsAny: Any {
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn as_any_owned(self: Box<Self>) -> Box<dyn Any>;
 }
 
 // Blanket implementation for any type that implements `Any`
-impl<T: Any> IsAnEvent for T {
+impl<T: Any> AsAny for T {
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
     fn as_any_owned(self: Box<Self>) -> Box<dyn Any> {
         self
+    }
+}
+
+trait IsAnEvent: AsAny {
+    fn as_add_request_start_time(&mut self) -> Result<&mut dyn AddRequestStartTime, String> {
+        Err("This event does not support adding request start time".to_string())
     }
 }
 
@@ -43,29 +44,25 @@ impl AEvent {
     }
 }
 
-impl SomeDataMutationYouWant for AEvent {
-    fn mutate_data(&mut self, string_data: &str) {
-        self.some_data = Some(string_data.to_string());
-    }
-}
-
 impl AddRequestStartTime for AEvent {
     fn add_request_start_time(&mut self, start_time: std::time::Instant) {
         self.request_start_time = Some(start_time);
     }
 }
 
+impl IsAnEvent for AEvent {
+    fn as_add_request_start_time(&mut self) -> Result<&mut dyn AddRequestStartTime, String> {
+        Ok(self as &mut dyn AddRequestStartTime)
+    }
+}
+
 // Blanket implementation for the trait to allow downcasting
 impl AddRequestStartTime for dyn IsAnEvent {
     fn add_request_start_time(&mut self, start_time: std::time::Instant) {
-        // if let Some(event) = self.as_any_mut().downcast_mut::<AEvent>() {
-        //     event.add_request_start_time(start_time);
-        // }
-        if let Some(event) = self.as_any_mut().downcast_mut::<AEvent>() {
+        if let Ok(event) = self.as_add_request_start_time() {
             event.add_request_start_time(start_time);
         } else {
-            // No-op since we don't care if the event that is in context does not care for
-            // this field
+            panic!("Event does not support adding request start time");
         }
     }
 }
