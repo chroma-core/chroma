@@ -1458,7 +1458,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         };
 
         let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
-        let mut log = Log::try_from_config(&config.log, registry).await?;
+        let mut log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
         let max_batch_size = log.get_max_batch_size().await?;
 
         // Create compation manager and pass handle to log service if configured

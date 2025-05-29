@@ -38,7 +38,7 @@ use tracing::Span;
 use uuid::Uuid;
 
 pub(crate) struct CompactionManager {
-    system: Option<System>,
+    system: System,
     scheduler: Scheduler,
     // Dependencies
     log: Log,
@@ -78,6 +78,7 @@ impl ChromaError for CompactionError {
 impl CompactionManager {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
+        system: System,
         scheduler: Scheduler,
         log: Log,
         sysdb: SysDb,
@@ -93,7 +94,7 @@ impl CompactionManager {
         fetch_log_batch_size: u32,
     ) -> Self {
         CompactionManager {
-            system: None,
+            system,
             scheduler,
             log,
             sysdb,
@@ -126,39 +127,31 @@ impl CompactionManager {
             }
         };
 
-        match self.system {
-            Some(ref system) => {
-                let orchestrator = CompactOrchestrator::new(
-                    collection_id,
-                    rebuild,
-                    self.fetch_log_batch_size,
-                    self.max_compaction_size,
-                    self.max_partition_size,
-                    self.log.clone(),
-                    self.sysdb.clone(),
-                    self.blockfile_provider.clone(),
-                    self.hnsw_index_provider.clone(),
-                    self.spann_provider.clone(),
-                    dispatcher,
-                    None,
-                );
+        let orchestrator = CompactOrchestrator::new(
+            collection_id,
+            rebuild,
+            self.fetch_log_batch_size,
+            self.max_compaction_size,
+            self.max_partition_size,
+            self.log.clone(),
+            self.sysdb.clone(),
+            self.blockfile_provider.clone(),
+            self.hnsw_index_provider.clone(),
+            self.spann_provider.clone(),
+            dispatcher,
+            None,
+        );
 
-                match orchestrator.run(system.clone()).await {
-                    Ok(result) => {
-                        tracing::info!("Compaction Job completed: {:?}", result);
-                        return Ok(result);
-                    }
-                    Err(e) => {
-                        tracing::error!("Compaction Job failed: {:?}", e);
-                        return Err(Box::new(e));
-                    }
-                }
+        match orchestrator.run(self.system.clone()).await {
+            Ok(result) => {
+                tracing::info!("Compaction Job completed: {:?}", result);
+                return Ok(result);
             }
-            None => {
-                tracing::error!("No system found");
-                return Err(Box::new(CompactionError::FailedToCompact));
+            Err(e) => {
+                tracing::error!("Compaction Job failed: {:?}", e);
+                return Err(Box::new(e));
             }
-        };
+        }
     }
 
     #[instrument(name = "CompactionManager::compact_batch")]
@@ -206,20 +199,18 @@ impl CompactionManager {
     pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
         self.dispatcher = Some(dispatcher);
     }
-
-    pub(crate) fn set_system(&mut self, system: System) {
-        self.system = Some(system);
-    }
 }
 
 #[async_trait]
-impl Configurable<CompactionServiceConfig> for CompactionManager {
+impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
     async fn try_from_config(
-        config: &crate::config::CompactionServiceConfig,
+        config: &(crate::config::CompactionServiceConfig, System),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let (config, system) = config;
         let log_config = &config.log;
-        let log = match Log::try_from_config(log_config, registry).await {
+        let log = match Log::try_from_config(&(log_config.clone(), system.clone()), registry).await
+        {
             Ok(log) => log,
             Err(err) => {
                 return Err(err);
@@ -293,6 +284,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         .await?;
 
         Ok(CompactionManager::new(
+            system.clone(),
             scheduler,
             log,
             sysdb,
@@ -674,7 +666,9 @@ mod tests {
             garbage_collection_context: Some(gc_context),
             metrics: SpannMetrics::default(),
         };
+        let system = System::new();
         let mut manager = CompactionManager::new(
+            system.clone(),
             scheduler,
             log,
             sysdb,
@@ -690,7 +684,6 @@ mod tests {
             fetch_log_batch_size,
         );
 
-        let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 10,
             task_queue_limit: 100,
@@ -700,7 +693,6 @@ mod tests {
         });
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
-        manager.set_system(system);
         let compacted = manager.compact_batch().await;
         assert!(
             (compacted == vec![collection_uuid_1, collection_uuid_2])

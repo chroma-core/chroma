@@ -159,7 +159,7 @@ impl QueryServiceConfig {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 /// # Description
 /// The primary config for the compaction service.
 /// ## Description of parameters

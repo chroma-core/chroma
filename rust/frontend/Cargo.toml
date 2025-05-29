@@ -28,7 +28,7 @@ regex = { workspace = true }
 futures = { workspace = true }
 backon = { workspace = true }
 tracing-opentelemetry = { workspace = true }
-tower = { version = "0.4.13", features = ["discover"] }
+tower = { workspace = true }
 mdac = { workspace = true }
 opentelemetry.workspace = true
 validator = { workspace = true }
