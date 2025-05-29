@@ -1,5 +1,9 @@
+mod example;
+
 pub mod errors;
 pub mod types;
+#[macro_use]
+pub mod macros;
 
 use crate::errors::MeteringError;
 use chroma_system::ReceiverForMessage;
