@@ -22,6 +22,7 @@ impl<T: Any> AsAny for T {
 }
 
 trait IsAnEvent: AsAny {
+    // not ideal that this has to be impl'ed
     fn as_add_request_start_time(&mut self) -> Result<&mut dyn AddRequestStartTime, String> {
         Err("This event does not support adding request start time".to_string())
     }
