@@ -163,7 +163,7 @@ pub struct KnnHnswOrchestrator {
     dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
 
-    // Output from KnnFilterOrchestrator
+    // Output from FilterOrchestrator
     filter_output: FilterOrchestratorOutput,
 
     // Knn operator shared between log and segments
