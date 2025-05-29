@@ -10,7 +10,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 use tracing::Span;
-
+pub use types::*;
 /// Trait representing the payload data for a metering event.
 ///
 /// Types implementing this trait can carry arbitrary structured data
