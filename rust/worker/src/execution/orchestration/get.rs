@@ -5,21 +5,20 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{
-    operator::{Filter, GetResult, Limit, Projection, ProjectionOutput},
-    CollectionAndSegments,
-};
+use chroma_types::operator::{GetResult, Limit, Projection, ProjectionOutput};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 
 use crate::execution::operators::{
-    fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-    filter::{FilterError, FilterInput, FilterOutput},
+    fetch_log::FetchLogError,
+    filter::FilterError,
     limit::{LimitError, LimitInput, LimitOutput},
     prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
     projection::{ProjectionError, ProjectionInput},
 };
+
+use super::filter::FilterOrchestratorOutput;
 
 #[derive(Error, Debug)]
 pub enum GetError {
@@ -69,51 +68,47 @@ where
     }
 }
 
-/// The `GetOrchestrator` chains a sequence of operators in sequence to evaluate
-/// a `<collection>.get(...)` query from the user
+/// The `GetOrchestrator` chains a sequence of operators in sequence to get data for user.
+/// When used together with `FilterOrchestrator`, they evaluate a `<collection>.get(...)` query
 ///
 /// # Pipeline
 /// ```text
-///       ┌────────────┐
-///       │            │
-///       │  on_start  │
-///       │            │
-///       └──────┬─────┘
+///              │
 ///              │
 ///              ▼
-///    ┌────────────────────┐
-///    │                    │
-///    │  FetchLogOperator  │
-///    │                    │
-///    └─────────┬──────────┘
+///  ┌───────────────────────┐
+///  │                       │
+///  │   FilterOrchestrator  │
+///  │                       │
+///  └───────────┬───────────┘
 ///              │
+/// ┌──────────  │  ────────────┐
+/// │            │     Get      │
+/// │            │ Orchestrator │
+/// │            ▼              │
+/// │   ┌─────────────────┐     │
+/// │   │                 │     │
+/// │   │  LimitOperator  │     │
+/// │   │                 │     │
+/// │   └────────┬────────┘     │
+/// │            │              │
+/// │            ▼              │
+/// │ ┌──────────────────────┐  │
+/// │ │                      │  │
+/// │ │  ProjectionOperator  │  │
+/// │ │                      │  │
+/// │ └──────────┬───────────┘  │
+/// │            │              │
+/// │            ▼              │
+/// │   ┌──────────────────┐    │
+/// │   │                  │    │
+/// │   │  result_channel  │    │
+/// │   │                  │    │
+/// │   └──────────────────┘    │
+/// │            │              │
+/// └──────────  │  ────────────┘
 ///              ▼
-///    ┌───────────────────┐
-///    │                   │
-///    │   FilterOperator  │
-///    │                   │
-///    └─────────┬─────────┘
-///              │
-///              ▼
-///     ┌─────────────────┐
-///     │                 │
-///     │  LimitOperator  │
-///     │                 │
-///     └────────┬────────┘
-///              │
-///              ▼
-///   ┌──────────────────────┐
-///   │                      │
-///   │  ProjectionOperator  │
-///   │                      │
-///   └──────────┬───────────┘
-///              │
-///              ▼
-///     ┌──────────────────┐
-///     │                  │
-///     │  result_channel  │
-///     │                  │
-///     └──────────────────┘
+///
 /// ```
 #[derive(Debug)]
 pub struct GetOrchestrator {
@@ -122,17 +117,10 @@ pub struct GetOrchestrator {
     dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
 
-    // Collection segments
-    collection_and_segments: CollectionAndSegments,
-
-    // Fetch logs
-    fetch_log: FetchLogOperator,
-
-    // Fetched logs
-    fetched_logs: Option<FetchLogOutput>,
+    // Output from FilterOrchestrator
+    filter_output: FilterOrchestratorOutput,
 
     // Pipelined operators
-    filter: Filter,
     limit: Limit,
     projection: Projection,
 
@@ -146,9 +134,7 @@ impl GetOrchestrator {
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
-        collection_and_segments: CollectionAndSegments,
-        fetch_log: FetchLogOperator,
-        filter: Filter,
+        filter_output: FilterOrchestratorOutput,
         limit: Limit,
         projection: Projection,
     ) -> Self {
@@ -156,10 +142,7 @@ impl GetOrchestrator {
             blockfile_provider,
             dispatcher,
             queue,
-            collection_and_segments,
-            fetch_log,
-            fetched_logs: None,
-            filter,
+            filter_output,
             limit,
             projection,
             result_channel: None,
@@ -181,7 +164,17 @@ impl Orchestrator for GetOrchestrator {
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
         vec![(
-            wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver()),
+            wrap(
+                Box::new(self.limit.clone()),
+                LimitInput {
+                    logs: self.filter_output.logs.clone(),
+                    blockfile_provider: self.blockfile_provider.clone(),
+                    record_segment: self.filter_output.record_segment.clone(),
+                    log_offset_ids: self.filter_output.filter_output.log_offset_ids.clone(),
+                    compact_offset_ids: self.filter_output.filter_output.compact_offset_ids.clone(),
+                },
+                ctx.receiver(),
+            ),
             Some(Span::current()),
         )]
     }
@@ -202,68 +195,6 @@ impl Orchestrator for GetOrchestrator {
 }
 
 #[async_trait]
-impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<FetchLogOutput, FetchLogError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => output,
-            None => return,
-        };
-
-        self.fetched_logs = Some(output.clone());
-
-        let task = wrap(
-            Box::new(self.filter.clone()),
-            FilterInput {
-                logs: output,
-                blockfile_provider: self.blockfile_provider.clone(),
-                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
-                record_segment: self.collection_and_segments.record_segment.clone(),
-            },
-            ctx.receiver(),
-        );
-        self.send(task, ctx, Some(Span::current())).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<FilterOutput, FilterError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => output,
-            None => return,
-        };
-        let task = wrap(
-            Box::new(self.limit.clone()),
-            LimitInput {
-                logs: self
-                    .fetched_logs
-                    .as_ref()
-                    .expect("FetchLogOperator should have finished already")
-                    .clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.collection_and_segments.record_segment.clone(),
-                log_offset_ids: output.log_offset_ids,
-                compact_offset_ids: output.compact_offset_ids,
-            },
-            ctx.receiver(),
-        );
-        self.send(task, ctx, Some(Span::current())).await;
-    }
-}
-
-#[async_trait]
 impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
     type Result = ();
 
@@ -278,13 +209,9 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
         };
 
         let input = ProjectionInput {
-            logs: self
-                .fetched_logs
-                .as_ref()
-                .expect("FetchLogOperator should have finished already")
-                .clone(),
+            logs: self.filter_output.logs.clone(),
             blockfile_provider: self.blockfile_provider.clone(),
-            record_segment: self.collection_and_segments.record_segment.clone(),
+            record_segment: self.filter_output.record_segment.clone(),
             offset_ids: output.offset_ids.iter().collect(),
         };
 
@@ -332,9 +259,8 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
         };
 
         let pulled_log_bytes = self
-            .fetched_logs
-            .as_ref()
-            .expect("FetchLogOperator should have finished already")
+            .filter_output
+            .logs
             .iter()
             .map(|(l, _)| l.size_bytes())
             .sum();

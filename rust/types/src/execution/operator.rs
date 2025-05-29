@@ -435,12 +435,12 @@ impl TryFrom<ProjectionRecord> for chroma_proto::ProjectionRecord {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProjectionOutput {
     pub records: Vec<ProjectionRecord>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct GetResult {
     pub pulled_log_bytes: u64,
     pub result: ProjectionOutput,

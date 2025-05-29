@@ -211,30 +211,44 @@ impl WorkerServer {
             .projection
             .ok_or(Status::invalid_argument("Invalid Projection Operator"))?;
 
+        // If dimension is not set and segment is uninitialized, we assume
+        // this is a get on empty collection, so we return early here
+        if collection_and_segments.collection.dimension.is_none()
+            && collection_and_segments.vector_segment.file_path.is_empty()
+        {
+            return Ok(Response::new(GetResult::default().try_into()?));
+        }
+
+        let filter_orchestrator = FilterOrchestrator::new(
+            self.blockfile_provider.clone(),
+            self.clone_dispatcher()?,
+            self.hnsw_index_provider.clone(),
+            // TODO: Make this configurable
+            1000,
+            collection_and_segments.clone(),
+            fetch_log,
+            filter.try_into()?,
+        );
+
+        let matching_records = match filter_orchestrator.run(self.system.clone()).await {
+            Ok(output) => output,
+            Err(e) => {
+                return Err(Status::new(e.code().into(), e.to_string()));
+            }
+        };
+
         let get_orchestrator = GetOrchestrator::new(
             self.blockfile_provider.clone(),
             self.clone_dispatcher()?,
             // TODO: Make this configurable
             1000,
-            collection_and_segments,
-            fetch_log,
-            filter.try_into()?,
+            matching_records,
             limit.into(),
             projection.into(),
         );
 
         match get_orchestrator.run(self.system.clone()).await {
-            Ok(GetResult {
-                pulled_log_bytes,
-                result,
-            }) => Ok(Response::new(chroma_proto::GetResult {
-                records: result
-                    .records
-                    .into_iter()
-                    .map(TryInto::try_into)
-                    .collect::<Result<_, _>>()?,
-                pulled_log_bytes,
-            })),
+            Ok(result) => Ok(Response::new(result.try_into()?)),
             Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
     }
@@ -289,7 +303,7 @@ impl WorkerServer {
         }
 
         let vector_segment_type = collection_and_segments.vector_segment.r#type;
-        let knn_filter_orchestrator = FilterOrchestrator::new(
+        let filter_orchestrator = FilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
             self.hnsw_index_provider.clone(),
@@ -300,7 +314,7 @@ impl WorkerServer {
             filter.try_into()?,
         );
 
-        let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
+        let matching_records = match filter_orchestrator.run(system.clone()).await {
             Ok(output) => output,
             Err(e) => {
                 return Err(Status::new(e.code().into(), e.to_string()));
