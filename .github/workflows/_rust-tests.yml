@@ -44,7 +44,9 @@ jobs:
     strategy:
       matrix:
         platform: [blacksmith-16vcpu-ubuntu-2204]
+        partition: [1, 2]
     runs-on: ${{ matrix.platform }}
+    name: 🦀 integration test ${{ matrix.partition }}/2
     # OIDC token auth for AWS
     permissions:
       contents: read
@@ -68,12 +70,12 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
-        run: cargo nextest run --profile ci_k8s_integration
+        run: cargo nextest run --profile ci_k8s_integration --partition hash:${{ matrix.partition }}/2
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
         with:
-          artifact-name: "rust-integration-test"
+          artifact-name: "rust-integration-test-${{ matrix.partition }}"
   test-benches:
     strategy:
       matrix:
