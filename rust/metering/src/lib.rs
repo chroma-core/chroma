@@ -92,17 +92,8 @@ impl MeterEventGuard {
     /// Open a new meter event and push it onto the thread-local stack.
     ///
     /// Returns an RAII guard that, when dropped, will submit the event.
-    pub fn open<T: MeterEventData>(
-        tenant: String,
-        database: String,
-        collection_id: String,
-        action: Action,
-        data: T,
-    ) -> Self {
+    pub fn open<T: MeterEventData>(action: Action, data: T) -> Self {
         let meter_event = MeterEvent {
-            tenant,
-            database,
-            collection_id,
             action: action,
             data: Box::new(data),
         };
@@ -159,14 +150,8 @@ impl Drop for MeterEventGuard {
 /// Convenience function to open a meter event with RAII submission.
 ///
 /// Equivalent to `MeterEventGuard::open(...)`.
-pub fn open<T: MeterEventData>(
-    tenant: String,
-    database: String,
-    collection_id: String,
-    action: Action,
-    data: T,
-) -> MeterEventGuard {
-    MeterEventGuard::open(tenant, database, collection_id, action, data)
+pub fn open<T: MeterEventData>(action: Action, data: T) -> MeterEventGuard {
+    MeterEventGuard::open(action, data)
 }
 
 /// Apply a mutation to the payload of the most recently opened event, if any.

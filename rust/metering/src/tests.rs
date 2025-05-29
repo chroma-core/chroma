@@ -113,9 +113,6 @@ async fn test_guard_drop_submits_event() {
     {
         // Open a new event and immediately drop it at end of scope.
         let _event_guard = open(
-            "tenant1".into(),
-            "database1".into(),
-            "collection_uuid".into(),
             Action::Read(ReadAction::Get),
             ReceivedAndCompleted {
                 request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
@@ -154,9 +151,6 @@ async fn test_close_top_only_submits_most_recent_event() {
     let event_buffer_handle = reset_and_get_event_buffer_handle();
 
     let first_event_guard = open(
-        "tenant2".into(),
-        "database2".into(),
-        "collection_uuid".into(),
         Action::Read(ReadAction::Get),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(1).unwrap(),
@@ -166,9 +160,6 @@ async fn test_close_top_only_submits_most_recent_event() {
         },
     );
     let _second_event_guard = open(
-        "tenant2".into(),
-        "database2".into(),
-        "collection_uuid".into(),
         Action::Read(ReadAction::Get),
         CompletedOnly {
             request_completed_at_timestamp: Some(
@@ -213,9 +204,6 @@ async fn test_close_all_submits_events_in_lifo_order() {
     let event_buffer_handle = reset_and_get_event_buffer_handle();
 
     let _first_guard = open(
-        "tenant3".into(),
-        "database3".into(),
-        "collection_uuid".into(),
         Action::Read(ReadAction::Get),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(10).unwrap(),
@@ -225,9 +213,6 @@ async fn test_close_all_submits_events_in_lifo_order() {
         },
     );
     let _second_guard = open(
-        "tenant3".into(),
-        "database3".into(),
-        "collection_uuid".into(),
         Action::Read(ReadAction::Get),
         CompletedOnly {
             request_completed_at_timestamp: Some(
@@ -262,9 +247,6 @@ async fn test_apply_all_increments_all_completion_timestamps() {
     let event_buffer_handle = reset_and_get_event_buffer_handle();
 
     let first_event_guard = open(
-        "tenant4".into(),
-        "database4".into(),
-        "collection_uuid".into(),
         Action::Read(ReadAction::Get),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
@@ -274,9 +256,6 @@ async fn test_apply_all_increments_all_completion_timestamps() {
         },
     );
     let _second_event_guard = open(
-        "tenant4".into(),
-        "database4".into(),
-        "collection_uuid".into(),
         Action::Read(ReadAction::Get),
         CompletedOnly {
             request_completed_at_timestamp: Some(
@@ -342,9 +321,6 @@ async fn test_apply_top_and_apply_all_affect_received_timestamp_correctly() {
     let event_buffer_handle = reset_and_get_event_buffer_handle();
 
     let first_event_guard = open(
-        "tenant5".into(),
-        "database5".into(),
-        "collection_uuid".into(),
         Action::Read(ReadAction::Get),
         ReceivedAndCompleted {
             request_received_at_timestamp: DateTime::<Utc>::from_timestamp_millis(0).unwrap(),
@@ -354,9 +330,6 @@ async fn test_apply_top_and_apply_all_affect_received_timestamp_correctly() {
         },
     );
     let _second_event_guard = open(
-        "tenant5".into(),
-        "database5".into(),
-        "collection_uuid".into(),
         Action::Read(ReadAction::Get),
         CompletedOnly {
             request_completed_at_timestamp: Some(

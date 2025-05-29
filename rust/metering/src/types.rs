@@ -8,12 +8,6 @@ use crate::MeterEventData;
 /// and the payload data implementing `MeterEventData`.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MeterEvent {
-    /// Identifier for the tenant.
-    pub tenant: String,
-    /// Identifier for the database.
-    pub database: String,
-    /// UUID of the collection to which this event pertains.
-    pub collection_id: String,
     /// The type of action being performed.
     pub action: Action,
     /// User-defined payload data for this event.
