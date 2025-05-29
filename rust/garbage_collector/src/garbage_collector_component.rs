@@ -251,6 +251,7 @@ struct GarbageCollectResult {
     num_completed_jobs: u32,
     num_failed_jobs: u32,
     num_skipped_jobs: u32,
+    num_hard_deleted_databases: u32,
 }
 
 #[derive(Debug)]
@@ -292,6 +293,8 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             "Filtered to {} collections to garbage collect",
             collections_to_gc.len()
         );
+
+        let mut sysdb = self.sysdb_client.clone();
 
         let mut jobs = FuturesUnordered::new();
 
@@ -371,6 +374,20 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             &[opentelemetry::KeyValue::new("status", "failure")],
         );
 
+        let num_hard_deleted_databases = match sysdb
+            .finish_database_deletion(absolute_cutoff_time.into())
+            .await
+        {
+            Ok(num_deleted) => {
+                tracing::debug!("Hard deleted {} databases", num_deleted);
+                num_deleted
+            }
+            Err(err) => {
+                tracing::error!("Call to FinishDatabaseDeletion failed: {:?}", err);
+                0
+            }
+        };
+
         // Schedule next run
         ctx.scheduler.schedule(
             GarbageCollectMessage {
@@ -385,6 +402,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             num_completed_jobs,
             num_failed_jobs,
             num_skipped_jobs,
+            num_hard_deleted_databases: num_hard_deleted_databases as u32,
         };
     }
 }
@@ -710,7 +728,8 @@ mod tests {
             GarbageCollectResult {
                 num_completed_jobs: 0,
                 num_failed_jobs: 0,
-                num_skipped_jobs: 1
+                num_skipped_jobs: 1,
+                num_hard_deleted_databases: 0,
             }
         );
     }
