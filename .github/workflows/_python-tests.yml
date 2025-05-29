@@ -155,7 +155,7 @@ jobs:
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}"' --durations 10
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}" --durations 10'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
