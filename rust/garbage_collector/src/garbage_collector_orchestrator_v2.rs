@@ -1,5 +1,5 @@
 use crate::construct_version_graph_orchestrator::{
-    ConstructVersionGraphError, ConstructVersionGraphOrchestrator, VersionGraph,
+    ConstructVersionGraphError, ConstructVersionGraphOrchestrator,
 };
 use crate::operators::compute_versions_to_delete_from_graph::{
     CollectionVersionAction, ComputeVersionsToDeleteError, ComputeVersionsToDeleteInput,
@@ -21,7 +21,7 @@ use crate::operators::mark_versions_at_sysdb::{
     MarkVersionsAtSysDbError, MarkVersionsAtSysDbInput, MarkVersionsAtSysDbOperator,
     MarkVersionsAtSysDbOutput,
 };
-use crate::types::CleanupMode;
+use crate::types::{version_graph_to_collection_dependency_graph, CleanupMode, VersionGraph};
 use async_trait::async_trait;
 use chroma_blockstore::RootManager;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -32,8 +32,11 @@ use chroma_system::{
     PanicError, System, TaskError, TaskResult,
 };
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
-use chroma_types::CollectionUuid;
+use chroma_types::{
+    BatchGetCollectionSoftDeleteStatusError, CollectionUuid, DeleteCollectionError,
+};
 use chrono::{DateTime, Utc};
+use petgraph::algo::toposort;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use thiserror::Error;
@@ -61,6 +64,9 @@ pub struct GarbageCollectorOrchestrator {
     num_pending_tasks: usize,
     min_versions_to_keep: u32,
     graph: Option<VersionGraph>,
+    soft_deleted_collections_to_gc: HashSet<CollectionUuid>,
+    tenant: Option<String>,
+    database_name: Option<String>,
 
     num_files_deleted: u32,
     num_versions_deleted: u32,
@@ -107,6 +113,9 @@ impl GarbageCollectorOrchestrator {
             num_pending_tasks: 0,
             min_versions_to_keep,
             graph: None,
+            soft_deleted_collections_to_gc: HashSet::new(),
+            tenant: None,
+            database_name: None,
 
             num_files_deleted: 0,
             num_versions_deleted: 0,
@@ -127,6 +136,8 @@ pub enum GarbageCollectorError {
     #[error("The task was aborted because resources were exhausted")]
     Aborted,
 
+    #[error("Failed to get collection soft delete status: {0}")]
+    BatchGetCollectionSoftDeleteStatus(#[from] BatchGetCollectionSoftDeleteStatusError),
     #[error("Failed to construct version graph: {0}")]
     ConstructVersionGraph(#[from] ConstructVersionGraphError),
     #[error("Failed to compute versions to delete: {0}")]
@@ -146,6 +157,8 @@ pub enum GarbageCollectorError {
     InvariantViolation(String),
     #[error("Could not parse UUID: {0}")]
     UnparsableUuid(#[from] uuid::Error),
+    #[error("Collection deletion failed: {0}")]
+    CollectionDeletionFailed(#[from] DeleteCollectionError),
 }
 
 impl ChromaError for GarbageCollectorError {
@@ -216,6 +229,25 @@ impl GarbageCollectorOrchestrator {
             self.lineage_file_path.clone(),
         );
         let output = orchestrator.run(self.system.clone()).await?;
+
+        let collection_ids = output.version_files.keys().cloned().collect::<Vec<_>>();
+        let soft_delete_statuses = self
+            .sysdb_client
+            .batch_get_collection_soft_delete_status(collection_ids)
+            .await?;
+        self.soft_deleted_collections_to_gc = soft_delete_statuses
+            .iter()
+            .filter_map(
+                |(collection_id, status)| {
+                    if *status {
+                        Some(*collection_id)
+                    } else {
+                        None
+                    }
+                },
+            )
+            .collect();
+
         self.version_files = output.version_files;
         self.graph = Some(output.graph.clone());
 
@@ -223,6 +255,7 @@ impl GarbageCollectorOrchestrator {
             Box::new(ComputeVersionsToDeleteOperator {}),
             ComputeVersionsToDeleteInput {
                 graph: output.graph,
+                soft_deleted_collections: self.soft_deleted_collections_to_gc.clone(),
                 cutoff_time: self.absolute_cutoff_time,
                 min_versions_to_keep: self.min_versions_to_keep,
             },
@@ -260,6 +293,13 @@ impl GarbageCollectorOrchestrator {
                     .map(|version| (*collection_id, *version))
                     .collect::<HashSet<_>>()
             })
+            .collect();
+
+        self.pending_mark_versions_at_sysdb_tasks = output
+            .versions
+            .keys()
+            .filter(|collection_id| !self.soft_deleted_collections_to_gc.contains(collection_id))
+            .cloned()
             .collect();
 
         for (collection_id, versions) in &output.versions {
@@ -398,7 +438,7 @@ impl GarbageCollectorOrchestrator {
                     output.collection_id, output.version
                 )))?;
 
-            let root = graph
+            let root_index = graph
                 .node_indices()
                 .find(|&n| {
                     graph
@@ -409,20 +449,26 @@ impl GarbageCollectorOrchestrator {
                 .ok_or(GarbageCollectorError::InvariantViolation(
                     "Expected to find root node".to_string(),
                 ))?;
+            let root = graph.node_weight(root_index).expect("Node should exist");
 
-            let versions_from_root_to_this_node =
-                petgraph::algo::astar(graph, root, |finish| finish == this_node, |_| 1, |_| 0)
-                    .ok_or(GarbageCollectorError::InvariantViolation(format!(
-                        "Expected to find path from root to node for {}@v{}",
-                        output.collection_id, output.version
-                    )))?
-                    .1
-                    .into_iter()
-                    .map(|i| {
-                        let node = graph.node_weight(i).expect("Node should exist");
-                        node.version
-                    })
-                    .collect::<Vec<_>>();
+            let versions_from_root_to_this_node = petgraph::algo::astar(
+                graph,
+                root_index,
+                |finish| finish == this_node,
+                |_| 1,
+                |_| 0,
+            )
+            .ok_or(GarbageCollectorError::InvariantViolation(format!(
+                "Expected to find path from root ({}@v{}) to node for {}@v{}",
+                root.collection_id, root.version, output.collection_id, output.version
+            )))?
+            .1
+            .into_iter()
+            .map(|i| {
+                let node = graph.node_weight(i).expect("Node should exist");
+                node.version
+            })
+            .collect::<Vec<_>>();
             let are_all_versions_v0 = versions_from_root_to_this_node
                 .iter()
                 .all(|&version| version == 0);
@@ -523,14 +569,15 @@ impl GarbageCollectorOrchestrator {
                     "Expected there to be at least one version file".to_string(),
                 ))?;
         // Assumes that all collections in a fork tree are under the same tenant
-        let tenant_id = version_file
-            .collection_info_immutable
-            .as_ref()
-            .ok_or(GarbageCollectorError::InvariantViolation(
+        let collection_info = version_file.collection_info_immutable.as_ref().ok_or(
+            GarbageCollectorError::InvariantViolation(
                 "Expected collection_info_immutable to be set".to_string(),
-            ))?
-            .tenant_id
-            .clone();
+            ),
+        )?;
+        let tenant_id = collection_info.tenant_id.clone();
+        self.tenant = Some(tenant_id.clone());
+        let database_name = collection_info.database_name.clone();
+        self.database_name = Some(database_name.clone());
 
         let task = wrap(
             Box::new(DeleteUnusedFilesOperator::new(
@@ -659,6 +706,88 @@ impl GarbageCollectorOrchestrator {
 
         Ok(())
     }
+
+    async fn handle_delete_versions_output(
+        &mut self,
+        output: DeleteVersionsAtSysDbOutput,
+        ctx: &ComponentContext<Self>,
+    ) -> Result<(), GarbageCollectorError> {
+        tracing::trace!("Received DeleteVersionsAtSysDbOutput: {:#?}", output);
+        self.num_versions_deleted += output.versions_to_delete.versions.len() as u32;
+
+        self.num_pending_tasks -= 1;
+        if self.num_pending_tasks == 0 {
+            let graph = self
+                .graph
+                .as_ref()
+                .ok_or(GarbageCollectorError::InvariantViolation(
+                    "Expected graph to be set".to_string(),
+                ))?;
+
+            let mut ordered_soft_deleted_to_hard_delete_collections = vec![];
+
+            // We cannot finalize collection deletion (perform a hard delete) if there are any forked collections downstream that are still alive. If we violated this invariant, there would be a missing edge in the lineage file (resulting in an unconnected graph).
+            // We must also delete collections in reverse topological order, so that we delete children before parents.
+            let collection_dependency_graph = version_graph_to_collection_dependency_graph(graph);
+            let topo = toposort(&collection_dependency_graph, None).map_err(|_| {
+                GarbageCollectorError::InvariantViolation(
+                    "Failed to topologically sort collection dependency graph".to_string(),
+                )
+            })?;
+
+            for collection_id in topo.iter().rev() {
+                let are_all_children_soft_deleted = petgraph::algo::dijkstra(
+                    &collection_dependency_graph,
+                    *collection_id,
+                    None,
+                    |_| 1,
+                )
+                .keys()
+                .all(|child_id| self.soft_deleted_collections_to_gc.contains(child_id));
+
+                if are_all_children_soft_deleted {
+                    ordered_soft_deleted_to_hard_delete_collections.push(*collection_id);
+                } else {
+                    tracing::trace!(
+                        "Skipping hard delete for collection {} because not all children are soft deleted",
+                        collection_id
+                    );
+                }
+            }
+
+            tracing::debug!(
+                "Hard deleting collections {:#?}",
+                ordered_soft_deleted_to_hard_delete_collections
+            );
+
+            for collection_id in ordered_soft_deleted_to_hard_delete_collections {
+                self.sysdb_client
+                    .finish_collection_deletion(
+                        self.tenant
+                            .clone()
+                            .ok_or(GarbageCollectorError::InvariantViolation(
+                                "Expected tenant to be set".to_string(),
+                            ))?,
+                        self.database_name.clone().ok_or(
+                            GarbageCollectorError::InvariantViolation(
+                                "Expected database to be set".to_string(),
+                            ),
+                        )?,
+                        collection_id,
+                    )
+                    .await?;
+            }
+
+            let response = GarbageCollectorResponse {
+                num_files_deleted: self.num_files_deleted,
+                num_versions_deleted: self.num_versions_deleted,
+            };
+
+            self.terminate_with_result(Ok(response), ctx).await;
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -774,18 +903,9 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
             Some(output) => output,
             None => return,
         };
-        tracing::trace!("Received DeleteVersionsAtSysDbOutput: {:#?}", output);
-        self.num_versions_deleted += output.versions_to_delete.versions.len() as u32;
 
-        self.num_pending_tasks -= 1;
-        if self.num_pending_tasks == 0 {
-            let response = GarbageCollectorResponse {
-                num_files_deleted: self.num_files_deleted,
-                num_versions_deleted: self.num_versions_deleted,
-            };
-
-            self.terminate_with_result(Ok(response), ctx).await;
-        }
+        let res = self.handle_delete_versions_output(output, ctx).await;
+        self.ok_or_terminate(res, ctx).await;
     }
 }
 

@@ -113,6 +113,23 @@ impl ChromaError for BatchGetCollectionVersionFilePathsError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum BatchGetCollectionSoftDeleteStatusError {
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] Status),
+    #[error("Could not parse UUID from string {1}: {0}")]
+    Uuid(uuid::Error, String),
+}
+
+impl ChromaError for BatchGetCollectionSoftDeleteStatusError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BatchGetCollectionSoftDeleteStatusError::Grpc(status) => status.code().into(),
+            BatchGetCollectionSoftDeleteStatusError::Uuid(_, _) => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct ResetResponse {}
 
