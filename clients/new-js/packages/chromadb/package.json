@@ -79,7 +79,7 @@
     "chromadb-js-bindings-win32-x64-msvc": "^0.1.3"
   },
   "engines": {
-    "node": ">=14.17.0"
+    "node": ">=20"
   },
   "bin": {
     "chroma": "dist/cli.mjs"

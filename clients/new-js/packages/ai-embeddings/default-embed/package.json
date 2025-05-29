@@ -42,7 +42,7 @@
     "tsup": "^8.3.5"
   },
   "engines": {
-    "node": ">=14.17.0"
+    "node": ">=20"
   },
   "publishConfig": {
     "access": "public"

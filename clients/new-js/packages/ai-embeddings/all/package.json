@@ -48,7 +48,7 @@
     "@chroma-core/voyageai": "workspace:^"
   },
   "engines": {
-    "node": ">=14.17.0"
+    "node": ">=20"
   },
   "publishConfig": {
     "access": "public"

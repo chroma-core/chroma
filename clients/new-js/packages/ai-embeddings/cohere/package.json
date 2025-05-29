@@ -47,7 +47,7 @@
     "cohere-ai": "^7.17.1"
   },
   "engines": {
-    "node": ">=14.17.0"
+    "node": ">=20"
   },
   "publishConfig": {
     "access": "public"

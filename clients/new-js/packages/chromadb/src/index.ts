@@ -3,6 +3,9 @@
  * Provides access to all public APIs for interacting with ChromaDB.
  */
 
+// Apply Deno compatibility patch
+import "./deno";
+
 export { Collection, CollectionAPI } from "./collection";
 export { withChroma } from "./next";
 export * from "./types";
