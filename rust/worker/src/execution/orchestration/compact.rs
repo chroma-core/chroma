@@ -1057,7 +1057,10 @@ mod tests {
 
     use crate::{
         config::RootConfig,
-        execution::{operators::fetch_log::FetchLogOperator, orchestration::get::GetOrchestrator},
+        execution::{
+            operators::fetch_log::FetchLogOperator,
+            orchestration::{filter::FilterOrchestrator, get::GetOrchestrator},
+        },
     };
 
     use super::CompactOrchestrator;
@@ -1155,6 +1158,19 @@ mod tests {
                 }),
             ])),
         };
+        let filter_orchestrator = FilterOrchestrator::new(
+            test_segments.blockfile_provider.clone(),
+            dispatcher_handle.clone(),
+            test_segments.hnsw_provider.clone(),
+            1000,
+            old_cas.clone(),
+            fetch_log.clone(),
+            filter.clone(),
+        );
+        let matching_records = filter_orchestrator
+            .run(system.clone())
+            .await
+            .expect("Filter orchestrator should not fail");
         let limit = Limit {
             skip: 0,
             fetch: None,
@@ -1168,9 +1184,7 @@ mod tests {
             test_segments.blockfile_provider.clone(),
             dispatcher_handle.clone(),
             1000,
-            old_cas.clone(),
-            fetch_log.clone(),
-            filter.clone(),
+            matching_records,
             limit.clone(),
             project.clone(),
         );
@@ -1230,13 +1244,25 @@ mod tests {
             old_cas.vector_segment.file_path
         );
 
-        let get_orchestrator = GetOrchestrator::new(
+        let filter_orchestrator = FilterOrchestrator::new(
             test_segments.blockfile_provider.clone(),
-            dispatcher_handle,
+            dispatcher_handle.clone(),
+            test_segments.hnsw_provider.clone(),
             1000,
             new_cas,
             fetch_log,
             filter,
+        );
+        let matching_records = filter_orchestrator
+            .run(system.clone())
+            .await
+            .expect("Filter orchestrator should not fail");
+
+        let get_orchestrator = GetOrchestrator::new(
+            test_segments.blockfile_provider.clone(),
+            dispatcher_handle,
+            1000,
+            matching_records,
             limit,
             project,
         );
