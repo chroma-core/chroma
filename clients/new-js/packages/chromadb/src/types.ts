@@ -1,13 +1,4 @@
-import {
-  CollectionConfiguration,
-  GetUserIdentityResponse,
-  Include,
-  UpdateCollectionConfiguration as GenUpdateCollectionConfiguration,
-} from "./api";
-import { EmbeddingFunction } from "./embedding-function";
-
-// Re-exporting generated CollectionConfiguration
-export type { CollectionConfiguration };
+import { GetUserIdentityResponse, Include } from "./api";
 
 /**
  * User identity information including tenant and database access.
@@ -102,6 +93,8 @@ type WhereDocumentOperator =
   | "$not_contains"
   | "$matches"
   | "$not_matches"
+  | "$regex"
+  | "$not_regex"
   | LogicalOperator;
 
 /**
@@ -113,6 +106,8 @@ export type WhereDocument =
   | { $not_contains: string }
   | { $matches: string }
   | { $not_matches: string }
+  | { $regex: string }
+  | { $not_regex: string }
   | { $and: WhereDocument[] }
   | { $or: WhereDocument[] };
 
@@ -131,22 +126,6 @@ export enum IncludeEnum {
   /** Include URIs in results */
   uris = "uris",
 }
-
-/**
- * Configuration for creating collection
- */
-export type CreateCollectionConfiguration = Omit<
-  CollectionConfiguration,
-  "embedding_function"
-> & { embeddingFunction?: EmbeddingFunction };
-
-/**
- * Configuration for updating a collection
- */
-export type UpdateCollectionConfiguration = Omit<
-  GenUpdateCollectionConfiguration,
-  "embedding_function"
-> & { embeddingFunction?: EmbeddingFunction };
 
 /**
  * Result class for get operations, containing retrieved records.

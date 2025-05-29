@@ -1,10 +1,11 @@
 import { expect, test, beforeEach, describe } from "@jest/globals";
-import { ChromaClient } from "../src";
-import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 import {
+  ChromaClient,
   CollectionConfiguration,
+  CreateCollectionConfiguration,
   UpdateCollectionConfiguration,
-} from "../src/api";
+} from "../src";
+import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 
 describe("collection operations", () => {
   // connects to the unauthenticated chroma instance started in
@@ -16,7 +17,7 @@ describe("collection operations", () => {
   });
 
   test("it should create a collection with configuration", async () => {
-    const config: CollectionConfiguration = {
+    const config: CreateCollectionConfiguration = {
       hnsw: {
         space: "cosine",
         ef_construction: 100,
@@ -39,7 +40,7 @@ describe("collection operations", () => {
   });
 
   test("it should get a collection with configuration", async () => {
-    const config: CollectionConfiguration = {
+    const config: CreateCollectionConfiguration = {
       hnsw: {
         space: "l2",
         ef_construction: 150,
@@ -67,7 +68,7 @@ describe("collection operations", () => {
   });
 
   test("it should update a collection configuration", async () => {
-    const initialConfig: CollectionConfiguration = {
+    const initialConfig: CreateCollectionConfiguration = {
       hnsw: {
         space: "cosine",
         ef_search: 10,
@@ -110,7 +111,7 @@ describe("collection operations", () => {
 
   test("it should reject invalid configurations", async () => {
     // Test invalid HNSW parameters
-    const invalidHnswConfig: CollectionConfiguration = {
+    const invalidHnswConfig: CreateCollectionConfiguration = {
       hnsw: {
         ef_construction: -1, // Invalid value
         space: "cosine",
@@ -142,7 +143,7 @@ describe("collection operations", () => {
   });
 
   test("it should apply defaults for unspecified hnsw params (space)", async () => {
-    const partialConfig: CollectionConfiguration = {
+    const partialConfig: CreateCollectionConfiguration = {
       hnsw: { space: "cosine" },
     };
     const collection = await client.createCollection({
@@ -156,7 +157,7 @@ describe("collection operations", () => {
   });
 
   test("it should apply defaults for unspecified hnsw params (ef_construction)", async () => {
-    const partialConfig: CollectionConfiguration = {
+    const partialConfig: CreateCollectionConfiguration = {
       hnsw: { ef_construction: 200, space: "l2" }, // space is required
     };
     const collection = await client.createCollection({
@@ -170,7 +171,7 @@ describe("collection operations", () => {
   });
 
   test("it should apply defaults for unspecified hnsw params (max_neighbors)", async () => {
-    const partialConfig: CollectionConfiguration = {
+    const partialConfig: CreateCollectionConfiguration = {
       hnsw: { max_neighbors: 32, space: "l2" }, // space is required
     };
     const collection = await client.createCollection({
@@ -184,7 +185,7 @@ describe("collection operations", () => {
   });
 
   test("it should apply defaults for unspecified hnsw params (ef_search)", async () => {
-    const partialConfig: CollectionConfiguration = {
+    const partialConfig: CreateCollectionConfiguration = {
       hnsw: { ef_search: 50, space: "l2" }, // space is required
     };
     const collection = await client.createCollection({
@@ -198,7 +199,7 @@ describe("collection operations", () => {
   });
 
   test("it should apply defaults for unspecified hnsw params (num_threads)", async () => {
-    const partialConfig: CollectionConfiguration = {
+    const partialConfig: CreateCollectionConfiguration = {
       hnsw: {
         // num_threads: 4,
         space: "l2",

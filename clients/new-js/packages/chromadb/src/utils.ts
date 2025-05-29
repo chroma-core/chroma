@@ -2,9 +2,6 @@ import { AdminClientArgs } from "./admin-client";
 import { ChromaClientArgs } from "./chroma-client";
 import {
   BaseRecordSet,
-  baseRecordSetFields,
-  CollectionConfiguration,
-  CreateCollectionConfiguration,
   IncludeEnum,
   Metadata,
   RecordSet,
@@ -13,13 +10,7 @@ import {
   WhereDocument,
 } from "./types";
 import { Include } from "./api";
-import { a, b } from "@hey-api/openapi-ts/dist/types.d-C5lgdIHG";
 import { ChromaValueError } from "./errors";
-import {
-  EmbeddingFunction,
-  getDefaultEFConfig,
-  serializeEmbeddingFunction,
-} from "./embedding-function";
 
 /** Default tenant name used when none is specified */
 export const DEFAULT_TENANT = "default_tenant";
@@ -443,12 +434,14 @@ export const validateWhereDocument = (whereDocument: WhereDocument) => {
       "$not_contains",
       "$matches",
       "$not_matches",
+      "$regex",
+      "$not_regex",
       "$and",
       "$or",
     ].includes(operator)
   ) {
     throw new ChromaValueError(
-      `Expected 'whereDocument' operator to be one of $contains, $not_contains, $matches, $not_matches, $and, or $or, but got ${operator}`,
+      `Expected 'whereDocument' operator to be one of $contains, $not_contains, $matches, $not_matches, $regex, $not_regex, $and, or $or, but got ${operator}`,
     );
   }
 
@@ -469,7 +462,10 @@ export const validateWhereDocument = (whereDocument: WhereDocument) => {
   }
 
   if (
-    (operand === "$contains" || operand === "$not_contains") &&
+    (operand === "$contains" ||
+      operand === "$not_contains" ||
+      operand === "$regex" ||
+      operand === "$not_regex") &&
     (typeof (operator as any) !== "string" || operator.length === 0)
   ) {
     throw new ChromaValueError(
@@ -531,32 +527,4 @@ export const validateNResults = (nResults: number) => {
   if (nResults <= 0) {
     throw new ChromaValueError("Number of requested results has to positive");
   }
-};
-
-/**
- *
- */
-export const processCreateCollectionConfig = async ({
-  configuration,
-  embeddingFunction,
-}: {
-  configuration?: CreateCollectionConfiguration;
-  embeddingFunction?: EmbeddingFunction;
-}) => {
-  if (configuration?.hnsw && configuration?.spann) {
-    throw new ChromaValueError(
-      "Cannot specify both HNSW and SPANN configurations",
-    );
-  }
-
-  const embeddingFunctionConfiguration =
-    serializeEmbeddingFunction({
-      embeddingFunction,
-      configEmbeddingFunction: configuration?.embeddingFunction,
-    }) || (await getDefaultEFConfig());
-
-  return {
-    ...(configuration || {}),
-    embedding_function: embeddingFunctionConfiguration,
-  } as CollectionConfiguration;
 };

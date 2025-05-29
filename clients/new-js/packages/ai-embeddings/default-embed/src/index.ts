@@ -59,7 +59,7 @@ export class DefaultEmbeddingFunction {
 
     this.modelName = modelName;
     this.revision = revision;
-    this.dtype = dtype || (quantized ? "uint8" : undefined);
+    this.dtype = dtype || (quantized ? "uint8" : "fp32");
     this.quantized = quantized;
     this.progressCallback = progressCallback;
     this.wasm = wasm;

@@ -10,9 +10,8 @@ import {
   RecordSet,
   Where,
   WhereDocument,
-  UpdateCollectionConfiguration,
 } from "./types";
-import { CollectionConfiguration, Include } from "./api";
+import { Include } from "./api";
 import { DefaultService as Api } from "./api";
 import {
   validateRecordSetLengthConsistency,
@@ -26,6 +25,11 @@ import {
 } from "./utils";
 import { createClient } from "@hey-api/client-fetch";
 import { ChromaValueError } from "./errors";
+import {
+  CollectionConfiguration,
+  processUpdateCollectionConfig,
+  UpdateCollectionConfiguration,
+} from "./collection-configuration";
 
 /**
  * Interface for collection operations using collection ID.
@@ -233,6 +237,12 @@ export class CollectionAPIImpl implements CollectionAPI {
 
   public get embeddingFunction(): EmbeddingFunction | undefined {
     return this._embeddingFunction;
+  }
+
+  protected set embeddingFunction(
+    embeddingFunction: EmbeddingFunction | undefined,
+  ) {
+    this._embeddingFunction = embeddingFunction;
   }
 
   protected async path(): Promise<{
@@ -489,11 +499,26 @@ export class CollectionAPIImpl implements CollectionAPI {
     metadata?: CollectionMetadata;
     configuration?: UpdateCollectionConfiguration;
   }): Promise<void> {
+    const { data } = await Api.getCollection({
+      client: this.apiClient,
+      path: await this.path(),
+    });
+
     if (metadata) {
       validateMetadata(metadata);
     }
 
-    if (configuration?.embedding_function) {
+    const { updateConfiguration, updateEmbeddingFunction } = configuration
+      ? await processUpdateCollectionConfig({
+          collectionName: data.name,
+          currentConfiguration: data.configuration_json,
+          newConfiguration: configuration,
+          currentEmbeddingFunction: this.embeddingFunction,
+        })
+      : {};
+
+    if (updateEmbeddingFunction) {
+      this.embeddingFunction = updateEmbeddingFunction;
     }
 
     await Api.updateCollection({
@@ -502,7 +527,7 @@ export class CollectionAPIImpl implements CollectionAPI {
       body: {
         new_name: name,
         new_metadata: metadata,
-        new_configuration: configuration,
+        new_configuration: updateConfiguration,
       },
     });
   }
@@ -688,13 +713,42 @@ export class CollectionImpl extends CollectionAPIImpl implements Collection {
     configuration?: UpdateCollectionConfiguration;
   }): Promise<void> {
     if (name) this.name = name;
-    if (configuration) this.configuration = configuration;
+
     if (metadata) {
       validateMetadata(metadata);
       this.metadata = metadata;
     }
 
-    await super.modify({ name, metadata, configuration });
+    const { updateConfiguration, updateEmbeddingFunction } = configuration
+      ? await processUpdateCollectionConfig({
+          collectionName: this.name,
+          currentConfiguration: this.configuration,
+          newConfiguration: configuration,
+          currentEmbeddingFunction: this.embeddingFunction,
+        })
+      : {};
+
+    if (updateEmbeddingFunction) {
+      this.embeddingFunction = updateEmbeddingFunction;
+    }
+
+    if (updateConfiguration) {
+      this.configuration = {
+        hnsw: { ...this.configuration.hnsw, ...updateConfiguration.hnsw },
+        spann: { ...this.configuration.spann, ...updateConfiguration.spann },
+        embeddingFunction: updateConfiguration.embedding_function,
+      };
+    }
+
+    await Api.updateCollection({
+      client: this.apiClient,
+      path: await this.path(),
+      body: {
+        new_name: name,
+        new_metadata: metadata,
+        new_configuration: updateConfiguration,
+      },
+    });
   }
 
   override async fork({ name }: { name: string }): Promise<Collection> {

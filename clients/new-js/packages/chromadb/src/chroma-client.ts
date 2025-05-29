@@ -3,14 +3,9 @@ import {
   defaultChromaClientArgs as defaultArgs,
   HttpMethod,
   normalizeMethod,
-  processCreateCollectionConfig,
 } from "./utils";
 import { DefaultService as Api } from "./api";
-import {
-  CollectionMetadata,
-  CreateCollectionConfiguration,
-  UserIdentity,
-} from "./types";
+import { CollectionMetadata, UserIdentity } from "./types";
 import {
   Collection,
   CollectionAPI,
@@ -21,6 +16,10 @@ import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
 import { chromaFetch } from "./chroma-fetch";
 import * as process from "node:process";
 import { ChromaUnauthorizedError, ChromaValueError } from "./errors";
+import {
+  CreateCollectionConfiguration,
+  processCreateCollectionConfig,
+} from "./collection-configuration";
 
 /**
  * Configuration options for the ChromaClient.
