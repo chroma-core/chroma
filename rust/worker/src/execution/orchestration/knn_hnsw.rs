@@ -1,13 +1,15 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{
-    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
-    TaskResult,
+    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::operator::{
     Knn, KnnMerge, KnnOutput, KnnProjection, KnnProjectionOutput, RecordDistance,
 };
-use tokio::sync::oneshot::Sender;
+use thiserror::Error;
+use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 
 use crate::execution::operators::{
@@ -20,9 +22,57 @@ use crate::execution::operators::{
     },
 };
 
-use super::knn_filter::{KnnError, KnnFilterOutput};
+use super::filter::FilterOrchestratorOutput;
 
-/// The `KnnOrchestrator` finds the nearest neighbor of a target embedding given the search domain.
+#[derive(Error, Debug)]
+pub enum KnnHnswOrchestratorError {
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
+    #[error("Error sending message through channel: {0}")]
+    Channel(#[from] ChannelError),
+    #[error("Error running Knn Hnsw Operator: {0}")]
+    KnnHnsw(#[from] KnnHnswError),
+    #[error("Error running Knn Log Operator: {0}")]
+    KnnLog(#[from] KnnLogError),
+    #[error("Error running Knn Merge Operator")]
+    KnnMerge(#[from] KnnMergeError),
+    #[error("Error running Knn Projection Operator: {0}")]
+    KnnProjection(#[from] KnnProjectionError),
+    #[error("Panic: {0}")]
+    Panic(#[from] PanicError),
+    #[error("Error receiving final result: {0}")]
+    Result(#[from] RecvError),
+}
+
+impl ChromaError for KnnHnswOrchestratorError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            KnnHnswOrchestratorError::Aborted => ErrorCodes::ResourceExhausted,
+            KnnHnswOrchestratorError::Channel(e) => e.code(),
+            KnnHnswOrchestratorError::KnnHnsw(e) => e.code(),
+            KnnHnswOrchestratorError::KnnLog(e) => e.code(),
+            KnnHnswOrchestratorError::KnnMerge(_) => ErrorCodes::Internal,
+            KnnHnswOrchestratorError::KnnProjection(e) => e.code(),
+            KnnHnswOrchestratorError::Panic(_) => ErrorCodes::Aborted,
+            KnnHnswOrchestratorError::Result(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+impl<E> From<TaskError<E>> for KnnHnswOrchestratorError
+where
+    E: Into<KnnHnswOrchestratorError>,
+{
+    fn from(value: TaskError<E>) -> Self {
+        match value {
+            TaskError::Aborted => KnnHnswOrchestratorError::Aborted,
+            TaskError::Panic(e) => e.into(),
+            TaskError::TaskFailed(e) => e.into(),
+        }
+    }
+}
+
+/// The `KnnHnswOrchestrator` finds the nearest neighbor of a target embedding given the search domain.
 /// When used together with `FilterOrchestrator`, they evaluate a `<collection>.query(...)` query
 /// for the user. We breakdown the evaluation into two parts because a `<collection>.query(...)`
 /// is inherently multiple queries sharing the same filter criteria. Thus we first evaluate
@@ -52,8 +102,8 @@ use super::knn_filter::{KnnError, KnnFilterOutput};
 ///                        │                                                                        │
 /// ┌────────────────────  │  ─────────────────────┐                         ┌────────────────────  │  ─────────────────────┐
 /// │                      ▼                       │                         │                      ▼                       │
-/// │               ┌────────────┐ KnnOrchestrator │                         │               ┌────────────┐ KnnOrchestrator │
-/// │               │            │                 │                         │               │            │                 │
+/// │               ┌────────────┐     KnnHnsw     │                         │               ┌────────────┐     KnnHnsw     │
+/// │               │            │   Orchestrator  │                         │               │            │   Orchestrator  │
 /// │           ┌───┤  on_start  ├────┐            │           ...           │           ┌───┤  on_start  ├────┐            │
 /// │           │   │            │    │            │                         │           │   │            │    │            │
 /// │           │   └────────────┘    │            │                         │           │   └────────────┘    │            │
@@ -107,14 +157,14 @@ use super::knn_filter::{KnnError, KnnFilterOutput};
 ///                                                            ▼
 /// ```
 #[derive(Debug)]
-pub struct KnnOrchestrator {
+pub struct KnnHnswOrchestrator {
     // Orchestrator parameters
     blockfile_provider: BlockfileProvider,
     dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
 
     // Output from KnnFilterOrchestrator
-    knn_filter_output: KnnFilterOutput,
+    filter_output: FilterOrchestratorOutput,
 
     // Knn operator shared between log and segments
     knn: Knn,
@@ -127,20 +177,20 @@ pub struct KnnOrchestrator {
     knn_projection: KnnProjection,
 
     // Result channel
-    result_channel: Option<Sender<Result<KnnProjectionOutput, KnnError>>>,
+    result_channel: Option<Sender<Result<KnnProjectionOutput, KnnHnswOrchestratorError>>>,
 }
 
-impl KnnOrchestrator {
+impl KnnHnswOrchestrator {
     pub fn new(
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
-        knn_filter_output: KnnFilterOutput,
+        filter_output: FilterOrchestratorOutput,
         knn: Knn,
         knn_projection: KnnProjection,
     ) -> Self {
         let fetch = knn.fetch;
-        let batch_distances = if knn_filter_output.hnsw_reader.is_none() {
+        let batch_distances = if filter_output.hnsw_reader.is_none() {
             vec![Vec::new()]
         } else {
             Vec::new()
@@ -149,7 +199,7 @@ impl KnnOrchestrator {
             blockfile_provider,
             dispatcher,
             queue,
-            knn_filter_output,
+            filter_output,
             knn,
             batch_distances,
             merge: KnnMerge { fetch },
@@ -173,9 +223,9 @@ impl KnnOrchestrator {
 }
 
 #[async_trait]
-impl Orchestrator for KnnOrchestrator {
+impl Orchestrator for KnnHnswOrchestrator {
     type Output = KnnProjectionOutput;
-    type Error = KnnError;
+    type Error = KnnHnswOrchestratorError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
         self.dispatcher.clone()
@@ -190,27 +240,23 @@ impl Orchestrator for KnnOrchestrator {
         let knn_log_task = wrap(
             Box::new(self.knn.clone()),
             KnnLogInput {
-                logs: self.knn_filter_output.logs.clone(),
+                logs: self.filter_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
-                log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
-                distance_function: self.knn_filter_output.distance_function.clone(),
+                record_segment: self.filter_output.record_segment.clone(),
+                log_offset_ids: self.filter_output.filter_output.log_offset_ids.clone(),
+                distance_function: self.filter_output.distance_function.clone(),
             },
             ctx.receiver(),
         );
         tasks.push((knn_log_task, Some(Span::current())));
 
-        if let Some(hnsw_reader) = self.knn_filter_output.hnsw_reader.as_ref().cloned() {
+        if let Some(hnsw_reader) = self.filter_output.hnsw_reader.as_ref().cloned() {
             let knn_segment_task = wrap(
                 Box::new(self.knn.clone()),
                 KnnHnswInput {
                     hnsw_reader,
-                    compact_offset_ids: self
-                        .knn_filter_output
-                        .filter_output
-                        .compact_offset_ids
-                        .clone(),
-                    distance_function: self.knn_filter_output.distance_function.clone(),
+                    compact_offset_ids: self.filter_output.filter_output.compact_offset_ids.clone(),
+                    distance_function: self.filter_output.distance_function.clone(),
                 },
                 ctx.receiver(),
             );
@@ -224,11 +270,16 @@ impl Orchestrator for KnnOrchestrator {
         self.queue
     }
 
-    fn set_result_channel(&mut self, sender: Sender<Result<KnnProjectionOutput, KnnError>>) {
+    fn set_result_channel(
+        &mut self,
+        sender: Sender<Result<KnnProjectionOutput, KnnHnswOrchestratorError>>,
+    ) {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<Result<KnnProjectionOutput, KnnError>> {
+    fn take_result_channel(
+        &mut self,
+    ) -> Sender<Result<KnnProjectionOutput, KnnHnswOrchestratorError>> {
         self.result_channel
             .take()
             .expect("The result channel should be set before take")
@@ -236,7 +287,7 @@ impl Orchestrator for KnnOrchestrator {
 }
 
 #[async_trait]
-impl Handler<TaskResult<KnnOutput, KnnLogError>> for KnnOrchestrator {
+impl Handler<TaskResult<KnnOutput, KnnLogError>> for KnnHnswOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -254,7 +305,7 @@ impl Handler<TaskResult<KnnOutput, KnnLogError>> for KnnOrchestrator {
 }
 
 #[async_trait]
-impl Handler<TaskResult<KnnOutput, KnnHnswError>> for KnnOrchestrator {
+impl Handler<TaskResult<KnnOutput, KnnHnswError>> for KnnHnswOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -272,7 +323,7 @@ impl Handler<TaskResult<KnnOutput, KnnHnswError>> for KnnOrchestrator {
 }
 
 #[async_trait]
-impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
+impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnHnswOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -289,9 +340,9 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
         let prefetch_task = wrap(
             Box::new(PrefetchRecordOperator {}),
             PrefetchRecordInput {
-                logs: self.knn_filter_output.logs.clone(),
+                logs: self.filter_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
+                record_segment: self.filter_output.record_segment.clone(),
                 offset_ids: output
                     .distances
                     .iter()
@@ -307,9 +358,9 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
         let projection_task = wrap(
             Box::new(self.knn_projection.clone()),
             KnnProjectionInput {
-                logs: self.knn_filter_output.logs.clone(),
+                logs: self.filter_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
+                record_segment: self.filter_output.record_segment.clone(),
                 record_distances: output.distances,
             },
             ctx.receiver(),
@@ -319,7 +370,7 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
 }
 
 #[async_trait]
-impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for KnnOrchestrator {
+impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for KnnHnswOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -332,7 +383,7 @@ impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for KnnOrche
 }
 
 #[async_trait]
-impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for KnnOrchestrator {
+impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for KnnHnswOrchestrator {
     type Result = ();
 
     async fn handle(

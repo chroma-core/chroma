@@ -2,19 +2,21 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use chroma_distance::{normalize, DistanceFunction};
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::{
     distributed_spann::{SpannSegmentReader, SpannSegmentReaderError},
     spann_provider::SpannProvider,
 };
 use chroma_system::{
-    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
-    TaskResult,
+    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
     operator::{Knn, KnnMerge, KnnOutput, KnnProjection, KnnProjectionOutput, RecordDistance},
     Collection,
 };
-use tokio::sync::oneshot::Sender;
+use thiserror::Error;
+use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 
 use crate::execution::operators::{
@@ -37,10 +39,67 @@ use crate::execution::operators::{
     },
 };
 
-use super::knn_filter::{KnnError, KnnFilterOutput};
+use super::filter::FilterOrchestratorOutput;
+
+#[derive(Error, Debug)]
+pub enum KnnSpannOrchestratorError {
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
+    #[error("Error sending message through channel: {0}")]
+    Channel(#[from] ChannelError),
+    #[error("Error running Knn Log Operator: {0}")]
+    KnnLog(#[from] KnnLogError),
+    #[error("Error running Knn Merge Operator")]
+    KnnMerge(#[from] KnnMergeError),
+    #[error("Error running Knn Projection Operator: {0}")]
+    KnnProjection(#[from] KnnProjectionError),
+    #[error("Panic: {0}")]
+    Panic(#[from] PanicError),
+    #[error("Error receiving final result: {0}")]
+    Result(#[from] RecvError),
+    #[error("Error running Spann Bruteforce Postinglist Operator: {0}")]
+    SpannBfPl(#[from] SpannBfPlError),
+    #[error("Error running Spann Fetch Postinglist Operator: {0}")]
+    SpannFetchPl(#[from] SpannFetchPlError),
+    #[error("Error running Spann Head Search Operator: {0}")]
+    SpannHeadSearch(#[from] SpannCentersSearchError),
+    #[error("Error creating spann segment reader: {0}")]
+    SpannSegmentReaderCreationError(#[from] SpannSegmentReaderError),
+}
+
+impl ChromaError for KnnSpannOrchestratorError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            KnnSpannOrchestratorError::Aborted => ErrorCodes::ResourceExhausted,
+            KnnSpannOrchestratorError::Channel(e) => e.code(),
+            KnnSpannOrchestratorError::KnnLog(e) => e.code(),
+            KnnSpannOrchestratorError::KnnMerge(_) => ErrorCodes::Internal,
+            KnnSpannOrchestratorError::KnnProjection(e) => e.code(),
+            KnnSpannOrchestratorError::Panic(_) => ErrorCodes::Aborted,
+            KnnSpannOrchestratorError::Result(_) => ErrorCodes::Internal,
+            KnnSpannOrchestratorError::SpannBfPl(e) => e.code(),
+            KnnSpannOrchestratorError::SpannFetchPl(e) => e.code(),
+            KnnSpannOrchestratorError::SpannHeadSearch(e) => e.code(),
+            KnnSpannOrchestratorError::SpannSegmentReaderCreationError(e) => e.code(),
+        }
+    }
+}
+
+impl<E> From<TaskError<E>> for KnnSpannOrchestratorError
+where
+    E: Into<KnnSpannOrchestratorError>,
+{
+    fn from(value: TaskError<E>) -> Self {
+        match value {
+            TaskError::Panic(e) => e.into(),
+            TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => KnnSpannOrchestratorError::Aborted,
+        }
+    }
+}
 
 #[derive(Debug)]
-pub struct SpannKnnOrchestrator {
+pub struct KnnSpannOrchestrator {
     // Orchestrator parameters
     spann_provider: SpannProvider,
     dispatcher: ComponentHandle<Dispatcher>,
@@ -48,7 +107,7 @@ pub struct SpannKnnOrchestrator {
     collection: Collection,
 
     // Output from KnnFilterOrchestrator
-    knn_filter_output: KnnFilterOutput,
+    filter_output: FilterOrchestratorOutput,
 
     // Query params.
     k: usize,
@@ -75,34 +134,33 @@ pub struct SpannKnnOrchestrator {
     knn_projection: KnnProjection,
 
     // Result channel
-    result_channel: Option<Sender<Result<KnnProjectionOutput, KnnError>>>,
+    result_channel: Option<Sender<Result<KnnProjectionOutput, KnnSpannOrchestratorError>>>,
     spann_reader: Option<SpannSegmentReader<'static>>,
 }
 
-impl SpannKnnOrchestrator {
+impl KnnSpannOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
         collection: Collection,
-        knn_filter_output: KnnFilterOutput,
+        filter_output: FilterOrchestratorOutput,
         k: usize,
         query_embedding: Vec<f32>,
         knn_projection: KnnProjection,
     ) -> Self {
-        let normalized_query_emb =
-            if knn_filter_output.distance_function == DistanceFunction::Cosine {
-                normalize(&query_embedding)
-            } else {
-                query_embedding.clone()
-            };
+        let normalized_query_emb = if filter_output.distance_function == DistanceFunction::Cosine {
+            normalize(&query_embedding)
+        } else {
+            query_embedding.clone()
+        };
         Self {
             spann_provider,
             dispatcher,
             queue,
             collection,
-            knn_filter_output,
+            filter_output,
             k,
             normalized_query_emb,
             log_knn: Knn {
@@ -140,9 +198,9 @@ impl SpannKnnOrchestrator {
 }
 
 #[async_trait]
-impl Orchestrator for SpannKnnOrchestrator {
+impl Orchestrator for KnnSpannOrchestrator {
     type Output = KnnProjectionOutput;
-    type Error = KnnError;
+    type Error = KnnSpannOrchestratorError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
         self.dispatcher.clone()
@@ -157,21 +215,21 @@ impl Orchestrator for SpannKnnOrchestrator {
         let knn_log_task = wrap(
             Box::new(self.log_knn.clone()),
             KnnLogInput {
-                logs: self.knn_filter_output.logs.clone(),
+                logs: self.filter_output.logs.clone(),
                 blockfile_provider: self.spann_provider.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
-                log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
-                distance_function: self.knn_filter_output.distance_function.clone(),
+                record_segment: self.filter_output.record_segment.clone(),
+                log_offset_ids: self.filter_output.filter_output.log_offset_ids.clone(),
+                distance_function: self.filter_output.distance_function.clone(),
             },
             ctx.receiver(),
         );
         tasks.push((knn_log_task, Some(Span::current())));
         let reader_res = SpannSegmentReader::from_segment(
             &self.collection,
-            &self.knn_filter_output.vector_segment,
+            &self.filter_output.vector_segment,
             &self.spann_provider.blockfile_provider,
             &self.spann_provider.hnsw_provider,
-            self.knn_filter_output.dimension,
+            self.filter_output.dimension,
         )
         .await;
         match reader_res {
@@ -197,7 +255,12 @@ impl Orchestrator for SpannKnnOrchestrator {
                 }
                 _ => {
                     let _: Option<()> = self
-                        .ok_or_terminate(Err(KnnError::SpannSegmentReaderCreationError(e)), ctx)
+                        .ok_or_terminate(
+                            Err(KnnSpannOrchestratorError::SpannSegmentReaderCreationError(
+                                e,
+                            )),
+                            ctx,
+                        )
                         .await;
                 }
             },
@@ -207,26 +270,26 @@ impl Orchestrator for SpannKnnOrchestrator {
         let prefetch_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
             PrefetchSegmentInput::new(
-                self.knn_filter_output.vector_segment.clone(),
+                self.filter_output.vector_segment.clone(),
                 self.spann_provider.blockfile_provider.clone(),
             ),
             ctx.receiver(),
         );
         // Prefetch task is detached from the orchestrator
-        let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.knn_filter_output.vector_segment.id);
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.filter_output.vector_segment.id);
         tasks.push((prefetch_task, Some(prefetch_span)));
 
         // prefetch record segment
         let prefetch_record_segment_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
             PrefetchSegmentInput::new(
-                self.knn_filter_output.record_segment.clone(),
+                self.filter_output.record_segment.clone(),
                 self.spann_provider.blockfile_provider.clone(),
             ),
             ctx.receiver(),
         );
         // Prefetch task is detached from the orchestrator
-        let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.knn_filter_output.record_segment.id);
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.filter_output.record_segment.id);
         tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
 
         tasks
@@ -236,11 +299,16 @@ impl Orchestrator for SpannKnnOrchestrator {
         self.queue
     }
 
-    fn set_result_channel(&mut self, sender: Sender<Result<KnnProjectionOutput, KnnError>>) {
+    fn set_result_channel(
+        &mut self,
+        sender: Sender<Result<KnnProjectionOutput, KnnSpannOrchestratorError>>,
+    ) {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<Result<KnnProjectionOutput, KnnError>> {
+    fn take_result_channel(
+        &mut self,
+    ) -> Sender<Result<KnnProjectionOutput, KnnSpannOrchestratorError>> {
         self.result_channel
             .take()
             .expect("The result channel should be set before take")
@@ -248,20 +316,20 @@ impl Orchestrator for SpannKnnOrchestrator {
 }
 
 #[async_trait]
-impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for SpannKnnOrchestrator {
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for KnnSpannOrchestrator {
     type Result = ();
 
     async fn handle(
         &mut self,
         _: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
-        _: &ComponentContext<SpannKnnOrchestrator>,
+        _: &ComponentContext<KnnSpannOrchestrator>,
     ) {
         // Nothing to do.
     }
 }
 
 #[async_trait]
-impl Handler<TaskResult<KnnOutput, KnnLogError>> for SpannKnnOrchestrator {
+impl Handler<TaskResult<KnnOutput, KnnLogError>> for KnnSpannOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -281,7 +349,7 @@ impl Handler<TaskResult<KnnOutput, KnnLogError>> for SpannKnnOrchestrator {
 
 #[async_trait]
 impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
-    for SpannKnnOrchestrator
+    for KnnSpannOrchestrator
 {
     type Result = ();
 
@@ -321,7 +389,7 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
 }
 
 #[async_trait]
-impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrchestrator {
+impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for KnnSpannOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -343,12 +411,8 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
             SpannBfPlInput {
                 posting_list: output.posting_list,
                 k: self.k,
-                filter: self
-                    .knn_filter_output
-                    .filter_output
-                    .compact_offset_ids
-                    .clone(),
-                distance_function: self.knn_filter_output.distance_function.clone(),
+                filter: self.filter_output.filter_output.compact_offset_ids.clone(),
+                distance_function: self.filter_output.distance_function.clone(),
                 query: self.normalized_query_emb.clone(),
             },
             ctx.receiver(),
@@ -359,7 +423,7 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
 }
 
 #[async_trait]
-impl Handler<TaskResult<SpannBfPlOutput, SpannBfPlError>> for SpannKnnOrchestrator {
+impl Handler<TaskResult<SpannBfPlOutput, SpannBfPlError>> for KnnSpannOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -380,7 +444,7 @@ impl Handler<TaskResult<SpannBfPlOutput, SpannBfPlError>> for SpannKnnOrchestrat
 }
 
 #[async_trait]
-impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for SpannKnnOrchestrator {
+impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnSpannOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -397,9 +461,9 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for SpannKnnOrchestrator
         let prefetch_task = wrap(
             Box::new(PrefetchRecordOperator {}),
             PrefetchRecordInput {
-                logs: self.knn_filter_output.logs.clone(),
+                logs: self.filter_output.logs.clone(),
                 blockfile_provider: self.spann_provider.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
+                record_segment: self.filter_output.record_segment.clone(),
                 offset_ids: output
                     .distances
                     .iter()
@@ -415,9 +479,9 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for SpannKnnOrchestrator
         let projection_task = wrap(
             Box::new(self.knn_projection.clone()),
             KnnProjectionInput {
-                logs: self.knn_filter_output.logs.clone(),
+                logs: self.filter_output.logs.clone(),
                 blockfile_provider: self.spann_provider.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
+                record_segment: self.filter_output.record_segment.clone(),
                 record_distances: output.distances,
             },
             ctx.receiver(),
@@ -427,7 +491,7 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for SpannKnnOrchestrator
 }
 
 #[async_trait]
-impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for SpannKnnOrchestrator {
+impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for KnnSpannOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -440,7 +504,7 @@ impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for SpannKnn
 }
 
 #[async_trait]
-impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for SpannKnnOrchestrator {
+impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for KnnSpannOrchestrator {
     type Result = ();
 
     async fn handle(

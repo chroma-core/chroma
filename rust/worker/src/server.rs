@@ -27,8 +27,8 @@ use crate::{
     execution::{
         operators::fetch_log::FetchLogOperator,
         orchestration::{
-            get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
-            spann_knn::SpannKnnOrchestrator, CountOrchestrator,
+            filter::FilterOrchestrator, get::GetOrchestrator, knn_hnsw::KnnHnswOrchestrator,
+            knn_spann::KnnSpannOrchestrator, CountOrchestrator,
         },
     },
 };
@@ -272,7 +272,7 @@ impl WorkerServer {
         }
 
         let vector_segment_type = collection_and_segments.vector_segment.r#type;
-        let knn_filter_orchestrator = KnnFilterOrchestrator::new(
+        let knn_filter_orchestrator = FilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
             self.hnsw_index_provider.clone(),
@@ -303,7 +303,7 @@ impl WorkerServer {
             let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
                 .into_iter()
                 .map(|knn| {
-                    SpannKnnOrchestrator::new(
+                    KnnSpannOrchestrator::new(
                         spann_provider.clone(),
                         dispatcher.clone(),
                         1000,
@@ -333,7 +333,7 @@ impl WorkerServer {
             let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
                 .into_iter()
                 .map(|knn| {
-                    KnnOrchestrator::new(
+                    KnnHnswOrchestrator::new(
                         self.blockfile_provider.clone(),
                         dispatcher.clone(),
                         // TODO: Make this configurable
