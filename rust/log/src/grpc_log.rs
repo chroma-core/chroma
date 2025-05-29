@@ -5,7 +5,9 @@ use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_memberlist::client_manager::{ClientAssigner, ClientManager, ClientOptions};
+use chroma_memberlist::client_manager::{
+    ClientAssigner, ClientAssignmentError, ClientManager, ClientOptions,
+};
 use chroma_memberlist::config::MemberlistProviderConfig;
 use chroma_memberlist::memberlist_provider::{
     CustomResourceMemberlistProvider, MemberlistProvider,
@@ -35,6 +37,8 @@ pub enum GrpcPullLogsError {
     FailedToScoutLogs(tonic::Status),
     #[error("Failed to convert proto embedding record into EmbeddingRecord")]
     ConversionError(#[from] RecordConversionError),
+    #[error(transparent)]
+    ClientAssignerError(#[from] ClientAssignmentError),
 }
 
 impl ChromaError for GrpcPullLogsError {
@@ -44,6 +48,7 @@ impl ChromaError for GrpcPullLogsError {
             GrpcPullLogsError::FailedToPullLogs(err) => err.code().into(),
             GrpcPullLogsError::FailedToScoutLogs(err) => err.code().into(),
             GrpcPullLogsError::ConversionError(_) => ErrorCodes::Internal,
+            GrpcPullLogsError::ClientAssignerError(e) => e.code(),
         }
     }
 }
@@ -58,6 +63,8 @@ pub enum GrpcPushLogsError {
     FailedToPushLogs(#[from] tonic::Status),
     #[error("Failed to convert records to proto")]
     ConversionError(#[from] RecordConversionError),
+    #[error(transparent)]
+    ClientAssignerError(#[from] ClientAssignmentError),
 }
 
 impl ChromaError for GrpcPushLogsError {
@@ -67,6 +74,7 @@ impl ChromaError for GrpcPushLogsError {
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
             GrpcPushLogsError::Sealed => ErrorCodes::FailedPrecondition,
+            GrpcPushLogsError::ClientAssignerError(e) => e.code(),
         }
     }
 }
@@ -77,6 +85,8 @@ pub enum GrpcForkLogsError {
     Backoff,
     #[error("Failed to push logs: {0}")]
     FailedToForkLogs(#[from] tonic::Status),
+    #[error(transparent)]
+    ClientAssignerError(#[from] ClientAssignmentError),
 }
 
 impl ChromaError for GrpcForkLogsError {
@@ -84,6 +94,7 @@ impl ChromaError for GrpcForkLogsError {
         match self {
             GrpcForkLogsError::Backoff => ErrorCodes::Unavailable,
             GrpcForkLogsError::FailedToForkLogs(_) => ErrorCodes::Internal,
+            GrpcForkLogsError::ClientAssignerError(e) => e.code(),
         }
     }
 }
@@ -108,6 +119,8 @@ impl ChromaError for GrpcGetCollectionsWithNewDataError {
 pub enum GrpcUpdateCollectionLogOffsetError {
     #[error("Failed to update collection log offset")]
     FailedToUpdateCollectionLogOffset(#[from] tonic::Status),
+    #[error(transparent)]
+    ClientAssignerError(#[from] ClientAssignmentError),
 }
 
 impl ChromaError for GrpcUpdateCollectionLogOffsetError {
@@ -116,6 +129,7 @@ impl ChromaError for GrpcUpdateCollectionLogOffsetError {
             GrpcUpdateCollectionLogOffsetError::FailedToUpdateCollectionLogOffset(_) => {
                 ErrorCodes::Internal
             }
+            GrpcUpdateCollectionLogOffsetError::ClientAssignerError(e) => e.code(),
         }
     }
 }
@@ -138,12 +152,15 @@ impl ChromaError for GrpcPurgeDirtyForCollectionError {
 pub enum GrpcSealLogError {
     #[error("Failed to seal collection: {0}")]
     FailedToSeal(#[from] tonic::Status),
+    #[error(transparent)]
+    ClientAssignerError(#[from] ClientAssignmentError),
 }
 
 impl ChromaError for GrpcSealLogError {
     fn code(&self) -> ErrorCodes {
         match self {
             GrpcSealLogError::FailedToSeal(_) => ErrorCodes::Internal,
+            GrpcSealLogError::ClientAssignerError(e) => e.code(),
         }
     }
 }
@@ -245,13 +262,6 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
         memberlist_provider.subscribe(client_manager_handle.receiver());
         let _memberlist_provider_handle = system.start_component(memberlist_provider);
 
-        // let alt_client = if let Some(alt_host) = my_config.alt_host.as_ref() {
-        //     let connection_string = format!("http://{}:{}", alt_host, port);
-        //     tracing::info!("connecting to alt host {connection_string}");
-        //     Some(client_for_conn_str(connection_string)?)
-        // } else {
-        //     None
-        // };
         return Ok(GrpcLog::new(
             my_config.clone(),
             client,
@@ -313,7 +323,10 @@ impl GrpcLog {
         &mut self,
         tenant: &str,
         collection_id: CollectionUuid,
-    ) -> LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>> {
+    ) -> Result<
+        LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+        ClientAssignmentError,
+    > {
         if let Some(client_assigner) = self.alt_client_assigner.as_mut() {
             if self.config.use_alt_for_tenants.iter().any(|t| t == tenant)
                 || self
@@ -326,18 +339,21 @@ impl GrpcLog {
                 )
             {
                 tracing::info!("using alt client for {collection_id}");
+                // Replication factor is always 1 for log service so we grab the first assigned client.
+                // NOTE(hammadb): This err should never be returned, ideally the clients() call
+                // would return a provably non-empty vector, but in lieu of that, or panic'ing
+                // on a impossible state, we return the underlying error here.
                 return client_assigner
-                    .clients(&collection_id.to_string())
-                    .unwrap_or_default()
+                    .clients(&collection_id.to_string())?
                     .drain(..)
                     .next()
-                    // fallback to the standard client if no alt client is available,
-                    // which prevents issues in case the memberlist system is not up to date
-                    .unwrap_or_else(|| self.client.clone());
+                    .ok_or(ClientAssignmentError::NoClientFound(
+                        "Impossible state: no client found for collection".to_string(),
+                    ));
             }
         }
         tracing::info!("using standard client for {collection_id}");
-        self.client.clone()
+        Ok(self.client.clone())
     }
 
     fn client_for_purge(
@@ -362,7 +378,9 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         start_from: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
-        let mut client = self.client_for(tenant, collection_id);
+        let mut client = self
+            .client_for(tenant, collection_id)
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let request = client.scout_logs(chroma_proto::ScoutLogsRequest {
             collection_id: collection_id.0.to_string(),
         });
@@ -391,7 +409,7 @@ impl GrpcLog {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
         };
-        let mut client = self.client_for(tenant, collection_id);
+        let mut client = self.client_for(tenant, collection_id)?;
         let request = client.pull_logs(chroma_proto::PullLogsRequest {
             // NOTE(rescrv):  Use the untyped string representation of the collection ID.
             collection_id: collection_id.0.to_string(),
@@ -445,7 +463,7 @@ impl GrpcLog {
         };
 
         let resp = self
-            .client_for(tenant, collection_id)
+            .client_for(tenant, collection_id)?
             .push_logs(request)
             .await
             .map_err(|err| {
@@ -472,7 +490,7 @@ impl GrpcLog {
         target_collection_id: CollectionUuid,
     ) -> Result<ForkLogsResponse, GrpcForkLogsError> {
         let response = self
-            .client_for(tenant, source_collection_id)
+            .client_for(tenant, source_collection_id)?
             .fork_logs(chroma_proto::ForkLogsRequest {
                 source_collection_id: source_collection_id.to_string(),
                 target_collection_id: target_collection_id.to_string(),
@@ -587,7 +605,7 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), GrpcUpdateCollectionLogOffsetError> {
-        let mut client = self.client_for(tenant, collection_id);
+        let mut client = self.client_for(tenant, collection_id)?;
         let request =
             client.update_collection_log_offset(chroma_proto::UpdateCollectionLogOffsetRequest {
                 // NOTE(rescrv):  Use the untyped string representation of the collection ID.
@@ -627,7 +645,7 @@ impl GrpcLog {
         collection_id: CollectionUuid,
     ) -> Result<(), GrpcSealLogError> {
         let _response = self
-            .client_for(tenant, collection_id)
+            .client_for(tenant, collection_id)?
             .seal_log(chroma_proto::SealLogRequest {
                 collection_id: collection_id.to_string(),
             })
