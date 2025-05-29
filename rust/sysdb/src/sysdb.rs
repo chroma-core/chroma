@@ -20,9 +20,9 @@ use chroma_types::{
 };
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
-    CollectionConversionError, CollectionUuid, CountForksError, FlushCompactionResponse,
-    FlushCompactionResponseConversionError, ForkCollectionError, Segment, SegmentConversionError,
-    SegmentScope, Tenant,
+    CollectionConversionError, CollectionUuid, CountForksError, FinishDatabaseDeletionError,
+    FlushCompactionResponse, FlushCompactionResponseConversionError, ForkCollectionError, Segment,
+    SegmentConversionError, SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -122,6 +122,17 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.delete_database(database_name, tenant).await,
             SysDb::Sqlite(sqlite) => sqlite.delete_database(database_name, tenant).await,
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
+    pub async fn finish_database_deletion(
+        &mut self,
+        cutoff_time: SystemTime,
+    ) -> Result<usize, FinishDatabaseDeletionError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.finish_database_deletion(cutoff_time).await,
+            SysDb::Sqlite(_) => unimplemented!(),
             SysDb::Test(_) => todo!(),
         }
     }
@@ -804,6 +815,22 @@ impl GrpcSysDb {
             }
             Err(err) => Err(DeleteDatabaseError::Internal(err.into())),
         }
+    }
+
+    async fn finish_database_deletion(
+        &mut self,
+        cutoff_time: SystemTime,
+    ) -> Result<usize, FinishDatabaseDeletionError> {
+        let req = chroma_proto::FinishDatabaseDeletionRequest {
+            cutoff_time: Some(cutoff_time.into()),
+        };
+
+        let res = self
+            .client
+            .finish_database_deletion(req)
+            .await
+            .map_err(|e| TonicError(e).boxed())?;
+        Ok(res.into_inner().num_deleted as usize)
     }
 
     async fn get_collections(

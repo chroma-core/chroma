@@ -46,6 +46,14 @@ message DeleteDatabaseRequest {
 
 message DeleteDatabaseResponse {}
 
+message FinishDatabaseDeletionRequest {
+  google.protobuf.Timestamp cutoff_time = 1;
+}
+
+message FinishDatabaseDeletionResponse {
+  uint64 num_deleted = 1;
+}
+
 message CreateTenantRequest {
   string name = 2; // Names are globally unique
 }
@@ -496,6 +504,7 @@ service SysDB {
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
   rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}
   rpc DeleteDatabase(DeleteDatabaseRequest) returns (DeleteDatabaseResponse) {}
+  rpc FinishDatabaseDeletion(FinishDatabaseDeletionRequest) returns (FinishDatabaseDeletionResponse) {}
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}
