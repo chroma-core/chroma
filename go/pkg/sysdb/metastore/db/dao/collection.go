@@ -551,8 +551,9 @@ func (s *collectionDb) LockCollection(collectionID string) (*bool, error) {
 }
 
 func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFileName *string, newLineageFileName string) error {
+	// TODO(@codetheweb): should error if no rows affected
 	return s.db.Model(&dbmodel.Collection{}).
-		Where("id = ? AND (lineage_file_name IS NULL OR lineage_file_name = ?)", collectionID, currentLineageFileName).
+		Where("id = ? AND (lineage_file_name IS NULL OR lineage_file_name = '' OR lineage_file_name = ?)", collectionID, currentLineageFileName).
 		Updates(map[string]interface{}{
 			"lineage_file_name": newLineageFileName,
 		}).Error
