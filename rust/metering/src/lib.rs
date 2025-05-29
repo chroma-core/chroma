@@ -1,9 +1,9 @@
 pub mod errors;
+pub mod types;
 
 use crate::errors::MeteringError;
 use chroma_system::ReceiverForMessage;
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use std::{
     any::Any,
     fmt::Debug,
@@ -11,6 +11,7 @@ use std::{
 };
 use tracing::Span;
 pub use types::*;
+
 /// Trait representing the payload data for a metering event.
 ///
 /// Types implementing this trait can carry arbitrary structured data
@@ -43,23 +44,6 @@ pub trait MeterEventData: Debug + Send + Sync + 'static {
     ) {
     }
     fn set_request_execution_time_ns(&mut self, _setter_fn: &mut dyn FnMut(&mut Option<u128>)) {}
-}
-
-/// Core structure representing a single metering event.
-///
-/// Contains tenant and database identifiers, the related collection ID,
-/// and the payload data implementing `MeterEventData`.
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MeterEvent {
-    /// Identifier for the tenant.
-    pub tenant: String,
-    /// Identifier for the database.
-    pub database: String,
-    /// UUID of the collection to which this event pertains.
-    pub collection_id: String,
-    /// User-defined payload data for this event.
-    #[serde(flatten)]
-    pub data: Box<dyn MeterEventData>,
 }
 
 /// Global, thread-safe receiver for dispatching completed meter events.
@@ -112,12 +96,14 @@ impl MeterEventGuard {
         tenant: String,
         database: String,
         collection_id: String,
+        action: Action,
         data: T,
     ) -> Self {
         let meter_event = MeterEvent {
             tenant,
             database,
             collection_id,
+            action: action,
             data: Box::new(data),
         };
         let meter_event_handle = Arc::new(Mutex::new(meter_event));
@@ -177,9 +163,10 @@ pub fn open<T: MeterEventData>(
     tenant: String,
     database: String,
     collection_id: String,
+    action: Action,
     data: T,
 ) -> MeterEventGuard {
-    MeterEventGuard::open(tenant, database, collection_id, data)
+    MeterEventGuard::open(tenant, database, collection_id, action, data)
 }
 
 /// Apply a mutation to the payload of the most recently opened event, if any.
