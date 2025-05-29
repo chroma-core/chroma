@@ -18,6 +18,10 @@ jobs:
     runs-on: "blacksmith-8vcpu-ubuntu-2204"
     steps:
       - uses: actions/checkout@v4
+      - name: Collect Workflow Telemetry
+        uses: catchpoint/workflow-telemetry-action@v2
+        with:
+          comment_on_pr: false
       - uses: ./.github/actions/python
         with:
           python-version: "3.12"

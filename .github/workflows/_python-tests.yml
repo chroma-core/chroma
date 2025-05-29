@@ -33,6 +33,10 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+      - name: Collect Workflow Telemetry
+        uses: catchpoint/workflow-telemetry-action@v2
+        with:
+          comment_on_pr: false
       - name: Setup Python
         uses: ./.github/actions/python
         with:
@@ -78,6 +82,10 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+    - name: Collect Workflow Telemetry
+      uses: catchpoint/workflow-telemetry-action@v2
+      with:
+        comment_on_pr: false
     - name: Set up Python (${{ matrix.python }})
       uses: ./.github/actions/python
     - name: Setup Rust
@@ -104,6 +112,10 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+      - name: Collect Workflow Telemetry
+        uses: catchpoint/workflow-telemetry-action@v2
+        with:
+          comment_on_pr: false
       - name: Set up Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
@@ -145,6 +157,10 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+      - name: Collect Workflow Telemetry
+        uses: catchpoint/workflow-telemetry-action@v2
+        with:
+          comment_on_pr: false
       - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
@@ -192,6 +208,10 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+      - name: Collect Workflow Telemetry
+        uses: catchpoint/workflow-telemetry-action@v2
+        with:
+          comment_on_pr: false
       - name: Setup Python
         uses: ./.github/actions/python
         with:
@@ -230,6 +250,10 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+    - name: Collect Workflow Telemetry
+      uses: catchpoint/workflow-telemetry-action@v2
+      with:
+        comment_on_pr: false
     - name: Set up Python (${{ matrix.python }})
       uses: ./.github/actions/python
     - name: Setup Rust
