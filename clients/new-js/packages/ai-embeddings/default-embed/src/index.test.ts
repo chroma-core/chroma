@@ -12,19 +12,19 @@ jest.mock("@huggingface/transformers", () => {
       .fill(0)
       .map((_, i) => (i + 100) / 1000),
   ];
-  
+
   // Create the pipeline mock that returns a function
   const pipelineFunction = jest.fn().mockImplementation(() => {
     // When the pipeline result is called with text, it returns this object with tolist
-    return function(texts: string[], options: any) {
+    return function (texts: string[], options: any) {
       return {
-        tolist: () => mockEmbeddings
+        tolist: () => mockEmbeddings,
       };
     };
   });
-  
+
   return {
-    pipeline: pipelineFunction
+    pipeline: pipelineFunction,
   };
 });
 
@@ -37,19 +37,19 @@ describe("DefaultEmbeddingFunction", () => {
 
   it("should initialize with default parameters", () => {
     expect(embedder.name).toBe("default");
-    expect(embedder.getConfig().model).toBe("Xenova/all-MiniLM-L6-v2");
+    expect(embedder.getConfig().model_name).toBe("Xenova/all-MiniLM-L6-v2");
     expect(embedder.getConfig().revision).toBe("main");
     expect(embedder.getConfig().dtype).toBeUndefined();
   });
 
   it("should initialize with custom parameters", () => {
     const customEmbedder = new DefaultEmbeddingFunction({
-      model: "custom-model",
+      modelName: "custom-model",
       revision: "custom-revision",
       dtype: "fp16",
     });
 
-    expect(customEmbedder.getConfig().model).toBe("custom-model");
+    expect(customEmbedder.getConfig().model_name).toBe("custom-model");
     expect(customEmbedder.getConfig().revision).toBe("custom-revision");
     expect(customEmbedder.getConfig().dtype).toBe("fp16");
   });
@@ -88,17 +88,18 @@ describe("DefaultEmbeddingFunction", () => {
 
     const configEmbedder = DefaultEmbeddingFunction.buildFromConfig(config);
 
-    expect(configEmbedder.getConfig().model).toBe("config-model");
+    expect(configEmbedder.getConfig().model_name).toBe("config-model");
     expect(configEmbedder.getConfig().revision).toBe("config-revision");
     expect(configEmbedder.getConfig().dtype).toBe("q8");
   });
 
   it("should validate config updates", () => {
-    const oldConfig = { model: "model-1" };
-    const newConfig = { model: "model-2" };
+    const newConfig = { model_name: "model-2" };
 
     expect(() => {
-      DefaultEmbeddingFunction.validateConfigUpdate(oldConfig, newConfig);
+      new DefaultEmbeddingFunction({
+        modelName: "model-1",
+      }).validateConfigUpdate(newConfig);
     }).toThrow(
       "The DefaultEmbeddingFunction's 'model' cannot be changed after initialization.",
     );

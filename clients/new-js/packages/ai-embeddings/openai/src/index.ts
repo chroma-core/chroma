@@ -1,24 +1,26 @@
-import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
+import {
+  ChromaValueError,
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+  registerEmbeddingFunction,
+} from "chromadb";
 import OpenAI from "openai";
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 
 const NAME = "openai";
 
-type StoredConfig = {
+export interface OpenAIConfig {
   api_key_env_var?: string;
   model_name: string;
   organization_id?: string;
   dimensions?: number;
-};
+}
 
-export interface OpenAIConfig {
+export interface OpenAIArgs {
   apiKeyEnvVar?: string;
   modelName: string;
   organizationId?: string;
   dimensions?: number;
-}
-
-export interface OpenAIArgs extends OpenAIConfig {
   apiKey?: string;
 }
 
@@ -62,7 +64,15 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
     return response.data.map((e) => e.embedding);
   }
 
-  public static buildFromConfig(config: StoredConfig): OpenAIEmbeddingFunction {
+  public defaultSpace(): EmbeddingFunctionSpace {
+    return "cosine";
+  }
+
+  public supportedSpaces(): EmbeddingFunctionSpace[] {
+    return ["cosine", "l2", "ip"];
+  }
+
+  public static buildFromConfig(config: OpenAIConfig): OpenAIEmbeddingFunction {
     return new OpenAIEmbeddingFunction({
       apiKeyEnvVar: config.api_key_env_var,
       modelName: config.model_name,
@@ -71,7 +81,7 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
     });
   }
 
-  getConfig(): StoredConfig {
+  public getConfig(): OpenAIConfig {
     return {
       api_key_env_var: this.apiKeyEnvVar,
       model_name: this.modelName,
@@ -80,7 +90,13 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
     };
   }
 
-  public static validateConfig(config: StoredConfig): void {
+  public validateConfigUpdate(newConfig: Record<string, any>): void {
+    if (this.getConfig().model_name !== newConfig.model_name) {
+      throw new ChromaValueError("Model name cannot be updated");
+    }
+  }
+
+  public static validateConfig(config: OpenAIConfig): void {
     validateConfigSchema(config, NAME);
   }
 }

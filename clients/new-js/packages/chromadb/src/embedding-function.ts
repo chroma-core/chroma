@@ -30,13 +30,9 @@ export interface EmbeddingFunction {
   getConfig?(): Record<string, any>;
   /**
    * Validates that a configuration update is allowed.
-   * @param oldConfig - Previous configuration
    * @param newConfig - New configuration to validate
    */
-  validateConfigUpdate?(
-    oldConfig: Record<string, any>,
-    newConfig: Record<string, any>,
-  ): void;
+  validateConfigUpdate?(newConfig: Record<string, any>): void;
   /**
    * Validates that a configuration object is valid.
    * @param config - Configuration to validate

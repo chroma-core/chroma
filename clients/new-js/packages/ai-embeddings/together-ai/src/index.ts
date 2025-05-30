@@ -1,4 +1,9 @@
-import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
+import {
+  ChromaValueError,
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+  registerEmbeddingFunction,
+} from "chromadb";
 import {
   snakeCase,
   validateConfigSchema,
@@ -7,17 +12,14 @@ import Together from "together-ai";
 
 const NAME = "together-ai";
 
-type StoredConfig = {
+export interface TogetherAIConfig {
   api_key_env_var: string;
   model_name: string;
-};
-
-export interface TogetherAIConfig {
-  modelName: string;
-  apiKeyEnvVar?: string;
 }
 
-export interface TogetherAIArgs extends TogetherAIConfig {
+export interface TogetherAIArgs {
+  modelName: string;
+  apiKeyEnvVar?: string;
   apiKey?: string;
 }
 
@@ -51,8 +53,16 @@ export class TogetherAIEmbeddingFunction implements EmbeddingFunction {
     return response.data.map((e) => e.embedding);
   }
 
+  public defaultSpace(): EmbeddingFunctionSpace {
+    return "cosine";
+  }
+
+  public supportedSpaces(): EmbeddingFunctionSpace[] {
+    return ["cosine", "l2", "ip"];
+  }
+
   public static buildFromConfig(
-    config: StoredConfig,
+    config: TogetherAIConfig,
   ): TogetherAIEmbeddingFunction {
     return new TogetherAIEmbeddingFunction({
       modelName: config.model_name,
@@ -60,14 +70,20 @@ export class TogetherAIEmbeddingFunction implements EmbeddingFunction {
     });
   }
 
-  getConfig(): StoredConfig {
+  public getConfig(): TogetherAIConfig {
     return {
       api_key_env_var: this.apiKeyEnvVar,
       model_name: this.modelName,
     };
   }
 
-  public static validateConfig(config: StoredConfig): void {
+  public validateConfigUpdate(newConfig: Record<string, any>): void {
+    if (this.getConfig().model_name !== newConfig.model_name) {
+      throw new ChromaValueError("Model name cannot be updated");
+    }
+  }
+
+  public static validateConfig(config: TogetherAIConfig): void {
     validateConfigSchema(config, NAME);
   }
 }

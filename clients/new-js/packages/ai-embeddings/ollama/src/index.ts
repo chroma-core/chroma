@@ -2,16 +2,21 @@ import {
   isBrowser,
   validateConfigSchema,
 } from "@chroma-core/ai-embeddings-common";
-import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
+import {
+  ChromaValueError,
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+  registerEmbeddingFunction,
+} from "chromadb";
 import type { Ollama as OllamaNode } from "ollama";
 import type { Ollama as OllamaBrowser } from "ollama/browser";
 
 const NAME = "ollama";
 
-type StoredConfig = {
+export interface OllamaConfig {
   url: string;
   model_name: string;
-};
+}
 
 export class OllamaEmbeddingFunction implements EmbeddingFunction {
   public readonly name = NAME;
@@ -50,21 +55,35 @@ export class OllamaEmbeddingFunction implements EmbeddingFunction {
     return response.embeddings;
   }
 
-  public static buildFromConfig(config: StoredConfig): OllamaEmbeddingFunction {
+  public defaultSpace(): EmbeddingFunctionSpace {
+    return "cosine";
+  }
+
+  public supportedSpaces(): EmbeddingFunctionSpace[] {
+    return ["cosine", "l2", "ip"];
+  }
+
+  public static buildFromConfig(config: OllamaConfig): OllamaEmbeddingFunction {
     return new OllamaEmbeddingFunction({
       model: config.model_name,
       url: config.url,
     });
   }
 
-  getConfig(): StoredConfig {
+  public getConfig(): OllamaConfig {
     return {
       model_name: this.model,
       url: this.url,
     };
   }
 
-  public static validateConfig(config: StoredConfig): void {
+  public validateConfigUpdate(newConfig: Record<string, any>): void {
+    if (this.getConfig().model_name !== newConfig.model_name) {
+      throw new ChromaValueError("Model name cannot be updated");
+    }
+  }
+
+  public static validateConfig(config: OllamaConfig): void {
     validateConfigSchema(config, NAME);
   }
 }

@@ -3,7 +3,7 @@
   "private": true,
   "description": "Monorepo for the Chroma JS client and embedding providers",
   "scripts": {
-    "build": "pnpm --filter \"ai-embeddings/common\" build && pnpm --filter \"default-embed\" build && pnpm --filter \"chromadb\" build && pnpm -r --filter \"./packages/**\" --filter \"!ai-embeddings/common\" --filter \"!default-embed\" --filter \"!chromadb\" build",
+    "build": "pnpm --filter \"ai-embeddings/common\" build && pnpm --filter \"default-embed\" build && pnpm --filter \"chromadb\" build && pnpm -r --filter \"./packages/**\" --filter \"!ai-embeddings/common\" --filter \"!default-embed\" --filter \"!chromadb\" --filter \"!all\" build && pnpm --filter \"all\" build",
     "build:chromadb": "pnpm --filter \"chromadb\" build",
     "test": "pnpm -r --filter \"./packages/**\" test",
     "genapi:chromadb": "pnpm --filter \"chromadb\" genapi"
@@ -19,5 +19,6 @@
   "engines": {
     "node": ">=14.17.0",
     "pnpm": ">=8"
-  }
+  },
+  "version": "0.0.1"
 }

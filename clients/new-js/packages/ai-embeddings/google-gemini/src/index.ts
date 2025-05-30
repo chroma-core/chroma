@@ -1,16 +1,21 @@
-import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
+import {
+  ChromaValueError,
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+  registerEmbeddingFunction,
+} from "chromadb";
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import { GoogleGenAI } from "@google/genai";
 
 const NAME = "google-generative-ai";
 
-type StoredConfig = {
+export interface GoogleGeminiConfig {
   api_key_env_var: string;
   model_name: string;
   task_type?: string;
-};
+}
 
-export interface GoogleGeminiConfig {
+export interface GoogleGeminiArgs {
   apiKey?: string;
   apiKeyEnvVar?: string;
   modelName?: string;
@@ -25,7 +30,7 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
   private readonly modelName: string;
   private readonly taskType: string | undefined;
 
-  constructor(args: Partial<GoogleGeminiConfig> = {}) {
+  constructor(args: Partial<GoogleGeminiArgs> = {}) {
     const {
       apiKeyEnvVar = "GEMINI_API_KEY",
       modelName = "text-embedding-004",
@@ -69,7 +74,7 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
   }
 
   public static buildFromConfig(
-    config: StoredConfig,
+    config: GoogleGeminiConfig,
   ): GoogleGeminiEmbeddingFunction {
     return new GoogleGeminiEmbeddingFunction({
       modelName: config.model_name,
@@ -78,7 +83,15 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
     });
   }
 
-  getConfig(): StoredConfig {
+  public defaultSpace(): EmbeddingFunctionSpace {
+    return "cosine";
+  }
+
+  public supportedSpaces(): EmbeddingFunctionSpace[] {
+    return ["cosine", "l2", "ip"];
+  }
+
+  public getConfig(): GoogleGeminiConfig {
     return {
       api_key_env_var: this.apiKeyEnvVar,
       model_name: this.modelName,
@@ -86,7 +99,13 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
     };
   }
 
-  public static validateConfig(config: StoredConfig): void {
+  public validateConfigUpdate(newConfig: Record<string, any>): void {
+    if (this.getConfig().model_name !== newConfig.model_name) {
+      throw new ChromaValueError("Model name cannot be updated");
+    }
+  }
+
+  public static validateConfig(config: GoogleGeminiConfig): void {
     validateConfigSchema(config, NAME);
   }
 }

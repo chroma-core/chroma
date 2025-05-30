@@ -1,7 +1,6 @@
 import { expect, test, beforeEach, describe } from "@jest/globals";
 import {
   ChromaClient,
-  CollectionConfiguration,
   CreateCollectionConfiguration,
   UpdateCollectionConfiguration,
 } from "../src";

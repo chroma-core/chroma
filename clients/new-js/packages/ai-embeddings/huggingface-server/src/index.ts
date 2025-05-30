@@ -1,13 +1,17 @@
-import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
+import {
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+  registerEmbeddingFunction,
+} from "chromadb";
 import * as process from "node:process";
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 
 const NAME = "huggingface-server";
 
-type StoredConfig = {
+export interface HuggingfaceServerConfig {
   api_key_env_var?: string;
   url: string;
-};
+}
 
 export class HuggingfaceServerEmbeddingFunction implements EmbeddingFunction {
   public readonly name = NAME;
@@ -46,8 +50,16 @@ export class HuggingfaceServerEmbeddingFunction implements EmbeddingFunction {
     return await response.json();
   }
 
+  public defaultSpace(): EmbeddingFunctionSpace {
+    return "cosine";
+  }
+
+  public supportedSpaces(): EmbeddingFunctionSpace[] {
+    return ["cosine", "l2", "ip"];
+  }
+
   public static buildFromConfig(
-    config: StoredConfig,
+    config: HuggingfaceServerConfig,
   ): HuggingfaceServerEmbeddingFunction {
     return new HuggingfaceServerEmbeddingFunction({
       url: config.url,
@@ -55,14 +67,14 @@ export class HuggingfaceServerEmbeddingFunction implements EmbeddingFunction {
     });
   }
 
-  getConfig(): StoredConfig {
+  public getConfig(): HuggingfaceServerConfig {
     return {
       api_key_env_var: this.apiKeyEnvVar,
       url: this.url,
     };
   }
 
-  public static validateConfig(config: StoredConfig): void {
+  public static validateConfig(config: HuggingfaceServerConfig): void {
     validateConfigSchema(config, NAME);
   }
 }

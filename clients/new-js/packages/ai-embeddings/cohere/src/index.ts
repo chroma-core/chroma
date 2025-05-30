@@ -1,4 +1,9 @@
-import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
+import {
+  ChromaValueError,
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+  registerEmbeddingFunction,
+} from "chromadb";
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import process from "node:process";
 import { CohereClient } from "cohere-ai";
@@ -21,26 +26,23 @@ export type CohereEmbedEmbeddingType =
 
 const NAME = "cohere";
 
-export type StoredConfig = {
+export interface CohereConfig {
   model_name: string;
   api_key_env_var: string;
   input_type?: CohereEmbedInputType;
   truncate?: CohereEmbedTruncate;
   embedding_type?: CohereEmbedEmbeddingType;
   image?: boolean;
-};
-
-interface CohereArgs {
-  inputType?: CohereEmbedInputType;
-  truncate?: CohereEmbedTruncate;
-  embeddingType?: CohereEmbedEmbeddingType;
 }
 
-export interface CohereConfig extends CohereArgs {
+export interface CohereArgs {
   apiKey?: string;
   apiKeyEnvVar?: string;
   modelName?: string;
   image?: boolean;
+  inputType?: CohereEmbedInputType;
+  truncate?: CohereEmbedTruncate;
+  embeddingType?: CohereEmbedEmbeddingType;
 }
 
 export class CohereEmbeddingFunction implements EmbeddingFunction {
@@ -54,7 +56,7 @@ export class CohereEmbeddingFunction implements EmbeddingFunction {
   private readonly embeddingType: CohereEmbedEmbeddingType | undefined;
   private readonly image: boolean;
 
-  constructor(args: Partial<CohereConfig> = {}) {
+  constructor(args: Partial<CohereArgs> = {}) {
     const {
       apiKeyEnvVar = "COHERE_API_KEY",
       modelName = "embed-english-v3.0",
@@ -116,7 +118,35 @@ export class CohereEmbeddingFunction implements EmbeddingFunction {
     throw new Error("Failed to generate embeddings");
   }
 
-  public static buildFromConfig(config: StoredConfig): CohereEmbeddingFunction {
+  public defaultSpace(): EmbeddingFunctionSpace {
+    if (this.modelName === "embed-multilingual-v2.0") {
+      return "ip";
+    }
+    return "cosine";
+  }
+
+  public supportedSpaces(): EmbeddingFunctionSpace[] {
+    switch (this.modelName) {
+      case "embed-english-v3.0":
+        return ["cosine", "l2", "ip"];
+      case "embed-english-light-v3.0":
+        return ["cosine", "ip", "l2"];
+      case "embed-english-v2.0":
+        return ["cosine"];
+      case "embed-english-light-v2.0":
+        return ["cosine"];
+      case "embed-multilingual-v3.0":
+        return ["cosine", "l2", "ip"];
+      case "embed-multilingual-light-v3.0":
+        return ["cosine", "l2", "ip"];
+      case "embed-multilingual-v2.0":
+        return ["ip"];
+      default:
+        return ["cosine", "l2", "ip"];
+    }
+  }
+
+  public static buildFromConfig(config: CohereConfig): CohereEmbeddingFunction {
     return new CohereEmbeddingFunction({
       modelName: config.model_name,
       apiKeyEnvVar: config.api_key_env_var,
@@ -127,7 +157,7 @@ export class CohereEmbeddingFunction implements EmbeddingFunction {
     });
   }
 
-  getConfig(): StoredConfig {
+  getConfig(): CohereConfig {
     return {
       model_name: this.modelName,
       api_key_env_var: this.apiKeyEnvVar,
@@ -138,7 +168,13 @@ export class CohereEmbeddingFunction implements EmbeddingFunction {
     };
   }
 
-  public static validateConfig(config: StoredConfig): void {
+  public validateConfigUpdate(newConfig: Record<string, any>): void {
+    if (this.getConfig().model_name !== newConfig.model_name) {
+      throw new ChromaValueError("Model name cannot be updated");
+    }
+  }
+
+  public static validateConfig(config: CohereConfig): void {
     validateConfigSchema(config, NAME);
   }
 }

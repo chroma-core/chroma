@@ -1,6 +1,6 @@
 {
   "name": "@chroma-core/cohere",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "private": false,
   "description": "Cohere embedding provider for Chroma",
   "main": "dist/cjs/cohere.cjs",

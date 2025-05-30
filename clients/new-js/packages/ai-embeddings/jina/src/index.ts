@@ -1,4 +1,9 @@
-import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
+import {
+  ChromaValueError,
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+  registerEmbeddingFunction,
+} from "chromadb";
 import {
   snakeCase,
   validateConfigSchema,
@@ -6,7 +11,7 @@ import {
 
 const NAME = "jina";
 
-type StoredConfig = {
+export interface JinaConfig {
   api_key_env_var: string;
   model_name: string;
   task?: string;
@@ -15,9 +20,9 @@ type StoredConfig = {
   dimensions?: number;
   normalized?: boolean;
   embedding_type?: string;
-};
+}
 
-interface JinaArgs {
+export interface JinaArgs {
   modelName?: string;
   task?: string;
   lateChunking?: boolean;
@@ -25,9 +30,6 @@ interface JinaArgs {
   dimensions?: number;
   normalized?: boolean;
   embeddingType?: string;
-}
-
-export interface JinaConfig extends JinaArgs {
   apiKey?: string;
   apiKeyEnvVar?: string;
 }
@@ -60,7 +62,7 @@ export class JinaEmbeddingFunction implements EmbeddingFunction {
   private readonly embeddingType: string | undefined;
   private readonly normalized: boolean | undefined;
 
-  constructor(args: Partial<JinaConfig> = {}) {
+  constructor(args: Partial<JinaArgs> = {}) {
     const {
       apiKeyEnvVar = "JINA_API_KEY",
       modelName = "jina-clip-v2",
@@ -130,7 +132,15 @@ export class JinaEmbeddingFunction implements EmbeddingFunction {
     }
   }
 
-  public static buildFromConfig(config: StoredConfig): JinaEmbeddingFunction {
+  public defaultSpace(): EmbeddingFunctionSpace {
+    return "cosine";
+  }
+
+  public supportedSpaces(): EmbeddingFunctionSpace[] {
+    return ["cosine", "l2", "ip"];
+  }
+
+  public static buildFromConfig(config: JinaConfig): JinaEmbeddingFunction {
     return new JinaEmbeddingFunction({
       modelName: config.model_name,
       task: config.task,
@@ -143,7 +153,7 @@ export class JinaEmbeddingFunction implements EmbeddingFunction {
     });
   }
 
-  getConfig(): StoredConfig {
+  public getConfig(): JinaConfig {
     return {
       api_key_env_var: this.apiKeyEnvVar,
       model_name: this.modelName,
@@ -156,7 +166,13 @@ export class JinaEmbeddingFunction implements EmbeddingFunction {
     };
   }
 
-  public static validateConfig(config: StoredConfig): void {
+  public validateConfigUpdate(newConfig: Record<string, any>): void {
+    if (this.getConfig().model_name !== newConfig.model_name) {
+      throw new ChromaValueError("Model name cannot be updated");
+    }
+  }
+
+  public static validateConfig(config: JinaConfig): void {
     validateConfigSchema(config, NAME);
   }
 }

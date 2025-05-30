@@ -91,18 +91,4 @@ describe("AdminClient", () => {
       expect(error).toBeInstanceOf(Error);
     }
   });
-
-  test("it should create the admin client connection", async () => {
-    const client = new CloudClient({
-      tenant: "e1080701-ff2b-494d-8a60-0fc95100d51e",
-      database: "chroma-game",
-      apiKey: "ck-HsVpc9HZt3Tt282a3eQ9EyxPCaBEMn3BRuhhwQyrDVip",
-    });
-
-    const collection = await client.getCollection({
-      name: "character-definitions",
-    });
-
-    await collection.add({ ids: ["1000"], embeddings: [[1, 2]] });
-  });
 });

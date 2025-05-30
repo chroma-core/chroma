@@ -1,4 +1,9 @@
-import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
+import {
+  ChromaValueError,
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+  registerEmbeddingFunction,
+} from "chromadb";
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import * as process from "node:process";
 
@@ -6,14 +11,14 @@ const NAME = "cloudflare-worker-ai";
 const BASE_URL = "https://api.cloudflare.com/client/v4/accounts";
 const GATEWAY_BASE_URL = "https://gateway.ai.cloudflare.com/v1";
 
-type StoredConfig = {
+export interface CloudflareWorkerAIConfig {
   account_id: string;
   model_name: string;
   api_key_env_var: string;
   gateway_id?: string;
-};
+}
 
-interface CloudflareWorkerAIConfig {
+export interface CloudflareWorkerAIArgs {
   apiKey?: string;
   accountId: string;
   modelName: string;
@@ -32,7 +37,7 @@ export class CloudflareWorkerAIEmbeddingFunction implements EmbeddingFunction {
   private readonly apiUrl: string;
   private readonly headers: Record<string, any>;
 
-  constructor(args: CloudflareWorkerAIConfig) {
+  constructor(args: CloudflareWorkerAIArgs) {
     const {
       accountId,
       modelName,
@@ -92,8 +97,16 @@ export class CloudflareWorkerAIEmbeddingFunction implements EmbeddingFunction {
     return cloudFlareResult.result.data;
   }
 
+  public defaultSpace(): EmbeddingFunctionSpace {
+    return "cosine";
+  }
+
+  public supportedSpaces(): EmbeddingFunctionSpace[] {
+    return ["cosine", "ip", "l2"];
+  }
+
   public static buildFromConfig(
-    config: StoredConfig,
+    config: CloudflareWorkerAIConfig,
   ): CloudflareWorkerAIEmbeddingFunction {
     return new CloudflareWorkerAIEmbeddingFunction({
       accountId: config.account_id,
@@ -103,7 +116,7 @@ export class CloudflareWorkerAIEmbeddingFunction implements EmbeddingFunction {
     });
   }
 
-  getConfig(): StoredConfig {
+  public getConfig(): CloudflareWorkerAIConfig {
     return {
       account_id: this.accountId,
       model_name: this.modelName,
@@ -112,7 +125,13 @@ export class CloudflareWorkerAIEmbeddingFunction implements EmbeddingFunction {
     };
   }
 
-  public static validateConfig(config: StoredConfig): void {
+  public validateConfigUpdate(newConfig: Record<string, any>): void {
+    if (this.getConfig().model_name !== newConfig.model_name) {
+      throw new ChromaValueError("Model name cannot be updated");
+    }
+  }
+
+  public static validateConfig(config: CloudflareWorkerAIConfig): void {
     validateConfigSchema(config, NAME);
   }
 }

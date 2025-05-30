@@ -117,14 +117,10 @@ export const processUpdateCollectionConfig = async ({
   if (
     embeddingFunction &&
     embeddingFunction.validateConfigUpdate &&
-    embeddingFunction.getConfig &&
     newEmbeddingFunction &&
     newEmbeddingFunction.getConfig
   ) {
-    embeddingFunction.validateConfigUpdate(
-      embeddingFunction.getConfig(),
-      newEmbeddingFunction.getConfig(),
-    );
+    embeddingFunction.validateConfigUpdate(newEmbeddingFunction.getConfig());
   }
 
   return {

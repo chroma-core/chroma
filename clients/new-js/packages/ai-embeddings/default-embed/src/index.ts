@@ -15,7 +15,7 @@ export type DType =
 
 export type Quantization = DType | Record<string, DType>;
 
-interface StoredConfig {
+export interface DefaultEmbeddingFunctionConfig {
   model_name?: string;
   revision?: string;
   dtype?: Quantization;
@@ -23,7 +23,7 @@ interface StoredConfig {
   wasm?: boolean;
 }
 
-export interface DefaultEmbeddingFunctionConfig {
+export interface DefaultEmbeddingFunctionArgs {
   modelName?: string;
   revision?: string;
   dtype?: Quantization;
@@ -43,7 +43,7 @@ export class DefaultEmbeddingFunction {
 
   constructor(
     args: Partial<
-      DefaultEmbeddingFunctionConfig & {
+      DefaultEmbeddingFunctionArgs & {
         progressCallback: ProgressCallback | undefined;
       }
     > = {},
@@ -69,7 +69,7 @@ export class DefaultEmbeddingFunction {
   }
 
   public static buildFromConfig(
-    config: StoredConfig,
+    config: DefaultEmbeddingFunctionConfig,
   ): DefaultEmbeddingFunction {
     return new DefaultEmbeddingFunction(config);
   }
@@ -85,7 +85,15 @@ export class DefaultEmbeddingFunction {
     return output.tolist();
   }
 
-  public getConfig(): StoredConfig {
+  public defaultSpace(): string {
+    return "cosine";
+  }
+
+  public supportedSpaces(): string[] {
+    return ["cosine", "l2", "ip"];
+  }
+
+  public getConfig(): DefaultEmbeddingFunctionConfig {
     return {
       model_name: this.modelName,
       revision: this.revision,
@@ -94,18 +102,15 @@ export class DefaultEmbeddingFunction {
     };
   }
 
-  public static validateConfigUpdate(
-    oldConfig: StoredConfig,
-    newConfig: StoredConfig,
-  ): void {
-    if (oldConfig.model_name !== newConfig.model_name) {
+  public validateConfigUpdate(newConfig: DefaultEmbeddingFunctionConfig): void {
+    if (this.getConfig().model_name !== newConfig.model_name) {
       throw new Error(
         "The DefaultEmbeddingFunction's 'model' cannot be changed after initialization.",
       );
     }
   }
 
-  public static validateConfig(config: StoredConfig): void {
+  public static validateConfig(config: DefaultEmbeddingFunctionConfig): void {
     validateConfigSchema(config, "transformers");
   }
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
-import { CohereEmbeddingFunction, StoredConfig } from "./index";
+import { CohereConfig, CohereEmbeddingFunction } from "./index";
 
 describe("CohereEmbeddingFunction", () => {
   beforeEach(() => {
@@ -83,7 +83,7 @@ describe("CohereEmbeddingFunction", () => {
     it.skip(buildFromConfigTest, () => {});
   } else {
     it(buildFromConfigTest, () => {
-      const config: StoredConfig = {
+      const config: CohereConfig = {
         model_name: "custom-model",
         api_key_env_var: "COHERE_API_KEY",
         input_type: "search_document",

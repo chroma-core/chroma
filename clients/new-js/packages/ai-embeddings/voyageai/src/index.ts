@@ -1,20 +1,22 @@
-import { EmbeddingFunction, registerEmbeddingFunction } from "chromadb";
+import {
+  ChromaValueError,
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+  registerEmbeddingFunction,
+} from "chromadb";
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import { VoyageAIClient } from "voyageai";
 
 const NAME = "voyageai";
 
-type StoredConfig = {
+export interface VoyageAIConfig {
   api_key_env_var: string;
   model_name: string;
-};
-
-export interface VoyageAIConfig {
-  modelName: string;
-  apiKeyEnvVar?: string;
 }
 
-export interface VoyageAIArgs extends VoyageAIConfig {
+export interface VoyageAIArgs {
+  modelName: string;
+  apiKeyEnvVar?: string;
   apiKey?: string;
 }
 
@@ -54,7 +56,7 @@ export class VoyageAIEmbeddingFunction implements EmbeddingFunction {
   }
 
   public static buildFromConfig(
-    config: StoredConfig,
+    config: VoyageAIConfig,
   ): VoyageAIEmbeddingFunction {
     return new VoyageAIEmbeddingFunction({
       modelName: config.model_name,
@@ -62,14 +64,28 @@ export class VoyageAIEmbeddingFunction implements EmbeddingFunction {
     });
   }
 
-  getConfig(): StoredConfig {
+  public defaultSpace(): EmbeddingFunctionSpace {
+    return "cosine";
+  }
+
+  public supportedSpaces(): EmbeddingFunctionSpace[] {
+    return ["cosine", "l2", "ip"];
+  }
+
+  public getConfig(): VoyageAIConfig {
     return {
       api_key_env_var: this.apiKeyEnvVar,
       model_name: this.modelName,
     };
   }
 
-  public static validateConfig(config: StoredConfig): void {
+  public validateConfigUpdate(newConfig: Record<string, any>): void {
+    if (this.getConfig().model_name !== newConfig.model_name) {
+      throw new ChromaValueError("Model name cannot be updated");
+    }
+  }
+
+  public static validateConfig(config: VoyageAIConfig): void {
     validateConfigSchema(config, NAME);
   }
 }

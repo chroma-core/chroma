@@ -1,21 +1,21 @@
 {
-  "name": "@chroma-core/google-gemini",
+  "name": "@chroma-core/mistral",
   "version": "0.1.7",
   "private": false,
-  "description": "Google Gemini embedding provider for Chroma",
-  "main": "dist/cjs/google-gemini.cjs",
-  "types": "dist/google-gemini.d.ts",
-  "module": "dist/google-gemini.legacy-esm.js",
+  "description": "Voyage AI embedding provider for Chroma",
+  "main": "dist/cjs/mistral.cjs",
+  "types": "dist/mistral.d.ts",
+  "module": "dist/mistral.legacy-esm.js",
   "type": "module",
   "exports": {
     ".": {
       "import": {
-        "types": "./dist/google-gemini.d.ts",
-        "default": "./dist/google-gemini.mjs"
+        "types": "./dist/mistral.d.ts",
+        "default": "./dist/mistral.mjs"
       },
       "require": {
-        "types": "./dist/cjs/google-gemini.d.cts",
-        "default": "./dist/cjs/google-gemini.cjs"
+        "types": "./dist/cjs/mistral.d.cts",
+        "default": "./dist/cjs/mistral.cjs"
       }
     }
   },
@@ -43,8 +43,8 @@
     "chromadb": "workspace:^"
   },
   "dependencies": {
-    "@chroma-core/ai-embeddings-common": "workspace:^0.1.0",
-    "@google/genai": "^0.14.1"
+    "@chroma-core/ai-embeddings-common": "workspace:^",
+    "@mistralai/mistralai": "^1.7.1"
   },
   "engines": {
     "node": ">=20"
