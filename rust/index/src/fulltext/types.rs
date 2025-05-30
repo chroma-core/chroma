@@ -1072,7 +1072,7 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        // Update document 3
+        // Update document document 1 with same content, update document 3 with new content
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
                 BlockfileWriterOptions::new()
@@ -1084,11 +1084,18 @@ mod tests {
         let pl_blockfile_id = pl_blockfile_writer.id();
         let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
         index_writer
-            .handle_batch([DocumentMutation::Update {
-                offset_id: 3,
-                old_document: "world",
-                new_document: "hello",
-            }])
+            .handle_batch([
+                DocumentMutation::Update {
+                    offset_id: 1,
+                    old_document: "hello world",
+                    new_document: "hello world",
+                },
+                DocumentMutation::Update {
+                    offset_id: 3,
+                    old_document: "world",
+                    new_document: "hello",
+                },
+            ])
             .unwrap();
 
         index_writer.write_to_blockfiles().await.unwrap();
@@ -1106,6 +1113,9 @@ mod tests {
         assert_eq!(res, RoaringBitmap::from([1, 2, 3]));
 
         let res = index_reader.search("world").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1]));
+
+        let res = index_reader.search("hello world").await.unwrap();
         assert_eq!(res, RoaringBitmap::from([1]));
     }
 
