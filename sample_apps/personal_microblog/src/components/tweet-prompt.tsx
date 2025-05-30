@@ -1,10 +1,12 @@
+"use client";
+
 import { useRef, useState, useEffect, forwardRef } from "react";
 import { motion } from "framer-motion";
 import styles from "./tweet-prompt.module.css";
 import React from "react";
 
-const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: string, setInput: (input: string) => void, onKeyDown: (event: React.KeyboardEvent<HTMLSpanElement>) => void }>(
-  ({ input, setInput, onKeyDown }, ref) => {
+const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: string, setInput: (input: string) => void, onKeyDown: (event: React.KeyboardEvent<HTMLSpanElement>) => void, placeholder?: string }>(
+  ({ input, setInput, onKeyDown, placeholder }, ref) => {
     const highlightRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -44,6 +46,7 @@ const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: str
           className="relative w-full min-h-[2.5em] resize-none bg-transparent text-transparent caret-black z-20 font-inherit p-2 outline-none overflow-hidden"
           spellCheck={true}
           autoFocus={true}
+          placeholder={placeholder ?? "What's happening?"}
           rows={1}
           onKeyDown={onKeyDown}
         />
@@ -54,6 +57,7 @@ const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: str
 
 interface TweetPromptProps {
   onSubmit: (input: string) => void;
+  placeholder?: string;
 }
 
 export default function TweetPrompt(props: TweetPromptProps) {
@@ -65,21 +69,33 @@ export default function TweetPrompt(props: TweetPromptProps) {
     setGlow(input.match(/(^|\s|&nbsp;)@assistant($|\s|&nbsp;)/) != null);
   }, [input]);
 
+  function handleSubmit() {
+    // Do nothing if input is empty
+    if (input.trim() === "") {
+      return;
+    }
+    const userInput = input;
+    setInput("");
+    try {
+      props.onSubmit(userInput);
+    } catch (error) {
+      setInput(userInput);
+    }
+  }
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLSpanElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      // Do nothing if input is empty
-      if (input.trim() === "") {
-        return;
-      }
-      props.onSubmit(input);
-      setInput("");
+      handleSubmit();
     }
   }
   const outlineVariants = {
-    outlineWidth: glow ? 2 : 0,
-    boxShadow: glow ? "0 0 0 6px #ffb4b4" : "none",
-    y: glow ? -4 : 0, // This gives the input a little bounce
+    backgroundSize: glow ? "200%" : 0,
+    y: glow ? -2 : 0,
+  };
+
+  const visibilityVariants = {
+    opacity: input.length > 0 ? 1 : 0,
   };
 
   function handleContainerClick() {
@@ -90,18 +106,18 @@ export default function TweetPrompt(props: TweetPromptProps) {
     <motion.div
       animate={outlineVariants}
       transition={{
-        duration: 0.2,
-        y: {
-          type: "spring",
-          stiffness: 300,
-          damping: 15,
-        },
+        duration: 0.3,
       }}
-      className={`flex flex-col gap-2 relative items-end w-full bg-zinc-100 rounded-md px-2 py-1.5 w-full outline-none text-zinc-800 cursor-text`}
+      className={`cursor-text ${glow ? styles.shadow : ""}`}
       onClick={handleContainerClick}
     >
-      <InputWithSyntaxHighlighting ref={textareaRef} input={input} setInput={setInput} onKeyDown={handleKeyDown} />
-      <div className="px-2 py-1 text-xs text-zinc-500">{input.length}</div>
+      <div className="flex flex-col gap-2 relative items-end w-full bg-zinc-100 px-2 py-1.5 w-full outline-none text-zinc-800">
+        <InputWithSyntaxHighlighting ref={textareaRef} input={input} setInput={setInput} onKeyDown={handleKeyDown} placeholder={props.placeholder} />
+        <div className="flex flex-row gap-1">
+          <motion.div className="px-2 py-1 text-xs text-zinc-500" animate={visibilityVariants}>{input.length}</motion.div>
+          <button className={`px-2 py-1 text-xs text-zinc-500 ${input.length > 0 ? "text-zinc-800" : "cursor-not-allowed"}`} onClick={handleSubmit}>Send</button>
+        </div>
+      </div>
     </motion.div>
   );
 }

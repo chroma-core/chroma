@@ -13,6 +13,10 @@ export default {
         foreground: "var(--foreground)",
       },
     },
+    fontFamily: {
+      display: ["var(--font-libre-baskerville)", "serif"],
+      body: ["system-ui", "-apple-system", "system-ui", "Segoe UI", "Roboto", "sans-serif"],
+    },
   },
   plugins: [],
 } satisfies Config;

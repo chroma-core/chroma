@@ -1,7 +1,45 @@
-.divInput:empty::before {
-    color: gray;
-    content: "What's happening?";
-    pointer-events: none;
-    display: block;
-    /* For Firefox */
+
+
+.shadow {
+    --gradient-shadow: linear-gradient(
+		45deg,
+		#FFFFFF,
+		#FFFFFF,
+		#0C51D0,
+        #0C51D0,
+        #FFFFFF,
+        #DBE9FE,
+        #0C51D0
+	);
+}
+
+.shadow:before,
+.shadow:after {
+    --border-width: 1.5px;
+	content: "";
+	position: absolute;
+	top: calc(-1 * var(--border-width));
+	left: calc(-1 * var(--border-width));
+	background: var(--gradient-shadow);
+	background-size: 200%;
+	width: calc(100% + var(--border-width));
+	height: calc(100% + var(--border-width));
+	z-index: -1;
+	animation: animate 20s linear infinite;
+}
+
+.shadow:after {
+	filter: blur(2px);
+}
+
+@keyframes animate {
+	0% {
+		background-position: 0 0;
+	}
+	50% {
+		background-position: 300% 0;
+	}
+	100% {
+		background-position: 0 0;
+	}
 }

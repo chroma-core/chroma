@@ -1,13 +1,14 @@
 "use server";
 
-import { PostModel, PostStatus, Role } from "@/types";
+import { TweetModel, TweetStatus } from "@/types";
 import { ChromaClient } from "chromadb";
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 import OpenAI from "openai";
 import {
   addPostModelToChromaCollection,
-  chromaResultsToPostModels,
-  makeTweetEntry,
+  chromaGetResultsToPostModels,
+  chromaQueryResultsToPostModels,
+  unixTimestampNow,
 } from "./util";
 
 const CHROMA_HOST = process.env.CHROMA_HOST;
@@ -29,7 +30,7 @@ const client = new ChromaClient({
 });
 
 const collection = await client.getOrCreateCollection({
-  name: "test-collection",
+  name: "personal-blog-tweets",
   embeddingFunction: new OpenAIEmbeddingFunction({
     apiKey: OPENAI_API_KEY ?? "",
     modelName: "text-embedding-3-small",
@@ -38,73 +39,79 @@ const collection = await client.getOrCreateCollection({
 
 const openAIClient = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-export async function getPosts(): Promise<PostModel[]> {
+export async function getPosts(): Promise<TweetModel[]> {
   var posts = await collection.get({
     where: { role: "user" },
     include: ["documents", "metadatas"],
   });
-  return chromaResultsToPostModels(posts).reverse();
+  return chromaGetResultsToPostModels(posts).reverse();
 }
 
-const idToPost: { [id: string]: PostModel } = {};
+const idToPost: { [id: string]: TweetModel } = {};
 var assistantPosts = await collection.get({
   where: { role: "assistant" },
   include: ["documents", "metadatas"],
 });
-var assistantPostModels = chromaResultsToPostModels(assistantPosts);
+var assistantPostModels = chromaGetResultsToPostModels(assistantPosts);
 assistantPostModels.forEach((post) => {
   idToPost[post.id] = post;
 });
 
-export async function getPostById(id: string): Promise<PostModel | null> {
-  /**
-   * This function will poll for the post to finish processing.
-   */
-  const MAX_WAIT_MS = 10000; // e.g. wait max 10s
-  const POLL_INTERVAL_MS = 200;
+export async function getPostById(id: string): Promise<TweetModel | null> {
+  const chromaResult = await collection.get({
+    ids: [id],
+    include: ["documents", "metadatas"],
+  });
 
-  const start = Date.now();
-
-  var post = idToPost[id];
-  while (Date.now() - start < MAX_WAIT_MS) {
-    post = idToPost[id];
-    if (!post) return null;
-
-    if (post.status !== "processing") {
-      return post;
-    }
-
-    await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS));
+  if (chromaResult.documents.length === 1) {
+    return chromaGetResultsToPostModels(chromaResult)[0];
+  } else {
+    return null;
   }
-
-  post.status = "error";
-  return post;
 }
 
-export async function publishNewPost(newPostBody: string): Promise<PostModel> {
-  const newPost: PostModel = {
+export async function getPostReplies(postId: string): Promise<TweetModel[]> {
+  const replies = await collection.get({
+    where: { threadParentId: postId },
+    include: ["documents", "metadatas"],
+  });
+  return chromaGetResultsToPostModels(replies);
+}
+
+export async function semanticSearch(query: string): Promise<TweetModel[]> {
+  const context = await collection.query({
+    queryTexts: [query],
+    nResults: 5,
+  });
+  return chromaQueryResultsToPostModels(context);
+}
+
+export async function publishNewUserPost(newPostBody: string, threadParentId?: string): Promise<TweetModel> {
+  const newPost: TweetModel = {
     id: crypto.randomUUID(),
+    threadParentId: threadParentId,
     role: "user",
     body: newPostBody,
-    date: new Date().toISOString(),
+    date: unixTimestampNow(),
     status: "done",
   };
   if (newPost.body.includes("@assistant")) {
-    const assistanceResponseId = getAssistantReponse(newPostBody);
-    newPost.replyId = assistanceResponseId;
+    const assistanceResponseId = getAssistantReponse(newPostBody, newPost.id);
+    newPost.aiReplyId = assistanceResponseId;
   }
   addPostModelToChromaCollection(newPost, collection).catch(console.error);
   return newPost;
 }
 
-function getAssistantReponse(userInput: string): string {
+function getAssistantReponse(userInput: string, parentThreadId: string): string {
   const id = crypto.randomUUID();
-  const assistantPost = {
+  const assistantPost: TweetModel = {
     id,
-    role: "assistant" as Role,
+    threadParentId: parentThreadId,
+    role: "assistant",
     body: "",
-    date: new Date().toISOString(),
-    status: "processing" as PostStatus,
+    date: unixTimestampNow(),
+    status: "processing",
   };
   addPostModelToChromaCollection(assistantPost, collection).catch(
     console.error
@@ -114,7 +121,7 @@ function getAssistantReponse(userInput: string): string {
   return id;
 }
 
-async function processAssistantResponse(userInput: string, post: PostModel) {
+async function processAssistantResponse(userInput: string, post: TweetModel) {
   const context = await collection.query({
     queryTexts: [userInput],
     nResults: 5,
@@ -136,6 +143,7 @@ async function processAssistantResponse(userInput: string, post: PostModel) {
   const response = await openAIClient.responses.create({
     model: "gpt-4.1",
     input: prompt,
+    max_output_tokens: 240,
   });
   post.body = response.output_text;
   if (response.error) {

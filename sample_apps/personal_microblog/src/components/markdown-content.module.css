@@ -1,0 +1,52 @@
+.markdown {
+  font-family: var(--font-geist-mono);
+}
+
+.markdown p {
+  text-justify: kashida;
+}
+
+.markdown a {
+  /* Inspiration taken from ink and switch */
+  background: url(/ul.svg) no-repeat bottom / 100% .5em;
+  padding-bottom: .1em;
+  -webkit-tap-highlight-color: hsla(1, 76%, 51%, .4);
+}
+
+.markdown h1 {
+  margin-bottom: 0.25em;
+  color: var(--accent);
+}
+
+.markdown h1::before {
+  content: "# ";
+}
+
+.markdown h2 {
+  margin-bottom: 0.25em;
+  color: var(--accent);
+}
+
+.markdown h2::before {
+  content: "## ";
+}
+
+.markdown hr {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  width: 100%;
+}
+
+.markdown code {
+  background-color: #f6f8fa;
+  padding: 0.2em 0.4em;
+  border-radius: 6px;
+}
+
+.markdown ul {
+  list-style-type: disc;
+  padding-left: 1.2em;
+  padding-top: 0.5em;
+  padding-bottom: 0.5em;
+  font-size: 0.9em;
+}
