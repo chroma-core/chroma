@@ -1120,6 +1120,86 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_update_document_noop() {
+        let tmp_dir = tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .await
+            .unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+
+        // Create empty index
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer.clone());
+
+        index_writer.handle_batch([]).unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
+
+        // Add document to index
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new()
+                    .ordered_mutations()
+                    .fork(pl_blockfile_id),
+            )
+            .await
+            .unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer.clone());
+        index_writer
+            .handle_batch([DocumentMutation::Create {
+                offset_id: 1,
+                new_document: "hello world",
+            }])
+            .unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
+
+        // Update document with same content, should be a noop
+        let pl_blockfile_writer = provider
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new()
+                    .ordered_mutations()
+                    .fork(pl_blockfile_id),
+            )
+            .await
+            .unwrap();
+        let pl_blockfile_id = pl_blockfile_writer.id();
+        let mut index_writer = FullTextIndexWriter::new(pl_blockfile_writer, tokenizer);
+        index_writer
+            .handle_batch([DocumentMutation::Update {
+                offset_id: 1,
+                old_document: "hello world",
+                new_document: "hello world",
+            }])
+            .unwrap();
+
+        index_writer.write_to_blockfiles().await.unwrap();
+        let flusher = index_writer.commit().await.unwrap();
+        flusher.flush().await.unwrap();
+
+        let pl_blockfile_reader = provider
+            .read::<u32, &[u32]>(&pl_blockfile_id)
+            .await
+            .unwrap();
+        let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
+        let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
+
+        let res = index_reader.search("hello world").await.unwrap();
+        assert_eq!(res, RoaringBitmap::from([1]));
+    }
+
+    #[tokio::test]
     async fn test_delete_document() {
         let tmp_dir = tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
