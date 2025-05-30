@@ -106,6 +106,11 @@ impl FullTextIndexWriter {
                     old_document,
                     new_document,
                 } => {
+                    if old_document == new_document {
+                        // Don't need to do anything if document is identical
+                        continue;
+                    }
+
                     // Remove old version
                     let mut trigrams_to_delete = HashSet::new(); // (need to filter out duplicates, each trigram may appear multiple times in a document)
                     self.tokenizer
