@@ -21,7 +21,10 @@ use crate::operators::mark_versions_at_sysdb::{
     MarkVersionsAtSysDbError, MarkVersionsAtSysDbInput, MarkVersionsAtSysDbOperator,
     MarkVersionsAtSysDbOutput,
 };
-use crate::types::{version_graph_to_collection_dependency_graph, CleanupMode, VersionGraph};
+use crate::types::{
+    version_graph_to_collection_dependency_graph, CleanupMode, GarbageCollectorResponse,
+    VersionGraph,
+};
 use async_trait::async_trait;
 use chroma_blockstore::RootManager;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -70,12 +73,6 @@ pub struct GarbageCollectorOrchestrator {
 
     num_files_deleted: u32,
     num_versions_deleted: u32,
-}
-
-#[derive(Debug)]
-pub struct GarbageCollectorResponse {
-    pub num_versions_deleted: u32,
-    pub num_files_deleted: u32,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -279,6 +276,8 @@ impl GarbageCollectorOrchestrator {
             let response = GarbageCollectorResponse {
                 num_versions_deleted: 0,
                 num_files_deleted: 0,
+                collection_id: self.collection_id,
+                ..Default::default()
             };
             self.terminate_with_result(Ok(response), ctx).await;
             return Ok(());
@@ -609,6 +608,8 @@ impl GarbageCollectorOrchestrator {
             let response = GarbageCollectorResponse {
                 num_versions_deleted: 0,
                 num_files_deleted: 0,
+                collection_id: self.collection_id,
+                ..Default::default()
             };
             self.terminate_with_result(Ok(response), ctx).await;
             return Ok(());
@@ -655,6 +656,8 @@ impl GarbageCollectorOrchestrator {
             let response = GarbageCollectorResponse {
                 num_versions_deleted: 0,
                 num_files_deleted: 0,
+                collection_id: self.collection_id,
+                ..Default::default()
             };
             self.terminate_with_result(Ok(response), ctx).await;
             return Ok(());
@@ -781,6 +784,8 @@ impl GarbageCollectorOrchestrator {
             let response = GarbageCollectorResponse {
                 num_files_deleted: self.num_files_deleted,
                 num_versions_deleted: self.num_versions_deleted,
+                collection_id: self.collection_id,
+                ..Default::default()
             };
 
             self.terminate_with_result(Ok(response), ctx).await;
