@@ -140,21 +140,20 @@ impl GarbageCollector {
             .as_ref()
             .ok_or(GarbageCollectCollectionError::Uninitialized)?;
 
-        let use_v1_orchestrator = match cleanup_mode {
-            CleanupMode::DryRun | CleanupMode::Rename | CleanupMode::Delete => true,
-            CleanupMode::DryRunV2 | CleanupMode::DeleteV2 => false,
-        };
-
-        if use_v1_orchestrator {
+        if cleanup_mode.is_v2() {
             let orchestrator =
-                crate::garbage_collector_orchestrator::GarbageCollectorOrchestrator::new(
+                crate::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator::new(
                     collection.id,
                     collection.version_file_path,
+                    collection.lineage_file_path,
                     absolute_cutoff_time,
                     self.sysdb_client.clone(),
                     dispatcher.clone(),
+                    system.clone(),
                     self.storage.clone(),
+                    self.root_manager.clone(),
                     cleanup_mode,
+                    2,
                 );
 
             let started_at = SystemTime::now();
@@ -178,23 +177,19 @@ impl GarbageCollector {
                     format!("{:?}", cleanup_mode),
                 )],
             );
+
             return Ok(result);
         }
 
-        let orchestrator =
-            crate::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator::new(
-                collection.id,
-                collection.version_file_path,
-                collection.lineage_file_path,
-                absolute_cutoff_time,
-                self.sysdb_client.clone(),
-                dispatcher.clone(),
-                system.clone(),
-                self.storage.clone(),
-                self.root_manager.clone(),
-                cleanup_mode,
-                2,
-            );
+        let orchestrator = crate::garbage_collector_orchestrator::GarbageCollectorOrchestrator::new(
+            collection.id,
+            collection.version_file_path,
+            absolute_cutoff_time,
+            self.sysdb_client.clone(),
+            dispatcher.clone(),
+            self.storage.clone(),
+            cleanup_mode,
+        );
 
         let started_at = SystemTime::now();
         let result = orchestrator.run(system.clone()).await?;
@@ -217,7 +212,6 @@ impl GarbageCollector {
                 format!("{:?}", cleanup_mode),
             )],
         );
-
         Ok(result)
     }
 }
@@ -360,9 +354,18 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 continue;
             }
 
-            if collection.lineage_file_path.is_some() {
+            let cleanup_mode = if let Some(tenant_mode_overrides) = &self.tenant_mode_overrides {
+                tenant_mode_overrides
+                    .get(&collection.tenant)
+                    .cloned()
+                    .unwrap_or(self.default_cleanup_mode)
+            } else {
+                self.default_cleanup_mode
+            };
+
+            if collection.lineage_file_path.is_some() && !cleanup_mode.is_v2() {
                 tracing::debug!(
-                    "Skipping garbage collection for root of fork tree: {}",
+                    "Skipping garbage collection for root of fork tree because GC v1 cannot handle fork trees: {}",
                     collection.id
                 );
                 num_skipped_jobs += 1;
@@ -375,17 +378,6 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 collection.tenant,
                 collection.version_file_path
             );
-
-            let cleanup_mode = if let Some(tenant_mode_overrides) = &self.tenant_mode_overrides {
-                tenant_mode_overrides
-                    .get(&collection.tenant)
-                    .cloned()
-                    .unwrap_or(self.default_cleanup_mode)
-            } else {
-                self.default_cleanup_mode
-            };
-
-            tracing::info!("Creating gc orchestrator for collection: {}", collection.id);
 
             let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job", collection_id = ?collection.id, tenant_id = %collection.tenant, cleanup_mode = ?cleanup_mode);
             instrumented_span.follows_from(Span::current());
@@ -1010,6 +1002,26 @@ mod tests {
         let (collection_in_dry_run_mode, _) = collection_in_dry_run_mode_handle.await.unwrap();
         let (collection_in_delete_mode, database_name_in_delete_mode) =
             collection_in_delete_mode_handle.await.unwrap();
+
+        // Fork collection in delete mode to give it a lineage file (only GC v2 can handle fork trees)
+        {
+            let source_collection = sysdb
+                .get_collections(Some(collection_in_delete_mode), None, None, None, None, 0)
+                .await
+                .unwrap();
+            let source_collection = source_collection.first().unwrap();
+
+            sysdb
+                .fork_collection(
+                    collection_in_delete_mode,
+                    source_collection.total_records_post_compaction,
+                    source_collection.total_records_post_compaction,
+                    CollectionUuid::new(),
+                    "test-fork".to_string(),
+                )
+                .await
+                .unwrap();
+        }
 
         // Wait 1 second for cutoff time
         tokio::time::sleep(Duration::from_secs(1)).await;

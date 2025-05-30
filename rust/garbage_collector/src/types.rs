@@ -19,6 +19,12 @@ pub enum CleanupMode {
     DeleteV2,
 }
 
+impl CleanupMode {
+    pub fn is_v2(&self) -> bool {
+        matches!(self, CleanupMode::DryRunV2 | CleanupMode::DeleteV2)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum VersionStatus {
     #[allow(dead_code)]
