@@ -61,6 +61,9 @@ from chromadb.utils.embedding_functions.cloudflare_workers_ai_embedding_function
 from chromadb.utils.embedding_functions.together_ai_embedding_function import (
     TogetherAIEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.mistral_embedding_function import (
+    MistralEmbeddingFunction,
+)
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -80,6 +83,7 @@ _all_classes: Set[str] = {
     "OllamaEmbeddingFunction",
     "InstructorEmbeddingFunction",
     "JinaEmbeddingFunction",
+    "MistralEmbeddingFunction",
     "VoyageAIEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
     "OpenCLIPEmbeddingFunction",
@@ -140,6 +144,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "ollama": OllamaEmbeddingFunction,
     "instructor": InstructorEmbeddingFunction,
     "jina": JinaEmbeddingFunction,
+    "mistral": MistralEmbeddingFunction,
     "voyageai": VoyageAIEmbeddingFunction,
     "onnx_mini_lm_l6_v2": ONNXMiniLM_L6_V2,
     "open_clip": OpenCLIPEmbeddingFunction,
@@ -227,6 +232,7 @@ __all__ = [
     "OllamaEmbeddingFunction",
     "InstructorEmbeddingFunction",
     "JinaEmbeddingFunction",
+    "MistralEmbeddingFunction",
     "VoyageAIEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
     "OpenCLIPEmbeddingFunction",
