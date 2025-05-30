@@ -34,7 +34,7 @@ use prost::Message;
 use serde::{Deserialize, Serialize};
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Code, Request, Response, Status};
-use tracing::Instrument;
+use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
     Cursor, CursorName, CursorStore, CursorStoreOptions, Limits, LogPosition, LogReader,
@@ -1223,6 +1223,7 @@ impl LogService for LogServer {
             let offset = witness
                 .map(|x| x.1.position)
                 .unwrap_or(LogPosition::from_offset(0));
+            tracing::event!(Level::INFO, offset = ?offset);
             wal3::copy(
                 &storage,
                 &options,
@@ -1250,6 +1251,7 @@ impl LogService for LogServer {
                     format!("max_offset={:?} < offset={:?}", max_offset, offset),
                 ));
             }
+            tracing::event!(Level::INFO, compaction_offset =? offset.offset(), enumeration_offset =? (max_offset - 1u64).offset());
             Ok(Response::new(ForkLogsResponse {
                 compaction_offset: offset.offset(),
                 enumeration_offset: (max_offset - 1u64).offset(),
