@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
     chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Segment,
@@ -29,6 +31,29 @@ use pyo3::types::PyAnyMethods;
 )]
 pub struct CollectionUuid(pub Uuid);
 
+/// DatabaseUuid is a wrapper around Uuid to provide a type for the database id.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    ToSchema,
+)]
+pub struct DatabaseUuid(pub Uuid);
+
+impl DatabaseUuid {
+    pub fn new() -> Self {
+        DatabaseUuid(Uuid::new_v4())
+    }
+}
+
 impl CollectionUuid {
     pub fn new() -> Self {
         CollectionUuid(Uuid::new_v4())
@@ -41,6 +66,17 @@ impl std::str::FromStr for CollectionUuid {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match Uuid::parse_str(s) {
             Ok(uuid) => Ok(CollectionUuid(uuid)),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl std::str::FromStr for DatabaseUuid {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Uuid::parse_str(s) {
+            Ok(uuid) => Ok(DatabaseUuid(uuid)),
             Err(err) => Err(err),
         }
     }
@@ -100,6 +136,8 @@ pub struct Collection {
     pub root_collection_id: Option<CollectionUuid>,
     #[serde(skip)]
     pub lineage_file_path: Option<String>,
+    #[serde(skip)]
+    pub database_id: DatabaseUuid,
 }
 
 impl Default for Collection {
@@ -120,6 +158,7 @@ impl Default for Collection {
             version_file_path: None,
             root_collection_id: None,
             lineage_file_path: None,
+            database_id: DatabaseUuid::new(),
         }
     }
 }
@@ -210,11 +249,8 @@ impl TryFrom<chroma_proto::Collection> for Collection {
     type Error = CollectionConversionError;
 
     fn try_from(proto_collection: chroma_proto::Collection) -> Result<Self, Self::Error> {
-        let collection_uuid = match Uuid::try_parse(&proto_collection.id) {
-            Ok(uuid) => uuid,
-            Err(_) => return Err(CollectionConversionError::InvalidUuid),
-        };
-        let collection_id = CollectionUuid(collection_uuid);
+        let collection_id = CollectionUuid::from_str(&proto_collection.id)
+            .map_err(|_| CollectionConversionError::InvalidUuid)?;
         let collection_metadata: Option<Metadata> = match proto_collection.metadata {
             Some(proto_metadata) => match proto_metadata.try_into() {
                 Ok(metadata) => Some(metadata),
@@ -222,6 +258,8 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             },
             None => None,
         };
+        let database_id = DatabaseUuid::from_str(&proto_collection.database_id)
+            .map_err(|_| CollectionConversionError::InvalidUuid)?;
         Ok(Collection {
             collection_id,
             name: proto_collection.name,
@@ -240,6 +278,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
                 .root_collection_id
                 .map(|uuid| CollectionUuid(Uuid::try_parse(&uuid).unwrap())),
             lineage_file_path: proto_collection.lineage_file_path,
+            database_id,
         })
     }
 }
@@ -278,6 +317,7 @@ impl TryFrom<Collection> for chroma_proto::Collection {
             version_file_path: value.version_file_path,
             root_collection_id: value.root_collection_id.map(|uuid| uuid.0.to_string()),
             lineage_file_path: value.lineage_file_path,
+            database_id: value.database_id.0.to_string(),
         })
     }
 }
@@ -326,6 +366,7 @@ mod test {
             version_file_path: Some("version_file_path".to_string()),
             root_collection_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
             lineage_file_path: Some("lineage_file_path".to_string()),
+            database_id: "00000000-0000-0000-0000-000000000000".to_string(),
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(
@@ -352,5 +393,6 @@ mod test {
             converted_collection.lineage_file_path,
             Some("lineage_file_path".to_string())
         );
+        assert_eq!(converted_collection.database_id, DatabaseUuid(Uuid::nil()));
     }
 }
