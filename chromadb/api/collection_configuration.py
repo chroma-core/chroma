@@ -717,7 +717,53 @@ def overwrite_collection_configuration(
     )
 
 
-class InvalidConfigurationError(ValueError):
-    """Represents an error that occurs when a configuration is invalid."""
+def validate_embedding_function_conflict_on_create(
+    embedding_function: Optional[EmbeddingFunction],  # type: ignore
+    configuration_ef: Optional[EmbeddingFunction],  # type: ignore
+) -> None:
+    """
+    Validates that there are no conflicting embedding functions between function parameter
+    and collection configuration.
 
-    pass
+    Args:
+        embedding_function: The embedding function provided as a parameter
+        configuration_ef: The embedding function from collection configuration
+
+    Returns:
+        bool: True if there is a conflict, False otherwise
+    """
+    # If ef provided in function params and collection config, check if they are the same
+    # If not, there's a conflict
+    # ef is by default "default" if not provided, so ignore that case.
+    if embedding_function is not None and configuration_ef is not None:
+        if (
+            embedding_function.name() != "default"
+            and embedding_function.name() != configuration_ef.name()
+        ):
+            raise ValueError(
+                f"Multiple embedding functions provided. Please provide only one. Embedding function conflict: {embedding_function.name()} vs {configuration_ef.name()}"
+            )
+    return None
+
+
+# The reason to use the config on get, rather than build the ef is because
+# if there is an issue with deserializing the config, an error shouldn't be raised
+# at get time. CollectionCommon.py will raise an error at _embed time if there is an issue deserializing.
+def validate_embedding_function_conflict_on_get(
+    embedding_function: Optional[EmbeddingFunction],  # type: ignore
+    persisted_ef_config: Optional[Dict[str, Any]],
+) -> None:
+    """
+    Validates that there are no conflicting embedding functions between function parameter
+    and collection configuration.
+    """
+    if persisted_ef_config is not None and embedding_function is not None:
+        if (
+            embedding_function.name() != "default"
+            and persisted_ef_config.get("name") is not None
+            and persisted_ef_config.get("name") != embedding_function.name()
+        ):
+            raise ValueError(
+                f"An embedding function already exists in the collection configuration, and a new one is provided. If this is intentional, please embed documents separately. Embedding function conflict: new: {embedding_function.name()} vs persisted: {persisted_ef_config.get('name')}"
+            )
+    return None
