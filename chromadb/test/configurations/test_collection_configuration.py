@@ -1,5 +1,5 @@
 import pytest
-from typing import Dict, Any, cast
+from typing import Dict, Any, cast, List
 import numpy as np
 from chromadb.api.types import (
     EmbeddingFunction,
@@ -16,7 +16,6 @@ from chromadb.api.collection_configuration import (
     UpdateHNSWConfiguration,
     CreateSpannConfiguration,
     UpdateSpannConfiguration,
-    load_update_collection_configuration_from_json,
     SpannConfiguration,
     overwrite_spann_configuration,
 )
@@ -24,6 +23,7 @@ import json
 import os
 from chromadb.utils.embedding_functions import register_embedding_function
 from chromadb.test.conftest import ClientFactories
+from chromadb.types import Collection as CollectionModel
 
 
 # Check if we are running in a mode where SPANN is disabled
@@ -709,19 +709,11 @@ def test_spann_update_from_json(client: ClientAPI) -> None:
         configuration={"spann": initial_spann},
     )
 
-    # Create JSON for update
-    update_json = """
-    {
-        "spann": {
-            "search_nprobe": 15,
-            "ef_search": 200
-        }
-    }
-    """
-
-    # Parse JSON and create update configuration
-    update_config = load_update_collection_configuration_from_json(
-        json.loads(update_json)
+    update_config = UpdateCollectionConfiguration(
+        spann=UpdateSpannConfiguration(
+            search_nprobe=15,
+            ef_search=200,
+        )
     )
 
     # Apply the update
@@ -830,3 +822,248 @@ def test_default_collection_creation(client: ClientAPI) -> None:
     ef = config.get("embedding_function")
     assert ef is not None
     assert ef.name() == "default"
+
+
+def test_invalid_configuration() -> None:
+    """Test that on an invalid configuration, an error is raised"""
+    invalid_config: Dict[str, Any] = {
+        "hnsw": {
+            "space": "l2",
+            "ef_construction": 100,
+            "ef_search": 100,
+            "max_neighbors": 16,
+            "resize_factor": 1.2,
+            "sync_threshold": 1000,
+        },
+        "spann": None,
+        "embedding_function": {
+            "name": "custom_ef",
+            "type": "known",
+            "config": {},
+        },
+    }
+    with pytest.raises(ValueError):
+        load_collection_configuration_from_json(invalid_config)
+
+
+def test_collection_load_with_invalid_configuration(client: ClientAPI) -> None:
+    """
+    When an invalid confiugration is used, collection create, get, list_collections should all pass
+    Only when trying to use the collection should an error be reaised
+    """
+    client.reset()
+
+    # Create a collection with a valid configuration first
+    coll = client.create_collection(name="test_invalid_config")
+
+    # Simulate an invalid configuration by directly modifying the collection model
+    # This mimics what would happen if a collection was created with invalid config
+    # and stored in the database
+    invalid_config_json = {
+        "embedding_function": {
+            "name": "custom_ef",
+            "type": "known",
+            "config": {},
+        }
+    }
+
+    invalid_collection = CollectionModel(
+        id=coll.id,
+        name="test_invalid_config_collection",
+        configuration_json=invalid_config_json,
+        metadata=None,
+        dimension=None,
+        tenant=coll.tenant,
+        database=coll.database,
+    )
+
+    assert invalid_collection is not None
+    assert invalid_collection.name == "test_invalid_config_collection"
+    assert invalid_collection.configuration_json == invalid_config_json
+
+    coll._model = invalid_collection
+
+    with pytest.raises(ValueError):
+        coll.add(ids=["1"], documents=["test"])
+
+    with pytest.raises(ValueError):
+        coll.query(query_texts=["test"], n_results=1)
+
+
+def test_configuration_json_vs_configuration_property_consistency(
+    client: ClientAPI,
+) -> None:
+    """Test that configuration_json and configuration properties are consistent"""
+    client.reset()
+
+    config: CreateCollectionConfiguration = {
+        "embedding_function": CustomEmbeddingFunction(dim=8),
+    }
+
+    coll = client.create_collection(
+        name="test_config_consistency",
+        configuration=config,
+    )
+
+    # Get both raw JSON and processed configuration
+    config_json = coll.configuration_json
+    config_processed = coll.configuration
+
+    assert "embedding_function" in config_json
+
+    # Verify embedding function consistency
+    ef_json = config_json.get("embedding_function")
+    ef_processed = config_processed.get("embedding_function")
+    assert ef_json is not None
+    assert ef_processed is not None
+    assert ef_json.get("type") == "known"
+    assert ef_json.get("name") == "custom_ef"
+    assert ef_processed.name() == "custom_ef"
+    assert ef_processed.get_config() == ef_json.get("config")
+
+
+def test_default_configuration_json_vs_configuration_property_consistency(
+    client: ClientAPI,
+) -> None:
+    """Test that default configuration_json and configuration properties are consistent"""
+    client.reset()
+
+    # Create collection with default configuration
+    coll = client.create_collection(name="test_default_config_consistency")
+
+    # Get both raw JSON and processed configuration
+    config_json = coll.configuration_json
+    config_processed = coll.configuration
+
+    assert "embedding_function" in config_json
+
+    # Verify default embedding function
+    ef_json = config_json.get("embedding_function")
+    ef_processed = config_processed.get("embedding_function")
+    assert ef_json is not None
+    assert ef_processed is not None
+    assert ef_json.get("type") == "known"
+    assert ef_json.get("name") == "default"
+    assert ef_processed.name() == "default"
+
+
+def test_invalid_configuration_operations_succeed_until_embed(
+    client: ClientAPI,
+) -> None:
+    """
+    Test that invalid configurations allow list_collections, get_collection to succeed,
+    but fail when _embed is called (during add, query, upsert operations)
+    """
+    client.reset()
+
+    # Create a collection with valid configuration first
+    coll = client.create_collection(name="test_invalid_operations")
+
+    # Create collections with various invalid configurations
+    # and verify which operations succeed vs fail
+    invalid_configs: List[Dict[str, Any]] = [
+        # Missing embedding function config
+        {
+            "embedding_function": {
+                "name": "nonexistent_ef",
+                "type": "known",
+                "config": {},
+            }
+        },
+        # Malformed embedding function config
+        {
+            "embedding_function": {
+                "type": "known",
+                # Missing 'name' field
+                "config": {"dim": 3},
+            }
+        },
+        # HNSW and SPANN both present (invalid)
+        {
+            "hnsw": {"space": "l2"},
+            "spann": {"space": "cosine"},
+            "embedding_function": {"type": "legacy"},
+        },
+    ]
+
+    for i, invalid_config in enumerate(invalid_configs):
+        # Simulate an invalid configuration by directly modifying the collection model
+        invalid_collection_model = CollectionModel(
+            id=coll.id,
+            name=f"test_invalid_config_{i}",
+            configuration_json=invalid_config,
+            metadata=None,
+            dimension=None,
+            tenant=coll.tenant,
+            database=coll.database,
+        )
+
+        coll._model = invalid_collection_model
+
+        # These operations should succeed (they don't process configuration)
+        assert coll.id == invalid_collection_model.id
+        assert coll.name == f"test_invalid_config_{i}"
+        assert coll.configuration_json == invalid_config
+
+        with pytest.raises(ValueError):
+            coll.configuration
+
+        with pytest.raises(ValueError):
+            coll.add(ids=["1"], documents=["test"])
+
+        with pytest.raises(ValueError):
+            coll.query(query_texts=["test"], n_results=1)
+
+        with pytest.raises(ValueError):
+            coll.upsert(ids=["1"], documents=["test"])
+
+        with pytest.raises(ValueError):
+            coll._embed(["test"])
+
+
+def test_get_collection_with_invalid_configuration(client: ClientAPI) -> None:
+    """
+    Test that get_collection works even with invalid configurations,
+    but operations that require _embed fail
+    """
+    client.reset()
+
+    # Create a valid collection first
+    valid_coll = client.create_collection(
+        name="test_get_invalid",
+        configuration={"embedding_function": CustomEmbeddingFunction(dim=4)},
+    )
+
+    # Simulate database corruption or invalid configuration
+    # by directly modifying the model's configuration
+    invalid_config = {
+        "embedding_function": {
+            "name": "nonexistent_function",
+            "type": "known",
+            "config": {"dim": 4},
+        }
+    }
+
+    # Update the collection's configuration to be invalid
+    valid_coll._model.configuration_json = invalid_config
+
+    # get_collection-like operations should still work
+    assert valid_coll.name == "test_get_invalid"
+    assert valid_coll.id is not None
+    assert valid_coll.configuration_json == invalid_config
+    assert valid_coll.tenant is not None
+    assert valid_coll.database is not None
+
+    # But operations requiring embedding should fail
+    with pytest.raises(ValueError):
+        valid_coll.add(ids=["test"], documents=["test doc"])
+
+    with pytest.raises(ValueError):
+        valid_coll.query(query_texts=["test"], n_results=1)
+
+    with pytest.raises(ValueError):
+        valid_coll.upsert(ids=["test"], documents=["test doc"])
+
+    # Accessing configuration property should also fail
+    with pytest.raises(ValueError):
+        _ = valid_coll.configuration

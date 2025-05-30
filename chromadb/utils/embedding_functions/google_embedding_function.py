@@ -4,6 +4,7 @@ import os
 import numpy as np
 import numpy.typing as npt
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
+import warnings
 
 
 class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -31,6 +32,12 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The Google Generative AI python package is not installed. Please install it with `pip install google-generativeai`"
             )
 
+        if api_key is not None:
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
+            )
         self.api_key_env_var = api_key_env_var
         self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
@@ -141,6 +148,12 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The Google Generative AI python package is not installed. Please install it with `pip install google-generativeai`"
             )
 
+        if api_key is not None:
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
+            )
         self.api_key_env_var = api_key_env_var
         self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
@@ -270,6 +283,12 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The vertexai python package is not installed. Please install it with `pip install google-cloud-aiplatform`"
             )
 
+        if api_key is not None:
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
+            )
         self.api_key_env_var = api_key_env_var
         self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:

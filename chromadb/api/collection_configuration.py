@@ -82,12 +82,24 @@ def load_collection_configuration_from_json(
             ef = None
         else:
             try:
-                ef = known_embedding_functions[ef_config["name"]]
-                ef = ef.build_from_config(ef_config["config"])  # type: ignore
+                ef_name = ef_config["name"]
             except KeyError:
                 raise ValueError(
-                    f"Embedding function {ef_config['name']} not found. Add @register_embedding_function decorator to the class definition."
+                    f"Embedding function name not found in config: {ef_config}"
                 )
+            try:
+                ef = known_embedding_functions[ef_name]
+            except KeyError:
+                raise ValueError(
+                    f"Embedding function {ef_name} not found. Add @register_embedding_function decorator to the class definition."
+                )
+            try:
+                ef = ef.build_from_config(ef_config["config"])  # type: ignore
+            except Exception as e:
+                raise ValueError(
+                    f"Could not build embedding function {ef_config['name']} from config {ef_config['config']}: {e}"
+                )
+
     else:
         ef = None
 
