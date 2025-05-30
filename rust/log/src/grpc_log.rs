@@ -618,7 +618,7 @@ impl GrpcLog {
 
         if let Some(status) = error {
             if combined_response.is_empty() {
-                return Err(status);
+                return Err(status.into());
             }
         }
 
