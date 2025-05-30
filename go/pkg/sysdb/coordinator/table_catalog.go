@@ -1052,9 +1052,11 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		// t2: Fork source collection in sysdb, the latest source collection compaction offset is 400. If we add new logs, it will start after offset 300, and the data is lost after compaction.
 		latestSourceCompactionOffset := uint64(sourceCollection.LogPosition)
 		if forkCollection.SourceCollectionLogEnumerationOffset < latestSourceCompactionOffset {
+			log.Error("CollectionLogPositionStale", zap.Uint64("latestSourceCompactionOffset", latestSourceCompactionOffset), zap.Uint64("forkCollection.SourceCollectionLogEnumerationOffset ", forkCollection.SourceCollectionLogEnumerationOffset))
 			return common.ErrCollectionLogPositionStale
 		}
 		if latestSourceCompactionOffset < forkCollection.SourceCollectionLogCompactionOffset {
+			log.Error("CompactionOffsetSomehowAhead", zap.Uint64("latestSourceCompactionOffset", latestSourceCompactionOffset), zap.Uint64("forkCollection.SourceCollectionLogCompactionOffset", forkCollection.SourceCollectionLogCompactionOffset))
 			return common.ErrCompactionOffsetSomehowAhead
 		}
 
