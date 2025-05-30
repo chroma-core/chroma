@@ -554,6 +554,7 @@ impl GrpcLog {
         min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
         let mut combined_response = Vec::new();
+        let mut error = None;
 
         if use_alt_log {
             // Iterate over all alt clients and gather collections
@@ -567,14 +568,25 @@ impl GrpcLog {
                 }
                 for mut alt_client in all_alt_clients.drain(..) {
                     // We error if any subrequest errors
-                    let response = alt_client
+                    match alt_client
                         .get_all_collection_info_to_compact(
                             chroma_proto::GetAllCollectionInfoToCompactRequest {
                                 min_compaction_size,
                             },
                         )
-                        .await?;
-                    combined_response.push(response.into_inner());
+                        .await
+                    {
+                        Ok(response) => {
+                            combined_response.push(response.into_inner());
+                        }
+                        Err(err) => {
+                            tracing::error!("could not get all collection info to compact: {err}");
+                            if error.is_none() {
+                                error = Some(err);
+                            }
+                            continue;
+                        }
+                    };
                 }
             } else {
                 tracing::warn!(
@@ -583,16 +595,32 @@ impl GrpcLog {
                 return Ok(vec![]);
             }
         } else {
-            let response = self
+            match self
                 .client
                 .get_all_collection_info_to_compact(
                     chroma_proto::GetAllCollectionInfoToCompactRequest {
                         min_compaction_size,
                     },
                 )
-                .await?;
-            combined_response.push(response.into_inner());
+                .await
+            {
+                Ok(response) => {
+                    combined_response.push(response.into_inner());
+                }
+                Err(err) => {
+                    tracing::error!("could not get all collection info to compact: {err}");
+                    if error.is_none() {
+                        error = Some(err);
+                    }
+                }
+            };
         };
+
+        if let Some(status) = error {
+            if combined_response.is_empty() {
+                return Err(status);
+            }
+        }
 
         let mut all_collections = Vec::new();
         for response in combined_response {
