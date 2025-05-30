@@ -1484,6 +1484,7 @@ pub fn all_data_sets() -> Vec<Arc<dyn DataSet>> {
         ALL_MINILM_L6_V2,
         1_000_000,
     )));
+    data_sets.push(Arc::clone(&reference_data_set) as _);
     data_sets.push(Arc::new(VerifyingDataSet {
         reference_data_set,
         test_data_set: "test-all-MiniLM-L6-v2".to_string(),
