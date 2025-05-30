@@ -21,6 +21,10 @@ from hypothesis.stateful import (
 from overrides import overrides
 from typing import Dict, cast, Union, Tuple, Set
 
+import grpc
+from chromadb.proto.logservice_pb2 import SealLogRequest
+from chromadb.proto.logservice_pb2_grpc import LogServiceStub
+
 collection_st = hyst.shared(strategies.collections(with_hnsw_params=True), key="source")
 
 
@@ -37,6 +41,10 @@ class ForkStateMachine(RuleBasedStateMachine):
         super().__init__()
         self.client = client
         self.collection_names = set()
+
+        # Create go log service client
+        channel = grpc.insecure_channel("localhost:50052")
+        self.go_log_service = LogServiceStub(channel)  # type: ignore[no-untyped-call]
 
     @initialize(collection=collection_st, target=updated_collections)
     def initialize(
@@ -77,12 +85,14 @@ class ForkStateMachine(RuleBasedStateMachine):
     @rule(
         cursor=consumes(forked_collections),
         delta=strategies.recordsets(collection_st),
+        seal=hyst.booleans(),
         target=updated_collections,
     )
     def upsert(
         self,
         cursor: Tuple[Collection, strategies.StateMachineRecordSet],
         delta: strategies.RecordSet,
+        seal: bool,
     ) -> Tuple[Collection, strategies.StateMachineRecordSet]:
         collection, record_set_state = cursor
         normalized_delta: strategies.NormalizedRecordSet = invariants.wrap_all(delta)
@@ -148,6 +158,8 @@ class ForkStateMachine(RuleBasedStateMachine):
                     )
                 else:
                     record_set_state["documents"].append(None)
+        if seal:
+            self.go_log_service.SealLog(SealLogRequest(collection_id=collection.id.hex))
         return collection, record_set_state
 
     @rule(
