@@ -1,12 +1,13 @@
-export type PostStatus = "processing" | "done" | "error";
+export type TweetStatus = "created" | "processing" | "done" | "error";
 
 export type Role = "user" | "assistant";
 
-export interface PostModel {
+export interface TweetModel {
   id: string;
+  threadParentId?: string
   role: Role;
   body: string;
-  date: string;
-  replyId?: string;
-  status: PostStatus;
+  date: number;
+  aiReplyId?: string;
+  status?: TweetStatus;
 }
