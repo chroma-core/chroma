@@ -14,43 +14,6 @@ on:
         type: string
 
 jobs:
-  stress-cross-version-test:
-    runs-on: blacksmith-8vcpu-ubuntu-2204
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: ./.github/actions/python
-        with:
-          python-version: "3.9"
-      - name: Setup Rust
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Build Rust bindings
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-      - name: Install built wheel
-        shell: bash
-        run: pip install --no-index --find-links target/wheels/ chromadb
-      - name: Run cross-version tests
-        # run: python -m pytest chromadb/test/property/test_cross_version_persist.py --durations 10
-        shell: bash
-        run: |
-          failures=0
-
-          for i in {1..30}; do
-            python -m pytest chromadb/test/property/test_cross_version_persist.py -n auto --dist worksteal
-            if [[ $? -ne 0 ]]; then
-              ((failures++))
-            fi
-          done
-
-          echo "Command failed $failures out of 15 runs."
-          exit $failures
-        env:
-          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
   test-rust-bindings:
     timeout-minutes: 90
     strategy:
@@ -61,7 +24,6 @@ jobs:
         test-globs:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
-          # TODO(@codetheweb): this test should be parallelized, but it frequently flakes in CI when parallelized. We have not been able to reproduce the failure locally. See https://github.com/chroma-core/chroma/issues/4263.
           - "chromadb/test/property/test_cross_version_persist.py"
         include:
           - test-globs: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
