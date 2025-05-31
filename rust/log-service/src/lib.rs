@@ -1219,17 +1219,16 @@ impl LogService for LogServer {
             let witness = cursors.load(cursor_name).await.map_err(|err| {
                 Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
             })?;
-            // This is the existing compaction_offset, which is the last record that was compacted.
+            // This is the existing compaction_offset, which is the next record to compact.
             let offset = witness
                 .map(|x| x.1.position)
-                .unwrap_or(LogPosition::from_offset(0));
+                .unwrap_or(LogPosition::from_offset(1));
             tracing::event!(Level::INFO, offset = ?offset);
             wal3::copy(
                 &storage,
                 &options,
                 &log_reader,
-                // + 1 to get to the first uncompacted record.
-                offset + 1u64,
+                offset,
                 target_prefix.clone(),
             )
             .await
@@ -1253,7 +1252,9 @@ impl LogService for LogServer {
             }
             tracing::event!(Level::INFO, compaction_offset =? offset.offset(), enumeration_offset =? (max_offset - 1u64).offset());
             Ok(Response::new(ForkLogsResponse {
-                compaction_offset: offset.offset(),
+                // NOTE: The upstream service expects the last compacted offset as compaction offset
+                compaction_offset: (offset - 1u64).offset(),
+                // NOTE: The upstream service expects the last uncompacted offset as enumeration offset
                 enumeration_offset: (max_offset - 1u64).offset(),
             }))
         }
