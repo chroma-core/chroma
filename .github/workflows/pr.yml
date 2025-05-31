@@ -200,7 +200,7 @@ jobs:
         - name: Check PR Title
           uses: Slashgear/action-check-pr-title@v4.3.0
           with:
-            regexp: '\[(ENH|BUG|DOC|TST|BLD|PERF|TYP|CLN|CHORE|RELEASE|HOTFIX)\].*'
+            regexp: '\[(ENH|BUG|DOC|TST|BLD|PERF|TYP|CLN|CHORE|RELEASE|HOTFIX|INST)\].*'
             helpMessage: "Please tag your PR title. See https://docs.trychroma.com/contributing#contributing-code-and-ideas. You must push new code to this PR for this check to run again."
         - name: Comment explaining failure
           if: failure()
