@@ -199,7 +199,9 @@ async fn get_log_from_handle<'a>(
     mark_dirty: MarkDirty,
 ) -> Result<LogRef<'a>, wal3::Error> {
     let mut active = handle.active.lock().await;
-    active.keep_alive(Duration::from_secs(60));
+    if active.log.is_some() {
+        active.keep_alive(Duration::from_secs(60));
+    }
     if let Some(log) = active.log.as_ref() {
         return Ok(LogRef {
             log: Arc::clone(log),
@@ -215,6 +217,7 @@ async fn get_log_from_handle<'a>(
         mark_dirty.clone(),
     )
     .await?;
+    active.keep_alive(Duration::from_secs(60));
     tracing::info!("Opened log at {}", prefix);
     let opened = Arc::new(opened);
     active.log = Some(Arc::clone(&opened));
