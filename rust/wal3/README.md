@@ -96,17 +96,33 @@ The Manifest is a JSON file that contains the following fields:
     - start:  The lowest log position in the fragment.  Note that this embeds time and space.
     - limit:  The lowest log position after the fragment.  Note that this embeds time and space.
     - setsum:  The setsum of the log fragment.
+- snapshots:  A list of snapshots.  These are like interior nodes of a B+ tree and refer to
+  fragments that are further in the past.  Each snapshot contains the following fields:
+    - path_to_snapshot:  The path to the snapshot relative to the root of the log.  Similar to fragments, the
+      full path is specified so that any bugs or changes in the path layout don't invalidate
+      previously-written logs.
+    - depth:  The maximum number of snapshots between this snapshot and the fragments that serve as
+      leaf nodes for the tree.
+    - setsum:  The setsum of the snapshot.  This uniquely identifies the data to the degree that
+      sha3 does not collide.
+    - start:  The offset of the first record maintained by this snapshot.
+    - limit:  The offset of the first record too new to be maintained within this snapshot.
 - writer:  A plain-text string for debugging which process wrote the manifest.
 
 Invariants of the manifest:
 
-- The setsum of all fragments in a manifest plus `pruned` must add up to the `setsum` of the
-  manifest.
+- The setsum of all snapshots+fragments in a manifest plus `pruned` must add up to the `setsum` of
+  the manifest.
 - fragments.seq_no is sequential.
 - fragment.start < fragment.limit for all fragments.
 - fragment.start is strictly increasing.
 - The range (fragment.start, fragment.limit) is disjoint for all fragments in a manifest.  No other
   fragment will have overlap with log position.
+- snapshot.start < snapshot.limit for all snapshots.
+- snapshot.start is strictly increasing.
+- The range (snapshot.start, snapshot.limit) is disjoint for all snapshots in a manifest.  No other
+  snapshot will have overlap with log position.  Children of the snapshot will be wholely contained
+  within the snapshot.
 
 ### Cursor Structure
 
@@ -116,6 +132,21 @@ A cursor is a JSON file that contains the following fields:
 - epoch_us:  A timestamp corresponding to when the cursor was written.  This is the number of
   microseconds since UNIX epoch.
 - writer:  A plain-text string for debugging which process wrote the cursor.
+
+### Garbage File
+
+A garbage file specifies a set of files to delete, a set of files to replace, and the hierarchical
+structure that attributes each node in the tree to its parent.  Conceptually, it mirrors the tree of
+fragments maintained by the manifest.  This hierarchy is necessary to capture the fact that the
+setsum of a snapshot includes the setsum of its children.  To be able to delete a file requires
+adjusting setsums up and down the tree.
+
+The garbage file gets written by reading the manifest, writing the file, and then having the active
+writer pick up the garbage file and apply it to the manifest on next write.
+
+This is done to avoid stressing the log contention path; it is not intended for a wal3 writer to
+garbage collect the same log that another wal3 writer is actively working on.  The result is safe
+and durable, but liveness may be impacted.
 
 ## Object Store Layout
 
@@ -141,6 +172,7 @@ wal3/log/Bucket=15000/FragmentSeqNo=15000.parquet
 ...
 wal3/manifest/MANIFEST.json
 wal3/snapshot/SNAPSHOT.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+wal3/garbage/GARBAGE
 ```
 
 ## Writer Arch Diagram
@@ -226,8 +258,8 @@ like:
 3.  Read all cursors again; if changed, goto 1.
 4.  Select the minimum timestamp across all cursors as the garbage collection cutoff.
 5.  Write a list of snapshots and fragments that hold data strictly less than the cutoff to a file
-    named `gc/GARBAGE.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX` where the
-    hex digits are the setsum of the garbage.
+    named `garbage/GARBAGE`.  There can be only one gc in progress at a time, so gc is kicked off by
+    running put-if-not-exist on `garbage/GARBAGE`.
 6.  Wait until the writer writes a manifest that does not contain the garbage's fragments.
 7.  Wait a sufficiently long time so that readers cannot see the fragments.
 8.  Slow-delete the contents of the garbage file.
@@ -362,9 +394,10 @@ first level of interior nodes point to the second level, and that level points t
 
 This is, strictly speaking, an optimization, but one that will allow us to scale the log to beyond
 all forseeable current requirements.  20-25 pointers in the root, or 2kB are all that's needed to
-capture a log that's more than a petabyte in size.  Compare that to 5k pointers or 329kB for a
-single manifest.  We're dealing with kilobytes per manifest for a log that's petabytes, but when
-each manifest targets < 1MB in size, the difference at write time is apparent in the latency.
+capture a log that's more than a petabyte in size if the log is written at maximum batch size.
+Compare that to 5k pointers or 329kB for a single manifest.  We're dealing with kilobytes per
+manifest for a log that's petabytes, but when each manifest targets < 1MB in size, the difference at
+write time is apparent in the latency.
 
 Consequently, the manifest and its transitive references will be a four-level tree.
 
@@ -384,18 +417,6 @@ root
 ├── fragment_8
 └── fragment_9
 ```
-
-### Interplay Between Garbage Collection and Snapshots
-
-The manifest compaction strategy is designed to reduce the cost of writing the manifest, but it
-incurs a cost for garbage collection.  To garbage collect an arbitary prefix of the log
-fragment-by-fragment would require rewriting the snapshots that partially cover the prefix and
-contain data that is not to be garbage collected.  This is complex.
-
-To side-step this problem we will introduce intentional fragmentation of the manifest and snapshots
-to align to the garbage collection interval.  This will guarantee that at most one interval worth of
-garbage that could be compacted is left uncompacted.  In practice, this means constructing fragments
-such that they are pre-aligned to garbage collection boundaries.
 
 ### Interplay Between Snapshots and Setsum
 
@@ -557,6 +578,22 @@ will indicate a problem.
 
 To do this, we will construct an end-to-end, variable throughput test that we can run against wal3
 to ensure that data written is readable exactly as written.
+
+## Error Handling
+
+Garbage collection is designed to be conservative:
+
+- **Partial Failures**: If any step fails, no fragments are deleted
+- **Verification Failures**: Setsum mismatches abort the entire operation  
+- **Timeout Handling**: Long-running operations have configurable timeouts
+- **Retry Logic**: Transient failures trigger exponential backoff retries
+
+## Performance Considerations
+
+- **Batch Operations**: Fragment listing and deletion use batch APIs for efficiency
+- **Incremental GC**: Large logs can be garbage collected incrementally over time
+- **Background Processing**: GC runs asynchronously without blocking writers or readers
+- **Resource Limits**: Configurable limits prevent GC from overwhelming object storage
 
 # Multiple wal3 Instances
 

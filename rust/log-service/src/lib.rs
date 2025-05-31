@@ -2071,6 +2071,7 @@ mod tests {
                     writer: "TODO".to_string(),
                     acc_bytes: 0,
                     setsum: Setsum::default(),
+                    collected: Setsum::default(),
                     snapshots: vec![],
                     fragments: vec![Fragment {
                         seq_no: FragmentSeqNo(1),
@@ -2201,6 +2202,7 @@ mod tests {
                         writer: "TODO".to_string(),
                         acc_bytes: 0,
                         setsum: Setsum::default(),
+                        collected: Setsum::default(),
                         snapshots: vec![],
                         fragments: vec![Fragment {
                             seq_no: FragmentSeqNo(1),
@@ -2216,6 +2218,7 @@ mod tests {
                         writer: "TODO".to_string(),
                         acc_bytes: 0,
                         setsum: Setsum::default(),
+                        collected: Setsum::default(),
                         snapshots: vec![],
                         fragments: vec![Fragment {
                             seq_no: FragmentSeqNo(1),
@@ -2304,6 +2307,7 @@ mod tests {
                         writer: "TODO".to_string(),
                         acc_bytes: 0,
                         setsum: Setsum::default(),
+                        collected: Setsum::default(),
                         snapshots: vec![],
                         fragments: vec![Fragment {
                             seq_no: FragmentSeqNo(1),
@@ -2319,6 +2323,7 @@ mod tests {
                         writer: "TODO".to_string(),
                         acc_bytes: 0,
                         setsum: Setsum::default(),
+                        collected: Setsum::default(),
                         snapshots: vec![],
                         fragments: vec![Fragment {
                             seq_no: FragmentSeqNo(1),
@@ -2390,6 +2395,7 @@ mod tests {
                         writer: "TODO".to_string(),
                         acc_bytes: 0,
                         setsum: Setsum::default(),
+                        collected: Setsum::default(),
                         snapshots: vec![],
                         fragments: vec![Fragment {
                             seq_no: FragmentSeqNo(1),
