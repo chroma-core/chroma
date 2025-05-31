@@ -1,19 +1,24 @@
+use std::collections::HashMap;
+use std::error::Error;
 use crate::client::admin_client::get_admin_client;
 use crate::ui_utils::copy_to_clipboard;
-use crate::utils::{get_current_profile, CliError, Profile, UtilsError, SELECTION_LIMIT};
+use crate::utils::{get_current_profile, CliError, Profile, UtilsError, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR, CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
 use std::fmt;
+use std::fs::{File, OpenOptions};
+use std::path::Path;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
+use std::io::{BufReader, Write, BufRead};
 
 #[derive(Debug, Error)]
 pub enum DbError {
-    #[error("")]
+    #[error("No databases found")]
     NoDBs,
     #[error("Database name cannot be empty")]
     EmptyDbName,
@@ -23,6 +28,8 @@ pub enum DbError {
     DbNotFound(String),
     #[error("Failed to get runtime for DB commands")]
     RuntimeError,
+    #[error("Failed to create or update .env file with Chroma environment variables")]
+    EnvFile
 }
 
 #[derive(Debug, Clone, ValueEnum, EnumIter)]
@@ -98,6 +105,10 @@ pub struct ConnectArgs {
         help = "The programming language to use for the connection snippet"
     )]
     language: Option<Language>,
+    #[clap(long = "env-file", default_value_t = false, conflicts_with_all = ["language", "env_vars"], help = "Add Chroma environment variables to a .env file in the current directory")]
+    env_file: bool,
+    #[clap(long = "env-file", default_value_t = false, conflicts_with_all = ["language", "env_file"], help = "Output Chroma environment variables")]
+    env_vars: bool
 }
 
 #[derive(Args, Debug)]
@@ -145,6 +156,10 @@ fn no_dbs_message(profile_name: &str) -> String {
         profile_name,
         "chroma db create <db name>".yellow()
     )
+}
+
+fn env_file_created_message() -> String {
+    format!("{}", "Chroma environment variables set in .env!".blue().bold())
 }
 
 fn select_language_message() -> String {
@@ -318,6 +333,52 @@ fn confirm_db_deletion(name: &str) -> Result<bool, CliError> {
     Ok(confirm.eq(name))
 }
 
+fn create_env_connection(current_profile: Profile, db_name: String) -> Result<(), Box<dyn Error>> {
+    let env_path = ".env";
+    let mut existing_vars = HashMap::new();
+    let key_value_pairs = vec![
+        (CHROMA_API_KEY_ENV_VAR.to_string(), current_profile.api_key),
+        (CHROMA_TENANT_ENV_VAR.to_string(), current_profile.tenant_id),
+        (CHROMA_DATABASE_ENV_VAR.to_string(), db_name),
+    ];
+
+    if Path::new(env_path).exists() {
+        let file = File::open(env_path)?;
+        let reader = BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line?;
+            let line = line.trim();
+
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+
+            if let Some(eq_pos) = line.find('=') {
+                let key = line[..eq_pos].trim().to_string();
+                let value = line[eq_pos + 1..].trim().to_string();
+                existing_vars.insert(key, value);
+            }
+        }
+    }
+
+    for (key, value) in key_value_pairs {
+        existing_vars.insert(key, value);
+    }
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(env_path)?;
+
+    for (key, value) in existing_vars {
+        writeln!(file, "{}={}", key, value)?;
+    }
+
+    Ok(())
+}
+
 pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), CliError> {
     let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
     let dbs = admin_client.list_databases().await?;
@@ -329,6 +390,21 @@ pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), 
 
     if !dbs.iter().any(|db| db.name == name) {
         return Err(CliError::Db(DbError::DbNotFound(name)));
+    }
+
+    if args.env_file {
+        if let Err(_) = create_env_connection(current_profile, name) {
+            return Err(DbError::EnvFile.into())
+        }
+        println!("{}", env_file_created_message());
+        return Ok(());
+    }
+
+    if args.env_vars {
+        println!("{}={}", CHROMA_API_KEY_ENV_VAR, current_profile.api_key);
+        println!("{}={}", CHROMA_TENANT_ENV_VAR, current_profile.tenant_id);
+        println!("{}={}", CHROMA_DATABASE_ENV_VAR, name);
+        return Ok(());
     }
 
     let language = match args.language {
