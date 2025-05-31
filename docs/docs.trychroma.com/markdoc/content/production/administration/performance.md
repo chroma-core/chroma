@@ -15,14 +15,14 @@ Roughly speaking, here is the sort of performance you can expect from Chroma on 
 - Small documents (100-200 words)
 - Three metadata fields per record.
 
-| Instance Type   | System RAM | Approx. Max Collection Size | Mean Latency (insert) | 99.9% Latency (insert) | Mean Latency (query) | 99.9% Latency (query) | Monthly Cost |
+| Instance Type   | System RAM | Approx. Max Collection Size | Mean Latency (insert, batch size=32) | 99.9% Latency (insert, batch size=32) | Mean Latency (query) | 99.9% Latency (query) | Monthly Cost |
 |-----------------|------------|-----------------------------|-----------------------|------------------------|----------------------|-----------------------|--------------|
-| **t3.small**    | 2          | 250,000                     | 55ms                  | 250ms                  | 22ms                 | 72ms                  | $15.936      |
-| **t3.medium**   | 4          | 700,000                     | 37ms                  | 120ms                  | 14ms                 | 41ms                  | $31.072      |
-| **t3.large**    | 8          | 1,700,000                   | 30ms                  | 100ms                  | 13ms                 | 35ms                  | $61.344      |
-| **t3.xlarge**   | 16         | 3,600,000                   | 30ms                  | 100ms                  | 13ms                 | 30ms                  | $121.888     |
-| **t3.2xlarge**  | 32         | 7,500,000                   | 30ms                  | 100ms                  | 13ms                 | 30ms                  | $242.976     |
-| **r7i.2xlarge** | 64         | 15,000,000                  | 13ms                  | 50ms                   | 7ms                  | 13ms                  | $386.944     |
+| **t3.small**    | 2          | 250,000                     | 231ms                  | 2335ms                  | 8ms                 | 29ms                  | $15.936      |
+| **t3.medium**   | 4          | 700,000                     | 191ms                  | 722ms                  | 5ms                 | 18ms                  | $31.072      |
+| **t3.large**    | 8          | 1,700,000                   | 199ms                  | 633ms                  | 4ms                 | 10ms                  | $61.344      |
+| **t3.xlarge**   | 16         | 3,600,000                   | 159ms                  | 530ms                  | 4ms                 | 7ms                  | $121.888     |
+| **t3.2xlarge**  | 32         | 7,500,000                   | 149ms                  | 520ms                  | 5ms                 | 33ms                  | $242.976     |
+| **r7i.2xlarge** | 64         | 15,000,000                  | 112ms                  | 405ms                   | 5ms                  | 7ms                  | $386.944     |
 
 {% br %}{% /br %}
 
@@ -60,15 +60,15 @@ In most realistic use cases, it’s likely that the size and performance of the 
 
 ## Latency and collection size
 
-As collections get larger and the size of the index grows, inserts and queries both take longer to complete. The rate of increase starts out fairly flat then grow roughly linearly, with the inflection point and slope depending on the quantity and speed of CPUs available.
+As collections get larger and the size of the index grows, inserts and queries both take longer to complete. The rate of increase starts out fairly flat then grow roughly linearly, with the inflection point and slope depending on the quantity and speed of CPUs available. The extreme spikes at the end of the charts for certain instances, such as `t3.2xlarge`, occur when the instance hits its memory limits and stops functioning properly.
 
 ### Query Latency
 
-![query-latency](/query-latency.png)
+![query-latency](/query_latency_1_0_10.png)
 
 ### Insert Latency
 
-![insert-latency](/insert-latency.png)
+![insert-latency](/insert_latency_1_0_10.png)
 
 {% note type="tip" title="" %}
 If you’re using multiple collections, performance looks quite similar, based on the total number of embeddings across collections. Splitting collections into multiple smaller collections doesn’t help, but it doesn’t hurt, either, as long as they all fit in memory at once.
@@ -76,33 +76,19 @@ If you’re using multiple collections, performance looks quite similar, based o
 
 ## Concurrency
 
-Although aspects of HNSW’s algorithm are multithreaded internally, only one thread can read or write to a given index at a time. For the most part, single-node Chroma is fundamentally single threaded. If an operation is executed while another is still in progress, it blocks until the first one is complete.
+The Rust rewrite fundamentally changed Chroma's concurrency model. The system now handles concurrent operations in parallel, so latency remains consistently low and flat across all batch sizes for writes, and scales linearly for queries.
 
-This means that under concurrent  load, the average latency of each request will increase.
+![concurrent-writes](/concurrent_writes_1_0_10.png)
 
-When writing, the increased latency is more pronounced with larger batch sizes, as the system is more completely saturated. We have experimentally verified this: as the number of concurrent writers is increased, average latency increases linearly.
-
-![concurrent-writes](/concurrent-writes.png)
-
-![concurrent-queries](/concurrent-queries.png)
-
-Despite the effect on latency, Chroma does remain stable with high concurrent load. Too many concurrent users can eventually increase latency to the point where the system does not perform acceptably, but this typically only happens with larger batch sizes. As the above graphs shows, the system remains usable with dozens to hundreds of operations per second.
+![concurrent-queries](/concurrent_queries_1_0_10.png)
 
 See the [Insert Throughput](./performance#insert-throughput) section below for a discussion of optimizing user count for maximum throughput when the concurrency is under your control, such as when inserting bulk data.
 
 # CPU speed, core count & type
 
-As a CPU bound application, it’s not surprising that CPU speed and type makes a difference for average latency.
+Due to Chroma's parallelization, latencies remain fairly constant regardless of CPU cores.
 
-As the data demonstrates, although it is not fully parallelized, Chroma can still take some advantage of multiple CPU cores for better throughput.
-
-![cpu-mean-query-latency](/cpu-mean-query-latency.png)
-
-{% note type="tip" title="" %}
-Note the slightly increased latency for the t3.2xlarge instance. Logically, it should be faster than the other t3 series instances, since it has the same class of CPU, and more of them.
-
-This data point is left in as an important reminder that the performance of EC2 instances is slightly variable, and it’s entirely possible to end up with an instance that has performance differences for no discernible reason.
-{% /note %}
+![cpu-mean-query-latency](/cpu_mean_query_latency_1_0_10.png)
 
 # Insert Throughput
 
@@ -110,13 +96,11 @@ A question that is often relevant is: given bulk data to insert, how fast is it 
 
 The first important factor to consider is the number of concurrent insert requests.
 
-As mentioned in the [Concurrency](./performance#concurrency) section above, actual insertion throughput does not benefit from concurrency. However, there is some amount of network and HTTP overhead which can be parallelized. Therefore, to saturate Chroma while keeping latencies as low as possible, we recommend 2 concurrent client processes or threads inserting as fast as possible.
-
-The second factor to consider is the batch size of each request. Performance is mostly linear with respect to batch size, with a constant overhead to process the HTTP request itself.
+As mentioned in the [Concurrency](./performance#concurrency) section above, insert throughput does benefit from increased concurrency. A second factor to consider is the batch size of each request. Performance scales with batch size up to CPU saturation, due to high overhead cost for smaller batch sizes. After reaching CPU saturation, around a batch size of 150 the throughput plateaus.
 
 Experimentation confirms this: overall throughput (total number of embeddings inserted, across batch size and request count) remains fairly flat between batch sizes of 100-500:
 
-![concurrent-inserts](/concurrent-inserts.png)
+![concurrent-inserts](/concurrent_inserts_1_0_10.png)
 
 Given that smaller batches have lower, more consistent latency and are less likely to lead to timeout errors, we recommend batches on the smaller side of this curve: anything between 50 and 250 is a reasonable choice.
 
