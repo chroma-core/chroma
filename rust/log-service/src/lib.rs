@@ -376,6 +376,8 @@ impl DirtyMarker {
         timeout_us: u64,
         metrics: &Metrics,
     ) -> Result<Option<Rollup>, wal3::Error> {
+        let cpu_span = tracing::info_span!("cpu computation");
+        let cpu_span_guard = cpu_span.enter();
         // NOTE(rescrv);  This is complicated code because it's a hard problem to do efficiently.
         // To cut complexity, I've chosen to do it in a way that is not the most efficient but is
         // readable and maintainable.  The most efficient way would be to do this in a single pass.
@@ -420,6 +422,7 @@ impl DirtyMarker {
         if compactable.is_empty() {
             return Ok(None);
         }
+        drop(cpu_span_guard);
         // Now fetch the compaction cursor for each collection.
         let retrieve_manifest = Arc::new(retrieve_manifest);
         let retrieve_cursor = Arc::new(retrieve_cursor);
@@ -435,8 +438,10 @@ impl DirtyMarker {
             })
             .map(
                 |(collection_id, storage, retrieve_manifest, retrieve_cursor)| async move {
-                    let cursor = (*retrieve_cursor)(Arc::clone(&storage), collection_id);
-                    let manifest = (*retrieve_manifest)(Arc::clone(&storage), collection_id);
+                    let cursor = (*retrieve_cursor)(Arc::clone(&storage), collection_id)
+                        .instrument(tracing::info_span!("fetching cursor"));
+                    let manifest = (*retrieve_manifest)(Arc::clone(&storage), collection_id)
+                        .instrument(tracing::info_span!("fetching manifest"));
                     let (cursor, manifest) = futures::future::join(cursor, manifest).await;
                     // NOTE(rescrv):  We silence the error so we log it instead.
                     let cursor = match cursor {
@@ -458,7 +463,12 @@ impl DirtyMarker {
                 },
             )
             .collect::<Vec<_>>();
-        let cursors = futures::future::join_all(futs).await;
+        let rollup_span = tracing::info_span!("fetching cursors and manifests");
+        let cursors = futures::future::join_all(futs)
+            .instrument(rollup_span)
+            .await;
+        let reprise_cpu_span = tracing::info_span!("cpu computation reprise");
+        let _reprise_cpu_span_guard = reprise_cpu_span.enter();
         let cursors = cursors
             .into_iter()
             .flat_map(Result::ok)
@@ -1361,6 +1371,7 @@ impl LogService for LogServer {
                 );
                 cursor_store.load(cursor).await
             };
+            let rollup_span = tracing::info_span!("DirtyMarker::rollup");
             let rollup = DirtyMarker::rollup(
                 Arc::clone(&self.storage),
                 load_manifest,
@@ -1375,6 +1386,7 @@ impl LogService for LogServer {
                 self.config.timeout_us,
                 &self.metrics,
             )
+            .instrument(rollup_span)
             .await
             .map_err(|err| Status::unavailable(err.to_string()))?;
             let Some(rollup) = rollup else {
