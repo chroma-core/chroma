@@ -34,6 +34,9 @@ runs:
           echo "Added registry mirror to ${node}:"
           docker exec "${node}" cat "${REGISTRY_DIR}/hosts.toml"
         done
+    - name: Wait for nodes to be ready
+      shell: bash
+      run: kubectl wait node --all --for condition=ready --timeout=60s
     - name: Start Tilt
       shell: bash
       run: tilt ci
