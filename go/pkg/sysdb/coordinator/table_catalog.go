@@ -1806,6 +1806,8 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			return nil, err
 		}
 
+		numActiveVersions := tc.getNumberOfActiveVersions(existingVersionFilePb)
+
 		txErr := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 			// NOTE: DO NOT move UpdateTenantLastCompactionTime & RegisterFilePaths to the end of the transaction.
 			//		 Keep both these operations before the UpdateLogPositionAndVersionInfo.
@@ -1849,6 +1851,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 				// SAFETY(hammadb): This int64 to uint64 conversion is ok because we always are in post-epoch time.
 				// and the value is always positive.
 				uint64(lastCompactionTime),
+				uint64(numActiveVersions),
 			)
 			if err != nil {
 				return err
