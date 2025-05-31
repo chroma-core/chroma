@@ -11,13 +11,13 @@ import UpdatesLink from "@/components/header/updates-link";
 const Header: React.FC = () => {
   return (
     <div className="flex items-center justify-between flex-shrink-0 p-3 px-5 h-14 border-b-[1px] dark:border-gray-700 ">
-      <div className="flex items-center gap-5">
+      <div className="flex items-center gap-5 w-full md:w-auto justify-between">
         <Link href="/">
           <Logo />
         </Link>
         <SearchBox />
       </div>
-      <div className="flex items-center justify-between gap-2">
+      <div className="hidden md:flex items-center justify-between gap-2">
         <DiscordLink />
         <GithubLink />
         <XLink />

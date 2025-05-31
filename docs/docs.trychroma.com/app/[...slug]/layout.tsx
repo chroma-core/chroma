@@ -11,7 +11,7 @@ const PageLayout: React.FC<LayoutProps> = ({ children, params }) => {
   const { slug } = params;
 
   return (
-    <div className={`flex flex-grow overflow-hidden `}>
+    <div className="flex flex-col md:flex-row flex-grow md:overflow-hidden">
       <Sidebar path={slug} />
       <div className="flex-grow overflow-y-auto">{children}</div>
     </div>
