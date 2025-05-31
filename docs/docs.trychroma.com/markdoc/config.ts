@@ -17,6 +17,7 @@ import CenteredContent from "@/components/markdoc/centered-content";
 import Latex from "@/components/markdoc/latex";
 import Banner from "@/components/markdoc/banner";
 import Heading from "@/components/markdoc/markdoc-heading";
+import MarkdocImage from "@/components/markdoc/markdoc-image";
 
 interface MarkDocConfig extends Config {
   components?: Record<string, React.FC<any>>;
@@ -110,6 +111,36 @@ const markdocConfig: MarkDocConfig = {
       render: "Latex",
       selfClosing: false,
     },
+    MarkdocImage: {
+      render: "MarkdocImage",
+      selfClosing: true,
+      attributes: {
+        lightSrc: {
+          type: String,
+          required: true,
+        },
+        darkSrc: {
+          type: String,
+          required: true,
+        },
+        alt: {
+          type: String,
+          required: true,
+        },
+        title: {
+          type: String,
+          required: false,
+        },
+        width: {
+          type: Number,
+          required: false,
+        },
+        height: {
+          type: Number,
+          required: false,
+        },
+      },
+    },
   },
   components: {
     InlineCode,
@@ -128,6 +159,7 @@ const markdocConfig: MarkDocConfig = {
     Banner,
     Latex,
     Heading,
+    MarkdocImage,
   },
 };
 
