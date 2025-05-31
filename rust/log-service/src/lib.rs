@@ -1554,9 +1554,13 @@ impl LogService for LogServer {
         let span =
             wrap_span_with_parent_context(tracing::trace_span!("SealLog",), request.metadata());
 
-        Err(Status::failed_precondition(
-            "rust log service doesn't do sealing",
-        ))
+        async {
+            Err(Status::failed_precondition(
+                "rust log service doesn't do sealing",
+            ))
+        }
+        .instrument(span)
+        .await
     }
 
     async fn migrate_log(
