@@ -1,0 +1,41 @@
+[package]
+name = "chroma_swift"
+version = "0.1.0"
+edition = "2021"
+description = "Swift bindings for Chroma vector database"
+
+# Define an empty workspace to keep this crate separate from the main Chroma workspace
+[workspace]
+
+[lib]
+name = "chroma_swift"
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+serde       = { version = "1.0", features = ["derive"] }
+serde_json  = "1.0"
+uniffi = { version = "0.29.2", features = ["bindgen", "tokio", "cli"] }
+tokio = { version = "1.38.0", features = ["macros", "sync"] }
+thiserror   = "1.0"
+anyhow      = "1.0"
+ndarray     = "0.15.6"
+futures     = "0.3"
+once_cell   = "1.19.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Local Chroma crates
+chroma = { path = "../chroma" }
+chroma-frontend = { path = "../frontend" }
+chroma-types = { path = "../types" }
+chroma-config = { path = "../config" }
+chroma-log = { path = "../log" }
+chroma-sysdb = { path = "../sysdb" }
+chroma-system = { path = "../system" }
+
+[build-dependencies]
+uniffi = { version = "0.25.3", features = ["build"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
