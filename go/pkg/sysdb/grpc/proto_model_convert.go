@@ -55,6 +55,7 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 		LastCompactionTimeSecs:     collection.LastCompactionTimeSecs,
 		VersionFilePath:            &collection.VersionFileName,
 		LineageFilePath:            collection.LineageFileName,
+		DatabaseId:                 collection.DatabaseId.String(),
 	}
 
 	if collection.RootCollectionID != nil {
