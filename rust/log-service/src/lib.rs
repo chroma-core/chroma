@@ -14,6 +14,7 @@ use chroma_error::ChromaError;
 use chroma_log::{config::GrpcLogConfig, grpc_log::GrpcLog};
 use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
+use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::chroma_proto::{
     log_service_client::LogServiceClient, log_service_server::LogService, CollectionInfo,
     GetAllCollectionInfoToCompactRequest, GetAllCollectionInfoToCompactResponse,
@@ -963,6 +964,8 @@ impl LogService for LogServer {
         &self,
         request: Request<PushLogsRequest>,
     ) -> Result<Response<PushLogsResponse>, Status> {
+        let span =
+            wrap_span_with_parent_context(tracing::trace_span!("PushLogs",), request.metadata());
         let push_logs = request.into_inner();
         let collection_id = Uuid::parse_str(&push_logs.collection_id)
             .map(CollectionUuid)
@@ -975,7 +978,6 @@ impl LogService for LogServer {
             return Err(Status::invalid_argument("Too few records"));
         }
         self.check_for_backpressure(collection_id)?;
-        let span = tracing::info_span!("push_logs");
 
         async move {
             let prefix = storage_prefix_for_log(collection_id);
@@ -1037,11 +1039,12 @@ impl LogService for LogServer {
         &self,
         request: Request<ScoutLogsRequest>,
     ) -> Result<Response<ScoutLogsResponse>, Status> {
+        let span =
+            wrap_span_with_parent_context(tracing::trace_span!("ScoutLogs"), request.metadata());
         let scout_logs = request.into_inner();
         let collection_id = Uuid::parse_str(&scout_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        let span = tracing::info_span!("scouting logs", collection_id = collection_id.to_string());
         async move {
             let prefix = storage_prefix_for_log(collection_id);
             let log_reader = LogReader::new(
@@ -1079,17 +1082,18 @@ impl LogService for LogServer {
         &self,
         request: Request<PullLogsRequest>,
     ) -> Result<Response<PullLogsResponse>, Status> {
+        let span =
+            wrap_span_with_parent_context(tracing::trace_span!("PullLogs"), request.metadata());
         let pull_logs = request.into_inner();
         let collection_id = Uuid::parse_str(&pull_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        let span = tracing::info_span!(
-            "pull_logs",
-            collection_id = collection_id.to_string(),
-            start_from_offset = pull_logs.start_from_offset,
-            batch_size = pull_logs.batch_size,
-        );
         async move {
+            tracing::info!(
+                collection_id = collection_id.to_string(),
+                start_from_offset = pull_logs.start_from_offset,
+                batch_size = pull_logs.batch_size,
+            );
             let prefix = storage_prefix_for_log(collection_id);
             let log_reader = LogReader::new(
                 self.config.reader.clone(),
@@ -1172,6 +1176,8 @@ impl LogService for LogServer {
         &self,
         request: Request<ForkLogsRequest>,
     ) -> Result<Response<ForkLogsResponse>, Status> {
+        let span =
+            wrap_span_with_parent_context(tracing::trace_span!("ForkLogs"), request.metadata());
         let request = request.into_inner();
         let source_collection_id = Uuid::parse_str(&request.source_collection_id)
             .map(CollectionUuid)
@@ -1182,15 +1188,14 @@ impl LogService for LogServer {
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let source_prefix = storage_prefix_for_log(source_collection_id);
         let target_prefix = storage_prefix_for_log(target_collection_id);
-        let span = tracing::info_span!(
-            "fork_logs",
-            source_collection_id = source_collection_id.to_string(),
-            target_collection_id = target_collection_id.to_string(),
-        );
         let storage = Arc::clone(&self.storage);
         let options = self.config.writer.clone();
 
         async move {
+            tracing::info!(
+                source_collection_id = source_collection_id.to_string(),
+                target_collection_id = target_collection_id.to_string(),
+            );
             let log_reader = LogReader::new(
                 self.config.reader.clone(),
                 Arc::clone(&storage),
@@ -1266,195 +1271,218 @@ impl LogService for LogServer {
         &self,
         request: Request<GetAllCollectionInfoToCompactRequest>,
     ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
+        let span = wrap_span_with_parent_context(
+            tracing::trace_span!("GetAllCollectionInfoToCompact"),
+            request.metadata(),
+        );
         let request = request.into_inner();
-        // Ensure at most one request at a time.
-        let _guard = self.compacting.lock().await;
-        let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
-            return Err(Status::unavailable("Failed to get dirty log reader"));
-        };
-        let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
-            return Err(Status::unavailable("Failed to get dirty log cursors"));
-        };
-        let witness = match cursors.load(&STABLE_PREFIX).await {
-            Ok(witness) => witness,
-            Err(err) => {
-                return Err(Status::new(err.code().into(), err.to_string()));
+        async move {
+            // Ensure at most one request at a time.
+            let _guard = self.compacting.lock().await;
+            let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
+                return Err(Status::unavailable("Failed to get dirty log reader"));
+            };
+            let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+                return Err(Status::unavailable("Failed to get dirty log cursors"));
+            };
+            let witness = match cursors.load(&STABLE_PREFIX).await {
+                Ok(witness) => witness,
+                Err(err) => {
+                    return Err(Status::new(err.code().into(), err.to_string()));
+                }
+            };
+            let default = Cursor::default();
+            let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
+            tracing::info!("cursoring from {cursor:?}");
+            let dirty_fragments = reader
+                .scan(
+                    cursor.position,
+                    Limits {
+                        max_files: Some(1_000_000),
+                        max_bytes: Some(1_000_000_000),
+                    },
+                )
+                .await
+                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            if dirty_fragments.is_empty() {
+                return Ok(Response::new(GetAllCollectionInfoToCompactResponse {
+                    all_collection_info: vec![],
+                }));
             }
-        };
-        let default = Cursor::default();
-        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
-        tracing::info!("cursoring from {cursor:?}");
-        let dirty_fragments = reader
-            .scan(
-                cursor.position,
-                Limits {
-                    max_files: Some(1_000_000),
-                    max_bytes: Some(1_000_000_000),
-                },
+            if dirty_fragments.len() >= 750_000 {
+                tracing::error!("Too many dirty fragments: {}", dirty_fragments.len());
+            }
+            if dirty_fragments.len() >= 1_000_000 {
+                return Err(Status::resource_exhausted("Too many dirty fragments"));
+            }
+            let dirty_futures = dirty_fragments
+                .iter()
+                .map(|fragment| reader.read_parquet(fragment))
+                .collect::<Vec<_>>();
+            let dirty_raw = futures::future::try_join_all(dirty_futures)
+                .await
+                .map_err(|err| {
+                    Status::new(
+                        err.code().into(),
+                        format!("Failed to fetch dirty parquet: {}", err),
+                    )
+                })?;
+            let mut dirty_markers = vec![];
+            for (_, records, _) in dirty_raw {
+                let records = records
+                    .into_iter()
+                    .map(|x| {
+                        let marker = serde_json::from_slice::<DirtyMarker>(&x.1)
+                            .map_err(|err| Status::unavailable(err.to_string()))?;
+                        Ok::<_, Status>((x.0, marker))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                dirty_markers.extend(records);
+            }
+            let load_manifest = |storage, collection_id| async move {
+                let reader = LogReader::new(
+                    LogReaderOptions::default(),
+                    storage,
+                    storage_prefix_for_log(collection_id),
+                );
+                reader.manifest().await
+            };
+            let load_cursor = |storage, collection_id| async move {
+                let cursor = &COMPACTION;
+                let cursor_store = CursorStore::new(
+                    CursorStoreOptions::default(),
+                    storage,
+                    storage_prefix_for_log(collection_id),
+                    "writer".to_string(),
+                );
+                cursor_store.load(cursor).await
+            };
+            let rollup = DirtyMarker::rollup(
+                Arc::clone(&self.storage),
+                load_manifest,
+                load_cursor,
+                &dirty_markers,
+                std::cmp::min(
+                    self.config.record_count_threshold,
+                    request.min_compaction_size,
+                ),
+                self.config.num_records_before_backpressure,
+                self.config.reinsert_threshold,
+                self.config.timeout_us,
+                &self.metrics,
             )
             .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-        if dirty_fragments.is_empty() {
-            return Ok(Response::new(GetAllCollectionInfoToCompactResponse {
-                all_collection_info: vec![],
-            }));
-        }
-        if dirty_fragments.len() >= 750_000 {
-            tracing::error!("Too many dirty fragments: {}", dirty_fragments.len());
-        }
-        if dirty_fragments.len() >= 1_000_000 {
-            return Err(Status::resource_exhausted("Too many dirty fragments"));
-        }
-        let dirty_futures = dirty_fragments
-            .iter()
-            .map(|fragment| reader.read_parquet(fragment))
-            .collect::<Vec<_>>();
-        let dirty_raw = futures::future::try_join_all(dirty_futures)
-            .await
-            .map_err(|err| {
-                Status::new(
-                    err.code().into(),
-                    format!("Failed to fetch dirty parquet: {}", err),
-                )
-            })?;
-        let mut dirty_markers = vec![];
-        for (_, records, _) in dirty_raw {
-            let records = records
+            .map_err(|err| Status::unavailable(err.to_string()))?;
+            let Some(rollup) = rollup else {
+                return Ok(Response::new(GetAllCollectionInfoToCompactResponse {
+                    all_collection_info: vec![],
+                }));
+            };
+            let reinsert_dirty_markers = rollup
+                .reinsert
                 .into_iter()
-                .map(|x| {
-                    let marker = serde_json::from_slice::<DirtyMarker>(&x.1)
-                        .map_err(|err| Status::unavailable(err.to_string()))?;
-                    Ok::<_, Status>((x.0, marker))
+                .map(|marker| {
+                    serde_json::to_string(&marker)
+                        .map(Vec::from)
+                        .map_err(|err| Status::unavailable(err.to_string()))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            dirty_markers.extend(records);
-        }
-        let load_manifest = |storage, collection_id| async move {
-            let reader = LogReader::new(
-                LogReaderOptions::default(),
-                storage,
-                storage_prefix_for_log(collection_id),
-            );
-            reader.manifest().await
-        };
-        let load_cursor = |storage, collection_id| async move {
-            let cursor = &COMPACTION;
-            let cursor_store = CursorStore::new(
-                CursorStoreOptions::default(),
-                storage,
-                storage_prefix_for_log(collection_id),
-                "writer".to_string(),
-            );
-            cursor_store.load(cursor).await
-        };
-        let rollup = DirtyMarker::rollup(
-            Arc::clone(&self.storage),
-            load_manifest,
-            load_cursor,
-            &dirty_markers,
-            std::cmp::min(
-                self.config.record_count_threshold,
-                request.min_compaction_size,
-            ),
-            self.config.num_records_before_backpressure,
-            self.config.reinsert_threshold,
-            self.config.timeout_us,
-            &self.metrics,
-        )
-        .await
-        .map_err(|err| Status::unavailable(err.to_string()))?;
-        let Some(rollup) = rollup else {
-            return Ok(Response::new(GetAllCollectionInfoToCompactResponse {
-                all_collection_info: vec![],
-            }));
-        };
-        let reinsert_dirty_markers = rollup
-            .reinsert
-            .into_iter()
-            .map(|marker| {
-                serde_json::to_string(&marker)
-                    .map(Vec::from)
-                    .map_err(|err| Status::unavailable(err.to_string()))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        self.set_backpressure(&rollup.backpressure);
-        if rollup.advance_to < cursor.position {
-            tracing::error!(
-                "advance_to went back in time: {:?} -> {:?}",
+            self.set_backpressure(&rollup.backpressure);
+            if rollup.advance_to < cursor.position {
+                tracing::error!(
+                    "advance_to went back in time: {:?} -> {:?}",
+                    cursor.position,
+                    rollup.advance_to
+                );
+                return Err(Status::aborted("Invalid advance_to"));
+            }
+            let mut new_cursor = cursor.clone();
+            new_cursor.position = rollup.advance_to;
+            if !reinsert_dirty_markers.is_empty() {
+                self.dirty_log
+                    .append_many(reinsert_dirty_markers)
+                    .await
+                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            }
+            tracing::info!(
+                "Advancing cursor {:?} -> {:?}",
                 cursor.position,
-                rollup.advance_to
+                new_cursor.position
             );
-            return Err(Status::aborted("Invalid advance_to"));
+            if let Some(witness) = witness {
+                cursors
+                    .save(&STABLE_PREFIX, &new_cursor, &witness)
+                    .await
+                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            } else {
+                cursors
+                    .init(&STABLE_PREFIX, new_cursor)
+                    .await
+                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            }
+            Ok(Response::new(GetAllCollectionInfoToCompactResponse {
+                all_collection_info: rollup.compactable,
+            }))
         }
-        let mut new_cursor = cursor.clone();
-        new_cursor.position = rollup.advance_to;
-        if !reinsert_dirty_markers.is_empty() {
-            self.dirty_log
-                .append_many(reinsert_dirty_markers)
-                .await
-                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-        }
-        tracing::info!(
-            "Advancing cursor {:?} -> {:?}",
-            cursor.position,
-            new_cursor.position
-        );
-        if let Some(witness) = witness {
-            cursors
-                .save(&STABLE_PREFIX, &new_cursor, &witness)
-                .await
-                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-        } else {
-            cursors
-                .init(&STABLE_PREFIX, new_cursor)
-                .await
-                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-        }
-        Ok(Response::new(GetAllCollectionInfoToCompactResponse {
-            all_collection_info: rollup.compactable,
-        }))
+        .instrument(span)
+        .await
     }
 
-    #[tracing::instrument(info, skip(self, request), err(Display))]
     async fn update_collection_log_offset(
         &self,
         request: Request<UpdateCollectionLogOffsetRequest>,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
-        let request = request.into_inner();
-        let collection_id = Uuid::parse_str(&request.collection_id)
-            .map(CollectionUuid)
-            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let span = wrap_span_with_parent_context(
+            tracing::trace_span!("UpdateCollectionLogOffset",),
+            request.metadata(),
+        );
 
-        // Grab a lock on the state for this key, so that a racing initialize won't do anything.
-        let key = LogKey { collection_id };
-        let handle = self.open_logs.get_or_create_state(key);
-        let mut _active = handle.active.lock().await;
-        self._update_collection_log_offset(Request::new(request))
-            .await
+        async move {
+            let request = request.into_inner();
+            let collection_id = Uuid::parse_str(&request.collection_id)
+                .map(CollectionUuid)
+                .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+
+            // Grab a lock on the state for this key, so that a racing initialize won't do anything.
+            let key = LogKey { collection_id };
+            let handle = self.open_logs.get_or_create_state(key);
+            let mut _active = handle.active.lock().await;
+            self._update_collection_log_offset(Request::new(request))
+                .await
+        }
+        .instrument(span)
+        .await
     }
 
-    #[tracing::instrument(skip(self, request), err(Display))]
     async fn purge_dirty_for_collection(
         &self,
         request: Request<PurgeDirtyForCollectionRequest>,
     ) -> Result<Response<PurgeDirtyForCollectionResponse>, Status> {
-        let request = request.into_inner();
-        let collection_id = Uuid::parse_str(&request.collection_id)
-            .map(CollectionUuid)
-            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        tracing::info!("purge_dirty_for_collection {collection_id}");
-        let dirty_marker = DirtyMarker::Purge { collection_id };
-        let dirty_marker_json = serde_json::to_string(&dirty_marker)
-            .map_err(|err| {
-                tracing::error!("Failed to serialize dirty marker: {}", err);
-                wal3::Error::Internal
-            })
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-        self.dirty_log
-            .append(Vec::from(dirty_marker_json))
-            .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-        Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+        let span = wrap_span_with_parent_context(
+            tracing::trace_span!("PurgeDirtyForCollection",),
+            request.metadata(),
+        );
+        async move {
+            let request = request.into_inner();
+            let collection_id = Uuid::parse_str(&request.collection_id)
+                .map(CollectionUuid)
+                .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+            tracing::info!("purge_dirty_for_collection {collection_id}");
+            let dirty_marker = DirtyMarker::Purge { collection_id };
+            let dirty_marker_json = serde_json::to_string(&dirty_marker)
+                .map_err(|err| {
+                    tracing::error!("Failed to serialize dirty marker: {}", err);
+                    wal3::Error::Internal
+                })
+                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            self.dirty_log
+                .append(Vec::from(dirty_marker_json))
+                .await
+                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+        }
+        .instrument(span)
+        .await
     }
 
     #[tracing::instrument(skip(self, _request))]
@@ -1518,8 +1546,11 @@ impl LogService for LogServer {
 
     async fn seal_log(
         &self,
-        _request: Request<SealLogRequest>,
+        request: Request<SealLogRequest>,
     ) -> Result<Response<SealLogResponse>, Status> {
+        let span =
+            wrap_span_with_parent_context(tracing::trace_span!("SealLog",), request.metadata());
+
         Err(Status::failed_precondition(
             "rust log service doesn't do sealing",
         ))
@@ -1529,11 +1560,13 @@ impl LogService for LogServer {
         &self,
         request: Request<MigrateLogRequest>,
     ) -> Result<Response<MigrateLogResponse>, Status> {
+        let span =
+            wrap_span_with_parent_context(tracing::trace_span!("MigrateLog",), request.metadata());
+
         let migrate_log = request.into_inner();
         let collection_id = Uuid::parse_str(&migrate_log.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        let span = tracing::info_span!("migrate_log");
 
         async move {
             tracing::info!(
