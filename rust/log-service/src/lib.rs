@@ -1,9 +1,8 @@
 #![recursion_limit = "256"]
 
-use std::cmp::Ordering;
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::future::Future;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -70,6 +69,20 @@ impl Metrics {
                 .build(),
         }
     }
+}
+
+/////////////////////////////////////////////// Error //////////////////////////////////////////////
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("wal3: {0:?}")]
+    Wal3(#[from] wal3::Error),
+    #[error("serialization error: {0:?}")]
+    Json(#[from] serde_json::Error),
+    #[error("Dirty log writer failed to provide a reader")]
+    CouldNotGetDirtyLogReader,
+    #[error("Dirty log writer failed to provide a cursor store")]
+    CouldNotGetDirtyLogCursors,
 }
 
 ///////////////////////////////////////// state maintenance ////////////////////////////////////////
@@ -263,23 +276,10 @@ impl chroma_cache::Weighted for CachedParquetFragment {
     }
 }
 
-////////////////////////////////////////////// Rollup //////////////////////////////////////////////
-
-/// A rollup is a summary of the dirty log.  It specifies a position that can be advanced to if and
-/// only if the given dirty markers are reinserted.  The compactable collection info is always
-/// compactable.
-#[derive(Debug, Default)]
-pub struct Rollup {
-    pub advance_to: LogPosition,
-    pub reinsert: Vec<DirtyMarker>,
-    pub compactable: Vec<CollectionInfo>,
-    pub backpressure: Vec<CollectionUuid>,
-}
-
 //////////////////////////////////////// RollupPerCollection ///////////////////////////////////////
 
 /// A summary of the data on the log for a single collection.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 struct RollupPerCollection {
     start_log_position: LogPosition,
     limit_log_position: LogPosition,
@@ -297,7 +297,7 @@ impl RollupPerCollection {
         }
     }
 
-    fn observe(
+    fn observe_dirty_marker(
         &mut self,
         log_position: LogPosition,
         num_records: u64,
@@ -315,6 +315,35 @@ impl RollupPerCollection {
         // Consider the most recent initial insertion time so if we've compacted earlier we drop.
         self.initial_insertion_epoch_us =
             std::cmp::max(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
+    }
+
+    fn witness_manifest_and_cursor(&mut self, manifest: &Manifest, witness: Option<&Witness>) {
+        self.limit_log_position =
+            std::cmp::max(manifest.maximum_log_position(), self.limit_log_position);
+        self.start_log_position = std::cmp::min(
+            witness
+                .map(|x| x.1.position)
+                .unwrap_or(manifest.minimum_log_position()),
+            self.start_log_position,
+        );
+    }
+
+    fn is_empty(&self) -> bool {
+        self.start_log_position == self.limit_log_position
+    }
+
+    fn dirty_marker(&self, collection_id: CollectionUuid) -> DirtyMarker {
+        DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: self.start_log_position,
+            num_records: self.limit_log_position - self.start_log_position,
+            reinsert_count: self.reinsert_count,
+            initial_insertion_epoch_us: self.initial_insertion_epoch_us,
+        }
+    }
+
+    fn requires_backpressure(&self, threshold: u64) -> bool {
+        self.limit_log_position - self.start_log_position >= threshold
     }
 }
 
@@ -359,214 +388,6 @@ impl DirtyMarker {
         }
     }
 
-    /// Given a contiguous prefix of markers, process the log into a rollup.  That is, a set of
-    /// markers to reinsert, a set of collections to compact, and an advance_to log position.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn rollup<
-        F1: Future<Output = Result<Option<Manifest>, wal3::Error>>,
-        F2: Future<Output = Result<Option<Witness>, wal3::Error>>,
-    >(
-        storage: Arc<Storage>,
-        retrieve_manifest: impl Fn(Arc<Storage>, CollectionUuid) -> F1,
-        retrieve_cursor: impl Fn(Arc<Storage>, CollectionUuid) -> F2,
-        markers: &[(LogPosition, DirtyMarker)],
-        record_count_threshold: u64,
-        record_count_backpressure: u64,
-        reinsert_threshold: u64,
-        timeout_us: u64,
-        metrics: &Metrics,
-    ) -> Result<Option<Rollup>, wal3::Error> {
-        let cpu_span = tracing::info_span!("cpu computation");
-        let cpu_span_guard = cpu_span.enter();
-        // NOTE(rescrv);  This is complicated code because it's a hard problem to do efficiently.
-        // To cut complexity, I've chosen to do it in a way that is not the most efficient but is
-        // readable and maintainable.  The most efficient way would be to do this in a single pass.
-        // Someone better can do that if it's ever necessary.
-        let per_collection = Self::coalesce_markers(markers)?;
-        let now_us = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| wal3::Error::Internal)?
-            .as_micros() as u64;
-        let mut reinsert = vec![];
-        let mut compactable = vec![];
-        // Process the output of the coalesce call to determine which collections need to be
-        // compacted.
-        for (collection_id, rollup_pc) in per_collection.iter() {
-            if rollup_pc.start_log_position > rollup_pc.limit_log_position {
-                tracing::error!(
-                    "Invalid dirty range for {}: {:?} -> {:?}",
-                    collection_id,
-                    rollup_pc.start_log_position,
-                    rollup_pc.limit_log_position
-                );
-                continue;
-            }
-            let num_records = rollup_pc.limit_log_position - rollup_pc.start_log_position;
-            let reinsert_count = rollup_pc.reinsert_count;
-            let initial_insertion_epoch_us = rollup_pc.initial_insertion_epoch_us;
-            let to_compact = num_records >= record_count_threshold
-                || now_us - initial_insertion_epoch_us >= timeout_us
-                || reinsert_count >= reinsert_threshold;
-            if to_compact {
-                compactable.push(collection_id);
-            }
-            let marker = DirtyMarker::MarkDirty {
-                collection_id: *collection_id,
-                log_position: rollup_pc.start_log_position,
-                num_records,
-                reinsert_count: reinsert_count + 1,
-                initial_insertion_epoch_us,
-            };
-            reinsert.push(marker);
-        }
-        if compactable.is_empty() {
-            return Ok(None);
-        }
-        drop(cpu_span_guard);
-        // Now fetch the compaction cursor for each collection.
-        let retrieve_manifest = Arc::new(retrieve_manifest);
-        let retrieve_cursor = Arc::new(retrieve_cursor);
-        let futs = compactable
-            .iter()
-            .map(|collection_id| {
-                (
-                    **collection_id,
-                    Arc::clone(&storage),
-                    Arc::clone(&retrieve_manifest),
-                    Arc::clone(&retrieve_cursor),
-                )
-            })
-            .map(
-                |(collection_id, storage, retrieve_manifest, retrieve_cursor)| async move {
-                    let cursor = (*retrieve_cursor)(Arc::clone(&storage), collection_id)
-                        .instrument(tracing::info_span!("fetching cursor"));
-                    let manifest = (*retrieve_manifest)(Arc::clone(&storage), collection_id)
-                        .instrument(tracing::info_span!("fetching manifest"));
-                    let (cursor, manifest) = futures::future::join(cursor, manifest).await;
-                    // NOTE(rescrv):  We silence the error so we log it instead.
-                    let cursor = match cursor {
-                        Ok(cursor) => cursor,
-                        Err(err) => {
-                            tracing::error!("Failed to get cursor for {}", collection_id);
-                            return Err(err);
-                        }
-                    };
-                    // NOTE(rescrv):  We silence the error so we log it instead.
-                    let manifest = match manifest {
-                        Ok(manifest) => manifest,
-                        Err(err) => {
-                            tracing::error!("Failed to get manifest for {}", collection_id);
-                            return Err(err);
-                        }
-                    };
-                    Ok((collection_id, (cursor, manifest)))
-                },
-            )
-            .collect::<Vec<_>>();
-        let rollup_span = tracing::info_span!("fetching cursors and manifests");
-        let cursors = futures::future::join_all(futs)
-            .instrument(rollup_span)
-            .await;
-        let reprise_cpu_span = tracing::info_span!("cpu computation reprise");
-        let _reprise_cpu_span_guard = reprise_cpu_span.enter();
-        let cursors = cursors
-            .into_iter()
-            .flat_map(Result::ok)
-            .collect::<HashMap<_, _>>();
-        let mut uncompacted = 0u64;
-        let mut backpressure = vec![];
-        let compactable = compactable
-            .into_iter()
-            .filter_map(|collection_id| {
-                let (witness, manifest) = cursors.get(collection_id)?.clone();
-                let cursor = witness.as_ref().map(|w| w.cursor());
-                let default = Cursor::default();
-                let cursor = cursor.unwrap_or(&default);
-                let manifest = match manifest {
-                    Some(manifest) => manifest,
-                    None => {
-                        // NOTE(rescrv):  If we saw that there is no manifest, we know that we can
-                        // drop the dirty bit because the collection was deleted and won't be
-                        // reinstantiated.
-                        reinsert.retain(|x| x.collection_id() != *collection_id);
-                        return None;
-                    }
-                };
-                let maximum_log_position = manifest.maximum_log_position();
-                let record_enumeration_position = maximum_log_position.offset() as i64 - 1;
-                let record_compaction_position = cursor.position.offset() as i64 - 1;
-                match record_enumeration_position.cmp(&record_compaction_position) {
-                    Ordering::Equal => {
-                        // Same as above.
-                        reinsert.retain(|x| x.collection_id() != *collection_id);
-                        None
-                    }
-                    Ordering::Less => {
-                        // We don't un-reinsert here because it'd snowball a bug.
-                        tracing::error!(
-                            "compaction sees cursor ahead of manifest: {:?} < {:?}",
-                            manifest.maximum_log_position(),
-                            cursor.position,
-                        );
-                        None
-                    }
-                    Ordering::Greater => {
-                        uncompacted += maximum_log_position - cursor.position;
-                        if maximum_log_position - cursor.position >= record_count_backpressure {
-                            backpressure.push(*collection_id);
-                        }
-                        if maximum_log_position - cursor.position >= record_count_threshold {
-                            Some(CollectionInfo {
-                                collection_id: collection_id.to_string(),
-                                first_log_offset: cursor.position.offset() as i64,
-                                first_log_ts: cursor.position.offset() as i64,
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
-        let mut advance_to = markers
-            .iter()
-            .map(|(log_position, _)| *log_position + 1u64)
-            .max()
-            .unwrap_or(LogPosition::default());
-        for (log_position, marker) in markers {
-            advance_to = std::cmp::max(advance_to, *log_position);
-            if let DirtyMarker::MarkDirty {
-                collection_id,
-                log_position,
-                num_records,
-                reinsert_count: _,
-                initial_insertion_epoch_us: _,
-            } = marker
-            {
-                let collection_id = collection_id.to_string();
-                if let Some(compactable) = compactable
-                    .iter()
-                    .find(|x| x.collection_id == collection_id)
-                {
-                    if LogPosition::from_offset(compactable.first_log_offset as u64)
-                        < *log_position + *num_records
-                    {
-                        break;
-                    }
-                }
-            }
-        }
-        metrics
-            .log_total_uncompacted_records_count
-            .record(uncompacted as f64, &[]);
-        Ok(Some(Rollup {
-            advance_to,
-            reinsert,
-            compactable,
-            backpressure,
-        }))
-    }
-
     fn coalesce_markers(
         markers: &[(LogPosition, DirtyMarker)],
     ) -> Result<HashMap<CollectionUuid, RollupPerCollection>, wal3::Error> {
@@ -584,7 +405,7 @@ impl DirtyMarker {
                     let position = rollups
                         .entry(*collection_id)
                         .or_insert_with(|| RollupPerCollection::new(*log_position, *num_records));
-                    position.observe(
+                    position.observe_dirty_marker(
                         *log_position,
                         *num_records,
                         *reinsert_count,
@@ -654,8 +475,9 @@ pub struct LogServer {
     dirty_log: Arc<LogWriter>,
     #[allow(clippy::type_complexity)]
     proxy: Option<LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>>,
-    compacting: tokio::sync::Mutex<()>,
+    rolling_up: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
+    need_to_compact: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
     cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedParquetFragment>>>,
     metrics: Metrics,
 }
@@ -837,7 +659,7 @@ impl LogServer {
             if resp.log_is_sealed {
                 self.effectuate_log_transfer(collection_id, proxy.clone(), 3)
                     .await?;
-                self.push_logs(Request::new(request)).await
+                Box::pin(self.push_logs(Request::new(request))).await
             } else {
                 Ok(Response::new(resp))
             }
@@ -952,6 +774,7 @@ impl LogServer {
                 .as_micros() as u64,
             writer: "TODO".to_string(),
         };
+        let position = cursor.position;
         if let Some(witness) = witness {
             cursor_store
                 .save(cursor_name, &cursor, &witness)
@@ -967,12 +790,215 @@ impl LogServer {
                     Status::new(err.code().into(), format!("Failed to init cursor: {}", err))
                 })?;
         }
+        let mut need_to_compact = self.need_to_compact.lock();
+        if let Entry::Occupied(mut entry) = need_to_compact.entry(collection_id) {
+            let rollup = entry.get_mut();
+            rollup.start_log_position = std::cmp::max(rollup.start_log_position, position);
+            if rollup.start_log_position >= rollup.limit_log_position {
+                entry.remove();
+            }
+        }
         Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
     }
-}
 
-#[async_trait::async_trait]
-impl LogService for LogServer {
+    async fn cached_get_all_collection_info_to_compact(
+        &self,
+        request: GetAllCollectionInfoToCompactRequest,
+    ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
+        // TODO(rescrv):  Realistically we could make this configurable.
+        const MAX_COLLECTION_INFO_NUMBER: usize = 10000;
+        let mut selected_rollups = Vec::with_capacity(MAX_COLLECTION_INFO_NUMBER);
+        // Do a non-allocating pass here.
+        {
+            let need_to_compact = self.need_to_compact.lock();
+            for (collection_id, rollup) in need_to_compact.iter() {
+                if rollup.limit_log_position - rollup.start_log_position
+                    >= request.min_compaction_size
+                {
+                    selected_rollups.push((*collection_id, *rollup));
+                }
+            }
+        }
+        // Then allocate the collection ID strings outside the lock.
+        let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
+        for (collection_id, rollup) in selected_rollups {
+            all_collection_info.push(CollectionInfo {
+                collection_id: collection_id.to_string(),
+                first_log_offset: rollup.start_log_position.offset() as i64,
+                first_log_ts: rollup.start_log_position.offset() as i64,
+            });
+        }
+        Ok(Response::new(GetAllCollectionInfoToCompactResponse {
+            all_collection_info,
+        }))
+    }
+
+    /// Read a prefix of the dirty log, coalescing records as it goes.
+    ///
+    /// This will rewrite the dirty log's coalesced contents at the tail and adjust the cursor to
+    /// said position so that the next read is O(1) if there are no more writes.
+    #[tracing::instrument(skip(self), err(Display))]
+    async fn roll_dirty_log(&self) -> Result<(), Error> {
+        // Ensure at most one request at a time.
+        let _guard = self.rolling_up.lock().await;
+        let (witness, cursor, dirty_markers) = self.read_dirty_log().await?;
+        let mut rollups = DirtyMarker::coalesce_markers(&dirty_markers)?;
+        self.enrich_dirty_log(&mut rollups).await?;
+        let mut markers = vec![];
+        let mut backpressure = vec![];
+        let mut total_uncompacted = 0;
+        for (collection_id, rollup) in rollups.iter() {
+            total_uncompacted += rollup
+                .limit_log_position
+                .offset()
+                .saturating_sub(rollup.start_log_position.offset());
+            let marker = rollup.dirty_marker(*collection_id);
+            markers.push(serde_json::to_string(&marker).map(Vec::from)?);
+            if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                backpressure.push(*collection_id);
+            }
+        }
+        if !markers.is_empty() {
+            let mut new_cursor = cursor.clone();
+            new_cursor.position = self.dirty_log.append_many(markers).await?;
+            let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+                return Err(Error::CouldNotGetDirtyLogCursors);
+            };
+            tracing::info!(
+                "Advancing dirty log cursor {:?} -> {:?}",
+                cursor.position,
+                new_cursor.position
+            );
+            if let Some(witness) = witness {
+                cursors.save(&STABLE_PREFIX, &new_cursor, &witness).await?;
+            } else {
+                cursors.init(&STABLE_PREFIX, new_cursor).await?;
+            }
+        }
+        self.metrics
+            .log_total_uncompacted_records_count
+            .record(total_uncompacted as f64, &[]);
+        self.set_backpressure(&backpressure);
+        let mut need_to_compact = self.need_to_compact.lock();
+        std::mem::swap(&mut *need_to_compact, &mut rollups);
+        Ok(())
+    }
+
+    /// Read the entirety of a prefix of the dirty log.
+    #[tracing::instrument(skip(self), err(Display))]
+    #[allow(clippy::type_complexity)]
+    async fn read_dirty_log(
+        &self,
+    ) -> Result<(Option<Witness>, Cursor, Vec<(LogPosition, DirtyMarker)>), Error> {
+        let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
+            return Err(Error::CouldNotGetDirtyLogReader);
+        };
+        let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+            return Err(Error::CouldNotGetDirtyLogCursors);
+        };
+        let witness = cursors.load(&STABLE_PREFIX).await?;
+        let default = Cursor::default();
+        let cursor = witness
+            .as_ref()
+            .map(|w| w.cursor())
+            .unwrap_or(&default)
+            .clone();
+        tracing::info!("cursoring from {cursor:?}");
+        let dirty_fragments = reader
+            .scan(
+                cursor.position,
+                Limits {
+                    max_files: Some(10_000),
+                    max_bytes: Some(1_000_000_000),
+                },
+            )
+            .await?;
+        if dirty_fragments.is_empty() {
+            return Ok((witness, cursor, vec![]));
+        }
+        if dirty_fragments.len() >= 1_000 {
+            tracing::error!("Too many dirty fragments: {}", dirty_fragments.len());
+        }
+        let dirty_futures = dirty_fragments
+            .iter()
+            .map(|fragment| reader.read_parquet(fragment))
+            .collect::<Vec<_>>();
+        let dirty_raw = futures::future::try_join_all(dirty_futures).await?;
+        let mut dirty_markers = vec![];
+        for (_, records, _) in dirty_raw {
+            let records = records
+                .into_iter()
+                .flat_map(|x| match serde_json::from_slice::<DirtyMarker>(&x.1) {
+                    Ok(marker) => Some((x.0, marker)),
+                    Err(err) => {
+                        tracing::error!(
+                            "could not read marker for {}: {err}",
+                            String::from_utf8_lossy(&x.1)
+                        );
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            dirty_markers.extend(records);
+        }
+        Ok((witness, cursor, dirty_markers))
+    }
+
+    /// Enrich a rolled up dirty log by reading cursors and manifests to determine what still needs
+    /// to be compacted.  Entries will be removed if they correspond to a compacted log range.
+    /// Entries will remain if there is data to be collected.
+    #[tracing::instrument(skip(self, rollups), err(Display))]
+    async fn enrich_dirty_log(
+        &self,
+        rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
+    ) -> Result<(), Error> {
+        let load_manifest = |storage, collection_id| async move {
+            let reader = LogReader::new(
+                LogReaderOptions::default(),
+                Arc::clone(storage),
+                storage_prefix_for_log(collection_id),
+            );
+            reader.manifest().await
+        };
+        let load_cursor = |storage, collection_id| async move {
+            let cursor = &COMPACTION;
+            let cursor_store = CursorStore::new(
+                CursorStoreOptions::default(),
+                Arc::clone(storage),
+                storage_prefix_for_log(collection_id),
+                "rollup".to_string(),
+            );
+            cursor_store.load(cursor).await
+        };
+        for (collection_id, mut rollup) in std::mem::take(rollups) {
+            // TODO(rescrv):  We can avoid loading the manifest and cursor by checking an
+            // in-memory lookaside structure.
+            let Some(manifest) = load_manifest(&self.storage, collection_id).await? else {
+                tracing::warn!("{collection_id} has no manifest; this may mean it was deleted");
+                continue;
+            };
+            let cursor = load_cursor(&self.storage, collection_id).await?;
+            // NOTE(rescrv):  There are two spreads that we have.
+            // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
+            // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
+            // data that needs to be compacted.
+            rollup.witness_manifest_and_cursor(&manifest, cursor.as_ref());
+            if !rollup.is_empty() {
+                rollups.insert(collection_id, rollup);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn background_task(&self) {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            if let Err(err) = self.roll_dirty_log().await {
+                tracing::error!("could not roll up dirty log: {err:?}");
+            }
+        }
+    }
+
     async fn push_logs(
         &self,
         request: Request<PushLogsRequest>,
@@ -983,7 +1009,6 @@ impl LogService for LogServer {
         let collection_id = Uuid::parse_str(&push_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        tracing::info!("Pushing logs for collection {}", collection_id);
         if push_logs.records.len() > i32::MAX as usize {
             return Err(Status::invalid_argument("Too many records"));
         }
@@ -993,6 +1018,7 @@ impl LogService for LogServer {
         self.check_for_backpressure(collection_id)?;
 
         async move {
+            tracing::info!("Pushing logs for collection {}", collection_id);
             let prefix = storage_prefix_for_log(collection_id);
             let key = LogKey { collection_id };
             let handle = self.open_logs.get_or_create_state(key);
@@ -1280,168 +1306,17 @@ impl LogService for LogServer {
         .await
     }
 
-    #[tracing::instrument(info, skip(self, request), err(Display))]
     async fn get_all_collection_info_to_compact(
         &self,
         request: Request<GetAllCollectionInfoToCompactRequest>,
     ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
         let span = wrap_span_with_parent_context(
-            tracing::trace_span!("GetAllCollectionInfoToCompact"),
+            tracing::trace_span!("GetAllCollectionInfoToCompact",),
             request.metadata(),
         );
-        let request = request.into_inner();
-        async move {
-            // Ensure at most one request at a time.
-            let _guard = self.compacting.lock().await;
-            let Some(reader) = self.dirty_log.reader(LogReaderOptions::default()) else {
-                return Err(Status::unavailable("Failed to get dirty log reader"));
-            };
-            let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
-                return Err(Status::unavailable("Failed to get dirty log cursors"));
-            };
-            let witness = match cursors.load(&STABLE_PREFIX).await {
-                Ok(witness) => witness,
-                Err(err) => {
-                    return Err(Status::new(err.code().into(), err.to_string()));
-                }
-            };
-            let default = Cursor::default();
-            let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
-            tracing::info!("cursoring from {cursor:?}");
-            let dirty_fragments = reader
-                .scan(
-                    cursor.position,
-                    Limits {
-                        max_files: Some(1_000_000),
-                        max_bytes: Some(1_000_000_000),
-                    },
-                )
-                .await
-                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-            if dirty_fragments.is_empty() {
-                return Ok(Response::new(GetAllCollectionInfoToCompactResponse {
-                    all_collection_info: vec![],
-                }));
-            }
-            if dirty_fragments.len() >= 750_000 {
-                tracing::error!("Too many dirty fragments: {}", dirty_fragments.len());
-            }
-            if dirty_fragments.len() >= 1_000_000 {
-                return Err(Status::resource_exhausted("Too many dirty fragments"));
-            }
-            let dirty_futures = dirty_fragments
-                .iter()
-                .map(|fragment| reader.read_parquet(fragment))
-                .collect::<Vec<_>>();
-            let dirty_raw = futures::future::try_join_all(dirty_futures)
-                .await
-                .map_err(|err| {
-                    Status::new(
-                        err.code().into(),
-                        format!("Failed to fetch dirty parquet: {}", err),
-                    )
-                })?;
-            let mut dirty_markers = vec![];
-            for (_, records, _) in dirty_raw {
-                let records = records
-                    .into_iter()
-                    .map(|x| {
-                        let marker = serde_json::from_slice::<DirtyMarker>(&x.1)
-                            .map_err(|err| Status::unavailable(err.to_string()))?;
-                        Ok::<_, Status>((x.0, marker))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                dirty_markers.extend(records);
-            }
-            let load_manifest = |storage, collection_id| async move {
-                let reader = LogReader::new(
-                    LogReaderOptions::default(),
-                    storage,
-                    storage_prefix_for_log(collection_id),
-                );
-                reader.manifest().await
-            };
-            let load_cursor = |storage, collection_id| async move {
-                let cursor = &COMPACTION;
-                let cursor_store = CursorStore::new(
-                    CursorStoreOptions::default(),
-                    storage,
-                    storage_prefix_for_log(collection_id),
-                    "writer".to_string(),
-                );
-                cursor_store.load(cursor).await
-            };
-            let rollup_span = tracing::info_span!("DirtyMarker::rollup");
-            let rollup = DirtyMarker::rollup(
-                Arc::clone(&self.storage),
-                load_manifest,
-                load_cursor,
-                &dirty_markers,
-                std::cmp::min(
-                    self.config.record_count_threshold,
-                    request.min_compaction_size,
-                ),
-                self.config.num_records_before_backpressure,
-                self.config.reinsert_threshold,
-                self.config.timeout_us,
-                &self.metrics,
-            )
-            .instrument(rollup_span)
+        self.cached_get_all_collection_info_to_compact(request.into_inner())
+            .instrument(span)
             .await
-            .map_err(|err| Status::unavailable(err.to_string()))?;
-            let Some(rollup) = rollup else {
-                return Ok(Response::new(GetAllCollectionInfoToCompactResponse {
-                    all_collection_info: vec![],
-                }));
-            };
-            let reinsert_dirty_markers = rollup
-                .reinsert
-                .into_iter()
-                .map(|marker| {
-                    serde_json::to_string(&marker)
-                        .map(Vec::from)
-                        .map_err(|err| Status::unavailable(err.to_string()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            self.set_backpressure(&rollup.backpressure);
-            if rollup.advance_to < cursor.position {
-                tracing::error!(
-                    "advance_to went back in time: {:?} -> {:?}",
-                    cursor.position,
-                    rollup.advance_to
-                );
-                return Err(Status::aborted("Invalid advance_to"));
-            }
-            let mut new_cursor = cursor.clone();
-            new_cursor.position = rollup.advance_to;
-            if !reinsert_dirty_markers.is_empty() {
-                self.dirty_log
-                    .append_many(reinsert_dirty_markers)
-                    .await
-                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-            }
-            tracing::info!(
-                "Advancing cursor {:?} -> {:?}",
-                cursor.position,
-                new_cursor.position
-            );
-            if let Some(witness) = witness {
-                cursors
-                    .save(&STABLE_PREFIX, &new_cursor, &witness)
-                    .await
-                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-            } else {
-                cursors
-                    .init(&STABLE_PREFIX, new_cursor)
-                    .await
-                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
-            }
-            Ok(Response::new(GetAllCollectionInfoToCompactResponse {
-                all_collection_info: rollup.compactable,
-            }))
-        }
-        .instrument(span)
-        .await
     }
 
     async fn update_collection_log_offset(
@@ -1671,6 +1546,92 @@ impl LogService for LogServer {
     }
 }
 
+struct LogServerWrapper {
+    log_server: Arc<LogServer>,
+}
+
+#[async_trait::async_trait]
+impl LogService for LogServerWrapper {
+    async fn push_logs(
+        &self,
+        request: Request<PushLogsRequest>,
+    ) -> Result<Response<PushLogsResponse>, Status> {
+        self.log_server.push_logs(request).await
+    }
+
+    async fn scout_logs(
+        &self,
+        request: Request<ScoutLogsRequest>,
+    ) -> Result<Response<ScoutLogsResponse>, Status> {
+        self.log_server.scout_logs(request).await
+    }
+
+    async fn pull_logs(
+        &self,
+        request: Request<PullLogsRequest>,
+    ) -> Result<Response<PullLogsResponse>, Status> {
+        self.log_server.pull_logs(request).await
+    }
+
+    async fn fork_logs(
+        &self,
+        request: Request<ForkLogsRequest>,
+    ) -> Result<Response<ForkLogsResponse>, Status> {
+        self.log_server.fork_logs(request).await
+    }
+
+    async fn get_all_collection_info_to_compact(
+        &self,
+        request: Request<GetAllCollectionInfoToCompactRequest>,
+    ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
+        self.log_server
+            .get_all_collection_info_to_compact(request)
+            .await
+    }
+
+    async fn update_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        self.log_server.update_collection_log_offset(request).await
+    }
+
+    async fn purge_dirty_for_collection(
+        &self,
+        request: Request<PurgeDirtyForCollectionRequest>,
+    ) -> Result<Response<PurgeDirtyForCollectionResponse>, Status> {
+        self.log_server.purge_dirty_for_collection(request).await
+    }
+
+    async fn inspect_dirty_log(
+        &self,
+        request: Request<InspectDirtyLogRequest>,
+    ) -> Result<Response<InspectDirtyLogResponse>, Status> {
+        self.log_server.inspect_dirty_log(request).await
+    }
+
+    async fn seal_log(
+        &self,
+        request: Request<SealLogRequest>,
+    ) -> Result<Response<SealLogResponse>, Status> {
+        self.log_server.seal_log(request).await
+    }
+
+    async fn migrate_log(
+        &self,
+        request: Request<MigrateLogRequest>,
+    ) -> Result<Response<MigrateLogResponse>, Status> {
+        self.log_server.migrate_log(request).await
+    }
+
+    async fn inspect_log_state(
+        &self,
+        request: Request<InspectLogStateRequest>,
+    ) -> Result<Response<InspectLogStateResponse>, Status> {
+        self.log_server.inspect_log_state(request).await
+    }
+}
+
 fn parquet_to_records(parquet: Arc<Vec<u8>>) -> Result<Vec<(LogPosition, Vec<u8>)>, Status> {
     let parquet = match Arc::try_unwrap(parquet) {
         Ok(parquet) => parquet,
@@ -1736,7 +1697,7 @@ fn parquet_to_records(parquet: Arc<Vec<u8>>) -> Result<Vec<(LogPosition, Vec<u8>
     Ok(records)
 }
 
-impl LogServer {
+impl LogServerWrapper {
     pub(crate) async fn run(log_server: LogServer) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("[::]:{}", log_server.config.port).parse().unwrap();
         println!("Log listening on {}", addr);
@@ -1746,8 +1707,14 @@ impl LogServer {
             .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
             .await;
 
+        let wrapper = LogServerWrapper {
+            log_server: Arc::new(log_server),
+        };
+        let background_server = Arc::clone(&wrapper.log_server);
+        let background =
+            tokio::task::spawn(async move { background_server.background_task().await });
         let server = Server::builder().add_service(health_service).add_service(
-            chroma_types::chroma_proto::log_service_server::LogServiceServer::new(log_server),
+            chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper),
         );
 
         let server = server.serve_with_shutdown(addr, async {
@@ -1762,9 +1729,9 @@ impl LogServer {
             tracing::info!("Received SIGTERM, shutting down");
         });
 
-        server.await?;
-
-        Ok(())
+        let res = server.await;
+        background.abort();
+        Ok(res?)
     }
 }
 
@@ -1983,17 +1950,19 @@ impl Configurable<LogServerConfig> for LogServer {
         } else {
             None
         };
-        let compacting = tokio::sync::Mutex::new(());
+        let rolling_up = tokio::sync::Mutex::new(());
         let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
         let backpressure = Mutex::new(Arc::new(HashSet::default()));
+        let need_to_compact = Mutex::new(HashMap::default());
         Ok(Self {
             config: config.clone(),
             open_logs: Arc::new(StateHashTable::default()),
             storage,
             dirty_log,
             proxy,
-            compacting,
+            rolling_up,
             backpressure,
+            need_to_compact,
             cache,
             metrics,
         })
@@ -2022,7 +1991,7 @@ pub async fn log_entrypoint() {
         .expect("Failed to create log server");
 
     let server_join_handle = tokio::spawn(async move {
-        let _ = LogServer::run(log_server).await;
+        let _ = LogServerWrapper::run(log_server).await;
     });
 
     match server_join_handle.await {
@@ -2037,412 +2006,7 @@ pub async fn log_entrypoint() {
 
 #[cfg(test)]
 mod tests {
-    use std::future::ready;
-
-    use setsum::Setsum;
-    use wal3::{Fragment, FragmentSeqNo};
-
     use super::*;
-
-    #[tokio::test]
-    async fn dirty_marker_coalesce1() {
-        // Test that a single collection gets coalesced to nothing.
-        let storage = chroma_storage::test_storage();
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| wal3::Error::Internal)
-            .unwrap()
-            .as_micros() as u64;
-        let collection_id = CollectionUuid::new();
-        let markers = vec![
-            (
-                LogPosition::from_offset(45),
-                DirtyMarker::MarkDirty {
-                    collection_id,
-                    log_position: LogPosition::from_offset(1),
-                    num_records: 1,
-                    reinsert_count: 0,
-                    initial_insertion_epoch_us: now,
-                },
-            ),
-            (
-                LogPosition::from_offset(46),
-                DirtyMarker::MarkDirty {
-                    collection_id,
-                    log_position: LogPosition::from_offset(2),
-                    num_records: 1,
-                    reinsert_count: 0,
-                    initial_insertion_epoch_us: now,
-                },
-            ),
-        ];
-        let rollup = DirtyMarker::rollup(
-            Arc::new(storage),
-            |_, _| async move {
-                Ok(Some(Manifest {
-                    writer: "TODO".to_string(),
-                    acc_bytes: 0,
-                    setsum: Setsum::default(),
-                    snapshots: vec![],
-                    fragments: vec![Fragment {
-                        seq_no: FragmentSeqNo(1),
-                        num_bytes: 0,
-                        path: "TODO".to_string(),
-                        setsum: Setsum::default(),
-                        start: LogPosition::from_offset(1),
-                        limit: LogPosition::from_offset(3),
-                    }],
-                }))
-            },
-            |_, _| ready(Ok(None)),
-            &markers,
-            1,
-            1,
-            1,
-            86_400_000_000,
-            &Metrics::new(opentelemetry::global::meter("chroma")),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(LogPosition::from_offset(47), rollup.advance_to);
-        println!("{:?}", rollup);
-        assert_eq!(1, rollup.reinsert.len());
-        assert_eq!(1, rollup.compactable.len());
-        assert_eq!(
-            collection_id.to_string(),
-            rollup.compactable[0].collection_id
-        );
-    }
-
-    #[tokio::test]
-    async fn dirty_marker_coalesce2() {
-        // Test that a single collection gets reinserted when there are not enough records.
-        let storage = chroma_storage::test_storage();
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| wal3::Error::Internal)
-            .unwrap()
-            .as_micros() as u64;
-        let collection_id = CollectionUuid::new();
-        let markers = vec![
-            (
-                LogPosition::from_offset(0),
-                DirtyMarker::MarkDirty {
-                    collection_id,
-                    log_position: LogPosition::from_offset(0),
-                    num_records: 1,
-                    reinsert_count: 0,
-                    initial_insertion_epoch_us: now,
-                },
-            ),
-            (
-                LogPosition::from_offset(1),
-                DirtyMarker::MarkDirty {
-                    collection_id,
-                    log_position: LogPosition::from_offset(1),
-                    num_records: 1,
-                    reinsert_count: 0,
-                    initial_insertion_epoch_us: now,
-                },
-            ),
-        ];
-        assert!(DirtyMarker::rollup(
-            Arc::new(storage),
-            |storage, collection_id| async move {
-                let reader = LogReader::new(
-                    LogReaderOptions::default(),
-                    storage,
-                    storage_prefix_for_log(collection_id),
-                );
-                reader.manifest().await
-            },
-            |_, _| ready(Ok(None)),
-            &markers,
-            3,
-            1,
-            1,
-            86_400_000_000,
-            &Metrics::new(opentelemetry::global::meter("chroma")),
-        )
-        .await
-        .unwrap()
-        .is_none());
-    }
-
-    #[tokio::test]
-    async fn dirty_marker_coalesce3() {
-        // Test that a collection without enough records won't induce head-of-line blocking.
-        let storage = chroma_storage::test_storage();
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| wal3::Error::Internal)
-            .unwrap()
-            .as_micros() as u64;
-        let collection_id_blocking = CollectionUuid::new();
-        let collection_id_acting = CollectionUuid::new();
-        let markers = vec![
-            (
-                LogPosition::from_offset(0),
-                DirtyMarker::MarkDirty {
-                    collection_id: collection_id_blocking,
-                    log_position: LogPosition::from_offset(1),
-                    num_records: 1,
-                    reinsert_count: 0,
-                    initial_insertion_epoch_us: now,
-                },
-            ),
-            (
-                LogPosition::from_offset(1),
-                DirtyMarker::MarkDirty {
-                    collection_id: collection_id_acting,
-                    log_position: LogPosition::from_offset(1),
-                    num_records: 100,
-                    reinsert_count: 0,
-                    initial_insertion_epoch_us: now,
-                },
-            ),
-        ];
-        let collection_id_blocking_clone = collection_id_blocking;
-        let collection_id_acting_clone = collection_id_acting;
-        let rollup = DirtyMarker::rollup(
-            Arc::new(storage),
-            |_, collection_id| async move {
-                if collection_id == collection_id_blocking_clone {
-                    Ok(Some(Manifest {
-                        writer: "TODO".to_string(),
-                        acc_bytes: 0,
-                        setsum: Setsum::default(),
-                        snapshots: vec![],
-                        fragments: vec![Fragment {
-                            seq_no: FragmentSeqNo(1),
-                            num_bytes: 0,
-                            path: "TODO".to_string(),
-                            setsum: Setsum::default(),
-                            start: LogPosition::from_offset(1),
-                            limit: LogPosition::from_offset(2),
-                        }],
-                    }))
-                } else if collection_id == collection_id_acting_clone {
-                    Ok(Some(Manifest {
-                        writer: "TODO".to_string(),
-                        acc_bytes: 0,
-                        setsum: Setsum::default(),
-                        snapshots: vec![],
-                        fragments: vec![Fragment {
-                            seq_no: FragmentSeqNo(1),
-                            num_bytes: 0,
-                            path: "TODO".to_string(),
-                            setsum: Setsum::default(),
-                            start: LogPosition::from_offset(1),
-                            limit: LogPosition::from_offset(101),
-                        }],
-                    }))
-                } else {
-                    unreachable!("we aren't testing this case");
-                }
-            },
-            |_, _| ready(Ok(None)),
-            &markers,
-            3,
-            1,
-            1,
-            86_400_000_000,
-            &Metrics::new(opentelemetry::global::meter("chroma")),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(LogPosition::from_offset(2), rollup.advance_to);
-        assert_eq!(1, rollup.compactable.len());
-        assert_eq!(
-            collection_id_acting.to_string(),
-            rollup.compactable[0].collection_id
-        );
-        assert_eq!(2, rollup.reinsert.len());
-        assert!(
-            (rollup.reinsert[0].collection_id() == collection_id_blocking
-                && rollup.reinsert[1].collection_id() == collection_id_acting)
-                || (rollup.reinsert[1].collection_id() == collection_id_blocking
-                    && rollup.reinsert[0].collection_id() == collection_id_acting)
-        );
-    }
-
-    #[tokio::test]
-    async fn dirty_marker_coalesce_race_condition() {
-        // There's a race condition that we patch-over.
-        //
-        // 1.  get_all_collections_to_compact(1) reads the log to roll it up for compactor 1;
-        //     wlog some record X will be reinserted that will be our victim record.
-        // 2.  compactor advances victim record from previous get_all_collections_compact
-        // 3.  get_all_collections_to_compact returns collections with empty records.
-        let storage = chroma_storage::test_storage();
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| wal3::Error::Internal)
-            .unwrap()
-            .as_micros() as u64;
-        let collection_id_blocking = CollectionUuid::new();
-        let collection_id_collected = CollectionUuid::new();
-        let markers = vec![
-            (
-                LogPosition::from_offset(0),
-                DirtyMarker::MarkDirty {
-                    collection_id: collection_id_blocking,
-                    log_position: LogPosition::from_offset(1),
-                    num_records: 1,
-                    reinsert_count: 0,
-                    initial_insertion_epoch_us: now,
-                },
-            ),
-            (
-                LogPosition::from_offset(1),
-                DirtyMarker::MarkDirty {
-                    collection_id: collection_id_collected,
-                    log_position: LogPosition::from_offset(1),
-                    num_records: 100,
-                    reinsert_count: 0,
-                    initial_insertion_epoch_us: now,
-                },
-            ),
-        ];
-        let collection_id_blocking_clone = collection_id_blocking;
-        let collection_id_collected_clone = collection_id_collected;
-        let rollup = DirtyMarker::rollup(
-            Arc::new(storage),
-            |_, collection_id| async move {
-                if collection_id == collection_id_blocking_clone {
-                    Ok(Some(Manifest {
-                        writer: "TODO".to_string(),
-                        acc_bytes: 0,
-                        setsum: Setsum::default(),
-                        snapshots: vec![],
-                        fragments: vec![Fragment {
-                            seq_no: FragmentSeqNo(1),
-                            num_bytes: 0,
-                            path: "TODO".to_string(),
-                            setsum: Setsum::default(),
-                            start: LogPosition::from_offset(1),
-                            limit: LogPosition::from_offset(2),
-                        }],
-                    }))
-                } else if collection_id == collection_id_collected_clone {
-                    Ok(Some(Manifest {
-                        writer: "TODO".to_string(),
-                        acc_bytes: 0,
-                        setsum: Setsum::default(),
-                        snapshots: vec![],
-                        fragments: vec![Fragment {
-                            seq_no: FragmentSeqNo(1),
-                            num_bytes: 0,
-                            path: "TODO".to_string(),
-                            setsum: Setsum::default(),
-                            start: LogPosition::from_offset(1),
-                            limit: LogPosition::from_offset(101),
-                        }],
-                    }))
-                } else {
-                    unreachable!("we aren't testing this case");
-                }
-            },
-            |_, collection_id| async move {
-                if collection_id == collection_id_blocking_clone {
-                    Ok(None)
-                } else if collection_id == collection_id_collected_clone {
-                    Ok(Some(Witness::default_etag_with_cursor(Cursor {
-                        position: LogPosition::from_offset(101),
-                        epoch_us: 0,
-                        writer: "TODO".to_string(),
-                    })))
-                } else {
-                    unreachable!("we aren't testing this case");
-                }
-            },
-            &markers,
-            3,
-            1,
-            1,
-            86_400_000_000,
-            &Metrics::new(opentelemetry::global::meter("chroma")),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(LogPosition::from_offset(2), rollup.advance_to);
-        assert_eq!(0, rollup.compactable.len());
-        assert_eq!(1, rollup.reinsert.len());
-        assert!(rollup.reinsert[0].collection_id() == collection_id_blocking);
-    }
-
-    #[tokio::test]
-    async fn dirty_marker_backpressure() {
-        // Test that the dirty marker gives proper backpressure.
-        let storage = chroma_storage::test_storage();
-        let now = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|_| wal3::Error::Internal)
-            .unwrap()
-            .as_micros() as u64;
-        let collection_id = CollectionUuid::new();
-        let markers = vec![(
-            LogPosition::from_offset(1),
-            DirtyMarker::MarkDirty {
-                collection_id,
-                log_position: LogPosition::from_offset(1),
-                num_records: 1_000_000,
-                reinsert_count: 0,
-                initial_insertion_epoch_us: now,
-            },
-        )];
-        let rollup = DirtyMarker::rollup(
-            Arc::new(storage),
-            |_, collection_id| async move {
-                if collection_id == collection_id {
-                    Ok(Some(Manifest {
-                        writer: "TODO".to_string(),
-                        acc_bytes: 0,
-                        setsum: Setsum::default(),
-                        snapshots: vec![],
-                        fragments: vec![Fragment {
-                            seq_no: FragmentSeqNo(1),
-                            num_bytes: 0,
-                            path: "TODO".to_string(),
-                            setsum: Setsum::default(),
-                            start: LogPosition::from_offset(1),
-                            limit: LogPosition::from_offset(1_000_001),
-                        }],
-                    }))
-                } else {
-                    unreachable!("we aren't testing this case");
-                }
-            },
-            |_, collection_id| async move {
-                if collection_id == collection_id {
-                    Ok(Some(Witness::default_etag_with_cursor(Cursor {
-                        position: LogPosition::from_offset(1),
-                        epoch_us: 0,
-                        writer: "TODO".to_string(),
-                    })))
-                } else {
-                    unreachable!("we aren't testing this case");
-                }
-            },
-            &markers,
-            1,
-            1,
-            1,
-            86_400_000_000,
-            &Metrics::new(opentelemetry::global::meter("chroma")),
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        assert_eq!(LogPosition::from_offset(2), rollup.advance_to);
-        assert_eq!(1, rollup.compactable.len());
-        assert_eq!(1, rollup.reinsert.len());
-        assert_eq!(1, rollup.backpressure.len());
-        assert_eq!(collection_id, rollup.backpressure[0]);
-    }
 
     #[test]
     fn unsafe_constants() {
