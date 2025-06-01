@@ -222,7 +222,7 @@ impl LogWriter {
             // Not Safety:
             // We mark dirty, but if we lose that we lose that.
             // Failure to mark dirty fails the bootstrap.
-            mark_dirty.mark_dirty(limit, num_records).await?;
+            mark_dirty.mark_dirty(start, num_records).await?;
         }
         Ok(())
     }

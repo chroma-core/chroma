@@ -318,14 +318,15 @@ impl RollupPerCollection {
     }
 
     fn witness_manifest_and_cursor(&mut self, manifest: &Manifest, witness: Option<&Witness>) {
-        self.limit_log_position =
-            std::cmp::max(manifest.maximum_log_position(), self.limit_log_position);
-        self.start_log_position = std::cmp::min(
+        self.start_log_position = std::cmp::max(
             witness
                 .map(|x| x.1.position)
                 .unwrap_or(manifest.minimum_log_position()),
             self.start_log_position,
         );
+        self.limit_log_position =
+            std::cmp::max(manifest.maximum_log_position(), self.limit_log_position);
+        self.limit_log_position = std::cmp::max(self.limit_log_position, self.start_log_position);
     }
 
     fn is_empty(&self) -> bool {
@@ -774,7 +775,6 @@ impl LogServer {
                 .as_micros() as u64,
             writer: "TODO".to_string(),
         };
-        let position = cursor.position;
         if let Some(witness) = witness {
             cursor_store
                 .save(cursor_name, &cursor, &witness)
@@ -793,7 +793,10 @@ impl LogServer {
         let mut need_to_compact = self.need_to_compact.lock();
         if let Entry::Occupied(mut entry) = need_to_compact.entry(collection_id) {
             let rollup = entry.get_mut();
-            rollup.start_log_position = std::cmp::max(rollup.start_log_position, position);
+            rollup.start_log_position = std::cmp::max(
+                rollup.start_log_position,
+                LogPosition::from_offset(request.log_offset as u64),
+            );
             if rollup.start_log_position >= rollup.limit_log_position {
                 entry.remove();
             }
@@ -801,6 +804,7 @@ impl LogServer {
         Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
     }
 
+    #[tracing::instrument(skip(self), err(Display))]
     async fn cached_get_all_collection_info_to_compact(
         &self,
         request: GetAllCollectionInfoToCompactRequest,
@@ -812,8 +816,9 @@ impl LogServer {
         {
             let need_to_compact = self.need_to_compact.lock();
             for (collection_id, rollup) in need_to_compact.iter() {
-                if rollup.limit_log_position - rollup.start_log_position
-                    >= request.min_compaction_size
+                if rollup.limit_log_position >= rollup.start_log_position
+                    && rollup.limit_log_position - rollup.start_log_position
+                        >= request.min_compaction_size
                 {
                     selected_rollups.push((*collection_id, *rollup));
                 }
@@ -848,6 +853,9 @@ impl LogServer {
         let mut backpressure = vec![];
         let mut total_uncompacted = 0;
         for (collection_id, rollup) in rollups.iter() {
+            if rollup.is_empty() {
+                continue;
+            }
             total_uncompacted += rollup
                 .limit_log_position
                 .offset()
@@ -958,7 +966,8 @@ impl LogServer {
                 Arc::clone(storage),
                 storage_prefix_for_log(collection_id),
             );
-            reader.manifest().await
+            let span = tracing::info_span!("manifest load", collection_id = ?collection_id);
+            reader.manifest().instrument(span).await
         };
         let load_cursor = |storage, collection_id| async move {
             let cursor = &COMPACTION;
@@ -968,7 +977,8 @@ impl LogServer {
                 storage_prefix_for_log(collection_id),
                 "rollup".to_string(),
             );
-            cursor_store.load(cursor).await
+            let span = tracing::info_span!("cursor load", collection_id = ?collection_id);
+            cursor_store.load(cursor).instrument(span).await
         };
         for (collection_id, mut rollup) in std::mem::take(rollups) {
             // TODO(rescrv):  We can avoid loading the manifest and cursor by checking an
