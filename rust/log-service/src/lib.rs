@@ -59,6 +59,7 @@ static COMPACTION: CursorName = unsafe { CursorName::from_string_unchecked("comp
 
 pub struct Metrics {
     log_total_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
+    dirty_log_records_rewritten: opentelemetry::metrics::Counter<u64>,
 }
 
 impl Metrics {
@@ -67,6 +68,7 @@ impl Metrics {
             log_total_uncompacted_records_count: meter
                 .f64_gauge("log_total_uncompacted_records_count")
                 .build(),
+            dirty_log_records_rewritten: meter.u64_counter("dirty_log_records_rewritten").build(),
         }
     }
 }
@@ -847,6 +849,9 @@ impl LogServer {
         // Ensure at most one request at a time.
         let _guard = self.rolling_up.lock().await;
         let (witness, cursor, dirty_markers) = self.read_dirty_log().await?;
+        self.metrics
+            .dirty_log_records_rewritten
+            .add(dirty_markers.len() as u64, &[]);
         let mut rollups = DirtyMarker::coalesce_markers(&dirty_markers)?;
         self.enrich_dirty_log(&mut rollups).await?;
         let mut markers = vec![];
