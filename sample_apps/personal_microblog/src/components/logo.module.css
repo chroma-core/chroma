@@ -6,7 +6,7 @@
     --radius: 10;
     --circumference: calc(2 * var(--radius) * 3.14);
     stroke-dasharray: var(--circumference) 1e100;
-    stroke-dashoffset: calc(var(--circumference) - 10);
+    stroke-dashoffset: calc(var(--circumference) - 12);
     transition-property: stroke-dashoffset transform;
     transition-duration: 0.4s;
     transition-timing-function: ease-in-out;
@@ -19,11 +19,19 @@
 .left {
     transform-origin: center;
     transform-box: fill-box;
+    transform: scaleY(-1) rotate(0deg) translateX(-6px);
+}
+
+.logo:hover .left {
     transform: scaleY(-1) rotate(45deg);
 }
 
 .right {
     transform-origin: center;
     transform-box: fill-box;
+    transform: scaleY(-1) rotate(-180deg) translateX(-6px);
+}
+
+.logo:hover .right {
     transform: scaleY(-1) rotate(-135deg);
 }
