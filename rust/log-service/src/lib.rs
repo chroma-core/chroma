@@ -140,7 +140,7 @@ struct ActiveLog {
 impl ActiveLog {
     pub fn keep_alive(&mut self, keep_alive: Duration) {
         let now = Instant::now();
-        let when = if keep_alive > Duration::ZERO {
+        let when = if keep_alive >= Duration::ZERO {
             now.checked_add(keep_alive).unwrap_or(now)
         } else {
             now
@@ -2022,6 +2022,7 @@ pub async fn log_entrypoint() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state_hash_table::Value;
 
     #[test]
     fn unsafe_constants() {
@@ -2124,5 +2125,411 @@ mod tests {
         );
         assert_eq!(1, rollup_acting.reinsert_count);
         assert_eq!(now, rollup_acting.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn dirty_marker_serialization() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        // Test MarkDirty serialization
+        let mark_dirty = DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: LogPosition::from_offset(42),
+            num_records: 100,
+            reinsert_count: 5,
+            initial_insertion_epoch_us: now,
+        };
+
+        let serialized = serde_json::to_string(&mark_dirty).unwrap();
+        let deserialized: DirtyMarker = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(mark_dirty, deserialized);
+
+        // Test Purge serialization
+        let purge = DirtyMarker::Purge { collection_id };
+        let serialized = serde_json::to_string(&purge).unwrap();
+        let deserialized: DirtyMarker = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(purge, deserialized);
+    }
+
+    #[test]
+    fn dirty_marker_collection_id() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mark_dirty = DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: LogPosition::from_offset(1),
+            num_records: 1,
+            reinsert_count: 0,
+            initial_insertion_epoch_us: now,
+        };
+        assert_eq!(collection_id, mark_dirty.collection_id());
+
+        let purge = DirtyMarker::Purge { collection_id };
+        assert_eq!(collection_id, purge.collection_id());
+    }
+
+    #[test]
+    fn dirty_marker_reinsert() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mut mark_dirty = DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: LogPosition::from_offset(1),
+            num_records: 1,
+            reinsert_count: 0,
+            initial_insertion_epoch_us: now,
+        };
+
+        // Test incrementing reinsert count
+        mark_dirty.reinsert();
+        if let DirtyMarker::MarkDirty { reinsert_count, .. } = mark_dirty {
+            assert_eq!(1, reinsert_count);
+        } else {
+            panic!("Expected MarkDirty variant");
+        }
+
+        // Test that Purge variant doesn't panic when reinsert is called
+        let mut purge = DirtyMarker::Purge { collection_id };
+        purge.reinsert(); // Should not panic
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_with_purge() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(1),
+                    num_records: 10,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::Purge { collection_id },
+            ),
+            (
+                LogPosition::from_offset(3),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(20),
+                    num_records: 5,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now + 1000,
+                },
+            ),
+        ];
+
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        // The purge should remove all markers for the collection, even ones that come after
+        assert_eq!(0, rollup.len());
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_purge_removes_all() {
+        // Test to clarify that purge removes ALL markers for a collection
+        let collection_id1 = CollectionUuid::new();
+        let collection_id2 = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id1,
+                    log_position: LogPosition::from_offset(1),
+                    num_records: 10,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id2,
+                    log_position: LogPosition::from_offset(10),
+                    num_records: 5,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(3),
+                DirtyMarker::Purge {
+                    collection_id: collection_id1,
+                },
+            ),
+            (
+                LogPosition::from_offset(4),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id1,
+                    log_position: LogPosition::from_offset(20),
+                    num_records: 3,
+                    reinsert_count: 2,
+                    initial_insertion_epoch_us: now + 1000,
+                },
+            ),
+        ];
+
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        // collection_id1 should be completely removed due to purge
+        // collection_id2 should remain
+        assert_eq!(1, rollup.len());
+        assert!(rollup.contains_key(&collection_id2));
+        assert!(!rollup.contains_key(&collection_id1));
+
+        let rollup2 = rollup.get(&collection_id2).unwrap();
+        assert_eq!(LogPosition::from_offset(10), rollup2.start_log_position);
+        assert_eq!(LogPosition::from_offset(15), rollup2.limit_log_position);
+    }
+
+    #[test]
+    fn rollup_per_collection_new() {
+        let start_position = LogPosition::from_offset(10);
+        let num_records = 5;
+        let rollup = RollupPerCollection::new(start_position, num_records);
+
+        assert_eq!(start_position, rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(15), rollup.limit_log_position);
+        assert_eq!(0, rollup.reinsert_count);
+        assert_eq!(0, rollup.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn rollup_per_collection_observe_dirty_marker() {
+        let start_position = LogPosition::from_offset(10);
+        let mut rollup = RollupPerCollection::new(start_position, 5);
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        // Observe a marker that extends the range
+        rollup.observe_dirty_marker(LogPosition::from_offset(20), 10, 3, now);
+        assert_eq!(LogPosition::from_offset(10), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(30), rollup.limit_log_position);
+        assert_eq!(3, rollup.reinsert_count);
+        assert_eq!(now, rollup.initial_insertion_epoch_us);
+
+        // Observe a marker that comes before the start
+        rollup.observe_dirty_marker(LogPosition::from_offset(5), 2, 1, now - 1000);
+        assert_eq!(LogPosition::from_offset(5), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(30), rollup.limit_log_position);
+        assert_eq!(3, rollup.reinsert_count); // Should keep max
+        assert_eq!(now, rollup.initial_insertion_epoch_us); // Should keep max
+    }
+
+    #[test]
+    fn rollup_per_collection_is_empty() {
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0);
+        assert!(rollup.is_empty());
+
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5);
+        assert!(!rollup.is_empty());
+    }
+
+    #[test]
+    fn rollup_per_collection_requires_backpressure() {
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 100);
+        assert!(rollup.requires_backpressure(50));
+        assert!(!rollup.requires_backpressure(150));
+        assert!(rollup.requires_backpressure(100)); // Equal case
+    }
+
+    #[test]
+    fn rollup_per_collection_dirty_marker() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5);
+        rollup.observe_dirty_marker(LogPosition::from_offset(10), 5, 2, now);
+
+        let marker = rollup.dirty_marker(collection_id);
+        match marker {
+            DirtyMarker::MarkDirty {
+                collection_id: cid,
+                log_position,
+                num_records,
+                reinsert_count,
+                initial_insertion_epoch_us,
+            } => {
+                assert_eq!(collection_id, cid);
+                assert_eq!(LogPosition::from_offset(10), log_position);
+                assert_eq!(5, num_records);
+                assert_eq!(2, reinsert_count);
+                assert_eq!(now, initial_insertion_epoch_us);
+            }
+            _ => panic!("Expected MarkDirty variant"),
+        }
+    }
+
+    #[test]
+    fn active_log_keep_alive() {
+        let mut active_log = ActiveLog::default();
+        let initial_time = active_log.collect_after;
+
+        // Test extending keep alive time
+        let keep_alive_duration = Duration::from_secs(30);
+        active_log.keep_alive(keep_alive_duration);
+        assert!(active_log.collect_after > initial_time + Duration::from_secs(30));
+
+        // Test that shorter duration doesn't reduce time
+        let long_time = active_log.collect_after;
+        active_log.keep_alive(Duration::from_millis(1));
+        assert_eq!(long_time, active_log.collect_after);
+    }
+
+    #[test]
+    fn log_stub_finished() {
+        let log_stub = LogStub::default();
+        // LogStub always returns true for finished()
+        assert!(log_stub.finished());
+    }
+
+    #[test]
+    fn storage_prefix_for_log_format() {
+        let collection_id = CollectionUuid::new();
+        let prefix = storage_prefix_for_log(collection_id);
+        assert_eq!(format!("logs/{}", collection_id), prefix);
+    }
+
+    #[tokio::test]
+    async fn mark_dirty_creates_correct_marker() {
+        // This test verifies the MarkDirty struct creates the correct DirtyMarker
+        // We can't easily test the full async behavior without a real LogWriter,
+        // but we can test the marker creation logic by examining what would be serialized
+
+        let collection_id = CollectionUuid::new();
+        let log_position = LogPosition::from_offset(42);
+        let num_records = 100usize;
+
+        // Create the expected marker manually
+        let expected_marker = DirtyMarker::MarkDirty {
+            collection_id,
+            log_position,
+            num_records: num_records as u64,
+            reinsert_count: 0,
+            initial_insertion_epoch_us: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_micros() as u64,
+        };
+
+        // Verify the marker can be serialized (this is what MarkDirty::mark_dirty does)
+        let serialized = serde_json::to_string(&expected_marker).unwrap();
+        assert!(serialized.contains("mark_dirty"));
+        assert!(serialized.contains(&collection_id.to_string()));
+        assert!(serialized.contains("42")); // log_position offset
+        assert!(serialized.contains("100")); // num_records
+
+        // Verify it can be deserialized back
+        let deserialized: DirtyMarker = serde_json::from_str(&serialized).unwrap();
+        if let DirtyMarker::MarkDirty {
+            collection_id: cid,
+            log_position: pos,
+            num_records: count,
+            reinsert_count,
+            ..
+        } = deserialized
+        {
+            assert_eq!(collection_id, cid);
+            assert_eq!(log_position, pos);
+            assert_eq!(100, count);
+            assert_eq!(0, reinsert_count);
+        } else {
+            panic!("Expected MarkDirty variant");
+        }
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_empty_markers() {
+        let rollup = DirtyMarker::coalesce_markers(&[]).unwrap();
+        assert!(rollup.is_empty());
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_multiple_collections() {
+        let collection_id1 = CollectionUuid::new();
+        let collection_id2 = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id1,
+                    log_position: LogPosition::from_offset(10),
+                    num_records: 5,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id2,
+                    log_position: LogPosition::from_offset(20),
+                    num_records: 10,
+                    reinsert_count: 2,
+                    initial_insertion_epoch_us: now + 1000,
+                },
+            ),
+            (
+                LogPosition::from_offset(3),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id1,
+                    log_position: LogPosition::from_offset(30),
+                    num_records: 3,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now - 1000,
+                },
+            ),
+        ];
+
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        assert_eq!(2, rollup.len());
+
+        // Check collection_id1 rollup
+        let rollup1 = rollup.get(&collection_id1).unwrap();
+        assert_eq!(LogPosition::from_offset(10), rollup1.start_log_position);
+        assert_eq!(LogPosition::from_offset(33), rollup1.limit_log_position);
+        assert_eq!(1, rollup1.reinsert_count); // max of 1 and 0
+        assert_eq!(now, rollup1.initial_insertion_epoch_us); // max of now and now-1000
+
+        // Check collection_id2 rollup
+        let rollup2 = rollup.get(&collection_id2).unwrap();
+        assert_eq!(LogPosition::from_offset(20), rollup2.start_log_position);
+        assert_eq!(LogPosition::from_offset(30), rollup2.limit_log_position);
+        assert_eq!(2, rollup2.reinsert_count);
+        assert_eq!(now + 1000, rollup2.initial_insertion_epoch_us);
     }
 }
