@@ -2027,4 +2027,102 @@ mod tests {
     fn unsafe_constants() {
         assert!(STABLE_PREFIX.is_valid());
     }
+
+    #[test]
+    fn dirty_marker_coalesce1() {
+        // Test that a single collection gets coalesced to nothing.
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::Internal)
+            .unwrap()
+            .as_micros() as u64;
+        let markers = vec![
+            (
+                LogPosition::from_offset(45),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(1),
+                    num_records: 1,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(46),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(2),
+                    num_records: 1,
+                    reinsert_count: 2,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+        ];
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        assert_eq!(1, rollup.len());
+        let rollup = rollup.get(&collection_id).unwrap();
+        assert_eq!(LogPosition::from_offset(1), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(3), rollup.limit_log_position);
+        assert_eq!(2, rollup.reinsert_count);
+        assert_eq!(now, rollup.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn dirty_marker_coalesce2() {
+        // Test that a collection without enough records won't induce head-of-line blocking.
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::Internal)
+            .unwrap()
+            .as_micros() as u64;
+        let collection_id_blocking = CollectionUuid::new();
+        let collection_id_acting = CollectionUuid::new();
+        let markers = vec![
+            (
+                LogPosition::from_offset(0),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id_blocking,
+                    log_position: LogPosition::from_offset(1),
+                    num_records: 1,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id: collection_id_acting,
+                    log_position: LogPosition::from_offset(1),
+                    num_records: 100,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+        ];
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        assert_eq!(2, rollup.len());
+        let rollup_blocking = rollup.get(&collection_id_blocking).unwrap();
+        assert_eq!(
+            LogPosition::from_offset(1),
+            rollup_blocking.start_log_position
+        );
+        assert_eq!(
+            LogPosition::from_offset(2),
+            rollup_blocking.limit_log_position
+        );
+        assert_eq!(0, rollup_blocking.reinsert_count);
+        assert_eq!(now, rollup_blocking.initial_insertion_epoch_us);
+        let rollup_acting = rollup.get(&collection_id_acting).unwrap();
+        assert_eq!(
+            LogPosition::from_offset(1),
+            rollup_acting.start_log_position
+        );
+        assert_eq!(
+            LogPosition::from_offset(101),
+            rollup_acting.limit_log_position
+        );
+        assert_eq!(1, rollup_acting.reinsert_count);
+        assert_eq!(now, rollup_acting.initial_insertion_epoch_us);
+    }
 }
