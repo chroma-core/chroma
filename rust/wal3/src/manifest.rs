@@ -305,6 +305,8 @@ pub struct Manifest {
     pub writer: String,
     pub snapshots: Vec<SnapshotPointer>,
     pub fragments: Vec<Fragment>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_offset: Option<LogPosition>,
 }
 
 impl Manifest {
@@ -316,6 +318,7 @@ impl Manifest {
             writer: writer.to_string(),
             snapshots: vec![],
             fragments: vec![],
+            initial_offset: None,
         }
     }
 
@@ -558,6 +561,7 @@ impl Manifest {
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
+            initial_offset: None,
         };
         Self::initialize_from_manifest(options, storage, prefix, initial).await
     }
@@ -711,7 +715,7 @@ impl Manifest {
             },
             (Some(f), None) => f,
             (None, Some(s)) => s,
-            (None, None) => LogPosition::from_offset(1),
+            (None, None) => self.initial_offset.unwrap_or(LogPosition::from_offset(1)),
         }
     }
 
@@ -733,7 +737,7 @@ impl Manifest {
             },
             (Some(f), None) => f,
             (None, Some(s)) => s,
-            (None, None) => LogPosition::default(),
+            (None, None) => self.initial_offset.unwrap_or(LogPosition::from_offset(1)),
         }
     }
 }
@@ -794,6 +798,7 @@ mod tests {
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
+            initial_offset: None,
         };
         assert!(!manifest.contains_position(LogPosition::from_offset(0)));
         assert!(manifest.contains_position(LogPosition::from_offset(1)));
@@ -836,6 +841,7 @@ mod tests {
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
+            initial_offset: None,
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
@@ -847,6 +853,7 @@ mod tests {
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
+            initial_offset: None,
         };
         assert!(manifest.scrub().is_err());
     }
@@ -881,6 +888,7 @@ mod tests {
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
+            initial_offset: None,
         };
         assert!(!manifest.can_apply_fragment(&fragment2));
         assert!(manifest.can_apply_fragment(&fragment1));
@@ -920,6 +928,7 @@ mod tests {
                         .unwrap()
                     }
                 ],
+                initial_offset: None,
             },
             manifest
         );
@@ -973,6 +982,7 @@ mod tests {
                 num_bytes: fragment1.num_bytes,
             }],
             fragments: vec![fragment2.clone()],
+            initial_offset: None,
         };
         assert!(manifest.can_apply_fragment(&fragment3));
         manifest.apply_fragment(fragment3.clone());
@@ -993,6 +1003,7 @@ mod tests {
                     num_bytes: fragment1.num_bytes,
                 }],
                 fragments: vec![fragment2.clone(), fragment3.clone()],
+                initial_offset: None,
             },
             manifest
         );
