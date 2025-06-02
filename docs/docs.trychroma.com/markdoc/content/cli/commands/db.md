@@ -24,7 +24,7 @@ If you prefer to simply output these variables to your terminal use:
 chroma db connect [db_name] --env-vars
 ```
 
-Setting these environment variables will allow you to consiscely instantiate the `CloudClient` with no arguments.
+Setting these environment variables will allow you to concisely instantiate the `CloudClient` with no arguments.
 
 ### Create
 
