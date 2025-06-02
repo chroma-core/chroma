@@ -156,7 +156,7 @@ impl LogReader {
                 > limits.max_records.unwrap_or(u64::MAX)
         {
             tracing::info!(
-                "truncating to {} files because bytes restrictions",
+                "truncating to {} files because records restrictions",
                 fragments.len() - 1
             );
             fragments.pop();
