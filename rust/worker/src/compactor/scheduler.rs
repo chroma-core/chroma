@@ -131,7 +131,7 @@ impl Scheduler {
                     }
 
                     // TODO: make querying the last compaction time in batch
-                    let log_position_in_collecion = collection[0].log_position;
+                    let log_position_in_collection = collection[0].log_position;
                     let tenant_ids = vec![collection[0].tenant.clone()];
                     let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
 
@@ -152,14 +152,16 @@ impl Scheduler {
                     // offset in log is the first offset in the log that has not been compacted. Note that
                     // since the offset is the first offset of log we get from the log service, we should
                     // use this offset to pull data from the log service.
-                    if log_position_in_collecion + 1 < offset {
+                    if log_position_in_collection + 1 < offset {
                         panic!(
-                            "offset in sysdb is less than offset in log, this should not happen!"
+                            "offset in sysdb ({}) is less than offset in log ({})",
+                            log_position_in_collection + 1,
+                            offset,
                         )
                     } else {
                         // The offset in sysdb is the last offset that has been compacted.
                         // We need to start from the next offset.
-                        offset = log_position_in_collecion + 1;
+                        offset = log_position_in_collection + 1;
                     }
 
                     collection_records.push(CollectionRecord {

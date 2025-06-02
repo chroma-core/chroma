@@ -759,14 +759,14 @@ impl LogServer {
         let witness = cursor_store.load(cursor_name).await.map_err(|err| {
             Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
         })?;
-        let default = Cursor::default();
+        let default = Cursor {
+            position: LogPosition::from_offset(0),
+            epoch_us: 0,
+            writer: String::new(),
+        };
         let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
         if cursor.position.offset() > adjusted_log_offset as u64 {
-            return Err(Status::aborted(format!(
-                "Invalid offset: {} > {}",
-                cursor.position.offset(),
-                adjusted_log_offset as u64
-            )));
+            return Ok(Response::new(UpdateCollectionLogOffsetResponse {}));
         }
         let cursor = Cursor {
             position: LogPosition::from_offset(adjusted_log_offset as u64),
@@ -831,8 +831,8 @@ impl LogServer {
         for (collection_id, rollup) in selected_rollups {
             all_collection_info.push(CollectionInfo {
                 collection_id: collection_id.to_string(),
-                first_log_offset: rollup.start_log_position.offset() as i64,
-                first_log_ts: rollup.start_log_position.offset() as i64,
+                first_log_offset: rollup.start_log_position.offset() as i64 - 1,
+                first_log_ts: rollup.start_log_position.offset() as i64 - 1,
             });
         }
         Ok(Response::new(GetAllCollectionInfoToCompactResponse {
