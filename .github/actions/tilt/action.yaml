@@ -50,3 +50,9 @@ runs:
         kubectl -n chroma port-forward svc/rust-frontend-service 3000:8000 &
         kubectl -n chroma port-forward svc/minio 9000:9000 &
         kubectl -n chroma port-forward svc/jaeger 16686:16686 &
+    - name: Export logs if it failed
+      if: failure()
+      shell: bash
+      run: |
+        kind export logs ./kind-logs
+        cat kind-logs
