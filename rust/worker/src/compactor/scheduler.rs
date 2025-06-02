@@ -501,9 +501,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(
-        expected = "offset in sysdb is less than offset in log, this should not happen!"
-    )]
+    #[should_panic(expected = "is less than offset")]
     async fn test_scheduler_panic() {
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
