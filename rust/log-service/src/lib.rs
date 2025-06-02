@@ -320,15 +320,10 @@ impl RollupPerCollection {
     }
 
     fn witness_manifest_and_cursor(&mut self, manifest: &Manifest, witness: Option<&Witness>) {
-        self.start_log_position = std::cmp::max(
-            witness
-                .map(|x| x.1.position)
-                .unwrap_or(manifest.minimum_log_position()),
-            self.start_log_position,
-        );
-        self.limit_log_position =
-            std::cmp::max(manifest.maximum_log_position(), self.limit_log_position);
-        self.limit_log_position = std::cmp::max(self.limit_log_position, self.start_log_position);
+        self.start_log_position = witness
+            .map(|x| x.1.position)
+            .unwrap_or(manifest.minimum_log_position());
+        self.limit_log_position = manifest.maximum_log_position();
     }
 
     fn is_empty(&self) -> bool {

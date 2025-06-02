@@ -154,9 +154,10 @@ impl Scheduler {
                     // use this offset to pull data from the log service.
                     if log_position_in_collection + 1 < offset {
                         panic!(
-                            "offset in sysdb ({}) is less than offset in log ({})",
+                            "offset in sysdb ({}) is less than offset in log ({}) for {}",
                             log_position_in_collection + 1,
                             offset,
+                            collection[0].collection_id,
                         )
                     } else {
                         // The offset in sysdb is the last offset that has been compacted.
