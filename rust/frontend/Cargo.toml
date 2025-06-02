@@ -33,7 +33,6 @@ mdac = { workspace = true }
 opentelemetry.workspace = true
 validator = { workspace = true }
 rust-embed = { workspace = true }
-
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
@@ -49,6 +48,7 @@ chroma-sqlite = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { version = "0.2.0", features = ["debug"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
+base64 = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }

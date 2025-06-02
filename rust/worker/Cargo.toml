@@ -28,6 +28,7 @@ regex = { workspace = true }
 tikv-jemallocator = "0.6"
 
 serde = { workspace = true }
+base64 = { workspace = true }
 serde_json = { workspace = true }
 arrow = { workspace = true }
 thiserror = { workspace = true }
@@ -62,6 +63,7 @@ chroma-storage = { workspace = true }
 chroma-system = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
+chroma-frontend = { workspace = true }
 
 fastrace = "0.7"
 fastrace-opentelemetry = "0.8"
@@ -79,6 +81,10 @@ rand_xorshift = { workspace = true }
 tempfile = { workspace = true }
 
 chroma-benchmark = { workspace = true }
+
+[[bench]]
+name="base64"
+harness = false
 
 [[bench]]
 name = "filter"

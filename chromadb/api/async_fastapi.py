@@ -24,8 +24,8 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.utils.async_to_sync import async_to_sync
-
 from chromadb.types import Database, Tenant, Collection as CollectionModel
+from chromadb.api.types import embeddings_to_base64_bytes
 
 from chromadb.api.types import (
     Documents,
@@ -516,16 +516,21 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         """
         Submits a batch of embeddings to the database
         """
+        data = {
+            "ids": batch[0],
+            "metadatas": batch[2],
+            "documents": batch[3],
+            "uris": batch[4],
+        }
+        if batch[1] is not None:
+            data["embeddings"] = embeddings_to_base64_bytes(batch[1])
+        else:
+            data["embeddings"] = None
+
         return await self._make_request(
             "post",
             url,
-            json={
-                "ids": batch[0],
-                "embeddings": batch[1],
-                "metadatas": batch[2],
-                "documents": batch[3],
-                "uris": batch[4],
-            },
+            json=data,
         )
 
     @trace_method("AsyncFastAPI._add", OpenTelemetryGranularity.ALL)
