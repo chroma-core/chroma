@@ -12,6 +12,20 @@ The output code snippet will already have the API key of your profile set for th
 chroma db connect [db_name] [--language python/JS/TS]
 ```
 
+The `connect` command can also add Chroma environment variables (`CHROMA_API_KEY`, `CHROMA_TENANT`, and `CHROMA_DATABASE`) to a `.env` file in your current working directory. It will create a `.env` file for you if it doesn't exist:
+
+```terminal
+chroma db connect [db_name] --env-file
+```
+
+If you prefer to simply output these variables to your terminal use:
+
+```terminal
+chroma db connect [db_name] --env-vars
+```
+
+Setting these environment variables will allow you to consiscely instantiate the `CloudClient` with no arguments.
+
 ### Create
 
 The `create` command lets you create a database on Chroma Cloud. It has the `name` argument, which is the name of the DB you want to create. If you don't provide it, the CLI will prompt you to choose a name.
