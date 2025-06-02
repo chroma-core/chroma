@@ -2,7 +2,7 @@
 
 export type AddCollectionRecordsPayload = {
     documents?: Array<string | null> | null;
-    embeddings?: Array<Array<number>> | null;
+    embeddings?: null | EmbeddingsPayload;
     ids: Array<string>;
     metadatas?: Array<null | HashMap> | null;
     uris?: Array<string | null> | null;
@@ -90,6 +90,8 @@ export type EmbeddingFunctionNewConfiguration = {
     config: unknown;
     name: string;
 };
+
+export type EmbeddingsPayload = Array<Array<number>> | Array<string>;
 
 export type ErrorResponse = {
     error: string;
@@ -197,7 +199,7 @@ export type UpdateCollectionPayload = {
 
 export type UpdateCollectionRecordsPayload = {
     documents?: Array<string | null> | null;
-    embeddings?: Array<Array<number> | null> | null;
+    embeddings?: null | UpdateEmbeddingsPayload;
     ids: Array<string>;
     metadatas?: Array<null | HashMap> | null;
     uris?: Array<string | null> | null;
@@ -211,6 +213,8 @@ export type UpdateCollectionResponse = {
     [key: string]: unknown;
 };
 
+export type UpdateEmbeddingsPayload = Array<Array<number> | null> | Array<string | null>;
+
 export type UpdateHnswConfiguration = {
     batch_size?: number | null;
     ef_search?: number | null;
@@ -222,7 +226,7 @@ export type UpdateHnswConfiguration = {
 
 export type UpsertCollectionRecordsPayload = {
     documents?: Array<string | null> | null;
-    embeddings?: Array<Array<number>> | null;
+    embeddings?: null | EmbeddingsPayload;
     ids: Array<string>;
     metadatas?: Array<null | HashMap> | null;
     uris?: Array<string | null> | null;

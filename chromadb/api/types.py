@@ -31,7 +31,10 @@ from chromadb.base_types import (
 from inspect import signature
 from tenacity import retry
 from abc import abstractmethod
-
+import pybase64
+from functools import lru_cache
+import struct
+import math
 
 # Re-export types from chromadb.types
 __all__ = [
@@ -69,6 +72,67 @@ Embedding = Vector
 Embeddings = List[Embedding]
 
 Space = Literal["cosine", "l2", "ip"]
+
+
+@lru_cache
+def _get_struct(vector_length: int) -> struct.Struct:
+    return struct.Struct(f"<{vector_length}f")
+
+
+def _to_f32(value: float) -> float:
+    F32_MAX = np.finfo(np.float32).max
+    F32_MIN = np.finfo(np.float32).min
+    if math.isnan(value):
+        return float("nan")
+    if value > F32_MAX:
+        return float("inf")
+    if value < F32_MIN:
+        return float("-inf")
+    return value
+
+
+def pack_embedding_safely(pyEmbedding: PyEmbedding) -> str:
+    try:
+        return pybase64.b64encode_as_string(  # type: ignore
+            _get_struct(len(pyEmbedding)).pack(*pyEmbedding)
+        )
+    except OverflowError:
+        return pybase64.b64encode_as_string(  # type: ignore
+            _get_struct(len(pyEmbedding)).pack(
+                *[_to_f32(value) for value in pyEmbedding]
+            )
+        )
+
+
+# returns base64 encoded embeddings or None if the embedding is None
+# currently, PyEmbeddings can't have None, but this is to future proof, we want to be able to handle None embeddings
+def optional_embeddings_to_base64_strings(
+    pyEmbeddings: Optional[PyEmbeddings],
+) -> Optional[list[Union[str, None]]]:
+    if pyEmbeddings is None:
+        return None
+    return [
+        pack_embedding_safely(pyEmbedding) if pyEmbedding is not None else None
+        for pyEmbedding in pyEmbeddings
+    ]
+
+
+def optional_base64_strings_to_embeddings(
+    b64_strings: Optional[list[Union[str, None]]],
+) -> Optional[PyEmbeddings]:
+    if b64_strings is None:
+        return None
+
+    embeddings: PyEmbeddings = []
+    for b64_string in b64_strings:
+        if b64_string is None:
+            embeddings.append(None)  # type: ignore
+        else:
+            packed_data = pybase64.b64decode(b64_string)
+            vector_length = len(packed_data) // 4
+            embedding_tuple = _get_struct(vector_length).unpack(packed_data)
+            embeddings.append(list(embedding_tuple))
+    return embeddings
 
 
 def normalize_embeddings(

@@ -36,6 +36,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     IncludeMetadataDocumentsEmbeddings,
+    optional_embeddings_to_base64_strings,
 )
 from chromadb.auth import UserIdentity
 from chromadb.auth import (
@@ -476,17 +477,17 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """
         Submits a batch of embeddings to the database
         """
-        self._make_request(
-            "post",
-            url,
-            json={
-                "ids": batch[0],
-                "embeddings": batch[1],
-                "metadatas": batch[2],
-                "documents": batch[3],
-                "uris": batch[4],
-            },
-        )
+        data = {
+            "ids": batch[0],
+            "embeddings": optional_embeddings_to_base64_strings(batch[1])
+            if self.get_settings().use_base64_encoding_for_embeddings
+            else batch[1],
+            "metadatas": batch[2],
+            "documents": batch[3],
+            "uris": batch[4],
+        }
+
+        self._make_request("post", url, json=data)
 
     @trace_method("FastAPI._add", OpenTelemetryGranularity.ALL)
     @override

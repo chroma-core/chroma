@@ -22,6 +22,7 @@ import {
   validateWhereDocument,
   validateNResults,
   validateMetadata,
+  optionalEmbeddingsToBase64Bytes,
 } from "./utils";
 import { createClient } from "@hey-api/client-fetch";
 import { ChromaValueError } from "./errors";
@@ -393,12 +394,15 @@ export class CollectionImpl implements Collection {
 
     await this.prepareRecords({ recordSet });
 
+    const embeddingsBase64 = this.chromaClient.useBase64EncodingForEmbeddings ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings) : recordSet.embeddings;
+
+
     await Api.collectionAdd({
       client: this.apiClient,
       path: await this.path(),
       body: {
         ids: recordSet.ids,
-        embeddings: recordSet.embeddings,
+        embeddings: embeddingsBase64,
         documents: recordSet.documents,
         metadatas: recordSet.metadatas,
         uris: recordSet.uris,
@@ -530,11 +534,11 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-          collectionName: this.name,
-          currentConfiguration: this.configuration,
-          newConfiguration: configuration,
-          currentEmbeddingFunction: this.embeddingFunction,
-        })
+        collectionName: this.name,
+        currentConfiguration: this.configuration,
+        newConfiguration: configuration,
+        currentEmbeddingFunction: this.embeddingFunction,
+      })
       : {};
 
     if (updateEmbeddingFunction) {
@@ -601,12 +605,14 @@ export class CollectionImpl implements Collection {
 
     await this.prepareRecords({ recordSet, update: true });
 
+    const embeddingsBase64 = this.chromaClient.useBase64EncodingForEmbeddings ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings) : recordSet.embeddings;
+
     await Api.collectionUpdate({
       client: this.apiClient,
       path: await this.path(),
       body: {
         ids: recordSet.ids,
-        embeddings: recordSet.embeddings,
+        embeddings: embeddingsBase64,
         metadatas: recordSet.metadatas,
         uris: recordSet.uris,
         documents: recordSet.documents,
@@ -637,12 +643,14 @@ export class CollectionImpl implements Collection {
 
     await this.prepareRecords({ recordSet, update: true });
 
+    const embeddingsBase64 = this.chromaClient.useBase64EncodingForEmbeddings ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings) : recordSet.embeddings;
+
     await Api.collectionUpsert({
       client: this.apiClient,
       path: await this.path(),
       body: {
         ids: recordSet.ids,
-        embeddings: recordSet.embeddings,
+        embeddings: embeddingsBase64,
         metadatas: recordSet.metadatas,
         uris: recordSet.uris,
         documents: recordSet.documents,
