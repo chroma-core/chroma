@@ -537,7 +537,7 @@ impl GrpcLog {
         {
             Ok(colls) => colls,
             Err(err) => {
-                tracing::error!("could not contact alt log: {err:?}");
+                tracing::error!("could not contact old log: {err:?}");
                 vec![]
             }
         };
@@ -551,7 +551,7 @@ impl GrpcLog {
             {
                 Ok(alt) => alt,
                 Err(err) => {
-                    tracing::error!("could not contact alt log: {err:?}");
+                    tracing::error!("could not contact new log: {err:?}");
                     vec![]
                 }
             };
