@@ -1107,6 +1107,7 @@ impl LogServer {
                     manifest.maximum_log_position(),
                 ),
                 Ok(None) | Err(wal3::Error::UninitializedLog) => {
+                    tracing::info!("Log is uninitialized on rust log service. Forwarding ScoutLog request to legacy log service");
                     return self.forward_scout_logs(Request::new(scout_logs)).await;
                 }
                 Err(err) => {
@@ -1116,6 +1117,13 @@ impl LogServer {
                     ));
                 }
             };
+
+            // NOTE(sicheng): This is temporary trace added for analyzing number of frags between the offsets
+            match log_reader.scan(start_position, Default::default()).await {
+                Ok(frags) => tracing::info!(name: "Counting live fragments", frag_count = frags.len()),
+                Err(e) => tracing::error!(name: "Unable to scout number of live fragments", error = e.to_string()),
+            }
+
             let start_offset = start_position.offset() as i64;
             let limit_offset = limit_position.offset() as i64;
             Ok(Response::new(ScoutLogsResponse {
