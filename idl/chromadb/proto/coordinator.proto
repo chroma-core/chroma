@@ -182,6 +182,8 @@ message GetCollectionsRequest {
   string database = 5;
   optional int32 limit = 6;
   optional int32 offset = 7;
+  repeated string ids = 8;
+  optional bool include_soft_deleted = 9;
 }
 
 message GetCollectionsResponse {

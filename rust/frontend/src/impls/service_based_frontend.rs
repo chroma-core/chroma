@@ -8,7 +8,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
-use chroma_sysdb::SysDb;
+use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_tracing::meter_event::{MeterEvent, ReadAction, WriteAction};
 use chroma_types::{
@@ -329,14 +329,13 @@ impl ServiceBasedFrontend {
         }: ListCollectionsRequest,
     ) -> Result<ListCollectionsResponse, GetCollectionsError> {
         self.sysdb_client
-            .get_collections(
-                None,
-                None,
-                Some(tenant_id),
-                Some(database_name),
+            .get_collections(GetCollectionsOptions {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
                 limit,
                 offset,
-            )
+                ..Default::default()
+            })
             .await
     }
 
@@ -365,14 +364,13 @@ impl ServiceBasedFrontend {
     ) -> Result<GetCollectionResponse, GetCollectionError> {
         let mut collections = self
             .sysdb_client
-            .get_collections(
-                None,
-                Some(collection_name.clone()),
-                Some(tenant_id),
-                Some(database_name),
-                None,
-                0,
-            )
+            .get_collections(GetCollectionsOptions {
+                name: Some(collection_name.clone()),
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                limit: Some(1),
+                ..Default::default()
+            })
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         collections

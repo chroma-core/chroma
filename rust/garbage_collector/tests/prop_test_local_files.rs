@@ -39,6 +39,7 @@
 use chroma_blockstore::test_utils::sparse_index_test_utils::create_test_sparse_index;
 use chroma_storage::local::LocalStorage;
 use chroma_storage::Storage;
+use chroma_sysdb::GetCollectionsOptions;
 use chroma_sysdb::TestSysDb;
 use chroma_system::Orchestrator;
 use chroma_types::chroma_proto::FilePaths;
@@ -577,7 +578,10 @@ impl GcTest {
         let collection_id = CollectionUuid::from_str(&id).unwrap();
         let collections = self
             .sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
 
@@ -734,14 +738,10 @@ impl GcTest {
 
         let collection_id = Uuid::parse_str(&id).unwrap();
         let collections = sysdb
-            .get_collections(
-                Some(CollectionUuid(collection_id)),
-                None,
-                None,
-                None,
-                None,
-                0,
-            )
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(CollectionUuid(collection_id)),
+                ..Default::default()
+            })
             .await
             .unwrap();
 

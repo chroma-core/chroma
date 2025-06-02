@@ -53,12 +53,21 @@ func (s *collectionDb) GetCollectionWithoutMetadata(collectionID *string, databa
 }
 
 func (s *collectionDb) GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	return s.getCollections(id, name, tenantID, databaseName, limit, offset, nil)
+	ids := []string{}
+	if id != nil {
+		ids = append(ids, *id)
+	}
+	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, nil)
 }
 
-func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
+func (s *collectionDb) GetCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*dbmodel.CollectionAndMetadata, error) {
 	isDeleted := false
-	return s.getCollections(id, name, tenantID, databaseName, limit, offset, &isDeleted)
+	isDeletedPtr := &isDeleted
+	if includeSoftDeleted {
+		isDeletedPtr = nil
+	}
+
+	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, isDeletedPtr)
 }
 
 func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*dbmodel.CollectionToGc, error) {
@@ -106,7 +115,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	return collections, nil
 }
 
-func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
+func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	type Result struct {
 		// Collection fields
 		CollectionId               string     `gorm:"column:collection_id"`
@@ -151,8 +160,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	if tenantID != "" {
 		query = query.Where("databases.tenant_id = ?", tenantID)
 	}
-	if id != nil {
-		query = query.Where("collections.id = ?", *id)
+	if ids != nil && len(ids) > 0 {
+		query = query.Where("collections.id IN ?", ids)
 	}
 	if name != nil {
 		query = query.Where("collections.name = ?", *name)
@@ -327,7 +336,11 @@ func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
 
 func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
 	isDeleted := true
-	return s.getCollections(collectionID, nil, tenantID, databaseName, &limit, nil, &isDeleted)
+	ids := []string{}
+	if collectionID != nil {
+		ids = append(ids, *collectionID)
+	}
+	return s.getCollections(ids, nil, tenantID, databaseName, &limit, nil, &isDeleted)
 }
 
 // NOTE: This is the only method to do a hard delete of a single collection.

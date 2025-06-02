@@ -920,7 +920,7 @@ mod tests {
     use chroma_blockstore::RootManager;
     use chroma_cache::nop::NopCache;
     use chroma_storage::test_storage;
-    use chroma_sysdb::TestSysDb;
+    use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
     use chroma_system::{Dispatcher, Orchestrator, System};
     use chroma_types::{
         CollectionUuid, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
@@ -988,7 +988,10 @@ mod tests {
 
         // Should fail
         let mut collections = sysdb
-            .get_collections(Some(root_collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(root_collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let root_collection = collections.pop().unwrap();

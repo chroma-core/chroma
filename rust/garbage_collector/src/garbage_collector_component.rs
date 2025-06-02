@@ -505,7 +505,7 @@ mod tests {
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
-    use chroma_sysdb::{GrpcSysDb, GrpcSysDbConfig};
+    use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig};
     use chroma_system::{DispatcherConfig, System};
     use tracing_test::traced_test;
 
@@ -714,7 +714,10 @@ mod tests {
                 .unwrap(),
         );
         let collections = sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let collection = collections.first().unwrap();
@@ -1006,7 +1009,10 @@ mod tests {
         // Fork collection in delete mode to give it a lineage file (only GC v2 can handle fork trees)
         {
             let source_collection = sysdb
-                .get_collections(Some(collection_in_delete_mode), None, None, None, None, 0)
+                .get_collections(GetCollectionsOptions {
+                    collection_id: Some(collection_in_delete_mode),
+                    ..Default::default()
+                })
                 .await
                 .unwrap();
             let source_collection = source_collection.first().unwrap();
