@@ -1,14 +1,17 @@
-use std::error::Error;
 use crate::client::admin_client::get_admin_client;
 use crate::ui_utils::copy_to_clipboard;
-use crate::utils::{get_current_profile, CliError, Profile, UtilsError, CHROMA_API_KEY_ENV_VAR, CHROMA_DATABASE_ENV_VAR, CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT};
+use crate::utils::{
+    get_current_profile, CliError, Profile, UtilsError, CHROMA_API_KEY_ENV_VAR,
+    CHROMA_DATABASE_ENV_VAR, CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
+};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
-use std::{fmt, fs};
+use std::error::Error;
 use std::path::Path;
+use std::{fmt, fs};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
@@ -26,7 +29,7 @@ pub enum DbError {
     #[error("Failed to get runtime for DB commands")]
     RuntimeError,
     #[error("Failed to create or update .env file with Chroma environment variables")]
-    EnvFile
+    EnvFile,
 }
 
 #[derive(Debug, Clone, ValueEnum, EnumIter)]
@@ -105,7 +108,7 @@ pub struct ConnectArgs {
     #[clap(long = "env-file", default_value_t = false, conflicts_with_all = ["language", "env_vars"], help = "Add Chroma environment variables to a .env file in the current directory")]
     env_file: bool,
     #[clap(long = "env-vars", default_value_t = false, conflicts_with_all = ["language", "env_file"], help = "Output Chroma environment variables")]
-    env_vars: bool
+    env_vars: bool,
 }
 
 #[derive(Args, Debug)]
@@ -156,7 +159,10 @@ fn no_dbs_message(profile_name: &str) -> String {
 }
 
 fn env_file_created_message() -> String {
-    format!("{}", "Chroma environment variables set in .env!".blue().bold())
+    format!(
+        "{}",
+        "Chroma environment variables set in .env!".blue().bold()
+    )
 }
 
 fn select_language_message() -> String {
@@ -332,7 +338,7 @@ fn confirm_db_deletion(name: &str) -> Result<bool, CliError> {
 
 fn create_env_connection(current_profile: Profile, db_name: String) -> Result<(), Box<dyn Error>> {
     let env_path = ".env";
-    let chroma_keys = vec![
+    let chroma_keys = [
         CHROMA_API_KEY_ENV_VAR,
         CHROMA_TENANT_ENV_VAR,
         CHROMA_DATABASE_ENV_VAR,
@@ -357,8 +363,14 @@ fn create_env_connection(current_profile: Profile, db_name: String) -> Result<()
         }
     }
 
-    lines.push(format!("{}={}", CHROMA_API_KEY_ENV_VAR, current_profile.api_key));
-    lines.push(format!("{}={}", CHROMA_TENANT_ENV_VAR, current_profile.tenant_id));
+    lines.push(format!(
+        "{}={}",
+        CHROMA_API_KEY_ENV_VAR, current_profile.api_key
+    ));
+    lines.push(format!(
+        "{}={}",
+        CHROMA_TENANT_ENV_VAR, current_profile.tenant_id
+    ));
     lines.push(format!("{}={}", CHROMA_DATABASE_ENV_VAR, db_name));
 
     fs::write(env_path, lines.join("\n") + "\n")?;
@@ -380,8 +392,8 @@ pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), 
     }
 
     if args.env_file {
-        if let Err(_) = create_env_connection(current_profile, name) {
-            return Err(DbError::EnvFile.into())
+        if create_env_connection(current_profile, name).is_err() {
+            return Err(DbError::EnvFile.into());
         }
         println!("{}", env_file_created_message());
         return Ok(());
