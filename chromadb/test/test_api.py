@@ -6,6 +6,8 @@ import tempfile
 import traceback
 from datetime import datetime, timedelta
 from typing import Any
+from chromadb.errors import InvalidArgumentError
+from chromadb.test.conftest import ClientFactories
 
 import httpx
 import numpy as np
@@ -28,7 +30,7 @@ def persist_dir():
 def local_persist_api(persist_dir):
     client = chromadb.Client(
         Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -49,7 +51,7 @@ def local_persist_api(persist_dir):
 def local_persist_api_cache_bust(persist_dir):
     client = chromadb.Client(
         Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -101,7 +103,9 @@ def test_persist_index_loading(api_fixture, request):
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
-def test_persist_index_loading_embedding_function(api_fixture, request):
+def test_persist_index_loading_embedding_function(
+    api_fixture, request
+):
     class TestEF(EmbeddingFunction[Document]):
         def __call__(self, input):
             return [np.array([1, 2, 3]) for _ in range(len(input))]
@@ -142,7 +146,9 @@ def test_persist_index_loading_embedding_function(api_fixture, request):
 
 
 @pytest.mark.parametrize("api_fixture", [local_persist_api])
-def test_persist_index_get_or_create_embedding_function(api_fixture, request):
+def test_persist_index_get_or_create_embedding_function(
+    api_fixture, request
+):
     class TestEF(EmbeddingFunction[Document]):
         def __call__(self, input):
             return [np.array([1, 2, 3]) for _ in range(len(input))]
