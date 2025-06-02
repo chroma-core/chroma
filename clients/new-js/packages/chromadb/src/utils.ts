@@ -350,7 +350,8 @@ export const validateWhere = (where: Where) => {
         );
       }
 
-      Object.values(where).forEach((w: Where) => validateWhere(w));
+      value.forEach((w: Where) => validateWhere(w));
+      return;
     }
 
     if (typeof value === "object") {
