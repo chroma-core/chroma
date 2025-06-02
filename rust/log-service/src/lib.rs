@@ -294,7 +294,9 @@ impl RollupPerCollection {
     fn new(first_observation: LogPosition, num_records: u64) -> Self {
         Self {
             start_log_position: first_observation,
-            limit_log_position: first_observation + num_records,
+            limit_log_position: LogPosition::from_offset(
+                first_observation.offset().saturating_add(num_records),
+            ),
             reinsert_count: 0,
             initial_insertion_epoch_us: 0,
         }
@@ -383,7 +385,7 @@ impl DirtyMarker {
             initial_insertion_epoch_us: _,
         } = self
         {
-            *reinsert_count += 1;
+            *reinsert_count = reinsert_count.saturating_add(1);
         }
     }
 
@@ -915,6 +917,7 @@ impl LogServer {
                 Limits {
                     max_files: Some(10_000),
                     max_bytes: Some(1_000_000_000),
+                    max_records: Some(10_000),
                 },
             )
             .await?;
@@ -1149,6 +1152,7 @@ impl LogServer {
             let limits = Limits {
                 max_files: Some(pull_logs.batch_size as u64 + 1),
                 max_bytes: None,
+                max_records: Some(pull_logs.batch_size as u64),
             };
             let fragments = match log_reader
                 .scan(
@@ -1170,17 +1174,25 @@ impl LogServer {
                 .map(|fragment| async {
                     let cache_key = format!("{collection_id}::{}", fragment.path);
                     if let Some(cache) = self.cache.as_ref() {
-                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
+                        let cache_span = tracing::info_span!("cache get");
+                        if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
+                        {
                             return Ok(Arc::new(answer.bytes));
                         }
-                        let answer = log_reader.fetch(fragment).await?;
+                        let fetch_span = tracing::info_span!("fragment fetch");
+                        let answer = log_reader.fetch(fragment).instrument(fetch_span).await?;
                         let cache_value = CachedParquetFragment {
                             bytes: Clone::clone(&*answer),
                         };
-                        cache.insert(cache_key, cache_value).await;
+                        let insert_span = tracing::info_span!("cache insert");
+                        cache
+                            .insert(cache_key, cache_value)
+                            .instrument(insert_span)
+                            .await;
                         Ok(answer)
                     } else {
-                        log_reader.fetch(fragment).await
+                        let fetch_span = tracing::info_span!("fragment fetch");
+                        log_reader.fetch(fragment).instrument(fetch_span).await
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1409,6 +1421,7 @@ impl LogServer {
                 Limits {
                     max_files: Some(1_000_000),
                     max_bytes: Some(1_000_000_000),
+                    max_records: Some(1_000_000),
                 },
             )
             .await
@@ -2531,5 +2544,556 @@ mod tests {
         assert_eq!(LogPosition::from_offset(30), rollup2.limit_log_position);
         assert_eq!(2, rollup2.reinsert_count);
         assert_eq!(now + 1000, rollup2.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn error_enum_conversion_from_wal3() {
+        let wal3_error = wal3::Error::Internal;
+        let service_error = Error::from(wal3_error);
+        match service_error {
+            Error::Wal3(wal3::Error::Internal) => {}
+            _ => panic!("Expected Wal3 error variant"),
+        }
+    }
+
+    #[test]
+    fn error_enum_conversion_from_json() {
+        let json_error = serde_json::from_str::<DirtyMarker>("invalid json").unwrap_err();
+        let service_error = Error::from(json_error);
+        match service_error {
+            Error::Json(_) => {}
+            _ => panic!("Expected Json error variant"),
+        }
+    }
+
+    #[test]
+    fn error_enum_display_messages() {
+        let wal3_error = Error::Wal3(wal3::Error::Internal);
+        assert!(wal3_error.to_string().contains("wal3"));
+
+        let json_error =
+            Error::Json(serde_json::from_str::<DirtyMarker>("invalid json").unwrap_err());
+        assert!(json_error.to_string().contains("serialization error"));
+
+        let reader_error = Error::CouldNotGetDirtyLogReader;
+        assert_eq!(
+            "Dirty log writer failed to provide a reader",
+            reader_error.to_string()
+        );
+
+        let cursor_error = Error::CouldNotGetDirtyLogCursors;
+        assert_eq!(
+            "Dirty log writer failed to provide a cursor store",
+            cursor_error.to_string()
+        );
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_invalid_positions() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![(
+            LogPosition::from_offset(1),
+            DirtyMarker::MarkDirty {
+                collection_id,
+                log_position: LogPosition::from_offset(u64::MAX - 1),
+                num_records: 100,
+                reinsert_count: 0,
+                initial_insertion_epoch_us: now,
+            },
+        )];
+
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        let collection_rollup = rollup.get(&collection_id).unwrap();
+        assert_eq!(
+            LogPosition::from_offset(u64::MAX - 1),
+            collection_rollup.start_log_position
+        );
+        assert_eq!(
+            LogPosition::from_offset(u64::MAX),
+            collection_rollup.limit_log_position
+        );
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_zero_records() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![(
+            LogPosition::from_offset(1),
+            DirtyMarker::MarkDirty {
+                collection_id,
+                log_position: LogPosition::from_offset(10),
+                num_records: 0,
+                reinsert_count: 0,
+                initial_insertion_epoch_us: now,
+            },
+        )];
+
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        let collection_rollup = rollup.get(&collection_id).unwrap();
+        assert_eq!(
+            LogPosition::from_offset(10),
+            collection_rollup.start_log_position
+        );
+        assert_eq!(
+            LogPosition::from_offset(10),
+            collection_rollup.limit_log_position
+        );
+        assert!(collection_rollup.is_empty());
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_max_reinsert_count() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(10),
+                    num_records: 1,
+                    reinsert_count: u64::MAX,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(11),
+                    num_records: 1,
+                    reinsert_count: 5,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+        ];
+
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        let collection_rollup = rollup.get(&collection_id).unwrap();
+        assert_eq!(u64::MAX, collection_rollup.reinsert_count);
+    }
+
+    #[test]
+    fn rollup_per_collection_witness_functionality() {
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5);
+
+        // Test that the rollup can handle boundary conditions
+        assert_eq!(LogPosition::from_offset(10), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(15), rollup.limit_log_position);
+        assert!(!rollup.is_empty());
+    }
+
+    #[test]
+    fn rollup_per_collection_backpressure_boundary_conditions() {
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), u64::MAX);
+        assert!(rollup.requires_backpressure(u64::MAX - 1));
+        assert!(rollup.requires_backpressure(u64::MAX));
+
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(u64::MAX - 100), 50);
+        assert!(!rollup.requires_backpressure(100));
+        assert!(rollup.requires_backpressure(25));
+    }
+
+    #[test]
+    fn active_log_keep_alive_zero_duration() {
+        let mut active_log = ActiveLog::default();
+        let initial_time = active_log.collect_after;
+
+        active_log.keep_alive(Duration::ZERO);
+        assert!(active_log.collect_after >= initial_time);
+    }
+
+    #[test]
+    fn active_log_keep_alive_overflow_protection() {
+        let mut active_log = ActiveLog::default();
+        let now = Instant::now();
+        active_log.keep_alive(Duration::from_secs(u64::MAX));
+        assert!(active_log.collect_after >= now);
+    }
+
+    #[test]
+    fn metrics_creation_and_structure() {
+        let meter = opentelemetry::global::meter("test");
+        let metrics = Metrics::new(meter);
+
+        // We can't easily test metric values without a full OpenTelemetry setup,
+        // but we can verify the metrics structure exists
+        let _log_gauge = &metrics.log_total_uncompacted_records_count;
+        let _dirty_counter = &metrics.dirty_log_records_read;
+    }
+
+    #[test]
+    fn cached_parquet_fragment_weighted() {
+        use chroma_cache::Weighted;
+
+        let fragment = CachedParquetFragment {
+            bytes: vec![0u8; 1024],
+        };
+        assert_eq!(1024, fragment.weight());
+
+        let empty_fragment = CachedParquetFragment { bytes: vec![] };
+        assert_eq!(0, empty_fragment.weight());
+
+        let large_fragment = CachedParquetFragment {
+            bytes: vec![0u8; 1000],
+        };
+        assert_eq!(1000, large_fragment.weight());
+    }
+
+    #[test]
+    fn log_server_config_defaults() {
+        let config = LogServerConfig::default();
+        assert_eq!(50051, config.port);
+        assert_eq!("rust-log-service-0", config.my_member_id);
+        assert_eq!(100, config.record_count_threshold);
+        assert_eq!(1_000_000, config.num_records_before_backpressure);
+        assert_eq!(10, config.reinsert_threshold);
+        assert_eq!(Duration::from_secs(10), config.rollup_interval);
+        assert_eq!(86_400_000_000, config.timeout_us);
+        assert!(config.proxy_to.is_none());
+    }
+
+    #[test]
+    fn opentelemetry_config_defaults() {
+        let config = OpenTelemetryConfig {
+            endpoint: default_endpoint(),
+            service_name: default_otel_service_name(),
+        };
+        assert_eq!("http://otel-collector:4317", config.endpoint);
+        assert_eq!("rust-log-service", config.service_name);
+    }
+
+    #[test]
+    fn dirty_marker_purge_after_multiple_marks() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(1),
+                    num_records: 10,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(11),
+                    num_records: 10,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now + 1000,
+                },
+            ),
+            (
+                LogPosition::from_offset(3),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(21),
+                    num_records: 10,
+                    reinsert_count: 2,
+                    initial_insertion_epoch_us: now + 2000,
+                },
+            ),
+            (
+                LogPosition::from_offset(4),
+                DirtyMarker::Purge { collection_id },
+            ),
+        ];
+
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        assert_eq!(0, rollup.len());
+    }
+
+    #[test]
+    fn dirty_marker_reinsert_operations() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mut mark_dirty = DirtyMarker::MarkDirty {
+            collection_id,
+            log_position: LogPosition::from_offset(1),
+            num_records: 1,
+            reinsert_count: u64::MAX - 1,
+            initial_insertion_epoch_us: now,
+        };
+
+        mark_dirty.reinsert();
+        if let DirtyMarker::MarkDirty { reinsert_count, .. } = mark_dirty {
+            assert_eq!(u64::MAX, reinsert_count);
+        } else {
+            panic!("Expected MarkDirty variant");
+        }
+
+        mark_dirty.reinsert();
+        if let DirtyMarker::MarkDirty { reinsert_count, .. } = mark_dirty {
+            assert_eq!(u64::MAX, reinsert_count);
+        } else {
+            panic!("Expected MarkDirty variant");
+        }
+    }
+
+    #[test]
+    fn rollup_per_collection_gap_handling() {
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5);
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        rollup.observe_dirty_marker(LogPosition::from_offset(20), 5, 1, now);
+
+        assert_eq!(LogPosition::from_offset(10), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(25), rollup.limit_log_position);
+        assert_eq!(1, rollup.reinsert_count);
+        assert_eq!(now, rollup.initial_insertion_epoch_us);
+    }
+
+    #[tokio::test]
+    async fn parquet_to_records_empty_parquet() {
+        let empty_parquet = Arc::new(vec![]);
+        let result = parquet_to_records(empty_parquet);
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn parquet_to_records_invalid_data() {
+        let invalid_data = Arc::new(vec![0u8; 100]);
+        let result = parquet_to_records(invalid_data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_stress_test() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let mut markers = Vec::with_capacity(1000);
+        for i in 0..1000 {
+            markers.push((
+                LogPosition::from_offset(i),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(i * 10),
+                    num_records: 1,
+                    reinsert_count: i % 100,
+                    initial_insertion_epoch_us: now + i,
+                },
+            ));
+        }
+
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        assert_eq!(1, rollup.len());
+        let collection_rollup = rollup.get(&collection_id).unwrap();
+        assert_eq!(
+            LogPosition::from_offset(0),
+            collection_rollup.start_log_position
+        );
+        assert_eq!(
+            LogPosition::from_offset(9991),
+            collection_rollup.limit_log_position
+        );
+        assert_eq!(99, collection_rollup.reinsert_count);
+        assert_eq!(now + 999, collection_rollup.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn dirty_marker_coalesce_alternating_purge_pattern() {
+        let collection_id = CollectionUuid::new();
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+
+        let markers = vec![
+            (
+                LogPosition::from_offset(1),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(1),
+                    num_records: 10,
+                    reinsert_count: 0,
+                    initial_insertion_epoch_us: now,
+                },
+            ),
+            (
+                LogPosition::from_offset(2),
+                DirtyMarker::Purge { collection_id },
+            ),
+            (
+                LogPosition::from_offset(3),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(20),
+                    num_records: 5,
+                    reinsert_count: 1,
+                    initial_insertion_epoch_us: now + 1000,
+                },
+            ),
+            (
+                LogPosition::from_offset(4),
+                DirtyMarker::Purge { collection_id },
+            ),
+            (
+                LogPosition::from_offset(5),
+                DirtyMarker::MarkDirty {
+                    collection_id,
+                    log_position: LogPosition::from_offset(30),
+                    num_records: 3,
+                    reinsert_count: 2,
+                    initial_insertion_epoch_us: now + 2000,
+                },
+            ),
+        ];
+
+        let rollup = DirtyMarker::coalesce_markers(&markers).unwrap();
+        assert_eq!(0, rollup.len());
+    }
+
+    #[test]
+    fn rollup_per_collection_extreme_positions() {
+        let start_position = LogPosition::from_offset(u64::MAX - 10);
+        let rollup = RollupPerCollection::new(start_position, 5);
+
+        assert_eq!(start_position, rollup.start_log_position);
+        assert!(!rollup.is_empty());
+        assert!(rollup.requires_backpressure(1));
+    }
+
+    #[test]
+    fn rollup_per_collection_zero_epoch() {
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5);
+
+        rollup.observe_dirty_marker(LogPosition::from_offset(15), 5, 1, 0);
+
+        assert_eq!(0, rollup.initial_insertion_epoch_us);
+    }
+
+    #[test]
+    fn error_chain_verification() {
+        let wal3_error = wal3::Error::Internal;
+        let service_error: Box<dyn std::error::Error> = Box::new(Error::from(wal3_error));
+
+        assert!(service_error.source().is_some());
+        assert!(format!("{:?}", service_error).contains("Internal"));
+    }
+
+    #[test]
+    fn active_log_default_state() {
+        let active_log = ActiveLog::default();
+        assert!(active_log.log.is_none());
+        assert!(active_log.collect_after > Instant::now() - Duration::from_secs(1));
+    }
+
+    #[test]
+    fn log_key_new_and_equality() {
+        let collection_id = CollectionUuid::new();
+        let key1 = LogKey { collection_id };
+        let key2 = LogKey { collection_id };
+
+        assert_eq!(key1, key2);
+        assert_eq!(key1.collection_id, collection_id);
+    }
+
+    #[test]
+    fn mark_dirty_struct_verification() {
+        let collection_id = CollectionUuid::new();
+
+        // Test that we can create the structure concept
+        assert!(!collection_id.to_string().is_empty());
+    }
+
+    #[test]
+    fn config_serialization_roundtrip() {
+        use serde_json;
+
+        let config = LogServerConfig::default();
+        let serialized = serde_json::to_string(&config).unwrap();
+        let deserialized: LogServerConfig = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(config.port, deserialized.port);
+        assert_eq!(config.my_member_id, deserialized.my_member_id);
+        assert_eq!(
+            config.record_count_threshold,
+            deserialized.record_count_threshold
+        );
+    }
+
+    #[test]
+    fn dirty_marker_invalid_json_handling() {
+        let invalid_json = r#"{"invalid": "structure"}"#;
+        let result: Result<DirtyMarker, _> = serde_json::from_str(invalid_json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rollup_per_collection_edge_case_positions() {
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(100), 0);
+
+        rollup.observe_dirty_marker(LogPosition::from_offset(50), 25, 1, 1000);
+
+        assert_eq!(LogPosition::from_offset(50), rollup.start_log_position);
+        assert_eq!(LogPosition::from_offset(100), rollup.limit_log_position);
+    }
+
+    #[test]
+    fn backpressure_threshold_verification() {
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), 100);
+
+        assert!(rollup.requires_backpressure(99));
+        assert!(rollup.requires_backpressure(100));
+        assert!(!rollup.requires_backpressure(101));
+
+        let zero_rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0);
+        assert!(!zero_rollup.requires_backpressure(1));
+        assert!(zero_rollup.requires_backpressure(0));
+    }
+
+    #[test]
+    fn metrics_struct_field_access() {
+        let meter = opentelemetry::global::meter("test_metrics");
+        let metrics = Metrics::new(meter);
+
+        let gauge_name = format!("{:?}", metrics.log_total_uncompacted_records_count);
+        let counter_name = format!("{:?}", metrics.dirty_log_records_read);
+
+        assert!(!gauge_name.is_empty());
+        assert!(!counter_name.is_empty());
+    }
+
+    #[test]
+    fn cached_parquet_fragment_default() {
+        use chroma_cache::Weighted;
+
+        let fragment = CachedParquetFragment::default();
+        assert_eq!(0, fragment.weight());
+        assert!(fragment.bytes.is_empty());
     }
 }

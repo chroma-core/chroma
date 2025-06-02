@@ -22,6 +22,7 @@ use crate::{
 pub struct Limits {
     pub max_files: Option<u64>,
     pub max_bytes: Option<u64>,
+    pub max_records: Option<u64>,
 }
 
 /// LogReader is a reader for the log.
@@ -90,16 +91,27 @@ impl LogReader {
         else {
             return Err(Error::UninitializedLog);
         };
+        let log_position_range = if let Some(max_records) = limits.max_records {
+            (from, from + max_records)
+        } else {
+            (from, LogPosition::MAX)
+        };
+        fn ranges_overlap(
+            lhs: (LogPosition, LogPosition),
+            rhs: (LogPosition, LogPosition),
+        ) -> bool {
+            lhs.0 <= rhs.1 && rhs.0 <= lhs.1
+        }
         let mut snapshots = manifest
             .snapshots
             .iter()
-            .filter(|s| s.limit.offset() > from.offset())
+            .filter(|s| ranges_overlap(log_position_range, (s.start, s.limit)))
             .cloned()
             .collect::<Vec<_>>();
         let mut fragments = manifest
             .fragments
             .iter()
-            .filter(|f| f.limit.offset() > from.offset())
+            .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
             .cloned()
             .collect::<Vec<_>>();
         while !snapshots.is_empty() {
@@ -136,6 +148,18 @@ impl LogReader {
                 tracing::info!("truncating to {} files from {}", max_files, fragments.len());
                 fragments.truncate(max_files as usize);
             }
+        }
+        while fragments.len() > 1
+            // NOTE(rescrv):  We take the start of the last fragment, because if there are enough
+            // records without it we can pop.
+            && fragments[fragments.len() - 1].start - fragments[0].start
+                > limits.max_records.unwrap_or(u64::MAX)
+        {
+            tracing::info!(
+                "truncating to {} files because records restrictions",
+                fragments.len() - 1
+            );
+            fragments.pop();
         }
         while fragments.len() > 1
             && fragments
