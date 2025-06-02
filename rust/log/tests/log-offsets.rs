@@ -169,6 +169,8 @@ async fn test_k8s_integration_log_offsets_empty_log_50054() {
     let resp = resp.into_inner();
     assert_eq!(1, resp.records.len());
     assert_eq!(1, resp.records[0].log_offset);
+    // Wait 15 seconds for the background interval.  It's a magic constant in log service code.
+    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
     // "compact" said record.
     let resp = rust_log_service
         .get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {
@@ -193,6 +195,8 @@ async fn test_k8s_integration_log_offsets_empty_log_50054() {
         })
         .await
         .unwrap();
+    // Wait 15 seconds for the background interval.  It's a magic constant in log service code.
+    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
     // said record no longer shows in compaction.
     let resp = rust_log_service
         .get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {

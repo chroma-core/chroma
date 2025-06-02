@@ -370,6 +370,7 @@ mod tests {
                 acc_bytes: 0,
                 snapshots: vec![],
                 fragments: vec![],
+                initial_offset: None,
             },
             work.0
         );
@@ -397,6 +398,7 @@ mod tests {
                         setsum: Setsum::default(),
                     }
                 ],
+                initial_offset: None,
             },
             work.2
         );
