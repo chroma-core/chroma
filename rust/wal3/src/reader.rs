@@ -100,7 +100,7 @@ impl LogReader {
             lhs: (LogPosition, LogPosition),
             rhs: (LogPosition, LogPosition),
         ) -> bool {
-            lhs.0 <= rhs.1 && lhs.1 <= rhs.0
+            lhs.0 <= rhs.1 && rhs.0 <= lhs.1
         }
         let mut snapshots = manifest
             .snapshots
@@ -148,6 +148,18 @@ impl LogReader {
                 tracing::info!("truncating to {} files from {}", max_files, fragments.len());
                 fragments.truncate(max_files as usize);
             }
+        }
+        while fragments.len() > 1
+            // NOTE(rescrv):  We take the start of the last fragment, because if there are enough
+            // records without it we can pop.
+            && fragments[fragments.len() - 1].start - fragments[0].start
+                > limits.max_records.unwrap_or(u64::MAX)
+        {
+            tracing::info!(
+                "truncating to {} files because bytes restrictions",
+                fragments.len() - 1
+            );
+            fragments.pop();
         }
         while fragments.len() > 1
             && fragments
