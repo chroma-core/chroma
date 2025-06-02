@@ -531,17 +531,31 @@ impl GrpcLog {
         &mut self,
         min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
-        let mut norm = self
+        let mut norm = match self
             ._get_collections_with_new_data(false, min_compaction_size)
-            .await?;
+            .await
+        {
+            Ok(colls) => colls,
+            Err(err) => {
+                tracing::error!("could not contact alt log: {err:?}");
+                vec![]
+            }
+        };
         if self.config.alt_host_threshold.is_some()
             || !self.config.use_alt_for_tenants.is_empty()
             || !self.config.use_alt_for_collections.is_empty()
         {
-            let alt = self
+            let alt = match self
                 ._get_collections_with_new_data(true, min_compaction_size)
-                .await?;
-            norm.extend(alt)
+                .await
+            {
+                Ok(alt) => alt,
+                Err(err) => {
+                    tracing::error!("could not contact alt log: {err:?}");
+                    vec![]
+                }
+            };
+            norm.extend(alt);
         }
         norm.sort_by_key(|n| n.collection_id);
         norm.dedup_by_key(|n| n.collection_id);
