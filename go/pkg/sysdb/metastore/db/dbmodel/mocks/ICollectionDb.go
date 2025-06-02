@@ -438,9 +438,9 @@ func (_m *ICollectionDb) UpdateCollectionLineageFilePath(collectionID string, cu
 	return r0
 }
 
-// UpdateLogPositionAndVersionInfo provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs
-func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFilePath string, newCollectionVersion int32, newVersionFilePath string, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64) (int64, error) {
-	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+// UpdateLogPositionAndVersionInfo provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, numVersions
+func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFilePath string, newCollectionVersion int32, newVersionFilePath string, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, numVersions uint64) (int64, error) {
+	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, numVersions)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateLogPositionAndVersionInfo")
@@ -448,17 +448,17 @@ func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, lo
 
 	var r0 int64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64) (int64, error)); ok {
-		return rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64, uint64) (int64, error)); ok {
+		return rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, numVersions)
 	}
-	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64) int64); ok {
-		r0 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64, uint64) int64); ok {
+		r0 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, numVersions)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64) error); ok {
-		r1 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+	if rf, ok := ret.Get(1).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64, uint64) error); ok {
+		r1 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, numVersions)
 	} else {
 		r1 = ret.Error(1)
 	}

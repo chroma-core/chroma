@@ -360,6 +360,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 		uint64(1),
 		uint64(1),
 		mock.Anything,
+		mock.Anything,
 	).Return(int64(1), nil)
 
 	mockTenantDb.On("UpdateTenantLastCompactionTime", tenantID, mock.Anything).Return(nil)
@@ -563,6 +564,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 		mock.Anything,
 		uint64(1),
 		uint64(1),
+		mock.Anything,
 		mock.Anything,
 	).Return(int64(1), nil)
 

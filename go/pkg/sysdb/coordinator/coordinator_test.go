@@ -1406,6 +1406,14 @@ func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 	suite.NoError(err)
 	suite.NotNil(flushInfo)
 
+	// Assert that num_versions is 2
+	type NumVersions struct {
+		NumVersions int64 `gorm:"column:num_versions"`
+	}
+	res := &NumVersions{}
+	suite.db.Select("num_versions").Table("collections").Find(&res, "id = ?", newCollection.ID.String())
+	suite.Equal(int64(2), res.NumVersions)
+
 	// TODO(rohitcp): Add these tests back once version file is enabled.
 	// Verify version file exists in S3
 	// versionFilePathPrefix := suite.s3MetaStore.GetVersionFilePath(newCollection.TenantID, newCollection.ID.String(), "")
