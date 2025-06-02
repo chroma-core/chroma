@@ -168,8 +168,8 @@ impl LogWriter {
         //
         // If the file exists, this will fail with LogContention, which fails us with
         // LogContention.  Other errors fail transparently, too.
-        let (unprefixed_path, setsum, num_bytes) = if num_records > 0 {
-            upload_parquet(
+        if num_records > 0 {
+            let (path, setsum, num_bytes) = upload_parquet(
                 options,
                 storage,
                 prefix,
@@ -177,21 +177,7 @@ impl LogWriter {
                 first_record_offset,
                 messages,
             )
-            .await?
-        } else {
-            ("".to_string(), Setsum::default(), 0)
-        };
-        // SAFETY(rescrv):  Any error here is an error.
-        Manifest::initialize(options, storage, prefix, writer).await?;
-        // SAFETY(rescrv):  We just initialized, so we should be able to load---done to get e_tag.
-        let Some((manifest, e_tag)) =
-            Manifest::load(&ThrottleOptions::default(), storage, prefix).await?
-        else {
-            tracing::error!("Manifest was initialized and then was None.");
-            return Err(Error::Internal);
-        };
-        if num_records > 0 {
-            let path = unprefixed_path;
+            .await?;
             let seq_no = FragmentSeqNo(1);
             let num_bytes = num_bytes as u64;
             let frag = Fragment {
@@ -202,7 +188,9 @@ impl LogWriter {
                 num_bytes,
                 setsum,
             };
-            let mut new_manifest = manifest.clone();
+            let empty_manifest = Manifest::new_empty(writer);
+            let mut new_manifest = empty_manifest.clone();
+            new_manifest.initial_offset = Some(start);
             // SAFETY(rescrv):  This is unit tested to never happen.  If it happens, add more tests.
             if !new_manifest.can_apply_fragment(&frag) {
                 tracing::error!("Cannot apply frag to a clean manifest.");
@@ -210,19 +198,36 @@ impl LogWriter {
             }
             new_manifest.apply_fragment(frag);
             // SAFETY(rescrv):  If this fails, there's nothing left to do.
-            manifest
+            empty_manifest
                 .install(
+                    //TODO(rescrv): Thread throttle options.
                     &ThrottleOptions::default(),
                     storage,
                     prefix,
-                    Some(&e_tag),
+                    None,
                     &new_manifest,
                 )
                 .await?;
             // Not Safety:
             // We mark dirty, but if we lose that we lose that.
             // Failure to mark dirty fails the bootstrap.
-            mark_dirty.mark_dirty(limit, num_records).await?;
+            mark_dirty.mark_dirty(start, num_records).await?;
+        } else {
+            let empty_manifest = Manifest::new_empty("bootstrap");
+            let mut new_manifest = empty_manifest.clone();
+            new_manifest.initial_offset = Some(start);
+            // SAFETY(rescrv):  If this fails, there's nothing left to do.
+            empty_manifest
+                .install(
+                    //TODO(rescrv): Thread throttle options.
+                    &ThrottleOptions::default(),
+                    storage,
+                    prefix,
+                    None,
+                    &new_manifest,
+                )
+                .await?;
+            // No need to mark dirty as the manifest is empty.
         }
         Ok(())
     }

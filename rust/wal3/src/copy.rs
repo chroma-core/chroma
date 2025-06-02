@@ -124,6 +124,7 @@ pub async fn copy(
         writer: "copy task".to_string(),
         snapshots,
         fragments,
+        initial_offset: manifest.initial_offset,
     };
     Manifest::initialize_from_manifest(options, storage, &target, manifest).await?;
     Ok(())
