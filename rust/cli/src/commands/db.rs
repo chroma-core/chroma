@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::error::Error;
 use crate::client::admin_client::get_admin_client;
 use crate::ui_utils::copy_to_clipboard;
@@ -8,13 +7,11 @@ use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
-use std::fmt;
-use std::fs::{File, OpenOptions};
+use std::{fmt, fs};
 use std::path::Path;
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
-use std::io::{BufReader, Write, BufRead};
 
 #[derive(Debug, Error)]
 pub enum DbError {
@@ -107,7 +104,7 @@ pub struct ConnectArgs {
     language: Option<Language>,
     #[clap(long = "env-file", default_value_t = false, conflicts_with_all = ["language", "env_vars"], help = "Add Chroma environment variables to a .env file in the current directory")]
     env_file: bool,
-    #[clap(long = "env-file", default_value_t = false, conflicts_with_all = ["language", "env_file"], help = "Output Chroma environment variables")]
+    #[clap(long = "env-vars", default_value_t = false, conflicts_with_all = ["language", "env_file"], help = "Output Chroma environment variables")]
     env_vars: bool
 }
 
@@ -335,46 +332,36 @@ fn confirm_db_deletion(name: &str) -> Result<bool, CliError> {
 
 fn create_env_connection(current_profile: Profile, db_name: String) -> Result<(), Box<dyn Error>> {
     let env_path = ".env";
-    let mut existing_vars = HashMap::new();
-    let key_value_pairs = vec![
-        (CHROMA_API_KEY_ENV_VAR.to_string(), current_profile.api_key),
-        (CHROMA_TENANT_ENV_VAR.to_string(), current_profile.tenant_id),
-        (CHROMA_DATABASE_ENV_VAR.to_string(), db_name),
+    let chroma_keys = vec![
+        CHROMA_API_KEY_ENV_VAR,
+        CHROMA_TENANT_ENV_VAR,
+        CHROMA_DATABASE_ENV_VAR,
     ];
 
+    let mut lines = Vec::new();
+
     if Path::new(env_path).exists() {
-        let file = File::open(env_path)?;
-        let reader = BufReader::new(file);
+        let content = fs::read_to_string(env_path)?;
 
-        for line in reader.lines() {
-            let line = line?;
-            let line = line.trim();
+        for line in content.lines() {
+            let keep = if let Some(eq_pos) = line.find('=') {
+                let key = line[..eq_pos].trim();
+                !chroma_keys.contains(&key)
+            } else {
+                true
+            };
 
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-
-            if let Some(eq_pos) = line.find('=') {
-                let key = line[..eq_pos].trim().to_string();
-                let value = line[eq_pos + 1..].trim().to_string();
-                existing_vars.insert(key, value);
+            if keep {
+                lines.push(line.to_string());
             }
         }
     }
 
-    for (key, value) in key_value_pairs {
-        existing_vars.insert(key, value);
-    }
+    lines.push(format!("{}={}", CHROMA_API_KEY_ENV_VAR, current_profile.api_key));
+    lines.push(format!("{}={}", CHROMA_TENANT_ENV_VAR, current_profile.tenant_id));
+    lines.push(format!("{}={}", CHROMA_DATABASE_ENV_VAR, db_name));
 
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open(env_path)?;
-
-    for (key, value) in existing_vars {
-        writeln!(file, "{}={}", key, value)?;
-    }
+    fs::write(env_path, lines.join("\n") + "\n")?;
 
     Ok(())
 }
