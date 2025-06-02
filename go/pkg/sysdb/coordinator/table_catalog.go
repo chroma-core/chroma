@@ -416,14 +416,10 @@ func (tc *Catalog) CheckCollection(ctx context.Context, collectionID types.Uniqu
 	}
 	// Collection is hard deleted.
 	if collectionInfo == nil {
-		return true, nil
+		return true, 0, nil
 	}
-	// Collection is soft deleted.
-	if collectionInfo.IsDeleted {
-		return true, nil
-	}
-	// Collection is not deleted.
-	return false, nil
+
+	return collectionInfo.IsDeleted, collectionInfo.LogPosition, nil
 }
 
 func (tc *Catalog) GetCollection(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string) (*model.Collection, error) {
