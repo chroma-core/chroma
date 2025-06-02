@@ -230,6 +230,7 @@ func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCo
 	if err != nil {
 		trace_log.Error("Error in getting collections to compact from record_log table", zap.Error(err))
 	}
+	trace_log.Info("GetAllCollectionInfoToCompact", zap.Int64("collections", int64(len(collectionToCompact))))
 	return
 }
 
