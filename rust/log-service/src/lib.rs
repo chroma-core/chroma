@@ -59,7 +59,8 @@ static COMPACTION: CursorName = unsafe { CursorName::from_string_unchecked("comp
 
 pub struct Metrics {
     log_total_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
-    dirty_log_records_rewritten: opentelemetry::metrics::Counter<u64>,
+    /// The rate at which records are read from the dirty log.
+    dirty_log_records_read: opentelemetry::metrics::Counter<u64>,
 }
 
 impl Metrics {
@@ -68,7 +69,7 @@ impl Metrics {
             log_total_uncompacted_records_count: meter
                 .f64_gauge("log_total_uncompacted_records_count")
                 .build(),
-            dirty_log_records_rewritten: meter.u64_counter("dirty_log_records_rewritten").build(),
+            dirty_log_records_read: meter.u64_counter("dirty_log_records_read").build(),
         }
     }
 }
@@ -320,15 +321,10 @@ impl RollupPerCollection {
     }
 
     fn witness_manifest_and_cursor(&mut self, manifest: &Manifest, witness: Option<&Witness>) {
-        self.start_log_position = std::cmp::max(
-            witness
-                .map(|x| x.1.position)
-                .unwrap_or(manifest.minimum_log_position()),
-            self.start_log_position,
-        );
-        self.limit_log_position =
-            std::cmp::max(manifest.maximum_log_position(), self.limit_log_position);
-        self.limit_log_position = std::cmp::max(self.limit_log_position, self.start_log_position);
+        self.start_log_position = witness
+            .map(|x| x.1.position)
+            .unwrap_or(manifest.minimum_log_position());
+        self.limit_log_position = manifest.maximum_log_position();
     }
 
     fn is_empty(&self) -> bool {
@@ -762,11 +758,7 @@ impl LogServer {
         let default = Cursor::default();
         let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
         if cursor.position.offset() > adjusted_log_offset as u64 {
-            return Err(Status::aborted(format!(
-                "Invalid offset: {} > {}",
-                cursor.position.offset(),
-                adjusted_log_offset as u64
-            )));
+            return Ok(Response::new(UpdateCollectionLogOffsetResponse {}));
         }
         let cursor = Cursor {
             position: LogPosition::from_offset(adjusted_log_offset as u64),
@@ -797,7 +789,7 @@ impl LogServer {
             let rollup = entry.get_mut();
             rollup.start_log_position = std::cmp::max(
                 rollup.start_log_position,
-                LogPosition::from_offset(request.log_offset as u64),
+                LogPosition::from_offset(adjusted_log_offset as u64),
             );
             if rollup.start_log_position >= rollup.limit_log_position {
                 entry.remove();
@@ -850,7 +842,7 @@ impl LogServer {
         let _guard = self.rolling_up.lock().await;
         let (witness, cursor, dirty_markers) = self.read_dirty_log().await?;
         self.metrics
-            .dirty_log_records_rewritten
+            .dirty_log_records_read
             .add(dirty_markers.len() as u64, &[]);
         let mut rollups = DirtyMarker::coalesce_markers(&dirty_markers)?;
         self.enrich_dirty_log(&mut rollups).await?;
@@ -1007,7 +999,7 @@ impl LogServer {
 
     pub async fn background_task(&self) {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            tokio::time::sleep(self.config.rollup_interval).await;
             if let Err(err) = self.roll_dirty_log().await {
                 tracing::error!("could not roll up dirty log: {err:?}");
             }
@@ -1871,6 +1863,8 @@ pub struct LogServerConfig {
     pub num_records_before_backpressure: u64,
     #[serde(default = "LogServerConfig::default_reinsert_threshold")]
     pub reinsert_threshold: u64,
+    #[serde(default = "LogServerConfig::default_rollup_interval")]
+    pub rollup_interval: Duration,
     #[serde(default = "LogServerConfig::default_timeout_us")]
     pub timeout_us: u64,
     #[serde(default)]
@@ -1897,6 +1891,11 @@ impl LogServerConfig {
         10
     }
 
+    /// rollup every ten seconds
+    fn default_rollup_interval() -> Duration {
+        Duration::from_secs(10)
+    }
+
     /// force compaction if a candidate has been on the log for one day.
     fn default_timeout_us() -> u64 {
         86_400_000_000
@@ -1916,6 +1915,7 @@ impl Default for LogServerConfig {
             record_count_threshold: Self::default_record_count_threshold(),
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
+            rollup_interval: Self::default_rollup_interval(),
             timeout_us: Self::default_timeout_us(),
             proxy_to: None,
         }
