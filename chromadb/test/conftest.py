@@ -62,7 +62,7 @@ hypothesis.settings.register_profile(
         hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
-    verbosity=hypothesis.Verbosity.verbose
+    verbosity=hypothesis.Verbosity.verbose,
 )
 
 hypothesis.settings.register_profile(
@@ -193,7 +193,7 @@ def _run_server(
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
         settings = Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -211,7 +211,7 @@ def _run_server(
         )
     else:
         settings = Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -574,9 +574,9 @@ def async_integration() -> Generator[System, None, None]:
 
 
 def sqlite_fixture() -> Generator[System, None, None]:
-    """Fixture generator for segment-based API using in-memory Sqlite"""
+    """Fixture generator for rust-based API using in-memory Sqlite"""
     settings = Settings(
-        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
         chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -591,10 +591,10 @@ def sqlite_fixture() -> Generator[System, None, None]:
 
 
 def sqlite_persistent_fixture() -> Generator[System, None, None]:
-    """Fixture generator for segment-based API using persistent Sqlite"""
+    """Fixture generator for rust-based API using persistent Sqlite"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
-        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
         chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
