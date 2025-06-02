@@ -188,7 +188,7 @@ impl LogWriter {
                 num_bytes,
                 setsum,
             };
-            let empty_manifest = Manifest::new_empty("bootstrap");
+            let empty_manifest = Manifest::new_empty(writer);
             let mut new_manifest = empty_manifest.clone();
             new_manifest.initial_offset = Some(start);
             // SAFETY(rescrv):  This is unit tested to never happen.  If it happens, add more tests.
