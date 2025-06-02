@@ -321,15 +321,10 @@ impl RollupPerCollection {
     }
 
     fn witness_manifest_and_cursor(&mut self, manifest: &Manifest, witness: Option<&Witness>) {
-        self.start_log_position = std::cmp::max(
-            witness
-                .map(|x| x.1.position)
-                .unwrap_or(manifest.minimum_log_position()),
-            self.start_log_position,
-        );
-        self.limit_log_position =
-            std::cmp::max(manifest.maximum_log_position(), self.limit_log_position);
-        self.limit_log_position = std::cmp::max(self.limit_log_position, self.start_log_position);
+        self.start_log_position = witness
+            .map(|x| x.1.position)
+            .unwrap_or(manifest.minimum_log_position());
+        self.limit_log_position = manifest.maximum_log_position();
     }
 
     fn is_empty(&self) -> bool {
@@ -763,11 +758,7 @@ impl LogServer {
         let default = Cursor::default();
         let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
         if cursor.position.offset() > adjusted_log_offset as u64 {
-            return Err(Status::aborted(format!(
-                "Invalid offset: {} > {}",
-                cursor.position.offset(),
-                adjusted_log_offset as u64
-            )));
+            return Ok(Response::new(UpdateCollectionLogOffsetResponse {}));
         }
         let cursor = Cursor {
             position: LogPosition::from_offset(adjusted_log_offset as u64),
@@ -798,7 +789,7 @@ impl LogServer {
             let rollup = entry.get_mut();
             rollup.start_log_position = std::cmp::max(
                 rollup.start_log_position,
-                LogPosition::from_offset(request.log_offset as u64),
+                LogPosition::from_offset(adjusted_log_offset as u64),
             );
             if rollup.start_log_position >= rollup.limit_log_position {
                 entry.remove();
