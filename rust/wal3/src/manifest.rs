@@ -1008,4 +1008,310 @@ mod tests {
             manifest
         );
     }
+
+    #[test]
+    fn manifest_maximum_log_position_with_initial_offset() {
+        let manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: Some(LogPosition::from_offset(100)),
+        };
+        assert_eq!(
+            manifest.maximum_log_position(),
+            LogPosition::from_offset(100)
+        );
+
+        let fragment = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentSeqNo(1),
+            start: LogPosition::from_offset(100),
+            limit: LogPosition::from_offset(200),
+            num_bytes: 100,
+            setsum: Setsum::default(),
+        };
+        let manifest_with_fragment = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 100,
+            snapshots: vec![],
+            fragments: vec![fragment],
+            initial_offset: Some(LogPosition::from_offset(100)),
+        };
+        assert_eq!(
+            manifest_with_fragment.maximum_log_position(),
+            LogPosition::from_offset(200)
+        );
+    }
+
+    #[test]
+    fn manifest_minimum_log_position_with_initial_offset() {
+        let manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: Some(LogPosition::from_offset(100)),
+        };
+        assert_eq!(
+            manifest.minimum_log_position(),
+            LogPosition::from_offset(100)
+        );
+
+        let fragment = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentSeqNo(1),
+            start: LogPosition::from_offset(100),
+            limit: LogPosition::from_offset(200),
+            num_bytes: 100,
+            setsum: Setsum::default(),
+        };
+        let manifest_with_fragment = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 100,
+            snapshots: vec![],
+            fragments: vec![fragment],
+            initial_offset: Some(LogPosition::from_offset(100)),
+        };
+        assert_eq!(
+            manifest_with_fragment.minimum_log_position(),
+            LogPosition::from_offset(100)
+        );
+    }
+
+    #[test]
+    fn manifest_position_bounds_with_initial_offset_and_snapshots() {
+        let snapshot = SnapshotPointer {
+            path_to_snapshot: "snap.1".to_string(),
+            setsum: Setsum::default(),
+            start: LogPosition::from_offset(50),
+            limit: LogPosition::from_offset(75),
+            depth: 1,
+            num_bytes: 25,
+        };
+        let fragment = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentSeqNo(1),
+            start: LogPosition::from_offset(100),
+            limit: LogPosition::from_offset(200),
+            num_bytes: 100,
+            setsum: Setsum::default(),
+        };
+
+        let manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 125,
+            snapshots: vec![snapshot],
+            fragments: vec![fragment],
+            initial_offset: Some(LogPosition::from_offset(25)),
+        };
+
+        assert_eq!(
+            manifest.minimum_log_position(),
+            LogPosition::from_offset(50)
+        );
+        assert_eq!(
+            manifest.maximum_log_position(),
+            LogPosition::from_offset(200)
+        );
+    }
+
+    #[test]
+    fn manifest_serialization_with_initial_offset() {
+        let manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: Some(LogPosition::from_offset(1000)),
+        };
+
+        let serialized = serde_json::to_string(&manifest).unwrap();
+        let deserialized: Manifest = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(manifest, deserialized);
+        assert_eq!(
+            deserialized.initial_offset,
+            Some(LogPosition::from_offset(1000))
+        );
+
+        let manifest_none = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: None,
+        };
+
+        let serialized_none = serde_json::to_string(&manifest_none).unwrap();
+        let deserialized_none: Manifest = serde_json::from_str(&serialized_none).unwrap();
+        assert_eq!(manifest_none, deserialized_none);
+        assert_eq!(deserialized_none.initial_offset, None);
+    }
+
+    #[test]
+    fn manifest_fragment_operations_with_initial_offset() {
+        let mut manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: Some(LogPosition::from_offset(500)),
+        };
+
+        let fragment = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentSeqNo(1),
+            start: LogPosition::from_offset(500),
+            limit: LogPosition::from_offset(600),
+            num_bytes: 100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+
+        assert!(manifest.can_apply_fragment(&fragment));
+        manifest.apply_fragment(fragment.clone());
+
+        let expected_manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: fragment.setsum,
+            acc_bytes: 100,
+            snapshots: vec![],
+            fragments: vec![fragment],
+            initial_offset: Some(LogPosition::from_offset(500)),
+        };
+
+        assert_eq!(manifest, expected_manifest);
+        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(2)));
+    }
+
+    #[test]
+    fn manifest_fragment_for_position_with_initial_offset() {
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentSeqNo(1),
+            start: LogPosition::from_offset(100),
+            limit: LogPosition::from_offset(150),
+            num_bytes: 50,
+            setsum: Setsum::default(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentSeqNo(2),
+            start: LogPosition::from_offset(150),
+            limit: LogPosition::from_offset(200),
+            num_bytes: 50,
+            setsum: Setsum::default(),
+        };
+
+        let manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 100,
+            snapshots: vec![],
+            fragments: vec![fragment1.clone(), fragment2.clone()],
+            initial_offset: Some(LogPosition::from_offset(100)),
+        };
+
+        assert_eq!(
+            manifest.fragment_for_position(LogPosition::from_offset(120)),
+            Some(&fragment1)
+        );
+        assert_eq!(
+            manifest.fragment_for_position(LogPosition::from_offset(175)),
+            Some(&fragment2)
+        );
+        assert_eq!(
+            manifest.fragment_for_position(LogPosition::from_offset(50)),
+            Some(&fragment1)
+        );
+        assert_eq!(
+            manifest.fragment_for_position(LogPosition::from_offset(250)),
+            None
+        );
+    }
+
+    #[test]
+    fn manifest_contains_position_with_initial_offset() {
+        let fragment = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentSeqNo(1),
+            start: LogPosition::from_offset(100),
+            limit: LogPosition::from_offset(200),
+            num_bytes: 100,
+            setsum: Setsum::default(),
+        };
+
+        let manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 100,
+            snapshots: vec![],
+            fragments: vec![fragment],
+            initial_offset: Some(LogPosition::from_offset(100)),
+        };
+
+        assert!(!manifest.contains_position(LogPosition::from_offset(50)));
+        assert!(manifest.contains_position(LogPosition::from_offset(150)));
+        assert!(!manifest.contains_position(LogPosition::from_offset(250)));
+    }
+
+    #[test]
+    fn manifest_timestamps_with_initial_offset() {
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentSeqNo(1),
+            start: LogPosition::from_offset(100),
+            limit: LogPosition::from_offset(150),
+            num_bytes: 50,
+            setsum: Setsum::default(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentSeqNo(2),
+            start: LogPosition::from_offset(150),
+            limit: LogPosition::from_offset(200),
+            num_bytes: 50,
+            setsum: Setsum::default(),
+        };
+
+        let manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 100,
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+            initial_offset: Some(LogPosition::from_offset(100)),
+        };
+
+        assert_eq!(
+            manifest.oldest_timestamp(),
+            Some(LogPosition::from_offset(100))
+        );
+        assert_eq!(
+            manifest.newest_timestamp(),
+            Some(LogPosition::from_offset(200))
+        );
+
+        let empty_manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: Some(LogPosition::from_offset(500)),
+        };
+
+        assert_eq!(empty_manifest.oldest_timestamp(), None);
+        assert_eq!(empty_manifest.newest_timestamp(), None);
+    }
 }
