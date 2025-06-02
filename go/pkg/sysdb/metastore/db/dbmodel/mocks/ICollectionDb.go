@@ -236,9 +236,9 @@ func (_m *ICollectionDb) GetCollectionWithoutMetadata(collectionID *string, data
 	return r0, r1
 }
 
-// GetCollections provides a mock function with given fields: collectionID, collectionName, tenantID, databaseName, limit, offset
-func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	ret := _m.Called(collectionID, collectionName, tenantID, databaseName, limit, offset)
+// GetCollections provides a mock function with given fields: collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted
+func (_m *ICollectionDb) GetCollections(collectionIDs []string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*dbmodel.CollectionAndMetadata, error) {
+	ret := _m.Called(collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollections")
@@ -246,19 +246,19 @@ func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *st
 
 	var r0 []*dbmodel.CollectionAndMetadata
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*string, *string, string, string, *int32, *int32) ([]*dbmodel.CollectionAndMetadata, error)); ok {
-		return rf(collectionID, collectionName, tenantID, databaseName, limit, offset)
+	if rf, ok := ret.Get(0).(func([]string, *string, string, string, *int32, *int32, bool) ([]*dbmodel.CollectionAndMetadata, error)); ok {
+		return rf(collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 	}
-	if rf, ok := ret.Get(0).(func(*string, *string, string, string, *int32, *int32) []*dbmodel.CollectionAndMetadata); ok {
-		r0 = rf(collectionID, collectionName, tenantID, databaseName, limit, offset)
+	if rf, ok := ret.Get(0).(func([]string, *string, string, string, *int32, *int32, bool) []*dbmodel.CollectionAndMetadata); ok {
+		r0 = rf(collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*dbmodel.CollectionAndMetadata)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*string, *string, string, string, *int32, *int32) error); ok {
-		r1 = rf(collectionID, collectionName, tenantID, databaseName, limit, offset)
+	if rf, ok := ret.Get(1).(func([]string, *string, string, string, *int32, *int32, bool) error); ok {
+		r1 = rf(collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 	} else {
 		r1 = ret.Error(1)
 	}

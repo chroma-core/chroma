@@ -4,7 +4,7 @@ use std::str::FromStr;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_log::{CollectionInfo, CollectionRecord, Log};
 use chroma_memberlist::memberlist_provider::Memberlist;
-use chroma_sysdb::SysDb;
+use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_types::CollectionUuid;
 use figment::providers::Env;
 use figment::Figment;
@@ -99,11 +99,13 @@ impl Scheduler {
                 );
                 continue;
             }
-            let collection_id = Some(collection_info.collection_id);
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collections(collection_id, None, None, None, None, 0)
+                .get_collections(GetCollectionsOptions {
+                    collection_id: Some(collection_info.collection_id),
+                    ..Default::default()
+                })
                 .await;
 
             match result {

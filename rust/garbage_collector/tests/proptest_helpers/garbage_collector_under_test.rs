@@ -9,7 +9,7 @@ use chroma_storage::config::{
     ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
 };
 use chroma_storage::{GetOptions, Storage};
-use chroma_sysdb::{GrpcSysDb, GrpcSysDbConfig, SysDb};
+use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig, SysDb};
 use chroma_system::Orchestrator;
 use chroma_system::{Dispatcher, DispatcherConfig, System};
 use chroma_types::chroma_proto::CollectionVersionFile;
@@ -410,7 +410,11 @@ impl StateMachineTest for GarbageCollectorUnderTest {
 
                         async move {
                             let collections = sysdb
-                                .get_collections(Some(collection_id), None, None, None, None, 0)
+                                .get_collections(
+                                   GetCollectionsOptions {
+                                        collection_id: Some(collection_id),
+                                        ..Default::default()
+                                })
                                 .await
                                 .unwrap();
 
