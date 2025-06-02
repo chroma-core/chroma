@@ -311,7 +311,7 @@ class SqlSysDB(SqlDB, SysDB):
         collection = Collection(
             id=id,
             name=name,
-            configuration_json=create_collection_configuration_to_json(configuration),
+            configuration=create_collection_configuration_to_json(configuration),
             metadata=metadata,
             dimension=dimension,
             tenant=tenant,
