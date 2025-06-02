@@ -1117,8 +1117,8 @@ impl LogServer {
 
             // NOTE(sicheng): This is temporary trace added for analyzing number of frags between the offsets
             match log_reader.scan(start_position, Default::default()).await {
-                Ok(frags) => tracing::info!("Number of live fragments: {}", frags.len()),
-                Err(e) => tracing::error!("Unable to scout number of live fragments: {e}"),
+                Ok(frags) => tracing::info!(name: "Counting live fragments", frag_count = frags.len()),
+                Err(e) => tracing::error!(name: "Unable to scout number of live fragments", error = e.to_string()),
             }
 
             let start_offset = start_position.offset() as i64;
