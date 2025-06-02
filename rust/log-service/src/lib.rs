@@ -917,6 +917,7 @@ impl LogServer {
                 Limits {
                     max_files: Some(10_000),
                     max_bytes: Some(1_000_000_000),
+                    max_records: Some(10_000),
                 },
             )
             .await?;
@@ -1151,6 +1152,7 @@ impl LogServer {
             let limits = Limits {
                 max_files: Some(pull_logs.batch_size as u64 + 1),
                 max_bytes: None,
+                max_records: Some(pull_logs.batch_size as u64),
             };
             let fragments = match log_reader
                 .scan(
@@ -1172,17 +1174,25 @@ impl LogServer {
                 .map(|fragment| async {
                     let cache_key = format!("{collection_id}::{}", fragment.path);
                     if let Some(cache) = self.cache.as_ref() {
-                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
+                        let cache_span = tracing::info_span!("cache get");
+                        if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
+                        {
                             return Ok(Arc::new(answer.bytes));
                         }
-                        let answer = log_reader.fetch(fragment).await?;
+                        let fetch_span = tracing::info_span!("fragment fetch");
+                        let answer = log_reader.fetch(fragment).instrument(fetch_span).await?;
                         let cache_value = CachedParquetFragment {
                             bytes: Clone::clone(&*answer),
                         };
-                        cache.insert(cache_key, cache_value).await;
+                        let insert_span = tracing::info_span!("cache insert");
+                        cache
+                            .insert(cache_key, cache_value)
+                            .instrument(insert_span)
+                            .await;
                         Ok(answer)
                     } else {
-                        log_reader.fetch(fragment).await
+                        let fetch_span = tracing::info_span!("fragment fetch");
+                        log_reader.fetch(fragment).instrument(fetch_span).await
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1411,6 +1421,7 @@ impl LogServer {
                 Limits {
                     max_files: Some(1_000_000),
                     max_bytes: Some(1_000_000_000),
+                    max_records: Some(1_000_000),
                 },
             )
             .await
