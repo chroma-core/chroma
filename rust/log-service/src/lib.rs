@@ -38,7 +38,7 @@ use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
     Cursor, CursorName, CursorStore, CursorStoreOptions, Fragment, Limits, LogPosition, LogReader,
-    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, Witness,
+    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, MarkDirty as MarkDirtyTrait, Witness,
 };
 
 pub mod state_hash_table;
@@ -1427,7 +1427,7 @@ impl LogServer {
             );
             // This is the next record to insert, so we'll have to adjust downwards.
             let max_offset = log_reader.maximum_log_position().await.map_err(|err| {
-                Status::new(err.code().into(), format!("Failed to copy log: {}", err))
+                Status::new(err.code().into(), format!("Failed to read copied log: {}", err))
             })?;
             if max_offset < offset {
                 return Err(Status::new(
@@ -1435,7 +1435,14 @@ impl LogServer {
                     format!("max_offset={:?} < offset={:?}", max_offset, offset),
                 ));
             }
-            tracing::event!(Level::INFO, compaction_offset =? offset.offset(), enumeration_offset =? (max_offset - 1u64).offset());
+            if offset != max_offset{
+                let mark_dirty = MarkDirty {
+                    collection_id: target_collection_id,
+                    dirty_log: Arc::clone(&self.dirty_log),
+                };
+                let _ = mark_dirty.mark_dirty(offset, (max_offset - offset) as usize).await;
+            }
+            tracing::event!(Level::INFO, compaction_offset =? offset.offset() - 1, enumeration_offset =? (max_offset - 1u64).offset());
             Ok(Response::new(ForkLogsResponse {
                 // NOTE: The upstream service expects the last compacted offset as compaction offset
                 compaction_offset: (offset - 1u64).offset(),
