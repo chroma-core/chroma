@@ -142,7 +142,10 @@ impl Dispatcher {
                 // If a worker is waiting for a task, send it to the worker in FIFO order
                 // Otherwise, add it to the task queue
                 match self.waiters.pop() {
-                    Some(channel) => match channel.reply_to.send(task, Some(Span::current())).await
+                    Some(channel) => match channel
+                        .reply_to
+                        .send(Box::new(task), Some(Span::current()))
+                        .await
                     {
                         Ok(_) => {}
                         Err(e) => {
@@ -168,7 +171,7 @@ impl Dispatcher {
     ///   it when one is available
     async fn handle_work_request(&mut self, request: TaskRequestMessage) {
         match self.task_queue.pop_front() {
-            Some((task, span)) => match request.reply_to.send(task, Some(span)).await {
+            Some((task, span)) => match request.reply_to.send(Box::new(task), Some(span)).await {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::error!("Error sending task to worker: {:?}", e);

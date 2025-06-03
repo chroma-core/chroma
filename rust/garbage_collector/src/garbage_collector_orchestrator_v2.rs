@@ -191,7 +191,10 @@ impl Orchestrator for GarbageCollectorOrchestrator {
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
         ctx.receiver()
-            .send(ConstructVersionGraphRequest, Some(Span::current()))
+            .send(
+                Box::new(ConstructVersionGraphRequest),
+                Some(Span::current()),
+            )
             .await
             .expect("Failed to send ConstructVersionGraphRequest");
     }

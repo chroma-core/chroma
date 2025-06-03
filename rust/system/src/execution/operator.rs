@@ -158,10 +158,10 @@ where
                 match self
                     .reply_channel
                     .send(
-                        TaskResult {
+                        Box::new(TaskResult {
                             result: result.map_err(|e| TaskError::TaskFailed(e)),
                             task_id: self.task_id,
-                        },
+                        }),
                         None,
                     )
                     .await
@@ -190,10 +190,10 @@ where
                 match self
                     .reply_channel
                     .send(
-                        TaskResult {
+                        Box::new(TaskResult {
                             result: Err(TaskError::Panic(PanicError::new(panic_value))),
                             task_id: self.task_id,
-                        },
+                        }),
                         None,
                     )
                     .await
@@ -233,10 +233,10 @@ where
         match self
             .reply_channel
             .send(
-                TaskResult {
+                Box::new(TaskResult {
                     result: Err(TaskError::Aborted),
                     task_id: self.task_id,
-                },
+                }),
                 None,
             )
             .await

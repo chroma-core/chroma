@@ -170,7 +170,9 @@ impl CustomResourceMemberlistProvider {
         let curr_memberlist = self.current_memberlist.read().clone();
 
         for subscriber in self.subscribers.iter() {
-            let _ = subscriber.send(curr_memberlist.clone(), None).await;
+            let _ = subscriber
+                .send(Box::new(curr_memberlist.clone()), None)
+                .await;
         }
     }
 }

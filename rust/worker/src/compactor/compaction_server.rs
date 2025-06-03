@@ -72,8 +72,10 @@ impl Compactor for CompactionServer {
         self.manager
             .receiver()
             .send(
-                OneOffCompactMessage::try_from(request.into_inner())
-                    .map_err(|e| Status::invalid_argument(e.to_string()))?,
+                Box::new(
+                    OneOffCompactMessage::try_from(request.into_inner())
+                        .map_err(|e| Status::invalid_argument(e.to_string()))?,
+                ),
                 Some(compact_span),
             )
             .await
@@ -89,8 +91,10 @@ impl Compactor for CompactionServer {
         self.manager
             .receiver()
             .send(
-                RebuildMessage::try_from(request.into_inner())
-                    .map_err(|e| Status::invalid_argument(e.to_string()))?,
+                Box::new(
+                    RebuildMessage::try_from(request.into_inner())
+                        .map_err(|e| Status::invalid_argument(e.to_string()))?,
+                ),
                 Some(rebuild_span),
             )
             .await

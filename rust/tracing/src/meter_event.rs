@@ -67,7 +67,7 @@ impl MeterEvent {
 
     pub async fn submit(self) {
         if let Some(handler) = METER_EVENT_RECEIVER.get() {
-            if let Err(err) = handler.send(self, Some(Span::current())).await {
+            if let Err(err) = handler.send(Box::new(self), Some(Span::current())).await {
                 tracing::error!("Unable to send meter event: {err}")
             }
         }

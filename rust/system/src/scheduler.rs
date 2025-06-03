@@ -47,7 +47,7 @@ impl Scheduler {
                 _ = cancel.cancelled() => {}
                 _ = tokio::time::sleep(duration) => {
                     let span = span_factory();
-                    match sender.send(message, span).await {
+                    match sender.send(Box::new(message), span).await {
                         Ok(_) => {
                         },
                         Err(e) => {
@@ -93,7 +93,7 @@ impl Scheduler {
                     }
                     _ = tokio::time::sleep(duration) => {
                         let span = span_factory();
-                        match sender.send(message.clone(), span).await {
+                        match sender.send(Box::new(message.clone()), span).await {
                             Ok(_) => {
                             },
                             Err(e) => {

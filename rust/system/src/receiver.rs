@@ -6,15 +6,15 @@ use thiserror::Error;
 
 /// A ReceiverForMessage is generic over a message type, and useful if you want to send a given message type to any component that can handle it.
 #[async_trait]
-pub trait ReceiverForMessage<M>: Send + Sync + Debug + ReceiverForMessageClone<M> {
+pub trait ReceiverForMessage<M: ?Sized>: Send + Sync + Debug + ReceiverForMessageClone<M> {
     async fn send(
         &self,
-        message: M,
+        message: Box<M>,
         tracing_context: Option<tracing::Span>,
     ) -> Result<(), ChannelError>;
 }
 
-pub trait ReceiverForMessageClone<M> {
+pub trait ReceiverForMessageClone<M: ?Sized> {
     fn clone_box(&self) -> Box<dyn ReceiverForMessage<M>>;
 }
 
@@ -24,7 +24,7 @@ impl<M> Clone for Box<dyn ReceiverForMessage<M>> {
     }
 }
 
-impl<T, M> ReceiverForMessageClone<M> for T
+impl<M: ?Sized, T> ReceiverForMessageClone<M> for T
 where
     T: 'static + ReceiverForMessage<M> + Clone,
 {
@@ -41,10 +41,10 @@ where
 {
     async fn send(
         &self,
-        message: M,
+        message: Box<M>,
         tracing_context: Option<tracing::Span>,
     ) -> Result<(), ChannelError> {
-        self.wrap_and_send(message, tracing_context).await
+        self.wrap_and_send(*message, tracing_context).await
     }
 }
 
