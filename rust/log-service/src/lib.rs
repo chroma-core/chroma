@@ -364,6 +364,8 @@ pub enum DirtyMarker {
     },
     #[serde(rename = "purge")]
     Purge { collection_id: CollectionUuid },
+    #[serde(rename = "clear")]
+    Cleared,
 }
 
 impl DirtyMarker {
@@ -372,6 +374,7 @@ impl DirtyMarker {
         match self {
             DirtyMarker::MarkDirty { collection_id, .. } => *collection_id,
             DirtyMarker::Purge { collection_id } => *collection_id,
+            DirtyMarker::Cleared => CollectionUuid::default(),
         }
     }
 
@@ -416,6 +419,7 @@ impl DirtyMarker {
                 DirtyMarker::Purge { collection_id } => {
                     forget.push(*collection_id);
                 }
+                DirtyMarker::Cleared => {}
             }
         }
         for collection_id in forget {
@@ -865,22 +869,23 @@ impl LogServer {
                 backpressure.push(*collection_id);
             }
         }
-        if !markers.is_empty() {
-            let mut new_cursor = cursor.clone();
-            new_cursor.position = self.dirty_log.append_many(markers).await?;
-            let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
-                return Err(Error::CouldNotGetDirtyLogCursors);
-            };
-            tracing::info!(
-                "Advancing dirty log cursor {:?} -> {:?}",
-                cursor.position,
-                new_cursor.position
-            );
-            if let Some(witness) = witness {
-                cursors.save(&STABLE_PREFIX, &new_cursor, &witness).await?;
-            } else {
-                cursors.init(&STABLE_PREFIX, new_cursor).await?;
-            }
+        if markers.is_empty() {
+            markers.push(serde_json::to_string(&DirtyMarker::Cleared).map(Vec::from)?);
+        }
+        let mut new_cursor = cursor.clone();
+        new_cursor.position = self.dirty_log.append_many(markers).await?;
+        let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+            return Err(Error::CouldNotGetDirtyLogCursors);
+        };
+        tracing::info!(
+            "Advancing dirty log cursor {:?} -> {:?}",
+            cursor.position,
+            new_cursor.position
+        );
+        if let Some(witness) = witness {
+            cursors.save(&STABLE_PREFIX, &new_cursor, &witness).await?;
+        } else {
+            cursors.init(&STABLE_PREFIX, new_cursor).await?;
         }
         self.metrics
             .log_total_uncompacted_records_count
@@ -1734,6 +1739,7 @@ impl LogServerWrapper {
         health_reporter
             .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
             .await;
+        log_server.roll_dirty_log().await?;
 
         let wrapper = LogServerWrapper {
             log_server: Arc::new(log_server),
