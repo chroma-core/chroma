@@ -41,7 +41,7 @@ use uuid::Uuid;
 
 use crate::{
     ac::AdmissionControlledService,
-    auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource, AuthzResult},
+    auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     config::FrontendServerConfig,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
@@ -354,7 +354,7 @@ impl FrontendServer {
         headers: &HeaderMap,
         action: AuthzAction,
         resource: AuthzResource,
-    ) -> Result<AuthzResult, ServerError> {
+    ) -> Result<AuthzResource, ServerError> {
         Ok(self
             .auth
             .authenticate_and_authorize(headers, action, resource)
@@ -369,7 +369,7 @@ impl FrontendServer {
         action: AuthzAction,
         resource: AuthzResource,
         collection_id: CollectionUuid,
-    ) -> Result<AuthzResult, ServerError> {
+    ) -> Result<AuthzResource, ServerError> {
         let collection = self.frontend.get_cached_collection(collection_id).await?;
         Ok(self
             .auth

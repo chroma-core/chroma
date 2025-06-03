@@ -69,13 +69,6 @@ pub struct AuthzResource {
     pub collection: Option<String>,
 }
 
-#[derive(Clone, Debug)]
-pub struct AuthzResult {
-    pub tenant: Option<String>,
-    pub database: Option<String>,
-    pub collection: Option<String>,
-}
-
 #[derive(thiserror::Error, Debug)]
 #[error("Permission denied.")]
 pub struct AuthError(pub StatusCode);
@@ -96,7 +89,7 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         _headers: &HeaderMap,
         action: AuthzAction,
         resource: AuthzResource,
-    ) -> Pin<Box<dyn Future<Output = Result<AuthzResult, AuthError>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<AuthzResource, AuthError>> + Send>>;
 
     fn authenticate_and_authorize_collection(
         &self,
@@ -104,7 +97,7 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         action: AuthzAction,
         resource: AuthzResource,
         _collection: Collection,
-    ) -> Pin<Box<dyn Future<Output = Result<AuthzResult, AuthError>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<AuthzResource, AuthError>> + Send>>;
 
     fn get_user_identity(
         &self,
@@ -118,8 +111,8 @@ impl AuthenticateAndAuthorize for () {
         _headers: &HeaderMap,
         _action: AuthzAction,
         resource: AuthzResource,
-    ) -> Pin<Box<dyn Future<Output = Result<AuthzResult, AuthError>> + Send>> {
-        Box::pin(ready(Ok::<AuthzResult, AuthError>(AuthzResult {
+    ) -> Pin<Box<dyn Future<Output = Result<AuthzResource, AuthError>> + Send>> {
+        Box::pin(ready(Ok::<AuthzResource, AuthError>(AuthzResource {
             tenant: resource.tenant,
             database: resource.database,
             collection: resource.collection,
@@ -132,8 +125,8 @@ impl AuthenticateAndAuthorize for () {
         _action: AuthzAction,
         resource: AuthzResource,
         _collection: Collection,
-    ) -> Pin<Box<dyn Future<Output = Result<AuthzResult, AuthError>> + Send>> {
-        Box::pin(ready(Ok::<AuthzResult, AuthError>(AuthzResult {
+    ) -> Pin<Box<dyn Future<Output = Result<AuthzResource, AuthError>> + Send>> {
+        Box::pin(ready(Ok::<AuthzResource, AuthError>(AuthzResource {
             tenant: resource.tenant,
             database: resource.database,
             collection: resource.collection,
