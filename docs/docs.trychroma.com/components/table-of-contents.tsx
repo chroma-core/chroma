@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 
 // @ts-expect-error - ignore
 export function TableOfContents({ toc }) {
-  
+
     return (
       <div className="sticky top-0 w-[300px] h-full py-5 overflow-y-auto mx-10 hidden xl:block">
         {/* Title Section */}
@@ -13,7 +13,7 @@ export function TableOfContents({ toc }) {
           <TextIcon className="h-5 w-5 pr-1" />
           &nbsp;On this page
         </div>
-  
+
         {/* Navigation Links */}
         <nav>
           {

@@ -16,19 +16,19 @@ This repository offers tools to:
 
 ## Repository Structure
 
-- **`generate_benchmark.ipynb`**  
+- **`generate_benchmark.ipynb`**
   A comprehensive guide to generating a custom benchmark based on your data
 
-- **`compare.ipynb`**  
+- **`compare.ipynb`**
   A framework for comparing results, which is useful when evaluating different embedding models or configurations
 
-- **`data/`**  
+- **`data/`**
   Example data to immediately test out the notebooks with
 
-- **`functions/`**  
+- **`functions/`**
   Functions used to run notebooks, includes various embedding functions and llm prompts
 
-- **`results/`**  
+- **`results/`**
   Folder for saving benchmark results, includes results produced from example data
 
 

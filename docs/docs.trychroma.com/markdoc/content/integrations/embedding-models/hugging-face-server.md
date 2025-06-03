@@ -60,7 +60,7 @@ The embedding model is configured on the server side. Check the docker-compose f
 
 ## Authentication
 
-The embedding server can be configured to only allow usage with API keys. 
+The embedding server can be configured to only allow usage with API keys.
 You can use authentication in the chroma clients:
 
 {% TabbedCodeBlock %}

@@ -15,7 +15,7 @@ And run a Chroma server:
 chroma run --path [path/to/persist/data]
 ```
 
-Then, on your client side, install the HTTP-only client: 
+Then, on your client side, install the HTTP-only client:
 
 ```terminal
 pip install chromadb-client

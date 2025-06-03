@@ -29,7 +29,7 @@ pip install chromadb
 
 {% Tab label="yarn" %}
 ```terminal
-yarn add chromadb chromadb-default-embed 
+yarn add chromadb chromadb-default-embed
 ```
 {% /Tab %}
 
@@ -41,7 +41,7 @@ npm install --save chromadb chromadb-default-embed
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm add chromadb chromadb-default-embed 
+pnpm add chromadb chromadb-default-embed
 ```
 {% /Tab %}
 
@@ -75,7 +75,7 @@ Run the Chroma backend:
 
 {% Tab label="CLI" %}
 ```terminal
-chroma run --path ./getting-started 
+chroma run --path ./getting-started
 ```
 {% /Tab %}
 
@@ -226,13 +226,13 @@ From the above query - you can see that our query about `hawaii` is the semantic
 {
     documents: [
         [
-            'This is a document about pineapple', 
+            'This is a document about pineapple',
             'This is a document about oranges'
         ]
-    ], 
+    ],
     ids: [
         ['id1', 'id2']
-    ], 
+    ],
     distances: [[1.0404009819030762, 1.243080496788025]],
     uris: null,
     data: null,

@@ -18,17 +18,17 @@ import { CloudflareWorkerAIEmbeddingFunction } from '@chroma-core/cloudflare-wor
 const embedder = new CloudflareWorkerAIEmbeddingFunction({
   // Optional: Provide API key directly (recommended to use environment variables instead)
   // apiKey: 'your-cloudflare-api-token',
-  
+
   // Optional: Provide Account ID directly (recommended to use environment variables instead)
   // accountId: 'your-cloudflare-account-id',
-  
+
   // Optional: Specify environment variable names (defaults shown)
   apiKeyEnvVar: 'CLOUDFLARE_API_TOKEN',
   accountIdEnvVar: 'CLOUDFLARE_ACCOUNT_ID',
-  
+
   // Optional: Specify model (default shown)
   model: '@cf/baai/bge-large-en-v1.5',
-  
+
   // Optional: Specify dimensions for the embeddings
   dimensions: 1024
 });

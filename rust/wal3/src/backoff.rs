@@ -10,10 +10,10 @@
 //! │                            HHHHHHHHHHHHHHHHHHHHH
 //! │                            HHHHHHHHHHHHHHHHHHHHH
 //! ├────────────┐              ┌─────────────────────
-//! │            │DDDDDDDDDDDDDD│          
-//! │            │DDDDDDDDDDDDDD│          
-//! │            │DDDDDDDDDDDDDD│          
-//! │            └──────────────┘          
+//! │            │DDDDDDDDDDDDDD│
+//! │            │DDDDDDDDDDDDDD│
+//! │            │DDDDDDDDDDDDDD│
+//! │            └──────────────┘
 //! └────────────────────────────────────────────────
 //! ```
 //!

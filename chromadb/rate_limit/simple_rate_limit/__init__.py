@@ -39,4 +39,5 @@ class SimpleAsyncRateLimitEnforcer(RateLimitEnforcer):
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             return await func(*args, **kwargs)
+
         return wrapper  # type: ignore

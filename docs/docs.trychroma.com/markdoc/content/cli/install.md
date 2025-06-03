@@ -29,7 +29,7 @@ pipx install chromadb
 {% Tab label="yarn" %}
 
 ```terminal
-yarn global add chromadb 
+yarn global add chromadb
 ```
 
 {% /Tab %}
@@ -47,7 +47,7 @@ npm install -g chromadb
 {% Tab label="pnpm" %}
 
 ```terminal
-pnpm add -g chromadb 
+pnpm add -g chromadb
 ```
 
 {% /Tab %}
@@ -56,7 +56,7 @@ pnpm add -g chromadb
 {% Tab label="bun" %}
 
 ```terminal
-bun add -g chromadb 
+bun add -g chromadb
 ```
 
 {% /Tab %}
@@ -70,7 +70,7 @@ bun add -g chromadb
 
 {% Tab label="cURL" %}
 ```terminal
-curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash 
+curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash
 ```
 {% /Tab %}
 

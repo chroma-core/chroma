@@ -26,8 +26,10 @@ def update():
         response.raise_for_status()
         releases = response.json()
 
-        version_pattern = re.compile(r'^\d+\.\d+\.\d+$')
-        numeric_releases = [r["tag_name"] for r in releases if version_pattern.fullmatch(r["tag_name"])]
+        version_pattern = re.compile(r"^\d+\.\d+\.\d+$")
+        numeric_releases = [
+            r["tag_name"] for r in releases if version_pattern.fullmatch(r["tag_name"])
+        ]
 
         if not numeric_releases:
             print("Couldn't fetch the latest Chroma version")
@@ -39,7 +41,8 @@ def update():
             return
 
         print(
-            f"A new version of Chroma is available!\nIf you're using pip, run 'pip install --upgrade chromadb' to upgrade to version {latest}")
+            f"A new version of Chroma is available!\nIf you're using pip, run 'pip install --upgrade chromadb' to upgrade to version {latest}"
+        )
 
     except Exception as e:
         print("Couldn't fetch the latest Chroma version")

@@ -228,6 +228,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
       - name: Run pre-commit
+        id: pre-commit
         shell: bash
         run: |
           pre-commit run --all-files trailing-whitespace
@@ -244,10 +245,19 @@ jobs:
           pre-commit run --all-files check-yaml
         continue-on-error: true
       - name: Cargo fmt check
+        id: cargo-fmt
         shell: bash
         run: cargo fmt -- --check
+        continue-on-error: true
       - name: Clippy
+        id: clippy
         run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
+        continue-on-error: true
+      - name: Mark job failed if flaky tests failed
+        if: ${{ steps.pre-commit.outcome == 'failure' || steps.cargo-fmt.outcome == 'failure' || steps.clippy.outcome == 'failure' }}
+        run: |
+          echo "::error ::At least one linting step failed."
+          exit 1
 
   # This job exists for our branch protection rule.
   # We want to require status checks to pass before merging, but the set of

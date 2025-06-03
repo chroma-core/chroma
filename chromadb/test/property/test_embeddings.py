@@ -378,8 +378,10 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
                 current_version,
             )
             new_version = wait_for_version_increase(
-                self.client, self.collection.name, current_version,
-                additional_time=VERSION_INCREASE_WAIT_TIME
+                self.client,
+                self.collection.name,
+                current_version,
+                additional_time=VERSION_INCREASE_WAIT_TIME,
             )
             # Everything got compacted.
             self.log_operation_count = 0

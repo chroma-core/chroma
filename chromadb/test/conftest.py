@@ -62,7 +62,7 @@ hypothesis.settings.register_profile(
         hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
-    verbosity=hypothesis.Verbosity.verbose
+    verbosity=hypothesis.Verbosity.verbose,
 )
 
 hypothesis.settings.register_profile(

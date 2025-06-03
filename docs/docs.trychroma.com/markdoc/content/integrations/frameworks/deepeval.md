@@ -52,7 +52,7 @@ test_case = LLMTestCase(
 Define retriever metrics like `Contextual Precision`, `Contextual Recall`, and `Contextual Relevancy` to evaluate test cases. Recall ensures enough vectors are retrieved, while relevancy reduces noise by filtering out irrelevant ones.
 
 {% Banner type="tip" %}
-Balancing recall and relevancy is key. `distance_function` and `embedding_model` affects recall, while `n_results` and `chunk_size` impact relevancy.  
+Balancing recall and relevancy is key. `distance_function` and `embedding_model` affects recall, while `n_results` and `chunk_size` impact relevancy.
 {% /Banner %}
 
 ```python

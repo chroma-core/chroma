@@ -19,7 +19,7 @@ chroma browse [collection_name] [--local]
 
 {% Tab label="cloud" %}
 ```terminal
-chroma browse my-collection 
+chroma browse my-collection
 ```
 {% /Tab %}
 
@@ -31,19 +31,19 @@ chroma browse my-collection --db my-db
 
 {% Tab label="local default" %}
 ```terminal
-chroma browse my-local-collection --local 
+chroma browse my-local-collection --local
 ```
 {% /Tab %}
 
 {% Tab label="local with host" %}
 ```terminal
-chroma browse my-local-collection --host http://localhost:8050 
+chroma browse my-local-collection --host http://localhost:8050
 ```
 {% /Tab %}
 
 {% Tab label="local with path" %}
 ```terminal
-chroma browse my-local-collection --path ~/Developer/my-app/chroma 
+chroma browse my-local-collection --path ~/Developer/my-app/chroma
 ```
 {% /Tab %}
 

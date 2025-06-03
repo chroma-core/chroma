@@ -5,12 +5,13 @@ from typing import List, Any, Dict
 from tqdm import tqdm
 from chromadb import Collection
 
+
 def collection_add_in_batches(
-    collection: Collection, 
-    ids: List[str], 
-    texts: List[str], 
-    embeddings: List[List[float]], 
-    metadatas: List[Dict] = None
+    collection: Collection,
+    ids: List[str],
+    texts: List[str],
+    embeddings: List[List[float]],
+    metadatas: List[Dict] = None,
 ) -> None:
     BATCH_SIZE = 100
     LEN = len(embeddings)
@@ -24,9 +25,16 @@ def collection_add_in_batches(
 
         try:
             if metadatas:
-                collection.add(ids=id_batch, documents=doc_batch, embeddings=embeddings[start:end], metadatas=metadatas[start:end])
+                collection.add(
+                    ids=id_batch,
+                    documents=doc_batch,
+                    embeddings=embeddings[start:end],
+                    metadatas=metadatas[start:end],
+                )
             else:
-                collection.add(ids=id_batch, documents=doc_batch, embeddings=embeddings[start:end])
+                collection.add(
+                    ids=id_batch, documents=doc_batch, embeddings=embeddings[start:end]
+                )
         except Exception as e:
             print(f"Error adding {start} to {end}")
             print(e)
@@ -38,6 +46,7 @@ def collection_add_in_batches(
 
     threadpool.shutdown(wait=True)
 
+
 def get_collection_items(
     collection: Collection,
 ) -> Dict:
@@ -45,22 +54,21 @@ def get_collection_items(
     collection_size = collection.count()
     items = collection.get(include=["metadatas"])
 
-    ids = items['ids']
+    ids = items["ids"]
 
     embeddings_lookup = dict()
 
     for i in tqdm(range(0, collection_size, BATCH_SIZE), desc="Processing batches"):
-        batch_ids = ids[i:i + BATCH_SIZE]
+        batch_ids = ids[i : i + BATCH_SIZE]
         result = collection.get(ids=batch_ids, include=["embeddings", "documents"])
 
         retrieved_ids = result["ids"]
         retrieved_embeddings = result["embeddings"]
         retrieved_documents = result["documents"]
 
-        for id, embedding, document in zip(retrieved_ids, retrieved_embeddings, retrieved_documents):
-            embeddings_lookup[id] = {
-                'embedding': embedding,
-                'document': document
-            }
-        
+        for id, embedding, document in zip(
+            retrieved_ids, retrieved_embeddings, retrieved_documents
+        ):
+            embeddings_lookup[id] = {"embedding": embedding, "document": document}
+
     return embeddings_lookup

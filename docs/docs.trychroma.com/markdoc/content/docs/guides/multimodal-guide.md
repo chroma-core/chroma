@@ -155,4 +155,3 @@ Support for multi-modal retrieval for Chroma's JavaScript client is coming soon!
 {% /tab %}
 
 {% /tabs %}
-

@@ -1,7 +1,7 @@
 # Sample Apps
 
 {% Banner type="tip" %}
-This CLI command is available on Chroma 1.0.4 and later. 
+This CLI command is available on Chroma 1.0.4 and later.
 {% /Banner %}
 
 The Chroma team regularly releases sample AI applications powered by Chroma, which you can use to learn about retrieval, building with AI, and as a jumping-off board for your own projects.

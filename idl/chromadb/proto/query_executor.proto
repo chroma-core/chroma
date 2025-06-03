@@ -94,4 +94,3 @@ service QueryExecutor {
     rpc Get(GetPlan) returns (GetResult) {}
     rpc KNN(KNNPlan) returns (KNNBatchResult) {}
 }
-

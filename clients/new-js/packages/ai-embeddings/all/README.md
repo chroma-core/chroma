@@ -31,7 +31,7 @@ const openAIEF = new OpenAIEmbeddingFunction({
 ## Included Providers
 
 - OpenAI
-- Cohere  
+- Cohere
 - Jina
 - Google Gemini
 - Hugging Face Server

@@ -3,7 +3,7 @@
 Using the Chroma CLI, you can copy collections from a local Chroma server to Chroma Cloud and vice versa.
 
 ```terminal
-chroma copy --from-local collections [collection names] 
+chroma copy --from-local collections [collection names]
 ```
 
 ### Arguments
@@ -24,7 +24,7 @@ chroma copy --from-local collections [collection names]
 
 {% Tab label="simple" %}
 ```terminal
-chroma copy --from-local collections col-1 col-2 
+chroma copy --from-local collections col-1 col-2
 ```
 {% /Tab %}
 
@@ -37,13 +37,13 @@ chroma copy --from-local --all --db my-db
 
 {% Tab label="host" %}
 ```terminal
-chroma copy --from-local --all --host http://localhost:8050 
+chroma copy --from-local --all --host http://localhost:8050
 ```
 {% /Tab %}
 
 {% Tab label="path" %}
 ```terminal
-chroma copy --from-local --all --path ~/Developer/my-app/chroma 
+chroma copy --from-local --all --path ~/Developer/my-app/chroma
 ```
 {% /Tab %}
 
@@ -55,7 +55,7 @@ chroma copy --from-local --all --path ~/Developer/my-app/chroma
 
 {% Tab label="simple" %}
 ```terminal
-chroma copy --from-cloud collections col-1 col-2 
+chroma copy --from-cloud collections col-1 col-2
 ```
 {% /Tab %}
 
@@ -68,13 +68,13 @@ chroma copy --from-cloud --all --db my-db
 
 {% Tab label="host" %}
 ```terminal
-chroma copy --from-cloud --all --host http://localhost:8050 
+chroma copy --from-cloud --all --host http://localhost:8050
 ```
 {% /Tab %}
 
 {% Tab label="path" %}
 ```terminal
-chroma copy --from-cloud --all --path ~/Developer/my-app/chroma 
+chroma copy --from-cloud --all --path ~/Developer/my-app/chroma
 ```
 {% /Tab %}
 
