@@ -340,6 +340,12 @@ impl RollupPerCollection {
     }
 
     fn witness_cursor(&mut self, witness: Option<&Witness>) {
+        // NOTE(rescrv):  There's an easy dance here to justify this as correct.  For the start log
+        // position to advance, there must have been at least one GC cycle with a cursor that was
+        // something other than 1.  That cursor should never get deleted, therefore we have a
+        // witness and the unwrap_or call 0x90s.
+        //
+        // The consequence of this breaking is that the offset in the log will be behind sysdb.
         self.start_log_position = witness
             .map(|x| x.1.position)
             .unwrap_or(LogPosition::from_offset(1));
