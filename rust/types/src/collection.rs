@@ -244,8 +244,6 @@ impl TryFrom<chroma_proto::Collection> for Collection {
     }
 }
 
-// todo: test comment to trigger rebuild
-
 #[derive(Error, Debug)]
 pub enum CollectionToProtoError {
     #[error("Could not serialize config: {0}")]
