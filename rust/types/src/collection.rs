@@ -230,6 +230,7 @@ impl Collection {
             dimension: Some(dim),
             tenant: "default_tenant".to_string(),
             database: "default_database".to_string(),
+            database_id: DatabaseUuid::new(),
             ..Default::default()
         }
     }
