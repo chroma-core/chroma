@@ -359,6 +359,10 @@ mod tests {
         counter: Arc<AtomicUsize>,
     }
 
+    struct AStruct {
+        value: usize,
+    }
+
     impl TestComponent {
         fn new(queue_size: usize, counter: Arc<AtomicUsize>) -> Self {
             TestComponent {
@@ -376,6 +380,19 @@ mod tests {
             self.counter.fetch_add(message, Ordering::SeqCst);
         }
     }
+    #[async_trait]
+    impl Handler<Box<AStruct>> for TestComponent {
+        type Result = ();
+
+        async fn handle(
+            &mut self,
+            message: Box<AStruct>,
+            _ctx: &ComponentContext<TestComponent>,
+        ) -> () {
+            self.counter.fetch_add(message.value, Ordering::SeqCst);
+        }
+    }
+
     impl StreamHandler<usize> for TestComponent {}
 
     #[async_trait]
