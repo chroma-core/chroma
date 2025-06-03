@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
-import { Libre_Baskerville } from "next/font/google";
+import { Gelasio } from "next/font/google";
 import "./globals.css";
 
-const libreBaskerville = Libre_Baskerville({
-  variable: "--font-libre-baskerville",
+const gelasio = Gelasio({
+  variable: "--font-gelasio",
   subsets: ["latin"],
-  weight: ["400", "700"],
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
@@ -21,7 +21,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${libreBaskerville.variable} antialiased`}
+        className={`${gelasio.variable} antialiased`}
       >
         {children}
       </body>

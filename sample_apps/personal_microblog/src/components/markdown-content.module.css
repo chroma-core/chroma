@@ -1,5 +1,5 @@
 .markdown {
-  font-family: var(--font-geist-mono);
+
 }
 
 .markdown p {
@@ -13,22 +13,15 @@
   -webkit-tap-highlight-color: hsla(1, 76%, 51%, .4);
 }
 
+.markdown strong {
+  font-weight: 600;
+}
+
 .markdown h1 {
-  margin-bottom: 0.25em;
-  color: var(--accent);
-}
-
-.markdown h1::before {
-  content: "# ";
-}
-
-.markdown h2 {
-  margin-bottom: 0.25em;
-  color: var(--accent);
-}
-
-.markdown h2::before {
-  content: "## ";
+  font-size: 110%;
+  margin-bottom: 0.3em;
+  font-weight: 500;
+  font-family: var(--font-display);
 }
 
 .markdown hr {
@@ -49,4 +42,8 @@
   padding-top: 0.5em;
   padding-bottom: 0.5em;
   font-size: 0.9em;
+}
+
+.markdown ul li {
+  margin-bottom: 0.2em;
 }

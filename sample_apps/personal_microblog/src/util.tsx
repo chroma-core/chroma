@@ -32,7 +32,10 @@ export async function addPostModelToChromaCollection(
   post: TweetModel,
   collection: Collection
 ) {
-  await collection.add({
+  if (post.body.length === 0) {
+    throw new Error("Post body is empty");
+  }
+  await collection.upsert({
     documents: [post.body],
     metadatas: [
       {

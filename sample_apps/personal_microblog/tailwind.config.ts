@@ -14,8 +14,9 @@ export default {
       },
     },
     fontFamily: {
-      display: ["var(--font-libre-baskerville)", "serif"],
-      body: ["system-ui", "-apple-system", "system-ui", "Segoe UI", "Roboto", "sans-serif"],
+      display: ["monospace", "serif"],
+      body: ["system-ui", "-apple-system", "system-ui", "Segoe UI", "Roboto", "sans-serif", "var(--font-gelasio)", "serif"],
+      ui: ["system-ui", "-apple-system", "system-ui", "Segoe UI", "Roboto", "sans-serif"],
     },
   },
   plugins: [],
