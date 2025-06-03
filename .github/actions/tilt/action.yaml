@@ -36,6 +36,9 @@ runs:
     #     done
     - name: Start minikube
       uses: medyagh/setup-minikube@latest
+      with:
+        cpus: max
+        memory: max
     - name: Start Tilt
       shell: bash
       run: tilt ci
