@@ -117,7 +117,7 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         _headers: &HeaderMap,
         action: AuthzAction,
         resource: AuthzResource,
-    ) -> Pin<Box<dyn Future<Output = Result<AuthzResource, AuthError>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
 
     fn authenticate_and_authorize_collection(
         &self,
@@ -125,7 +125,7 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         action: AuthzAction,
         resource: AuthzResource,
         _collection: Collection,
-    ) -> Pin<Box<dyn Future<Output = Result<AuthzResource, AuthError>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
 
     fn get_user_identity(
         &self,
@@ -138,27 +138,19 @@ impl AuthenticateAndAuthorize for () {
         &self,
         _headers: &HeaderMap,
         _action: AuthzAction,
-        resource: AuthzResource,
-    ) -> Pin<Box<dyn Future<Output = Result<AuthzResource, AuthError>> + Send>> {
-        Box::pin(ready(Ok::<AuthzResource, AuthError>(AuthzResource {
-            tenant: resource.tenant,
-            database: resource.database,
-            collection: resource.collection,
-        })))
+        _resource: AuthzResource,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
+        Box::pin(ready(Ok::<(), AuthError>(())))
     }
 
     fn authenticate_and_authorize_collection(
         &self,
         _headers: &HeaderMap,
         _action: AuthzAction,
-        resource: AuthzResource,
+        _resource: AuthzResource,
         _collection: Collection,
-    ) -> Pin<Box<dyn Future<Output = Result<AuthzResource, AuthError>> + Send>> {
-        Box::pin(ready(Ok::<AuthzResource, AuthError>(AuthzResource {
-            tenant: resource.tenant,
-            database: resource.database,
-            collection: resource.collection,
-        })))
+    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
+        Box::pin(ready(Ok::<(), AuthError>(())))
     }
 
     fn get_user_identity(

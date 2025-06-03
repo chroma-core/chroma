@@ -354,7 +354,7 @@ impl FrontendServer {
         headers: &HeaderMap,
         action: AuthzAction,
         resource: AuthzResource,
-    ) -> Result<AuthzResource, ServerError> {
+    ) -> Result<(), ServerError> {
         Ok(self
             .auth
             .authenticate_and_authorize(headers, action, resource)
@@ -369,7 +369,7 @@ impl FrontendServer {
         action: AuthzAction,
         resource: AuthzResource,
         collection_id: CollectionUuid,
-    ) -> Result<AuthzResource, ServerError> {
+    ) -> Result<(), ServerError> {
         let collection = self.frontend.get_cached_collection(collection_id).await?;
         Ok(self
             .auth
@@ -983,7 +983,7 @@ async fn get_collection(
         .get_collection
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!(name: "get_collection", tenant_name = %tenant, database_name = %database, collection_name = %collection_name);
-    let authz_result = server
+    server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::GetCollection,
@@ -996,11 +996,7 @@ async fn get_collection(
         .await?;
     let _guard =
         server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()])?;
-    let request = GetCollectionRequest::try_new(
-        authz_result.tenant.unwrap_or(tenant),
-        authz_result.database.unwrap_or(database),
-        authz_result.collection.unwrap_or(collection_name),
-    )?;
+    let request = GetCollectionRequest::try_new(tenant, database, collection_name)?;
     let collection = server.frontend.get_collection(request).await?;
     Ok(Json(collection))
 }

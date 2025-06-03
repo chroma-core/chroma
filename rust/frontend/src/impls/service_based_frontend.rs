@@ -235,6 +235,22 @@ impl ServiceBasedFrontend {
         }
     }
 
+    fn _parse_universal_collection_identifier(input: String) -> Option<(String, String, String)> {
+        let parts: Vec<&str> = input.split('/').collect();
+        match parts.as_slice() {
+            [tenant, database, collection]
+                if !tenant.is_empty() && !database.is_empty() && !collection.is_empty() =>
+            {
+                Some((
+                    tenant.to_string(),
+                    database.to_string(),
+                    collection.to_string(),
+                ))
+            }
+            _ => None,
+        }
+    }
+
     pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
         if !self.allow_reset {
             return Err(ResetError::NotAllowed);
@@ -362,12 +378,19 @@ impl ServiceBasedFrontend {
             ..
         }: GetCollectionRequest,
     ) -> Result<GetCollectionResponse, GetCollectionError> {
+        let (resolved_tenant_id, resolved_database_name, resolved_collection_name) =
+            Self::_parse_universal_collection_identifier(collection_name.clone()).unwrap_or((
+                tenant_id.clone(),
+                database_name.clone(),
+                collection_name.clone(),
+            ));
+
         let mut collections = self
             .sysdb_client
             .get_collections(GetCollectionsOptions {
-                name: Some(collection_name.clone()),
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                name: Some(resolved_collection_name.clone()),
+                tenant: Some(resolved_tenant_id.clone()),
+                database: Some(resolved_database_name.clone()),
                 limit: Some(1),
                 ..Default::default()
             })
