@@ -278,7 +278,7 @@ func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckC
 		}
 
 		res.Deleted[i] = deleted
-		res.LogPosition[i] = logPosition,
+		res.LogPosition[i] = logPosition
 	}
 	return res, nil
 }
