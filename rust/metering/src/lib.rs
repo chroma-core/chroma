@@ -121,7 +121,6 @@ pub fn create<E: MeteringEvent>(ev: E) -> MeteringEventGuard {
 
 thread_local! {
     static THREAD_NOOP_PTR: *mut dyn MeteringEvent = {
-        // Allocate one `Box<NoopMeteringEvent>` per thread.
         let boxed = Box::new(NoopMeteringEvent);
         Box::into_raw(boxed) as *mut dyn MeteringEvent
     };
@@ -138,42 +137,29 @@ impl Debug for NoopMeteringEvent {
 impl MeteringEvent for NoopMeteringEvent {}
 
 pub fn current() -> &'static mut dyn MeteringEvent {
-    // 1) Try to get a mutable reference to the top of the stack:
     if let Some(raw_ptr) = EVENT_STACK.with(|stack| {
         let mut vec = stack.borrow_mut();
-        // Use last_mut() instead of last():
         if let Some((_, boxed_evt)) = vec.last_mut() {
-            // boxed_evt: &mut Box<dyn MeteringEvent>
             let raw: *mut dyn MeteringEvent = &mut **boxed_evt as *mut dyn MeteringEvent;
             Some(raw)
         } else {
             None
         }
     }) {
-        // SAFETY: box still lives in the Vec, so &mut is valid
         unsafe { &mut *raw_ptr }
     } else {
-        // 2) Fallback: thread‐local no–op
-        THREAD_NOOP_PTR.with(|p| {
-            // SAFETY: each thread has its own Noop pointer, so returning &mut *p is safe
-            unsafe { &mut *(*p) }
-        })
+        THREAD_NOOP_PTR.with(|p| unsafe { &mut *(*p) })
     }
 }
 
-/// Pops the top‐of‐stack if it is exactly an E, and returns `Some(E)`. Otherwise returns `None`.
 pub fn close<E: MeteringEvent>() -> Option<E> {
     EVENT_STACK.with(|stack| {
         let mut vec = stack.borrow_mut();
         if let Some((type_id, _boxed_evt)) = vec.last() {
             if *type_id == TypeId::of::<E>() {
-                // Pop off (type_id, boxed_evt)
                 let (_type_id, boxed_any) = vec.pop().unwrap();
-                // Convert into raw pointer:
                 let raw_evt: *mut dyn MeteringEvent = Box::into_raw(boxed_any);
-                // Cast `*mut dyn MeteringEvent` → `*mut E` (safe because TypeId matched).
                 let raw_e: *mut E = raw_evt as *mut E;
-                // Reconstruct Box<E> and return the inner E
                 let boxed_e: Box<E> = unsafe { Box::from_raw(raw_e) };
                 return Some(*boxed_e);
             }
