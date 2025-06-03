@@ -153,6 +153,16 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 }
 
 func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID string, targetCollectionID string) (compactionOffset uint64, enumerationOffset uint64, err error) {
+	for i := 0; i < 3; i++ {
+		compactionOffset, enumerationOffset, err = r.innerForkRecords(ctx, sourceCollectionID, targetCollectionID)
+		if err == nil {
+			return
+		}
+	}
+	return
+}
+
+func (r *LogRepository) innerForkRecords(ctx context.Context, sourceCollectionID string, targetCollectionID string) (compactionOffset uint64, enumerationOffset uint64, err error) {
 	var tx pgx.Tx
 	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -168,7 +178,8 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		}
 	}()
 
-	sourceBounds, err := queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
+	var sourceBounds log.GetBoundsForCollectionRow
+	sourceBounds, err = queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
 	if err != nil {
 		trace_log.Error("Error in getting compaction and enumeration offset for source collection", zap.Error(err), zap.String("collectionId", sourceCollectionID))
 		return
@@ -188,6 +199,33 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 	})
 	if err != nil {
 		trace_log.Error("Error in updating offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
+		return
+	}
+	var targetBounds log.GetMinimumMaximumOffsetForCollectionRow
+	targetBounds, err = queriesWithTx.GetMinimumMaximumOffsetForCollection(ctx, targetCollectionID)
+	if err != nil {
+		trace_log.Error("Error in getting minimax for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
+		return
+	}
+	if targetBounds.MinOffset != sourceBounds.RecordCompactionOffsetPosition + 1 {
+		trace_log.Error("Race condition: Someone adjusted records during our transaction",
+			zap.String("collectionId", targetCollectionID),
+			zap.Int64("MinOffset", targetBounds.MinOffset),
+			zap.Int64("CompactionOffset+1", sourceBounds.RecordCompactionOffsetPosition + 1))
+		err = errors.New("concurrent updates caused fork to fail")
+		return
+	}
+	if targetBounds.MaxOffset != sourceBounds.RecordEnumerationOffsetPosition {
+		trace_log.Error("Race condition: Someone adjusted records during our transaction",
+			zap.String("collectionId", targetCollectionID),
+			zap.Int64("MaxOffset", targetBounds.MaxOffset),
+			zap.Int64("EnumerationOffset", sourceBounds.RecordEnumerationOffsetPosition))
+		err = errors.New("concurrent updates caused fork to fail")
+		return
+	}
+	err = tx.Commit(ctx)
+	if err != nil {
+		trace_log.Error("Error committing ForkRecords", zap.Error(err), zap.String("collectionId", targetCollectionID))
 		return
 	}
 	return
