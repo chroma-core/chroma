@@ -661,7 +661,13 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let record_writer = match self
             .ok_or_terminate(
-                RecordSegmentWriter::from_segment(&record_segment, &self.blockfile_provider).await,
+                RecordSegmentWriter::from_segment(
+                    &collection.tenant,
+                    &collection.database_id,
+                    &record_segment,
+                    &self.blockfile_provider,
+                )
+                .await,
                 ctx,
             )
             .await
@@ -671,8 +677,13 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
         let metadata_writer = match self
             .ok_or_terminate(
-                MetadataSegmentWriter::from_segment(&metadata_segment, &self.blockfile_provider)
-                    .await,
+                MetadataSegmentWriter::from_segment(
+                    &collection.tenant,
+                    &collection.database_id,
+                    &metadata_segment,
+                    &self.blockfile_provider,
+                )
+                .await,
                 ctx,
             )
             .await

@@ -7,15 +7,20 @@ pub enum BlockfileWriterMutationOrdering {
     Ordered,
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BlockfileWriterOptions {
     pub(crate) mutation_ordering: BlockfileWriterMutationOrdering,
     pub(crate) fork_from: Option<Uuid>,
+    pub(crate) prefix_path: String,
 }
 
 impl BlockfileWriterOptions {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(prefix_path: String) -> Self {
+        BlockfileWriterOptions {
+            prefix_path,
+            fork_from: None,
+            mutation_ordering: BlockfileWriterMutationOrdering::default(),
+        }
     }
 
     /// No guarantees are made about the order of mutations (calls to `.set()` and `.delete()`).

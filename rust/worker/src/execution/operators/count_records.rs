@@ -206,7 +206,9 @@ mod tests {
         types::materialize_logs,
     };
     use chroma_system::Operator;
-    use chroma_types::{Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid};
+    use chroma_types::{
+        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+    };
     use std::{collections::HashMap, str::FromStr};
     use tracing::{Instrument, Span};
 
@@ -222,11 +224,17 @@ mod tests {
             metadata: None,
             file_path: HashMap::new(),
         };
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &in_memory_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &in_memory_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let data = vec![
                 LogRecord {
                     log_offset: 1,
