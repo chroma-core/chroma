@@ -9,7 +9,7 @@ import { getPosts, publishNewUserPost } from "@/actions";
 import Logo from "./logo";
 
 export default function FeedView() {
-  const [newMessages, setNewMessages] = useState<Array<TweetModel | PartialAssistantPost>>([]);
+  const [newMessages, setNewMessages] = useState<Array<{userPost: TweetModel, assistantPost?: PartialAssistantPost}>>([]);
 
   return (
     <>
@@ -20,10 +20,7 @@ export default function FeedView() {
         <TweetPrompt
           onSubmit={(input) => {
             publishNewUserPost(input).then(({ userPost, assistantPost }) => {
-              setNewMessages((tweets) => [userPost, ...tweets]);
-              if (assistantPost) {
-                setNewMessages((tweets) => [assistantPost, ...tweets]);
-              }
+              setNewMessages((tweets) => [{userPost, assistantPost}, ...tweets]);
             });
           }}
         />
@@ -50,7 +47,7 @@ function IntroTweet() {
   );
 }
 
-function Tweets({ newMessages }: { newMessages: (TweetModel | PartialAssistantPost)[] }) {
+function Tweets({ newMessages }: { newMessages: {userPost: TweetModel, assistantPost?: PartialAssistantPost}[] }) {
   const [loadingMessages, setLoadingMessages] = useState<boolean>(true);
   const [oldMessages, setOldMessages] = useState<TweetModel[]>([]);
   const [currPage, setCurrPage] = useState<number>(0);
@@ -128,13 +125,13 @@ function Tweets({ newMessages }: { newMessages: (TweetModel | PartialAssistantPo
   return (
     <div>
       <AnimatePresence>
-        {newMessages.map((m, i) => (
+        {newMessages.map(({userPost, assistantPost}, i) => (
           <motion.li
-              key={m.id}
+              key={userPost.id}
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
             >
-              <Tweet tweet={m} bodyStream={('stream' in m ? m.stream : undefined)} />
+              <Tweet tweet={userPost} aiReply={assistantPost} />
             </motion.li>
         ))}
 

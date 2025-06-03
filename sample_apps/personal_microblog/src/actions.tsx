@@ -10,6 +10,7 @@ import {
   addPostModelToChromaCollection,
   chromaGetResultsToPostModels,
   chromaQueryResultsToPostModels,
+  generateId,
   unixTimestampNow,
 } from "./util";
 
@@ -61,16 +62,17 @@ export async function getPosts(page: number): Promise<TweetModel[]> {
     page = 0;
   }
   const posts = await collection.get({
+    where: { "role": "user" },
     include: ["documents", "metadatas"],
   });
   const postModels = chromaGetResultsToPostModels(posts);
   const pageSize = 15;
-  const documents = postModels.length;
-  let start = documents - (page + 1) * pageSize;
+  const count = postModels.length;
+  let start = count - (page + 1) * pageSize;
   if (start < 0) {
     start = 0;
   }
-  const end = documents - page * pageSize;
+  const end = count - page * pageSize;
   if (end < 0) {
     return [];
   }
@@ -111,9 +113,9 @@ export async function semanticSearch(query: string): Promise<TweetModel[]> {
   return chromaQueryResultsToPostModels(context);
 }
 
-export async function publishNewUserPost(newPostBody: string, threadParentId?: string): Promise<{userPost: TweetModel, assistantPost: PartialAssistantPost | undefined}> {
+export async function publishNewUserPost(newPostBody: string, threadParentId?: string): Promise<{ userPost: TweetModel, assistantPost: PartialAssistantPost | undefined }> {
   const newPost: TweetModel = {
-    id: crypto.randomUUID(),
+    id: generateId(),
     threadParentId: threadParentId,
     role: "user",
     body: newPostBody,
@@ -126,11 +128,11 @@ export async function publishNewUserPost(newPostBody: string, threadParentId?: s
     newPost.aiReplyId = partialAssistantPost?.id;
   }
   addPostModelToChromaCollection(newPost, collection).catch(console.error);
-  return {userPost: newPost, assistantPost: partialAssistantPost};
+  return { userPost: newPost, assistantPost: partialAssistantPost };
 }
 
 function getAssistantReponse(userInput: string, parentThreadId: string): PartialAssistantPost {
-  const id = crypto.randomUUID();
+  const id = generateId();
   const stream = createStreamableValue<string, any>();
   const assistantPost: PartialAssistantPost = {
     id,

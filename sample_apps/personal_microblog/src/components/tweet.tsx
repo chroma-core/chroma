@@ -2,52 +2,45 @@
 
 import { motion } from "framer-motion";
 
-import { TweetModel } from "@/types";
+import { PartialAssistantPost, TweetModel } from "@/types";
 
-import MarkdownContent from "./markdown-content";
-import { readStreamableValue, StreamableValue } from "ai/rsc";
+import { MarkdownContent, StreamedMarkdownContent } from "./markdown-content";
 import { useEffect, useState } from "react";
+import { getPostById } from "@/actions";
 
 interface TweetProps {
   tweet: TweetModel;
-  bodyStream?: StreamableValue<string, any>;
+  aiReply?: PartialAssistantPost;
   className?: string;
 }
 
-export function Tweet({ tweet, bodyStream, className }: TweetProps) {
-  const [body, setBody] = useState<string>(tweet.body ?? '');
-  const [isStreaming, setIsStreaming] = useState<boolean>(false);
+export function Tweet({ tweet, aiReply, className }: TweetProps) {
+  const [reply, setReply] = useState<PartialAssistantPost | undefined>(undefined);
 
   useEffect(() => {
-    if (!bodyStream) {
-      return;
-    }
-
-    setIsStreaming(true);
-    setBody('');
-
-    const streamContent = async () => {
-      try {
-        for await (const content of readStreamableValue(bodyStream)) {
-          if (content) {
-            setBody(content);
-          }
+    if (aiReply) {
+      setReply(aiReply);
+    } else if (tweet.aiReplyId) {
+      getPostById(tweet.aiReplyId).then((post: TweetModel | null) => {
+        if (post) {
+          setReply(post);
         }
-      } catch (error) {
-        console.error('Streaming error:', error);
-      } finally {
-        setIsStreaming(false);
-      }
-    };
-
-    streamContent();
-  }, [bodyStream]);
+      });
+    }
+  }, []);
 
   const formattedDate = new Date(tweet.date * 1000).toLocaleDateString('en-US', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric'
   });
+
+  let replyContent = undefined;
+  if (reply?.stream) {
+    replyContent = <StreamedMarkdownContent stream={reply.stream} placeholder="Thinking..." className={`${className} text-[.9em]/[1.3] font-ui text-gray-500`} />;
+  } else if (reply?.body) {
+    replyContent = <MarkdownContent content={reply.body} className={`${className} text-[.9em]/[1.3] font-ui text-gray-500`} />
+  }
 
   return (
     <a href={`/post/${tweet.id}`}>
@@ -56,7 +49,10 @@ export function Tweet({ tweet, bodyStream, className }: TweetProps) {
           <div className={`font-ui pl-2 pr-4 pt-4 mt-[.0em] pb-4 text-gray-600 text-sm`}>{formattedDate}</div>
         </div>
         <div className={`pt-4 pb-4 pl-4 pr-4 border-l-[.5px]`}>
-          <MarkdownContent content={body} className={`${className} text-[.95em]/[1.3] font-body ${tweet.role === "assistant" ? "font-bold text-blue-600" : ""}`} />
+          <MarkdownContent content={tweet.body} className={`${className} text-[.95em]/[1.3] font-body`} />
+          <div className="mt-2">
+            {replyContent}
+          </div>
         </div>
       </motion.div>
     </a>

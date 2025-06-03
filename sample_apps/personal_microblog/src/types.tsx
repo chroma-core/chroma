@@ -22,5 +22,5 @@ export interface PartialAssistantPost {
   date: number;
   aiReplyId?: string;
   status?: TweetStatus;
-  stream: StreamableValue<string, any>;
+  stream?: StreamableValue<string, any>;
 }

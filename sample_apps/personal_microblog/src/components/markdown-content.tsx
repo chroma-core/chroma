@@ -5,6 +5,7 @@ import remarkRehype from "remark-rehype";
 import rehypeReact from "rehype-react";
 import styles from "./markdown-content.module.css";
 import { AnchorTag, Strong } from "@/markdown";
+import { readStreamableValue, StreamableValue } from "ai/rsc";
 
 const markdownPipeline = remark()
   .use(remarkPluginReplaceMatch(/@assistant/, (match) => {
@@ -28,10 +29,67 @@ const markdownPipeline = remark()
     }
   })
 
-export default function MarkdownContent({ content, className }: { content: string, className?: string }) {
+export function MarkdownContent({ content, className }: { content: string, className?: string }) {
   const [rendering, setRendering] = useState(true);
   const [htmlBody, setHtmlBody] = useState(<></>);
   const [estimatedLines, setEstimatedLines] = useState(3);
+
+  useEffect(() => {
+    markdownPipeline
+      .process(content)
+      .then((result: { result: any }) => {
+        setRendering(false);
+        setHtmlBody(result.result);
+      })
+      .catch((err: any) => {
+        setHtmlBody(
+          <>
+            <span className="error">{err}</span>
+            <pre>{content}</pre>
+          </>
+        );
+      });
+    setEstimatedLines(content.length / 30);
+  }, [content]);
+
+  if (rendering) {
+    return <MarkdownContentSkeleton lines={estimatedLines} className={className} />;
+  }
+  return <div className={`w-full ${styles.markdown} ${className}`}>
+    {htmlBody}
+  </div>;
+}
+
+export function StreamedMarkdownContent({ stream, placeholder, className }: { stream: StreamableValue<string, any>, placeholder?: string, className?: string }) {
+  const [rendering, setRendering] = useState(true);
+  const [content, setContent] = useState<string>(placeholder ?? '');
+  const [htmlBody, setHtmlBody] = useState(<></>);
+  const [estimatedLines, setEstimatedLines] = useState(3);
+
+  useEffect(() => {
+    if (!stream) {
+      return;
+    }
+
+    setHtmlBody(<></>);
+
+    const streamContent = async () => {
+      if (!stream) {
+        return;
+      }
+      try {
+        for await (const content of readStreamableValue(stream)) {
+          if (content) {
+            setContent(content);
+          }
+        }
+      } catch (error) {
+        console.error('Streaming error:', error);
+      }
+    };
+
+    streamContent();
+  }, [stream]);
 
   useEffect(() => {
     markdownPipeline

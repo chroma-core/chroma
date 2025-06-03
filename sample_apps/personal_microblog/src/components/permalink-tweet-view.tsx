@@ -4,7 +4,7 @@ import { publishNewUserPost } from "@/actions";
 import { TweetModel } from "@/types";
 import { unixTimestampNow } from "@/util";
 import { useState } from "react";
-import MarkdownContent from "./markdown-content";
+import {MarkdownContent} from "./markdown-content";
 import TweetPrompt from "./tweet-prompt";
 import { motion } from "framer-motion";
 import { Tweet } from "./tweet";

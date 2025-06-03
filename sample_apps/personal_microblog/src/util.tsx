@@ -1,5 +1,6 @@
 import { Collection } from "chromadb";
 import { TweetModel } from "./types";
+import { customAlphabet } from 'nanoid'
 
 export function chromaQueryResultsToPostModels(queryResult: any): TweetModel[] {
   if (queryResult.ids.length !== 1) {
@@ -52,4 +53,11 @@ export async function addPostModelToChromaCollection(
 
 export function unixTimestampNow(): number {
   return Math.floor(Date.now() / 1000);
+}
+
+// https://zelark.github.io/nano-id-cc/ -- 1% chance of collision after 4M posts
+const nanoid = customAlphabet('1234567890abcdefghijklmnopqrstuvwxyz', 10)
+
+export function generateId(): string {
+  return nanoid();
 }
