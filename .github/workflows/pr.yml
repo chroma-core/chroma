@@ -166,6 +166,7 @@ jobs:
     secrets: inherit
     with:
       property_testing_preset: 'normal'
+      python_versions: '["3.9", "3.10", "3.11", "3.12"]'
 
   python-vulnerability-scan:
     name: Python vulnerability scan
