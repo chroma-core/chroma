@@ -7,10 +7,8 @@
 }
 
 .markdown a {
-  /* Inspiration taken from ink and switch */
-  background: url(/ul.svg) no-repeat bottom / 100% .5em;
+  text-decoration: underline;
   padding-bottom: .1em;
-  -webkit-tap-highlight-color: hsla(1, 76%, 51%, .4);
 }
 
 .markdown strong {

@@ -14,14 +14,15 @@
     "ai": "^4.3.16",
     "chromadb": "^3.0.0",
     "framer-motion": "^12.12.2",
-    "next": "15.1.8",
+    "next": "^15.1.8",
     "openai": "^4.103.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-icons": "^5.5.0",
     "rehype-react": "^8.0.0",
     "remark": "^15.0.1",
-    "remark-html": "^16.0.1"
+    "remark-html": "^16.0.1",
+    "remark-rehype": "^11.1.2"
   },
   "devDependencies": {
     "@types/node": "^20",

@@ -1,21 +1,52 @@
 import React, { useState, useEffect } from "react";
+import * as production from 'react/jsx-runtime';
 import { remark } from "remark";
-import remarkHtml from "remark-html";
+import remarkRehype from "remark-rehype";
+import rehypeReact from "rehype-react";
 import styles from "./markdown-content.module.css";
+import { AnchorTag, Strong } from "@/markdown";
+
+const markdownPipeline = remark()
+  .use(remarkPluginReplaceMatch(/@assistant/, (match) => {
+    return {
+      type: "strong",
+      children: [{ type: "text", value: match }],
+    }
+  }))
+  .use(remarkPluginReplaceMatch(/\$[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i, (match) => {
+    return {
+      type: "link",
+      url: `${match}`,
+      children: [{ type: "text", value: match }],
+    }
+  }))
+  .use(remarkRehype)
+  .use(rehypeReact, {
+    ...production, components: {
+      a: AnchorTag,
+      strong: Strong,
+    }
+  })
 
 export default function MarkdownContent({ content, className }: { content: string, className?: string }) {
   const [rendering, setRendering] = useState(true);
-  const [htmlBody, setHtmlBody] = useState(content);
+  const [htmlBody, setHtmlBody] = useState(<></>);
   const [estimatedLines, setEstimatedLines] = useState(3);
 
   useEffect(() => {
-    remark()
-      .use(remarkHtml)
-      .use(remarkCustom)
+    markdownPipeline
       .process(content)
-      .then((result) => {
+      .then((result: { result: any }) => {
         setRendering(false);
-        setHtmlBody(result.toString());
+        setHtmlBody(result.result);
+      })
+      .catch((err: any) => {
+        setHtmlBody(
+          <>
+            <span className="error">{err}</span>
+            <pre>{content}</pre>
+          </>
+        );
       });
     setEstimatedLines(content.length / 30);
   }, [content]);
@@ -23,11 +54,9 @@ export default function MarkdownContent({ content, className }: { content: strin
   if (rendering) {
     return <MarkdownContentSkeleton lines={estimatedLines} className={className} />;
   }
-
-  return <div
-    className={`w-full ${styles.markdown} ${className}`}
-    dangerouslySetInnerHTML={{ __html: htmlBody }}
-  ></div>;
+  return <div className={`w-full ${styles.markdown} ${className}`}>
+    {htmlBody}
+  </div>;
 }
 
 function MarkdownContentSkeleton({ lines, className }: { lines: number, className?: string }) {
@@ -38,7 +67,7 @@ function MarkdownContentSkeleton({ lines, className }: { lines: number, classNam
   </div>;
 }
 
-function remarkCustom() {
+function remarkPluginReplaceMatch(find: RegExp, replace: (match: string) => any) {
   /**
    * @param {Root} tree
    * @return {undefined}
@@ -51,7 +80,7 @@ function remarkCustom() {
     if (tree.type == "paragraph" && tree.children.length > 0) {
       tree.children = tree.children.flatMap((node: any) => {
         if (node.type == "text") {
-          return replaceMentions(node.value);
+          return replaceMatches(node.value, find, replace);
         } else {
           return node;
         }
@@ -61,24 +90,23 @@ function remarkCustom() {
     }
     return tree;
   }
-  return visit;
+  return () => visit;
 }
 
-function replaceMentions(body: string): any[] {
+function replaceMatches(body: string, find: RegExp, replace: (match: string) => any): any[] {
   const parts: any[] = [];
-  const mentionRegex = /(@\w+)/g;
   let lastIndex = 0;
 
   if (!body || body.length === 0) {
     return [];
   }
 
-  if (!mentionRegex.test(body)) {
+  if (!find.test(body)) {
     return [{ type: "text", value: body }];
   }
 
-  body.replace(mentionRegex, (match, mention, offset) => {
-    // Push text before the mention
+  body.replace(find, (match, offset) => {
+    // Push text before
     if (lastIndex < offset) {
       const content = body.slice(lastIndex, offset);
       parts.push({
@@ -86,12 +114,8 @@ function replaceMentions(body: string): any[] {
         value: content,
       });
     }
-    // Push the mention
-    parts.push({
-      type: "html",
-      children: undefined,
-      value: `<span class="text-blue-500">${mention}</span>`,
-    });
+    //Push new node
+    parts.push(replace(match));
     lastIndex = offset + match.length;
     return "";
   });
