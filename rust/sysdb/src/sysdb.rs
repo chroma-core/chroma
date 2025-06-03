@@ -16,7 +16,8 @@ use chroma_types::{
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
     ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
     ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
-    UpdateCollectionConfiguration, UpdateCollectionError, VectorIndexConfiguration,
+    UpdateCollectionConfiguration, UpdateCollectionError, UpdateTenantError, UpdateTenantResponse,
+    VectorIndexConfiguration,
 };
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
@@ -64,6 +65,18 @@ impl SysDb {
             SysDb::Grpc(grpc) => grpc.get_tenant(tenant_name).await,
             SysDb::Sqlite(sqlite) => sqlite.get_tenant(&tenant_name).await,
             SysDb::Test(_) => todo!(),
+        }
+    }
+
+    pub async fn update_tenant(
+        &mut self,
+        tenant_id: String,
+        static_name: String,
+    ) -> Result<UpdateTenantResponse, UpdateTenantError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.update_tenant(tenant_id, static_name).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(test) => test.update_tenant(tenant_id, static_name).await,
         }
     }
 
@@ -1378,6 +1391,20 @@ impl GrpcSysDb {
 
         let res = self.client.delete_collection_version(req).await?;
         Ok(res.into_inner().collection_id_to_success)
+    }
+
+    async fn update_tenant(
+        &mut self,
+        tenant_id: String,
+        static_name: String,
+    ) -> Result<UpdateTenantResponse, UpdateTenantError> {
+        let req = chroma_proto::SetTenantStaticNameRequest {
+            id: tenant_id,
+            static_name,
+        };
+
+        self.client.set_tenant_static_name(req).await?;
+        Ok(UpdateTenantResponse {})
     }
 
     async fn reset(&mut self) -> Result<ResetResponse, ResetError> {

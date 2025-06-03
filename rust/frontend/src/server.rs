@@ -17,7 +17,8 @@ use chroma_types::{
     InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
     UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateMetadata, UpsertCollectionRecordsResponse,
+    UpdateMetadata, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -98,6 +99,7 @@ pub struct Metrics {
     get_user_identity: Counter<u64>,
     create_tenant: Counter<u64>,
     get_tenant: Counter<u64>,
+    update_tenant: Counter<u64>,
     list_databases: Counter<u64>,
     create_database: Counter<u64>,
     get_database: Counter<u64>,
@@ -129,6 +131,7 @@ impl Metrics {
             get_user_identity: meter.u64_counter("get_user_identity").build(),
             create_tenant: meter.u64_counter("create_tenant").build(),
             get_tenant: meter.u64_counter("get_tenant").build(),
+            update_tenant: meter.u64_counter("update_tenant").build(),
             list_databases: meter.u64_counter("list_databases").build(),
             create_database: meter.u64_counter("create_database").build(),
             get_database: meter.u64_counter("get_database").build(),
@@ -583,6 +586,49 @@ async fn get_tenant(
         .await?;
     let request = GetTenantRequest::try_new(name)?;
     Ok(Json(server.frontend.get_tenant(request).await?))
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug)]
+pub struct UpdateTenantPayload {
+    pub static_name: String,
+}
+
+/// Updates an existing tenant by name.
+#[utoipa::path(
+    patch,
+    path = "/api/v2/tenants/{tenant_id}",
+    params(
+        ("tenant_id" = String, Path, description = "ID of the tenant to update")
+    ),
+    request_body = UpdateTenantPayload,
+    responses(
+        (status = 200, description = "Tenant updated successfully", body = UpdateTenantResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Tenant not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
+async fn update_tenant(
+    headers: HeaderMap,
+    Path(tenant_id): Path<String>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<UpdateTenantPayload>,
+) -> Result<Json<UpdateTenantResponse>, ServerError> {
+    server.metrics.update_tenant.add(1, &[]);
+    tracing::info!(name: "update_tenant", tenant_id = %tenant_id);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::UpdateTenant,
+            AuthzResource {
+                tenant: Some(tenant_id.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
+    let request = UpdateTenantRequest::try_new(tenant_id, payload.static_name)?;
+    Ok(Json(server.frontend.update_tenant(request).await?))
 }
 
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
