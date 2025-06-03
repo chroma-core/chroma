@@ -1,0 +1,15 @@
+[package]
+name = "chroma-metering"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = { workspace = true }
+once_cell = { workspace = true }
+parking_lot = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+chroma-metering-registry = { path = "../metering-registry" }
+chroma-metering-macros = { path = "../metering-macros" }
+chroma-system = { path = "../system" }
