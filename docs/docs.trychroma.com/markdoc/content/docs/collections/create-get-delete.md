@@ -51,7 +51,7 @@ Collections have a few useful convenience methods.
 
 {% /Tab %}
 
-{% Tab label="Typescript" %}
+{% Tab label="typescript" %}
 
 Chroma collections are created with a name and an optional embedding function.
 
