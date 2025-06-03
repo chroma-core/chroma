@@ -16,6 +16,9 @@ members = [
     "rust/log",
     "rust/log-service",
     "rust/memberlist",
+    "rust/metering",
+    "rust/metering-macros",
+    "rust/metering-registry",
     "rust/storage",
     "rust/system",
     "rust/sysdb",
@@ -28,7 +31,7 @@ members = [
     "rust/sqlite",
     "rust/cli",
     "rust/wal3",
-    "rust/js_bindings"
+    "rust/js_bindings",
 ]
 
 [workspace.dependencies]
@@ -43,18 +46,22 @@ figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 flatbuffers = "24.3.25"
 futures = "0.3"
 futures-core = "0.3"
+heck = "0.5.0"
 http-body-util = "0.1.3"
 lazy_static = { version = "1.4" }
 lexical-core = "1.0"
 num_cpus = "1.16.0"
+once_cell = "1.21.3"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
 opentelemetry-http = { version = "0.27", features = ["reqwest"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
 parquet = "52"
+proc-macro2 = "1.0.95"
 prost = "0.13"
 prost-types = "0.13.5"
+quote = "1.0.40"
 regex = "1.11.1"
 regex-syntax = "0.8.5"
 roaring = "0.10.6"
@@ -63,6 +70,7 @@ sea-query-binder = "0.7"
 serde = { version = "1.0.215", features = ["derive"] }
 serde_json = "1.0.133"
 setsum = "0.7"
+syn = "2.0.101"
 tantivy = "0.22.0"
 thiserror = "1.0.69"
 tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread"] }
@@ -105,6 +113,9 @@ chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
 chroma-memberlist = { path = "rust/memberlist" }
+chroma-metering = { path = "rust/metering" }
+chroma-metering-macros = { path = "rust/metering-macros" }
+chroma-metering-registry = { path = "rust/metering-registry" }
 chroma-segment = { path = "rust/segment" }
 chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
