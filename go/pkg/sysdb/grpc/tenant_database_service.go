@@ -142,6 +142,15 @@ func (s *Server) SetLastCompactionTimeForTenant(ctx context.Context, req *coordi
 	return &emptypb.Empty{}, nil
 }
 
+func (s *Server) SetTenantStaticName(ctx context.Context, req *coordinatorpb.SetTenantStaticNameRequest) (*coordinatorpb.SetTenantStaticNameResponse, error) {
+	err := s.coordinator.SetTenantStaticName(ctx, req.Id, req.StaticName)
+	if err != nil {
+		log.Error("error SetTenantStaticName", zap.String("request", req.String()), zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return &coordinatorpb.SetTenantStaticNameResponse{}, nil
+}
+
 func (s *Server) GetLastCompactionTimeForTenant(ctx context.Context, req *coordinatorpb.GetLastCompactionTimeForTenantRequest) (*coordinatorpb.GetLastCompactionTimeForTenantResponse, error) {
 	res := &coordinatorpb.GetLastCompactionTimeForTenantResponse{}
 	tenantIDs := req.TenantId
