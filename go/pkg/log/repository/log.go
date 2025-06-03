@@ -223,10 +223,6 @@ func (r *LogRepository) innerForkRecords(ctx context.Context, sourceCollectionID
 		err = errors.New("concurrent updates caused fork to fail")
 		return
 	}
-	if err != nil {
-		trace_log.Error("Error committing ForkRecords", zap.Error(err), zap.String("collectionId", targetCollectionID))
-		return
-	}
 	return
 }
 
