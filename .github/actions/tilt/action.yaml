@@ -14,6 +14,8 @@ runs:
       with:
         cpus: max
         memory: max
+        mount-path: "./etcd-data:/etcd-data"
+        extra-config: "kubeadm.etcd.local.dataDir=/etcd-data"
     - name: Start Tilt
       shell: bash
       run: tilt ci

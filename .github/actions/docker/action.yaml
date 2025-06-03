@@ -34,14 +34,6 @@ runs:
       with:
         username: ${{ inputs.dockerhub-username }}
         password: ${{ inputs.dockerhub-password }}
-    - shell: bash
-      run: |
-        echo "$PATH"
-        sudo cat >/usr/bin/nproc <<'EOF'
-        #!/bin/sh
-        printf '%s\n' "4"
-        EOF
-        sudo chmod +x /usr/bin/nproc
     - uses: useblacksmith/build-push-action@v1.1
       with:
         setup-only: true
