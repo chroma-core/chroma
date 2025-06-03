@@ -218,13 +218,14 @@ impl LogReader {
         Self::stateless_fetch(&self.storage, &self.prefix, fragment).await
     }
 
+    /// A class method to fetch data (no state from an instantiated log reader)
     #[tracing::instrument]
     pub async fn stateless_fetch(
         storage: &Storage,
         prefix: &str,
         fragment: &Fragment,
     ) -> Result<Arc<Vec<u8>>, Error> {
-        let path = format!("{}/{}", prefix, fragment.path);
+        let path = fragment_path(prefix, fragment.path);
         Ok(storage
             .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
             .await
@@ -369,12 +370,16 @@ impl LogReader {
     }
 }
 
+pub fn fragment_path(prefix: &str, path: &str) -> String {
+    format!("{prefix}/{path}")
+}
+
 pub async fn read_parquet(
     storage: &Storage,
     prefix: &str,
     path: &str,
 ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
-    let path = format!("{prefix}/{path}");
+    let path = fragment_path(prefix, path);
     let parquet = storage
         .get(&path, GetOptions::new(StorageRequestPriority::P0))
         .await
