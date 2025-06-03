@@ -359,6 +359,7 @@ mod tests {
         counter: Arc<AtomicUsize>,
     }
 
+    #[derive(Debug)]
     struct AStruct {
         value: usize,
     }
@@ -445,5 +446,17 @@ mod tests {
         cloned.consume().await.unwrap();
         // Expected to panic
         handle.consume().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_can_recieve_a_box() {
+        let system = System::new();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let component = TestComponent::new(10, counter.clone());
+        let mut handle = system.start_component(component);
+        handle
+            .send(Box::new(AStruct { value: 5 }), None)
+            .await
+            .unwrap();
     }
 }
