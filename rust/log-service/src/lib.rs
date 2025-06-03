@@ -215,8 +215,7 @@ async fn get_log_from_handle<'a>(
     prefix: &str,
     mark_dirty: MarkDirty,
 ) -> Result<LogRef<'a>, wal3::Error> {
-    let handle_clone = handle.clone();
-    let mut active = handle.active.lock().await;
+    let active = handle.active.lock().await;
     get_log_from_handle_with_mutex_held(handle, active, options, storage, prefix, mark_dirty).await
 }
 
