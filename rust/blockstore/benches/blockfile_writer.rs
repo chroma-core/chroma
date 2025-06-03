@@ -134,16 +134,17 @@ fn bench_writer_for_generator_and_size<D: DataGenerator>(
         name, data_byte_size
     );
     let data = generator.data();
+    let prefix = String::from("block/");
 
     let name_writer_options_data = [
         (
             "UnorderedBlockfileWriter",
-            BlockfileWriterOptions::new().unordered_mutations(),
+            BlockfileWriterOptions::new(prefix.clone()).unordered_mutations(),
             data.clone(),
         ),
         (
             "OrderedBlockfileWriter",
-            BlockfileWriterOptions::new().ordered_mutations(),
+            BlockfileWriterOptions::new(prefix.clone()).ordered_mutations(),
             {
                 let mut data = data;
                 data.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
@@ -162,7 +163,7 @@ fn bench_writer_for_generator_and_size<D: DataGenerator>(
                     || data.clone(),
                     |data| async {
                         let writer = provider
-                            .write::<D::Key, D::Value>(*writer_options)
+                            .write::<D::Key, D::Value>(writer_options.clone())
                             .await
                             .unwrap();
                         for (prefix, key, value) in data {
@@ -180,7 +181,9 @@ fn bench_writer_for_generator_and_size<D: DataGenerator>(
     {
         let populated_blockfile_id = runner.block_on(async {
             let writer = provider
-                .write::<D::Key, D::Value>(BlockfileWriterOptions::new().unordered_mutations())
+                .write::<D::Key, D::Value>(
+                    BlockfileWriterOptions::new(prefix).unordered_mutations(),
+                )
                 .await
                 .unwrap();
 
@@ -204,7 +207,9 @@ fn bench_writer_for_generator_and_size<D: DataGenerator>(
                     || data.clone(),
                     |data| async {
                         let writer = provider
-                            .write::<D::Key, D::Value>(writer_options.fork(populated_blockfile_id))
+                            .write::<D::Key, D::Value>(
+                                writer_options.clone().fork(populated_blockfile_id),
+                            )
                             .await
                             .unwrap();
 
