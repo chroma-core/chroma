@@ -339,11 +339,16 @@ impl RollupPerCollection {
             std::cmp::max(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
     }
 
-    fn witness_manifest_and_cursor(&mut self, manifest: &Manifest, witness: Option<&Witness>) {
+    fn witness_cursor(&mut self, witness: Option<&Witness>) {
+        // NOTE(rescrv):  There's an easy dance here to justify this as correct.  For the start log
+        // position to advance, there must have been at least one GC cycle with a cursor that was
+        // something other than 1.  That cursor should never get deleted, therefore we have a
+        // witness and the unwrap_or call 0x90s.
+        //
+        // The consequence of this breaking is that the offset in the log will be behind sysdb.
         self.start_log_position = witness
             .map(|x| x.1.position)
-            .unwrap_or(manifest.minimum_log_position());
-        self.limit_log_position = manifest.maximum_log_position();
+            .unwrap_or(LogPosition::from_offset(1));
     }
 
     fn is_empty(&self) -> bool {
@@ -1006,15 +1011,6 @@ impl LogServer {
         &self,
         rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
     ) -> Result<(), Error> {
-        let load_manifest = |storage, collection_id| async move {
-            let reader = LogReader::new(
-                LogReaderOptions::default(),
-                Arc::clone(storage),
-                storage_prefix_for_log(collection_id),
-            );
-            let span = tracing::info_span!("manifest load", collection_id = ?collection_id);
-            reader.manifest().instrument(span).await
-        };
         let load_cursor = |storage, collection_id| async move {
             let cursor = &COMPACTION;
             let cursor_store = CursorStore::new(
@@ -1027,18 +1023,12 @@ impl LogServer {
             cursor_store.load(cursor).instrument(span).await
         };
         for (collection_id, mut rollup) in std::mem::take(rollups) {
-            // TODO(rescrv):  We can avoid loading the manifest and cursor by checking an
-            // in-memory lookaside structure.
-            let Some(manifest) = load_manifest(&self.storage, collection_id).await? else {
-                tracing::warn!("{collection_id} has no manifest; this may mean it was deleted");
-                continue;
-            };
             let cursor = load_cursor(&self.storage, collection_id).await?;
             // NOTE(rescrv):  There are two spreads that we have.
             // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
             // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
             // data that needs to be compacted.
-            rollup.witness_manifest_and_cursor(&manifest, cursor.as_ref());
+            rollup.witness_cursor(cursor.as_ref());
             if !rollup.is_empty() {
                 rollups.insert(collection_id, rollup);
             }
