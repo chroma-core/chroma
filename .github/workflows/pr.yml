@@ -158,9 +158,27 @@ jobs:
           header: helm-chart-version-info
           delete: true
 
+  build-images:
+    name: Build images
+    runs-on: blacksmith-16vcpu-ubuntu-2204
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/go
+      - name: Set up Docker
+        uses: ./.github/actions/docker
+        with:
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Bake
+        run: docker buildx bake -f docker-bake.hcl
+
   python-tests:
     name: Python tests
-    needs: change-detection
+    needs:
+      - change-detection
+      - build-images
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-tests.yml
     secrets: inherit

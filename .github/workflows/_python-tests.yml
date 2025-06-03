@@ -126,7 +126,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["blacksmith-16vcpu-ubuntu-2204"]
+        platform: ["blacksmith-8vcpu-ubuntu-2204"]
         test-globs: ["chromadb/test/api",
                     "chromadb/test/api/test_collection.py",
                     "chromadb/test/api/test_limit_offset.py",
