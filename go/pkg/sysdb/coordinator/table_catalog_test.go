@@ -1352,3 +1352,46 @@ func int64Ptr(i int64) *int64 {
 func float64Ptr(f float64) *float64 {
 	return &f
 }
+
+func TestCatalog_SetTenantStaticName(t *testing.T) {
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockTenantDb := &mocks.ITenantDb{}
+
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
+
+	tenantID := "test_tenant"
+	staticName := "static_tenant_name"
+
+	mockMetaDomain.On("TenantDb", mock.Anything).Return(mockTenantDb)
+	mockTenantDb.On("SetTenantStaticName", tenantID, staticName).Return(nil)
+
+	err := catalog.SetTenantStaticName(context.Background(), tenantID, staticName)
+
+	assert.NoError(t, err)
+
+	mockMetaDomain.AssertExpectations(t)
+	mockTenantDb.AssertExpectations(t)
+}
+
+func TestCatalog_SetTenantStaticName_TenantNotFound(t *testing.T) {
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockTenantDb := &mocks.ITenantDb{}
+
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
+
+	tenantID := "non_existent_tenant"
+	staticName := "static_tenant_name"
+
+	mockMetaDomain.On("TenantDb", mock.Anything).Return(mockTenantDb)
+	mockTenantDb.On("SetTenantStaticName", tenantID, staticName).Return(common.ErrTenantNotFound)
+
+	err := catalog.SetTenantStaticName(context.Background(), tenantID, staticName)
+
+	assert.Error(t, err)
+	assert.Equal(t, common.ErrTenantNotFound, err)
+
+	mockMetaDomain.AssertExpectations(t)
+	mockTenantDb.AssertExpectations(t)
+}

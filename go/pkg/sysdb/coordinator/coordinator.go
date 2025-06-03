@@ -229,6 +229,10 @@ func (s *Coordinator) GetTenantsLastCompactionTime(ctx context.Context, tenantID
 	return s.catalog.GetTenantsLastCompactionTime(ctx, tenantIDs)
 }
 
+func (s *Coordinator) SetTenantStaticName(ctx context.Context, tenantID string, staticName string) error {
+	return s.catalog.SetTenantStaticName(ctx, tenantID, staticName)
+}
+
 func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
 	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
 }

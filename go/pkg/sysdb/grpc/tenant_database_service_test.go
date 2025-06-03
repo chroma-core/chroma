@@ -185,6 +185,33 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_DeleteDatabase() {
 	suite.Equal(0, len(databases))
 }
 
+func (suite *TenantDatabaseServiceTestSuite) TestServer_SetTenantStaticName() {
+	log.Info("TestServer_SetTenantStaticName")
+	tenantId := "TestSetTenantStaticName"
+	staticName := "test-static-name"
+
+	_, err := suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
+		Name: tenantId,
+		Ts:   time.Now().Unix(),
+	}, time.Now().Unix())
+	suite.NoError(err)
+
+	request := &coordinatorpb.SetTenantStaticNameRequest{
+		Id:         tenantId,
+		StaticName: staticName,
+	}
+	_, err = suite.s.SetTenantStaticName(context.Background(), request)
+	suite.NoError(err)
+
+	var tenant dbmodel.Tenant
+	err = suite.db.Where("id = ?", tenantId).First(&tenant).Error
+	suite.NoError(err)
+	suite.Equal(staticName, *tenant.StaticName)
+
+	err = dao.CleanUpTestTenant(suite.db, tenantId)
+	suite.NoError(err)
+}
+
 func TestTenantDatabaseServiceTestSuite(t *testing.T) {
 	testSuite := new(TenantDatabaseServiceTestSuite)
 	suite.Run(t, testSuite)

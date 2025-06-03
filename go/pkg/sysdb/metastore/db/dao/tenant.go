@@ -95,3 +95,20 @@ func (s *tenantDb) GetTenantsLastCompactionTime(tenantIDs []string) ([]*dbmodel.
 
 	return tenants, nil
 }
+
+func (s *tenantDb) SetTenantStaticName(tenantID string, staticName string) error {
+	var tenants []dbmodel.Tenant
+	result := s.db.Model(&tenants).
+		Clauses(clause.Returning{Columns: []clause.Column{{Name: "id"}}}).
+		Where("id = ?", tenantID).
+		Update("static_name", staticName)
+
+	if result.Error != nil {
+		log.Error("SetTenantStaticName error", zap.Error(result.Error))
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return common.ErrTenantNotFound
+	}
+	return nil
+}

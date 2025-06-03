@@ -281,6 +281,16 @@ message SetLastCompactionTimeForTenantRequest {
   TenantLastCompactionTime tenant_last_compaction_time = 1;
 }
 
+message SetTenantStaticNameRequest {
+  string id = 1;
+  string static_name = 2;
+}
+
+message SetTenantStaticNameResponse {
+  reserved 1;
+  reserved "status";
+}
+
 message FlushSegmentCompactionInfo {
   string segment_id = 1;
   map<string,FilePaths> file_paths = 2;
@@ -513,6 +523,7 @@ service SysDB {
   rpc FinishDatabaseDeletion(FinishDatabaseDeletionRequest) returns (FinishDatabaseDeletionResponse) {}
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
+  rpc SetTenantStaticName(SetTenantStaticNameRequest) returns (SetTenantStaticNameResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}
   rpc DeleteSegment(DeleteSegmentRequest) returns (DeleteSegmentResponse) {}
   rpc GetSegments(GetSegmentsRequest) returns (GetSegmentsResponse) {}

@@ -218,7 +218,12 @@ func convertDatabaseToModel(dbDatabase *dbmodel.Database) *model.Database {
 }
 
 func convertTenantToModel(dbTenant *dbmodel.Tenant) *model.Tenant {
+	var staticName string
+	if dbTenant.StaticName != nil {
+		staticName = *dbTenant.StaticName
+	}
 	return &model.Tenant{
-		Name: dbTenant.ID,
+		Name:       dbTenant.ID,
+		StaticName: staticName,
 	}
 }
