@@ -41,6 +41,14 @@ const sidebarConfig: AppSection[] = [
             name: "Telemetry",
           },
           {
+            id: "migration",
+            name: "Migration",
+          },
+          {
+            id: "troubleshooting",
+            name: "Troubleshooting",
+          },
+          {
             id: "about",
             name: "About",
           },
@@ -54,6 +62,7 @@ const sidebarConfig: AppSection[] = [
           { id: "persistent-client", name: "Persistent Client" },
           { id: "client-server", name: "Client-Server Mode" },
           { id: "python-http-client", name: "Python HTTP-Only Client" },
+          { id: "cloud-client", name: "Cloud Client" },
         ],
       },
       {
