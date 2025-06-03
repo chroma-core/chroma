@@ -266,6 +266,12 @@ async fn get_log_from_handle<'a>(
     })
 }
 
+////////////////////////////////////// cache_key_for_manifest //////////////////////////////////////
+
+fn cache_key_for_manifest(collection_id: CollectionUuid) -> String {
+    format!("{collection_id}::MANIFEST")
+}
+
 ////////////////////////////////////////// CachedFragment //////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -1076,7 +1082,7 @@ impl LogServer {
                 }
             })?;
             if let Some(cache) = self.cache.as_ref() {
-                let cache_key = format!("{collection_id}::MANIFEST");
+                let cache_key = cache_key_for_manifest(collection_id);
                 if let Some(manifest) = log.manifest() {
                     if let Ok(manifest_bytes) = serde_json::to_vec(&manifest) {
                         let cache_value = CachedBytes {
@@ -1168,7 +1174,7 @@ impl LogServer {
         pull_logs: &PullLogsRequest,
     ) -> Option<Vec<Fragment>> {
         if let Some(cache) = self.cache.as_ref() {
-            let cache_key = format!("{collection_id}::MANIFEST");
+            let cache_key = cache_key_for_manifest(collection_id);
             let cached_bytes = cache.get(&cache_key).await.ok().flatten()?;
             let manifest: Manifest = serde_json::from_slice(&cached_bytes.bytes).ok()?;
             let limits = Limits {
@@ -1176,6 +1182,8 @@ impl LogServer {
                 max_bytes: None,
                 max_records: Some(pull_logs.batch_size as u64),
             };
+            // NOTE(rescrv):  Log records are immutable, so if a manifest includes our range we can
+            // serve it directly from the scan_from_manifest call.
             let (manifest_start, manifest_limit) = (
                 manifest.minimum_log_position().offset() as i64,
                 manifest.maximum_log_position().offset() as i64,
