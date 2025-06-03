@@ -69,6 +69,13 @@ pub struct AuthzResource {
     pub collection: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub struct AuthzResult {
+    pub tenant: Option<String>,
+    pub database: Option<String>,
+    pub collection: Option<String>,
+}
+
 #[derive(thiserror::Error, Debug)]
 #[error("Permission denied.")]
 pub struct AuthError(pub StatusCode);
@@ -89,7 +96,7 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         _headers: &HeaderMap,
         action: AuthzAction,
         resource: AuthzResource,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<AuthzResult, AuthError>> + Send>>;
 
     fn authenticate_and_authorize_collection(
         &self,
@@ -97,7 +104,7 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         action: AuthzAction,
         resource: AuthzResource,
         _collection: Collection,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<AuthzResult, AuthError>> + Send>>;
 
     fn get_user_identity(
         &self,
@@ -110,19 +117,27 @@ impl AuthenticateAndAuthorize for () {
         &self,
         _headers: &HeaderMap,
         _action: AuthzAction,
-        _resource: AuthzResource,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
-        Box::pin(ready(Ok::<(), AuthError>(())))
+        resource: AuthzResource,
+    ) -> Pin<Box<dyn Future<Output = Result<AuthzResult, AuthError>> + Send>> {
+        Box::pin(ready(Ok::<AuthzResult, AuthError>(AuthzResult {
+            tenant: resource.tenant,
+            database: resource.database,
+            collection: resource.collection,
+        })))
     }
 
     fn authenticate_and_authorize_collection(
         &self,
         _headers: &HeaderMap,
         _action: AuthzAction,
-        _resource: AuthzResource,
+        resource: AuthzResource,
         _collection: Collection,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
-        Box::pin(ready(Ok::<(), AuthError>(())))
+    ) -> Pin<Box<dyn Future<Output = Result<AuthzResult, AuthError>> + Send>> {
+        Box::pin(ready(Ok::<AuthzResult, AuthError>(AuthzResult {
+            tenant: resource.tenant,
+            database: resource.database,
+            collection: resource.collection,
+        })))
     }
 
     fn get_user_identity(
