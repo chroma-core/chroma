@@ -316,6 +316,13 @@ impl LogWriter {
             )
         })
     }
+
+    pub fn manifest(&self) -> Option<Manifest> {
+        let inner = self.inner.lock().unwrap();
+        inner
+            .as_ref()
+            .map(|inner| inner.writer.manifest_manager.latest())
+    }
 }
 
 impl std::fmt::Debug for LogWriter {
