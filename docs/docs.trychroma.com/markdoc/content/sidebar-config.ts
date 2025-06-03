@@ -54,6 +54,7 @@ const sidebarConfig: AppSection[] = [
           { id: "persistent-client", name: "Persistent Client" },
           { id: "client-server", name: "Client-Server Mode" },
           { id: "python-http-client", name: "Python HTTP-Only Client" },
+          { id: "cloud-client", name: "Cloud Client" },
         ],
       },
       {
