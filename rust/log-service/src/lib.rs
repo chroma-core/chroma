@@ -342,8 +342,7 @@ impl RollupPerCollection {
     fn witness_manifest_and_cursor(&mut self, manifest: &Manifest, witness: Option<&Witness>) {
         self.start_log_position = witness
             .map(|x| x.1.position)
-            .unwrap_or(manifest.minimum_log_position());
-        self.limit_log_position = manifest.maximum_log_position();
+            .unwrap_or(LogPosition::from_offset(1));
     }
 
     fn is_empty(&self) -> bool {
