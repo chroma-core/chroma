@@ -20,7 +20,6 @@ pub fn attribute(
     raw_args: proc_macro::TokenStream,
     raw_body: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    // Parse out the arguments supplied to `#[attribute(<args>)]`
     let args = TokenStream::from(raw_args);
     let body = TokenStream::from(raw_body);
 
@@ -34,10 +33,9 @@ pub fn attribute(
         }
     };
 
-    // Parse out the line following the macro invocation
     let AttributeBodyResult {
         attribute_type_name,
-        attribute_type, // TODO: this should be a TokenStream to handle more complex types
+        attribute_type,
     } = match process_attribute_body(&body, &attribute_name_string) {
         Ok(result) => result,
         Err(error) => {
@@ -98,34 +96,25 @@ pub fn event(
         }
     };
 
-    // 4) Collect all field names/types so we can re‐emit the struct exactly:
     let mut field_names: Vec<Ident> = Vec::new();
     let mut field_types: Vec<TokenStream> = Vec::new();
 
-    // Also collect just the “constant” (non‐annotated) fields so we can build `new(...)`:
     let mut constant_field_names: Vec<Ident> = Vec::new();
     let mut constant_field_types: Vec<TokenStream> = Vec::new();
 
     let mut annotated_fields: Vec<AnnotatedField> = Vec::new();
 
-    // For the registry, build up Vec<(String, String, String)> of (attribute_name, mutator_name, type_str):
     let mut registry_tuples: Vec<(String, String, String)> = Vec::new();
 
-    // For the impl MeteringEvent override, we need three parallel Vecs:
-    //   - `attribute_methods`: Ident for the method name
-    //   - `mutable_types`: TokenStream for the argument type
-    //   - `mutator_idents`: Ident for the user’s mutator fn
     let mut attribute_methods: Vec<Ident> = Vec::new();
     let mut mutable_types: Vec<TokenStream> = Vec::new();
     let mut mutator_idents: Vec<Ident> = Vec::new();
 
     for field in &fields {
-        // Re‐emit every field in the struct:
         field_names.push(field.field_name.clone());
         field_types.push(field.field_type.clone());
 
         if field.field_mutability == FieldMutability::Constant {
-            // Keep a list of fields that are “constant” (to appear in the `new(...)` signature)
             constant_field_names.push(field.field_name.clone());
             constant_field_types.push(field.field_type.clone());
         } else {
@@ -146,21 +135,19 @@ pub fn event(
                     .to_string(),
             });
 
-            // A “mutable” (annotated) field -> record for registry + override method
             let attr_name_literal = field
                 .field_attribute_name
                 .clone()
                 .expect("mutable field always has an attribute name");
-            let attr_name_str = attr_name_literal.to_string().trim_matches('\"').to_string(); // e.g. "my_attribute"
+            let attr_name_str = attr_name_literal.to_string().trim_matches('\"').to_string();
             let mutator_ident_str = field_to_mutator
                 .get(&field.field_name)
                 .expect("must have a mutator for this annotated field")
                 .to_string()
                 .trim_matches('\"')
-                .to_string(); // e.g. "my_mutator"
+                .to_string();
             let mutator_ident = Ident::new(&mutator_ident_str, Span::call_site());
 
-            // The field’s type AST -> to_string() for registry:
             let field_ty_str: String = field.field_type.to_string();
             registry_tuples.push((
                 attr_name_str.clone(),
@@ -168,7 +155,6 @@ pub fn event(
                 field_ty_str.clone(),
             ));
 
-            // For overrides in impl:
             let method_ident = Ident::new(&attr_name_str, Span::call_site());
             attribute_methods.push(method_ident);
             mutable_types.push(field.field_type.clone());
