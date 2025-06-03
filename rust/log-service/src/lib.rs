@@ -364,6 +364,8 @@ pub enum DirtyMarker {
     },
     #[serde(rename = "purge")]
     Purge { collection_id: CollectionUuid },
+    // A Cleared marker is a no-op.  It exists so that a log consisting of mark-dirty markers that
+    // map onto purge markers will be cleared and can be erased.
     #[serde(rename = "clear")]
     Cleared,
 }
