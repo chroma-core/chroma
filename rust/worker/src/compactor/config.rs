@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CompactorConfig {
     #[serde(default = "CompactorConfig::default_compaction_manager_queue_size")]
     pub compaction_manager_queue_size: usize,

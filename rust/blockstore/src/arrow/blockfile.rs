@@ -471,6 +471,15 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         self.load_blocks(&target_block_ids).await;
     }
 
+    pub(crate) async fn load_blocks_for_prefixes(&self, prefixes: impl IntoIterator<Item = &str>) {
+        let prefix_vec = prefixes.into_iter().collect();
+        let target_block_ids = self
+            .root
+            .sparse_index
+            .get_block_ids_for_prefixes(prefix_vec);
+        self.load_blocks(&target_block_ids).await;
+    }
+
     pub(crate) async fn get(
         &'me self,
         prefix: &str,

@@ -1,8 +1,8 @@
-use std::{collections::HashMap, time::Duration};
-
+use chroma_cache::CacheConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
 use figment::providers::{Env, Format, Yaml};
+use std::{collections::HashMap, time::Duration};
 
 use crate::types::CleanupMode;
 
@@ -38,6 +38,10 @@ pub(super) struct GarbageCollectorConfig {
     pub(super) assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig,
     pub(super) memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     pub my_member_id: String,
+    #[serde(default = "GarbageCollectorConfig::default_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub root_cache_config: CacheConfig,
 }
 
 impl GarbageCollectorConfig {
@@ -60,6 +64,10 @@ impl GarbageCollectorConfig {
             Ok(config) => config,
             Err(e) => panic!("Error loading config: {}", e),
         }
+    }
+
+    fn default_port() -> u16 {
+        50055
     }
 }
 

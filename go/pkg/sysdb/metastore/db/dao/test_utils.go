@@ -71,7 +71,7 @@ func CleanUpTestDatabase(db *gorm.DB, tenantName string, databaseName string) er
 	collectionDb := &collectionDb{
 		db: db,
 	}
-	collections, err := collectionDb.GetCollections(nil, nil, tenantName, databaseName, nil, nil)
+	collections, err := collectionDb.GetCollections(nil, nil, tenantName, databaseName, nil, nil, false)
 	log.Info("clean up test database", zap.Int("collections", len(collections)))
 	if err != nil {
 		return err

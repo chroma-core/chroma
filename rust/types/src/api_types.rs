@@ -20,7 +20,6 @@ use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
 use crate::UpdateMetadata;
 use crate::Where;
-use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
@@ -110,6 +109,23 @@ impl ChromaError for BatchGetCollectionVersionFilePathsError {
         match self {
             BatchGetCollectionVersionFilePathsError::Grpc(status) => status.code().into(),
             BatchGetCollectionVersionFilePathsError::Uuid(_, _) => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum BatchGetCollectionSoftDeleteStatusError {
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] Status),
+    #[error("Could not parse UUID from string {1}: {0}")]
+    Uuid(uuid::Error, String),
+}
+
+impl ChromaError for BatchGetCollectionSoftDeleteStatusError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BatchGetCollectionSoftDeleteStatusError::Grpc(status) => status.code().into(),
+            BatchGetCollectionSoftDeleteStatusError::Uuid(_, _) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -456,6 +472,20 @@ impl ChromaError for DeleteDatabaseError {
             DeleteDatabaseError::Internal(err) => err.code(),
             DeleteDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
             DeleteDatabaseError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum FinishDatabaseDeletionError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for FinishDatabaseDeletionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            FinishDatabaseDeletionError::Internal(err) => err.code(),
         }
     }
 }
@@ -1703,14 +1733,10 @@ impl HealthCheckResponse {
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
-    #[error("Assignment error: {0}")]
-    AssignmentError(#[from] AssignmentError),
     #[error("Error converting: {0}")]
     Conversion(#[from] QueryConversionError),
     #[error("Error converting plan to proto: {0}")]
     PlanToProto(#[from] PlanToProtoError),
-    #[error("Memberlist is empty")]
-    EmptyMemberlist,
     #[error(transparent)]
     Grpc(#[from] Status),
     #[error("Inconsistent data")]
@@ -1719,8 +1745,6 @@ pub enum ExecutorError {
     CollectionMissingHnswConfiguration,
     #[error("Internal error: {0}")]
     Internal(Box<dyn ChromaError>),
-    #[error("No client found for node: {0}")]
-    NoClientFound(String),
     #[error("Error sending backfill request to compactor: {0}")]
     BackfillError(Box<dyn ChromaError>),
 }
@@ -1728,15 +1752,12 @@ pub enum ExecutorError {
 impl ChromaError for ExecutorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ExecutorError::AssignmentError(_) => ErrorCodes::Internal,
             ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
             ExecutorError::PlanToProto(_) => ErrorCodes::Internal,
-            ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
             ExecutorError::Grpc(e) => e.code().into(),
             ExecutorError::InconsistentData => ErrorCodes::Internal,
             ExecutorError::CollectionMissingHnswConfiguration => ErrorCodes::Internal,
             ExecutorError::Internal(e) => e.code(),
-            ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
             ExecutorError::BackfillError(e) => e.code(),
         }
     }

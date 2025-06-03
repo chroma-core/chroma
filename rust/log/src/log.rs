@@ -213,11 +213,11 @@ impl Log {
 
     pub async fn seal_log(
         &mut self,
-        tenant: &str,
+        _: &str,
         collection_id: CollectionUuid,
     ) -> Result<(), GrpcSealLogError> {
         match self {
-            Log::Grpc(log) => log.seal_log(tenant, collection_id).await,
+            Log::Grpc(log) => log.seal_log(collection_id).await,
             Log::Sqlite(_) => unimplemented!(),
             Log::InMemory(_) => unimplemented!(),
         }

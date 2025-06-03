@@ -36,13 +36,13 @@ describe("Schema Validation", () => {
   });
 
   test("should validate an embedding function", () => {
-    process.env.OPENAI_API_KEY = "test-key";
+    process.env.CHROMA_OPENAI_API_KEY = "test-key";
 
     const embeddingFunction = new OpenAIEmbeddingFunction({});
     expect(() =>
       embeddingFunction.validateConfig(embeddingFunction.getConfig()),
     ).not.toThrow();
 
-    process.env.OPENAI_API_KEY = undefined;
+    process.env.CHROMA_OPENAI_API_KEY = undefined;
   });
 });

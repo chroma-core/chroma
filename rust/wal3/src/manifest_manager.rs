@@ -168,6 +168,12 @@ impl ManifestManager {
         })
     }
 
+    /// Return the latest stable manifest
+    pub fn latest(&self) -> Manifest {
+        let staging = self.staging.lock().unwrap();
+        staging.stable.manifest.clone()
+    }
+
     /// Recover from a fault in writing.  It is possible that fragments have been written that are
     /// not referenced by the manifest.  Scout ahead until an empty slot is observed.  Then write
     /// the manifest that includes the new fragments.
@@ -370,6 +376,7 @@ mod tests {
                 acc_bytes: 0,
                 snapshots: vec![],
                 fragments: vec![],
+                initial_offset: None,
             },
             work.0
         );
@@ -397,6 +404,7 @@ mod tests {
                         setsum: Setsum::default(),
                     }
                 ],
+                initial_offset: None,
             },
             work.2
         );

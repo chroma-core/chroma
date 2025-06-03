@@ -51,7 +51,7 @@ type CollectionAndMetadata struct {
 
 //go:generate mockery --name=ICollectionDb
 type ICollectionDb interface {
-	GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*CollectionAndMetadata, error)
+	GetCollections(collectionIDs []string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*CollectionAndMetadata, error)
 	GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*CollectionAndMetadata, error)
 	CountCollections(tenantID string, databaseName *string) (uint64, error)
 	DeleteCollectionByID(collectionID string) (int, error)
@@ -62,7 +62,7 @@ type ICollectionDb interface {
 	DeleteAll() error
 	UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string) (int32, error)
 	UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFilePath string, newCollectionVersion int32, newVersionFilePath string, totalRecordsPostCompaction uint64,
-		sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64) (int64, error)
+		sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, numVersions uint64) (int64, error)
 	GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*Collection, error)
 	GetCollectionSize(collectionID string) (uint64, error)
 	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*CollectionToGc, error)
@@ -70,4 +70,5 @@ type ICollectionDb interface {
 	LockCollection(collectionID string) (*bool, error)
 	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath *string, newLineageFilePath string) error
 	BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error)
+	BatchGetCollectionSoftDeleteStatus(collectionIDs []string) (map[string]bool, error)
 }

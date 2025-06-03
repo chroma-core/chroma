@@ -1,17 +1,18 @@
 use chroma_types::{
-    BatchGetCollectionVersionFilePathsError, Collection, CollectionAndSegments, CollectionUuid,
-    CountForksError, Database, FlushCompactionResponse, GetCollectionSizeError,
-    GetCollectionWithSegmentsError, GetSegmentsError, ListDatabasesError, ListDatabasesResponse,
-    Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant,
+    BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
+    CollectionAndSegments, CollectionUuid, CountForksError, Database, FlushCompactionResponse,
+    GetCollectionSizeError, GetCollectionWithSegmentsError, GetSegmentsError, ListDatabasesError,
+    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant,
 };
 use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::sysdb::FlushCompactionError;
 use super::sysdb::GetLastCompactionTimeError;
 use crate::sysdb::VERSION_FILE_S3_PREFIX;
+use crate::GetCollectionsOptions;
 use chroma_storage::PutOptions;
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
 use chroma_types::chroma_proto::CollectionInfoImmutable;
@@ -38,6 +39,7 @@ struct Inner {
     segments: HashMap<SegmentUuid, Segment>,
     tenant_last_compaction_time: HashMap<String, i64>,
     collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
+    soft_deleted_collections: HashSet<CollectionUuid>,
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
     mock_time: u64,
@@ -52,6 +54,7 @@ impl TestSysDb {
                 segments: HashMap::new(),
                 tenant_last_compaction_time: HashMap::new(),
                 collection_to_version_file: HashMap::new(),
+                soft_deleted_collections: HashSet::new(),
                 storage: None,
                 mock_time: 0,
             })),
@@ -148,11 +151,19 @@ impl TestSysDb {
 
     pub(crate) async fn get_collections(
         &mut self,
-        collection_id: Option<CollectionUuid>,
-        name: Option<String>,
-        tenant: Option<String>,
-        database: Option<String>,
+        options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
+        let GetCollectionsOptions {
+            collection_id,
+            collection_ids: _,
+            include_soft_deleted: _,
+            name,
+            tenant,
+            database,
+            limit: _,
+            offset: _,
+        } = options;
+
         let inner = self.inner.lock();
         let mut collections = Vec::new();
         for collection in inner.collections.values() {
@@ -582,5 +593,21 @@ impl TestSysDb {
             }
         }
         Ok(paths)
+    }
+
+    pub(crate) async fn batch_get_collection_soft_delete_status(
+        &mut self,
+        collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashMap<CollectionUuid, bool>, BatchGetCollectionSoftDeleteStatusError> {
+        let inner = self.inner.lock();
+        let mut statuses = HashMap::new();
+        for collection_id in collection_ids {
+            if inner.soft_deleted_collections.contains(&collection_id) {
+                statuses.insert(collection_id, true);
+            } else if inner.collections.contains_key(&collection_id) {
+                statuses.insert(collection_id, false);
+            }
+        }
+        Ok(statuses)
     }
 }

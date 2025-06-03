@@ -17,11 +17,16 @@ use crate::{
     ScrubSuccess, Snapshot,
 };
 
+fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
+    lhs.0 <= rhs.1 && rhs.0 <= lhs.1
+}
+
 /// Limits allows encoding things like offset, timestamp, and byte size limits for the read.
 #[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct Limits {
     pub max_files: Option<u64>,
     pub max_bytes: Option<u64>,
+    pub max_records: Option<u64>,
 }
 
 /// LogReader is a reader for the log.
@@ -90,16 +95,21 @@ impl LogReader {
         else {
             return Err(Error::UninitializedLog);
         };
+        let log_position_range = if let Some(max_records) = limits.max_records {
+            (from, from + max_records)
+        } else {
+            (from, LogPosition::MAX)
+        };
         let mut snapshots = manifest
             .snapshots
             .iter()
-            .filter(|s| s.limit.offset() > from.offset())
+            .filter(|s| ranges_overlap(log_position_range, (s.start, s.limit)))
             .cloned()
             .collect::<Vec<_>>();
         let mut fragments = manifest
             .fragments
             .iter()
-            .filter(|f| f.limit.offset() > from.offset())
+            .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
             .cloned()
             .collect::<Vec<_>>();
         while !snapshots.is_empty() {
@@ -131,11 +141,61 @@ impl LogReader {
         }
         fragments.retain(|f| f.limit > from);
         fragments.sort_by_key(|f| f.start.offset());
+        Ok(Self::post_process_fragments(fragments, limits))
+    }
+
+    /// Do a consistent stale read of the manifest.  If the read can be returned without I/O,
+    /// return Some(Vec<Fragment>).  If the read would require reading from the future or
+    /// snapshots, return None.  Scan is more appropriate for that.
+    ///
+    /// 1. Up to, but not including, the offset of the log position.  This makes it a half-open
+    ///    interval.
+    /// 2. Up to, and including, the number of files to return.
+    /// 3. Up to, and including, the total number of bytes to return.
+    pub fn scan_from_manifest(
+        manifest: &Manifest,
+        from: LogPosition,
+        limits: Limits,
+    ) -> Option<Vec<Fragment>> {
+        let log_position_range = if let Some(max_records) = limits.max_records {
+            (from, from + max_records)
+        } else {
+            (from, LogPosition::MAX)
+        };
+        // If no there is no fragment with a start earlier than the from LogPosition, that means
+        // we'd need to load snapshots.  Since this is an in-memory only function, we return "None"
+        // to indicate that it's not satisfiable.
+        if !manifest.fragments.iter().any(|f| f.start <= from) {
+            return None;
+        }
+        let fragments = manifest
+            .fragments
+            .iter()
+            .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
+            .cloned()
+            .collect::<Vec<_>>();
+        Some(Self::post_process_fragments(fragments, limits))
+    }
+
+    fn post_process_fragments(mut fragments: Vec<Fragment>, limits: Limits) -> Vec<Fragment> {
+        fragments.sort_by_key(|f| f.start.offset());
         if let Some(max_files) = limits.max_files {
             if fragments.len() as u64 > max_files {
                 tracing::info!("truncating to {} files from {}", max_files, fragments.len());
                 fragments.truncate(max_files as usize);
             }
+        }
+        while fragments.len() > 1
+            // NOTE(rescrv):  We take the start of the last fragment, because if there are enough
+            // records without it we can pop.
+            && fragments[fragments.len() - 1].start - fragments[0].start
+                > limits.max_records.unwrap_or(u64::MAX)
+        {
+            tracing::info!(
+                "truncating to {} files because records restrictions",
+                fragments.len() - 1
+            );
+            fragments.pop();
         }
         while fragments.len() > 1
             && fragments
@@ -150,14 +210,23 @@ impl LogReader {
             );
             fragments.pop();
         }
-        Ok(fragments)
+        fragments
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn fetch(&self, fragment: &Fragment) -> Result<Arc<Vec<u8>>, Error> {
-        let path = format!("{}/{}", self.prefix, fragment.path);
-        Ok(self
-            .storage
+        Self::stateless_fetch(&self.storage, &self.prefix, fragment).await
+    }
+
+    /// A class method to fetch data (no state from an instantiated log reader)
+    #[tracing::instrument]
+    pub async fn stateless_fetch(
+        storage: &Storage,
+        prefix: &str,
+        fragment: &Fragment,
+    ) -> Result<Arc<Vec<u8>>, Error> {
+        let path = fragment_path(prefix, &fragment.path);
+        Ok(storage
             .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
             .await
             .map_err(Arc::new)?
@@ -301,12 +370,16 @@ impl LogReader {
     }
 }
 
+pub fn fragment_path(prefix: &str, path: &str) -> String {
+    format!("{prefix}/{path}")
+}
+
 pub async fn read_parquet(
     storage: &Storage,
     prefix: &str,
     path: &str,
 ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
-    let path = format!("{prefix}/{path}");
+    let path = fragment_path(prefix, path);
     let parquet = storage
         .get(&path, GetOptions::new(StorageRequestPriority::P0))
         .await

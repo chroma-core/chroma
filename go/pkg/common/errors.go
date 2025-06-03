@@ -30,6 +30,7 @@ var (
 	ErrCollectionTooManyFork                 = errors.New("collection entry has too many forks")
 	ErrCollectionDeletedWithLocksHeld        = errors.New("collection got deleted concurrently even though select for update locks were held. Not possible unless corruption somehow")
 	ErrMissingLineageFileName                = errors.New("missing lineage file name in root collection entry")
+	ErrCollectionWasNotSoftDeleted           = errors.New("collection was not soft deleted")
 
 	// Collection metadata errors
 	ErrUnknownCollectionMetadataType = errors.New("collection metadata value type not supported")

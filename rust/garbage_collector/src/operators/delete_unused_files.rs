@@ -117,7 +117,7 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
         // It's possible that the file was already renamed/deleted in the last run that
         // did not finish successfully (i.e. crashed before committing the work to SysDb).
         match self.cleanup_mode {
-            CleanupMode::DryRun => {}
+            CleanupMode::DryRun | CleanupMode::DryRunV2 => {}
             CleanupMode::Rename => {
                 // Soft delete - rename the file
                 if !all_files.is_empty() {
@@ -144,7 +144,7 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                     }
                 }
             }
-            CleanupMode::Delete => {
+            CleanupMode::Delete | CleanupMode::DeleteV2 => {
                 // Hard delete - remove the file
                 if !all_files.is_empty() {
                     let mut delete_stream = futures::stream::iter(all_files.clone())

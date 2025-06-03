@@ -85,7 +85,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         NgramRange: Clone + RangeBounds<&'me str> + Send + Sync;
 
     // Return the documents containing the literals. The search space is restricted to the documents in the mask if specified
-    // If all documents could contain the literals, Ok(None) is returned
+    // The literal slice must not be shorter than N, else `[...].split_at(N)` will panic
     async fn match_literal_with_mask(
         &self,
         literals: &[Literal],
@@ -273,5 +273,307 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 .all(|c| c.width() <= self.maximum_branching_factor()),
             LiteralExpr::Concat(_) | LiteralExpr::Alternation(_) => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::HashSet, ops::RangeBounds};
+
+    use regex_syntax::hir::{ClassUnicode, ClassUnicodeRange};
+    use roaring::RoaringBitmap;
+
+    use crate::regex::literal_expr::LiteralExpr;
+
+    use super::{Literal, NgramLiteralProvider};
+
+    struct StaticLiteralProvider {
+        #[allow(clippy::type_complexity)]
+        inverted_literal_index: Vec<(String, Vec<(u32, Vec<u32>)>)>,
+    }
+
+    #[async_trait::async_trait]
+    impl NgramLiteralProvider<()> for StaticLiteralProvider {
+        fn maximum_branching_factor(&self) -> usize {
+            6
+        }
+
+        async fn lookup_ngram_range<'me, NgramRange>(
+            &'me self,
+            ngram_range: NgramRange,
+        ) -> Result<Vec<(&'me str, u32, &'me [u32])>, ()>
+        where
+            NgramRange: Clone + RangeBounds<&'me str> + Send + Sync,
+        {
+            Ok(self
+                .inverted_literal_index
+                .iter()
+                .filter(|(literal, _)| ngram_range.contains(&literal.as_str()))
+                .flat_map(|(literal, m)| {
+                    m.iter()
+                        .map(|(doc, pos)| (literal.as_str(), *doc, pos.as_slice()))
+                })
+                .collect())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_simple_literal_match() {
+        let provider = StaticLiteralProvider {
+            inverted_literal_index: vec![
+                ("aaa".to_string(), vec![(0, vec![0])]),
+                ("aab".to_string(), vec![(0, vec![])]),
+            ],
+        };
+
+        assert_eq!(
+            provider
+                .match_literal_with_mask(
+                    &[Literal::Char('a'), Literal::Char('a'), Literal::Char('a')],
+                    None
+                )
+                .await
+                .unwrap(),
+            HashSet::from_iter([0])
+        );
+
+        assert_eq!(
+            provider
+                .match_literal_with_mask(
+                    &[Literal::Char('a'), Literal::Char('a'), Literal::Char('b')],
+                    None
+                )
+                .await
+                .unwrap(),
+            HashSet::from_iter([])
+        );
+
+        let case_insensitive_a = ClassUnicode::new([
+            ClassUnicodeRange::new('a', 'a'),
+            ClassUnicodeRange::new('A', 'A'),
+        ]);
+        assert_eq!(
+            provider
+                .match_literal_with_mask(
+                    &[
+                        Literal::Class(case_insensitive_a.clone()),
+                        Literal::Char('a'),
+                        Literal::Char('a')
+                    ],
+                    None
+                )
+                .await
+                .unwrap(),
+            HashSet::from_iter([0])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_long_literal_match() {
+        let provider = StaticLiteralProvider {
+            inverted_literal_index: vec![
+                (
+                    "abc".to_string(),
+                    vec![(0, vec![0, 6]), (1, vec![10, 16]), (2, vec![3])],
+                ),
+                (
+                    "bcd".to_string(),
+                    vec![(0, vec![1, 7]), (1, vec![11, 27]), (3, vec![4])],
+                ),
+                ("cde".to_string(), vec![(0, vec![8, 20]), (1, vec![12, 28])]),
+                ("def".to_string(), vec![(0, vec![9, 21])]),
+                ("deF".to_string(), vec![(1, vec![29, 40])]),
+            ],
+        };
+
+        assert_eq!(
+            provider
+                .match_literal_with_mask(
+                    &[Literal::Char('a'), Literal::Char('b'), Literal::Char('c')],
+                    None
+                )
+                .await
+                .unwrap(),
+            HashSet::from_iter([0, 1, 2])
+        );
+
+        assert_eq!(
+            provider
+                .match_literal_with_mask(
+                    &[
+                        Literal::Char('a'),
+                        Literal::Char('b'),
+                        Literal::Char('c'),
+                        Literal::Char('d'),
+                    ],
+                    None
+                )
+                .await
+                .unwrap(),
+            HashSet::from_iter([0, 1])
+        );
+
+        assert_eq!(
+            provider
+                .match_literal_with_mask(
+                    &[
+                        Literal::Char('a'),
+                        Literal::Char('b'),
+                        Literal::Char('c'),
+                        Literal::Char('d'),
+                        Literal::Char('e'),
+                    ],
+                    None
+                )
+                .await
+                .unwrap(),
+            HashSet::from_iter([0, 1])
+        );
+
+        assert_eq!(
+            provider
+                .match_literal_with_mask(
+                    &[
+                        Literal::Char('a'),
+                        Literal::Char('b'),
+                        Literal::Char('c'),
+                        Literal::Char('d'),
+                        Literal::Char('e'),
+                        Literal::Char('f'),
+                    ],
+                    None
+                )
+                .await
+                .unwrap(),
+            HashSet::from_iter([0])
+        );
+
+        assert_eq!(
+            provider
+                .match_literal_with_mask(
+                    &[
+                        Literal::Char('a'),
+                        Literal::Char('b'),
+                        Literal::Char('c'),
+                        Literal::Char('d'),
+                        Literal::Char('e'),
+                        Literal::Char('F'),
+                    ],
+                    None
+                )
+                .await
+                .unwrap(),
+            HashSet::from_iter([])
+        );
+
+        assert_eq!(
+            provider
+                .match_literal_with_mask(
+                    &[
+                        Literal::Char('b'),
+                        Literal::Char('c'),
+                        Literal::Char('d'),
+                        Literal::Char('e'),
+                        Literal::Char('F'),
+                    ],
+                    None
+                )
+                .await
+                .unwrap(),
+            HashSet::from_iter([1])
+        );
+
+        let case_insensitive_f = ClassUnicode::new([
+            ClassUnicodeRange::new('f', 'f'),
+            ClassUnicodeRange::new('F', 'F'),
+        ]);
+        assert_eq!(
+            provider
+                .match_literal_with_mask(
+                    &[
+                        Literal::Char('b'),
+                        Literal::Char('c'),
+                        Literal::Char('d'),
+                        Literal::Char('e'),
+                        Literal::Class(case_insensitive_f),
+                    ],
+                    None
+                )
+                .await
+                .unwrap(),
+            HashSet::from_iter([0, 1])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_literal_expression_match() {
+        let provider = StaticLiteralProvider {
+            inverted_literal_index: vec![
+                (
+                    "abc".to_string(),
+                    vec![(0, vec![0, 6]), (1, vec![10, 16]), (2, vec![3])],
+                ),
+                (
+                    "def".to_string(),
+                    vec![(0, vec![9, 21]), (2, vec![30]), (3, vec![7])],
+                ),
+            ],
+        };
+
+        assert_eq!(
+            provider
+                .match_literal_expression(&LiteralExpr::Concat(vec![
+                    LiteralExpr::Literal(vec![
+                        Literal::Char('a'),
+                        Literal::Char('b'),
+                        Literal::Char('c'),
+                    ]),
+                    LiteralExpr::Literal(vec![
+                        Literal::Char('d'),
+                        Literal::Char('e'),
+                        Literal::Char('f'),
+                    ])
+                ]))
+                .await
+                .unwrap(),
+            Some(RoaringBitmap::from_sorted_iter([0, 2]).unwrap())
+        );
+
+        assert_eq!(
+            provider
+                .match_literal_expression(&LiteralExpr::Alternation(vec![
+                    LiteralExpr::Literal(vec![
+                        Literal::Char('a'),
+                        Literal::Char('b'),
+                        Literal::Char('c'),
+                    ]),
+                    LiteralExpr::Literal(vec![
+                        Literal::Char('d'),
+                        Literal::Char('e'),
+                        Literal::Char('f'),
+                    ])
+                ]))
+                .await
+                .unwrap(),
+            Some(RoaringBitmap::from_sorted_iter([0, 1, 2, 3]).unwrap())
+        );
+
+        // Literal is ignored if it is too wide (i.e. can match too many characters)
+        let digit = ClassUnicode::new([ClassUnicodeRange::new('0', '9')]);
+        assert_eq!(
+            provider
+                .match_literal_expression(&LiteralExpr::Literal(vec![
+                    Literal::Char('a'),
+                    Literal::Char('b'),
+                    Literal::Char('c'),
+                    Literal::Class(digit),
+                    Literal::Char('d'),
+                    Literal::Char('e'),
+                    Literal::Char('f'),
+                ]))
+                .await
+                .unwrap(),
+            Some(RoaringBitmap::from_sorted_iter([0, 2]).unwrap())
+        );
     }
 }
