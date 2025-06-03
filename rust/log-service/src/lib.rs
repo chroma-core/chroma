@@ -215,7 +215,18 @@ async fn get_log_from_handle<'a>(
     prefix: &str,
     mark_dirty: MarkDirty,
 ) -> Result<LogRef<'a>, wal3::Error> {
-    let mut active = handle.active.lock().await;
+    let active = handle.active.lock().await;
+    get_log_from_handle_with_mutex_held(handle, active, options, storage, prefix, mark_dirty).await
+}
+
+async fn get_log_from_handle_with_mutex_held<'a>(
+    handle: &'a crate::state_hash_table::Handle<LogKey, LogStub>,
+    mut active: tokio::sync::MutexGuard<'_, ActiveLog>,
+    options: &LogWriterOptions,
+    storage: &Arc<Storage>,
+    prefix: &str,
+    mark_dirty: MarkDirty,
+) -> Result<LogRef<'a>, wal3::Error> {
     if active.log.is_some() {
         active.keep_alive(Duration::from_secs(60));
     }
@@ -525,7 +536,12 @@ impl LogServer {
         // Grab a lock on the state for this key, so that a racing initialize won't do anything.
         let key = LogKey { collection_id };
         let handle = self.open_logs.get_or_create_state(key);
-        let mut _active = handle.active.lock().await;
+        let active = handle.active.lock().await;
+
+        // Someone already initialized the log on a prior call.
+        if active.log.is_some() {
+            return Ok(());
+        }
 
         tracing::info!("log transfer to {collection_id}");
         let scout_request = Request::new(ScoutLogsRequest {
@@ -647,6 +663,23 @@ impl LogServer {
             log_offset: start as i64 - 1,
         }))
         .await?;
+        // Set it up so that once we release the mutex, the next person won't do I/O and will
+        // immediately be able to push logs.
+        let storage_prefix = storage_prefix_for_log(collection_id);
+        let mark_dirty = MarkDirty {
+            collection_id,
+            dirty_log: Arc::clone(&self.dirty_log),
+        };
+        // If this fails, the next writer will load manifest and continue unimpeded.
+        let _ = get_log_from_handle_with_mutex_held(
+            &handle,
+            active,
+            &self.config.writer,
+            &self.storage,
+            &storage_prefix,
+            mark_dirty,
+        )
+        .await;
         Ok(())
     }
 
