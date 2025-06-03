@@ -37,7 +37,7 @@ use tonic::{transport::Server, Code, Request, Response, Status};
 use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
-    Cursor, CursorName, CursorStore, CursorStoreOptions, Limits, LogPosition, LogReader,
+    Cursor, CursorName, CursorStore, CursorStoreOptions, Fragment, Limits, LogPosition, LogReader,
     LogReaderOptions, LogWriter, LogWriterOptions, Manifest, Witness,
 };
 
@@ -266,14 +266,20 @@ async fn get_log_from_handle<'a>(
     })
 }
 
+////////////////////////////////////// cache_key_for_manifest //////////////////////////////////////
+
+fn cache_key_for_manifest(collection_id: CollectionUuid) -> String {
+    format!("{collection_id}::MANIFEST")
+}
+
 ////////////////////////////////////////// CachedFragment //////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct CachedParquetFragment {
+pub struct CachedBytes {
     bytes: Vec<u8>,
 }
 
-impl chroma_cache::Weighted for CachedParquetFragment {
+impl chroma_cache::Weighted for CachedBytes {
     fn weight(&self) -> usize {
         self.bytes.len()
     }
@@ -479,7 +485,7 @@ pub struct LogServer {
     rolling_up: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
     need_to_compact: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
-    cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedParquetFragment>>>,
+    cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedBytes>>>,
     metrics: Metrics,
 }
 
@@ -1075,6 +1081,17 @@ impl LogServer {
                     Status::new(err.code().into(), err.to_string())
                 }
             })?;
+            if let Some(cache) = self.cache.as_ref() {
+                let cache_key = cache_key_for_manifest(collection_id);
+                if let Some(manifest) = log.manifest() {
+                    if let Ok(manifest_bytes) = serde_json::to_vec(&manifest) {
+                        let cache_value = CachedBytes {
+                            bytes: manifest_bytes,
+                        };
+                        cache.insert(cache_key, cache_value).await;
+                    }
+                }
+            }
             Ok(Response::new(PushLogsResponse {
                 record_count,
                 log_is_sealed: false,
@@ -1135,6 +1152,82 @@ impl LogServer {
         .await
     }
 
+    async fn read_fragments(
+        &self,
+        collection_id: CollectionUuid,
+        pull_logs: &PullLogsRequest,
+    ) -> Result<Vec<Fragment>, wal3::Error> {
+        if let Some(fragments) = self
+            .read_fragments_via_cache(collection_id, pull_logs)
+            .await
+        {
+            Ok(fragments)
+        } else {
+            self.read_fragments_via_log_reader(collection_id, pull_logs)
+                .await
+        }
+    }
+
+    async fn read_fragments_via_cache(
+        &self,
+        collection_id: CollectionUuid,
+        pull_logs: &PullLogsRequest,
+    ) -> Option<Vec<Fragment>> {
+        if let Some(cache) = self.cache.as_ref() {
+            let cache_key = cache_key_for_manifest(collection_id);
+            let cached_bytes = cache.get(&cache_key).await.ok().flatten()?;
+            let manifest: Manifest = serde_json::from_slice(&cached_bytes.bytes).ok()?;
+            let limits = Limits {
+                max_files: Some(pull_logs.batch_size as u64 + 1),
+                max_bytes: None,
+                max_records: Some(pull_logs.batch_size as u64),
+            };
+            // NOTE(rescrv):  Log records are immutable, so if a manifest includes our range we can
+            // serve it directly from the scan_from_manifest call.
+            let (manifest_start, manifest_limit) = (
+                manifest.minimum_log_position().offset() as i64,
+                manifest.maximum_log_position().offset() as i64,
+            );
+            if manifest_start <= pull_logs.start_from_offset
+                && pull_logs.start_from_offset + pull_logs.batch_size as i64 <= manifest_limit
+            {
+                LogReader::scan_from_manifest(
+                    &manifest,
+                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                    limits,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    async fn read_fragments_via_log_reader(
+        &self,
+        collection_id: CollectionUuid,
+        pull_logs: &PullLogsRequest,
+    ) -> Result<Vec<Fragment>, wal3::Error> {
+        let prefix = storage_prefix_for_log(collection_id);
+        let log_reader = LogReader::new(
+            self.config.reader.clone(),
+            Arc::clone(&self.storage),
+            prefix,
+        );
+        let limits = Limits {
+            max_files: Some(pull_logs.batch_size as u64 + 1),
+            max_bytes: None,
+            max_records: Some(pull_logs.batch_size as u64),
+        };
+        log_reader
+            .scan(
+                LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                limits,
+            )
+            .await
+    }
+
     async fn pull_logs(
         &self,
         request: Request<PullLogsRequest>,
@@ -1151,24 +1244,7 @@ impl LogServer {
                 start_from_offset = pull_logs.start_from_offset,
                 batch_size = pull_logs.batch_size,
             );
-            let prefix = storage_prefix_for_log(collection_id);
-            let log_reader = LogReader::new(
-                self.config.reader.clone(),
-                Arc::clone(&self.storage),
-                prefix,
-            );
-            let limits = Limits {
-                max_files: Some(pull_logs.batch_size as u64 + 1),
-                max_bytes: None,
-                max_records: Some(pull_logs.batch_size as u64),
-            };
-            let fragments = match log_reader
-                .scan(
-                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
-                    limits,
-                )
-                .await
-            {
+            let fragments = match self.read_fragments(collection_id, &pull_logs).await {
                 Ok(fragments) => fragments,
                 Err(wal3::Error::UninitializedLog) => {
                     return self.forward_pull_logs(Request::new(pull_logs)).await;
@@ -1180,16 +1256,19 @@ impl LogServer {
             let futures = fragments
                 .iter()
                 .map(|fragment| async {
-                    let cache_key = format!("{collection_id}::{}", fragment.path);
+                    let prefix = storage_prefix_for_log(collection_id);
                     if let Some(cache) = self.cache.as_ref() {
+                        let cache_key = format!("{collection_id}::{}", fragment.path);
                         let cache_span = tracing::info_span!("cache get");
                         if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
                         {
                             return Ok(Arc::new(answer.bytes));
                         }
                         let fetch_span = tracing::info_span!("fragment fetch");
-                        let answer = log_reader.fetch(fragment).instrument(fetch_span).await?;
-                        let cache_value = CachedParquetFragment {
+                        let answer = LogReader::stateless_fetch(&self.storage, &prefix, fragment)
+                            .instrument(fetch_span)
+                            .await?;
+                        let cache_value = CachedBytes {
                             bytes: Clone::clone(&*answer),
                         };
                         let insert_span = tracing::info_span!("cache insert");
@@ -1200,7 +1279,9 @@ impl LogServer {
                         Ok(answer)
                     } else {
                         let fetch_span = tracing::info_span!("fragment fetch");
-                        log_reader.fetch(fragment).instrument(fetch_span).await
+                        LogReader::stateless_fetch(&self.storage, &prefix, fragment)
+                            .instrument(fetch_span)
+                            .await
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1950,11 +2031,7 @@ impl Configurable<LogServerConfig> for LogServer {
         registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let cache = if let Some(cache_config) = &config.cache {
-            match chroma_cache::from_config_persistent::<String, CachedParquetFragment>(
-                cache_config,
-            )
-            .await
-            {
+            match chroma_cache::from_config_persistent::<String, CachedBytes>(cache_config).await {
                 Ok(cache) => Some(cache),
                 Err(err) => {
                     tracing::error!("cache not configured: {err:?}");
@@ -2748,15 +2825,15 @@ mod tests {
     fn cached_parquet_fragment_weighted() {
         use chroma_cache::Weighted;
 
-        let fragment = CachedParquetFragment {
+        let fragment = CachedBytes {
             bytes: vec![0u8; 1024],
         };
         assert_eq!(1024, fragment.weight());
 
-        let empty_fragment = CachedParquetFragment { bytes: vec![] };
+        let empty_fragment = CachedBytes { bytes: vec![] };
         assert_eq!(0, empty_fragment.weight());
 
-        let large_fragment = CachedParquetFragment {
+        let large_fragment = CachedBytes {
             bytes: vec![0u8; 1000],
         };
         assert_eq!(1000, large_fragment.weight());
@@ -3100,7 +3177,7 @@ mod tests {
     fn cached_parquet_fragment_default() {
         use chroma_cache::Weighted;
 
-        let fragment = CachedParquetFragment::default();
+        let fragment = CachedBytes::default();
         assert_eq!(0, fragment.weight());
         assert!(fragment.bytes.is_empty());
     }
