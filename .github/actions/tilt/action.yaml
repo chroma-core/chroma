@@ -14,6 +14,9 @@ runs:
       with:
         cpus: max
         memory: max
+    - name: Bake images
+      shell: bash
+      run: docker buildx bake -f docker-bake.hcl
     - name: Pre-pull images referenced in k8s manifests
       shell: bash
       run: |
@@ -37,7 +40,6 @@ runs:
         # Build a temporary docker-compose file
         tmpfile=$(mktemp)
         {
-          echo "version: '3.9'"
           echo "services:"
           for i in "${!images[@]}"; do
             echo "  img$i:"

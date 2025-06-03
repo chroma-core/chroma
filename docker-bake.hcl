@@ -1,6 +1,7 @@
 target "log-service" {
   dockerfile = "go/Dockerfile"
   target = "logservice"
+  tags = [ "log-service:ci" ]
 }
 
 target "log-service-migration" {

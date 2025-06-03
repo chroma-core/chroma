@@ -10,7 +10,8 @@ docker_build(
 if config.tilt_subcommand == "ci":
   custom_build(
     'logservice',
-    'docker buildx build --load -t $EXPECTED_REF --target logservice -f ./go/Dockerfile .',
+    # 'docker buildx build --load -t $EXPECTED_REF --target logservice -f ./go/Dockerfile .',
+    'docker image tag log-service:ci $EXPECTED_REF && docker image push $EXPECTED_REF',
     ['./go/', './idl/']
   )
 else:
