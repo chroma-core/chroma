@@ -31,4 +31,3 @@ Chroma will persist its data in the `chroma_data` directory. If you want to rest
 ```bash
 rm -rf chroma_data
 ```
-

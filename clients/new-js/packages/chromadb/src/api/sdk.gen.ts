@@ -28,7 +28,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Health check endpoint that returns 200 if the server and executor are ready
      */
@@ -38,7 +38,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Heartbeat endpoint that returns a nanosecond timestamp of the current time.
      */
@@ -48,7 +48,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Pre-flight checks endpoint reporting basic readiness info.
      */
@@ -58,7 +58,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Reset endpoint allowing authorized users to reset the database.
      */
@@ -68,7 +68,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Creates a new tenant.
      */
@@ -82,7 +82,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Returns an existing tenant by name.
      */
@@ -92,7 +92,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Lists all databases for a given tenant.
      */
@@ -102,7 +102,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Creates a new database for a given tenant.
      */
@@ -116,7 +116,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Deletes a specific database.
      */
@@ -126,7 +126,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Retrieves a specific database by name.
      */
@@ -136,7 +136,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Lists all collections in the specified database.
      */
@@ -146,7 +146,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Creates a new collection under the specified database.
      */
@@ -160,7 +160,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Deletes a collection in a given database.
      */
@@ -170,7 +170,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Retrieves a collection by ID or name.
      */
@@ -180,7 +180,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Updates an existing collection's name or metadata.
      */
@@ -194,7 +194,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Adds records to a collection.
      */
@@ -208,7 +208,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Retrieves the number of records in a collection.
      */
@@ -218,7 +218,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Deletes records in a collection. Can filter by IDs or metadata.
      */
@@ -232,7 +232,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Forks an existing collection.
      */
@@ -246,7 +246,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Retrieves records from a collection by ID or metadata filter.
      */
@@ -260,7 +260,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
      */
@@ -274,7 +274,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Updates records in a collection by ID.
      */
@@ -288,7 +288,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Upserts records in a collection (create if not exists, otherwise update).
      */
@@ -302,7 +302,7 @@ export class DefaultService {
             }
         });
     }
-    
+
     /**
      * Retrieves the total number of collections in a given database.
      */
@@ -312,7 +312,7 @@ export class DefaultService {
             ...options
         });
     }
-    
+
     /**
      * Returns the version of the server.
      */
@@ -322,5 +322,5 @@ export class DefaultService {
             ...options
         });
     }
-    
+
 }

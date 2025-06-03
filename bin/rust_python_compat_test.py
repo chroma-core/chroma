@@ -25,21 +25,27 @@ collection_name = "rust_py_compat_test"
 
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
+
 def versions() -> List[str]:
     """Returns the pinned minimum version and the latest version of chromadb."""
     url = "https://pypi.org/pypi/chromadb/json"
     data = json.load(request.urlopen(request.Request(url)))
     versions = list(data["releases"].keys())
     # Older versions on pypi contain "devXYZ" suffixes
-    versions = [v for v in versions if version_re.match(v) and version.Version(v) >= version.Version("0.5.3")]
+    versions = [
+        v
+        for v in versions
+        if version_re.match(v) and version.Version(v) >= version.Version("0.5.3")
+    ]
     versions.sort(key=version.Version)
     return versions
+
 
 def persist_with_old_version(ver: str, path: str):
     print(f"Installing ChromaDB {ver}")
     install_version(ver, {})
     old_modules = switch_to_version(ver, ["pydantic", "numpy", "tokenizers"])
-    
+
     print(f"Initializing client {ver}")
     settings = Settings(
         chroma_api_impl="chromadb.api.segment.SegmentAPI",
@@ -57,7 +63,7 @@ def persist_with_old_version(ver: str, path: str):
     api = system.instance(api_import_for_version(old_modules, ver))
     system.start()
     api.reset()
-    if version.Version(ver) >= version.Version("0.5.4"):    
+    if version.Version(ver) >= version.Version("0.5.4"):
         api = old_modules.api.client.Client.from_system(system)
 
     print(f"Persisting data with old client to {path}")
@@ -68,7 +74,9 @@ def persist_with_old_version(ver: str, path: str):
         embeddings = [[i, i] for i in id_vals]
         ids = [str(i) for i in id_vals]
         metadatas = [{"int": i, "float": i / 2.0, "str": f"<{i}>"} for i in id_vals]
-        coll.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
+        coll.add(
+            ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas
+        )
     assert coll.count() == persist_size // 2
     system.instance(LocalSegmentManager).stop()
     for start in tqdm.tqdm(range(persist_size // 2, persist_size, batch_size)):
@@ -77,7 +85,10 @@ def persist_with_old_version(ver: str, path: str):
         embeddings = [[i, i] for i in id_vals]
         ids = [str(i) for i in id_vals]
         metadatas = [{"int": i, "float": i / 2.0, "str": f"<{i}>"} for i in id_vals]
-        coll.add(ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas)
+        coll.add(
+            ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas
+        )
+
 
 def verify_collection_content(path: str):
     print("Loading collection from rust client")
@@ -90,6 +101,7 @@ def verify_collection_content(path: str):
     assert records["ids"] == [str(i) for i in range(persist_size)]
     assert records["documents"] == [f"DOC-{i}" for i in range(persist_size)]
     assert all(emb[0] == emb[1] == i for i, emb in enumerate(records["embeddings"]))
+
 
 if __name__ == "__main__":
     for ver in versions():

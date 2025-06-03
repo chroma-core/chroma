@@ -77,7 +77,9 @@ def main(
 
     # Ask what model to use
     model_name = "gpt-4o-mini"
-    change_model = input(f"This program is using the GPT-4o-mini model. Do you want to use a different model? (y/n): ")
+    change_model = input(
+        f"This program is using the GPT-4o-mini model. Do you want to use a different model? (y/n): "
+    )
     if change_model == "y":
         model_name = input("Please enter your desired model: ")
 

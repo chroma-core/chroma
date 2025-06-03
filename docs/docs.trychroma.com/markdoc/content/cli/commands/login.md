@@ -22,4 +22,4 @@ Back in the CLI, you will be prompted to select the team you want to authenticat
 
 Upon your first login, the first created profile will be automatically set as your "active" profile.
 
-On subsequent logins, the CLI will instruct you how to switch to a new profile you added (using the `chroma profile use` command). 
+On subsequent logins, the CLI will instruct you how to switch to a new profile you added (using the `chroma profile use` command).

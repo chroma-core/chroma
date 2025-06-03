@@ -91,4 +91,3 @@ Continue with the full [getting started guide](./getting-started).
 {% br %}{% /br %}
 
 We welcome [contributions](/markdoc/content/docs/overview/contributing.md) for other languages!
-

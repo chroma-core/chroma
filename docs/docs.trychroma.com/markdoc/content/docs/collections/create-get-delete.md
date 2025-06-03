@@ -51,12 +51,12 @@ When creating collections, you can pass the optional `metadata` argument to add 
 from datetime import datetime
 
 collection = client.create_collection(
-    name="my_collection", 
+    name="my_collection",
     embedding_function=emb_fn,
     metadata={
         "description": "my first Chroma collection",
         "created": str(datetime.now())
-    }  
+    }
 )
 ```
 {% /Tab %}
@@ -110,8 +110,8 @@ Collections have a few useful convenience methods.
 
 {% Tab label="python" %}
 ```python
-collection.peek() 
-collection.count() 
+collection.peek()
+collection.count()
 collection.modify(name="new_name")
 ```
 {% /Tab %}

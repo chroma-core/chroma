@@ -19,4 +19,3 @@ huggingface_ef = embedding_functions.HuggingFaceEmbeddingFunction(
 ```
 
 You can pass in an optional `model_name` argument, which lets you choose which HuggingFace model to use. By default, Chroma uses `sentence-transformers/all-MiniLM-L6-v2`. You can see a list of all available models [here](https://huggingface.co/models).
-
