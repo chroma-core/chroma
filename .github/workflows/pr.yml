@@ -164,8 +164,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Setup
-        uses: ./.github/actions/go
       - name: Set up Docker
         uses: ./.github/actions/docker
         with:
@@ -207,8 +205,8 @@ jobs:
 
   go-tests:
     name: Go tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+    # needs: change-detection
+    # if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
     uses: ./.github/workflows/_go-tests.yml
     secrets: inherit
 

@@ -145,7 +145,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'load-service',
-    'docker buildx build --load -t $EXPECTED_REF --target load_service -f ./rust/load/Dockerfile .',
+    'docker buildx build --load -t $EXPECTED_REF --target load_service -f ./rust/Dockerfile .',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
   )
 else:
@@ -153,7 +153,7 @@ else:
     'load-service',
     '.',
     only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/load/Dockerfile',
+    dockerfile='./rust/Dockerfile',
     target='load_service'
   )
 
