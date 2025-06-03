@@ -168,7 +168,8 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		}
 	}()
 
-	sourceBounds, err := queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
+	var sourceBounds GetBoundsForCollectionRow
+	sourceBounds, err = queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
 	if err != nil {
 		trace_log.Error("Error in getting compaction and enumeration offset for source collection", zap.Error(err), zap.String("collectionId", sourceCollectionID))
 		return
