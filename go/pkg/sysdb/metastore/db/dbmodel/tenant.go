@@ -13,7 +13,7 @@ type Tenant struct {
 	CreatedAt          time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
 	UpdatedAt          time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
 	LastCompactionTime int64           `gorm:"last_compaction_time;not null"`
-	StaticName         string          `gorm:"static_name;uniqueIndex:idx_static_name_unique,where:static_name is not null"`
+	StaticName         *string         `gorm:"static_name;uniqueIndex:idx_static_name_unique,where:static_name is not null"`
 }
 
 func (v Tenant) TableName() string {
