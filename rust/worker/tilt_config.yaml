@@ -185,6 +185,9 @@ log_service:
                 count_based_policy:
                     max_concurrent_requests: 500
                     bandwidth_allocation: [1.0]
+    cache:
+        memory:
+          capacity: 100000000 # 100 MB
     writer:
         throttle_fragment:
             batch_interval_us: 100000
