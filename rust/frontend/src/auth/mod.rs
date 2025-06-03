@@ -70,12 +70,40 @@ pub struct AuthzResource {
 }
 
 #[derive(thiserror::Error, Debug)]
-#[error("Permission denied.")]
-pub struct AuthError(pub StatusCode);
+pub struct AuthError {
+    pub status_code: StatusCode,
+    pub message: Option<String>,
+}
+
+impl Display for AuthError {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.message.as_deref().unwrap_or("Permission denied.")
+        )
+    }
+}
+
+impl AuthError {
+    pub fn new(status_code: StatusCode) -> Self {
+        Self {
+            status_code,
+            message: None,
+        }
+    }
+
+    pub fn with_message(status_code: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status_code,
+            message: Some(message.into()),
+        }
+    }
+}
 
 impl chroma_error::ChromaError for AuthError {
     fn code(&self) -> chroma_error::ErrorCodes {
-        match self.0 {
+        match self.status_code {
             StatusCode::UNAUTHORIZED => chroma_error::ErrorCodes::Unauthenticated,
             StatusCode::FORBIDDEN => chroma_error::ErrorCodes::PermissionDenied,
             _ => chroma_error::ErrorCodes::Internal,
