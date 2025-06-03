@@ -1739,7 +1739,6 @@ impl LogServerWrapper {
         health_reporter
             .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
             .await;
-        log_server.roll_dirty_log().await?;
 
         let wrapper = LogServerWrapper {
             log_server: Arc::new(log_server),
