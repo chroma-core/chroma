@@ -41,6 +41,14 @@ const sidebarConfig: AppSection[] = [
             name: "Telemetry",
           },
           {
+            id: "migration",
+            name: "Migration",
+          },
+          {
+            id: "troubleshooting",
+            name: "Troubleshooting",
+          },
+          {
             id: "about",
             name: "About",
           },

@@ -6,19 +6,18 @@ If you don't see your problem listed here, please also search the [Github Issues
 
 ## Chroma JS-Client failures on NextJS projects
 
-When using Chroma with Next.js, be sure to do any embedding in the server - client-side embedding is not supported.
-
-Next.js v15.2.1 includes a fix for embedding functions used by Chroma. If you're using an earlier version of Next.js, you may need to add this configuration to your `next.config.{js|ts}` file:
+Our default embedding function uses @huggingface/transformers, which depends on binaries that NextJS fails to bundle. If you are running into this issue, you can wrap your `nextConfig` (in `next.config.ts`) with the `withChroma` plugin, which will add the required settings to overcome the bundling issues.
 
 ```typescript
-const nextConfig = {
-  serverExternalPackages: ['chromadb', 'chromadb-default-embed'],
+import type { NextConfig } from "next";
+import { withChroma } from "chromadb";
+
+const nextConfig: NextConfig = {
+  /* config options here */
 };
-module.exports = nextConfig
+
+export default withChroma(nextConfig);
 ```
-
-In addition, make sure you're using the latest of the `chromadb` package. Version v2.0.0 includes some important fixes for Next.js environments.
-
 
 ## Cannot return the results in a contiguous 2D array. Probably ef or M is too small
 
