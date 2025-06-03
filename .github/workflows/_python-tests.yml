@@ -186,6 +186,11 @@ jobs:
         uses: ./.github/actions/export-tilt-logs
         with:
           artifact-name: ${{ steps.compute-artifact-name.outputs.artifact_name }}
+      - name: Save IOPS Data
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.compute-artifact-name.outputs.artifact_name }}-iops-log
+          path: iostat.log
 
   merge-cluster-logs:
     runs-on: blacksmith-4vcpu-ubuntu-2204
