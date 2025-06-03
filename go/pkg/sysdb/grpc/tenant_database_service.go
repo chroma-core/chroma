@@ -127,7 +127,8 @@ func (s *Server) GetTenant(ctx context.Context, req *coordinatorpb.GetTenantRequ
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Tenant = &coordinatorpb.Tenant{
-		Name: tenant.Name,
+		Name:       tenant.Name,
+		StaticName: tenant.StaticName,
 	}
 	return res, nil
 }

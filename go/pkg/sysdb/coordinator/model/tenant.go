@@ -4,7 +4,7 @@ import "github.com/chroma-core/chroma/go/pkg/types"
 
 type Tenant struct {
 	Name       string
-	StaticName string
+	StaticName *string
 }
 
 type CreateTenant struct {

@@ -212,6 +212,47 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_SetTenantStaticName() {
 	suite.NoError(err)
 }
 
+func (suite *TenantDatabaseServiceTestSuite) TestServer_GetTenant() {
+	log.Info("TestServer_GetTenant")
+	tenantId := "TestGetTenant"
+	staticName := "test-static-name"
+
+	_, err := suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
+		Name: tenantId,
+		Ts:   time.Now().Unix(),
+	}, time.Now().Unix())
+	suite.NoError(err)
+
+	response, err := suite.s.GetTenant(context.Background(), &coordinatorpb.GetTenantRequest{
+		Name: tenantId,
+	})
+	suite.NoError(err)
+	suite.Equal(tenantId, response.Tenant.Name)
+	suite.Nil(response.Tenant.StaticName)
+
+	_, err = suite.s.SetTenantStaticName(context.Background(), &coordinatorpb.SetTenantStaticNameRequest{
+		Id:         tenantId,
+		StaticName: staticName,
+	})
+	suite.NoError(err)
+
+	response, err = suite.s.GetTenant(context.Background(), &coordinatorpb.GetTenantRequest{
+		Name: tenantId,
+	})
+	suite.NoError(err)
+	suite.Equal(tenantId, response.Tenant.Name)
+	suite.Equal(staticName, *response.Tenant.StaticName)
+
+	_, err = suite.s.GetTenant(context.Background(), &coordinatorpb.GetTenantRequest{
+		Name: "NonExistentTenant",
+	})
+	suite.Error(err)
+	suite.Equal(codes.NotFound, status.Code(err))
+
+	err = dao.CleanUpTestTenant(suite.db, tenantId)
+	suite.NoError(err)
+}
+
 func TestTenantDatabaseServiceTestSuite(t *testing.T) {
 	testSuite := new(TenantDatabaseServiceTestSuite)
 	suite.Run(t, testSuite)
