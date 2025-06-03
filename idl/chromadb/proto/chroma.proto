@@ -74,6 +74,7 @@ message Database {
 
 message Tenant {
     string name = 1;
+    optional string static_name = 2;
 }
 
 message UpdateMetadataValue {
