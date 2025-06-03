@@ -225,7 +225,7 @@ impl LogReader {
         prefix: &str,
         fragment: &Fragment,
     ) -> Result<Arc<Vec<u8>>, Error> {
-        let path = fragment_path(prefix, fragment.path);
+        let path = fragment_path(prefix, &fragment.path);
         Ok(storage
             .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
             .await
