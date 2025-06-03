@@ -16,7 +16,7 @@ const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: str
     // is its own state to make the animation not jank.
     // With input + autoCompletion, it may be inconsistent for a fraction of a second
     // (@ass + stant), but autoComplete is always consistent.
-    const [autoComplete, setAutoComplete] = useState<string>(input);
+    const [autoComplete, setAutoComplete] = useState<string>(input); // = input + autoCompletion
     const [autoCompletion, setAutoCompletion] = useState<string>("");
 
     function getHighlightedText(text: string) {
@@ -34,7 +34,7 @@ const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: str
       }
 
       // Check if input ends with any prefix of "@assistant"
-      const target = "@assistant";
+      const target = "@assistant ";
       let completion = "";
 
       for (let i = 1; i <= target.length; i++) {
@@ -154,7 +154,7 @@ export default function TweetPrompt(props: TweetPromptProps) {
       className={`cursor-text ${glow ? styles.shadow : ""}`}
       onClick={handleContainerClick}
     >
-      <div className="font-ui flex flex-col gap-2 relative items-end w-full bg-zinc-100 px-2 py-1.5 w-full outline-none text-zinc-800">
+      <div className={`font-ui flex flex-col gap-2 relative items-end w-full bg-zinc-100 px-2 py-1.5 w-full outline-none text-zinc-800`}>
         <InputWithSyntaxHighlighting ref={textareaRef} input={input} setInput={setInput} onKeyDown={handleKeyDown} placeholder={props.placeholder} />
         <div className="flex flex-row gap-1">
           <motion.div className="px-2 py-1 text-xs text-zinc-500" animate={visibilityVariants}>{input.length}</motion.div>

@@ -1,5 +1,3 @@
-
-
 .shadow {
     --gradient-shadow: linear-gradient(
 		45deg,
@@ -42,4 +40,65 @@
 	100% {
 		background-position: 0 0;
 	}
+}
+
+.debugLayers {
+	perspective: 1000px;
+	transform-style: preserve-3d;
+	transition: all 0.8s ease-in-out;
+}
+
+.debugLayers:hover {
+	transform: rotateX(15deg) rotateY(-10deg);
+}
+
+.debugLayers > div:first-child {
+	transform-style: preserve-3d;
+	transition: all 0.8s ease-in-out;
+}
+
+.debugLayers:hover > div:first-child {
+	transform: translateZ(20px) rotateX(5deg);
+}
+
+/* Autocomplete layer (first div) */
+.debugLayers > div:first-child > div:nth-child(1) {
+	transition: all 0.8s ease-in-out;
+	transform-origin: center;
+	background: rgba(156, 163, 175, 0.1) !important;
+	border: 1px solid rgba(156, 163, 175, 0.3) !important;
+}
+
+.debugLayers:hover > div:first-child > div:nth-child(1) {
+	transform: translateZ(30px) rotateY(-15deg) rotateX(10deg);
+	background: rgba(156, 163, 175, 0.2) !important;
+	box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+}
+
+/* Highlight layer (second div) */
+.debugLayers > div:first-child > div:nth-child(2) {
+	transition: all 0.8s ease-in-out;
+	transform-origin: center;
+	background: rgba(59, 130, 246, 0.1) !important;
+	border: 1px solid rgba(59, 130, 246, 0.3) !important;
+}
+
+.debugLayers:hover > div:first-child > div:nth-child(2) {
+	transform: translateZ(10px) rotateX(5deg);
+	background: rgba(59, 130, 246, 0.2) !important;
+	box-shadow: 0 8px 16px rgba(59, 130, 246, 0.1);
+}
+
+/* Textarea layer */
+.debugLayers > div:first-child > textarea {
+	transition: all 0.8s ease-in-out;
+	transform-origin: center;
+	background: rgba(34, 197, 94, 0.1) !important;
+	border: 1px solid rgba(34, 197, 94, 0.3) !important;
+}
+
+.debugLayers:hover > div:first-child > textarea {
+	transform: translateZ(20px) rotateY(10deg) rotateX(-5deg);
+	background: rgba(34, 197, 94, 0.2) !important;
+	box-shadow: 0 6px 12px rgba(34, 197, 94, 0.1);
 }

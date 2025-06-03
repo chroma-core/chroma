@@ -2,26 +2,46 @@
 
 import { motion } from "framer-motion";
 
-import { useEffect, useState } from "react";
 import { TweetModel } from "@/types";
-import { getPostById } from "@/actions";
 
 import MarkdownContent from "./markdown-content";
+import { readStreamableValue, StreamableValue } from "ai/rsc";
+import { useEffect, useState } from "react";
 
 interface TweetProps {
   tweet: TweetModel;
+  bodyStream?: StreamableValue<string, any>;
   className?: string;
 }
 
-export function Tweet({ tweet, className }: TweetProps) {
-  const [reply, setReply] = useState<TweetModel | null>(null);
-  const hasReply = tweet.aiReplyId !== undefined && tweet.aiReplyId !== "";
+export function Tweet({ tweet, bodyStream, className }: TweetProps) {
+  const [body, setBody] = useState<string>(tweet.body ?? '');
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
 
   useEffect(() => {
-    if (hasReply && tweet.aiReplyId) {
-      getPostById(tweet.aiReplyId).then(setReply);
+    if (!bodyStream) {
+      return;
     }
-  }, [tweet.aiReplyId, hasReply]);
+
+    setIsStreaming(true);
+    setBody('');
+
+    const streamContent = async () => {
+      try {
+        for await (const content of readStreamableValue(bodyStream)) {
+          if (content) {
+            setBody(content);
+          }
+        }
+      } catch (error) {
+        console.error('Streaming error:', error);
+      } finally {
+        setIsStreaming(false);
+      }
+    };
+
+    streamContent();
+  }, [bodyStream]);
 
   const formattedDate = new Date(tweet.date * 1000).toLocaleDateString('en-US', {
     day: '2-digit',
@@ -29,35 +49,14 @@ export function Tweet({ tweet, className }: TweetProps) {
     year: 'numeric'
   });
 
-  const padding = tweet.body.length > 40 || tweet.body.split("\n").length > 2 ? "4" : "4";
-
-  let replyContent = null;
-  if (reply && reply.status == 'done') {
-    replyContent = <MarkdownContent content={reply.body} className={`${className} font-ui`} />
-  }
-  if (reply && reply.status === 'error') {
-    replyContent = <p>Sorry, an error occurred while trying to answer your question.</p>
-  } else if ((reply && (reply.status === 'created' || reply.status === 'processing'))) {
-    replyContent = <p>Generating reply...</p>
-  }
-
   return (
     <a href={`/post/${tweet.id}`}>
       <motion.div className={`grid grid-cols-[120px_1fr] hover:bg-gray-100 ${className}`}>
         <div className="flex flex-col items-end">
-          <div className={`font-ui pl-2 pr-4 pt-${padding} mt-[.0em] pb-4 text-gray-600 text-sm`}>{formattedDate}</div>
+          <div className={`font-ui pl-2 pr-4 pt-4 mt-[.0em] pb-4 text-gray-600 text-sm`}>{formattedDate}</div>
         </div>
-        <div className={`pt-${padding} pb-${padding} pl-4 pr-4 border-l-[.5px]`}>
-          <MarkdownContent content={tweet.body} className={`${className} text-[.95em]/[1.3] font-light font-body`} />
-          {reply && <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            transition={{ duration: 0.2 }}
-          >
-            <div className="font-ui text-gray-500 text-[.75em]/[1.3] mt-2">
-              {replyContent}
-            </div>
-          </motion.div>}
+        <div className={`pt-4 pb-4 pl-4 pr-4 border-l-[.5px]`}>
+          <MarkdownContent content={body} className={`${className} text-[.95em]/[1.3] font-body ${tweet.role === "assistant" ? "font-bold text-blue-600" : ""}`} />
         </div>
       </motion.div>
     </a>

@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m, motion } from "framer-motion";
 import { Tweet, TweetSkeleton } from "@/components/tweet";
 import TweetPrompt from "@/components/tweet-prompt";
-import { TweetModel } from "@/types";
+import { PartialAssistantPost, TweetModel } from "@/types";
 import { getPosts, publishNewUserPost } from "@/actions";
 import Logo from "./logo";
 
 export default function FeedView() {
-  const [newMessages, setNewMessages] = useState<Array<TweetModel>>([]);
+  const [newMessages, setNewMessages] = useState<Array<TweetModel | PartialAssistantPost>>([]);
 
   return (
     <>
@@ -19,8 +19,11 @@ export default function FeedView() {
         </div>
         <TweetPrompt
           onSubmit={(input) => {
-            publishNewUserPost(input).then((newTweet) => {
-              setNewMessages((tweets) => [newTweet, ...tweets]);
+            publishNewUserPost(input).then(({ userPost, assistantPost }) => {
+              setNewMessages((tweets) => [userPost, ...tweets]);
+              if (assistantPost) {
+                setNewMessages((tweets) => [assistantPost, ...tweets]);
+              }
             });
           }}
         />
@@ -47,7 +50,7 @@ function IntroTweet() {
   );
 }
 
-function Tweets({ newMessages }: { newMessages: TweetModel[] }) {
+function Tweets({ newMessages }: { newMessages: (TweetModel | PartialAssistantPost)[] }) {
   const [loadingMessages, setLoadingMessages] = useState<boolean>(true);
   const [oldMessages, setOldMessages] = useState<TweetModel[]>([]);
   const [currPage, setCurrPage] = useState<number>(0);
@@ -127,12 +130,12 @@ function Tweets({ newMessages }: { newMessages: TweetModel[] }) {
       <AnimatePresence>
         {newMessages.map((m, i) => (
           <motion.li
-            key={m.id}
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-          >
-            <Tweet tweet={m} />
-          </motion.li>
+              key={m.id}
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+            >
+              <Tweet tweet={m} bodyStream={('stream' in m ? m.stream : undefined)} />
+            </motion.li>
         ))}
 
         <li className="flex flex-col">

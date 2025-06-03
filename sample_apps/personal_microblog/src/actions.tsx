@@ -1,10 +1,11 @@
 "use server";
 
-import { TweetModel, TweetStatus } from "@/types";
+import { PartialAssistantPost, TweetModel, TweetStatus } from "@/types";
 import { ChromaClient } from "chromadb";
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 import { openai } from '@ai-sdk/openai';
-import { generateText, generateObject, jsonSchema } from 'ai';
+import { createStreamableValue, StreamableValue } from 'ai/rsc';
+import { generateText, generateObject, jsonSchema, streamText } from 'ai';
 import {
   addPostModelToChromaCollection,
   chromaGetResultsToPostModels,
@@ -60,7 +61,6 @@ export async function getPosts(page: number): Promise<TweetModel[]> {
     page = 0;
   }
   const posts = await collection.get({
-    where: { role: "user" },
     include: ["documents", "metadatas"],
   });
   const postModels = chromaGetResultsToPostModels(posts);
@@ -92,17 +92,12 @@ export async function getPostById(id: string): Promise<TweetModel | null> {
   }
 }
 
-export async function getPostReplies(postId: string): Promise<{
-  aiReplies: TweetModel[],
-  userReplies: TweetModel[],
-}> {
+export async function getPostReplies(postId: string): Promise<TweetModel[]> {
   const replies = await collection.get({
     where: { threadParentId: postId },
     include: ["documents", "metadatas"],
   });
-  const aiReplies = chromaGetResultsToPostModels(replies).filter((post) => post.role === "assistant");
-  const userReplies = chromaGetResultsToPostModels(replies).filter((post) => post.role === "user");
-  return { aiReplies, userReplies };
+  return chromaGetResultsToPostModels(replies);
 }
 
 export async function semanticSearch(query: string): Promise<TweetModel[]> {
@@ -116,7 +111,7 @@ export async function semanticSearch(query: string): Promise<TweetModel[]> {
   return chromaQueryResultsToPostModels(context);
 }
 
-export async function publishNewUserPost(newPostBody: string, threadParentId?: string): Promise<TweetModel> {
+export async function publishNewUserPost(newPostBody: string, threadParentId?: string): Promise<{userPost: TweetModel, assistantPost: PartialAssistantPost | undefined}> {
   const newPost: TweetModel = {
     id: crypto.randomUUID(),
     threadParentId: threadParentId,
@@ -125,32 +120,33 @@ export async function publishNewUserPost(newPostBody: string, threadParentId?: s
     date: unixTimestampNow(),
     status: "done",
   };
+  let partialAssistantPost: PartialAssistantPost | undefined;
   if (newPost.body.includes("@assistant")) {
-    const assistanceResponseId = getAssistantReponse(newPostBody, newPost.id);
-    newPost.aiReplyId = assistanceResponseId;
+    partialAssistantPost = getAssistantReponse(newPostBody, newPost.id);
+    newPost.aiReplyId = partialAssistantPost?.id;
   }
   addPostModelToChromaCollection(newPost, collection).catch(console.error);
-  return newPost;
+  return {userPost: newPost, assistantPost: partialAssistantPost};
 }
 
-function getAssistantReponse(userInput: string, parentThreadId: string): string {
+function getAssistantReponse(userInput: string, parentThreadId: string): PartialAssistantPost {
   const id = crypto.randomUUID();
-  const assistantPost: TweetModel = {
+  const stream = createStreamableValue<string, any>();
+  const assistantPost: PartialAssistantPost = {
     id,
     threadParentId: parentThreadId,
     role: "assistant",
     body: "Thinking...",
     date: unixTimestampNow(),
     status: "processing",
+    stream: stream.value,
   };
-  addPostModelToChromaCollection(assistantPost, collection).catch(
-    console.error
-  );
-  processAssistantResponse(userInput, assistantPost).catch(console.error); // Run in background
-  return id;
+  addPostModelToChromaCollection(assistantPost, collection).catch(console.error);
+  processAssistantResponse(userInput, assistantPost, stream).catch(console.error); // Run in background
+  return assistantPost;
 }
 
-async function processAssistantResponse(userInput: string, post: TweetModel) {
+async function processAssistantResponse(userInput: string, post: PartialAssistantPost, stream: any) {
   const cleanedUserInput = userInput.replace(/@assistant/g, "").trim();
   try {
     const [semanticContext, queryRange] = await Promise.all([
@@ -194,7 +190,7 @@ async function processAssistantResponse(userInput: string, post: TweetModel) {
       return `${new Date(post.date * 1000).toISOString()}: ${post.body}`;
     }).join("\n\n");
 
-    const { text } = await generateText({
+    const { textStream } = await streamText({
       model: llmModel,
       messages: [
         {
@@ -218,12 +214,20 @@ async function processAssistantResponse(userInput: string, post: TweetModel) {
       maxTokens: 240,
     });
 
+    let text = "";
+    for await (const textPart of textStream) {
+      text += textPart;
+      stream.update(text);
+    }
+
     post.body = text;
     post.status = "done";
   } catch (error) {
     console.error('Error generating assistant response:', error);
     post.body = "Sorry, I encountered an error while processing your request.";
     post.status = "error";
+  } finally {
+    stream.done();
   }
 
   addPostModelToChromaCollection(post, collection).catch(console.error);
