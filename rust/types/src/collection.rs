@@ -87,6 +87,12 @@ impl std::str::FromStr for DatabaseUuid {
     }
 }
 
+impl std::fmt::Display for DatabaseUuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl std::fmt::Display for CollectionUuid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)

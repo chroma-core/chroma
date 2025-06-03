@@ -1,8 +1,8 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, LogRecord,
-    MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
-    Operation, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+    logical_size_of_metadata, Chunk, CollectionUuid, DataRecord, DatabaseUuid, DeletedMetadata,
+    LogRecord, MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue,
+    MetadataValueConversionError, Operation, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
@@ -18,6 +18,18 @@ use super::blockfile_record::{
     RecordSegmentReaderCreationError, RecordSegmentWriter,
 };
 use super::distributed_hnsw::DistributedHNSWSegmentWriter;
+
+pub(super) fn construct_prefix_path(
+    tenant: &str,
+    database_id: &DatabaseUuid,
+    collection_id: &CollectionUuid,
+    segment_id: &SegmentUuid,
+) -> String {
+    format!(
+        "{}/{}/{}/{}/",
+        tenant, database_id, collection_id, segment_id
+    )
+}
 
 // Materializes metadata from update metadata, populating the delete list
 // and upsert list.
@@ -1086,7 +1098,7 @@ mod tests {
     };
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, OperationRecord, SegmentUuid};
+    use chroma_types::{CollectionUuid, DatabaseUuid, OperationRecord, SegmentUuid};
     use std::{collections::HashMap, str::FromStr};
 
     #[tokio::test]
@@ -1103,6 +1115,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1122,14 +1136,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1264,14 +1286,22 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
@@ -1375,6 +1405,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1394,14 +1426,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1527,14 +1567,22 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
@@ -1639,6 +1687,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1658,14 +1708,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1811,14 +1869,22 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
@@ -1931,11 +1997,17 @@ mod tests {
             metadata: None,
             file_path: HashMap::new(),
         };
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -2164,10 +2236,14 @@ mod tests {
         assert_eq!(1, id2_found);
         assert_eq!(1, id3_found);
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
