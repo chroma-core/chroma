@@ -244,6 +244,8 @@ impl TryFrom<chroma_proto::Collection> for Collection {
     }
 }
 
+// todo test rebuild 007921EB-0663-4188-B2F9-00FF548EC36E
+
 #[derive(Error, Debug)]
 pub enum CollectionToProtoError {
     #[error("Could not serialize config: {0}")]
