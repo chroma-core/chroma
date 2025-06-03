@@ -3,55 +3,58 @@ description: "This action starts Tilt services"
 runs:
   using: "composite"
   steps:
-    - name: Install Tilt
-      shell: bash
-      run: |
-        TILT_VERSION="0.34.2"
-        curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v$TILT_VERSION/tilt.$TILT_VERSION.linux.x86_64.tar.gz | \
-          tar -xzv -C /usr/local/bin tilt
-    - name: Start minikube
-      uses: medyagh/setup-minikube@latest
+    - uses: qoomon/actions--parallel-steps@v1
       with:
-        cpus: max
-        memory: max
-    - name: Bake images
-      shell: bash
-      run: docker buildx bake -f docker-bake.hcl
-    - name: Pre-pull images referenced in k8s manifests
-      shell: bash
-      run: |
-        set -euo pipefail
+        steps: |
+          - name: Install Tilt
+            shell: bash
+            run: |
+              TILT_VERSION="0.34.2"
+              curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v$TILT_VERSION/tilt.$TILT_VERSION.linux.x86_64.tar.gz | \
+                tar -xzv -C /usr/local/bin tilt
+          - name: Start minikube
+            uses: medyagh/setup-minikube@latest
+            with:
+              cpus: max
+              memory: max
+          - name: Bake images
+            shell: bash
+            run: docker buildx bake -f docker-bake.hcl
+          - name: Pre-pull images referenced in k8s manifests
+            shell: bash
+            run: |
+              set -euo pipefail
 
-        k8s_dir="k8s"
+              k8s_dir="k8s"
 
-        # Collect literal image references and ignore templated values
-        mapfile -t images < <(
-          grep -RhoE '^[[:space:]]*image:[[:space:]]*[[:graph:]]+' "$k8s_dir" |
-          grep -v '{{' |
-          sed -E 's/.*image:[[:space:]]*//' |
-          tr -d '"' |
-          grep -vi 'chroma-postgres' |                 # EXCLUDE chroma-postgres
-          grep -vi 'load-service' |                 # EXCLUDE chroma-postgres
-          sort -u
-        )
+              # Collect literal image references and ignore templated values
+              mapfile -t images < <(
+                grep -RhoE '^[[:space:]]*image:[[:space:]]*[[:graph:]]+' "$k8s_dir" |
+                grep -v '{{' |
+                sed -E 's/.*image:[[:space:]]*//' |
+                tr -d '"' |
+                grep -vi 'chroma-postgres' |                 # EXCLUDE chroma-postgres
+                grep -vi 'load-service' |                 # EXCLUDE chroma-postgres
+                sort -u
+              )
 
-        (( ${#images[@]} )) || { echo "No literal images found – nothing to pull."; exit 0; }
+              (( ${#images[@]} )) || { echo "No literal images found – nothing to pull."; exit 0; }
 
-        # Build a temporary docker-compose file
-        tmpfile=$(mktemp)
-        {
-          echo "services:"
-          for i in "${!images[@]}"; do
-            echo "  img$i:"
-            echo "    image: \"${images[$i]}\""
-          done
-        } > "$tmpfile"
+              # Build a temporary docker-compose file
+              tmpfile=$(mktemp)
+              {
+                echo "services:"
+                for i in "${!images[@]}"; do
+                  echo "  img$i:"
+                  echo "    image: \"${images[$i]}\""
+                done
+              } > "$tmpfile"
 
-        echo "Generated compose file:"
-        cat "$tmpfile"
+              echo "Generated compose file:"
+              cat "$tmpfile"
 
-        # Pull all images concurrently
-        docker compose -f "$tmpfile" pull --parallel --quiet
+              # Pull all images concurrently
+              docker compose -f "$tmpfile" pull --parallel --quiet
 
     - name: Start Tilt
       shell: bash
