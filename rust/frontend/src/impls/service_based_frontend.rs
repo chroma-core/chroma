@@ -30,9 +30,9 @@ use chroma_types::{
     Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
     Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
     UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -262,6 +262,19 @@ impl ServiceBasedFrontend {
         GetTenantRequest { name, .. }: GetTenantRequest,
     ) -> Result<GetTenantResponse, GetTenantError> {
         self.sysdb_client.get_tenant(name).await
+    }
+
+    pub async fn update_tenant(
+        &mut self,
+        UpdateTenantRequest {
+            tenant_id,
+            static_name,
+            ..
+        }: UpdateTenantRequest,
+    ) -> Result<UpdateTenantResponse, UpdateTenantError> {
+        self.sysdb_client
+            .update_tenant(tenant_id, static_name)
+            .await
     }
 
     pub async fn create_database(

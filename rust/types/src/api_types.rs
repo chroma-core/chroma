@@ -273,6 +273,46 @@ impl ChromaError for GetTenantError {
 
 #[non_exhaustive]
 #[derive(Validate, Serialize, ToSchema)]
+pub struct UpdateTenantRequest {
+    pub tenant_id: String,
+    pub static_name: String,
+}
+
+impl UpdateTenantRequest {
+    pub fn try_new(tenant_id: String, static_name: String) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            static_name,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct UpdateTenantResponse {}
+
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl UpdateTenantResponse {}
+
+#[derive(Error, Debug)]
+pub enum UpdateTenantError {
+    #[error("Failed to set static name")]
+    FailedToSetStaticName(#[from] tonic::Status),
+}
+
+impl ChromaError for UpdateTenantError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            UpdateTenantError::FailedToSetStaticName(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+#[non_exhaustive]
+#[derive(Validate, Serialize, ToSchema)]
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
