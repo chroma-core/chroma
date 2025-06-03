@@ -269,11 +269,11 @@ async fn get_log_from_handle<'a>(
 ////////////////////////////////////////// CachedFragment //////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct CachedParquetFragment {
+pub struct CachedBytes {
     bytes: Vec<u8>,
 }
 
-impl chroma_cache::Weighted for CachedParquetFragment {
+impl chroma_cache::Weighted for CachedBytes {
     fn weight(&self) -> usize {
         self.bytes.len()
     }
@@ -479,7 +479,7 @@ pub struct LogServer {
     rolling_up: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
     need_to_compact: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
-    cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedParquetFragment>>>,
+    cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedBytes>>>,
     metrics: Metrics,
 }
 
@@ -1079,7 +1079,7 @@ impl LogServer {
                 let cache_key = format!("{collection_id}::MANIFEST");
                 if let Some(manifest) = log.manifest() {
                     if let Ok(manifest_bytes) = serde_json::to_vec(&manifest) {
-                        let cache_value = CachedParquetFragment {
+                        let cache_value = CachedBytes {
                             bytes: manifest_bytes,
                         };
                         cache.insert(cache_key, cache_value).await;
@@ -1260,7 +1260,7 @@ impl LogServer {
                         let answer = LogReader::stateless_fetch(&self.storage, &prefix, fragment)
                             .instrument(fetch_span)
                             .await?;
-                        let cache_value = CachedParquetFragment {
+                        let cache_value = CachedBytes {
                             bytes: Clone::clone(&*answer),
                         };
                         let insert_span = tracing::info_span!("cache insert");
@@ -2023,11 +2023,7 @@ impl Configurable<LogServerConfig> for LogServer {
         registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let cache = if let Some(cache_config) = &config.cache {
-            match chroma_cache::from_config_persistent::<String, CachedParquetFragment>(
-                cache_config,
-            )
-            .await
-            {
+            match chroma_cache::from_config_persistent::<String, CachedBytes>(cache_config).await {
                 Ok(cache) => Some(cache),
                 Err(err) => {
                     tracing::error!("cache not configured: {err:?}");
@@ -2821,15 +2817,15 @@ mod tests {
     fn cached_parquet_fragment_weighted() {
         use chroma_cache::Weighted;
 
-        let fragment = CachedParquetFragment {
+        let fragment = CachedBytes {
             bytes: vec![0u8; 1024],
         };
         assert_eq!(1024, fragment.weight());
 
-        let empty_fragment = CachedParquetFragment { bytes: vec![] };
+        let empty_fragment = CachedBytes { bytes: vec![] };
         assert_eq!(0, empty_fragment.weight());
 
-        let large_fragment = CachedParquetFragment {
+        let large_fragment = CachedBytes {
             bytes: vec![0u8; 1000],
         };
         assert_eq!(1000, large_fragment.weight());
@@ -3173,7 +3169,7 @@ mod tests {
     fn cached_parquet_fragment_default() {
         use chroma_cache::Weighted;
 
-        let fragment = CachedParquetFragment::default();
+        let fragment = CachedBytes::default();
         assert_eq!(0, fragment.weight());
         assert!(fragment.bytes.is_empty());
     }
