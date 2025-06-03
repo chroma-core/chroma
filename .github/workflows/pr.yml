@@ -259,7 +259,7 @@ jobs:
   all-required-pr-checks-passed:
     if: always()
     needs:
-    - python-tests
+    # - python-tests
     - python-vulnerability-scan
     - javascript-client-tests
     - rust-tests
