@@ -11,6 +11,7 @@ pub enum BlockfileWriterMutationOrdering {
 pub struct BlockfileWriterOptions {
     pub(crate) mutation_ordering: BlockfileWriterMutationOrdering,
     pub(crate) fork_from: Option<Uuid>,
+    #[allow(dead_code)]
     pub(crate) prefix_path: String,
 }
 
