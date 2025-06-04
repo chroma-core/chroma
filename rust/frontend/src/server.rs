@@ -590,7 +590,7 @@ async fn get_tenant(
 
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
 pub struct UpdateTenantPayload {
-    pub static_name: String,
+    pub resource_name: String,
 }
 
 /// Updates an existing tenant by name.
@@ -627,7 +627,7 @@ async fn update_tenant(
             },
         )
         .await?;
-    let request = UpdateTenantRequest::try_new(tenant, payload.static_name)?;
+    let request = UpdateTenantRequest::try_new(tenant, payload.resource_name)?;
     Ok(Json(server.frontend.update_tenant(request).await?))
 }
 

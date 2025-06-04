@@ -71,12 +71,12 @@ impl SysDb {
     pub async fn update_tenant(
         &mut self,
         tenant_id: String,
-        static_name: String,
+        resource_name: String,
     ) -> Result<UpdateTenantResponse, UpdateTenantError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.update_tenant(tenant_id, static_name).await,
-            SysDb::Sqlite(_) => unimplemented!(),
-            SysDb::Test(test) => test.update_tenant(tenant_id, static_name).await,
+            SysDb::Grpc(grpc) => grpc.update_tenant(tenant_id, resource_name).await,
+            SysDb::Sqlite(sqlite) => sqlite.update_tenant(tenant_id, resource_name).await,
+            SysDb::Test(test) => test.update_tenant(tenant_id, resource_name).await,
         }
     }
 
@@ -710,7 +710,7 @@ impl GrpcSysDb {
                     .ok_or(GetTenantError::NotFound(tenant_name))?;
                 Ok(GetTenantResponse {
                     name: tenant.name,
-                    static_name: tenant.static_name,
+                    resource_name: tenant.resource_name,
                 })
             }
             Err(err) => Err(GetTenantError::Internal(err.into())),
@@ -1399,14 +1399,14 @@ impl GrpcSysDb {
     async fn update_tenant(
         &mut self,
         tenant_id: String,
-        static_name: String,
+        resource_name: String,
     ) -> Result<UpdateTenantResponse, UpdateTenantError> {
-        let req = chroma_proto::SetTenantStaticNameRequest {
+        let req = chroma_proto::SetTenantResourceNameRequest {
             id: tenant_id,
-            static_name,
+            resource_name,
         };
 
-        self.client.set_tenant_static_name(req).await?;
+        self.client.set_tenant_resource_name(req).await?;
         Ok(UpdateTenantResponse {})
     }
 

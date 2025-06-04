@@ -14,6 +14,7 @@ use chroma_types::{
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
     ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
     SegmentType, SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError,
+    UpdateTenantError, UpdateTenantResponse,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -217,7 +218,7 @@ impl SqliteSysDb {
     }
 
     pub(crate) async fn get_tenant(&self, name: &str) -> Result<GetTenantResponse, GetTenantError> {
-        sqlx::query("SELECT id FROM tenants WHERE id = $1")
+        sqlx::query("SELECT id, resource_name FROM tenants WHERE id = $1")
             .bind(name)
             .fetch_one(self.db.get_conn())
             .await
@@ -227,8 +228,25 @@ impl SqliteSysDb {
             })
             .map(|row| GetTenantResponse {
                 name: row.get(0),
-                static_name: None, // TODO: Implement static name
+                resource_name: row.get(1),
             })
+    }
+
+    pub(crate) async fn update_tenant(
+        &self,
+        tenant_id: String,
+        resource_name: String,
+    ) -> Result<UpdateTenantResponse, UpdateTenantError> {
+        sqlx::query("UPDATE tenants SET resource_name = $1 WHERE id = $2")
+            .bind(resource_name)
+            .bind(tenant_id.clone())
+            .execute(self.db.get_conn())
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => UpdateTenantError::NotFound(tenant_id.to_string()),
+                _ => UpdateTenantError::Internal(e.into()),
+            })
+            .map(|_| UpdateTenantResponse {})
     }
 
     ////////////////////////// Collection Methods ////////////////////////
@@ -1118,6 +1136,31 @@ mod tests {
         // Get tenant
         let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
         assert_eq!(tenant.name, "new_tenant");
+    }
+
+    #[tokio::test]
+    async fn test_update_tenant() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+
+        // Create tenant
+        sysdb.create_tenant("new_tenant".to_string()).await.unwrap();
+
+        // Get tenant
+        let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
+        assert_eq!(tenant.name, "new_tenant");
+        assert_eq!(tenant.resource_name, None);
+
+        // Update tenant
+        sysdb
+            .update_tenant("new_tenant".to_string(), "new_resource_name".to_string())
+            .await
+            .unwrap();
+
+        // Get tenant
+        let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
+        assert_eq!(tenant.name, "new_tenant");
+        assert_eq!(tenant.resource_name, Some("new_resource_name".to_string()));
     }
 
     #[tokio::test]
