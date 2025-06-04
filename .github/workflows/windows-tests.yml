@@ -1,15 +1,10 @@
-name: Run Windows tests nightly
+name: Windows-specific tests
 on:
   workflow_dispatch:
-  schedule:
-      # 12:21 AM PDT, offseted by a few minutes because:
-      # "The schedule event can be delayed during periods of high loads of GitHub Actions workflow runs. High load times include the start of every hour. If the load is sufficiently high enough, some queued jobs may be dropped."
-      - cron: '21 9 * * *'
-  # This is a temporary hack to get the workflow to run on the main branch
   push:
     branches:
-      - eculver/ci-nightly-windows-tests
-
+      - main
+      - eculver/ci-nightly-windows-tests # This is a temporary hack to get the workflow to run on my PR branch
 jobs:
   python-tests:
     name: Python tests (Windows)
