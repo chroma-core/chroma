@@ -5,11 +5,11 @@ import { AnimatePresence, m, motion } from "framer-motion";
 import { Tweet, TweetSkeleton } from "@/components/tweet";
 import TweetPrompt from "@/components/tweet-prompt";
 import { PartialAssistantPost, TweetModel } from "@/types";
-import { getPosts, publishNewUserPost } from "@/actions";
+import { publishNewUserPost } from "@/actions";
 import Logo from "./logo";
 
 export default function FeedView() {
-  const [newMessages, setNewMessages] = useState<Array<{userPost: TweetModel, assistantPost?: PartialAssistantPost}>>([]);
+  const [newMessages, setNewMessages] = useState<Array<{ userPost: TweetModel, assistantPost?: PartialAssistantPost }>>([]);
 
   return (
     <>
@@ -20,7 +20,7 @@ export default function FeedView() {
         <TweetPrompt
           onSubmit={(input) => {
             publishNewUserPost(input).then(({ userPost, assistantPost }) => {
-              setNewMessages((tweets) => [{userPost, assistantPost}, ...tweets]);
+              setNewMessages((tweets) => [{ userPost, assistantPost }, ...tweets]);
             });
           }}
         />
@@ -47,24 +47,31 @@ function IntroTweet() {
   );
 }
 
-function Tweets({ newMessages }: { newMessages: {userPost: TweetModel, assistantPost?: PartialAssistantPost}[] }) {
-  const [loadingMessages, setLoadingMessages] = useState<boolean>(true);
+function Tweets({ newMessages }: { newMessages: { userPost: TweetModel, assistantPost?: PartialAssistantPost }[] }) {
   const [oldMessages, setOldMessages] = useState<TweetModel[]>([]);
-  const [currPage, setCurrPage] = useState<number>(0);
-  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+
+  // These states are used for infinite scroll pagination
+  // we have `page` to keep track of how many "pages" we've loaded and to
+  // prevent infinite loops through state change hooks changing their own state
+  // `loading` acts like a mutex to prevent multiple requests being made at the same time
+  // `cursor` is specific to the pagination implementation
+  const [loading, setLoading] = useState<boolean>(false);
+  const [page, setPage] = useState<number>(0);
+  const [cursor, setCursor] = useState<number>(0);
   const [hasMore, setHasMore] = useState<boolean>(true);
 
   // Initial load
   useEffect(() => {
     const loadInitialPosts = async () => {
       try {
-        const posts = await getPosts(0);
+        const { posts, cursor } = await fetch(`/api/post`).then(async (res) => await res.json());
+        setCursor(cursor);
         setOldMessages(posts);
-        setHasMore(posts.length > 0);
-        setLoadingMessages(false);
+        setHasMore(cursor > -1);
       } catch (error) {
         console.error('Error loading initial posts:', error);
-        setLoadingMessages(false);
+      } finally {
+        setLoading(false);
       }
     };
 
@@ -72,37 +79,32 @@ function Tweets({ newMessages }: { newMessages: {userPost: TweetModel, assistant
   }, []);
 
   useEffect(() => {
-    if (currPage === 0) return;
+    if (cursor === -1 || loading || !hasMore) return;
 
     const loadMorePosts = async () => {
-      if (isLoadingMore || !hasMore) return;
-
-      setIsLoadingMore(true);
+      setLoading(true);
       try {
-        const posts = await getPosts(currPage);
-        if (posts.length === 0) {
-          setHasMore(false);
-        } else {
-          setOldMessages(prev => [...prev, ...posts]);
-        }
+        const { posts, newCursor } = await fetch(`/api/post?page=${cursor}`).then(res => res.json());
+        setCursor(newCursor);
+        setHasMore(newCursor > 0);
+        setOldMessages(prev => [...prev, ...posts]);
       } catch (error) {
         console.error('Error loading more posts:', error);
       } finally {
-        setIsLoadingMore(false);
+        setLoading(false);
       }
     };
 
     loadMorePosts();
-  }, [currPage]);
+  }, [page]);
 
   // Window scroll event listener for infinite scroll
   useEffect(() => {
     const onScroll = () => {
-      if (hasMore && !isLoadingMore) {
-        const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
-        if (scrollTop + clientHeight >= scrollHeight - 100) {
-          setCurrPage(prev => prev + 1);
-        }
+      if (!hasMore || loading) return;
+      const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
+      if (scrollTop + clientHeight >= scrollHeight - 100) {
+        setPage((prevPage) => prevPage + 1);
       }
     };
 
@@ -110,11 +112,11 @@ function Tweets({ newMessages }: { newMessages: {userPost: TweetModel, assistant
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  if (loadingMessages) {
+  if (loading && oldMessages.length === 0 && newMessages.length === 0) {
     return <TweetSkeleton />;
   }
 
-  if (!loadingMessages && oldMessages.length === 0 && newMessages.length === 0) {
+  if (!loading && oldMessages.length === 0 && newMessages.length === 0) {
     return <div className="flex flex-row font-ui justify-center py-20 mb-48">
       <div>
         <p>No posts yet... Make your first post!</p>
@@ -125,14 +127,14 @@ function Tweets({ newMessages }: { newMessages: {userPost: TweetModel, assistant
   return (
     <div>
       <AnimatePresence>
-        {newMessages.map(({userPost, assistantPost}, i) => (
+        {newMessages.map(({ userPost, assistantPost }, i) => (
           <motion.li
-              key={userPost.id}
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-            >
-              <Tweet tweet={userPost} aiReply={assistantPost} />
-            </motion.li>
+            key={userPost.id}
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+          >
+            <Tweet tweet={userPost} aiReply={assistantPost} />
+          </motion.li>
         ))}
 
         <li className="flex flex-col">

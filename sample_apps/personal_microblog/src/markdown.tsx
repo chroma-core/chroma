@@ -2,7 +2,6 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { TweetModel } from "./types";
 import { useEffect, useState } from "react";
-import { getPostById } from "./actions";
 
 export const Strong: React.FC<React.HTMLProps<HTMLSpanElement>> = ({ children, ...props }) => {
   if (children === "@assistant") {
@@ -45,7 +44,10 @@ function TweetReference({ children, id }: { children: React.ReactNode, id: strin
   const [post, setPost] = useState<TweetModel | null>(null);
 
   useEffect(() => {
-    getPostById(id).then(setPost);
+    fetch(`/api/post/${id}`).then(async (res) => {
+      const json = await res.json();
+      setPost(json);
+    });
   }, [id]);
 
   let body = undefined;

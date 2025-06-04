@@ -1,6 +1,7 @@
-import { getPostById, getPostReplies, semanticSearch } from "@/actions";
 import { notFound } from "next/navigation";
 import PermalinkTweetView from "@/components/permalink-tweet-view";
+import { getPostById, getPostReplies, semanticSearch } from "@/actions";
+
 export default async function PostPermalinkPage({
   params,
 }: {
@@ -14,7 +15,7 @@ export default async function PostPermalinkPage({
   }
 
   const [replies, relatedPosts] = await Promise.all([
-    getPostReplies(post.id),
+    getPostReplies(id),
     semanticSearch(post.body)
   ]);
 

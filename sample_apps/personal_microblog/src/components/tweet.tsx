@@ -6,7 +6,6 @@ import { PartialAssistantPost, TweetModel } from "@/types";
 
 import { MarkdownContent, StreamedMarkdownContent } from "./markdown-content";
 import { useEffect, useState } from "react";
-import { getPostById } from "@/actions";
 
 interface TweetProps {
   tweet: TweetModel;
@@ -21,9 +20,10 @@ export function Tweet({ tweet, aiReply, className }: TweetProps) {
     if (aiReply) {
       setReply(aiReply);
     } else if (tweet.aiReplyId) {
-      getPostById(tweet.aiReplyId).then((post: TweetModel | null) => {
-        if (post) {
-          setReply(post);
+      fetch(`/api/post/${tweet.aiReplyId}`).then(async (res) => {
+        const json = await res.json();
+        if (json) {
+          setReply(json);
         }
       });
     }

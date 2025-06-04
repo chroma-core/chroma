@@ -1,8 +1,6 @@
 "use server";
 
 import { PartialAssistantPost, TweetModel, TweetStatus } from "@/types";
-import { ChromaClient } from "chromadb";
-import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 import { openai } from '@ai-sdk/openai';
 import { createStreamableValue, StreamableValue } from 'ai/rsc';
 import { generateText, generateObject, jsonSchema, streamText } from 'ai';
@@ -13,6 +11,10 @@ import {
   generateId,
   unixTimestampNow,
 } from "./util";
+
+
+import { ChromaClient } from "chromadb";
+import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 const CHROMA_HOST = process.env.CHROMA_HOST;
 const CHROMA_CLOUD_API_KEY = process.env.CHROMA_CLOUD_API_KEY;
@@ -37,9 +39,8 @@ if (CHROMA_DB == null) {
 if (OPENAI_API_KEY == null) {
   throw new Error("OPENAI_API_KEY is not set");
 }
-const llmModel = openai('gpt-4-turbo')
 
-const client = new ChromaClient({
+const chromaClient = new ChromaClient({
   ssl: !usingChromaLocal,
   host: CHROMA_HOST,
   database: CHROMA_DB,
@@ -49,7 +50,7 @@ const client = new ChromaClient({
   },
 });
 
-const collection = await client.getOrCreateCollection({
+const chromaCollection = await chromaClient.getOrCreateCollection({
   name: "personal-blog-tweets",
   embeddingFunction: new OpenAIEmbeddingFunction({
     apiKey: OPENAI_API_KEY ?? "",
@@ -57,60 +58,60 @@ const collection = await client.getOrCreateCollection({
   }),
 });
 
-export async function getPosts(page: number): Promise<TweetModel[]> {
-  if (page == null || page < 0 || isNaN(page)) {
-    page = 0;
-  }
-  const posts = await collection.get({
-    where: { "role": "user" },
-    include: ["documents", "metadatas"],
-  });
-  const postModels = chromaGetResultsToPostModels(posts);
+const llmModel = openai('gpt-4-turbo')
+
+export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], cursor: number }> {
   const pageSize = 15;
-  const count = postModels.length;
-  let start = count - (page + 1) * pageSize;
-  if (start < 0) {
-    start = 0;
-  }
-  const end = count - page * pageSize;
-  if (end < 0) {
-    return [];
-  }
-  return postModels
-    .slice(start, end)
-    .reverse();
-}
-
-export async function getPostById(id: string): Promise<TweetModel | null> {
-  const chromaResult = await collection.get({
-    ids: [id],
-    include: ["documents", "metadatas"],
-  });
-
-  if (chromaResult.documents.length === 1) {
-    return chromaGetResultsToPostModels(chromaResult)[0];
+  if (cursor != undefined) {
+    const adjustedCursor = Math.max(cursor - pageSize, 0);
+    const posts = await chromaCollection.get({
+      where: { "role": "user" },
+      include: ["documents", "metadatas"],
+      limit: pageSize,
+      offset: adjustedCursor,
+    });
+    return {
+      posts: chromaGetResultsToPostModels(posts).reverse(),
+      cursor: adjustedCursor - 1,
+    };
   } else {
-    return null;
+    const posts = await chromaCollection.get({
+      where: { "role": "user" },
+      include: ["documents", "metadatas"],
+    });
+    const postModels = chromaGetResultsToPostModels(posts);
+    const count = postModels.length;
+    const adjustedCursor = Math.max(count - pageSize, 0);
+    return {
+      posts: postModels.slice(adjustedCursor, count).reverse(),
+      cursor: adjustedCursor - 1,
+    };
   }
 }
 
-export async function getPostReplies(postId: string): Promise<TweetModel[]> {
-  const replies = await collection.get({
-    where: { threadParentId: postId },
-    include: ["documents", "metadatas"],
+export async function getPostById(id: string): Promise<TweetModel | undefined> {
+  const post = await chromaCollection.get({
+    ids: [id],
   });
-  return chromaGetResultsToPostModels(replies);
+  const res = chromaGetResultsToPostModels(post)
+  return res.length > 0 ? res[0] : undefined;
+}
+
+export async function getPostReplies(id: string): Promise<TweetModel[]> {
+  const posts = await chromaCollection.get({
+    where: {
+      "threadParentId": id,
+    }
+  });
+  return chromaGetResultsToPostModels(posts);
 }
 
 export async function semanticSearch(query: string): Promise<TweetModel[]> {
-  const context = await collection.query({
+  const posts = await chromaCollection.query({
     queryTexts: [query],
-    nResults: 5,
-    where: {
-      "role": "user",
-    }
+    nResults: 10,
   });
-  return chromaQueryResultsToPostModels(context);
+  return chromaGetResultsToPostModels(posts);
 }
 
 export async function publishNewUserPost(newPostBody: string, threadParentId?: string): Promise<{ userPost: TweetModel, assistantPost: PartialAssistantPost | undefined }> {
@@ -127,7 +128,7 @@ export async function publishNewUserPost(newPostBody: string, threadParentId?: s
     partialAssistantPost = getAssistantReponse(newPostBody, newPost.id);
     newPost.aiReplyId = partialAssistantPost?.id;
   }
-  addPostModelToChromaCollection(newPost, collection).catch(console.error);
+  addPostModelToChromaCollection(newPost, chromaCollection).catch(console.error);
   return { userPost: newPost, assistantPost: partialAssistantPost };
 }
 
@@ -143,7 +144,7 @@ function getAssistantReponse(userInput: string, parentThreadId: string): Partial
     status: "processing",
     stream: stream.value,
   };
-  addPostModelToChromaCollection(assistantPost, collection).catch(console.error);
+  addPostModelToChromaCollection(assistantPost, chromaCollection).catch(console.error);
   processAssistantResponse(userInput, assistantPost, stream).catch(console.error); // Run in background
   return assistantPost;
 }
@@ -152,7 +153,7 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
   const cleanedUserInput = userInput.replace(/@assistant/g, "").trim();
   try {
     const [semanticContext, queryRange] = await Promise.all([
-      collection.query({
+      chromaCollection.query({
         queryTexts: [cleanedUserInput],
         nResults: 5,
         where: {
@@ -164,19 +165,19 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
     let context = chromaQueryResultsToPostModels(semanticContext);
 
     if (false && queryRange.start != null && queryRange.end != null) {
-      const temporalContext = await collection.query({
+      const temporalContext = await chromaCollection.query({
         queryTexts: [cleanedUserInput],
         nResults: 5,
         where: {
           "$and": [
             {
               "date": {
-                "$gte": queryRange.start,
+                "$gte": queryRange.start as number,
               },
             },
             {
               "date": {
-                "$lte": queryRange.end,
+                "$lte": queryRange.end as number,
               },
             }
           ],
@@ -232,7 +233,7 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
     stream.done();
   }
 
-  addPostModelToChromaCollection(post, collection).catch(console.error);
+  addPostModelToChromaCollection(post, chromaCollection).catch(console.error);
 }
 
 interface QueryRange {

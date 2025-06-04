@@ -1,6 +1,5 @@
 "use server";
 
-import { getPosts } from "@/actions";
 import FeedView from "@/components/feed-view";
 
 export default async function Home() {
