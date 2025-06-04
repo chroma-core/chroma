@@ -1207,6 +1207,17 @@ impl LogServer {
             let cache_key = cache_key_for_manifest(collection_id);
             let cached_bytes = cache.get(&cache_key).await.ok().flatten()?;
             let manifest: Manifest = serde_json::from_slice(&cached_bytes.bytes).ok()?;
+            if pull_logs
+                .start_from_offset
+                .saturating_add(pull_logs.batch_size.into())
+                == i64::MAX
+                || manifest.maximum_log_position()
+                    < LogPosition::from_offset(
+                        pull_logs.start_from_offset as u64 + pull_logs.batch_size as u64,
+                    )
+            {
+                return None;
+            }
             let limits = Limits {
                 max_files: Some(pull_logs.batch_size as u64 + 1),
                 max_bytes: None,
@@ -1289,7 +1300,7 @@ impl LogServer {
                     let prefix = storage_prefix_for_log(collection_id);
                     if let Some(cache) = self.cache.as_ref() {
                         let cache_key = format!("{collection_id}::{}", fragment.path);
-                        let cache_span = tracing::info_span!("cache get");
+                        let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
                         if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
                         {
                             return Ok(Arc::new(answer.bytes));
