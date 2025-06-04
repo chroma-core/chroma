@@ -3,6 +3,8 @@ description: "This action starts Tilt services"
 runs:
   using: "composite"
   steps:
+    - name: Collect Workflow Telemetry
+      uses: catchpoint/workflow-telemetry-action@v2
     - name: Start minikube
       uses: medyagh/setup-minikube@latest
       with:
