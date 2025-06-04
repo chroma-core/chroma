@@ -1,3 +1,5 @@
+use crate::types::construct_prefix_path;
+
 use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::{
@@ -102,6 +104,12 @@ impl SpannSegmentWriter {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
+        let prefix_path = construct_prefix_path(
+            &collection.tenant,
+            &collection.database_id,
+            &collection.collection_id,
+            &segment.id,
+        );
         let params = collection
             .config
             .get_spann_config()
@@ -184,6 +192,7 @@ impl SpannSegmentWriter {
             posting_list_id.as_ref(),
             max_head_id_bf_id.as_ref(),
             &segment.collection,
+            prefix_path,
             dimensionality,
             blockfile_provider,
             params,
