@@ -187,6 +187,7 @@ export const getDefaultEFConfig =
         "@chroma-core/default-embed"
       );
       if (!knownEmbeddingFunctions.has(new DefaultEmbeddingFunction().name)) {
+        // @ts-ignore
         registerEmbeddingFunction("default", DefaultEmbeddingFunction);
       }
     } catch (e) {

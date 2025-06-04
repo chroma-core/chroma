@@ -1,6 +1,6 @@
 {
   "name": "chromadb",
-  "version": "3.0.1-alpha.0",
+  "version": "3.0.1",
   "description": "A JavaScript interface for chroma",
   "keywords": [
     "chroma",
