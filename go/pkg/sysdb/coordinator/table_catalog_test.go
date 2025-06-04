@@ -1353,7 +1353,7 @@ func float64Ptr(f float64) *float64 {
 	return &f
 }
 
-func TestCatalog_SetTenantStaticName(t *testing.T) {
+func TestCatalog_SetTenantResourceName(t *testing.T) {
 	mockTxImpl := &mocks.ITransaction{}
 	mockMetaDomain := &mocks.IMetaDomain{}
 	mockTenantDb := &mocks.ITenantDb{}
@@ -1361,12 +1361,12 @@ func TestCatalog_SetTenantStaticName(t *testing.T) {
 	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
 
 	tenantID := "test_tenant"
-	staticName := "static_tenant_name"
+	resourceName := "static_tenant_name"
 
 	mockMetaDomain.On("TenantDb", mock.Anything).Return(mockTenantDb)
-	mockTenantDb.On("SetTenantStaticName", tenantID, staticName).Return(nil)
+	mockTenantDb.On("SetTenantResourceName", tenantID, resourceName).Return(nil)
 
-	err := catalog.SetTenantStaticName(context.Background(), tenantID, staticName)
+	err := catalog.SetTenantResourceName(context.Background(), tenantID, resourceName)
 
 	assert.NoError(t, err)
 
@@ -1374,7 +1374,7 @@ func TestCatalog_SetTenantStaticName(t *testing.T) {
 	mockTenantDb.AssertExpectations(t)
 }
 
-func TestCatalog_SetTenantStaticName_TenantNotFound(t *testing.T) {
+func TestCatalog_SetTenantResourceName_TenantNotFound(t *testing.T) {
 	mockTxImpl := &mocks.ITransaction{}
 	mockMetaDomain := &mocks.IMetaDomain{}
 	mockTenantDb := &mocks.ITenantDb{}
@@ -1382,12 +1382,12 @@ func TestCatalog_SetTenantStaticName_TenantNotFound(t *testing.T) {
 	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
 
 	tenantID := "non_existent_tenant"
-	staticName := "static_tenant_name"
+	resourceName := "static_tenant_name"
 
 	mockMetaDomain.On("TenantDb", mock.Anything).Return(mockTenantDb)
-	mockTenantDb.On("SetTenantStaticName", tenantID, staticName).Return(common.ErrTenantNotFound)
+	mockTenantDb.On("SetTenantResourceName", tenantID, resourceName).Return(common.ErrTenantNotFound)
 
-	err := catalog.SetTenantStaticName(context.Background(), tenantID, staticName)
+	err := catalog.SetTenantResourceName(context.Background(), tenantID, resourceName)
 
 	assert.Error(t, err)
 	assert.Equal(t, common.ErrTenantNotFound, err)

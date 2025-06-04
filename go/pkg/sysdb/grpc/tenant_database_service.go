@@ -127,8 +127,8 @@ func (s *Server) GetTenant(ctx context.Context, req *coordinatorpb.GetTenantRequ
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Tenant = &coordinatorpb.Tenant{
-		Name:       tenant.Name,
-		StaticName: tenant.StaticName,
+		Name:         tenant.Name,
+		ResourceName: tenant.ResourceName,
 	}
 	return res, nil
 }
@@ -143,13 +143,13 @@ func (s *Server) SetLastCompactionTimeForTenant(ctx context.Context, req *coordi
 	return &emptypb.Empty{}, nil
 }
 
-func (s *Server) SetTenantStaticName(ctx context.Context, req *coordinatorpb.SetTenantStaticNameRequest) (*coordinatorpb.SetTenantStaticNameResponse, error) {
-	err := s.coordinator.SetTenantStaticName(ctx, req.Id, req.StaticName)
+func (s *Server) SetTenantResourceName(ctx context.Context, req *coordinatorpb.SetTenantResourceNameRequest) (*coordinatorpb.SetTenantResourceNameResponse, error) {
+	err := s.coordinator.SetTenantResourceName(ctx, req.Id, req.ResourceName)
 	if err != nil {
-		log.Error("error SetTenantStaticName", zap.String("request", req.String()), zap.Error(err))
+		log.Error("error SetTenantResourceName", zap.String("request", req.String()), zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
-	return &coordinatorpb.SetTenantStaticNameResponse{}, nil
+	return &coordinatorpb.SetTenantResourceNameResponse{}, nil
 }
 
 func (s *Server) GetLastCompactionTimeForTenant(ctx context.Context, req *coordinatorpb.GetLastCompactionTimeForTenantRequest) (*coordinatorpb.GetLastCompactionTimeForTenantResponse, error) {

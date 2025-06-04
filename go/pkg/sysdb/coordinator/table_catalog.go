@@ -1503,8 +1503,8 @@ func (tc *Catalog) GetTenantsLastCompactionTime(ctx context.Context, tenantIDs [
 	return tenants, err
 }
 
-func (tc *Catalog) SetTenantStaticName(ctx context.Context, tenantID string, staticName string) error {
-	return tc.metaDomain.TenantDb(ctx).SetTenantStaticName(tenantID, staticName)
+func (tc *Catalog) SetTenantResourceName(ctx context.Context, tenantID string, resourceName string) error {
+	return tc.metaDomain.TenantDb(ctx).SetTenantResourceName(tenantID, resourceName)
 }
 
 // ListCollectionVersions lists all versions of a collection that have not been marked for deletion.
