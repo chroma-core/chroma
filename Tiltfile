@@ -10,9 +10,9 @@ docker_build(
 if config.tilt_subcommand == "ci":
   custom_build(
     'logservice',
-    # 'docker buildx build --load -t $EXPECTED_REF --target logservice -f ./go/Dockerfile .',
-    'docker image tag log-service:ci $EXPECTED_REF && docker image push $EXPECTED_REF',
-    ['./go/', './idl/']
+    'docker image tag log-service:ci $EXPECTED_REF',
+    ['./go/', './idl/'],
+    disable_push=True
   )
 else:
   docker_build(
@@ -26,8 +26,9 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'logservice-migration',
-    'docker buildx build --load -t $EXPECTED_REF --target logservice-migration -f ./go/Dockerfile.migration .',
-    ['./go/']
+    'docker image tag logservice-migration:ci $EXPECTED_REF',
+    ['./go/'],
+    disable_push=True
   )
 else:
   docker_build(
@@ -41,8 +42,9 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-log-service',
-    'docker buildx build --load -t $EXPECTED_REF --target=log_service -f ./rust/Dockerfile .',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+    'docker image tag rust-log-service:ci $EXPECTED_REF',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    disable_push=True
   )
 else:
   docker_build(
@@ -56,8 +58,9 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'sysdb',
-    'docker buildx build --load -t $EXPECTED_REF --target sysdb -f ./go/Dockerfile .',
-    ['./go/', './idl/']
+    'docker image tag sysdb:ci $EXPECTED_REF',
+    ['./go/', './idl/'],
+    disable_push=True
   )
 else:
   docker_build(
@@ -71,8 +74,9 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'sysdb-migration',
-    'docker buildx build --load -t $EXPECTED_REF --target sysdb-migration -f ./go/Dockerfile.migration .',
-    ['./go/']
+    'docker image tag sysdb-migration:ci $EXPECTED_REF',
+    ['./go/'],
+    disable_push=True
   )
 else:
   docker_build(
@@ -86,8 +90,9 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'rust-frontend-service',
-    'docker buildx build --load -t $EXPECTED_REF -f ./rust/Dockerfile --target cli . ',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+    'docker image tag rust-frontend-service:ci $EXPECTED_REF',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    disable_push=True
   )
 else:
   docker_build(
@@ -101,8 +106,9 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'query-service',
-    'docker buildx build --load -t $EXPECTED_REF --target query_service -f ./rust/Dockerfile .',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+    'docker image tag query-service:ci $EXPECTED_REF',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    disable_push=True
   )
 else:
   docker_build(
@@ -116,8 +122,9 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'compaction-service',
-    'docker buildx build --load -t $EXPECTED_REF --target compaction_service -f ./rust/Dockerfile .',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+    'docker image tag compaction-service:ci $EXPECTED_REF',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    disable_push=True
   )
 else:
   docker_build(
@@ -131,8 +138,9 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'garbage-collector',
-    'docker buildx build --load -t $EXPECTED_REF --target garbage_collector -f ./rust/Dockerfile .',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+    'docker image tag garbage-collector:ci $EXPECTED_REF',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    disable_push=True
   )
 else:
   docker_build(
@@ -146,8 +154,9 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'load-service',
-    'docker buildx build --load -t $EXPECTED_REF --target load_service -f ./rust/Dockerfile .',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock']
+    'docker image tag load-service:ci $EXPECTED_REF',
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    disable_push=True
   )
 else:
   docker_build(
