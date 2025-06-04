@@ -339,11 +339,16 @@ impl RollupPerCollection {
             std::cmp::max(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
     }
 
-    fn witness_manifest_and_cursor(&mut self, manifest: &Manifest, witness: Option<&Witness>) {
+    fn witness_cursor(&mut self, witness: Option<&Witness>) {
+        // NOTE(rescrv):  There's an easy dance here to justify this as correct.  For the start log
+        // position to advance, there must have been at least one GC cycle with a cursor that was
+        // something other than 1.  That cursor should never get deleted, therefore we have a
+        // witness and the unwrap_or call 0x90s.
+        //
+        // The consequence of this breaking is that the offset in the log will be behind sysdb.
         self.start_log_position = witness
             .map(|x| x.1.position)
-            .unwrap_or(manifest.minimum_log_position());
-        self.limit_log_position = manifest.maximum_log_position();
+            .unwrap_or(LogPosition::from_offset(1));
     }
 
     fn is_empty(&self) -> bool {
@@ -381,6 +386,10 @@ pub enum DirtyMarker {
     },
     #[serde(rename = "purge")]
     Purge { collection_id: CollectionUuid },
+    // A Cleared marker is a no-op.  It exists so that a log consisting of mark-dirty markers that
+    // map onto purge markers will be cleared and can be erased.
+    #[serde(rename = "clear")]
+    Cleared,
 }
 
 impl DirtyMarker {
@@ -389,6 +398,7 @@ impl DirtyMarker {
         match self {
             DirtyMarker::MarkDirty { collection_id, .. } => *collection_id,
             DirtyMarker::Purge { collection_id } => *collection_id,
+            DirtyMarker::Cleared => CollectionUuid::default(),
         }
     }
 
@@ -433,6 +443,7 @@ impl DirtyMarker {
                 DirtyMarker::Purge { collection_id } => {
                     forget.push(*collection_id);
                 }
+                DirtyMarker::Cleared => {}
             }
         }
         for collection_id in forget {
@@ -904,22 +915,23 @@ impl LogServer {
                 backpressure.push(*collection_id);
             }
         }
-        if !markers.is_empty() {
-            let mut new_cursor = cursor.clone();
-            new_cursor.position = self.dirty_log.append_many(markers).await?;
-            let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
-                return Err(Error::CouldNotGetDirtyLogCursors);
-            };
-            tracing::info!(
-                "Advancing dirty log cursor {:?} -> {:?}",
-                cursor.position,
-                new_cursor.position
-            );
-            if let Some(witness) = witness {
-                cursors.save(&STABLE_PREFIX, &new_cursor, &witness).await?;
-            } else {
-                cursors.init(&STABLE_PREFIX, new_cursor).await?;
-            }
+        if markers.is_empty() {
+            markers.push(serde_json::to_string(&DirtyMarker::Cleared).map(Vec::from)?);
+        }
+        let mut new_cursor = cursor.clone();
+        new_cursor.position = self.dirty_log.append_many(markers).await?;
+        let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+            return Err(Error::CouldNotGetDirtyLogCursors);
+        };
+        tracing::info!(
+            "Advancing dirty log cursor {:?} -> {:?}",
+            cursor.position,
+            new_cursor.position
+        );
+        if let Some(witness) = witness {
+            cursors.save(&STABLE_PREFIX, &new_cursor, &witness).await?;
+        } else {
+            cursors.init(&STABLE_PREFIX, new_cursor).await?;
         }
         self.metrics
             .log_total_uncompacted_records_count
@@ -999,15 +1011,6 @@ impl LogServer {
         &self,
         rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
     ) -> Result<(), Error> {
-        let load_manifest = |storage, collection_id| async move {
-            let reader = LogReader::new(
-                LogReaderOptions::default(),
-                Arc::clone(storage),
-                storage_prefix_for_log(collection_id),
-            );
-            let span = tracing::info_span!("manifest load", collection_id = ?collection_id);
-            reader.manifest().instrument(span).await
-        };
         let load_cursor = |storage, collection_id| async move {
             let cursor = &COMPACTION;
             let cursor_store = CursorStore::new(
@@ -1020,18 +1023,12 @@ impl LogServer {
             cursor_store.load(cursor).instrument(span).await
         };
         for (collection_id, mut rollup) in std::mem::take(rollups) {
-            // TODO(rescrv):  We can avoid loading the manifest and cursor by checking an
-            // in-memory lookaside structure.
-            let Some(manifest) = load_manifest(&self.storage, collection_id).await? else {
-                tracing::warn!("{collection_id} has no manifest; this may mean it was deleted");
-                continue;
-            };
             let cursor = load_cursor(&self.storage, collection_id).await?;
             // NOTE(rescrv):  There are two spreads that we have.
             // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
             // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
             // data that needs to be compacted.
-            rollup.witness_manifest_and_cursor(&manifest, cursor.as_ref());
+            rollup.witness_cursor(cursor.as_ref());
             if !rollup.is_empty() {
                 rollups.insert(collection_id, rollup);
             }

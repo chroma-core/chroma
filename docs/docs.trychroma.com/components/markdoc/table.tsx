@@ -13,7 +13,7 @@ export const Table = React.forwardRef<
   React.HTMLAttributes<HTMLTableElement>
 >(({ ...props }, ref) => {
   return (
-    <div className="relative w-full overflow-auto rounded-md my-5 border-[0.5px] border-gray-300">
+    <div className="relative w-full overflow-auto rounded-md my-5 border-[0.5px] border-gray-300 dark:border-gray-700">
       <UITable ref={ref} className="m-0" {...props} />
     </div>
   );

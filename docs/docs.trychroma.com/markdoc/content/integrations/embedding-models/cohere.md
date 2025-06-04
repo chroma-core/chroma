@@ -23,9 +23,11 @@ cohere_ef(input=["document1","document2"])
 {% Tab label="typescript" %}
 
 ```typescript
-import { CohereEmbeddingFunction } from 'chromadb';
+// npm install @chroma-core/cohere
 
-const embedder = new CohereEmbeddingFunction("apiKey")
+import { CohereEmbeddingFunction } from '@chroma-core/cohere';
+
+const embedder = new CohereEmbeddingFunction({ apiKey: "apiKey" })
 
 // use directly
 const embeddings = embedder.generate(["document1","document2"])

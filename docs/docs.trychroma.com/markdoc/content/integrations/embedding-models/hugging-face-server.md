@@ -42,7 +42,10 @@ huggingface_ef = HuggingFaceEmbeddingServer(url="http://localhost:8001/embed")
 
 
 ```typescript
-import  {HuggingFaceEmbeddingServerFunction} from 'chromadb';
+// npm install @chroma-core/huggingface-server
+
+import { HuggingFaceEmbeddingServerFunction } from '@chroma-core/huggingface-server';
+
 const embedder = new HuggingFaceEmbeddingServerFunction({ url: "http://localhost:8001/embed" })
 
 // use directly

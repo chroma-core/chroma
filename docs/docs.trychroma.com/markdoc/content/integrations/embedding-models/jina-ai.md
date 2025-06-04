@@ -25,7 +25,9 @@ jinaai_ef(input=["This is my first text to embed", "This is my second document"]
 {% Tab label="typescript" %}
 
 ```typescript
-import { JinaEmbeddingFunction } from 'chromadb';
+// npm install @chroma-core/jina
+
+import { JinaEmbeddingFunction } from '@chroma-core/jina';
 
 const embedder = new JinaEmbeddingFunction({
   jinaai_api_key: 'jina_****',

@@ -30,9 +30,11 @@ ef(input=["This is my first text to embed", "This is my second document"])
 {% Tab label="typescript" %}
 
 ```typescript
-import { CloudflareWorkersAIEmbeddingFunction } from 'chromadb';
+// npm install @chroma-core/cloudflare-worker-ai
 
-process.env.CHROMA_CLOUDFLARE_API_KEY = "<INSERT API KEY HERE>"
+import { CloudflareWorkersAIEmbeddingFunction } from '@chroma-core/cloudflare-worker-ai';
+
+process.env.CLOUDFLARE_API_KEY = "<INSERT API KEY HERE>"
 
 const embedder = new CloudflareWorkersAIEmbeddingFunction({
     account_id="<INSERT ACCOUNT ID HERE>",

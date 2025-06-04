@@ -23,9 +23,14 @@ voyageai_ef(input=["document1","document2"])
 {% Tab label="typescript" %}
 
 ```typescript
-import { VoyageAIEmbeddingFunction } from 'chromadb';
+// npm install @chroma-core/voyageai
 
-const embedder = new VoyageAIEmbeddingFunction("apiKey", "model_name")
+import { VoyageAIEmbeddingFunction } from '@chroma-core/voyageai';
+
+const embedder = new VoyageAIEmbeddingFunction({
+    apiKey: "apiKey", 
+    modelName: "model_name"
+})
 
 // use directly
 const embeddings = embedder.generate(["document1","document2"])

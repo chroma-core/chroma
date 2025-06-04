@@ -411,7 +411,7 @@ export class ChromaClient {
    * @param options.embeddingFunction - Optional embedding function to use
    * @returns A CollectionAPI instance for the specified collection
    */
-  public collection({
+  public getCollectionById({
     id,
     embeddingFunction,
   }: {
@@ -431,7 +431,7 @@ export class ChromaClient {
    * @param items - Array of collection IDs or objects with ID and optional embedding function
    * @returns Array of CollectionAPI instances
    */
-  public collections(
+  public getCollectionsById(
     items: string[] | { id: string; embeddingFunction?: EmbeddingFunction }[],
   ) {
     if (items.length === 0) return [];
