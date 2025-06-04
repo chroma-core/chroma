@@ -1,10 +1,18 @@
 update_settings(max_parallel_updates=6)
 
-docker_build(
-  'chroma-postgres',
-  context='./k8s/test/postgres',
-  dockerfile='./k8s/test/postgres/Dockerfile'
-)
+if config.tilt_subcommand == "ci":
+  custom_build(
+    'chroma-postgres',
+    'docker build -t $EXPECTED_REF -f k8s/test/postgres/Dockerfile k8s/test/postgres',
+    ['./k8s/test/postgres/'],
+    disable_push=True
+  )
+else:
+  docker_build(
+    'chroma-postgres',
+    context='./k8s/test/postgres',
+    dockerfile='./k8s/test/postgres/Dockerfile'
+  )
 
 
 if config.tilt_subcommand == "ci":
@@ -26,7 +34,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'logservice-migration',
-    'docker image tag logservice-migration:ci $EXPECTED_REF',
+    'docker image tag log-service-migration:ci $EXPECTED_REF',
     ['./go/'],
     disable_push=True
   )
@@ -122,7 +130,7 @@ else:
 if config.tilt_subcommand == "ci":
   custom_build(
     'compaction-service',
-    'docker image tag compaction-service:ci $EXPECTED_REF',
+    'docker image tag compactor-service:ci $EXPECTED_REF',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
     disable_push=True
   )
