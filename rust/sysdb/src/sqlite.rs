@@ -225,7 +225,10 @@ impl SqliteSysDb {
                 sqlx::Error::RowNotFound => GetTenantError::NotFound(name.to_string()),
                 _ => GetTenantError::Internal(e.into()),
             })
-            .map(|row| GetTenantResponse { name: row.get(0) })
+            .map(|row| GetTenantResponse {
+                name: row.get(0),
+                static_name: None, // TODO: Implement static name
+            })
     }
 
     ////////////////////////// Collection Methods ////////////////////////

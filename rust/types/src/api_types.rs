@@ -243,6 +243,7 @@ impl GetTenantRequest {
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
+    pub static_name: Option<String>,
 }
 
 #[cfg(feature = "pyo3")]
@@ -251,6 +252,11 @@ impl GetTenantResponse {
     #[getter]
     pub fn name(&self) -> &String {
         &self.name
+    }
+
+    #[getter]
+    pub fn static_name(&self) -> Option<String> {
+        self.static_name.clone()
     }
 }
 

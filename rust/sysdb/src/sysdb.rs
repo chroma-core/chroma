@@ -703,13 +703,16 @@ impl GrpcSysDb {
             name: tenant_name.clone(),
         };
         match self.client.get_tenant(req).await {
-            Ok(resp) => Ok(GetTenantResponse {
-                name: resp
+            Ok(resp) => {
+                let tenant = resp
                     .into_inner()
                     .tenant
-                    .ok_or(GetTenantError::NotFound(tenant_name))?
-                    .name,
-            }),
+                    .ok_or(GetTenantError::NotFound(tenant_name))?;
+                Ok(GetTenantResponse {
+                    name: tenant.name,
+                    static_name: tenant.static_name,
+                })
+            }
             Err(err) => Err(GetTenantError::Internal(err.into())),
         }
     }
