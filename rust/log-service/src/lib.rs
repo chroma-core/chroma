@@ -1212,23 +1212,11 @@ impl LogServer {
                 max_bytes: None,
                 max_records: Some(pull_logs.batch_size as u64),
             };
-            // NOTE(rescrv):  Log records are immutable, so if a manifest includes our range we can
-            // serve it directly from the scan_from_manifest call.
-            let (manifest_start, manifest_limit) = (
-                manifest.minimum_log_position().offset() as i64,
-                manifest.maximum_log_position().offset() as i64,
-            );
-            if manifest_start <= pull_logs.start_from_offset
-                && pull_logs.start_from_offset + pull_logs.batch_size as i64 <= manifest_limit
-            {
-                LogReader::scan_from_manifest(
-                    &manifest,
-                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
-                    limits,
-                )
-            } else {
-                None
-            }
+            LogReader::scan_from_manifest(
+                &manifest,
+                LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                limits,
+            )
         } else {
             None
         }
@@ -1289,7 +1277,7 @@ impl LogServer {
                     let prefix = storage_prefix_for_log(collection_id);
                     if let Some(cache) = self.cache.as_ref() {
                         let cache_key = format!("{collection_id}::{}", fragment.path);
-                        let cache_span = tracing::info_span!("cache get");
+                        let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
                         if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
                         {
                             return Ok(Arc::new(answer.bytes));
