@@ -3,15 +3,11 @@ description: "This action starts Tilt services"
 runs:
   using: "composite"
   steps:
-    # - name: Start minikube
-    #   uses: medyagh/setup-minikube@latest
-    #   with:
-    #     cpus: max
-    #     memory: max
-    #     driver: none
     - name: Start minikube
-      shell: bash
-      run: bash .github/actions/tilt/setup_minikube.sh
+      uses: medyagh/setup-minikube@latest
+      with:
+        driver: none
+        start: false
     - name: Install Tilt, bake images, pre-pull external images
       shell: bash
       env:
@@ -20,7 +16,8 @@ runs:
         parallel --line-buffer --tagstring '{#}' ::: \
           "bash -c 'curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux.x86_64.tar.gz | tar -xzv -C /usr/local/bin tilt'" \
           "docker buildx bake -f docker-bake.hcl --load" \
-          "bash .github/actions/tilt/pull_external_images.sh"
+          "bash .github/actions/tilt/pull_external_images.sh" \
+          "minikube start --driver=none --cpus=max --memory=max"
     - name: Start Tilt
       shell: bash
       run: tilt ci
