@@ -296,7 +296,7 @@ export class ChromaClient {
    */
   public async getCollections(
     items: string[] | { name: string; embeddingFunction?: EmbeddingFunction }[],
-  ) {
+  ): Promise<Collection[]> {
     if (items.length === 0) return [];
 
     let requestedCollections = items;
@@ -313,7 +313,7 @@ export class ChromaClient {
 
     return Promise.all(
       collections.map(async (collection) => {
-        await this.getCollection({ ...collection });
+        return await this.getCollection({ ...collection });
       }),
     );
   }
