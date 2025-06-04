@@ -109,10 +109,10 @@ const [col1, col2] = client.getCollections([
 ])
 ```
 
-The `getCollection` and `getCollections` methods issue an API call to a Chroma server to get collections with all their fields. If you only need access to collection actions on records and want to save the API call, you can get a "thin" collection object using the `collection` method. It takes in a collection **ID** and an embedding function.
+The `getCollection` and `getCollections` methods issue an API call to a Chroma server to get collections with all their fields. If you only need access to collection actions on records, and want to save the API call, you can get a "thin" collection object using the `getCollectionById` method (and `getCollectionsById`). It takes in a collection **ID** and an embedding function.
 
 ```typescript
-const collection = client.collection({ id: 'abc', embeddingFunction: openaiEF })
+const collection = client.getCollectionById({ id: 'abc', embeddingFunction: openaiEF })
 ```
 
 You can also delete collections by name using `deleteCollection`:
