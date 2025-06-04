@@ -31,6 +31,13 @@ pub(super) fn construct_prefix_path(
     )
 }
 
+pub(super) fn extract_prefix_and_id(path: &str) -> (&str, &str) {
+    match path.rfind('/') {
+        Some(pos) => (&path[..pos], &path[pos + 1..]),
+        None => ("", path),
+    }
+}
+
 // Materializes metadata from update metadata, populating the delete list
 // and upsert list.
 fn materialize_update_metadata(
