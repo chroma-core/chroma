@@ -101,13 +101,12 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["${{inputs.platform}}"]
         test-globs: ["chromadb/test/property/test_add.py",
                     "chromadb/test/property/test_collections.py",
                     "chromadb/test/property/test_collections_with_database_tenant.py",
                     "chromadb/test/property/test_embeddings.py",
                     "chromadb/test/property/test_filtering.py"]
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ inputs.platform }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python (${{ matrix.python }})
@@ -127,11 +126,11 @@ jobs:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-cluster-rust-frontend:
+    if: ${{ contains(inputs.platform, 'ubuntu') }}
     strategy:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["blacksmith-16vcpu-ubuntu-2204"]
         test-globs: ["chromadb/test/api",
                     "chromadb/test/api/test_collection.py",
                     "chromadb/test/api/test_limit_offset.py",
@@ -144,7 +143,7 @@ jobs:
                     "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
                     "chromadb/test/distributed/test_sanity.py",
                     "chromadb/test/distributed/test_log_failover.py"]
-    runs-on: ${{ matrix.platform }}
+    runs-on: ["blacksmith-16vcpu-ubuntu-2204"]
     # OIDC token auth for AWS
     permissions:
       contents: read
@@ -178,6 +177,7 @@ jobs:
           artifact-name: ${{ steps.compute-artifact-name.outputs.artifact_name }}
 
   merge-cluster-logs:
+    if: ${{ contains(inputs.platform, 'ubuntu') }}
     runs-on: blacksmith-4vcpu-ubuntu-2204
     needs: test-cluster-rust-frontend
     steps:
