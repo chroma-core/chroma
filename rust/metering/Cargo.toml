@@ -10,6 +10,5 @@ parking_lot = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
-chroma-metering-registry = { path = "../metering-registry" }
 chroma-metering-macros = { path = "../metering-macros" }
 chroma-system = { path = "../system" }

@@ -3,7 +3,6 @@ extern crate proc_macro;
 use attribute::{
     process_attribute_args, process_attribute_body, AttributeArgsResult, AttributeBodyResult,
 };
-use chroma_metering_registry::AnnotatedField;
 use errors::MeteringMacrosError;
 use event::{process_event_body, EventBodyResult, FieldMutability};
 use proc_macro2::{Ident, Literal, Span, TokenStream};
@@ -13,6 +12,7 @@ use utils::generate_compile_error;
 mod attribute;
 mod errors;
 mod event;
+mod registry;
 mod utils;
 
 #[proc_macro_attribute]
@@ -50,7 +50,7 @@ pub fn attribute(
 
     let _attribute_type_tokens_literal = Literal::string(attribute_type.to_string().as_str());
 
-    if let Err(error) = chroma_metering_registry::register_attribute(
+    if let Err(error) = registry::register_attribute(
         &attribute_name_string,
         attribute_type.to_string().trim_matches('\"'),
     ) {
@@ -102,7 +102,7 @@ pub fn event(
     let mut constant_field_names: Vec<Ident> = Vec::new();
     let mut constant_field_types: Vec<TokenStream> = Vec::new();
 
-    let mut annotated_fields: Vec<AnnotatedField> = Vec::new();
+    let mut annotated_fields: Vec<registry::AnnotatedField> = Vec::new();
 
     let mut registry_tuples: Vec<(String, String, String)> = Vec::new();
 
@@ -118,7 +118,7 @@ pub fn event(
             constant_field_names.push(field.field_name.clone());
             constant_field_types.push(field.field_type.clone());
         } else {
-            annotated_fields.push(AnnotatedField {
+            annotated_fields.push(registry::AnnotatedField {
                 field_name: field.field_name.to_string(),
                 attribute_name: field
                     .field_attribute_name
@@ -163,9 +163,7 @@ pub fn event(
     }
 
     let event_name_string = event_name.to_string().trim_matches('\"').to_string();
-    if let Err(error) =
-        chroma_metering_registry::register_event(&event_name_string, annotated_fields)
-    {
+    if let Err(error) = registry::register_event(&event_name_string, annotated_fields) {
         return proc_macro::TokenStream::from(generate_compile_error(&format!(
             "failed to register event: {}",
             error
@@ -212,7 +210,7 @@ pub fn event(
 
 #[proc_macro]
 pub fn generate_base_mutators(_input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    let registered_attributes = match chroma_metering_registry::list_registered_attributes() {
+    let registered_attributes = match registry::list_registered_attributes() {
         Ok(result) => result,
         Err(_) => {
             return proc_macro::TokenStream::from(generate_compile_error(
