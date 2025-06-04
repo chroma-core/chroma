@@ -158,15 +158,15 @@ jobs:
           header: helm-chart-version-info
           delete: true
 
-  # python-tests:
-  #   name: Python tests
-  #   needs: change-detection
-  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
-  #   uses: ./.github/workflows/_python-tests.yml
-  #   secrets: inherit
-  #   with:
-  #     property_testing_preset: 'normal'
-  #     python_versions: '["3.9", "3.10", "3.11", "3.12"]'
+  python-tests:
+    name: Python tests
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
+    with:
+      property_testing_preset: 'normal'
+      python_versions: '["3.9", "3.10", "3.11", "3.12"]'
 
   python-vulnerability-scan:
     name: Python vulnerability scan
@@ -259,7 +259,7 @@ jobs:
   all-required-pr-checks-passed:
     if: always()
     needs:
-    # - python-tests
+    - python-tests
     - python-vulnerability-scan
     - javascript-client-tests
     - rust-tests

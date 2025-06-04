@@ -246,6 +246,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
 
 // todo test rebuild AC7B900F-8EF4-4035-9B09-80DD3D4D8E35
 // 4EEDDBBB-B8E4-4468-BDFD-B1E6A6EBFEF2
+// 86337F43-A95B-4AF4-B68B-03BD35648AEC
 
 #[derive(Error, Debug)]
 pub enum CollectionToProtoError {
