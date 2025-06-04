@@ -1,5 +1,7 @@
 update_settings(max_parallel_updates=6)
 
+# *:ci images are defined in .github/actions/tilt/docker-bake.hcl and used for .github/actions/tilt/action.yaml.
+
 if config.tilt_subcommand == "ci":
   custom_build(
     'chroma-postgres',

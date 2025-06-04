@@ -1,3 +1,7 @@
+#!/usr/bin/env bash
+
+# This is a simple script to gather all external images referenced in Kubernetes manifests and then pull them in parallel.
+
 set -euo pipefail
 
 k8s_dir="k8s"
@@ -8,12 +12,15 @@ mapfile -t images < <(
   grep -v '{{' |
   sed -E 's/.*image:[[:space:]]*//' |
   tr -d '"' |
-  grep -vi 'chroma-postgres' |                 # EXCLUDE chroma-postgres
-  grep -vi 'load-service' |                 # EXCLUDE chroma-postgres
+  # chroma-postgres appears to be an external image ref, but it's a custom image.
+  # It's just the base postgres image with a single file copied in (k8s/test/postgres/Dockerfile) so it's ok to build during `tilt ci`.
+  grep -vi 'chroma-postgres' |
+  # The load service appears in k8s/test and is not Helm-templated, so we must exclude it here.
+  grep -vi 'load-service' |
   sort -u
 )
 
-(( ${#images[@]} )) || { echo "No literal images found – nothing to pull."; exit 0; }
+(( ${#images[@]} )) || { echo "No literal images found, nothing to pull."; exit 0; }
 
 # Build a temporary docker-compose file
 tmpfile=$(mktemp)
