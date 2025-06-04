@@ -23,11 +23,13 @@ async fn main() {
         .await
         .expect("could not inspect log state");
     let scouted = scouted.into_inner();
-    for i in (scouted.first_uncompacted_record_offset..scouted.first_uninserted_record_offset)
+    println!("Scouted {scouted:?}");
+    for i in (scouted.first_uncompacted_record_offset..=scouted.first_uninserted_record_offset)
         .step_by(100)
     {
         let batch_size: i32 =
             (std::cmp::min(i + 100, scouted.first_uninserted_record_offset) - i) as i32;
+        println!("Fetching [{i}:{})", i + batch_size as i64);
         let pulled = client
             .pull_logs(PullLogsRequest {
                 collection_id: args[1].clone(),
