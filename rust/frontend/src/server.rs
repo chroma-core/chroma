@@ -552,7 +552,7 @@ async fn create_tenant(
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
-/// Returns an existing tenant by name.
+/// Returns an existing tenant by ID.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant}",
@@ -593,7 +593,7 @@ pub struct UpdateTenantPayload {
     pub resource_name: String,
 }
 
-/// Updates an existing tenant by name.
+/// Updates an existing tenant by ID.
 #[utoipa::path(
     patch,
     path = "/api/v2/tenants/{tenant}",
