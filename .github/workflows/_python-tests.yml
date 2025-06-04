@@ -34,6 +34,10 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+      - name: Collect Workflow Telemetry
+        uses: catchpoint/workflow-telemetry-action@v2
+        with:
+          comment_on_pr: false
       - name: Setup Python
         uses: ./.github/actions/python
         with:
@@ -79,6 +83,10 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+    - name: Collect Workflow Telemetry
+      uses: catchpoint/workflow-telemetry-action@v2
+      with:
+        comment_on_pr: false
     - name: Set up Python (${{ matrix.python }})
       uses: ./.github/actions/python
     - name: Setup Rust
@@ -105,6 +113,10 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+      - name: Collect Workflow Telemetry
+        uses: catchpoint/workflow-telemetry-action@v2
+        with:
+          comment_on_pr: false
       - name: Set up Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
@@ -146,6 +158,10 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+      - name: Collect Workflow Telemetry
+        uses: catchpoint/workflow-telemetry-action@v2
+        with:
+          comment_on_pr: false
       - uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
@@ -171,6 +187,11 @@ jobs:
         uses: ./.github/actions/export-tilt-logs
         with:
           artifact-name: ${{ steps.compute-artifact-name.outputs.artifact_name }}
+      - name: Save IOPS Data
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.compute-artifact-name.outputs.artifact_name }}-iops-log
+          path: iostat.log
 
   merge-cluster-logs:
     runs-on: blacksmith-4vcpu-ubuntu-2204
@@ -193,6 +214,10 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+      - name: Collect Workflow Telemetry
+        uses: catchpoint/workflow-telemetry-action@v2
+        with:
+          comment_on_pr: false
       - name: Setup Python
         uses: ./.github/actions/python
         with:
@@ -231,6 +256,10 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v4
+    - name: Collect Workflow Telemetry
+      uses: catchpoint/workflow-telemetry-action@v2
+      with:
+        comment_on_pr: false
     - name: Set up Python (${{ matrix.python }})
       uses: ./.github/actions/python
     - name: Setup Rust
