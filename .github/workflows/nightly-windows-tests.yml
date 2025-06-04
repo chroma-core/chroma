@@ -17,6 +17,7 @@ jobs:
     with:
       property_testing_preset: 'normal'
       platform: '16core-64gb-windows-latest'
+      env-file: 'compose-env.windows'
 
   notify-on-failure:
     name: Notify on failure

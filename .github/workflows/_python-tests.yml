@@ -17,6 +17,11 @@ on:
         required: false
         default: 'blacksmith-8vcpu-ubuntu-2204'
         type: string
+      env-file:
+        description: 'Environment file to use'
+        required: false
+        default: 'compose-env.linux'
+        type: string
 
 jobs:
   test-rust-bindings:
@@ -25,7 +30,6 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["${{inputs.platform}}"]
         test-globs:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
@@ -36,7 +40,7 @@ jobs:
           - test-globs: "chromadb/test/property/test_cross_version_persist.py"
             parallelized: true
 
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ inputs.platform }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python
@@ -67,7 +71,6 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["${{inputs.platform}}"]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'",
                     "chromadb/test/property/test_add.py",
                     "chromadb/test/property/test_collections.py",
@@ -77,10 +80,7 @@ jobs:
                     "chromadb/test/property/test_filtering.py",
                     "chromadb/test/property/test_persist.py",
                     "chromadb/test/stress"]
-        include:
-          - platform: blacksmith-4vcpu-ubuntu-2204
-            env-file: compose-env.linux
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ inputs.platform }}
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -94,7 +94,7 @@ jobs:
       run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
       shell: bash
       env:
-        ENV_FILE: ${{ matrix.env-file }}
+        ENV_FILE: ${{ inputs.env-file }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-rust-thin-client:
@@ -123,7 +123,7 @@ jobs:
         shell: bash
         env:
           CHROMA_THIN_CLIENT: "1"
-          ENV_FILE: ${{ matrix.env-file }}
+          ENV_FILE: ${{ inputs.env-file }}
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-cluster-rust-frontend:
@@ -193,9 +193,8 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["${{inputs.platform}}"]
         test-globs: ["chromadb/test/stress"]
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ inputs.platform }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python
@@ -225,14 +224,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["${{inputs.platform}}"]
-        test-globs: ["chromadb/test/test_cli.py"]
-        include:
-          - platform: blacksmith-4vcpu-ubuntu-2204
-            env-file: compose-env.linux
-          - platform: windows-latest
-            env-file: compose-env.windows
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ inputs.platform }}
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -250,8 +242,8 @@ jobs:
       shell: bash
       run: pip install --no-index --find-links target/wheels/ chromadb
     - name: Integration Test
-      run: python -m pytest ${{ matrix.test-globs }}
+      run: python -m pytest "chromadb/test/test_cli.py"
       shell: bash
       env:
-        ENV_FILE: ${{ matrix.env-file }}
+        ENV_FILE: ${{ inputs.env-file }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
