@@ -10,6 +10,7 @@ use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::{future::Shared, stream, FutureExt, StreamExt};
 use std::{
@@ -525,8 +526,29 @@ impl RateLimitPolicy {
 }
 
 #[derive(Debug)]
+pub struct CountBasedPolicyMetrics {
+    // The delay in milliseconds before a request is allowed to proceed.
+    pub nac_delay_ms: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl Default for CountBasedPolicyMetrics {
+    fn default() -> Self {
+        Self {
+            nac_delay_ms: opentelemetry::global::meter("chroma.storage.admission_control")
+                .u64_histogram("nac_delay_ms")
+                .with_description(
+                    "The delay in milliseconds before a request is allowed to proceed.",
+                )
+                .with_unit("ms")
+                .build(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct CountBasedPolicy {
     remaining_tokens: Vec<Semaphore>,
+    metrics: CountBasedPolicyMetrics,
 }
 
 impl CountBasedPolicy {
@@ -537,7 +559,10 @@ impl CountBasedPolicy {
                 (max_allowed_outstanding as f32 * allocation).ceil() as usize,
             ));
         }
-        Self { remaining_tokens }
+        Self {
+            remaining_tokens,
+            metrics: CountBasedPolicyMetrics::default(),
+        }
     }
 
     async fn acquire(
@@ -545,6 +570,7 @@ impl CountBasedPolicy {
         priority: Arc<AtomicUsize>,
         mut channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
+        let _stopwatch = Stopwatch::new(&self.metrics.nac_delay_ms, &[]);
         loop {
             let current_priority = priority.load(Ordering::SeqCst);
             let current_priority: StorageRequestPriority = current_priority.into();

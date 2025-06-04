@@ -81,7 +81,7 @@ sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFuncti
 
 {% Tab label="typescript" %}
 ```typescript
-import { DefaultEmbeddingFunction } from "chromadb";
+import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 const modelName = "all-MiniLM-L6-v2";
 const defaultEF = new DefaultEmbeddingFunction(modelName);
 ```

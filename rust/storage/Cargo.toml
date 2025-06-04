@@ -23,9 +23,11 @@ thiserror.workspace = true
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+opentelemetry = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
+chroma-tracing = { workspace = true }
 
 [dev-dependencies]
 rand_xorshift = { workspace = true }

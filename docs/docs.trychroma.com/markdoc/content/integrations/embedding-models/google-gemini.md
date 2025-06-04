@@ -36,12 +36,14 @@ For more info - please visit the [official Google python docs](https://ai.google
 
 {% Tab label="typescript" %}
 
-This embedding function relies on the `@google/generative-ai` npm package, which you can install with e.g. `npm install @google/generative-ai`.
-
 ```typescript
-import { ChromaClient, GoogleGenerativeAiEmbeddingFunction } from "chromadb";
+// npm install @chroma-core/google-gemini
+
+import { ChromaClient } from "chromadb";
+import { GoogleGenerativeAiEmbeddingFunction } from "@chroma-core/google-gemini";
+
 const embedder = new GoogleGenerativeAiEmbeddingFunction({
-  googleApiKey: "<YOUR API KEY>",
+  apiKey: "<YOUR API KEY>",
 });
 
 // use directly

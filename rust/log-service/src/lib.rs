@@ -37,8 +37,8 @@ use tonic::{transport::Server, Code, Request, Response, Status};
 use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
-    Cursor, CursorName, CursorStore, CursorStoreOptions, Limits, LogPosition, LogReader,
-    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, Witness,
+    Cursor, CursorName, CursorStore, CursorStoreOptions, Fragment, Limits, LogPosition, LogReader,
+    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, MarkDirty as MarkDirtyTrait, Witness,
 };
 
 pub mod state_hash_table;
@@ -215,7 +215,18 @@ async fn get_log_from_handle<'a>(
     prefix: &str,
     mark_dirty: MarkDirty,
 ) -> Result<LogRef<'a>, wal3::Error> {
-    let mut active = handle.active.lock().await;
+    let active = handle.active.lock().await;
+    get_log_from_handle_with_mutex_held(handle, active, options, storage, prefix, mark_dirty).await
+}
+
+async fn get_log_from_handle_with_mutex_held<'a>(
+    handle: &'a crate::state_hash_table::Handle<LogKey, LogStub>,
+    mut active: tokio::sync::MutexGuard<'_, ActiveLog>,
+    options: &LogWriterOptions,
+    storage: &Arc<Storage>,
+    prefix: &str,
+    mark_dirty: MarkDirty,
+) -> Result<LogRef<'a>, wal3::Error> {
     if active.log.is_some() {
         active.keep_alive(Duration::from_secs(60));
     }
@@ -266,14 +277,20 @@ async fn get_log_from_handle<'a>(
     })
 }
 
+////////////////////////////////////// cache_key_for_manifest //////////////////////////////////////
+
+fn cache_key_for_manifest(collection_id: CollectionUuid) -> String {
+    format!("{collection_id}::MANIFEST")
+}
+
 ////////////////////////////////////////// CachedFragment //////////////////////////////////////////
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct CachedParquetFragment {
+pub struct CachedBytes {
     bytes: Vec<u8>,
 }
 
-impl chroma_cache::Weighted for CachedParquetFragment {
+impl chroma_cache::Weighted for CachedBytes {
     fn weight(&self) -> usize {
         self.bytes.len()
     }
@@ -322,11 +339,16 @@ impl RollupPerCollection {
             std::cmp::max(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
     }
 
-    fn witness_manifest_and_cursor(&mut self, manifest: &Manifest, witness: Option<&Witness>) {
+    fn witness_cursor(&mut self, witness: Option<&Witness>) {
+        // NOTE(rescrv):  There's an easy dance here to justify this as correct.  For the start log
+        // position to advance, there must have been at least one GC cycle with a cursor that was
+        // something other than 1.  That cursor should never get deleted, therefore we have a
+        // witness and the unwrap_or call 0x90s.
+        //
+        // The consequence of this breaking is that the offset in the log will be behind sysdb.
         self.start_log_position = witness
             .map(|x| x.1.position)
-            .unwrap_or(manifest.minimum_log_position());
-        self.limit_log_position = manifest.maximum_log_position();
+            .unwrap_or(LogPosition::from_offset(1));
     }
 
     fn is_empty(&self) -> bool {
@@ -364,6 +386,10 @@ pub enum DirtyMarker {
     },
     #[serde(rename = "purge")]
     Purge { collection_id: CollectionUuid },
+    // A Cleared marker is a no-op.  It exists so that a log consisting of mark-dirty markers that
+    // map onto purge markers will be cleared and can be erased.
+    #[serde(rename = "clear")]
+    Cleared,
 }
 
 impl DirtyMarker {
@@ -372,6 +398,7 @@ impl DirtyMarker {
         match self {
             DirtyMarker::MarkDirty { collection_id, .. } => *collection_id,
             DirtyMarker::Purge { collection_id } => *collection_id,
+            DirtyMarker::Cleared => CollectionUuid::default(),
         }
     }
 
@@ -416,6 +443,7 @@ impl DirtyMarker {
                 DirtyMarker::Purge { collection_id } => {
                     forget.push(*collection_id);
                 }
+                DirtyMarker::Cleared => {}
             }
         }
         for collection_id in forget {
@@ -479,7 +507,7 @@ pub struct LogServer {
     rolling_up: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
     need_to_compact: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
-    cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedParquetFragment>>>,
+    cache: Option<Box<dyn chroma_cache::PersistentCache<String, CachedBytes>>>,
     metrics: Metrics,
 }
 
@@ -519,7 +547,12 @@ impl LogServer {
         // Grab a lock on the state for this key, so that a racing initialize won't do anything.
         let key = LogKey { collection_id };
         let handle = self.open_logs.get_or_create_state(key);
-        let mut _active = handle.active.lock().await;
+        let active = handle.active.lock().await;
+
+        // Someone already initialized the log on a prior call.
+        if active.log.is_some() {
+            return Ok(());
+        }
 
         tracing::info!("log transfer to {collection_id}");
         let scout_request = Request::new(ScoutLogsRequest {
@@ -641,6 +674,23 @@ impl LogServer {
             log_offset: start as i64 - 1,
         }))
         .await?;
+        // Set it up so that once we release the mutex, the next person won't do I/O and will
+        // immediately be able to push logs.
+        let storage_prefix = storage_prefix_for_log(collection_id);
+        let mark_dirty = MarkDirty {
+            collection_id,
+            dirty_log: Arc::clone(&self.dirty_log),
+        };
+        // If this fails, the next writer will load manifest and continue unimpeded.
+        let _ = get_log_from_handle_with_mutex_held(
+            &handle,
+            active,
+            &self.config.writer,
+            &self.storage,
+            &storage_prefix,
+            mark_dirty,
+        )
+        .await;
         Ok(())
     }
 
@@ -865,22 +915,23 @@ impl LogServer {
                 backpressure.push(*collection_id);
             }
         }
-        if !markers.is_empty() {
-            let mut new_cursor = cursor.clone();
-            new_cursor.position = self.dirty_log.append_many(markers).await?;
-            let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
-                return Err(Error::CouldNotGetDirtyLogCursors);
-            };
-            tracing::info!(
-                "Advancing dirty log cursor {:?} -> {:?}",
-                cursor.position,
-                new_cursor.position
-            );
-            if let Some(witness) = witness {
-                cursors.save(&STABLE_PREFIX, &new_cursor, &witness).await?;
-            } else {
-                cursors.init(&STABLE_PREFIX, new_cursor).await?;
-            }
+        if markers.is_empty() {
+            markers.push(serde_json::to_string(&DirtyMarker::Cleared).map(Vec::from)?);
+        }
+        let mut new_cursor = cursor.clone();
+        new_cursor.position = self.dirty_log.append_many(markers).await?;
+        let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
+            return Err(Error::CouldNotGetDirtyLogCursors);
+        };
+        tracing::info!(
+            "Advancing dirty log cursor {:?} -> {:?}",
+            cursor.position,
+            new_cursor.position
+        );
+        if let Some(witness) = witness {
+            cursors.save(&STABLE_PREFIX, &new_cursor, &witness).await?;
+        } else {
+            cursors.init(&STABLE_PREFIX, new_cursor).await?;
         }
         self.metrics
             .log_total_uncompacted_records_count
@@ -960,15 +1011,6 @@ impl LogServer {
         &self,
         rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
     ) -> Result<(), Error> {
-        let load_manifest = |storage, collection_id| async move {
-            let reader = LogReader::new(
-                LogReaderOptions::default(),
-                Arc::clone(storage),
-                storage_prefix_for_log(collection_id),
-            );
-            let span = tracing::info_span!("manifest load", collection_id = ?collection_id);
-            reader.manifest().instrument(span).await
-        };
         let load_cursor = |storage, collection_id| async move {
             let cursor = &COMPACTION;
             let cursor_store = CursorStore::new(
@@ -981,18 +1023,12 @@ impl LogServer {
             cursor_store.load(cursor).instrument(span).await
         };
         for (collection_id, mut rollup) in std::mem::take(rollups) {
-            // TODO(rescrv):  We can avoid loading the manifest and cursor by checking an
-            // in-memory lookaside structure.
-            let Some(manifest) = load_manifest(&self.storage, collection_id).await? else {
-                tracing::warn!("{collection_id} has no manifest; this may mean it was deleted");
-                continue;
-            };
             let cursor = load_cursor(&self.storage, collection_id).await?;
             // NOTE(rescrv):  There are two spreads that we have.
             // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
             // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
             // data that needs to be compacted.
-            rollup.witness_manifest_and_cursor(&manifest, cursor.as_ref());
+            rollup.witness_cursor(cursor.as_ref());
             if !rollup.is_empty() {
                 rollups.insert(collection_id, rollup);
             }
@@ -1075,6 +1111,17 @@ impl LogServer {
                     Status::new(err.code().into(), err.to_string())
                 }
             })?;
+            if let Some(cache) = self.cache.as_ref() {
+                let cache_key = cache_key_for_manifest(collection_id);
+                if let Some(manifest) = log.manifest() {
+                    if let Ok(manifest_bytes) = serde_json::to_vec(&manifest) {
+                        let cache_value = CachedBytes {
+                            bytes: manifest_bytes,
+                        };
+                        cache.insert(cache_key, cache_value).await;
+                    }
+                }
+            }
             Ok(Response::new(PushLogsResponse {
                 record_count,
                 log_is_sealed: false,
@@ -1135,6 +1182,82 @@ impl LogServer {
         .await
     }
 
+    async fn read_fragments(
+        &self,
+        collection_id: CollectionUuid,
+        pull_logs: &PullLogsRequest,
+    ) -> Result<Vec<Fragment>, wal3::Error> {
+        if let Some(fragments) = self
+            .read_fragments_via_cache(collection_id, pull_logs)
+            .await
+        {
+            Ok(fragments)
+        } else {
+            self.read_fragments_via_log_reader(collection_id, pull_logs)
+                .await
+        }
+    }
+
+    async fn read_fragments_via_cache(
+        &self,
+        collection_id: CollectionUuid,
+        pull_logs: &PullLogsRequest,
+    ) -> Option<Vec<Fragment>> {
+        if let Some(cache) = self.cache.as_ref() {
+            let cache_key = cache_key_for_manifest(collection_id);
+            let cached_bytes = cache.get(&cache_key).await.ok().flatten()?;
+            let manifest: Manifest = serde_json::from_slice(&cached_bytes.bytes).ok()?;
+            let limits = Limits {
+                max_files: Some(pull_logs.batch_size as u64 + 1),
+                max_bytes: None,
+                max_records: Some(pull_logs.batch_size as u64),
+            };
+            // NOTE(rescrv):  Log records are immutable, so if a manifest includes our range we can
+            // serve it directly from the scan_from_manifest call.
+            let (manifest_start, manifest_limit) = (
+                manifest.minimum_log_position().offset() as i64,
+                manifest.maximum_log_position().offset() as i64,
+            );
+            if manifest_start <= pull_logs.start_from_offset
+                && pull_logs.start_from_offset + pull_logs.batch_size as i64 <= manifest_limit
+            {
+                LogReader::scan_from_manifest(
+                    &manifest,
+                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                    limits,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    async fn read_fragments_via_log_reader(
+        &self,
+        collection_id: CollectionUuid,
+        pull_logs: &PullLogsRequest,
+    ) -> Result<Vec<Fragment>, wal3::Error> {
+        let prefix = storage_prefix_for_log(collection_id);
+        let log_reader = LogReader::new(
+            self.config.reader.clone(),
+            Arc::clone(&self.storage),
+            prefix,
+        );
+        let limits = Limits {
+            max_files: Some(pull_logs.batch_size as u64 + 1),
+            max_bytes: None,
+            max_records: Some(pull_logs.batch_size as u64),
+        };
+        log_reader
+            .scan(
+                LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                limits,
+            )
+            .await
+    }
+
     async fn pull_logs(
         &self,
         request: Request<PullLogsRequest>,
@@ -1151,24 +1274,7 @@ impl LogServer {
                 start_from_offset = pull_logs.start_from_offset,
                 batch_size = pull_logs.batch_size,
             );
-            let prefix = storage_prefix_for_log(collection_id);
-            let log_reader = LogReader::new(
-                self.config.reader.clone(),
-                Arc::clone(&self.storage),
-                prefix,
-            );
-            let limits = Limits {
-                max_files: Some(pull_logs.batch_size as u64 + 1),
-                max_bytes: None,
-                max_records: Some(pull_logs.batch_size as u64),
-            };
-            let fragments = match log_reader
-                .scan(
-                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
-                    limits,
-                )
-                .await
-            {
+            let fragments = match self.read_fragments(collection_id, &pull_logs).await {
                 Ok(fragments) => fragments,
                 Err(wal3::Error::UninitializedLog) => {
                     return self.forward_pull_logs(Request::new(pull_logs)).await;
@@ -1180,16 +1286,19 @@ impl LogServer {
             let futures = fragments
                 .iter()
                 .map(|fragment| async {
-                    let cache_key = format!("{collection_id}::{}", fragment.path);
+                    let prefix = storage_prefix_for_log(collection_id);
                     if let Some(cache) = self.cache.as_ref() {
+                        let cache_key = format!("{collection_id}::{}", fragment.path);
                         let cache_span = tracing::info_span!("cache get");
                         if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
                         {
                             return Ok(Arc::new(answer.bytes));
                         }
                         let fetch_span = tracing::info_span!("fragment fetch");
-                        let answer = log_reader.fetch(fragment).instrument(fetch_span).await?;
-                        let cache_value = CachedParquetFragment {
+                        let answer = LogReader::stateless_fetch(&self.storage, &prefix, fragment)
+                            .instrument(fetch_span)
+                            .await?;
+                        let cache_value = CachedBytes {
                             bytes: Clone::clone(&*answer),
                         };
                         let insert_span = tracing::info_span!("cache insert");
@@ -1200,7 +1309,9 @@ impl LogServer {
                         Ok(answer)
                     } else {
                         let fetch_span = tracing::info_span!("fragment fetch");
-                        log_reader.fetch(fragment).instrument(fetch_span).await
+                        LogReader::stateless_fetch(&self.storage, &prefix, fragment)
+                            .instrument(fetch_span)
+                            .await
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1313,7 +1424,7 @@ impl LogServer {
             );
             // This is the next record to insert, so we'll have to adjust downwards.
             let max_offset = log_reader.maximum_log_position().await.map_err(|err| {
-                Status::new(err.code().into(), format!("Failed to copy log: {}", err))
+                Status::new(err.code().into(), format!("Failed to read copied log: {}", err))
             })?;
             if max_offset < offset {
                 return Err(Status::new(
@@ -1321,7 +1432,14 @@ impl LogServer {
                     format!("max_offset={:?} < offset={:?}", max_offset, offset),
                 ));
             }
-            tracing::event!(Level::INFO, compaction_offset =? offset.offset(), enumeration_offset =? (max_offset - 1u64).offset());
+            if offset != max_offset{
+                let mark_dirty = MarkDirty {
+                    collection_id: target_collection_id,
+                    dirty_log: Arc::clone(&self.dirty_log),
+                };
+                let _ = mark_dirty.mark_dirty(offset, (max_offset - offset) as usize).await;
+            }
+            tracing::event!(Level::INFO, compaction_offset =? offset.offset() - 1, enumeration_offset =? (max_offset - 1u64).offset());
             Ok(Response::new(ForkLogsResponse {
                 // NOTE: The upstream service expects the last compacted offset as compaction offset
                 compaction_offset: (offset - 1u64).offset(),
@@ -1950,11 +2068,7 @@ impl Configurable<LogServerConfig> for LogServer {
         registry: &chroma_config::registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let cache = if let Some(cache_config) = &config.cache {
-            match chroma_cache::from_config_persistent::<String, CachedParquetFragment>(
-                cache_config,
-            )
-            .await
-            {
+            match chroma_cache::from_config_persistent::<String, CachedBytes>(cache_config).await {
                 Ok(cache) => Some(cache),
                 Err(err) => {
                     tracing::error!("cache not configured: {err:?}");
@@ -2748,15 +2862,15 @@ mod tests {
     fn cached_parquet_fragment_weighted() {
         use chroma_cache::Weighted;
 
-        let fragment = CachedParquetFragment {
+        let fragment = CachedBytes {
             bytes: vec![0u8; 1024],
         };
         assert_eq!(1024, fragment.weight());
 
-        let empty_fragment = CachedParquetFragment { bytes: vec![] };
+        let empty_fragment = CachedBytes { bytes: vec![] };
         assert_eq!(0, empty_fragment.weight());
 
-        let large_fragment = CachedParquetFragment {
+        let large_fragment = CachedBytes {
             bytes: vec![0u8; 1000],
         };
         assert_eq!(1000, large_fragment.weight());
@@ -3100,7 +3214,7 @@ mod tests {
     fn cached_parquet_fragment_default() {
         use chroma_cache::Weighted;
 
-        let fragment = CachedParquetFragment::default();
+        let fragment = CachedBytes::default();
         assert_eq!(0, fragment.weight());
         assert!(fragment.bytes.is_empty());
     }
