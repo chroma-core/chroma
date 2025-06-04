@@ -71,7 +71,7 @@ export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], 
       cursor: -1,
     };
   }
-  const pageSize = 15;
+  const pageSize = 25;
   if (cursor != undefined) {
     let start = cursor - pageSize + 1;
     if (start < 0) {
@@ -86,7 +86,7 @@ export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], 
     const postModels = chromaGetResultsToPostModels(posts);
     return {
       posts: postModels.reverse(),
-      cursor: start - 1,
+      cursor: start,
     };
   } else {
     const posts = await chromaCollection.get({
@@ -101,7 +101,7 @@ export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], 
     }
     return {
       posts: postModels.slice(start).reverse(),
-      cursor: start - 1,
+      cursor: start,
     };
   }
 }

@@ -23,6 +23,7 @@ export default function FeedView() {
               setNewMessages((tweets) => [{ userPost, assistantPost }, ...tweets]);
             });
           }}
+          animate={true}
         />
       </div>
       <ul className="flex flex-col items-stretch h-full items-center">

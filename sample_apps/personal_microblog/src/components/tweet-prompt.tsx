@@ -103,9 +103,12 @@ const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: str
 interface TweetPromptProps {
   onSubmit: (input: string) => void;
   placeholder?: string;
+  animate?: boolean;
 }
 
 export default function TweetPrompt(props: TweetPromptProps) {
+  const animate = props.animate ?? true;
+
   const [glow, setGlow] = useState<boolean>(false);
   const [input, setInput] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -135,8 +138,8 @@ export default function TweetPrompt(props: TweetPromptProps) {
     }
   }
   const outlineVariants = {
-    backgroundSize: glow ? "200%" : 0,
-    y: glow ? -2 : 0,
+    backgroundSize: animate && glow ? "200%" : 0,
+    y: animate && glow ? -2 : 0,
   };
 
   const visibilityVariants = {
@@ -153,7 +156,7 @@ export default function TweetPrompt(props: TweetPromptProps) {
       transition={{
         duration: 0.3,
       }}
-      className={`cursor-text ${glow ? styles.shadow : ""}`}
+      className={`cursor-text border ${glow ? animate ? styles.shadow : " border-blue-200" : "border-zinc-100"}`}
       onClick={handleContainerClick}
     >
       <div className={`font-ui flex flex-col gap-2 relative items-end w-full bg-zinc-100 px-2 py-1.5 w-full outline-none text-zinc-800 ${DEBUG_MODE ? styles.debugLayers : ""}`}>

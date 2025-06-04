@@ -45,7 +45,7 @@ export default function PermalinkTweetView({ post, existingReplies, relatedPosts
           <div className="bg-[#fafafa] py-12 px-4">
             <MarkdownContent content={post.body} className="text-[1.15em]/5 font-body" />
           </div>
-          <TweetPrompt placeholder="Continue your thoughts..." onSubmit={handleSubmit} />
+          <TweetPrompt placeholder="Continue your thoughts..." onSubmit={handleSubmit} animate={false} />
           {replies.map((r) => (
             <div key={r.id} className="py-4 px-4 bg-[#fafafa] border-b">
               <MarkdownContent content={r.body} className={`font-body ${r.role === "assistant" ? "bold text-blue-600" : ""}`} />
