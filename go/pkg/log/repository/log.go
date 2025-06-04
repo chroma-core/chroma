@@ -153,11 +153,12 @@ func (r *LogRepository) PullRecords(ctx context.Context, collectionId string, of
 }
 
 func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID string, targetCollectionID string) (compactionOffset uint64, enumerationOffset uint64, err error) {
-	for i := 0; i < 3; i++ {
+	for retries := 0; retries < 3; retries++ {
 		compactionOffset, enumerationOffset, err = r.innerForkRecords(ctx, sourceCollectionID, targetCollectionID)
 		if err == nil {
 			return
 		}
+		time.Sleep(time.Millisecond * 100 * (1 << retries))
 	}
 	return
 }
@@ -212,7 +213,7 @@ func (r *LogRepository) innerForkRecords(ctx context.Context, sourceCollectionID
 			zap.String("collectionId", targetCollectionID),
 			zap.Int64("MinOffset", targetBounds.MinOffset),
 			zap.Int64("CompactionOffset+1", sourceBounds.RecordCompactionOffsetPosition + 1))
-		err = errors.New("concurrent updates caused fork to fail")
+		err = errors.New("concurrent updates caused fork to fail on compaction offset")
 		return
 	}
 	if targetBounds.MaxOffset > 0 && targetBounds.MaxOffset != sourceBounds.RecordEnumerationOffsetPosition {
@@ -220,7 +221,7 @@ func (r *LogRepository) innerForkRecords(ctx context.Context, sourceCollectionID
 			zap.String("collectionId", targetCollectionID),
 			zap.Int64("MaxOffset", targetBounds.MaxOffset),
 			zap.Int64("EnumerationOffset", sourceBounds.RecordEnumerationOffsetPosition))
-		err = errors.New("concurrent updates caused fork to fail")
+		err = errors.New("concurrent updates caused fork to fail on enumeration offset")
 		return
 	}
 	return
