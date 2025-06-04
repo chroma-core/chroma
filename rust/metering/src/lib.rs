@@ -21,10 +21,8 @@ pub enum MeteringError {
 }
 
 pub trait MeteringEvent: Debug + Any + Send + 'static {
-    chroma_metering_macros::generate_base_mutators! {}
+    chroma_metering_macros::generate_noop_mutators! {}
 }
-
-pub type MutatorFn = fn(&mut Box<dyn MeteringEvent>, dyn Any);
 
 #[derive(Clone, Debug)]
 pub struct DefaultReceiver;

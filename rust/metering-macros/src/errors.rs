@@ -6,10 +6,16 @@ pub enum MeteringMacrosError {
     AttributeArgsError,
     #[error("The `attribute` macro may only be used to annotate statements of the structure: `type <YourAttributeName> = <a valid type>`")]
     AttributeBodyError,
+    #[error("No attribute exists with the specified name: {0}")]
+    AttributeNotFoundError(String),
     #[error("Events must not have any arguments in their annotation.")]
     EventArgsError,
     #[error("Events must ... TODO")]
     EventBodyError,
+    #[error("Annotated field {0} must have an attribute.")]
+    AnnotatedFieldMissingAttributeError(String),
+    #[error("Annotated field {0} must have a mutator.")]
+    AnnotatedFieldMissingMutatorError(String),
     // #[error("Fields must be annotated as `#[field(attribute = \"<some_registered_attribute>\", mutator = \"<some_valid_mutator_fn>\"")]
     // FieldArgsError,
     #[error("Found attribute with identical name")]
