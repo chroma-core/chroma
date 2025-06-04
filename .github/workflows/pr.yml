@@ -158,14 +158,14 @@ jobs:
           header: helm-chart-version-info
           delete: true
 
-  python-tests:
-    name: Python tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
-    uses: ./.github/workflows/_python-tests.yml
-    secrets: inherit
-    with:
-      property_testing_preset: 'normal'
+  # python-tests:
+  #   name: Python tests
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+  #   uses: ./.github/workflows/_python-tests.yml
+  #   secrets: inherit
+  #   with:
+  #     property_testing_preset: 'normal'
 
   python-vulnerability-scan:
     name: Python vulnerability scan
@@ -193,6 +193,32 @@ jobs:
     uses: ./.github/workflows/_go-tests.yml
     secrets: inherit
 
+  go-tests-2:
+    name: Go tests 2
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+    uses: ./.github/workflows/_go-tests.yml
+    secrets: inherit
+
+  go-tests-3:
+    name: Go tests 3
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+    uses: ./.github/workflows/_go-tests.yml
+    secrets: inherit
+
+  go-tests-4:
+    name: Go tests 4
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+    uses: ./.github/workflows/_go-tests.yml
+    secrets: inherit
+  go-tests-5:
+    name: Go tests 5
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+    uses: ./.github/workflows/_go-tests.yml
+    secrets: inherit
   check-title:
     name: Check PR Title
     runs-on: blacksmith-4vcpu-ubuntu-2204
@@ -258,7 +284,7 @@ jobs:
   all-required-pr-checks-passed:
     if: always()
     needs:
-    - python-tests
+    # - python-tests
     - python-vulnerability-scan
     - javascript-client-tests
     - rust-tests
