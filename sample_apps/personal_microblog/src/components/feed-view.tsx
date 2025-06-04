@@ -55,38 +55,31 @@ function Tweets({ newMessages }: { newMessages: { userPost: TweetModel, assistan
   // prevent infinite loops through state change hooks changing their own state
   // `loading` acts like a mutex to prevent multiple requests being made at the same time
   // `cursor` is specific to the pagination implementation
+  const [initialLoading, setInitialLoading] = useState<boolean>(true);
   const [loading, setLoading] = useState<boolean>(false);
   const [page, setPage] = useState<number>(0);
-  const [cursor, setCursor] = useState<number>(0);
+  const [cursor, setCursor] = useState<number>(-1);
   const [hasMore, setHasMore] = useState<boolean>(true);
 
-  // Initial load
   useEffect(() => {
-    const loadInitialPosts = async () => {
-      try {
-        const { posts, cursor } = await fetch(`/api/post`).then(async (res) => await res.json());
-        setCursor(cursor);
-        setOldMessages(posts);
-        setHasMore(cursor > -1);
-      } catch (error) {
-        console.error('Error loading initial posts:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadInitialPosts();
-  }, []);
-
-  useEffect(() => {
-    if (cursor === -1 || loading || !hasMore) return;
+    if (loading || !hasMore) return;
 
     const loadMorePosts = async () => {
       setLoading(true);
       try {
-        const { posts, newCursor } = await fetch(`/api/post?page=${cursor}`).then(res => res.json());
+        let url;
+        if (initialLoading) {
+          url = "/api/post";
+          setInitialLoading(false);
+        } else {
+          url = `/api/post?cursor=${cursor}`;
+        }
+        const { posts, cursor: newCursor } = await fetch(url).then(res => res.json()).catch(console.error);
+        if (newCursor == undefined) {
+          throw new Error("newCursor is undefined");
+        }
         setCursor(newCursor);
-        setHasMore(newCursor > 0);
+        setHasMore(newCursor > -1);
         setOldMessages(prev => [...prev, ...posts]);
       } catch (error) {
         console.error('Error loading more posts:', error);

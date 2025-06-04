@@ -60,19 +60,33 @@ const chromaCollection = await chromaClient.getOrCreateCollection({
 
 const llmModel = openai('gpt-4-turbo')
 
+/**
+ * Returns the posts from `cursor` to `cursor - pageSize`, inclusive
+ * The new cursor is `cursor - pageSize - 1`
+ */
 export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], cursor: number }> {
+  if (cursor != undefined && cursor <= -1) {
+    return {
+      posts: [],
+      cursor: -1,
+    };
+  }
   const pageSize = 15;
   if (cursor != undefined) {
-    const adjustedCursor = Math.max(cursor - pageSize, 0);
+    let start = cursor - pageSize + 1;
+    if (start < 0) {
+      start = 0;
+    }
     const posts = await chromaCollection.get({
       where: { "role": "user" },
       include: ["documents", "metadatas"],
-      limit: pageSize,
-      offset: adjustedCursor,
+      limit: cursor - start,
+      offset: start,
     });
+    const postModels = chromaGetResultsToPostModels(posts);
     return {
-      posts: chromaGetResultsToPostModels(posts).reverse(),
-      cursor: adjustedCursor - 1,
+      posts: postModels.reverse(),
+      cursor: start - 1,
     };
   } else {
     const posts = await chromaCollection.get({
@@ -81,10 +95,13 @@ export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], 
     });
     const postModels = chromaGetResultsToPostModels(posts);
     const count = postModels.length;
-    const adjustedCursor = Math.max(count - pageSize, 0);
+    let start = count - pageSize + 1;
+    if (start < 0) {
+      start = 0;
+    }
     return {
-      posts: postModels.slice(adjustedCursor, count).reverse(),
-      cursor: adjustedCursor - 1,
+      posts: postModels.slice(start).reverse(),
+      cursor: start - 1,
     };
   }
 }
