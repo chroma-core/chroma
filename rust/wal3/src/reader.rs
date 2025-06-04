@@ -164,8 +164,22 @@ impl LogReader {
         };
         // If no there is no fragment with a start earlier than the from LogPosition, that means
         // we'd need to load snapshots.  Since this is an in-memory only function, we return "None"
-        // to indicate that it's not satisfiable.
-        if !manifest.fragments.iter().any(|f| f.start <= from) {
+        // to indicate that it's not satisfiable and do no I/O.
+        if !manifest
+            .fragments
+            .iter()
+            .any(|f| f.start <= log_position_range.0)
+        {
+            return None;
+        }
+        // If no there is no fragment with a limit later than the upper-bound LogPosition, that
+        // means we have a stale manifest.  Since this is an in-memory only function, we return
+        // "None" to indicate that it's not satisfiable and do no I/O.
+        if !manifest
+            .fragments
+            .iter()
+            .any(|f| f.limit >= log_position_range.1)
+        {
             return None;
         }
         let fragments = manifest

@@ -1207,39 +1207,16 @@ impl LogServer {
             let cache_key = cache_key_for_manifest(collection_id);
             let cached_bytes = cache.get(&cache_key).await.ok().flatten()?;
             let manifest: Manifest = serde_json::from_slice(&cached_bytes.bytes).ok()?;
-            if pull_logs
-                .start_from_offset
-                .saturating_add(pull_logs.batch_size.into())
-                == i64::MAX
-                || manifest.maximum_log_position()
-                    < LogPosition::from_offset(
-                        pull_logs.start_from_offset as u64 + pull_logs.batch_size as u64,
-                    )
-            {
-                return None;
-            }
             let limits = Limits {
                 max_files: Some(pull_logs.batch_size as u64 + 1),
                 max_bytes: None,
                 max_records: Some(pull_logs.batch_size as u64),
             };
-            // NOTE(rescrv):  Log records are immutable, so if a manifest includes our range we can
-            // serve it directly from the scan_from_manifest call.
-            let (manifest_start, manifest_limit) = (
-                manifest.minimum_log_position().offset() as i64,
-                manifest.maximum_log_position().offset() as i64,
-            );
-            if manifest_start <= pull_logs.start_from_offset
-                && pull_logs.start_from_offset + pull_logs.batch_size as i64 <= manifest_limit
-            {
-                LogReader::scan_from_manifest(
-                    &manifest,
-                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
-                    limits,
-                )
-            } else {
-                None
-            }
+            LogReader::scan_from_manifest(
+                &manifest,
+                LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                limits,
+            )
         } else {
             None
         }
