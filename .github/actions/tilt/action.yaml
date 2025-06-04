@@ -3,12 +3,15 @@ description: "This action starts Tilt services"
 runs:
   using: "composite"
   steps:
+    # - name: Start minikube
+    #   uses: medyagh/setup-minikube@latest
+    #   with:
+    #     cpus: max
+    #     memory: max
+    #     driver: none
     - name: Start minikube
-      uses: medyagh/setup-minikube@latest
-      with:
-        cpus: max
-        memory: max
-        driver: none
+      shell: bash
+      run: bash .github/actions/tilt/setup_minikube.sh
     - name: Install Tilt, bake images, pre-pull external images
       shell: bash
       env:
