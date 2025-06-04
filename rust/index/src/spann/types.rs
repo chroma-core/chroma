@@ -535,9 +535,8 @@ impl SpannIndexWriter {
     async fn fork_postings_list(
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
+        prefix_path: String,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
-        // TODO(Sanket-temp): Change this suitably
-        let prefix_path = String::from("");
         let mut bf_options = BlockfileWriterOptions::new(prefix_path);
         bf_options = bf_options.unordered_mutations();
         bf_options = bf_options.fork(*blockfile_id);
@@ -559,9 +558,8 @@ impl SpannIndexWriter {
 
     async fn create_posting_list(
         blockfile_provider: &BlockfileProvider,
+        prefix_path: String,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
-        // TODO(Sanket-temp): Change this suitably
-        let prefix_path = String::from("");
         let mut bf_options = BlockfileWriterOptions::new(prefix_path);
         bf_options = bf_options.unordered_mutations();
         match blockfile_provider
@@ -584,6 +582,7 @@ impl SpannIndexWriter {
         posting_list_id: Option<&Uuid>,
         max_head_id_bf_id: Option<&Uuid>,
         collection_id: &CollectionUuid,
+        prefix_path: String,
         dimensionality: usize,
         blockfile_provider: &BlockfileProvider,
         params: InternalSpannConfiguration,
@@ -629,9 +628,10 @@ impl SpannIndexWriter {
         // Fork the posting list writer.
         let posting_list_writer = match posting_list_id {
             Some(posting_list_id) => {
-                Self::fork_postings_list(posting_list_id, blockfile_provider).await?
+                Self::fork_postings_list(posting_list_id, blockfile_provider, prefix_path.clone())
+                    .await?
             }
-            None => Self::create_posting_list(blockfile_provider).await?,
+            None => Self::create_posting_list(blockfile_provider, prefix_path).await?,
         };
 
         let max_head_id = match max_head_id_bf_id {
@@ -2753,6 +2753,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
+        let prefix_path = String::from("block/");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2760,6 +2761,7 @@ mod tests {
             None,
             None,
             &collection_id,
+            prefix_path,
             dimensionality,
             &blockfile_provider,
             params,
@@ -2965,6 +2967,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
+        let prefix_path = String::from("block/");
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2972,6 +2975,7 @@ mod tests {
             None,
             None,
             &collection_id,
+            prefix_path,
             dimensionality,
             &blockfile_provider,
             params,
@@ -3212,6 +3216,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
+        let prefix_path = String::from("block/");
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3219,6 +3224,7 @@ mod tests {
             None,
             None,
             &collection_id,
+            prefix_path,
             dimensionality,
             &blockfile_provider,
             params,
@@ -3427,6 +3433,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
+        let prefix_path = String::from("block/");
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3434,6 +3441,7 @@ mod tests {
             None,
             None,
             &collection_id,
+            prefix_path,
             dimensionality,
             &blockfile_provider,
             params,
@@ -3685,6 +3693,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
+        let prefix_path = String::from("block/");
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3692,6 +3701,7 @@ mod tests {
             None,
             None,
             &collection_id,
+            prefix_path,
             dimensionality,
             &blockfile_provider,
             params,
@@ -3980,6 +3990,7 @@ mod tests {
             )
             .await
             .expect("Error converting config to gc context");
+            let prefix_path = String::from("block/");
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 None,
@@ -3987,6 +3998,7 @@ mod tests {
                 None,
                 None,
                 &collection_id,
+                prefix_path,
                 dimensionality,
                 &blockfile_provider,
                 params,
@@ -4091,6 +4103,7 @@ mod tests {
             )
             .await
             .expect("Error converting config to gc context");
+            let prefix_path = String::from("block/");
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 None,
@@ -4098,6 +4111,7 @@ mod tests {
                 None,
                 None,
                 &collection_id,
+                prefix_path,
                 dimensionality,
                 &blockfile_provider,
                 params,
@@ -4226,6 +4240,7 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let prefix_path = String::from("block/");
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4233,6 +4248,7 @@ mod tests {
                     pl_path.as_ref(),
                     max_bf_id_path.as_ref(),
                     &collection_id,
+                    prefix_path,
                     dimensionality,
                     &blockfile_provider,
                     params.clone(),
@@ -4364,6 +4380,7 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let prefix_path = String::from("block/");
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4371,6 +4388,7 @@ mod tests {
                     pl_path.as_ref(),
                     max_bf_id_path.as_ref(),
                     &collection_id,
+                    prefix_path,
                     dimensionality,
                     &blockfile_provider,
                     params.clone(),
@@ -4523,6 +4541,7 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let prefix_path = String::from("block/");
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4530,6 +4549,7 @@ mod tests {
                     pl_path.as_ref(),
                     max_bf_id_path.as_ref(),
                     &collection_id,
+                    prefix_path,
                     dimensionality,
                     &blockfile_provider,
                     params.clone(),
@@ -4638,6 +4658,7 @@ mod tests {
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let prefix_path = String::from("block/");
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 hnsw_path.as_ref(),
@@ -4645,6 +4666,7 @@ mod tests {
                 pl_path.as_ref(),
                 max_bf_id_path.as_ref(),
                 &collection_id,
+                prefix_path,
                 dimensionality,
                 &blockfile_provider,
                 params.clone(),
@@ -4756,6 +4778,7 @@ mod tests {
                 count += 1;
             }
             assert_eq!(results.len(), count);
+            let prefix_path = String::from("block/");
             // After GC, it should return the same result.
             let mut writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
@@ -4764,6 +4787,7 @@ mod tests {
                 pl_path.as_ref(),
                 max_bf_id_path.as_ref(),
                 &collection_id,
+                prefix_path,
                 dimensionality,
                 &blockfile_provider,
                 params,

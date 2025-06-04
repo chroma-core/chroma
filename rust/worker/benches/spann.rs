@@ -90,6 +90,7 @@ fn add_to_index_and_get_reader<'a>(
         )
         .await
         .expect("Error converting config to gc context");
+        let prefix_path = String::from("block/");
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -97,6 +98,7 @@ fn add_to_index_and_get_reader<'a>(
             None,
             None,
             &collection_id,
+            prefix_path,
             dimensionality,
             &blockfile_provider,
             params.clone(),
