@@ -96,8 +96,8 @@ func (suite *TenantDbTestSuite) TestTenantDb_GetTenantsLastCompactionTime() {
 	}
 }
 
-func (suite *TenantDbTestSuite) TestTenantDb_SetTenantStaticName() {
-	tenantId := "testSetTenantStaticName"
+func (suite *TenantDbTestSuite) TestTenantDb_SetTenantResourceName() {
+	tenantId := "testSetTenantResourceName"
 	err := suite.Db.Insert(&dbmodel.Tenant{
 		ID: tenantId,
 	})
@@ -105,15 +105,15 @@ func (suite *TenantDbTestSuite) TestTenantDb_SetTenantStaticName() {
 	tenant, err := suite.Db.GetTenants(tenantId)
 	suite.Require().NoError(err)
 	suite.Require().Len(tenant, 1)
-	suite.Assert().Nil(tenant[0].StaticName)
+	suite.Assert().Nil(tenant[0].ResourceName)
 
-	err = suite.Db.SetTenantStaticName(tenantId, "staticName")
+	err = suite.Db.SetTenantResourceName(tenantId, "resourceName")
 	suite.Require().NoError(err)
 
 	tenant, err = suite.Db.GetTenants(tenantId)
 	suite.Require().NoError(err)
 	suite.Require().Len(tenant, 1)
-	suite.Require().Equal("staticName", *tenant[0].StaticName)
+	suite.Require().Equal("resourceName", *tenant[0].ResourceName)
 
 	suite.db.Delete(&dbmodel.Tenant{}, "id = ?", tenantId)
 }

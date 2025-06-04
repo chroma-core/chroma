@@ -167,12 +167,12 @@ func TestConvertCollectionToModel(t *testing.T) {
 }
 
 func TestConvertTenantToModel(t *testing.T) {
-	staticName := "staticName"
+	resourceName := "resourceName"
 	tenant := &dbmodel.Tenant{
-		ID:         "tenantID",
-		StaticName: &staticName,
+		ID:           "tenantID",
+		ResourceName: &resourceName,
 	}
 	modelTenant := convertTenantToModel(tenant)
 	assert.Equal(t, "tenantID", modelTenant.Name)
-	assert.Equal(t, "staticName", modelTenant.StaticName)
+	assert.Equal(t, "resourceName", modelTenant.ResourceName)
 }

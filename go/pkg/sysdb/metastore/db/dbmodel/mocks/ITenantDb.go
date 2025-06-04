@@ -138,17 +138,17 @@ func (_m *ITenantDb) Insert(in *dbmodel.Tenant) error {
 	return r0
 }
 
-// SetTenantStaticName provides a mock function with given fields: tenantID, staticName
-func (_m *ITenantDb) SetTenantStaticName(tenantID string, staticName string) error {
-	ret := _m.Called(tenantID, staticName)
+// SetTenantResourceName provides a mock function with given fields: tenantID, resourceName
+func (_m *ITenantDb) SetTenantResourceName(tenantID string, resourceName string) error {
+	ret := _m.Called(tenantID, resourceName)
 
 	if len(ret) == 0 {
-		panic("no return value specified for SetTenantStaticName")
+		panic("no return value specified for SetTenantResourceName")
 	}
 
 	var r0 error
 	if rf, ok := ret.Get(0).(func(string, string) error); ok {
-		r0 = rf(tenantID, staticName)
+		r0 = rf(tenantID, resourceName)
 	} else {
 		r0 = ret.Error(0)
 	}
