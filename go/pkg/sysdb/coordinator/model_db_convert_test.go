@@ -174,5 +174,5 @@ func TestConvertTenantToModel(t *testing.T) {
 	}
 	modelTenant := convertTenantToModel(tenant)
 	assert.Equal(t, "tenantID", modelTenant.Name)
-	assert.Equal(t, "resourceName", modelTenant.ResourceName)
+	assert.Equal(t, "resourceName", *modelTenant.ResourceName)
 }
