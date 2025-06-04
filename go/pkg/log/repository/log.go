@@ -207,7 +207,7 @@ func (r *LogRepository) innerForkRecords(ctx context.Context, sourceCollectionID
 		trace_log.Error("Error in getting minimax for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
 		return
 	}
-	if targetBounds.MinOffset != sourceBounds.RecordCompactionOffsetPosition + 1 {
+	if targetBounds.MinOffset > 0 && targetBounds.MinOffset != sourceBounds.RecordCompactionOffsetPosition + 1 {
 		trace_log.Error("Race condition: Someone adjusted records during our transaction",
 			zap.String("collectionId", targetCollectionID),
 			zap.Int64("MinOffset", targetBounds.MinOffset),
@@ -215,7 +215,7 @@ func (r *LogRepository) innerForkRecords(ctx context.Context, sourceCollectionID
 		err = errors.New("concurrent updates caused fork to fail")
 		return
 	}
-	if targetBounds.MaxOffset != sourceBounds.RecordEnumerationOffsetPosition {
+	if targetBounds.MaxOffset > 0 && targetBounds.MaxOffset != sourceBounds.RecordEnumerationOffsetPosition {
 		trace_log.Error("Race condition: Someone adjusted records during our transaction",
 			zap.String("collectionId", targetCollectionID),
 			zap.Int64("MaxOffset", targetBounds.MaxOffset),
