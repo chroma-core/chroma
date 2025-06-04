@@ -9,7 +9,7 @@ runs:
   steps:
     - name: Cache Rust toolchain
       id: cache-rustup
-      uses: useblacksmith/cache@v5
+      uses: actions/cache@v4
       if: ${{ runner.os != 'windows' }}
       with:
         path: ~/.rustup
@@ -18,7 +18,7 @@ runs:
       if: ${{ steps.cache-rustup.outputs.cache-hit != 'true' }}
       uses: actions-rust-lang/setup-rust-toolchain@v1
       with:
-        cache: false # we use Blacksmith's cache package below
+        cache: false
     - name: Set channel in rust-toolchain.toml as default
       shell: bash
       run: |
@@ -28,10 +28,6 @@ runs:
       with:
         repo-token: ${{ inputs.github-token }}
     - name: Set up cache
-      uses: useblacksmith/rust-cache@v3
-      if: ${{ runner.os != 'windows' }}
-    - name: Set up cache (Windows)
       uses: Swatinem/rust-cache@v2
-      if: ${{ runner.os == 'windows' }}
     - name: Setup Nextest
       uses: taiki-e/install-action@nextest

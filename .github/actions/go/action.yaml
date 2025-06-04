@@ -3,15 +3,7 @@ description: "This action sets up Go"
 runs:
   using: "composite"
   steps:
-    - uses: useblacksmith/setup-go@v6
-      # NOTE(hammadb) Blacksmith does not support windows, so we use the official action for windows and
-      # skip it on other platforms
-      if: runner.os != 'Windows'
-      with:
-        cache-dependency-path: go/go.sum
-
     - uses: actions/setup-go@v5
-      if: runner.os == 'Windows'
       with:
         cache-dependency-path: go/go.sum
 
