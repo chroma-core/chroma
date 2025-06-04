@@ -27,8 +27,9 @@ use crate::{
         PlGarbageCollectionPolicyConfig, RandomSamplePolicyConfig,
     },
     hnsw_provider::{
-        HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderFlushError,
-        HnswIndexProviderForkError, HnswIndexProviderOpenError, HnswIndexRef,
+        HnswIndexFlusher, HnswIndexProvider, HnswIndexProviderCreateError,
+        HnswIndexProviderFlushError, HnswIndexProviderForkError, HnswIndexProviderOpenError,
+        HnswIndexRef,
     },
     spann::utils::cluster,
     Index, IndexUuid,
@@ -444,6 +445,7 @@ impl SpannIndexWriter {
         distance_function: DistanceFunction,
         dimensionality: usize,
         ef_search: usize,
+        prefix_path: &str,
     ) -> Result<HnswIndexRef, SpannIndexWriterError> {
         match hnsw_provider
             .fork(
@@ -452,6 +454,7 @@ impl SpannIndexWriter {
                 dimensionality as i32,
                 distance_function,
                 ef_search,
+                prefix_path,
             )
             .await
         {
@@ -468,6 +471,7 @@ impl SpannIndexWriter {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn create_hnsw_index(
         hnsw_provider: &HnswIndexProvider,
         collection_id: &CollectionUuid,
@@ -476,6 +480,7 @@ impl SpannIndexWriter {
         m: usize,
         ef_construction: usize,
         ef_search: usize,
+        prefix_path: &str,
     ) -> Result<HnswIndexRef, SpannIndexWriterError> {
         match hnsw_provider
             .create(
@@ -485,6 +490,7 @@ impl SpannIndexWriter {
                 ef_search,
                 dimensionality as i32,
                 distance_function,
+                prefix_path,
             )
             .await
         {
@@ -535,9 +541,9 @@ impl SpannIndexWriter {
     async fn fork_postings_list(
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
-        prefix_path: String,
+        prefix_path: &str,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
-        let mut bf_options = BlockfileWriterOptions::new(prefix_path);
+        let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string());
         bf_options = bf_options.unordered_mutations();
         bf_options = bf_options.fork(*blockfile_id);
         match blockfile_provider
@@ -558,9 +564,9 @@ impl SpannIndexWriter {
 
     async fn create_posting_list(
         blockfile_provider: &BlockfileProvider,
-        prefix_path: String,
+        prefix_path: &str,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
-        let mut bf_options = BlockfileWriterOptions::new(prefix_path);
+        let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string());
         bf_options = bf_options.unordered_mutations();
         match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)
@@ -582,7 +588,7 @@ impl SpannIndexWriter {
         posting_list_id: Option<&Uuid>,
         max_head_id_bf_id: Option<&Uuid>,
         collection_id: &CollectionUuid,
-        prefix_path: String,
+        prefix_path: &str,
         dimensionality: usize,
         blockfile_provider: &BlockfileProvider,
         params: InternalSpannConfiguration,
@@ -600,6 +606,7 @@ impl SpannIndexWriter {
                     distance_function.clone(),
                     dimensionality,
                     params.ef_search,
+                    prefix_path,
                 )
                 .await?
             }
@@ -612,6 +619,7 @@ impl SpannIndexWriter {
                     params.max_neighbors,
                     params.ef_construction,
                     params.ef_search,
+                    prefix_path,
                 )
                 .await?
             }
@@ -628,8 +636,7 @@ impl SpannIndexWriter {
         // Fork the posting list writer.
         let posting_list_writer = match posting_list_id {
             Some(posting_list_id) => {
-                Self::fork_postings_list(posting_list_id, blockfile_provider, prefix_path.clone())
-                    .await?
+                Self::fork_postings_list(posting_list_id, blockfile_provider, prefix_path).await?
             }
             None => Self::create_posting_list(blockfile_provider, prefix_path).await?,
         };
@@ -781,6 +788,7 @@ impl SpannIndexWriter {
         let allowed_ids = vec![];
         let disallowed_ids = vec![];
         let (nearest_ids, nearest_distances) = read_guard
+            .hnsw_index
             .query(head_embedding, k, &allowed_ids, &disallowed_ids)
             .map_err(|e| {
                 tracing::error!("Error querying hnsw for {:?}: {:?}", head_embedding, e);
@@ -790,6 +798,7 @@ impl SpannIndexWriter {
         // TODO(Sanket): Don't consider heads that are farther away than the closest.
         for id in nearest_ids.iter() {
             let emb = read_guard
+                .hnsw_index
                 .get(*id)
                 .map_err(|e| {
                     tracing::error!(
@@ -1310,20 +1319,24 @@ impl SpannIndexWriter {
                         new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
                         let mut hnsw_write_guard = self.hnsw_index.inner.write();
-                        let hnsw_len = hnsw_write_guard.len_with_deleted();
-                        let hnsw_capacity = hnsw_write_guard.capacity();
+                        let hnsw_len = hnsw_write_guard.hnsw_index.len_with_deleted();
+                        let hnsw_capacity = hnsw_write_guard.hnsw_index.capacity();
                         if hnsw_len + 1 > hnsw_capacity {
                             tracing::info!("Resizing hnsw index to {}", hnsw_capacity * 2);
-                            hnsw_write_guard.resize(hnsw_capacity * 2).map_err(|e| {
-                                tracing::error!(
-                                    "Error resizing hnsw index during append to {}: {}",
-                                    hnsw_capacity * 2,
-                                    e
-                                );
-                                SpannIndexWriterError::HnswIndexResizeError(e)
-                            })?;
+                            hnsw_write_guard
+                                .hnsw_index
+                                .resize(hnsw_capacity * 2)
+                                .map_err(|e| {
+                                    tracing::error!(
+                                        "Error resizing hnsw index during append to {}: {}",
+                                        hnsw_capacity * 2,
+                                        e
+                                    );
+                                    SpannIndexWriterError::HnswIndexResizeError(e)
+                                })?;
                         }
                         hnsw_write_guard
+                            .hnsw_index
                             .add(next_id as usize, &clustering_output.cluster_centers[k])
                             .map_err(|e| {
                                 tracing::error!(
@@ -1347,10 +1360,17 @@ impl SpannIndexWriter {
                     );
                     // Delete the old head
                     let hnsw_write_guard = self.hnsw_index.inner.write();
-                    hnsw_write_guard.delete(head_id as usize).map_err(|e| {
-                        tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
-                        SpannIndexWriterError::HnswIndexMutateError(e)
-                    })?;
+                    hnsw_write_guard
+                        .hnsw_index
+                        .delete(head_id as usize)
+                        .map_err(|e| {
+                            tracing::error!(
+                                "Error deleting head {} from hnsw index: {}",
+                                head_id,
+                                e
+                            );
+                            SpannIndexWriterError::HnswIndexMutateError(e)
+                        })?;
                     self.stats
                         .num_heads_deleted
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1423,23 +1443,29 @@ impl SpannIndexWriter {
             // Next add to hnsw.
             {
                 let mut write_guard = self.hnsw_index.inner.write();
-                let hnsw_len = write_guard.len_with_deleted();
-                let hnsw_capacity = write_guard.capacity();
+                let hnsw_len = write_guard.hnsw_index.len_with_deleted();
+                let hnsw_capacity = write_guard.hnsw_index.capacity();
                 if hnsw_len + 1 > hnsw_capacity {
                     tracing::info!("Resizing hnsw index to {}", hnsw_capacity * 2);
-                    write_guard.resize(hnsw_capacity * 2).map_err(|e| {
-                        tracing::error!(
-                            "Error resizing hnsw index during append to {}: {}",
-                            hnsw_capacity * 2,
-                            e
-                        );
-                        SpannIndexWriterError::HnswIndexResizeError(e)
-                    })?;
+                    write_guard
+                        .hnsw_index
+                        .resize(hnsw_capacity * 2)
+                        .map_err(|e| {
+                            tracing::error!(
+                                "Error resizing hnsw index during append to {}: {}",
+                                hnsw_capacity * 2,
+                                e
+                            );
+                            SpannIndexWriterError::HnswIndexResizeError(e)
+                        })?;
                 }
-                write_guard.add(next_id as usize, embeddings).map_err(|e| {
-                    tracing::error!("Error adding new head {} to hnsw index: {}", next_id, e);
-                    SpannIndexWriterError::HnswIndexMutateError(e)
-                })?;
+                write_guard
+                    .hnsw_index
+                    .add(next_id as usize, embeddings)
+                    .map_err(|e| {
+                        tracing::error!("Error adding new head {} to hnsw index: {}", next_id, e);
+                        SpannIndexWriterError::HnswIndexMutateError(e)
+                    })?;
                 self.stats
                     .num_heads_created
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1526,7 +1552,7 @@ impl SpannIndexWriter {
 
     async fn is_head_deleted(&self, head_id: usize) -> Result<bool, SpannIndexWriterError> {
         let hnsw_read_guard = self.hnsw_index.inner.read();
-        let hnsw_emb = hnsw_read_guard.get(head_id);
+        let hnsw_emb = hnsw_read_guard.hnsw_index.get(head_id);
         // TODO(Sanket): Check for exact error.
         // TODO(Sanket): We should get this information from hnswlib and not rely on error.
         if hnsw_emb.is_err() || hnsw_emb.unwrap().is_none() {
@@ -1669,7 +1695,7 @@ impl SpannIndexWriter {
                 tracing::info!("Posting list of {} is empty. Deleting from hnsw", head_id);
                 // Delete from hnsw.
                 let hnsw_write_guard = self.hnsw_index.inner.write();
-                hnsw_write_guard.delete(head_id).map_err(|e| {
+                hnsw_write_guard.hnsw_index.delete(head_id).map_err(|e| {
                     tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
                     SpannIndexWriterError::HnswIndexMutateError(e)
                 })?;
@@ -1752,7 +1778,7 @@ impl SpannIndexWriter {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     // Delete from hnsw.
                     let hnsw_write_guard = self.hnsw_index.inner.write();
-                    hnsw_write_guard.delete(head_id).map_err(|e| {
+                    hnsw_write_guard.hnsw_index.delete(head_id).map_err(|e| {
                         tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
                         SpannIndexWriterError::HnswIndexMutateError(e)
                     })?;
@@ -1776,14 +1802,17 @@ impl SpannIndexWriter {
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     // Delete from hnsw.
                     let hnsw_write_guard = self.hnsw_index.inner.write();
-                    hnsw_write_guard.delete(nearest_head_id).map_err(|e| {
-                        tracing::error!(
-                            "Error deleting head {} from hnsw index: {}",
-                            nearest_head_id,
-                            e
-                        );
-                        SpannIndexWriterError::HnswIndexMutateError(e)
-                    })?;
+                    hnsw_write_guard
+                        .hnsw_index
+                        .delete(nearest_head_id)
+                        .map_err(|e| {
+                            tracing::error!(
+                                "Error deleting head {} from hnsw index: {}",
+                                nearest_head_id,
+                                e
+                            );
+                            SpannIndexWriterError::HnswIndexMutateError(e)
+                        })?;
                     self.stats
                         .num_heads_deleted
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1854,7 +1883,10 @@ impl SpannIndexWriter {
     pub fn eligible_to_gc(&mut self, threshold: f32) -> bool {
         let (len_with_deleted, len_without_deleted) = {
             let hnsw_read_guard = self.hnsw_index.inner.read();
-            (hnsw_read_guard.len_with_deleted(), hnsw_read_guard.len())
+            (
+                hnsw_read_guard.hnsw_index.len_with_deleted(),
+                hnsw_read_guard.hnsw_index.len(),
+            )
         };
         if (len_with_deleted as f32) < ((1.0 + (threshold / 100.0)) * (len_without_deleted as f32))
         {
@@ -1868,6 +1900,10 @@ impl SpannIndexWriter {
 
     pub async fn garbage_collect_heads(&mut self) -> Result<(), SpannIndexWriterError> {
         tracing::info!("Garbage collecting all the heads");
+        let prefix_path = {
+            let hnsw_read_guard = self.hnsw_index.inner.read();
+            hnsw_read_guard.prefix_path.clone()
+        };
         // Create a new hnsw index and add elements to it.
         let clean_hnsw = self
             .hnsw_provider
@@ -1878,6 +1914,7 @@ impl SpannIndexWriter {
                 self.params.ef_search,
                 self.dimensionality as i32,
                 self.params.space.clone().into(),
+                &prefix_path,
             )
             .await
             .map_err(|e| {
@@ -1887,11 +1924,12 @@ impl SpannIndexWriter {
         {
             let hnsw_read_guard = self.hnsw_index.inner.read();
             let mut clean_hnsw_write_guard = clean_hnsw.inner.write();
-            let (non_deleted_heads, _) = hnsw_read_guard.get_all_ids().map_err(|e| {
+            let (non_deleted_heads, _) = hnsw_read_guard.hnsw_index.get_all_ids().map_err(|e| {
                 tracing::error!("Error getting all ids from hnsw index during gc: {}", e);
                 SpannIndexWriterError::HnswIndexSearchError(e)
             })?;
             clean_hnsw_write_guard
+                .hnsw_index
                 .resize(non_deleted_heads.len())
                 .map_err(|e| {
                     tracing::error!(
@@ -1903,6 +1941,7 @@ impl SpannIndexWriter {
                 })?;
             for head in non_deleted_heads {
                 let head_embedding = hnsw_read_guard
+                    .hnsw_index
                     .get(head)
                     .map_err(|e| {
                         tracing::error!(
@@ -1913,11 +1952,12 @@ impl SpannIndexWriter {
                         SpannIndexWriterError::HnswIndexSearchError(e)
                     })?
                     .ok_or(SpannIndexWriterError::HeadNotFound)?;
-                let hnsw_len = clean_hnsw_write_guard.len_with_deleted();
-                let hnsw_capacity = clean_hnsw_write_guard.capacity();
+                let hnsw_len = clean_hnsw_write_guard.hnsw_index.len_with_deleted();
+                let hnsw_capacity = clean_hnsw_write_guard.hnsw_index.capacity();
                 if hnsw_len + 1 > hnsw_capacity {
                     tracing::info!("Resizing hnsw index to {}", hnsw_capacity * 2);
                     clean_hnsw_write_guard
+                        .hnsw_index
                         .resize(hnsw_capacity * 2)
                         .map_err(|e| {
                             tracing::error!(
@@ -1929,6 +1969,7 @@ impl SpannIndexWriter {
                         })?;
                 }
                 clean_hnsw_write_guard
+                    .hnsw_index
                     .add(head, &head_embedding)
                     .map_err(|e| {
                         tracing::error!("Error adding head {} to clean hnsw index: {}", head, e);
@@ -1953,7 +1994,7 @@ impl SpannIndexWriter {
         let non_deleted_heads;
         {
             let hnsw_read_guard = self.hnsw_index.inner.read();
-            (non_deleted_heads, _) = hnsw_read_guard.get_all_ids().map_err(|e| {
+            (non_deleted_heads, _) = hnsw_read_guard.hnsw_index.get_all_ids().map_err(|e| {
                 tracing::error!("Error getting all ids from hnsw index during gc: {}", e);
                 SpannIndexWriterError::HnswIndexSearchError(e)
             })?;
@@ -1972,6 +2013,7 @@ impl SpannIndexWriter {
                 .hnsw_index
                 .inner
                 .read()
+                .hnsw_index
                 .get(*head_id)
                 .map_err(|e| {
                     tracing::error!(
@@ -2249,17 +2291,23 @@ impl SpannIndexWriter {
         tracing::info!("Committed max head id");
 
         // Hnsw.
-        let hnsw_id = {
+        let (hnsw_id, prefix_path) = {
             let stopwatch = Stopwatch::new(&self.metrics.hnsw_commit_latency, attribute);
-            let (hnsw_id, hnsw_index) = match self.cleaned_up_hnsw_index {
+            let (hnsw_id, prefix_path, hnsw_index) = match self.cleaned_up_hnsw_index {
                 Some(index) => {
                     tracing::info!("Committing cleaned up hnsw index");
-                    let index_id = index.inner.read().id;
-                    (index_id, index)
+                    let (id, prefix_path) = {
+                        let index_guard = index.inner.read();
+                        (index_guard.hnsw_index.id, index_guard.prefix_path.clone())
+                    };
+                    (id, prefix_path, index)
                 }
                 None => {
-                    let index_id = self.hnsw_index.inner.read().id;
-                    (index_id, self.hnsw_index)
+                    let (id, prefix_path) = {
+                        let index_guard = self.hnsw_index.inner.read();
+                        (index_guard.hnsw_index.id, index_guard.prefix_path.clone())
+                    };
+                    (id, prefix_path, self.hnsw_index)
                 }
             };
             self.hnsw_provider.commit(hnsw_index).map_err(|e| {
@@ -2270,15 +2318,18 @@ impl SpannIndexWriter {
                 "Committed hnsw index in {} ms",
                 stopwatch.elapsed_micros() / 1000
             );
-            hnsw_id
+            (hnsw_id, prefix_path)
         };
 
         Ok(SpannIndexFlusher {
             pl_flusher,
             versions_map_flusher,
             max_head_id_flusher,
-            hnsw_id,
-            hnsw_flusher: self.hnsw_provider,
+            hnsw_flusher: HnswIndexFlusher {
+                provider: self.hnsw_provider,
+                prefix_path,
+                index_id: hnsw_id,
+            },
             collection_id: self.collection_id,
             metrics: SpannIndexFlusherMetrics {
                 pl_flush_latency: self.metrics.pl_flush_latency.clone(),
@@ -2306,8 +2357,7 @@ pub struct SpannIndexFlusher {
     pl_flusher: BlockfileFlusher,
     versions_map_flusher: BlockfileFlusher,
     max_head_id_flusher: BlockfileFlusher,
-    hnsw_id: IndexUuid,
-    hnsw_flusher: HnswIndexProvider,
+    hnsw_flusher: HnswIndexFlusher,
     collection_id: CollectionUuid,
     metrics: SpannIndexFlusherMetrics,
 }
@@ -2326,7 +2376,7 @@ impl SpannIndexFlusher {
             pl_id: self.pl_flusher.id(),
             versions_map_id: self.versions_map_flusher.id(),
             max_head_id_id: self.max_head_id_flusher.id(),
-            hnsw_id: self.hnsw_id,
+            hnsw_id: self.hnsw_flusher.index_id,
         };
         let attribute = &[KeyValue::new(
             "collection_id",
@@ -2379,10 +2429,14 @@ impl SpannIndexFlusher {
             })?;
         {
             let stopwatch = Stopwatch::new(&self.metrics.hnsw_flush_latency, attribute);
-            self.hnsw_flusher.flush(&self.hnsw_id).await.map_err(|e| {
-                tracing::error!("Error flushing hnsw index {}: {}", res.hnsw_id, e);
-                SpannIndexWriterError::HnswIndexFlushError(*e)
-            })?;
+            self.hnsw_flusher
+                .provider
+                .flush(&self.hnsw_flusher.prefix_path, &self.hnsw_flusher.index_id)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Error flushing hnsw index {}: {}", res.hnsw_id, e);
+                    SpannIndexWriterError::HnswIndexFlushError(*e)
+                })?;
             tracing::info!(
                 "Flushed hnsw index {} in {} ms",
                 res.hnsw_id,
@@ -2456,6 +2510,7 @@ impl<'me> SpannIndexReader<'me> {
         distance_function: DistanceFunction,
         dimensionality: usize,
         ef_search: usize,
+        prefix_path: &str,
     ) -> Result<HnswIndexRef, SpannIndexReaderError> {
         match hnsw_provider
             .open(
@@ -2464,6 +2519,7 @@ impl<'me> SpannIndexReader<'me> {
                 dimensionality as i32,
                 distance_function,
                 ef_search,
+                prefix_path,
             )
             .await
         {
@@ -2519,6 +2575,7 @@ impl<'me> SpannIndexReader<'me> {
         pl_blockfile_id: Option<&Uuid>,
         versions_map_blockfile_id: Option<&Uuid>,
         blockfile_provider: &BlockfileProvider,
+        prefix_path: &str,
     ) -> Result<SpannIndexReader<'me>, SpannIndexReaderError> {
         let hnsw_reader = match hnsw_id {
             Some(hnsw_id) => {
@@ -2529,6 +2586,7 @@ impl<'me> SpannIndexReader<'me> {
                     distance_function,
                     dimensionality,
                     ef_search,
+                    prefix_path,
                 )
                 .await?
             }
@@ -2619,10 +2677,16 @@ impl<'me> SpannIndexReader<'me> {
     // Intentionally dumb and not paginated.
     pub async fn scan(&self) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
         // Get all the heads.
-        let (non_deleted_heads, _) = self.hnsw_index.inner.read().get_all_ids().map_err(|e| {
-            tracing::error!("Error getting all ids from hnsw index during scan: {}", e);
-            SpannIndexReaderError::ScanHnswError(e)
-        })?;
+        let (non_deleted_heads, _) = self
+            .hnsw_index
+            .inner
+            .read()
+            .hnsw_index
+            .get_all_ids()
+            .map_err(|e| {
+                tracing::error!("Error getting all ids from hnsw index during scan: {}", e);
+                SpannIndexReaderError::ScanHnswError(e)
+            })?;
         let mut postings_map: HashMap<u32, Vec<f32>> = HashMap::new();
         for head in non_deleted_heads {
             let res = self
@@ -2753,7 +2817,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
-        let prefix_path = String::from("block/");
+        let prefix_path = "";
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2799,8 +2863,9 @@ mod tests {
         }
         {
             let hnsw_read_guard = writer.hnsw_index.inner.read();
-            assert_eq!(hnsw_read_guard.len(), 1);
+            assert_eq!(hnsw_read_guard.hnsw_index.len(), 1);
             let emb = hnsw_read_guard
+                .hnsw_index
                 .get(1)
                 .expect("Error getting hnsw index")
                 .unwrap();
@@ -2828,10 +2893,10 @@ mod tests {
         let mut emb_2_id;
         {
             let hnsw_read_guard = writer.hnsw_index.inner.read();
-            assert_eq!(hnsw_read_guard.len(), 2);
+            assert_eq!(hnsw_read_guard.hnsw_index.len(), 2);
             emb_2_id = 2;
             // Head could be 2 and 3 or 1 and 2.
-            if hnsw_read_guard.get(1).is_err() {
+            if hnsw_read_guard.hnsw_index.get(1).is_err() {
                 emb_1_id = 3;
             } else {
                 emb_1_id = 1;
@@ -2888,10 +2953,10 @@ mod tests {
         }
         {
             let hnsw_read_guard = writer.hnsw_index.inner.read();
-            assert_eq!(hnsw_read_guard.len(), 2);
+            assert_eq!(hnsw_read_guard.hnsw_index.len(), 2);
             emb_2_id = 2;
             // Head could be 2 and 3 or 1 and 2.
-            if hnsw_read_guard.get(1).is_err() {
+            if hnsw_read_guard.hnsw_index.get(1).is_err() {
                 emb_1_id = 3;
             } else {
                 emb_1_id = 1;
@@ -2967,7 +3032,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
-        let prefix_path = String::from("block/");
+        let prefix_path = "";
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2988,9 +3053,11 @@ mod tests {
         {
             let hnsw_guard = writer.hnsw_index.inner.write();
             hnsw_guard
+                .hnsw_index
                 .add(1, &[0.0, 0.0])
                 .expect("Error adding to hnsw index");
             hnsw_guard
+                .hnsw_index
                 .add(2, &[1000.0, 1000.0])
                 .expect("Error adding to hnsw index");
         }
@@ -3123,8 +3190,9 @@ mod tests {
         }
         {
             let hnsw_read_guard = writer.hnsw_index.inner.read();
-            assert_eq!(hnsw_read_guard.len(), 2);
+            assert_eq!(hnsw_read_guard.hnsw_index.len(), 2);
             let (mut non_deleted_ids, deleted_ids) = hnsw_read_guard
+                .hnsw_index
                 .get_all_ids()
                 .expect("Error getting all ids");
             assert_eq!(non_deleted_ids.len(), 2);
@@ -3133,11 +3201,13 @@ mod tests {
             assert_eq!(non_deleted_ids[0], 1);
             assert_eq!(non_deleted_ids[1], 2);
             let emb = hnsw_read_guard
+                .hnsw_index
                 .get(non_deleted_ids[0])
                 .expect("Error getting hnsw index")
                 .unwrap();
             assert_eq!(emb, &[0.0, 0.0]);
             let emb = hnsw_read_guard
+                .hnsw_index
                 .get(non_deleted_ids[1])
                 .expect("Error getting hnsw index")
                 .unwrap();
@@ -3147,20 +3217,24 @@ mod tests {
                 .cleaned_up_hnsw_index
                 .expect("Expected cleaned up hnsw index to be set");
             let cleaned_guard = cleaned_hnsw.inner.read();
-            assert_eq!(cleaned_guard.len(), 2);
-            let (mut non_deleted_ids, deleted_ids) =
-                cleaned_guard.get_all_ids().expect("Error getting all ids");
+            assert_eq!(cleaned_guard.hnsw_index.len(), 2);
+            let (mut non_deleted_ids, deleted_ids) = cleaned_guard
+                .hnsw_index
+                .get_all_ids()
+                .expect("Error getting all ids");
             assert_eq!(non_deleted_ids.len(), 2);
             assert_eq!(deleted_ids.len(), 0);
             non_deleted_ids.sort();
             assert_eq!(non_deleted_ids[0], 1);
             assert_eq!(non_deleted_ids[1], 2);
             let emb = cleaned_guard
+                .hnsw_index
                 .get(non_deleted_ids[0])
                 .expect("Error getting hnsw index")
                 .unwrap();
             assert_eq!(emb, &[0.0, 0.0]);
             let emb = cleaned_guard
+                .hnsw_index
                 .get(non_deleted_ids[1])
                 .expect("Error getting hnsw index")
                 .unwrap();
@@ -3216,7 +3290,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
-        let prefix_path = String::from("block/");
+        let prefix_path = "";
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3237,9 +3311,11 @@ mod tests {
         {
             let hnsw_guard = writer.hnsw_index.inner.write();
             hnsw_guard
+                .hnsw_index
                 .add(1, &[0.0, 0.0])
                 .expect("Error adding to hnsw index");
             hnsw_guard
+                .hnsw_index
                 .add(2, &[1000.0, 1000.0])
                 .expect("Error adding to hnsw index");
         }
@@ -3350,8 +3426,9 @@ mod tests {
         // Expect only one center now. [0.0, 0.0]
         {
             let hnsw_read_guard = writer.hnsw_index.inner.read();
-            assert_eq!(hnsw_read_guard.len(), 1);
+            assert_eq!(hnsw_read_guard.hnsw_index.len(), 1);
             let (non_deleted_ids, deleted_ids) = hnsw_read_guard
+                .hnsw_index
                 .get_all_ids()
                 .expect("Error getting all ids");
             assert_eq!(non_deleted_ids.len(), 1);
@@ -3359,6 +3436,7 @@ mod tests {
             assert_eq!(non_deleted_ids[0], 1);
             assert_eq!(deleted_ids[0], 2);
             let emb = hnsw_read_guard
+                .hnsw_index
                 .get(non_deleted_ids[0])
                 .expect("Error getting hnsw index")
                 .unwrap();
@@ -3368,13 +3446,16 @@ mod tests {
                 .cleaned_up_hnsw_index
                 .expect("Expected cleaned up hnsw index to be set");
             let cleaned_guard = cleaned_hnsw.inner.read();
-            assert_eq!(cleaned_guard.len(), 1);
-            let (non_deleted_ids, deleted_ids) =
-                cleaned_guard.get_all_ids().expect("Error getting all ids");
+            assert_eq!(cleaned_guard.hnsw_index.len(), 1);
+            let (non_deleted_ids, deleted_ids) = cleaned_guard
+                .hnsw_index
+                .get_all_ids()
+                .expect("Error getting all ids");
             assert_eq!(non_deleted_ids.len(), 1);
             assert_eq!(deleted_ids.len(), 0);
             assert_eq!(non_deleted_ids[0], 1);
             let emb = cleaned_guard
+                .hnsw_index
                 .get(non_deleted_ids[0])
                 .expect("Error getting hnsw index")
                 .unwrap();
@@ -3433,7 +3514,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
-        let prefix_path = String::from("block/");
+        let prefix_path = "";
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3454,12 +3535,15 @@ mod tests {
         {
             let hnsw_guard = writer.hnsw_index.inner.write();
             hnsw_guard
+                .hnsw_index
                 .add(1, &[0.0, 0.0])
                 .expect("Error adding to hnsw index");
             hnsw_guard
+                .hnsw_index
                 .add(2, &[1000.0, 1000.0])
                 .expect("Error adding to hnsw index");
             hnsw_guard
+                .hnsw_index
                 .add(3, &[10000.0, 10000.0])
                 .expect("Error adding to hnsw index");
         }
@@ -3693,7 +3777,7 @@ mod tests {
         )
         .await
         .expect("Error converting config to gc context");
-        let prefix_path = String::from("block/");
+        let prefix_path = "";
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3715,12 +3799,15 @@ mod tests {
         {
             let hnsw_guard = writer.hnsw_index.inner.write();
             hnsw_guard
+                .hnsw_index
                 .add(1, &[0.0, 0.0])
                 .expect("Error adding to hnsw index");
             hnsw_guard
+                .hnsw_index
                 .add(2, &[1000.0, 1000.0])
                 .expect("Error adding to hnsw index");
             hnsw_guard
+                .hnsw_index
                 .add(3, &[10000.0, 10000.0])
                 .expect("Error adding to hnsw index");
         }
@@ -3883,8 +3970,9 @@ mod tests {
         // There should only be two heads.
         {
             let hnsw_read_guard = writer.hnsw_index.inner.read();
-            assert_eq!(hnsw_read_guard.len(), 2);
+            assert_eq!(hnsw_read_guard.hnsw_index.len(), 2);
             let (mut non_deleted_ids, deleted_ids) = hnsw_read_guard
+                .hnsw_index
                 .get_all_ids()
                 .expect("Error getting all ids");
             non_deleted_ids.sort();
@@ -3894,11 +3982,13 @@ mod tests {
             assert_eq!(non_deleted_ids[1], 3);
             assert_eq!(deleted_ids[0], 2);
             let emb = hnsw_read_guard
+                .hnsw_index
                 .get(non_deleted_ids[0])
                 .expect("Error getting hnsw index")
                 .unwrap();
             assert_eq!(emb, &[0.0, 0.0]);
             let emb = hnsw_read_guard
+                .hnsw_index
                 .get(non_deleted_ids[1])
                 .expect("Error getting hnsw index")
                 .unwrap();
@@ -3907,20 +3997,24 @@ mod tests {
                 .cleaned_up_hnsw_index
                 .expect("Expected cleaned up hnsw index to be set");
             let cleaned_guard = cleaned_hnsw.inner.read();
-            assert_eq!(cleaned_guard.len(), 2);
-            let (mut non_deleted_ids, deleted_ids) =
-                cleaned_guard.get_all_ids().expect("Error getting all ids");
+            assert_eq!(cleaned_guard.hnsw_index.len(), 2);
+            let (mut non_deleted_ids, deleted_ids) = cleaned_guard
+                .hnsw_index
+                .get_all_ids()
+                .expect("Error getting all ids");
             non_deleted_ids.sort();
             assert_eq!(non_deleted_ids.len(), 2);
             assert_eq!(deleted_ids.len(), 0);
             assert_eq!(non_deleted_ids[0], 1);
             assert_eq!(non_deleted_ids[1], 3);
             let emb = cleaned_guard
+                .hnsw_index
                 .get(non_deleted_ids[0])
                 .expect("Error getting hnsw index")
                 .unwrap();
             assert_eq!(emb, &[0.0, 0.0]);
             let emb = cleaned_guard
+                .hnsw_index
                 .get(non_deleted_ids[1])
                 .expect("Error getting hnsw index")
                 .unwrap();
@@ -3990,7 +4084,7 @@ mod tests {
             )
             .await
             .expect("Error converting config to gc context");
-            let prefix_path = String::from("block/");
+            let prefix_path = "";
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 None,
@@ -4044,6 +4138,7 @@ mod tests {
                 Some(&paths.pl_id),
                 Some(&paths.versions_map_id),
                 &blockfile_provider,
+                prefix_path,
             )
             .await
             .expect("Error creating spann index reader");
@@ -4103,7 +4198,7 @@ mod tests {
             )
             .await
             .expect("Error converting config to gc context");
-            let prefix_path = String::from("block/");
+            let prefix_path = "";
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 None,
@@ -4179,6 +4274,7 @@ mod tests {
                 Some(&paths.pl_id),
                 Some(&paths.versions_map_id),
                 &blockfile_provider,
+                prefix_path,
             )
             .await
             .expect("Error creating spann index reader");
@@ -4230,6 +4326,7 @@ mod tests {
             let distance_function = params.space.clone().into();
             let dimensionality = 1000;
             let ef_search = params.ef_search;
+            let prefix_path = "";
             let mut hnsw_path = None;
             let mut versions_map_path = None;
             let mut pl_path = None;
@@ -4240,7 +4337,6 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
-                let prefix_path = String::from("block/");
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4302,6 +4398,7 @@ mod tests {
                 pl_path.as_ref(),
                 versions_map_path.as_ref(),
                 &blockfile_provider,
+                prefix_path,
             )
             .await
             .expect("Error creating spann index reader");
@@ -4357,6 +4454,7 @@ mod tests {
             let distance_function = params.space.clone().into();
             let collection_id = CollectionUuid::new();
             let dimensionality = 1000;
+            let prefix_path = "";
             let ef_search = params.ef_search;
             let mut hnsw_path = None;
             let mut versions_map_path = None;
@@ -4380,7 +4478,6 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
-                let prefix_path = String::from("block/");
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4452,6 +4549,7 @@ mod tests {
                 pl_path.as_ref(),
                 versions_map_path.as_ref(),
                 &blockfile_provider,
+                prefix_path,
             )
             .await
             .expect("Error creating spann index reader");
@@ -4518,6 +4616,7 @@ mod tests {
             let distance_function: DistanceFunction = params.space.clone().into();
             let collection_id = CollectionUuid::new();
             let dimensionality = 1000;
+            let prefix_path = "";
             let ef_search = params.ef_search;
             let mut hnsw_path = None;
             let mut versions_map_path = None;
@@ -4541,7 +4640,6 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
-                let prefix_path = String::from("block/");
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4658,7 +4756,6 @@ mod tests {
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
-            let prefix_path = String::from("block/");
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 hnsw_path.as_ref(),
@@ -4747,6 +4844,7 @@ mod tests {
                 pl_path.as_ref(),
                 versions_map_path.as_ref(),
                 &blockfile_provider,
+                prefix_path,
             )
             .await
             .expect("Error creating spann index reader");
@@ -4778,7 +4876,6 @@ mod tests {
                 count += 1;
             }
             assert_eq!(results.len(), count);
-            let prefix_path = String::from("block/");
             // After GC, it should return the same result.
             let mut writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
@@ -4821,6 +4918,7 @@ mod tests {
                 pl_path.as_ref(),
                 versions_map_path.as_ref(),
                 &blockfile_provider,
+                prefix_path,
             )
             .await
             .expect("Error creating spann index reader");
