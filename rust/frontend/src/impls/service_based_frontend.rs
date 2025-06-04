@@ -268,12 +268,12 @@ impl ServiceBasedFrontend {
         &mut self,
         UpdateTenantRequest {
             tenant_id,
-            static_name,
+            resource_name,
             ..
         }: UpdateTenantRequest,
     ) -> Result<UpdateTenantResponse, UpdateTenantError> {
         self.sysdb_client
-            .update_tenant(tenant_id, static_name)
+            .update_tenant(tenant_id, resource_name)
             .await
     }
 

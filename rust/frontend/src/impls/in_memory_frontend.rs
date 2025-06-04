@@ -72,7 +72,7 @@ impl InMemoryFrontend {
         if self.inner.tenants.contains(&request.name) {
             Ok(chroma_types::GetTenantResponse {
                 name: request.name,
-                static_name: None,
+                resource_name: None,
             })
         } else {
             Err(chroma_types::GetTenantError::NotFound(request.name))

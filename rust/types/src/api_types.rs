@@ -243,7 +243,7 @@ impl GetTenantRequest {
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
-    pub static_name: Option<String>,
+    pub resource_name: Option<String>,
 }
 
 #[cfg(feature = "pyo3")]
@@ -255,8 +255,8 @@ impl GetTenantResponse {
     }
 
     #[getter]
-    pub fn static_name(&self) -> Option<String> {
-        self.static_name.clone()
+    pub fn resource_name(&self) -> Option<String> {
+        self.resource_name.clone()
     }
 }
 
@@ -281,14 +281,17 @@ impl ChromaError for GetTenantError {
 #[derive(Validate, Serialize, ToSchema)]
 pub struct UpdateTenantRequest {
     pub tenant_id: String,
-    pub static_name: String,
+    pub resource_name: String,
 }
 
 impl UpdateTenantRequest {
-    pub fn try_new(tenant_id: String, static_name: String) -> Result<Self, ChromaValidationError> {
+    pub fn try_new(
+        tenant_id: String,
+        resource_name: String,
+    ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
-            static_name,
+            resource_name,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -305,14 +308,20 @@ impl UpdateTenantResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateTenantError {
-    #[error("Failed to set static name")]
-    FailedToSetStaticName(#[from] tonic::Status),
+    #[error("Failed to set resource name")]
+    FailedToSetResourceName(#[from] tonic::Status),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Tenant [{0}] not found")]
+    NotFound(String),
 }
 
 impl ChromaError for UpdateTenantError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateTenantError::FailedToSetStaticName(_) => ErrorCodes::Internal,
+            UpdateTenantError::FailedToSetResourceName(_) => ErrorCodes::Internal,
+            UpdateTenantError::Internal(err) => err.code(),
+            UpdateTenantError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }

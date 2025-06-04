@@ -39,7 +39,7 @@ struct Inner {
     collections: HashMap<CollectionUuid, Collection>,
     segments: HashMap<SegmentUuid, Segment>,
     tenant_last_compaction_time: HashMap<String, i64>,
-    tenant_static_names: HashMap<String, String>,
+    tenant_resource_names: HashMap<String, String>,
     collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
     soft_deleted_collections: HashSet<CollectionUuid>,
     #[derivative(Debug = "ignore")]
@@ -55,7 +55,7 @@ impl TestSysDb {
                 collections: HashMap::new(),
                 segments: HashMap::new(),
                 tenant_last_compaction_time: HashMap::new(),
-                tenant_static_names: HashMap::new(),
+                tenant_resource_names: HashMap::new(),
                 collection_to_version_file: HashMap::new(),
                 soft_deleted_collections: HashSet::new(),
                 storage: None,
@@ -617,10 +617,10 @@ impl TestSysDb {
     pub(crate) async fn update_tenant(
         &mut self,
         tenant_id: String,
-        static_name: String,
+        resource_name: String,
     ) -> Result<UpdateTenantResponse, UpdateTenantError> {
         let mut inner = self.inner.lock();
-        inner.tenant_static_names.insert(tenant_id, static_name);
+        inner.tenant_resource_names.insert(tenant_id, resource_name);
         Ok(UpdateTenantResponse {})
     }
 }
