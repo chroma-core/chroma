@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import styles from "./tweet-prompt.module.css";
 import React from "react";
 
+const DEBUG_MODE = false;
+
 const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: string, setInput: (input: string) => void, onKeyDown: (event: React.KeyboardEvent<HTMLSpanElement>) => void, placeholder?: string }>(
   ({ input, setInput, onKeyDown, placeholder }, ref) => {
     const highlightRef = useRef<HTMLDivElement>(null);
@@ -154,7 +156,7 @@ export default function TweetPrompt(props: TweetPromptProps) {
       className={`cursor-text ${glow ? styles.shadow : ""}`}
       onClick={handleContainerClick}
     >
-      <div className={`font-ui flex flex-col gap-2 relative items-end w-full bg-zinc-100 px-2 py-1.5 w-full outline-none text-zinc-800`}>
+      <div className={`font-ui flex flex-col gap-2 relative items-end w-full bg-zinc-100 px-2 py-1.5 w-full outline-none text-zinc-800 ${DEBUG_MODE ? styles.debugLayers : ""}`}>
         <InputWithSyntaxHighlighting ref={textareaRef} input={input} setInput={setInput} onKeyDown={handleKeyDown} placeholder={props.placeholder} />
         <div className="flex flex-row gap-1">
           <motion.div className="px-2 py-1 text-xs text-zinc-500" animate={visibilityVariants}>{input.length}</motion.div>
