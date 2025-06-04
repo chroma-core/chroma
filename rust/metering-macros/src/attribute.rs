@@ -1,108 +1,169 @@
+//! This file contains logic for parsing the arguments and tokens
+//! provided in an invocation of the [`crate::attribute`] procedural
+//! macro.
+
 use heck::ToUpperCamelCase;
-use proc_macro2::{Ident, Literal, Spacing, TokenStream, TokenTree};
+use proc_macro2::{Ident, Spacing, TokenStream, TokenTree};
 
-use crate::errors::MeteringMacrosError;
+use crate::{errors::MeteringMacrosError, utils};
 
-pub struct AttributeArgsResult {
+/// The result of parsing arguments passed to an invocation
+/// of the [`crate::attribute`] procedural macro.
+pub struct AttributeArgsParseResult {
+    /// The name of the attribute as a `String`.
     pub attribute_name_string: String,
-    pub attribute_name_literal: Literal,
 }
 
-pub fn process_attribute_args(
+/// Parses and validates the arguments provided to the [`crate::attribute`] macro.
+///
+/// # Overview
+/// This function expects the input token stream to match the pattern:
+/// `name = "<attribute_name>"`. If valid, it returns an [`AttributeArgsParseResult`]
+/// containing the parsed attribute name in both string and literal form.  
+/// If invalid, it returns a [`MeteringMacrosError`] indicating an argument error.
+///
+/// # Arguments
+/// * `token_stream` - A reference to the token stream passed to the macro invocation.
+///
+/// # Returns
+/// * `Ok(AttributeArgsParseResult)` - When the arguments match the expected pattern.
+/// * `Err(MeteringMacrosError)` - If the input is malformed or does not match expectations.
+pub fn parse_attribute_args(
     token_stream: &TokenStream,
-) -> Result<AttributeArgsResult, MeteringMacrosError> {
+) -> Result<AttributeArgsParseResult, MeteringMacrosError> {
+    // Collect the tokens as a vector
     let tokens: Vec<TokenTree> = token_stream.clone().into_iter().collect();
 
+    // Match against the expected pattern: Ident(name), Punct(=), Literal("<attribute_name>")
     match tokens.as_slice() {
-        [TokenTree::Ident(ident1), TokenTree::Punct(punct1), TokenTree::Literal(literal1)] => {
-            if (ident1.to_string() != "name")
-                || (punct1.as_char() != '=' || punct1.spacing() != Spacing::Alone)
+        [TokenTree::Ident(expected_name_ident), TokenTree::Punct(expected_equals_punct), TokenTree::Literal(expected_attribute_name_literal)] =>
+        {
+            if (expected_name_ident != "name")
+                || (expected_equals_punct.as_char() != '='
+                    || expected_equals_punct.spacing() != Spacing::Alone)
             {
                 return Err(MeteringMacrosError::AttributeArgsError);
             }
 
-            let attribute_name = literal1.to_string().trim_matches('"').to_string();
+            let attribute_name_string = utils::literal_to_string(expected_attribute_name_literal);
 
-            Ok(AttributeArgsResult {
-                attribute_name_string: attribute_name,
-                attribute_name_literal: literal1.clone(),
+            Ok(AttributeArgsParseResult {
+                attribute_name_string,
             })
         }
-
         _ => Err(MeteringMacrosError::AttributeArgsError),
     }
 }
 
-pub struct AttributeBodyResult {
-    pub attribute_type_name: Ident,
-    pub attribute_type: TokenStream,
+/// The result of parsing the tokens on which the [`crate::attribute`] macro was invoked.
+///
+/// This struct contains both the alias (`proc_macro2::Ident`) used for the attribute type and
+/// the actual type representation as a `proc_macro2::TokenStream`.
+pub struct AttributeBodyParseResult {
+    /// The alias of the type assigned to the attribute (e.g., `MyType` in `type MyType = u8;`).
+    pub attribute_type_alias_ident: Ident,
+
+    /// The full token stream representing the type assigned to the attribute.
+    pub attribute_type_token_stream: TokenStream,
 }
 
-pub fn process_attribute_body(
+/// Parses and validates the tokens on which the [`crate::attribute`] macro is invoked.
+///
+/// # Overview
+/// This function expects the input token stream to represent a Rust type alias
+/// (e.g., `type MyAlias = SomeType;`). If the tokens are valid and match the expected
+/// structure, it extracts the alias and type and returns an [`AttributeBodyParseResult`].
+/// If parsing fails or the input is malformed, it returns a [`MeteringMacrosError`].
+///
+/// # Arguments
+/// * `token_stream` - The token stream representing the macro's target.
+/// * `attribute_name` - The name of the attribute being parsed, used to validate the input.
+///
+/// # Returns
+/// * `Ok(AttributeBodyParseResult)` - When parsing succeeds and the structure is valid.
+/// * `Err(MeteringMacrosError)` - When parsing fails or validation is unsuccessful.
+pub fn parse_attribute_body(
     token_stream: &TokenStream,
     attribute_name: &str,
-) -> Result<AttributeBodyResult, MeteringMacrosError> {
-    let mut token_stream_iter = token_stream.clone().into_iter().peekable();
+) -> Result<AttributeBodyParseResult, MeteringMacrosError> {
+    // Convert the tokens into an iterator
+    let mut tokens_iter = token_stream.clone().into_iter().peekable();
 
-    let expected_type_keyword = token_stream_iter
+    // We expect to see the `type` keyword as the first token
+    let expected_type_keyword_token_tree = tokens_iter
         .next()
         .ok_or(MeteringMacrosError::AttributeBodyError)?;
-    match expected_type_keyword {
-        TokenTree::Ident(ref ident) if ident == "type" => {}
+    // We can throw out the ident once we've validated it.
+    match expected_type_keyword_token_tree {
+        TokenTree::Ident(ref expected_type_keyword_ident)
+            if expected_type_keyword_ident == "type" => {}
         _ => return Err(MeteringMacrosError::AttributeBodyError),
     }
 
-    let expected_type_alias = token_stream_iter
+    // Next, we expect the alias type name. It must be the CamelCase equivalent of the
+    // attribute name supplied to the macro's arguments.
+    let expected_type_alias_token_tree = tokens_iter
         .next()
         .ok_or(MeteringMacrosError::AttributeBodyError)?;
-    let type_name_ident = match expected_type_alias {
-        TokenTree::Ident(ref ident) if ident == &attribute_name.to_upper_camel_case() => {
-            ident.clone()
+    // We need to return the type alias so we can output it as part of the generated code.
+    let attribute_type_alias_ident = match expected_type_alias_token_tree {
+        TokenTree::Ident(ref expected_type_alias_ident)
+            if expected_type_alias_ident == &attribute_name.to_upper_camel_case() =>
+        {
+            expected_type_alias_ident.clone()
         }
         _ => return Err(MeteringMacrosError::AttributeBodyError),
     };
 
-    let expected_punct_equals = token_stream_iter
+    // After the type alias, we expect to see an equals sign.
+    let expected_equals_token_tree = tokens_iter
         .next()
         .ok_or(MeteringMacrosError::AttributeBodyError)?;
-    match expected_punct_equals {
-        TokenTree::Punct(ref p) if p.as_char() == '=' && p.spacing() == Spacing::Alone => {}
+    // We can throw out this token once we've validated it.
+    match expected_equals_token_tree {
+        TokenTree::Punct(ref expected_equals_punct)
+            if expected_equals_punct.as_char() == '='
+                && expected_equals_punct.spacing() == Spacing::Alone => {}
         _ => return Err(MeteringMacrosError::AttributeBodyError),
     }
 
-    let mut collected: Vec<TokenTree> = Vec::new();
-    while let Some(tt) = token_stream_iter.peek() {
-        match tt {
+    // Now, we iterate over the remaining tokens, which we expect to be a valid type definition.
+    let mut attribute_type_tokens: Vec<TokenTree> = Vec::new();
+    while let Some(token_tree) = tokens_iter.peek() {
+        match token_tree {
+            // We stop when we encounter a semicolon.
             TokenTree::Punct(p) if p.as_char() == ';' && p.spacing() == Spacing::Alone => {
                 break;
             }
-            // Otherwise, consume it as part of the RHS type.
+            // We consume all other tokens as part of the type definition.
             _ => {
-                let next_tt = token_stream_iter.next().unwrap();
-                collected.push(next_tt);
+                let next_token_tree = tokens_iter.next().unwrap();
+                attribute_type_tokens.push(next_token_tree);
             }
         }
     }
 
-    // 6) Now expect exactly one final semicolon
-    let semicolon = token_stream_iter
+    // Finally, we expect to see a semicolon.
+    let expected_semicolon_token_tree = tokens_iter
         .next()
         .ok_or(MeteringMacrosError::AttributeBodyError)?;
-    match semicolon {
-        TokenTree::Punct(ref p) if p.as_char() == ';' && p.spacing() == Spacing::Alone => {}
+    match expected_semicolon_token_tree {
+        TokenTree::Punct(ref expected_semicolon_punct)
+            if expected_semicolon_punct.as_char() == ';'
+                && expected_semicolon_punct.spacing() == Spacing::Alone => {}
         _ => return Err(MeteringMacrosError::AttributeBodyError),
     }
 
-    // 7) There must be no more tokens after that semicolon
-    if token_stream_iter.next().is_some() {
+    // We ensure that there are no remaining tokens after the semicolon.
+    if tokens_iter.next().is_some() {
         return Err(MeteringMacrosError::AttributeBodyError);
     }
 
-    // 8) Reconstruct a TokenStream for the collected “type” tokens
-    let attribute_type = TokenStream::from_iter(collected.into_iter());
+    // We reconstruct a token stream from the collected type definition tokens.
+    let attribute_type_token_stream = TokenStream::from_iter(attribute_type_tokens.into_iter());
 
-    Ok(AttributeBodyResult {
-        attribute_type_name: type_name_ident,
-        attribute_type,
+    Ok(AttributeBodyParseResult {
+        attribute_type_alias_ident,
+        attribute_type_token_stream,
     })
 }
