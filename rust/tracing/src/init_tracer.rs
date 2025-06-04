@@ -32,7 +32,8 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "compaction_service",
                 "distance_metrics",
                 "full_text",
-                "hosted-frontend",
+                "hosted_frontend",
+                "billing_service",
                 "metadata_filtering",
                 "query_service",
                 "wal3",
@@ -107,53 +108,19 @@ pub fn init_otel_layer(
         .with_resource(resource.clone())
         .build();
     global::set_meter_provider(meter_provider);
-    // Layer for adding our configured tracer.
-    // Export everything at this layer. The backend i.e. honeycomb or jaeger will filter at its end.
-    tracing_opentelemetry::OpenTelemetryLayer::new(tracer)
-        .with_filter(tracing_subscriber::filter::LevelFilter::TRACE)
-        .boxed()
+    tracing_opentelemetry::OpenTelemetryLayer::new(tracer).boxed()
 }
 
 pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
-    fmt::layer()
-        .pretty()
-        .with_target(false)
-        .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
-            // NOTE(rescrv):  This is a hack, too.  Not an uppercase hack, just a hack.  This
-            // one's localized to the cache module.  There's not much to do to unify it with
-            // the otel filter because these are different output layers from the tracing.
-
-            // This filter ensures that we don't cache calls for get/insert on stdout, but will
-            // still see the clear call.
-            !(metadata
-                .module_path()
-                .unwrap_or("")
-                .starts_with("chroma_cache")
-                && metadata.name() != "clear")
-        }))
-        .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
-            metadata.module_path().unwrap_or("").starts_with("chroma")
-                || metadata.module_path().unwrap_or("").starts_with("wal3")
-                || metadata.module_path().unwrap_or("").starts_with("worker")
-                || metadata
-                    .module_path()
-                    .unwrap_or("")
-                    .starts_with("garbage_collector")
-                || metadata
-                    .module_path()
-                    .unwrap_or("")
-                    .starts_with("opentelemetry_sdk")
-                || metadata
-                    .module_path()
-                    .unwrap_or("")
-                    .starts_with("hosted-frontend")
-        }))
-        .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
-        .boxed()
+    fmt::layer().pretty().with_target(false).boxed()
 }
 
 pub fn init_tracing(layers: Vec<Box<dyn Layer<Registry> + Send + Sync>>) {
     global::set_text_map_propagator(TraceContextPropagator::new());
+    let layers = layers
+        .into_iter()
+        .reduce(|a, b| Box::new(a.and_then(b)))
+        .expect("Should be able to create tracing layers");
     let subscriber = tracing_subscriber::registry().with(layers);
     tracing::subscriber::set_global_default(subscriber)
         .expect("Should be able to set global tracing subscriber");
@@ -184,7 +151,7 @@ pub fn init_panic_tracing_hook() {
 
 pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
     let layers = vec![
-        init_global_filter_layer(),
+        // init_global_filter_layer(),
         init_otel_layer(service_name, otel_endpoint),
         init_stdout_layer(),
     ];
