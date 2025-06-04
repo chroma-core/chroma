@@ -11,8 +11,6 @@ import Link from "next/link";
 import { getAllPages, getPagePrevNext } from "@/lib/content";
 import sidebarConfig from "@/markdoc/content/sidebar-config";
 import PageNav from "@/components/markdoc/page-nav";
-import AskAI from "@/components/markdoc/ask-ai";
-import { TextIcon } from "lucide-react";
 import { TableOfContents } from "../table-of-contents";
 
 const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
@@ -93,8 +91,7 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
 
   return (
     <MarkdocPage>
-      <div className="flex flex-row">
-      <div className="py-10 relative pr-10 max-w-3xl h-full marker:text-black dark:marker:text-gray-200">
+      <div className="py-10 relative pr-10 marker:text-black dark:marker:text-gray-200">
         <SidebarToggle path={slug} />
         {/* <AskAI content={source} /> */}
         {output}
@@ -116,22 +113,6 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
         </div>
       </div>
       <TableOfContents toc={toc} />
-       {/* <div className="sticky top-0 w-[300px] h-full py-5 overflow-y-auto mx-10">
-          <div className="flex flex-row items-center font-bold"><TextIcon className="h-5 w-5 pr-1"/>&nbsp;On this page</div>
-          <nav className="">
-              {toc.map((item) => (
-                <div key={item.id} className={`mt-1 pl-${item.level * 1}`}>
-                  <a
-                    href={`#${item.id}`}
-                    className="text-gray-700 font-normal dark:text-gray-200 hover:text-blue-500 transition-all no-underline text-sm"
-                  >
-                    {item.title}
-                  </a>
-                </div>
-              ))}
-          </nav>
-        </div> */}
-        </div>
     </MarkdocPage>
   );
 };

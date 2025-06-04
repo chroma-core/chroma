@@ -36,6 +36,7 @@ export const metadata: Metadata = {
     creatorId: '1507488634458439685',
     images: ['https://docs.trychroma.com/og.png'], // must be an absolute url
   },
+  viewport: 'width=device-width, initial-scale=1',
 }
 
 const inter = Inter({ subsets: ["latin"] });
@@ -46,8 +47,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full overscroll-none" suppressHydrationWarning>
-      <body className={`h-full overflow-hidden ${inter.className} antialiased`}>
+    <html lang="en" suppressHydrationWarning>
+      <body className={`${inter.className} antialiased bg-white bg-[url(/composite_noise.jpg)] bg-repeat relative`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
@@ -55,15 +56,23 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <PostHogProvider>
-            <div className="relative h-full w-full">
-              <div className="absolute inset-0 bg-[url('/background.jpg')] bg-cover bg-center opacity-10 dark:invert dark:opacity-10" />
-              <div className="relative z-10 flex flex-col h-full">
+            {/* the primary page structure is all done here
+                first we make the page a large flex column container */}
+            <div className="relative z-10 flex flex-col h-dvh overflow-hidden">
+              {/* prevent the header from shrinking */}
+              <div className="shrink-0">
                 <Header />
                 <HeaderNav/>
-                <CloudSignUp />
+              </div>
+              {/* have this container take up the remaining space and hide any overflow 
+                  the side bar and main page content will be rendered here and will 
+                  fill the available space and do their own scrolling */}
+              <div className="flex-1 overflow-y-hidden h-full">
                 {children}
               </div>
             </div>
+            {/* the cloud signup can live down here as it is position fixed */}
+            <CloudSignUp />
           </PostHogProvider>
         </ThemeProvider>
       </body>
