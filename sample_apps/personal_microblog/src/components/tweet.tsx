@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useRouter } from "next/navigation";
 
 import { PartialAssistantPost, TweetModel } from "@/types";
 
@@ -14,6 +15,7 @@ interface TweetProps {
 }
 
 export function Tweet({ tweet, aiReply, className }: TweetProps) {
+  const router = useRouter();
   const [reply, setReply] = useState<PartialAssistantPost | undefined>(undefined);
 
   useEffect(() => {
@@ -42,20 +44,25 @@ export function Tweet({ tweet, aiReply, className }: TweetProps) {
     replyContent = <MarkdownContent content={reply.body} className={`${className} text-[.9em]/[1.3] font-ui text-gray-500`} />
   }
 
+  const handleClick = () => {
+    router.push(`/post/${tweet.id}`);
+  };
+
   return (
-    <a href={`/post/${tweet.id}`}>
-      <motion.div className={`grid grid-cols-[120px_1fr] hover:bg-gray-100 ${className}`}>
-        <div className="flex flex-col items-end">
-          <div className={`font-ui pl-2 pr-4 pt-4 mt-[.0em] pb-4 text-gray-600 text-sm`}>{formattedDate}</div>
+    <motion.div
+      className={`grid grid-cols-[120px_1fr] hover:bg-gray-100 cursor-pointer ${className}`}
+      onClick={handleClick}
+    >
+      <div className="flex flex-col items-end">
+        <div className={`font-ui pl-2 pr-4 pt-4 mt-[.0em] pb-4 text-gray-600 text-sm`}>{formattedDate}</div>
+      </div>
+      <div className={`pt-4 pb-4 pl-4 pr-4 border-l-[.5px]`}>
+        <MarkdownContent content={tweet.body} className={`${className} text-[.95em]/[1.3] font-body`} />
+        <div className="mt-2">
+          {replyContent}
         </div>
-        <div className={`pt-4 pb-4 pl-4 pr-4 border-l-[.5px]`}>
-          <MarkdownContent content={tweet.body} className={`${className} text-[.95em]/[1.3] font-body`} />
-          <div className="mt-2">
-            {replyContent}
-          </div>
-        </div>
-      </motion.div>
-    </a>
+      </div>
+    </motion.div>
   );
 }
 
