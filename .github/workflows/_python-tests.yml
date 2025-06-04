@@ -12,6 +12,11 @@ on:
         description: 'Property testing preset'
         required: true
         type: string
+      platform:
+        description: 'Platform to test on (string)'
+        required: false
+        default: 'blacksmith-8vcpu-ubuntu-2204'
+        type: string
 
 jobs:
   test-rust-bindings:
@@ -20,7 +25,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [blacksmith-8vcpu-ubuntu-2204, 16core-64gb-windows-latest]
+        platform: ["${{inputs.platform}}"]
         test-globs:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
@@ -62,7 +67,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [blacksmith-4vcpu-ubuntu-2204, windows-latest]
+        platform: ["${{inputs.platform}}"]
         test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'",
                     "chromadb/test/property/test_add.py",
                     "chromadb/test/property/test_collections.py",
@@ -96,7 +101,7 @@ jobs:
     strategy:
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [blacksmith-4vcpu-ubuntu-2204, windows-latest]
+        platform: ["${{inputs.platform}}"]
         test-globs: ["chromadb/test/property/test_add.py",
                     "chromadb/test/property/test_collections.py",
                     "chromadb/test/property/test_collections_with_database_tenant.py",
@@ -188,7 +193,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [blacksmith-16vcpu-ubuntu-2204, 16core-64gb-windows-latest]
+        platform: ["${{inputs.platform}}"]
         test-globs: ["chromadb/test/stress"]
     runs-on: ${{ matrix.platform }}
     steps:
@@ -220,7 +225,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: [blacksmith-4vcpu-ubuntu-2204, windows-latest]
+        platform: ["${{inputs.platform}}"]
         test-globs: ["chromadb/test/test_cli.py"]
         include:
           - platform: blacksmith-4vcpu-ubuntu-2204
