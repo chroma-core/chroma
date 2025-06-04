@@ -1749,7 +1749,6 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chroma-metering-macros",
- "chroma-metering-registry",
  "chroma-system",
  "once_cell",
  "parking_lot",
@@ -1762,22 +1761,12 @@ dependencies = [
 name = "chroma-metering-macros"
 version = "0.1.0"
 dependencies = [
- "chroma-metering-registry",
  "heck 0.5.0",
  "proc-macro2 1.0.95",
  "quote 1.0.40",
  "serde",
  "serde_json",
  "syn 2.0.101",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "chroma-metering-registry"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
  "thiserror 1.0.69",
 ]
 

@@ -13,7 +13,6 @@ use std::fmt::Debug;
 use thiserror::Error;
 
 pub use chroma_metering_macros::*;
-pub use chroma_metering_registry::*;
 
 #[derive(Debug, Error)]
 pub enum MeteringError {

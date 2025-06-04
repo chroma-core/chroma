@@ -1,11 +1,6 @@
-use std::{collections::HashMap, fs, path::PathBuf};
-
+use crate::errors::MeteringMacrosError;
 use serde::{Deserialize, Serialize};
-
-use errors::MeteringRegistryError;
-
-pub mod errors;
-pub mod utils;
+use std::{collections::HashMap, fs, path::PathBuf};
 
 pub const REGISTRY_FILE_NAME: &str = "chroma_metering_registry.json";
 pub const CARGO_MANIFEST_ENV_VAR: &str = "CARGO_MANIFEST_DIR";
@@ -22,17 +17,17 @@ pub struct MeteringRegistry {
     events: HashMap<String, HashMap<String, (String, String)>>, // event_name -> (field_name -> (attribute_name, mutator_name))
 }
 
-fn registry_path() -> Result<PathBuf, MeteringRegistryError> {
+fn registry_path() -> Result<PathBuf, MeteringMacrosError> {
     let mut registry_path = PathBuf::from(
         std::env::var(CARGO_MANIFEST_ENV_VAR)
-            .map_err(|_| MeteringRegistryError::CargoManifestError)?,
+            .map_err(|_| MeteringMacrosError::CargoManifestError)?,
     );
     registry_path.push("target");
     registry_path.push(REGISTRY_FILE_NAME);
     return Ok(registry_path);
 }
 
-fn read_registry() -> Result<MeteringRegistry, MeteringRegistryError> {
+fn read_registry() -> Result<MeteringRegistry, MeteringMacrosError> {
     let registry_path = registry_path()?;
     if !registry_path.exists() {
         return Ok(MeteringRegistry::default());
@@ -45,7 +40,7 @@ fn read_registry() -> Result<MeteringRegistry, MeteringRegistryError> {
     return Ok(registry);
 }
 
-fn write_registry(registry: &MeteringRegistry) -> Result<(), MeteringRegistryError> {
+fn write_registry(registry: &MeteringRegistry) -> Result<(), MeteringMacrosError> {
     let registry_path = registry_path()?;
     if let Some(parent) = registry_path.parent() {
         fs::create_dir_all(parent)?;
@@ -57,11 +52,11 @@ fn write_registry(registry: &MeteringRegistry) -> Result<(), MeteringRegistryErr
 pub fn register_attribute(
     attribute_name: &str,
     attribute_type_tokens: &str,
-) -> Result<(), MeteringRegistryError> {
+) -> Result<(), MeteringMacrosError> {
     let mut registry = read_registry()?;
 
     // if registry.events.contains_key(attribute_name) {
-    //     return Err(MeteringRegistryError::DuplicateAttributeError);
+    //     return Err(MeteringMacrosError::DuplicateAttributeError);
     // }
 
     registry.attributes.insert(
@@ -74,7 +69,7 @@ pub fn register_attribute(
     Ok(())
 }
 
-pub fn list_registered_attributes() -> Result<HashMap<String, String>, MeteringRegistryError> {
+pub fn list_registered_attributes() -> Result<HashMap<String, String>, MeteringMacrosError> {
     let registry = read_registry()?;
     let registered_attributes = registry.attributes;
     // TODO: don't return owned
@@ -84,11 +79,11 @@ pub fn list_registered_attributes() -> Result<HashMap<String, String>, MeteringR
 pub fn register_event(
     event_name: &str,
     annotated_fields: Vec<AnnotatedField>,
-) -> Result<(), MeteringRegistryError> {
+) -> Result<(), MeteringMacrosError> {
     let mut registry = read_registry()?;
 
     // if registry.events.contains_key(event_name) {
-    //     return Err(MeteringRegistryError::DuplicateEventError);
+    //     return Err(MeteringMacrosError::DuplicateEventError);
     // }
 
     let mut annotated_fields_map = HashMap::new();
