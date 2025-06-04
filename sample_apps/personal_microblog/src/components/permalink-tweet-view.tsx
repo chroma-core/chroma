@@ -37,7 +37,7 @@ export default function PermalinkTweetView({ post, existingReplies, relatedPosts
     <div className="flex flex-col items-center py-20">
       <div className="w-[600px] max-w-[calc(100dvw-32px)]">
         <div className="flex flex-row font-ui justify-between">
-          <a href="/">← Post</a>
+          <a href="/">← Feed</a>
           <div className="flex flex-row gap-2">
             {post.threadParentId && <a href={`/post/${post.threadParentId}`}>Parent</a>}
             <a href={`/post/${post.id}`}>Permalink</a>
@@ -72,14 +72,11 @@ function PermalinkReply({ reply }: { reply: TweetModel }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isReplying, setIsReplying] = useState(false);
 
-  // This doesn't hold all historical replies -- just the ones the user made on this page session.
-  const [replies, setReplies] = useState<TweetModel[]>([]);
-
   const router = useRouter()
 
   function handleSubmit(input: string) {
     publishNewUserPost(input, reply.id).then(({ userPost }) => {
-      setReplies([...replies, userPost]);
+      router.push(`/post/${userPost.id}`);
     });
   }
 
@@ -89,7 +86,7 @@ function PermalinkReply({ reply }: { reply: TweetModel }) {
       onMouseLeave={() => setIsHovered(false)}
       className="border-b"
     >
-      <div className="pt-4 px-4 bg-[#fafafa] cursor-pointer" onClick={() => router.push(`/post/${reply.id}`)}>
+      <div className="pt-4 px-4 cursor-pointer" onClick={() => router.push(`/post/${reply.id}`)}>
         <MarkdownContent content={reply.body} className={`font-body ${reply.role === "assistant" ? "bold text-blue-600" : ""}`} />
         <motion.div
           className="flex flex-row items-center gap-2 py-2 w-full"
@@ -100,13 +97,6 @@ function PermalinkReply({ reply }: { reply: TweetModel }) {
           <PermalinkReplyButton icon={<BiReply className={`w-5 h-5`} />} onClick={(e) => {setIsReplying((prev) => !prev); e.stopPropagation()}} />
           <PermalinkReplyButton icon={<BiLinkAlt className={`w-[18px] h-[18px]`} />} onClick={(e) => {setIsReplying((prev) => !prev); e.stopPropagation()}} />
         </motion.div>
-        <div className="flex flex-row items-center gap-2">
-          {replies.map((r) => (
-            <div key={r.id} className="flex flex-row items-center gap-2 py-2">
-              <MarkdownContent content={r.body} className={`font-body ${r.role === "assistant" ? "bold text-blue-600" : ""}`} />
-            </div>
-          ))}
-        </div>
       </div>
       <AnimatePresence>
       {isReplying && (

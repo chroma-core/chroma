@@ -1,7 +1,3 @@
-.markdown {
-
-}
-
 .markdown p {
   text-justify: kashida;
 }
@@ -39,9 +35,21 @@
   padding-left: 1.2em;
   padding-top: 0.5em;
   padding-bottom: 0.5em;
-  font-size: 0.9em;
+  font-size: 0.95em;
 }
 
 .markdown ul li {
+  margin-bottom: 0.2em;
+}
+
+.markdown ol {
+  list-style-type: decimal;
+  padding-left: 1.2em;
+  padding-top: 0.5em;
+  padding-bottom: 0.5em;
+  font-size: 0.95em;
+}
+
+.markdown ol li {
   margin-bottom: 0.2em;
 }

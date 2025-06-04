@@ -51,7 +51,7 @@ const chromaClient = new ChromaClient({
 });
 
 const chromaCollection = await chromaClient.getOrCreateCollection({
-  name: "personal-blog-tweets",
+  name: "personal-microblog-tweets",
   embeddingFunction: new OpenAIEmbeddingFunction({
     apiKey: OPENAI_API_KEY ?? "",
     modelName: "text-embedding-3-small",
@@ -131,48 +131,64 @@ export async function semanticSearch(query: string): Promise<TweetModel[]> {
   return chromaQueryResultsToPostModels(posts);
 }
 
-export async function publishNewUserPost(newPostBody: string, threadParentId?: string): Promise<{ userPost: TweetModel, assistantPost: PartialAssistantPost | undefined }> {
+export async function publishNewUserPost(rawBody: string, threadParentId?: string): Promise<{ userPost: TweetModel, assistantPost: PartialAssistantPost | undefined }> {
+  const { citationIds, newBody } = extractTweetCitations(rawBody);
   const newPost: TweetModel = {
     id: generateId(),
     threadParentId: threadParentId,
     role: "user",
-    body: newPostBody,
+    body: newBody,
+    citations: citationIds,
     date: unixTimestampNow(),
     status: "done",
   };
   let partialAssistantPost: PartialAssistantPost | undefined;
   if (newPost.body.includes("@assistant")) {
-    partialAssistantPost = getAssistantReponse(newPostBody, newPost.id);
+    partialAssistantPost = getAssistantReponse(newBody, newPost.id);
     newPost.aiReplyId = partialAssistantPost?.id;
   }
   addPostModelToChromaCollection(newPost, chromaCollection).catch(console.error);
   return { userPost: newPost, assistantPost: partialAssistantPost };
 }
 
+function extractTweetCitations(body: string): {citationIds: string[], newBody: string} {
+  const citationIds: string[] = [];
+  const newBody = body.replace(/\[\[([a-zA-Z0-9]+)\]\]/g, (_, p1) => {
+    citationIds.push(p1);
+    return ``;
+  });
+  const uniqueCitationIds = [...new Set(citationIds)];
+  return { citationIds: uniqueCitationIds, newBody };
+}
+
 function getAssistantReponse(userInput: string, parentThreadId: string): PartialAssistantPost {
   const id = generateId();
-  const stream = createStreamableValue<string, any>();
+  const bodyStream = createStreamableValue<string, any>();
+  const citationStream = createStreamableValue<string, any>();
   const assistantPost: PartialAssistantPost = {
     id,
     threadParentId: parentThreadId,
     role: "assistant",
     body: "Thinking...",
+    citations: [],
     date: unixTimestampNow(),
     status: "processing",
-    stream: stream.value,
+
+    bodyStream: bodyStream.value,
+    citationStream: citationStream.value,
   };
   addPostModelToChromaCollection(assistantPost, chromaCollection).catch(console.error);
-  processAssistantResponse(userInput, assistantPost, stream).catch(console.error); // Run in background
+  processAssistantResponse(userInput, assistantPost, bodyStream, citationStream).catch(console.error); // Run in background
   return assistantPost;
 }
 
-async function processAssistantResponse(userInput: string, post: PartialAssistantPost, stream: any) {
+async function processAssistantResponse(userInput: string, post: PartialAssistantPost, bodyStream: any, citationStream: any) {
   const cleanedUserInput = userInput.replace(/@assistant/g, "").trim();
   try {
     const [semanticContext, queryRange] = await Promise.all([
       chromaCollection.query({
         queryTexts: [cleanedUserInput],
-        nResults: 5,
+        nResults: 10,
         where: {
           "role": "user",
         }
@@ -184,7 +200,7 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
     if (false && queryRange.start != null && queryRange.end != null) {
       const temporalContext = await chromaCollection.query({
         queryTexts: [cleanedUserInput],
-        nResults: 5,
+        nResults: 10,
         where: {
           "$and": [
             {
@@ -206,7 +222,9 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
       );
     }
 
-    const formattedContext = context.map((post, i) => {
+    const rerankedContext = await rerank(userInput, context);
+
+    const formattedContext = rerankedContext.map((post, i) => {
       return `${new Date(post.date * 1000).toISOString()}: ${post.body}`;
     }).join("\n\n");
 
@@ -237,7 +255,19 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
     let text = "";
     for await (const textPart of textStream) {
       text += textPart;
-      stream.update(text);
+      bodyStream.update(text);
+    }
+
+    // Only take the top 5 citations in order to avoid Metadata quota limits
+    post.citations = rerankedContext.map((p) => p.id).slice(0, 5);
+
+
+    try {
+      for (const citation of post.citations) {
+        citationStream.update(citation);
+      }
+    } catch (error) {
+      console.error("Error updating citation stream:", error);
     }
 
     post.body = text;
@@ -247,7 +277,8 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
     post.body = "Sorry, I encountered an error while processing your request.";
     post.status = "error";
   } finally {
-    stream.done();
+    bodyStream.done();
+    citationStream.done();
   }
 
   addPostModelToChromaCollection(post, chromaCollection).catch(console.error);
@@ -272,7 +303,8 @@ async function generateQueryRange(userInput: string): Promise<QueryRange> {
     messages: [
       {
         role: 'system',
-        content: `You will determine the appropriate time range that should be searched based on the user's query.
+        content: `
+        You will determine the appropriate time range that should be searched based on the user's query.
         The current date is ${new Date().toISOString()}.
         The user's query is: ${userInput}
         The time range should be in the format of this json:
@@ -308,4 +340,26 @@ async function generateQueryRange(userInput: string): Promise<QueryRange> {
     start: object.start ? new Date(object.start).getTime() / 1000 : undefined,
     end: object.end ? new Date(object.end).getTime() / 1000 : undefined,
   };
+}
+
+async function rerank(userInput: string, posts: TweetModel[]): Promise<TweetModel[]> {
+  const { object } = await generateObject({
+    model: llmModel,
+    output: "array",
+    schema: jsonSchema<number>({
+      type: "number",
+    }),
+    messages: [
+      {
+        role: 'system',
+        content: `
+        You are a helpful assistant that reranks a list of posts based on the user's query.
+        Remove any posts that are not relevant to the user's query or necessary to answer the user's query.
+        Reorder them based on how relevant they are to the user's query.
+        The user's query is: ${userInput}
+        The posts are: ${posts.map((p, i) => `(${i}) ${p.body}`).join("\n")}`
+      }
+    ]
+  });
+  return object.map((i) => posts[i]).filter((p) => p != undefined);
 }

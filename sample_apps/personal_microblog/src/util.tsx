@@ -24,9 +24,17 @@ export function chromaGetResultsToPostModels(getResult: any): TweetModel[] {
       status: getResult.metadatas[i]?.status,
       role: getResult.metadatas[i]?.role,
       aiReplyId: getResult.metadatas[i]?.aiReplyId,
+      citations: splitCitations(getResult.metadatas[i]?.citations),
     };
   });
   return postModels;
+}
+
+export function splitCitations(citations: string): string[] {
+  if (citations == undefined || citations.length == 0) {
+    return [];
+  }
+  return citations.split(",");
 }
 
 export async function addPostModelToChromaCollection(
@@ -42,6 +50,7 @@ export async function addPostModelToChromaCollection(
       {
         threadParentId: post.threadParentId ?? "",
         date: post.date,
+        citations: post.citations.join(","),
         status: post.status ?? '',
         role: post.role,
         aiReplyId: post.aiReplyId ?? "",
@@ -60,4 +69,12 @@ const nanoid = customAlphabet('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklm
 
 export function generateId(): string {
   return nanoid();
+}
+
+export function formatDate(date: number): string {
+  return new Date(date * 1000).toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }

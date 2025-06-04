@@ -9,18 +9,23 @@ export interface TweetModel {
   threadParentId?: string
   role: Role;
   body: string;
+  citations: string[];
   date: number;
   aiReplyId?: string;
   status?: TweetStatus;
 }
 
 export interface PartialAssistantPost {
+  // Must be a superset of TweetModel
   id: string;
   threadParentId?: string
   role: Role;
   body: string;
+  citations: string[];
   date: number;
   aiReplyId?: string;
   status?: TweetStatus;
-  stream?: StreamableValue<string, any>;
+
+  bodyStream?: StreamableValue<string, any>;
+  citationStream?: StreamableValue<string, any>;
 }
