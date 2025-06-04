@@ -22,6 +22,21 @@ mistral_ef(input=["document1","document2"])
 ```
 
 {% /Tab %}
+
+{% Tab label="typescript" %}
+
+```typescript
+// npm install @chroma-core/mistral
+
+import { MistralEmbeddingFunction } from '@chroma-core/mistral';
+
+const embedder = new MistralEmbeddingFunction({
+    apiKey: 'your-api-key', // Or set MISTRAL_API_KEY env var
+    model: 'mistral-embed',
+});
+```
+
+{% /Tab %}
 {% /Tabs %}
 
 You must pass in a `model` argument, which selects the Mistral embedding model to use. You can see the supported embedding types and models in Mistral's docs [here](https://docs.mistral.ai/capabilities/embeddings/overview/)
