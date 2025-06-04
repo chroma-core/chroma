@@ -158,6 +158,9 @@ impl LogReader {
         limits: Limits,
     ) -> Option<Vec<Fragment>> {
         let log_position_range = if let Some(max_records) = limits.max_records {
+            if from.offset().saturating_add(max_records) == u64::MAX {
+                return None;
+            }
             (from, from + max_records)
         } else {
             (from, LogPosition::MAX)
@@ -178,7 +181,7 @@ impl LogReader {
         if !manifest
             .fragments
             .iter()
-            .any(|f| f.limit >= log_position_range.1)
+            .any(|f| f.limit > log_position_range.1)
         {
             return None;
         }
@@ -612,5 +615,151 @@ mod tests {
             "Only first fragment should remain with 50 record limit"
         );
         assert_eq!(result_edge[0].seq_no, FragmentSeqNo(1));
+    }
+
+    #[test]
+    fn scan_from_manifest_cached_manifest_boundary_conditions() {
+        use crate::Manifest;
+
+        // Test boundary conditions for the cached manifest bug fix
+        // This tests the logic that checks if a cached manifest can satisfy a pull-logs request
+
+        let fragments = vec![
+            Fragment {
+                path: "fragment1".to_string(),
+                seq_no: FragmentSeqNo(1),
+                start: LogPosition::from_offset(1),
+                limit: LogPosition::from_offset(101),
+                num_bytes: 1000,
+                setsum: Setsum::default(),
+            },
+            Fragment {
+                path: "fragment2".to_string(),
+                seq_no: FragmentSeqNo(2),
+                start: LogPosition::from_offset(101),
+                limit: LogPosition::from_offset(201), // Manifest max is 201
+                num_bytes: 1000,
+                setsum: Setsum::default(),
+            },
+        ];
+
+        let manifest = Manifest {
+            setsum: Setsum::default(),
+            acc_bytes: 2000,
+            writer: "test-writer".to_string(),
+            snapshots: vec![],
+            fragments: fragments.clone(),
+            initial_offset: Some(LogPosition::from_offset(1)),
+        };
+
+        // Boundary case 1: Request exactly at the manifest limit
+        let from = LogPosition::from_offset(100);
+        let limits = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(100), // Would need data up to exactly offset 200
+        };
+        let result = LogReader::scan_from_manifest(&manifest, from, limits.clone());
+        assert!(
+            result.is_some(),
+            "Should succeed when request stays within manifest coverage"
+        );
+
+        // Boundary case 2: Request exactly to the manifest limit
+        let limits_at_limit = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(101), // Would need data up to offset 201, manifest limit is 201
+        };
+        let result_at_limit = LogReader::scan_from_manifest(&manifest, from, limits_at_limit);
+        assert!(
+            result_at_limit.is_none(),
+            "Should fail when request  exceeds limit"
+        );
+
+        // Boundary case 3: Request one beyond the manifest limit
+        let limits_beyond = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(102), // Would need data up to offset 202, beyond manifest limit of 201
+        };
+        let result_beyond = LogReader::scan_from_manifest(&manifest, from, limits_beyond);
+        assert!(
+            result_beyond.is_none(),
+            "Should return None when request exceeds manifest coverage"
+        );
+
+        // Boundary case 4: Request from the very end of the manifest
+        let from_end = LogPosition::from_offset(200);
+        let limits_at_end = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(1), // Would need data up to offset 201, exactly at manifest limit
+        };
+        let result_at_end = LogReader::scan_from_manifest(&manifest, from_end, limits_at_end);
+        assert!(
+            result_at_end.is_none(),
+            "Should fail when reading exactly at manifest boundary"
+        );
+
+        // Boundary case 5: Request from beyond the manifest
+        let from_beyond = LogPosition::from_offset(201);
+        let limits_beyond = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(1),
+        };
+        let result_beyond = LogReader::scan_from_manifest(&manifest, from_beyond, limits_beyond);
+        assert!(
+            result_beyond.is_none(),
+            "Should return None when starting beyond manifest coverage"
+        );
+
+        // Boundary case 6: No max_records limit (LogPosition::MAX)
+        let from_middle = LogPosition::from_offset(50);
+        let limits_unlimited = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: None, // This creates a range to LogPosition::MAX
+        };
+        let result_unlimited =
+            LogReader::scan_from_manifest(&manifest, from_middle, limits_unlimited);
+        assert!(
+            result_unlimited.is_none(),
+            "Should return None when unlimited range extends beyond manifest"
+        );
+
+        // Boundary case 7: Empty manifest
+        let empty_manifest = Manifest {
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            writer: "test-writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: None,
+        };
+        let result_empty = LogReader::scan_from_manifest(
+            &empty_manifest,
+            LogPosition::from_offset(0),
+            limits.clone(),
+        );
+        assert!(
+            result_empty.is_none(),
+            "Should return None for empty manifest"
+        );
+
+        // Boundary case 8: Integer overflow conditions (i64::MAX scenario from the bug fix)
+        let from_overflow_test = LogPosition::from_offset(u64::MAX - 10);
+        let limits_overflow = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(20), // This would overflow if not handled properly
+        };
+        let result_overflow =
+            LogReader::scan_from_manifest(&manifest, from_overflow_test, limits_overflow);
+        assert!(
+            result_overflow.is_none(),
+            "Should handle potential overflow gracefully"
+        );
     }
 }
