@@ -383,9 +383,9 @@ impl GrpcLog {
         match &mut self.alt_client_assigner {
             Some(assigner) => assigner
                 .clients(&collection_id.to_string())
-                .unwrap_or_default()
-                .first()
-                .cloned(),
+                .ok()?
+                .drain(..)
+                .next(),
             None => None,
         }
     }
