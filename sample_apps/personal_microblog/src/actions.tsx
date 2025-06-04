@@ -109,9 +109,9 @@ export async function getPostReplies(id: string): Promise<TweetModel[]> {
 export async function semanticSearch(query: string): Promise<TweetModel[]> {
   const posts = await chromaCollection.query({
     queryTexts: [query],
-    nResults: 10,
+    nResults: 5,
   });
-  return chromaGetResultsToPostModels(posts);
+  return chromaQueryResultsToPostModels(posts);
 }
 
 export async function publishNewUserPost(newPostBody: string, threadParentId?: string): Promise<{ userPost: TweetModel, assistantPost: PartialAssistantPost | undefined }> {
