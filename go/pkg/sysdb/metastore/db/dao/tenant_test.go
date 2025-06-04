@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	"github.com/pingcap/log"
@@ -114,6 +115,10 @@ func (suite *TenantDbTestSuite) TestTenantDb_SetTenantResourceName() {
 	suite.Require().NoError(err)
 	suite.Require().Len(tenant, 1)
 	suite.Require().Equal("resourceName", *tenant[0].ResourceName)
+
+	err = suite.Db.SetTenantResourceName("fake-tenant", "resourceName")
+	suite.Require().Error(err)
+	suite.Require().Equal(common.ErrTenantNotFound, err)
 
 	suite.db.Delete(&dbmodel.Tenant{}, "id = ?", tenantId)
 }
