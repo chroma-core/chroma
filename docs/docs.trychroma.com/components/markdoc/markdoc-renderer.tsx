@@ -92,7 +92,7 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
   return (
     <MarkdocPage>
       <div className="flex max-w-6xl 2xl:max-w-7xl mx-auto">
-        <div className="py-10 relative pr-10 marker:text-black dark:marker:text-gray-200 grow max-w-6xl w-full grow-4 prose dark:prose-invert ">
+        <div className="py-10 relative md:pr-10 marker:text-black dark:marker:text-gray-200 grow max-w-6xl w-full grow-4 prose dark:prose-invert ">
           <SidebarToggle path={slug} />
           {output}
           <div className="flex items-center justify-between mt-5">

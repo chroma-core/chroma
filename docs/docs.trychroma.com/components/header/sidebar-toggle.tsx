@@ -7,7 +7,7 @@ const SidebarToggle: React.FC<{ path: string[] }> = ({ path }) => {
   return (
     <Drawer direction="left">
       <DrawerTrigger>
-        <div className="fixed md:hidden bg-white dark:bg-black p-3 rounded-lg shadow-lg z-50 bottom-4 left-4">
+        <div className="fixed md:hidden bg-white dark:bg-black p-3 rounded-xl shadow-lg z-50 bottom-4 left-4 border dark:border-gray-700">
           <SidebarIcon children="w-5 h-5" />
         </div>
       </DrawerTrigger>
