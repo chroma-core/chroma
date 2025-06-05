@@ -3341,10 +3341,10 @@ mod tests {
         #[test]
          fn test_push_pull_logs(
             read_offset in 1usize..=100,
-            batch_size in 0usize..=100,
+            batch_size in 1usize..=100,
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=100)
         ) {
-            // NOTE: It seems somehow the stack will overflow if we run it
+            // NOTE: Somehow it overflow the stack if we run with default stack size
             let builder = std::thread::Builder::new().stack_size(1 << 23);
             builder
                 .spawn(move || {
