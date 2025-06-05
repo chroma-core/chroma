@@ -9,11 +9,12 @@ use chroma_sqlite::table;
 use chroma_types::{
     Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
     CreateCollectionError, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
-    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
-    ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError,
+    CreateTenantError, CreateTenantResponse, Database, DatabaseUuid, DeleteCollectionError,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
+    GetCollectionsError, GetDatabaseError, GetSegmentsError, GetTenantError, GetTenantResponse,
+    InternalCollectionConfiguration, ListDatabasesError, Metadata, MetadataValue, ResetError,
+    ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionConfiguration,
+    UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -341,6 +342,8 @@ impl SqliteSysDb {
             version_file_path: None,
             root_collection_id: None,
             lineage_file_path: None,
+            // TODO(Sanket): can populate database_id here if needed.
+            database_id: DatabaseUuid::new(),
         })
     }
 
@@ -735,6 +738,8 @@ impl SqliteSysDb {
                     version_file_path: None,
                     root_collection_id: None,
                     lineage_file_path: None,
+                    // TODO(Sanket): can populate database_id here if needed.
+                    database_id: DatabaseUuid::new(),
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;

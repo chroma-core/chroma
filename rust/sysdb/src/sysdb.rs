@@ -20,9 +20,9 @@ use chroma_types::{
 };
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
-    CollectionConversionError, CollectionUuid, CountForksError, FinishDatabaseDeletionError,
-    FlushCompactionResponse, FlushCompactionResponseConversionError, ForkCollectionError, Segment,
-    SegmentConversionError, SegmentScope, Tenant,
+    CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
+    FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
+    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -265,6 +265,7 @@ impl SysDb {
                     version_file_path: None,
                     root_collection_id: None,
                     lineage_file_path: None,
+                    database_id: DatabaseUuid::new(),
                 };
 
                 test_sysdb.add_collection(collection.clone());
