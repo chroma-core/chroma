@@ -11,7 +11,11 @@ import { Collection, CollectionImpl } from "./collection";
 import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
 import { chromaFetch } from "./chroma-fetch";
 import * as process from "node:process";
-import { ChromaConnectionError } from "./errors";
+import {
+  ChromaConnectionError,
+  ChromaUnauthorizedError,
+  ChromaValueError,
+} from "./errors";
 import {
   CreateCollectionConfiguration,
   processCreateCollectionConfig,
@@ -134,9 +138,20 @@ export class ChromaClient {
   /** @ignore */
   public async _path(): Promise<{ tenant: string; database: string }> {
     if (!this._tenant || !this._database) {
-      throw new ChromaConnectionError(
-        "Tenant and database not set for this client",
-      );
+      const { tenant, databases } = await this.getUserIdentity();
+      const uniqueDBs = [...new Set(databases)];
+      this._tenant = tenant;
+      if (uniqueDBs.length === 0) {
+        throw new ChromaUnauthorizedError(
+          `Your API key does not have access to any DBs for tenant ${this.tenant}`,
+        );
+      }
+      if (uniqueDBs.length > 1 || uniqueDBs[0] === "*") {
+        throw new ChromaValueError(
+          "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
+        );
+      }
+      this._database = uniqueDBs[0];
     }
     return { tenant: this._tenant, database: this._database };
   }
@@ -329,7 +344,7 @@ export class ChromaClient {
 
     return Promise.all(
       collections.map(async (collection) => {
-        return await this.getCollection({ ...collection });
+        return this.getCollection({ ...collection });
       }),
     );
   }
