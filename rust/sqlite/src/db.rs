@@ -154,11 +154,7 @@ impl SqliteDb {
             }
         }
 
-        let unapplied = if applied_migrations.len() < source_migrations.len() {
-            source_migrations[applied_migrations.len()..].to_vec()
-        } else {
-            Vec::<Migration>::new()
-        };
+        let unapplied = source_migrations[applied_migrations.len()..].to_vec();
 
         Ok(unapplied)
     }
