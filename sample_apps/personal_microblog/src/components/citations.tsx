@@ -23,6 +23,7 @@ export default function Citations({ citationIds, citationStream, collapsedByDefa
       if (!citationStream) {
         return;
       }
+      setIsLoading(true);
       try {
         for await (const citationId of readStreamableValue(citationStream)) {
           if (citationId) {
@@ -32,25 +33,30 @@ export default function Citations({ citationIds, citationStream, collapsedByDefa
       } catch (error) {
         console.error('Streaming error:', error);
       }
+      setIsLoading(false);
     }
     loadCitationsFromStream();
   }, [citationStream]);
+
+  async function prefetchCitations() {
+    if (isLoading || loadedCitations.length > 0) {
+      return;
+    }
+    await Promise.all(internalCitationIds.map(async (id) => {
+      const res = await fetch(`/api/post/${id}`);
+      const json = await res.json();
+      return json;
+    })).then((citations) => {
+      setLoadedCitations(citations);
+    });
+  }
 
   useEffect(() => {
     if (collapsed) {
       return;
     }
-    async function loadCitations() {
-      await Promise.all(internalCitationIds.map(async (id) => {
-        const res = await fetch(`/api/post/${id}`);
-        const json = await res.json();
-        return json;
-      })).then((citations) => {
-        setLoadedCitations(citations);
-      });
-    }
     setIsLoading(true);
-    loadCitations();
+    prefetchCitations();
     setIsLoading(false);
   }, [collapsed, internalCitationIds]);
 
@@ -58,24 +64,39 @@ export default function Citations({ citationIds, citationStream, collapsedByDefa
     return null;
   }
 
-  if (collapsed) {
-    return (
-      <div onClick={(e) => {
-        e.stopPropagation();
-        setCollapsed(false);
-      }}
-        className="cursor-pointer">Show {internalCitationIds.length} citations</div>
-    )
-  }
-
+  /*
+   * citation-count-element and citation-list-element are in the same grid cell
+   * to make them render on top of each other. This eliminates jank when switching
+   * between the two elements.
+   * This effectively makes the height of the container max(citation-count-element, citation-list-element),
+   * which makes for a smoother transition when `collapsed` is toggled.
+   */
   return (
-    <AnimatePresence>
-      <div className="flex flex-col gap-2">
-        {loadedCitations.map((citation) => (
-          <Citation key={citation.id} tweet={citation} />
-        ))}
-      </div>
-    </AnimatePresence>
+    <div className="grid grid-cols-1 grid-rows-1">
+      <AnimatePresence>
+        <motion.div
+          key="citation-count-element"
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: collapsed ? 1 : 0, height: 'auto' }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setCollapsed(false);
+          }}
+          onHoverStart={() => prefetchCitations()}
+          className={`cursor-pointer col-[1] row-[1]`}>Show {internalCitationIds.length} citations</motion.div>
+        {!collapsed && (
+          <motion.div
+            key="citation-list-element"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="flex flex-col gap-2 col-[1] row-[1]">
+            {loadedCitations.map((citation) => (
+              <Citation key={citation.id} tweet={citation} />
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 }
 

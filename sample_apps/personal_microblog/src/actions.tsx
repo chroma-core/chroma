@@ -80,7 +80,7 @@ export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], 
     const posts = await chromaCollection.get({
       where: { "role": "user" },
       include: ["documents", "metadatas"],
-      limit: cursor - start,
+      limit: cursor - start + 1,
       offset: start,
     });
     const postModels = chromaGetResultsToPostModels(posts);

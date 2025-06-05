@@ -34,11 +34,25 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
     postReply();
   }
 
+  function webNativeShare() {
+    const url = window.location.href;
+    const data = {
+      title: post.body,
+      text: post.body,
+      url: url,
+    }
+    if (!navigator.canShare(data)) {
+      return;
+    }
+    navigator.share(data).catch(() => {
+      // Do nothing
+    });
+  }
+
   const headerComponent = (<div className="flex flex-row font-ui justify-between sticky top-0 bg-[var(--background)] py-4">
     <a href="/">← Feed</a>
     <div className="flex flex-row gap-2">
-      {post.threadParentId && <a href={`/post/${post.threadParentId}`}>Parent</a>}
-      <a href={`/post/${post.id}`}>Permalink</a>
+      <button onClick={webNativeShare}>Share</button>
     </div>
   </div>);
 
