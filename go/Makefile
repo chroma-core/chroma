@@ -28,6 +28,7 @@ build: proto
 	go build -v -o bin/logservice ./cmd/logservice/
 
 test: build
+	go clean -testcache
 	go test -race -cover ./...
 
 

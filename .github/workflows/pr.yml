@@ -193,32 +193,6 @@ jobs:
     uses: ./.github/workflows/_go-tests.yml
     secrets: inherit
 
-  go-tests-2:
-    name: Go tests 2
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
-    uses: ./.github/workflows/_go-tests.yml
-    secrets: inherit
-
-  go-tests-3:
-    name: Go tests 3
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
-    uses: ./.github/workflows/_go-tests.yml
-    secrets: inherit
-
-  go-tests-4:
-    name: Go tests 4
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
-    uses: ./.github/workflows/_go-tests.yml
-    secrets: inherit
-  go-tests-5:
-    name: Go tests 5
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
-    uses: ./.github/workflows/_go-tests.yml
-    secrets: inherit
   check-title:
     name: Check PR Title
     runs-on: blacksmith-4vcpu-ubuntu-2204
