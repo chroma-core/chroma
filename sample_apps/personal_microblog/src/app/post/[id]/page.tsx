@@ -15,21 +15,15 @@ export default async function PostPermalinkPage({
     notFound();
   }
 
-  const [parentPosts, replies, relatedPosts] = await Promise.all([
+  const [parentPosts, replies] = await Promise.all([
     getParentPosts(post),
     getPostReplies(id),
-    semanticSearch(post.body)
   ]);
-
-  const relatedPostsFiltered = relatedPosts
-    .filter(p => p.id !== post.id)
-    .filter(p => !replies.some(r => r.id === p.id));
 
   return <PermalinkTweetView
     post={post}
     parentPosts={parentPosts}
     existingReplies={replies}
-    relatedPosts={relatedPostsFiltered}
   />;
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { publishNewUserPost } from "@/actions";
+import { publishNewUserPost, semanticSearch } from "@/actions";
 import { TweetModel } from "@/types";
 import { unixTimestampNow } from "@/util";
 import { useEffect, useState } from "react";
@@ -11,8 +11,18 @@ import { BiReply, BiLinkAlt } from "react-icons/bi";
 import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from 'next/navigation'
 
-export default function PermalinkTweetView({ post, parentPosts, existingReplies, relatedPosts }: { post: TweetModel, parentPosts: TweetModel[], existingReplies: TweetModel[], relatedPosts: TweetModel[] }) {
+export default function PermalinkTweetView({ post, parentPosts, existingReplies }: { post: TweetModel, parentPosts: TweetModel[], existingReplies: TweetModel[] }) {
   const [replies, setReplies] = useState<TweetModel[]>(existingReplies);
+  const [relatedPosts, setRelatedPosts] = useState<TweetModel[]>([]);
+
+  useEffect(() => {
+    const getRelatedPosts = async () => {
+      const response = await fetch(`/api/search?q=${encodeURIComponent(post.body)}`);
+      const relatedPosts = await response.json();
+      setRelatedPosts(relatedPosts.filter((p: TweetModel) => p.id !== post.id));
+    };
+    getRelatedPosts();
+  }, [post]);
 
   function handleSubmit(input: string) {
     const postReply = async () => {
