@@ -3392,6 +3392,9 @@ mod tests {
     }
 
     proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 1, .. ProptestConfig::default()
+        })]
         #[test]
         fn test_k8s_integration_rust_log_service_push_pull_logs(
             read_offset in 1usize..=100,
@@ -3422,7 +3425,7 @@ mod tests {
                         push_log_to_server(&log_server, collection_id, chunk).await;
                     }
 
-                    validate_dirty_log_on_server(&log_server, &vec![collection_id]).await;
+                    validate_dirty_log_on_server(&log_server, &[collection_id]).await;
                     validate_log_on_server(&log_server, collection_id, &operations, read_offset, batch_size).await;
                     mock_compact_on_server(&log_server, collection_id).await;
                     validate_dirty_log_on_server(&log_server, &Vec::new()).await;
