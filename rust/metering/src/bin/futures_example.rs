@@ -2,37 +2,32 @@ use std::sync::{Arc, Mutex as StdMutex};
 use tokio::time::{sleep, Duration};
 use tracing::Span;
 
-use chroma_metering::{
-    attribute, close, create, current, event, register_receiver, MeteredFutureExt, SubmitExt,
-};
-use chroma_metering_core::MeteringEvent;
-
 use async_trait::async_trait;
 use std::fmt::Debug;
 
-#[attribute(name = "nested_attribute")]
-type NestedAttribute = Option<u8>;
+chroma_metering::initialize_metering! {
+    #[attribute(name = "nested_attribute")]
+    type NestedAttribute = Option<u8>;
 
-#[event]
-#[derive(Debug)]
-struct ParentEvent {
-    parent_value: usize,
+    #[event]
+    #[derive(Debug, Default, Clone)]
+    struct ParentEvent {
+        parent_value: usize,
+        #[field(attribute = "nested_attribute", mutator = "parent_mutator")]
+        parent_field: Option<u8>,
+    }
 
-    #[field(attribute = "nested_attribute", mutator = "parent_mutator")]
-    parent_field: Option<u8>,
+    #[event]
+    #[derive(Debug, Default, Clone)]
+    struct ChildEvent {
+        child_value: usize,
+        #[field(attribute = "nested_attribute", mutator = "child_mutator")]
+        child_field: Option<u8>,
+    }
 }
 
 fn parent_mutator(evt: &mut ParentEvent, value: Option<u8>) {
     evt.parent_field = value;
-}
-
-#[event]
-#[derive(Debug)]
-struct ChildEvent {
-    child_value: usize,
-
-    #[field(attribute = "nested_attribute", mutator = "child_mutator")]
-    child_field: Option<u8>,
 }
 
 fn child_mutator(evt: &mut ChildEvent, value: Option<u8>) {
@@ -58,7 +53,7 @@ impl chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>> for CollectingRec
     }
 }
 
-async fn parent_scope(collector: CollectingReceiver) {
+async fn parent_scope(_collector: CollectingReceiver) {
     let _parent_guard = create(ParentEvent {
         parent_value: 10,
         parent_field: None,
@@ -90,7 +85,7 @@ async fn parent_scope(collector: CollectingReceiver) {
     println!("[parent_scope] back to parent, current = {:?}", current());
 }
 
-async fn isolated_tasks_demo(collector: CollectingReceiver) {
+async fn isolated_tasks_demo(_collector: CollectingReceiver) {
     let a = tokio::spawn(async move {
         let _guard_a = create(ParentEvent {
             parent_value: 100,

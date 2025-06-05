@@ -1,241 +1,278 @@
-// use std::{
-//     any::TypeId,
-//     cell::RefCell,
-//     future::Future,
-//     pin::Pin,
-//     task::{Context, Poll},
-// };
+//! This crate contains the implementation of the procedural macros used in
+//! Chroma's metering library. There are three primary exports:
+//!     - [`crate::attribute`] is a procedural attribute macro that
+//!       parses definitions for metering attributes and
+//!       registers them in the application's metering registry.
+//!     - [`crate::event`] is a procedural attribute macro that parses
+//!       a metering event definition, registers the event, and
+//!       generates the necessary trait implementations for the
+//!       event.
+//!     - [`crate::generate_noop_mutators`] is a procedural functional
+//!       macro that is used by the `chroma-metering` crate (it is not
+//!       intended for use in applications) to generate definitions
+//!       of no-op mutators on the `MeteringEvent` trait.
 
-// use async_trait::async_trait;
-// use once_cell::sync::Lazy;
-// use parking_lot::Mutex;
-// use std::fmt::Debug;
+extern crate proc_macro;
 
-// pub use chroma_metering_core;
-// pub use chroma_metering_macros::{attribute, event};
+use crate::{
+    attributes::generate_attribute_definition_token_stream,
+    events::generate_event_definition_token_stream,
+    mutators::generate_noop_mutator_definition_token_stream,
+    utils::{generate_compile_error, process_token_stream},
+};
+use proc_macro2::TokenStream;
+use quote::quote;
 
-// /// The default receiver registered in the library.
-// #[derive(Clone, Debug)]
-// pub struct DefaultReceiver;
+mod annotations;
+mod attributes;
+mod errors;
+mod events;
+mod fields;
+mod mutators;
+mod utils;
 
-// /// The default receiver simply prints out the metering events submitted to it.
-// #[async_trait]
-// impl chroma_system::ReceiverForMessage<Box<dyn chroma_metering_core::MeteringEvent>>
-//     for DefaultReceiver
-// {
-//     async fn send(
-//         &self,
-//         message: Box<dyn chroma_metering_core::MeteringEvent>,
-//         tracing_context: Option<tracing::Span>,
-//     ) -> Result<(), chroma_system::ChannelError> {
-//         if let Some(span) = tracing_context {
-//             println!("[chroma_metering] span={:?} event={:?}", span, message);
-//         } else {
-//             println!("[chroma_metering] event={:?}", message);
-//         }
-//         Ok(())
-//     }
-// }
+#[proc_macro]
+pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let token_stream = TokenStream::from(raw_token_stream);
 
-// /// The storage slot for the registered receiver.
-// static RECEIVER: Lazy<
-//     Mutex<Box<dyn chroma_system::ReceiverForMessage<Box<dyn chroma_metering_core::MeteringEvent>>>>,
-// > = Lazy::new(|| Mutex::new(Box::new(DefaultReceiver)));
+    let (attributes, events) = match process_token_stream(&token_stream) {
+        Ok(result) => result,
+        Err(error) => return generate_compile_error(&error.to_string()),
+    };
 
-// /// Allows library users to register their own receivers.
-// pub fn register_receiver(
-//     receiver: Box<
-//         dyn chroma_system::ReceiverForMessage<Box<dyn chroma_metering_core::MeteringEvent>>,
-//     >,
-// ) {
-//     let mut receiver_slot = RECEIVER.lock();
-//     *receiver_slot = receiver;
-// }
+    let noop_mutator_definition_token_streams: Vec<TokenStream> = attributes
+        .iter()
+        .map(|attribute| generate_noop_mutator_definition_token_stream(attribute))
+        .collect();
 
-// /// A trait containing a `submit` method to send metering events to the registered receiver.
-// #[async_trait]
-// pub trait SubmitExt: chroma_metering_core::MeteringEvent + Sized + Send {
-//     async fn submit(self) {
-//         let span_opt = Some(tracing::Span::current());
+    let attribute_definition_token_streams: Vec<TokenStream> = attributes
+        .iter()
+        .map(|attribute| generate_attribute_definition_token_stream(attribute))
+        .collect();
 
-//         let handler: Box<
-//             dyn chroma_system::ReceiverForMessage<Box<dyn chroma_metering_core::MeteringEvent>>,
-//         > = {
-//             let lock = RECEIVER.lock();
-//             (*lock).clone()
-//         };
+    let event_definition_token_streams: Vec<TokenStream> = events
+        .iter()
+        .map(|event| generate_event_definition_token_stream(event))
+        .collect();
 
-//         let boxed_evt: Box<dyn chroma_metering_core::MeteringEvent> = Box::new(self);
+    return proc_macro::TokenStream::from(quote! {
+        pub trait MeteringEvent: std::fmt::Debug + std::any::Any + Send + 'static {
+            #( #noop_mutator_definition_token_streams )*
+        }
 
-//         if let Err(err) = handler.send(boxed_evt, span_opt).await {
-//             tracing::error!("Unable to send meter event: {err}");
-//         }
-//     }
-// }
+        #( #attribute_definition_token_streams )*
 
-// /// A blanket-impl of the `submit` method for all metering events.
-// #[async_trait]
-// impl<T> SubmitExt for T
-// where
-//     T: chroma_metering_core::MeteringEvent + Send + 'static,
-// {
-//     async fn submit(self) {
-//         let span_opt = Some(tracing::Span::current());
-//         let handler: Box<
-//             dyn chroma_system::ReceiverForMessage<Box<dyn chroma_metering_core::MeteringEvent>>,
-//         > = {
-//             let lock = RECEIVER.lock();
-//             (*lock).clone_box()
-//         };
-//         let boxed_evt: Box<dyn chroma_metering_core::MeteringEvent> = Box::new(self);
-//         if let Err(err) = handler.send(boxed_evt, span_opt).await {
-//             tracing::error!("Unable to send meter event: {err}");
-//         }
-//     }
-// }
+        #( #event_definition_token_streams )*
 
-// thread_local! {
-//     /// The thread-local event stack in which metering events are stored.
-//     static EVENT_STACK: RefCell<Vec<(TypeId, Box<dyn chroma_metering_core::MeteringEvent>)>> = RefCell::new(Vec::new());
-// }
+        /// The default receiver registered in the library.
+        #[derive(Clone, std::fmt::Debug)]
 
-// /// A zero-sized struct used to implement RAII for metering events.
-// pub struct MeteringEventGuard;
+        pub struct __DefaultReceiver;
 
-// /// We implement drop for the guard such that metering events are dropped when they fall out of scope.
-// impl Drop for MeteringEventGuard {
-//     fn drop(&mut self) {
-//         if let Some(dropped_event) = EVENT_STACK.with(|event_stack| event_stack.borrow_mut().pop())
-//         {
-//             tracing::warn!(
-//                 "Dropping event because it is now out of scope: {:?}",
-//                 dropped_event
-//             );
-//         }
-//     }
-// }
+        /// The default receiver simply prints out the metering events submitted to it.
+        #[async_trait::async_trait]
+        impl chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>>
+            for __DefaultReceiver
+        {
+            async fn send(
+                &self,
+                message: Box<dyn MeteringEvent>,
+                tracing_context: Option<tracing::Span>,
+            ) -> Result<(), chroma_system::ChannelError> {
+                if let Some(span) = tracing_context {
+                    println!("[metering] span={:?} event={:?}", span, message);
+                } else {
+                    println!("[metering] event={:?}", message);
+                }
+                Ok(())
+            }
+        }
 
-// /// Creates a metering event of type `E` and pushes it onto the stack.
-// pub fn create<E: chroma_metering_core::MeteringEvent>(metering_event: E) -> MeteringEventGuard {
-//     let type_id = TypeId::of::<E>();
-//     let boxed_metering_event: Box<dyn chroma_metering_core::MeteringEvent> =
-//         Box::new(metering_event);
-//     EVENT_STACK.with(|event_stack| {
-//         event_stack
-//             .borrow_mut()
-//             .push((type_id, boxed_metering_event));
-//     });
-//     MeteringEventGuard
-// }
+        /// The storage slot for the registered receiver.
+        static RECEIVER: once_cell::sync::Lazy<
+            parking_lot::Mutex<Box<dyn chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>>>>,
+        > = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(Box::new(__DefaultReceiver)));
 
-// thread_local! {
-//     /// A thread-local pointer to an empty metering event such that if the stack is empty
-//     /// method invocations won't fail.
-//     static BLANK_METERING_EVENT_POINTER: *mut dyn chroma_metering_core::MeteringEvent = {
-//         let boxed_blank_metering_event = Box::new(BlankMeteringEvent);
-//         Box::into_raw(boxed_blank_metering_event) as *mut dyn chroma_metering_core::MeteringEvent
-//     };
-// }
+        /// Allows library users to register their own receivers.
+        pub fn register_receiver(
+            receiver: Box<
+                dyn chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>>,
+            >,
+        ) {
+            let mut receiver_slot = RECEIVER.lock();
+            *receiver_slot = receiver;
+        }
 
-// /// A zero-sized metering event to use in case of the stack being empty.
-// struct BlankMeteringEvent;
+        /// A trait containing a `submit` method to send metering events to the registered receiver.
+        #[async_trait::async_trait]
+        pub trait SubmitExt: MeteringEvent + Sized + Send {
+            async fn submit(self) {
+                let maybe_current_span = Some(tracing::Span::current());
 
-// /// We implement debug so that the metering event can be sent to the default receiver.
-// impl Debug for BlankMeteringEvent {
-//     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         write!(formatter, "BlankMeteringEvent")
-//     }
-// }
+                let receiver: Box<
+                    dyn chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>>,
+                > = {
+                    let lock = RECEIVER.lock();
+                    (*lock).clone()
+                };
 
-// /// The blank metering event has no custom mutators, so everything is a no-op.
-// impl chroma_metering_core::MeteringEvent for BlankMeteringEvent {}
+                let boxed_metering_event: Box<dyn MeteringEvent> = Box::new(self);
 
-// /// Returns a pointer to the metering event at the top of the stack.
-// pub fn current() -> &'static mut dyn chroma_metering_core::MeteringEvent {
-//     if let Some(raw_ptr) = EVENT_STACK.with(|event_stack| {
-//         let mut vec = event_stack.borrow_mut();
-//         if let Some((_, boxed_evt)) = vec.last_mut() {
-//             let raw: *mut dyn chroma_metering_core::MeteringEvent =
-//                 &mut **boxed_evt as *mut dyn chroma_metering_core::MeteringEvent;
-//             Some(raw)
-//         } else {
-//             None
-//         }
-//     }) {
-//         unsafe { &mut *raw_ptr }
-//     } else {
-//         BLANK_METERING_EVENT_POINTER.with(|p| unsafe { &mut *(*p) })
-//     }
-// }
+                if let Err(error) = receiver.send(boxed_metering_event, maybe_current_span).await {
+                    tracing::error!("Unable to send meter event: {error}");
+                }
+            }
+        }
 
-// /// Checks if the top event on the stack is of type `E`. If so, the event is removed from the stack
-// /// and returned to the caller. If not, `None` is returned.
-// pub fn close<E: chroma_metering_core::MeteringEvent>() -> Option<E> {
-//     EVENT_STACK.with(|event_stack| {
-//         let mut vec = event_stack.borrow_mut();
-//         if let Some((type_id, _boxed_evt)) = vec.last() {
-//             if *type_id == TypeId::of::<E>() {
-//                 let (_type_id, boxed_any) = vec.pop().unwrap();
-//                 let raw_evt: *mut dyn chroma_metering_core::MeteringEvent =
-//                     Box::into_raw(boxed_any);
-//                 let raw_e: *mut E = raw_evt as *mut E;
-//                 let boxed_e: Box<E> = unsafe { Box::from_raw(raw_e) };
-//                 return Some(*boxed_e);
-//             }
-//         }
-//         None
-//     })
-// }
+        /// A blanket-impl of the `submit` method for all metering events.
+        #[async_trait::async_trait]
+        impl<T> SubmitExt for T
+        where
+            T: MeteringEvent + Send + 'static,
+        {
+            async fn submit(self) {
+                let maybe_current_span = Some(tracing::Span::current());
+                let receiver: Box<
+                    dyn chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>>,
+                > = {
+                    let lock = RECEIVER.lock();
+                    (*lock).clone_box()
+                };
+                let boxed_metering_event: Box<dyn MeteringEvent> = Box::new(self);
+                if let Err(error) = receiver.send(boxed_metering_event, maybe_current_span).await {
+                    tracing::error!("Unable to send meter event: {error}");
+                }
+            }
+        }
 
-// /// A trait that allows futures to be metered to pass events between async contexts.
-// pub trait MeteredFutureExt: Future + Sized {
-//     fn metered(self, _metering_event_guard: MeteringEventGuard) -> MeteredFuture<Self> {
-//         MeteredFuture { inner: self }
-//     }
-// }
+        thread_local! {
+            /// The thread-local event stack in which metering events are stored.
+            static EVENT_STACK: std::cell::RefCell<Vec<(std::any::TypeId, Box<dyn MeteringEvent>)>> = std::cell::RefCell::new(Vec::new());
+        }
 
-// /// Blanket-impl of the `MeteredFutureExt` trait for futures.
-// impl<F: Future> MeteredFutureExt for F {}
+        /// A zero-sized struct used to implement RAII for metering events.
+        pub struct MeteringEventGuard;
 
-// /// The struct that holds the inner future for metered futures.
-// pub struct MeteredFuture<F: Future> {
-//     inner: F,
-// }
+        /// We implement drop for the guard such that metering events are dropped when they fall out of scope.
+        impl Drop for MeteringEventGuard {
+            fn drop(&mut self) {
+                if let Some(dropped_event) = EVENT_STACK.with(|event_stack| event_stack.borrow_mut().pop())
+                {
+                    tracing::warn!(
+                        "Dropping event because it is now out of scope: {:?}",
+                        dropped_event
+                    );
+                }
+            }
+        }
 
-// /// Implementation of the `Future` trait for `MeteredFuture`.
-// impl<F: Future> Future for MeteredFuture<F> {
-//     type Output = F::Output;
+        /// Creates a metering event of type `E` and pushes it onto the stack.
+        pub fn create<E: MeteringEvent>(metering_event: E) -> MeteringEventGuard {
+            let type_id = std::any::TypeId::of::<E>();
+            let boxed_metering_event: Box<dyn MeteringEvent> =
+                Box::new(metering_event);
+            EVENT_STACK.with(|event_stack| {
+                event_stack
+                    .borrow_mut()
+                    .push((type_id, boxed_metering_event));
+            });
+            MeteringEventGuard
+        }
 
-//     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-//         let inner_future = unsafe {
-//             self.as_mut()
-//                 .map_unchecked_mut(|metered_future| &mut metered_future.inner)
-//         };
-//         inner_future.poll(context)
-//     }
-// }
+        thread_local! {
+            /// A thread-local pointer to an empty metering event such that if the stack is empty
+            /// method invocations won't fail.
+            static BLANK_METERING_EVENT_POINTER: *mut dyn MeteringEvent = {
+                let boxed_blank_metering_event = Box::new(BlankMeteringEvent);
+                Box::into_raw(boxed_blank_metering_event) as *mut dyn MeteringEvent
+            };
+        }
 
-// /// Implementation of `Unpin` for metered future.
-// impl<F: Future + Unpin> Unpin for MeteredFuture<F> {}
+        /// A zero-sized metering event to use in case of the stack being empty.
+        struct BlankMeteringEvent;
+
+        /// We implement debug so that the metering event can be sent to the default receiver.
+        impl std::fmt::Debug for BlankMeteringEvent {
+            fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(formatter, "BlankMeteringEvent")
+            }
+        }
+
+        /// The blank metering event has no custom mutators, so everything is a no-op.
+        impl MeteringEvent for BlankMeteringEvent {}
+
+        /// Returns a pointer to the metering event at the top of the stack.
+        pub fn current() -> &'static mut dyn MeteringEvent {
+            if let Some(raw_ptr) = EVENT_STACK.with(|event_stack| {
+                let mut vec = event_stack.borrow_mut();
+                if let Some((_, boxed_metering_event)) = vec.last_mut() {
+                    let raw: *mut dyn MeteringEvent =
+                        &mut **boxed_metering_event as *mut dyn MeteringEvent;
+                    Some(raw)
+                } else {
+                    None
+                }
+            }) {
+                unsafe { &mut *raw_ptr }
+            } else {
+                BLANK_METERING_EVENT_POINTER.with(|p| unsafe { &mut *(*p) })
+            }
+        }
+
+        /// Checks if the top event on the stack is of type `E`. If so, the event is removed from the stack
+        /// and returned to the caller. If not, `None` is returned.
+        pub fn close<E: MeteringEvent>() -> Option<E> {
+            EVENT_STACK.with(|event_stack| {
+                let mut vec = event_stack.borrow_mut();
+                if let Some((type_id, _boxed_evt)) = vec.last() {
+                    if *type_id == std::any::TypeId::of::<E>() {
+                        let (_type_id, boxed_any) = vec.pop().unwrap();
+                        let raw_evt: *mut dyn MeteringEvent =
+                            Box::into_raw(boxed_any);
+                        let raw_e: *mut E = raw_evt as *mut E;
+                        let boxed_e: Box<E> = unsafe { Box::from_raw(raw_e) };
+                        return Some(*boxed_e);
+                    }
+                }
+                None
+            })
+        }
+
+        /// A trait that allows futures to be metered to pass events between async contexts.
+        pub trait MeteredFutureExt: std::future::Future + Sized {
+            fn metered(self, _metering_event_guard: MeteringEventGuard) -> MeteredFuture<Self> {
+                MeteredFuture { inner: self }
+            }
+        }
+
+        /// Blanket-impl of the `MeteredFutureExt` trait for futures.
+        impl<F: std::future::Future> MeteredFutureExt for F {}
+
+        /// The struct that holds the inner future for metered futures.
+        pub struct MeteredFuture<F: std::future::Future> {
+            inner: F,
+        }
+
+        /// Implementation of the `Future` trait for `MeteredFuture`.
+        impl<F: std::future::Future> std::future::Future for MeteredFuture<F> {
+            type Output = F::Output;
+
+            fn poll(mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+                let inner_future = unsafe {
+                    self.as_mut()
+                        .map_unchecked_mut(|metered_future| &mut metered_future.inner)
+                };
+                inner_future.poll(context)
+            }
+        }
+
+        /// Implementation of `Unpin` for metered future.
+        impl<F: std::future::Future + Unpin> Unpin for MeteredFuture<F> {}
+    });
+}
 
 #[cfg(test)]
 mod tests {
-    chroma_metering_macros::initialize_metering! {
-        #[attribute(name = "my_test_attribute")]
-        type MyTestAttribute = Option<u64>;
-
-        #[event]
-        struct MyTestEvent {
-            test_constant_field: String,
-            #[field(attribute = "my_test_attribute", mutator = "my_test_mutator")]
-            test_annotated_field: MyTestAttribute,
-        }
-    }
-
-    fn my_test_mutator(event: &mut MyTestEvent, value: MyTestAttribute) {
-        event.test_annotated_field = value;
-    }
-
     fn test_register_custom_receiver() {}
 
     #[tokio::test]
