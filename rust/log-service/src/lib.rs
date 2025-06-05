@@ -3339,7 +3339,7 @@ mod tests {
 
     proptest! {
         #[test]
-         fn test_push_pull_logs(
+         fn test_k8s_integration_rust_log_service_push_pull_logs(
             read_offset in 1usize..=100,
             batch_size in 1usize..=100,
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=100)
