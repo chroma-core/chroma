@@ -101,6 +101,7 @@ impl TryFrom<OperationRecord> for chroma_proto::OperationRecord {
         let mut metadata = operation_record.metadata;
 
         if let Some(doc) = operation_record.document {
+            // NOTE: The proto record does not have a document field so we need to hide document in metadata
             let mut patched_metdata = metadata.take().unwrap_or_default();
             patched_metdata.insert(
                 CHROMA_DOCUMENT_KEY.to_string(),
@@ -148,6 +149,7 @@ impl TryFrom<chroma_proto::OperationRecord> for OperationRecord {
         let (metadata, document) = match operation_record_proto.metadata {
             Some(proto_metadata) => match UpdateMetadata::try_from(proto_metadata) {
                 Ok(mut metadata) => {
+                    // NOTE: The proto record does not have a document field so we need to extract document from metadata
                     let document = metadata.remove(CHROMA_DOCUMENT_KEY);
                     match document {
                         Some(UpdateMetadataValue::Str(document)) => {
