@@ -896,6 +896,14 @@ impl LogServer {
         self.metrics
             .dirty_log_records_read
             .add(dirty_markers.len() as u64, &[]);
+        let Some((last_record_inserted, _)) = dirty_markers.last() else {
+            let backpressure = vec![];
+            self.set_backpressure(&backpressure);
+            let mut need_to_compact = self.need_to_compact.lock();
+            let mut rollups = HashMap::new();
+            std::mem::swap(&mut *need_to_compact, &mut rollups);
+            return Ok(());
+        };
         let mut rollups = DirtyMarker::coalesce_markers(&dirty_markers)?;
         self.enrich_dirty_log(&mut rollups).await?;
         let mut markers = vec![];
@@ -919,7 +927,8 @@ impl LogServer {
             markers.push(serde_json::to_string(&DirtyMarker::Cleared).map(Vec::from)?);
         }
         let mut new_cursor = cursor.clone();
-        new_cursor.position = self.dirty_log.append_many(markers).await?;
+        self.dirty_log.append_many(markers).await?;
+        new_cursor.position = *last_record_inserted + 1u64;
         let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
             return Err(Error::CouldNotGetDirtyLogCursors);
         };
