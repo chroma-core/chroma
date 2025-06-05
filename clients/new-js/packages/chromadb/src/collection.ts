@@ -1,5 +1,5 @@
 import { ChromaClient } from "./chroma-client";
-import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
+import { EmbeddingFunction } from "./embedding-function";
 import {
   BaseRecordSet,
   CollectionMetadata,

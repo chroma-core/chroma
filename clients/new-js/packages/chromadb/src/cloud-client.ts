@@ -49,6 +49,7 @@ export class CloudClient extends ChromaClient {
     this.database = database;
   }
 
+  /** @ignore */
   override async _path(): Promise<{ tenant: string; database: string }> {
     if (!this.tenant || !this.database) {
       const { tenant, databases } = await this.getUserIdentity();

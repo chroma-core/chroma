@@ -17,5 +17,13 @@ const config: Config.InitialOptions = {
     "!**/vendor/**",
     "!**/vendor/**",
   ],
+  globals: {
+    "ts-jest": {
+      tsconfig: {
+        module: "esnext",
+        target: "es2020"
+      }
+    }
+  },
 };
 export default config;

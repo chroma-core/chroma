@@ -9,13 +9,16 @@ export type UserIdentity = GetUserIdentityResponse;
  * Metadata that can be associated with a collection.
  * Values must be boolean, number, or string types.
  */
-export type CollectionMetadata = Record<string, boolean | number | string>;
+export type CollectionMetadata = Record<
+  string,
+  boolean | number | string | null
+>;
 
 /**
  * Metadata that can be associated with individual records.
  * Values must be boolean, number, or string types.
  */
-export type Metadata = Record<string, boolean | number | string>;
+export type Metadata = Record<string, boolean | number | string | null>;
 
 /**
  * Base interface for record sets containing optional fields.
