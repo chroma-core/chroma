@@ -758,7 +758,7 @@ impl Configurable<StorageConfig> for S3Storage {
     }
 }
 
-pub async fn s3_client_for_test_with_new_bucket() -> crate::Storage {
+pub async fn s3_client_for_test_with_bucket_name(name: &str) -> crate::Storage {
     // Set up credentials assuming minio is running locally
     let cred =
         aws_sdk_s3::config::Credentials::new("minio", "minio123", None, None, "loaded-from-env");
@@ -773,14 +773,17 @@ pub async fn s3_client_for_test_with_new_bucket() -> crate::Storage {
         .build();
 
     let storage = S3Storage::new(
-        &format!("test-{}", rand::thread_rng().gen::<u64>()),
+        name,
         aws_sdk_s3::Client::from_conf(config),
         1024 * 1024 * 8,
         1024 * 1024 * 8,
     );
-    eprintln!("Creating bucket {}", storage.bucket);
     storage.create_bucket().await.unwrap();
     crate::Storage::S3(storage)
+}
+
+pub async fn s3_client_for_test_with_new_bucket() -> crate::Storage {
+    s3_client_for_test_with_bucket_name(&format!("test-{}", rand::thread_rng().gen::<u64>())).await
 }
 
 #[cfg(test)]
