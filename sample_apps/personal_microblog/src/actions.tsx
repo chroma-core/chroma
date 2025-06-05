@@ -86,7 +86,7 @@ export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], 
     const postModels = chromaGetResultsToPostModels(posts);
     return {
       posts: postModels.reverse(),
-      cursor: start,
+      cursor: start - 1,
     };
   } else {
     const posts = await chromaCollection.get({
@@ -101,7 +101,7 @@ export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], 
     }
     return {
       posts: postModels.slice(start).reverse(),
-      cursor: start,
+      cursor: start - 1,
     };
   }
 }
@@ -144,7 +144,7 @@ export async function publishNewUserPost(rawBody: string, threadParentId?: strin
   };
   let partialAssistantPost: PartialAssistantPost | undefined;
   if (newPost.body.includes("@assistant")) {
-    partialAssistantPost = getAssistantReponse(newBody, newPost.id);
+    partialAssistantPost = getAssistantResponse(newBody, newPost.id);
     newPost.aiReplyId = partialAssistantPost?.id;
   }
   addPostModelToChromaCollection(newPost, chromaCollection).catch(console.error);
@@ -161,7 +161,7 @@ function extractTweetCitations(body: string): {citationIds: string[], newBody: s
   return { citationIds: uniqueCitationIds, newBody };
 }
 
-function getAssistantReponse(userInput: string, parentThreadId: string): PartialAssistantPost {
+function getAssistantResponse(userInput: string, parentThreadId: string): PartialAssistantPost {
   const id = generateId();
   const bodyStream = createStreamableValue<string, any>();
   const citationStream = createStreamableValue<string, any>();

@@ -14,6 +14,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Search query is required' }, { status: 400 });
     }
 
+    if (query.length === 0) {
+      return NextResponse.json({ error: 'Search query must be non-empty' }, { status: 400 });
+    }
+
     return NextResponse.json(await semanticSearch(query));
   } catch (error) {
     console.error('API Error:', error);

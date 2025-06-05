@@ -31,7 +31,7 @@ export function Tweet({ tweet, aiReply, className }: TweetProps) {
         }
       });
     }
-  }, []);
+  }, [tweet.aiReplyId]);
 
   const formattedDate = new Date(tweet.date * 1000).toLocaleDateString('en-US', {
     day: '2-digit',
@@ -101,7 +101,7 @@ function Citation({ citationId }: { citationId: string }) {
   return (
     citation &&
     <motion.div
-      className="bg-gray-100 rounded-md p-2"
+      className="border p-2"
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: 'auto' }}
     >

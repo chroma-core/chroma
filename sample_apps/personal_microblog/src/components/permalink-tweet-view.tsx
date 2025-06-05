@@ -3,7 +3,7 @@
 import { publishNewUserPost } from "@/actions";
 import { TweetModel } from "@/types";
 import { unixTimestampNow } from "@/util";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { MarkdownContent } from "./markdown-content";
 import TweetPrompt from "./tweet-prompt";
 import { Tweet } from "./tweet";
@@ -11,22 +11,18 @@ import { BiReply, BiLinkAlt } from "react-icons/bi";
 import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from 'next/navigation'
 
-export default function PermalinkTweetView({ post, existingReplies, relatedPosts }: { post: TweetModel, existingReplies: TweetModel[], relatedPosts: TweetModel[] }) {
+export default function PermalinkTweetView({ post, parentPosts, existingReplies, relatedPosts }: { post: TweetModel, parentPosts: TweetModel[], existingReplies: TweetModel[], relatedPosts: TweetModel[] }) {
   const [replies, setReplies] = useState<TweetModel[]>(existingReplies);
 
   function handleSubmit(input: string) {
-    if (!post) {
-      return;
+    const postReply = async () => {
+      if (!post) {
+        return;
+      }
+      const { userPost } = await publishNewUserPost(input, post.id);
+      setReplies([...replies, userPost]);
     }
-    publishNewUserPost(input, post.id);
-    const reply = {
-      id: crypto.randomUUID(),
-      threadParentId: post.id,
-      role: "user",
-      body: input,
-      date: unixTimestampNow(),
-    } as TweetModel;
-    setReplies([...replies, reply]);
+    postReply();
   }
 
   if (!post) {
@@ -45,7 +41,11 @@ export default function PermalinkTweetView({ post, existingReplies, relatedPosts
         </div>
         <div className="py-4">
           <div className="bg-[#fafafa] py-12 px-4">
+            {parentPosts.map((p) => <div key={p.id} className="bg-gray-100 p-2 w-full">
+              <MarkdownContent content={p.body} className="text-[1.15em]/5 font-body" />
+            </div>)}
             <MarkdownContent content={post.body} className="text-[1.15em]/5 font-body" />
+            <PermalinkTweetCitations citationIds={post.citations} />
           </div>
           <TweetPrompt placeholder="Continue your thoughts..." onSubmit={handleSubmit} animate={false} />
           <div className='h-12' />
@@ -65,6 +65,32 @@ export default function PermalinkTweetView({ post, existingReplies, relatedPosts
         )}
       </div>
     </div>
+  );
+}
+
+function PermalinkTweetCitations({ citationIds }: { citationIds: string[] }) {
+  const [loading, setLoading] = useState(true);
+  const [citations, setCitations] = useState<TweetModel[]>([]);
+
+  useEffect(() => {
+    const getCitations = async () => {
+      const results = await Promise.all(citationIds.map(async (id) => {
+        const res = await fetch(`/api/post/${id}`);
+        return res.json();
+      }));
+      console.log(results);
+      setCitations(results);
+      setLoading(false);
+    };
+    getCitations();
+  }, []);
+  console.log(loading, citations);
+  return (
+    (!loading && citations.length > 0) && (<div className="mt-4 flex flex-row gap-2">
+      {citations.map((c) => <div key={c.id} className="bg-gray-100 p-2 w-full">
+        <MarkdownContent content={c.body} className="text-[1.15em]/5 font-body" />
+      </div>)}
+    </div>)
   );
 }
 
@@ -94,21 +120,21 @@ function PermalinkReply({ reply }: { reply: TweetModel }) {
           animate={{ opacity: isHovered ? 1 : 0 }}
           transition={{ duration: 0.2, ease: "easeInOut" }}
         >
-          <PermalinkReplyButton icon={<BiReply className={`w-5 h-5`} />} onClick={(e) => {setIsReplying((prev) => !prev); e.stopPropagation()}} />
-          <PermalinkReplyButton icon={<BiLinkAlt className={`w-[18px] h-[18px]`} />} onClick={(e) => {setIsReplying((prev) => !prev); e.stopPropagation()}} />
+          <PermalinkReplyButton icon={<BiReply className={`w-5 h-5`} />} onClick={(e) => { setIsReplying((prev) => !prev); e.stopPropagation() }} />
+          <PermalinkReplyButton icon={<BiLinkAlt className={`w-[18px] h-[18px]`} />} onClick={(e) => { setIsReplying((prev) => !prev); e.stopPropagation() }} />
         </motion.div>
       </div>
       <AnimatePresence>
-      {isReplying && (
-        <motion.div
-          initial={{ opacity: 0, height: 0}}
-          animate={{ opacity: 1, height: "auto" }}
-          exit={{ opacity: 0, height: 0 }}
-          transition={{ duration: 0.2, ease: "easeInOut" }}
-        >
-          <TweetPrompt placeholder="Reply to this post..." onSubmit={handleSubmit} animate={false} />
-        </motion.div>
-      )}
+        {isReplying && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2, ease: "easeInOut" }}
+          >
+            <TweetPrompt placeholder="Reply to this post..." onSubmit={handleSubmit} animate={false} />
+          </motion.div>
+        )}
       </AnimatePresence>
     </div>
   );

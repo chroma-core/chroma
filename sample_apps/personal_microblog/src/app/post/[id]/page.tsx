@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import PermalinkTweetView from "@/components/permalink-tweet-view";
 import { getPostById, getPostReplies, semanticSearch } from "@/actions";
+import { TweetModel } from "@/types";
 
 export default async function PostPermalinkPage({
   params,
@@ -14,7 +15,8 @@ export default async function PostPermalinkPage({
     notFound();
   }
 
-  const [replies, relatedPosts] = await Promise.all([
+  const [parentPosts, replies, relatedPosts] = await Promise.all([
+    getParentPosts(post),
     getPostReplies(id),
     semanticSearch(post.body)
   ]);
@@ -25,7 +27,23 @@ export default async function PostPermalinkPage({
 
   return <PermalinkTweetView
     post={post}
+    parentPosts={parentPosts}
     existingReplies={replies}
     relatedPosts={relatedPostsFiltered}
   />;
+}
+
+async function getParentPosts(post: TweetModel): Promise<TweetModel[]> {
+  const parentPosts = [];
+  let currentPost = post;
+  while (currentPost.threadParentId) {
+    const parentPost = await getPostById(currentPost.threadParentId);
+    if (parentPost) {
+      parentPosts.push(parentPost);
+      currentPost = parentPost;
+    } else {
+      break;
+    }
+  }
+  return parentPosts;
 }
