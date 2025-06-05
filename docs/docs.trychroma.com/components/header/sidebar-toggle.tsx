@@ -11,7 +11,7 @@ const SidebarToggle: React.FC<{ path: string[] }> = ({ path }) => {
           <SidebarIcon children="w-5 h-5" />
         </div>
       </DrawerTrigger>
-      <DrawerContent className="h-full w-[270px] bg-red-300 bg-[url(/composite_noise.jpg)] dark:backdrop-invert">
+      <DrawerContent className="h-full w-[270px] bg-[url(/composite_noise.jpg)] dark:backdrop-invert">
         <Sidebar path={path} mobile />
       </DrawerContent>
     </Drawer>
