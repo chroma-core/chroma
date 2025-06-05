@@ -1,6 +1,9 @@
-if pgrep -x atlas > /dev/null; then
-  echo "Error: Another atlas instance is already running"
-  exit 1
+LOCK_FILE="/tmp/atlas_migrate.lock"
+
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+  echo "Waiting for another atlas instance to complete..."
+  flock 200
 fi
 
 atlas schema apply \
@@ -8,3 +11,5 @@ atlas schema apply \
   --to file://pkg/log/store/schema/ \
 --dev-url "docker://postgres/15/dev" \
 --auto-approve
+
+flock -u 200
