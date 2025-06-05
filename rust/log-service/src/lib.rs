@@ -3344,34 +3344,31 @@ mod tests {
             batch_size in 1usize..=100,
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=100)
         ) {
-            // NOTE: Somehow it overflow the stack if we run with default stack size
-            let builder = std::thread::Builder::new().stack_size(1 << 23);
-            builder
-                .spawn(move || {
-                    let runtime = Runtime::new().unwrap();
-                    let log_server = runtime.block_on(setup_log_server());
+            // NOTE: Somehow it overflow the stack if we directly run it
+            std::thread::spawn(move || {
+                let runtime = Runtime::new().unwrap();
+                let log_server = runtime.block_on(setup_log_server());
 
-                    let collection_id = CollectionUuid::new();
-                    runtime.block_on(async move {
-                        log_server
-                            .proxy
-                            .clone()
-                            .expect("Legacy log service should be present")
-                            .seal_log(Request::new(
-                                SealLogRequest { collection_id: collection_id.to_string() }
-                            ))
-                            .await
-                            .expect("Seal log should not fail");
-                        for chunk in operations.chunks(100) {
-                            push_log_to_server(&log_server, collection_id, chunk).await;
-                        }
+                let collection_id = CollectionUuid::new();
+                runtime.block_on(async move {
+                    log_server
+                        .proxy
+                        .clone()
+                        .expect("Legacy log service should be present")
+                        .seal_log(Request::new(
+                            SealLogRequest { collection_id: collection_id.to_string() }
+                        ))
+                        .await
+                        .expect("Seal log should not fail");
+                    for chunk in operations.chunks(100) {
+                        push_log_to_server(&log_server, collection_id, chunk).await;
+                    }
 
-                        validate_log_on_server(&log_server, collection_id, &operations, read_offset, batch_size).await;
-                    });
-                })
-                .expect("Thread should be spawnable")
-                .join()
-                .expect("Spawned thread should not fail to join");
+                    validate_log_on_server(&log_server, collection_id, &operations, read_offset, batch_size).await;
+                });
+            })
+            .join()
+            .expect("Spawned thread should not fail to join");
         }
     }
 }
