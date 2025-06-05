@@ -38,6 +38,8 @@ pub struct DeleteVersionsAtSysDbOutput {
 
 #[derive(Error, Debug)]
 pub enum DeleteVersionsAtSysDbError {
+    #[error("Unknown error occurred when deleting versions at sysdb")]
+    UnknownError,
     #[error("Error deleting versions in sysdb: {0}")]
     SysDBError(String),
     #[error("Error deleting version file {path}: {message}")]
@@ -157,7 +159,13 @@ impl Operator<DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOutput>
                 .delete_collection_version(vec![input.versions_to_delete.clone()])
                 .await
             {
-                Ok(_) => {
+                Ok(results) => {
+                    for (_, was_successful) in results {
+                        if !was_successful {
+                            return Err(DeleteVersionsAtSysDbError::UnknownError);
+                        }
+                    }
+
                     tracing::info!(
                         versions = ?input.versions_to_delete.versions,
                         "Successfully deleted versions from SysDB"

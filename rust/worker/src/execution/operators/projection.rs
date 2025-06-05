@@ -71,6 +71,8 @@ pub enum ProjectionError {
     RecordSegment(#[from] Box<dyn ChromaError>),
     #[error("Error reading unitialized record segment")]
     RecordSegmentUninitialized,
+    #[error("Error reading phantom record: {0}")]
+    RecordSegmentPhantomRecord(u32),
 }
 
 impl ChromaError for ProjectionError {
@@ -80,6 +82,7 @@ impl ChromaError for ProjectionError {
             ProjectionError::RecordReader(e) => e.code(),
             ProjectionError::RecordSegment(e) => e.code(),
             ProjectionError::RecordSegmentUninitialized => ErrorCodes::Internal,
+            ProjectionError::RecordSegmentPhantomRecord(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -153,7 +156,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
                         let record = reader
                             .get_data_for_offset_id(*offset_id)
                             .await?
-                            .ok_or(ProjectionError::RecordSegmentUninitialized)?;
+                            .ok_or(ProjectionError::RecordSegmentPhantomRecord(*offset_id))?;
                         ProjectionRecord {
                             id: record.id.to_string(),
                             document: record

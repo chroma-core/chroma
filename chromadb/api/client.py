@@ -7,6 +7,8 @@ from chromadb.api import AdminAPI, ClientAPI, ServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
+    validate_embedding_function_conflict_on_create,
+    validate_embedding_function_conflict_on_get,
 )
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
@@ -151,8 +153,18 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> Collection:
         if configuration is None:
             configuration = {}
-            if embedding_function is not None:
-                configuration["embedding_function"] = embedding_function
+
+        configuration_ef = configuration.get("embedding_function")
+
+        validate_embedding_function_conflict_on_create(
+            embedding_function, configuration_ef
+        )
+
+        # If ef provided in function params and collection config ef is None,
+        # set the collection config ef to the function params
+        if embedding_function is not None and configuration_ef is None:
+            configuration["embedding_function"] = embedding_function
+
         model = self._server.create_collection(
             name=name,
             metadata=metadata,
@@ -182,6 +194,12 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
+        persisted_ef_config = model.configuration_json.get("embedding_function")
+
+        validate_embedding_function_conflict_on_get(
+            embedding_function, persisted_ef_config
+        )
+
         return Collection(
             client=self._server,
             model=model,
@@ -202,8 +220,15 @@ class Client(SharedSystemClient, ClientAPI):
     ) -> Collection:
         if configuration is None:
             configuration = {}
-            if embedding_function is not None:
-                configuration["embedding_function"] = embedding_function
+
+        configuration_ef = configuration.get("embedding_function")
+
+        validate_embedding_function_conflict_on_create(
+            embedding_function, configuration_ef
+        )
+
+        if embedding_function is not None and configuration_ef is None:
+            configuration["embedding_function"] = embedding_function
         model = self._server.get_or_create_collection(
             name=name,
             metadata=metadata,
@@ -211,6 +236,13 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
             configuration=configuration,
         )
+
+        persisted_ef_config = model.configuration_json.get("embedding_function")
+
+        validate_embedding_function_conflict_on_get(
+            embedding_function, persisted_ef_config
+        )
+
         return Collection(
             client=self._server,
             model=model,

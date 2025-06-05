@@ -23,15 +23,22 @@ jobs:
         run: cargo build --bin chroma
       - name: Test
         run: cargo nextest run --no-capture --profile ci
-      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
-      # - name: Upload test results
-      #   uses: datadog/junit-upload-github-action@v1
-      #   with:
-      #       api_key: ${{ secrets.DD_API_KEY }}
-      #       site: ${{ vars.DD_SITE }}
-      #       service: chroma
-      #       files: target/nextest/ci/junit.xml
-      #       logs: true
+  test-long:
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Build CLI
+        run: cargo build --bin chroma
+      - name: Test
+        run: cargo nextest run --no-capture --profile ci_long_running
 
   test-integration:
     strategy:
@@ -51,24 +58,17 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - uses: useblacksmith/build-push-action@v1.1
+      - name: Set up Docker
+        uses: ./.github/actions/docker
         with:
-          setup-only: true
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
         run: cargo nextest run --profile ci_k8s_integration
-      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
-      # - name: Upload test results
-      #   uses: datadog/junit-upload-github-action@v1
-      #   with:
-      #       api_key: ${{ secrets.DD_API_KEY }}
-      #       site: ${{ vars.DD_SITE }}
-      #       service: chroma
-      #       files: target/nextest/ci/junit.xml
-      #       logs: true
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs

@@ -1,4 +1,3 @@
-use super::types::ArrowReadableKey;
 use crate::key::CompositeKey;
 use chroma_error::ChromaError;
 use parking_lot::Mutex;
@@ -363,16 +362,52 @@ impl SparseIndexReader {
         result_uuids
     }
 
-    pub(super) fn get_block_ids_range<'prefix, 'referred_data, K, PrefixRange, KeyRange>(
+    pub(super) fn get_block_ids_for_prefixes(&self, mut prefixes: Vec<&str>) -> Vec<Uuid> {
+        prefixes.sort();
+        let mut result_uuids = Vec::new();
+        let block_start = self.data.forward.iter();
+        let block_end = block_start
+            .clone()
+            .skip(1)
+            .map(|(delim, _)| match delim {
+                SparseIndexDelimiter::Start => {
+                    unreachable!("The start delimiter should only appear in the first block")
+                }
+                SparseIndexDelimiter::Key(composite_key) => Some(composite_key.prefix.as_str()),
+            })
+            .chain([None]);
+        let mut prefix_iter = prefixes.into_iter().peekable();
+        for ((start_delim, block), end_prefix) in block_start.zip(block_end) {
+            if let SparseIndexDelimiter::Key(CompositeKey {
+                prefix: start_prefix,
+                key: _,
+            }) = start_delim
+            {
+                while let Some(&prefix) = prefix_iter.peek() {
+                    if start_prefix.as_str() <= prefix {
+                        break;
+                    }
+                    prefix_iter.next();
+                }
+            }
+            if let Some(&prefix) = prefix_iter.peek() {
+                if end_prefix.is_none() || end_prefix.is_some_and(|end_prefix| prefix <= end_prefix)
+                {
+                    result_uuids.push(block.id);
+                }
+            } else {
+                break;
+            }
+        }
+        result_uuids
+    }
+
+    pub(super) fn get_block_ids_range<'prefix, PrefixRange>(
         &self,
-        // These key ranges are flattened instead of using a single RangeBounds<CompositeKey> because not all keys have a well-defined min and max value. E.x. if the key is a string, there would be no way to get the range for all keys within a specific prefix.
         prefix_range: PrefixRange,
-        key_range: KeyRange,
     ) -> Vec<Uuid>
     where
-        K: ArrowReadableKey<'referred_data>,
         PrefixRange: RangeBounds<&'prefix str>,
-        KeyRange: RangeBounds<K>,
     {
         let forward = &self.data.forward;
 
@@ -392,67 +427,52 @@ impl SparseIndexReader {
             .iter()
             .zip(start_keys_offset_by_1_iter)
             .map(|((start_key, block_uuid), end_key)| (block_uuid, start_key, end_key))
-            .filter(|(_, block_start_key, block_end_key)| {
-                let prefix_start_valid = match block_start_key {
-                    SparseIndexDelimiter::Start => true,
-                    SparseIndexDelimiter::Key(start_key) => match prefix_range.start_bound() {
-                        Bound::Included(prefix_start) => *prefix_start >= start_key.prefix.as_str(),
-                        Bound::Excluded(prefix_start) => *prefix_start > start_key.prefix.as_str(),
-                        Bound::Unbounded => true,
-                    },
+            .filter(|(_, block_start_delimiter, block_end_delimiter)| {
+                // The block should be retained if and only if its prefix range overlaps with the given prefix range
+                // The necessary and sufficient condition for range R1, R2 to overlap is MAX(R1.START, R2.START) <= MIN(R1.END, R2.END)
+                let max_start_prefix = match block_start_delimiter {
+                    SparseIndexDelimiter::Start => prefix_range.start_bound().cloned(),
+                    SparseIndexDelimiter::Key(block_start_key) => {
+                        let start_prefix = block_start_key.prefix.as_str();
+                        match prefix_range.start_bound() {
+                            Bound::Included(given_start_prefix)
+                            | Bound::Excluded(given_start_prefix)
+                                if given_start_prefix < &start_prefix =>
+                            {
+                                Bound::Included(start_prefix)
+                            }
+                            Bound::Unbounded => Bound::Included(start_prefix),
+                            given_bound => given_bound.cloned(),
+                        }
+                    }
                 };
 
-                if !prefix_start_valid {
-                    return false;
+                let min_end_prefix = match block_end_delimiter {
+                    Some(block_end_key) => {
+                        let end_prefix = block_end_key.prefix.as_str();
+                        match prefix_range.end_bound() {
+                            Bound::Included(given_end_prefix)
+                            | Bound::Excluded(given_end_prefix)
+                                if &end_prefix < given_end_prefix =>
+                            {
+                                Bound::Included(end_prefix)
+                            }
+                            Bound::Unbounded => Bound::Included(end_prefix),
+                            given_bound => given_bound.cloned(),
+                        }
+                    }
+                    None => prefix_range.end_bound().cloned(),
+                };
+
+                // Check whether max_start_prefix <= min_end_prefix
+                match (max_start_prefix, min_end_prefix) {
+                    (Bound::Included(start), Bound::Included(end)) => start <= end,
+                    (Bound::Included(start), Bound::Excluded(end))
+                    | (Bound::Excluded(start), Bound::Included(end))
+                    | (Bound::Excluded(start), Bound::Excluded(end)) => start < end,
+                    // At least one of these is unbounded.
+                    _ => true,
                 }
-
-                let prefix_end_valid = match prefix_range.end_bound() {
-                    Bound::Included(prefix_end) => match block_end_key {
-                        Some(end_key) => *prefix_end <= end_key.prefix.as_str(),
-                        None => true,
-                    },
-                    Bound::Excluded(prefix_end) => match block_end_key {
-                        Some(end_key) => *prefix_end < end_key.prefix.as_str(),
-                        None => true,
-                    },
-                    Bound::Unbounded => true,
-                };
-
-                if !prefix_end_valid {
-                    return false;
-                }
-
-                let key_start_valid = match block_end_key {
-                    Some(block_end_key) => match key_range.start_bound() {
-                        Bound::Included(key_range_start) => {
-                            key_range_start.clone().into() <= block_end_key.key
-                        }
-                        Bound::Excluded(key_range_start) => {
-                            key_range_start.clone().into() < block_end_key.key
-                        }
-                        Bound::Unbounded => true,
-                    },
-                    None => true,
-                };
-
-                if !key_start_valid {
-                    return false;
-                }
-
-                let key_end_valid = match block_start_key {
-                    SparseIndexDelimiter::Start => true,
-                    SparseIndexDelimiter::Key(start_key) => match key_range.end_bound() {
-                        Bound::Included(key_range_end) => {
-                            key_range_end.clone().into() >= start_key.key
-                        }
-                        Bound::Excluded(key_range_end) => {
-                            key_range_end.clone().into() > start_key.key
-                        }
-                        Bound::Unbounded => true,
-                    },
-                };
-
-                key_end_valid
             })
             .map(|(sparse_index_value, _, _)| sparse_index_value.id)
             .collect()
@@ -735,6 +755,89 @@ mod tests {
         let blocks = reader.get_all_target_block_ids(composite_keys);
         assert_eq!(blocks.len(), 1);
         assert!(blocks.contains(&block_id_3));
+    }
+
+    #[test]
+    fn test_get_block_ids_range() {
+        let block_id_0 = uuid::Uuid::new_v4();
+        let writer = SparseIndexWriter::new(block_id_0);
+        writer
+            .set_count(block_id_0, 5)
+            .expect("Set count should succeed");
+        let mut blockfile_key = CompositeKey::new("a".to_string(), "a");
+        let block_id_1 = uuid::Uuid::new_v4();
+        writer
+            .add_block(blockfile_key.clone(), block_id_1)
+            .expect("No error");
+        writer
+            .set_count(block_id_1, 10)
+            .expect("Set count should succeed");
+
+        let block_id_2 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("a".to_string(), "c");
+        writer
+            .add_block(blockfile_key.clone(), block_id_2)
+            .expect("No error");
+        writer
+            .set_count(block_id_2, 10)
+            .expect("Set count should succeed");
+
+        let block_id_3 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("b".to_string(), "a");
+        writer
+            .add_block(blockfile_key.clone(), block_id_3)
+            .expect("No error");
+        writer
+            .set_count(block_id_3, 10)
+            .expect("Set count should succeed");
+
+        let block_id_4 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("b".to_string(), "f");
+        writer
+            .add_block(blockfile_key.clone(), block_id_4)
+            .expect("No error");
+        writer
+            .set_count(block_id_4, 10)
+            .expect("Set count should succeed");
+
+        let block_id_5 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("c".to_string(), "n");
+        writer
+            .add_block(blockfile_key.clone(), block_id_5)
+            .expect("No error");
+        writer
+            .set_count(block_id_5, 10)
+            .expect("Set count should succeed");
+
+        let block_id_6 = uuid::Uuid::new_v4();
+        blockfile_key = CompositeKey::new("d".to_string(), "x");
+        writer
+            .add_block(blockfile_key.clone(), block_id_6)
+            .expect("No error");
+        writer
+            .set_count(block_id_6, 10)
+            .expect("Set count should succeed");
+
+        let reader = writer.to_reader().expect("Conversion should succeed");
+        let blocks = reader.get_block_ids_range(..);
+        assert_eq!(
+            blocks,
+            vec![
+                block_id_0, block_id_1, block_id_2, block_id_3, block_id_4, block_id_5, block_id_6
+            ]
+        );
+
+        let blocks = reader.get_block_ids_range(.."a");
+        assert_eq!(blocks, vec![block_id_0]);
+
+        let blocks = reader.get_block_ids_range(..="a");
+        assert_eq!(blocks, vec![block_id_0, block_id_1, block_id_2]);
+
+        let blocks = reader.get_block_ids_range("b"..="c");
+        assert_eq!(blocks, vec![block_id_2, block_id_3, block_id_4, block_id_5]);
+
+        let blocks = reader.get_block_ids_range("c"..);
+        assert_eq!(blocks, vec![block_id_4, block_id_5, block_id_6]);
     }
 
     #[test]

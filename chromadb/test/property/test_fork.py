@@ -8,6 +8,7 @@ import pytest
 
 from chromadb.api.models.Collection import Collection
 from chromadb.test.conftest import reset, skip_if_not_cluster
+from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 from hypothesis.stateful import (
     Bundle,
     RuleBasedStateMachine,
@@ -189,3 +190,38 @@ class ForkStateMachine(RuleBasedStateMachine):
 def test_fork(caplog: pytest.LogCaptureFixture, client: chromadb.api.ClientAPI) -> None:
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(lambda: ForkStateMachine(client))  # type: ignore
+
+
+@skip_if_not_cluster()
+def test_fork_with_log_migration(
+    caplog: pytest.LogCaptureFixture, client: chromadb.api.ClientAPI
+) -> None:
+    import grpc
+    from chromadb.proto.logservice_pb2 import SealLogRequest
+    from chromadb.proto.logservice_pb2_grpc import LogServiceStub
+    from chromadb.proto.coordinator_pb2_grpc import SysDBStub
+
+    caplog.set_level(logging.ERROR)
+    client.reset()
+    channel = grpc.insecure_channel("localhost:50052")
+    go_log_service = LogServiceStub(channel)  # type: ignore[no-untyped-call]
+
+    channel = grpc.insecure_channel("localhost:50051")
+    sysdb_service = SysDBStub(channel)  # type: ignore[no-untyped-call]
+
+    NUMBER = 100
+
+    collection = client.create_collection("legacy-go-collection-0")
+    ids = sorted([f"id_{i}" for i in range(NUMBER)])
+    collection.add(ids=ids, embeddings=[[i, i] for i in range(NUMBER)])  # type: ignore[arg-type]
+    go_log_service.SealLog(SealLogRequest(collection_id=collection.id.hex))
+    fork_collection = collection.fork("fork-legacy-go-collection-0")
+    assert sorted(fork_collection.get()["ids"]) == ids
+
+    collection = client.create_collection("legacy-go-collection-1")
+    go_log_service.SealLog(SealLogRequest(collection_id=collection.id.hex))
+    ids = sorted([f"id_{i}" for i in range(NUMBER)])
+    collection.add(ids=ids, embeddings=[[i, i] for i in range(NUMBER)])  # type: ignore[arg-type]
+    fork_collection = collection.fork("fork-legacy-go-collection-1")
+    wait_for_version_increase(client, fork_collection.name, 0)
+    assert sorted(fork_collection.get()["ids"]) == ids

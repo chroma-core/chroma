@@ -267,7 +267,7 @@ impl CompactOrchestrator {
         tracing::info!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, ctx.receiver());
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 
     async fn materialize_log(
@@ -299,7 +299,7 @@ impl CompactOrchestrator {
                 next_max_offset_id.clone(),
             );
             let task = wrap(operator, input, ctx.receiver());
-            self.send(task, ctx).await;
+            self.send(task, ctx, Some(Span::current())).await;
         }
     }
 
@@ -450,7 +450,7 @@ impl CompactOrchestrator {
         );
 
         let task = wrap(operator, input, ctx.receiver());
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 
     fn get_segment_writers(&self) -> Result<CompactWriters, CompactionError> {
@@ -526,14 +526,20 @@ impl Orchestrator for CompactOrchestrator {
         self.dispatcher.clone()
     }
 
-    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
-        vec![wrap(
-            Box::new(GetCollectionAndSegmentsOperator {
-                sysdb: self.sysdb.clone(),
-                collection_id: self.collection_id,
-            }),
-            (),
-            ctx.receiver(),
+    async fn initial_tasks(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+    ) -> Vec<(TaskMessage, Option<Span>)> {
+        vec![(
+            wrap(
+                Box::new(GetCollectionAndSegmentsOperator {
+                    sysdb: self.sysdb.clone(),
+                    collection_id: self.collection_id,
+                }),
+                (),
+                ctx.receiver(),
+            ),
+            Some(Span::current()),
         )]
     }
 
@@ -626,6 +632,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                         .unwrap_or_default(),
                     maximum_fetch_count: Some(self.max_compaction_size as u32),
                     collection_uuid: self.collection_id,
+                    tenant: collection.tenant.clone(),
                 }),
                 (),
                 ctx.receiver(),
@@ -637,7 +644,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => {
                 // Collection is not yet initialized, there is no need to initialize the writers
                 // Future handlers should return early on empty materialized logs without using writers
-                self.send(log_task, ctx).await;
+                self.send(log_task, ctx, Some(Span::current())).await;
                 return;
             }
         };
@@ -746,15 +753,19 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             }
         };
         for segment in prefetch_segments {
+            let segment_id = segment.id;
             let prefetch_task = wrap(
                 Box::new(PrefetchSegmentOperator::new()),
                 PrefetchSegmentInput::new(segment, self.blockfile_provider.clone()),
                 ctx.receiver(),
             );
-            self.send(prefetch_task, ctx).await;
+            // Prefetch task is detached from the orchestrator
+            let prefetch_span =
+                tracing::info_span!(parent: None, "Prefetch segment", segment_id = %segment_id);
+            self.send(prefetch_task, ctx, Some(prefetch_span)).await;
         }
 
-        self.send(log_task, ctx).await;
+        self.send(log_task, ctx, Some(Span::current())).await;
     }
 }
 
@@ -794,10 +805,14 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
                 tracing::info!("Pulled Logs Up To Offset: {:?}", self.pulled_log_offset);
             }
             None => {
+                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
+                // TODO(hammadb): We can repair the log service's understanding of the offset here, as this only happens
+                // when the log service is not up to date on the latest compacted offset, which leads it to schedule an already
+                // compacted collection.
                 self.terminate_with_result(
-                    Err(CompactionError::InvariantViolation(
-                        "Logs should be present for compaction",
-                    )),
+                    Ok(CompactionResponse {
+                        collection_id: self.collection_id,
+                    }),
                     ctx,
                 )
                 .await;
@@ -1127,6 +1142,7 @@ mod tests {
                 .unwrap_or_default(),
             maximum_fetch_count: None,
             collection_uuid: collection_id,
+            tenant: old_cas.collection.tenant.clone(),
         };
         let filter = FilterOperator {
             query_ids: None,
@@ -1140,7 +1156,7 @@ mod tests {
                 }),
                 Where::Document(DocumentExpression {
                     operator: DocumentOperator::Contains,
-                    text: "<cat>".to_string(),
+                    pattern: "<cat>".to_string(),
                 }),
             ])),
         };
@@ -1195,6 +1211,14 @@ mod tests {
 
         let mut expected_new_collection = old_cas.collection.clone();
         expected_new_collection.version += 1;
+        expected_new_collection.version_file_path = Some(
+            old_cas
+                .collection
+                .version_file_path
+                .clone()
+                .unwrap()
+                .replace("/1", "/2"),
+        );
         assert_eq!(new_cas.collection, expected_new_collection);
         assert_eq!(new_cas.metadata_segment.id, old_cas.metadata_segment.id);
         assert_eq!(new_cas.record_segment.id, old_cas.record_segment.id);

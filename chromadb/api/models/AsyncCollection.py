@@ -256,6 +256,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             new_name=name,
             new_metadata=metadata,
             new_configuration=configuration,
+            tenant=self.tenant,
+            database=self.database,
         )
 
         self._update_model_after_modify_success(name, metadata, configuration)

@@ -3,10 +3,10 @@ description: "This action sets up Docker Buildx and authenticates to registries"
 inputs:
   ghcr-username:
     description: "Github Container Registry username"
-    required: true
+    required: false
   ghcr-password:
     description: "Github Container Registry password"
-    required: true
+    required: false
   dockerhub-username:
     description: "DockerHub username"
     required: true
@@ -17,15 +17,9 @@ inputs:
 runs:
   using: "composite"
   steps:
-    # https://github.com/docker/setup-qemu-action - for multiplatform builds
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v2
-    # https://github.com/docker/setup-buildx-action - for multiplatform builds
-    - name: Set up Docker Buildx
-      id: buildx
-      uses: docker/setup-buildx-action@v2
     - name: Log in to the Github Container registry
       uses: docker/login-action@v2.1.0
+      if: ${{ inputs.ghcr-username != '' }}
       with:
         registry: ghcr.io
         username: ${{ inputs.ghcr-username }}
@@ -35,3 +29,6 @@ runs:
       with:
         username: ${{ inputs.dockerhub-username }}
         password: ${{ inputs.dockerhub-password }}
+    - uses: useblacksmith/build-push-action@v1.1
+      with:
+        setup-only: true

@@ -7,7 +7,6 @@ use distributed::DistributedExecutor;
 use local::LocalExecutor;
 
 //////////////////////// Exposed Modules ////////////////////////
-pub(super) mod client_manager;
 pub mod config;
 // TODO: This should be private once we fix dep injection
 mod distributed;

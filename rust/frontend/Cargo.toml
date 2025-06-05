@@ -8,12 +8,14 @@ name = "frontend_service"
 path = "src/bin/frontend_service.rs"
 
 [dependencies]
+bytes = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 figment = { workspace = true }
+http-body-util = { workspace = true }
 lazy_static.workspace = true
 uuid = { workspace = true }
 tonic = { workspace = true }
@@ -26,7 +28,7 @@ regex = { workspace = true }
 futures = { workspace = true }
 backon = { workspace = true }
 tracing-opentelemetry = { workspace = true }
-tower = { version = "0.4.13", features = ["discover"] }
+tower = { workspace = true }
 mdac = { workspace = true }
 opentelemetry.workspace = true
 validator = { workspace = true }

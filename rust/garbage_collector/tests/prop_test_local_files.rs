@@ -39,6 +39,7 @@
 use chroma_blockstore::test_utils::sparse_index_test_utils::create_test_sparse_index;
 use chroma_storage::local::LocalStorage;
 use chroma_storage::Storage;
+use chroma_sysdb::GetCollectionsOptions;
 use chroma_sysdb::TestSysDb;
 use chroma_system::Orchestrator;
 use chroma_types::chroma_proto::FilePaths;
@@ -52,6 +53,7 @@ use chrono::DateTime;
 use futures::executor::block_on;
 use garbage_collector_library::garbage_collector_orchestrator::GarbageCollectorOrchestrator;
 use garbage_collector_library::types::CleanupMode;
+use garbage_collector_library::types::GarbageCollectorResponse;
 use itertools::Itertools;
 use proptest::prelude::*;
 use proptest::strategy::BoxedStrategy;
@@ -61,7 +63,6 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use tracing_test::traced_test;
 use uuid::Uuid;
 
 // SegmentBlockIdInfo is used to keep track of the segment block ids for a version.
@@ -577,7 +578,10 @@ impl GcTest {
         let collection_id = CollectionUuid::from_str(&id).unwrap();
         let collections = self
             .sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
 
@@ -597,6 +601,7 @@ impl GcTest {
         // Create sparse index for record segment
         let sparse_index_id = create_test_sparse_index(
             &self.storage,
+            Uuid::new_v4(),
             record_segment_info.block_ids.clone(),
             Some("test_si_rec_".to_string()),
         )
@@ -624,6 +629,7 @@ impl GcTest {
             .clone();
         let sparse_index_id_metadata = create_test_sparse_index(
             &self.storage,
+            Uuid::new_v4(),
             metadata_segment_info.block_ids.clone(),
             Some("test_si_meta_".to_string()),
         )
@@ -732,14 +738,10 @@ impl GcTest {
 
         let collection_id = Uuid::parse_str(&id).unwrap();
         let collections = sysdb
-            .get_collections(
-                Some(CollectionUuid(collection_id)),
-                None,
-                None,
-                None,
-                None,
-                0,
-            )
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(CollectionUuid(collection_id)),
+                ..Default::default()
+            })
             .await
             .unwrap();
 
@@ -767,8 +769,10 @@ impl GcTest {
 
         self.last_cleanup_files = Vec::new();
         match orchestrator.run(system.clone()).await {
-            Ok(response) => {
-                self.last_cleanup_files = response.deletion_list.clone();
+            #[expect(deprecated)]
+            Ok(GarbageCollectorResponse { deletion_list, .. }) => {
+                self.last_cleanup_files = deletion_list;
+
                 tracing::info!(
                     line = line!(),
                     "GcTest: cleanup_versions: last_cleanup_files: {:?}",
@@ -957,8 +961,11 @@ prop_state_machine! {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[traced_test]
 async fn run_gc_test_ext() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
     INVARIANT_CHECK_COUNT.store(0, Ordering::SeqCst);
     run_gc_test();
     let checks = INVARIANT_CHECK_COUNT.load(Ordering::SeqCst);

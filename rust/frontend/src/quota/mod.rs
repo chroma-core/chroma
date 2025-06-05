@@ -7,6 +7,7 @@ use std::{
 use chroma_error::ChromaError;
 use chroma_types::{CollectionUuid, Metadata, UpdateMetadata, Where};
 use thiserror::Error;
+use validator::Validate;
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Action {
@@ -20,6 +21,7 @@ pub enum Action {
     Update,
     Upsert,
     Query,
+    ForkCollection,
 }
 
 impl fmt::Display for Action {
@@ -35,6 +37,7 @@ impl fmt::Display for Action {
             Action::Update => write!(f, "Update"),
             Action::Upsert => write!(f, "Upsert"),
             Action::Query => write!(f, "Query"),
+            Action::ForkCollection => write!(f, "Fork Collection"),
         }
     }
 }
@@ -54,6 +57,7 @@ impl TryFrom<&str> for Action {
             "update" => Ok(Action::Update),
             "upsert" => Ok(Action::Upsert),
             "query" => Ok(Action::Query),
+            "fork_collection" => Ok(Action::ForkCollection),
             _ => Err(format!("Invalid Action: {}", value)),
         }
     }
@@ -240,6 +244,8 @@ pub enum UsageType {
     NumCollections,        // Total number of collections for a tenant
     NumDatabases,          // Total number of databases for a tenant
     NumQueryIDs,           // Number of IDs to filter by in a query
+    RegexPatternLength,    // Length of regex pattern specified in filter
+    NumForks,              // Number of forks a root collection may have
 }
 
 impl fmt::Display for UsageType {
@@ -269,6 +275,8 @@ impl fmt::Display for UsageType {
             UsageType::NumCollections => write!(f, "Number of collections"),
             UsageType::NumDatabases => write!(f, "Number of databases"),
             UsageType::NumQueryIDs => write!(f, "Number of IDs to filter by in a query"),
+            UsageType::RegexPatternLength => write!(f, "Length of regex pattern"),
+            UsageType::NumForks => write!(f, "Number of forks"),
         }
     }
 }
@@ -298,6 +306,8 @@ impl TryFrom<&str> for UsageType {
             "num_collections" => Ok(UsageType::NumCollections),
             "num_databases" => Ok(UsageType::NumDatabases),
             "num_query_ids" => Ok(UsageType::NumQueryIDs),
+            "regex_pattern_length" => Ok(UsageType::RegexPatternLength),
+            "num_forks" => Ok(UsageType::NumForks),
             _ => Err(format!("Invalid UsageType: {}", value)),
         }
     }
@@ -326,16 +336,20 @@ lazy_static::lazy_static! {
         m.insert(UsageType::NumCollections, 1_000_000);
         m.insert(UsageType::NumDatabases, 10);
         m.insert(UsageType::NumQueryIDs, 1000);
+        m.insert(UsageType::RegexPatternLength, 0);
+        m.insert(UsageType::NumForks, 256);
         m
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Validate)]
 pub struct QuotaExceededError {
     pub usage_type: UsageType,
     pub action: Action,
     pub usage: usize,
     pub limit: usize,
+    #[validate(length(min = 1))]
+    pub message: Option<String>,
 }
 
 impl fmt::Display for QuotaExceededError {
@@ -344,7 +358,11 @@ impl fmt::Display for QuotaExceededError {
             f,
             "'{}' exceeded quota limit for action '{}': current usage of {} exceeds limit of {}",
             self.usage_type, self.action, self.usage, self.limit
-        )
+        )?;
+        if let Some(msg) = self.message.as_ref() {
+            write!(f, ". {}", msg)?;
+        }
+        Ok(())
     }
 }
 
@@ -387,5 +405,65 @@ impl QuotaEnforcer for () {
         _: &QuotaPayload<'_>,
     ) -> Pin<Box<dyn Future<Output = Result<(), QuotaEnforcerError>> + Send>> {
         Box::pin(ready(Ok(())))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Action, QuotaExceededError, UsageType};
+    use validator::Validate;
+
+    #[test]
+    fn test_quota_exceeded_error_message_none() {
+        let error = QuotaExceededError {
+            usage_type: UsageType::NumRecords,
+            action: Action::Add,
+            usage: 100,
+            limit: 50,
+            message: None,
+        };
+        assert!(error.validate().is_ok());
+    }
+
+    #[test]
+    fn test_quota_exceeded_error_message_empty() {
+        let error = QuotaExceededError {
+            usage_type: UsageType::NumRecords,
+            action: Action::Add,
+            usage: 100,
+            limit: 50,
+            message: Some("".to_string()),
+        };
+        assert!(error.validate().is_err());
+    }
+
+    #[test]
+    fn test_quota_exceeded_error_message_valid() {
+        let custom_message = "This is a valid message.";
+        let error = QuotaExceededError {
+            usage_type: UsageType::NumRecords,
+            action: Action::Add,
+            usage: 100,
+            limit: 50,
+            message: Some(custom_message.to_string()),
+        };
+        assert!(error.validate().is_ok());
+        let error_string = format!("{}", error);
+        let expected_error_string = "'Number of records' exceeded quota limit for action 'Add': current usage of 100 exceeds limit of 50. This is a valid message.";
+        assert_eq!(error_string, expected_error_string);
+    }
+
+    #[test]
+    fn test_quota_exceeded_error_display_no_message() {
+        let error = QuotaExceededError {
+            usage_type: UsageType::NumRecords,
+            action: Action::Add,
+            usage: 100,
+            limit: 50,
+            message: None,
+        };
+        assert!(error.validate().is_ok());
+        let error_string = format!("{}", error);
+        assert_eq!(error_string, "'Number of records' exceeded quota limit for action 'Add': current usage of 100 exceeds limit of 50");
     }
 }

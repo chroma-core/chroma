@@ -23,6 +23,9 @@ mod tenant;
 mod validators;
 mod where_parsing;
 
+pub mod optional_u128;
+pub mod regex;
+
 // Re-export the types module, so that we can use it as a single import in other modules.
 pub use api_types::*;
 pub use collection::*;
@@ -45,6 +48,7 @@ pub use tenant::*;
 pub use types::*;
 pub use where_parsing::*;
 
+#[allow(clippy::all)]
 pub mod chroma_proto {
     tonic::include_proto!("chroma");
 }

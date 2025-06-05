@@ -46,6 +46,14 @@ message DeleteDatabaseRequest {
 
 message DeleteDatabaseResponse {}
 
+message FinishDatabaseDeletionRequest {
+  google.protobuf.Timestamp cutoff_time = 1;
+}
+
+message FinishDatabaseDeletionResponse {
+  uint64 num_deleted = 1;
+}
+
 message CreateTenantRequest {
   string name = 2; // Names are globally unique
 }
@@ -146,6 +154,14 @@ message DeleteCollectionResponse {
   reserved "status";
 }
 
+message FinishCollectionDeletionRequest {
+  string id = 1;
+  string tenant = 2;
+  string database = 3;
+}
+
+message FinishCollectionDeletionResponse {}
+
 // Request to get a single collection.
 message GetCollectionRequest {
   string id = 1;
@@ -166,6 +182,8 @@ message GetCollectionsRequest {
   string database = 5;
   optional int32 limit = 6;
   optional int32 offset = 7;
+  repeated string ids = 8;
+  optional bool include_soft_deleted = 9;
 }
 
 message GetCollectionsResponse {
@@ -227,6 +245,14 @@ message ForkCollectionRequest {
 message ForkCollectionResponse {
   Collection collection = 1;
   repeated Segment segments = 2;
+}
+
+message CountForksRequest {
+  string source_collection_id = 1;
+}
+
+message CountForksResponse {
+  uint64 count = 1;
 }
 
 message ResetStateResponse {
@@ -421,6 +447,8 @@ message ListCollectionsToGcRequest {
   // This also allows for a cheap and stateless pagination without using offsets.
   optional uint64 limit = 2;
 
+  optional string tenant_id = 3;
+
   // Design NOTE: When GC calls DeleteCollectionVersion, sysdb will update the
   // time associated with the oldest version of the collection. This allows
   // sysdb to return the collections that have not been GCed for a long time.
@@ -430,8 +458,9 @@ message CollectionToGcInfo {
   string id = 1;
   string name = 2;
   string version_file_path = 3;
-  int64 latest_version = 4;
+  reserved 4; // used to be "latest_version"
   string tenant_id = 5;
+  optional string lineage_file_path = 6;
 }
 
 message ListCollectionsToGcResponse {
@@ -456,11 +485,28 @@ message DeleteCollectionVersionResponse {
   map<string, bool> collection_id_to_success = 1;
 }
 
+message BatchGetCollectionVersionFilePathsRequest {
+  repeated string collection_ids = 1;
+}
+
+message BatchGetCollectionVersionFilePathsResponse {
+  map<string, string> collection_id_to_version_file_path = 1;
+}
+
+message BatchGetCollectionSoftDeleteStatusRequest {
+  repeated string collection_ids = 1;
+}
+
+message BatchGetCollectionSoftDeleteStatusResponse {
+  map<string, bool> collection_id_to_is_soft_deleted = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
   rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}
   rpc DeleteDatabase(DeleteDatabaseRequest) returns (DeleteDatabaseResponse) {}
+  rpc FinishDatabaseDeletion(FinishDatabaseDeletionRequest) returns (FinishDatabaseDeletionResponse) {}
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}
@@ -469,6 +515,7 @@ service SysDB {
   rpc UpdateSegment(UpdateSegmentRequest) returns (UpdateSegmentResponse) {}
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
+  rpc FinishCollectionDeletion(FinishCollectionDeletionRequest) returns (FinishCollectionDeletionResponse) {}
   rpc GetCollection(GetCollectionRequest) returns (GetCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
   rpc CountCollections(CountCollectionsRequest) returns (CountCollectionsResponse) {}
@@ -476,6 +523,7 @@ service SysDB {
   rpc CheckCollections(CheckCollectionsRequest) returns (CheckCollectionsResponse) {}
   rpc UpdateCollection(UpdateCollectionRequest) returns (UpdateCollectionResponse) {}
   rpc ForkCollection(ForkCollectionRequest) returns (ForkCollectionResponse) {}
+  rpc CountForks(CountForksRequest) returns (CountForksResponse) {}
   rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
   rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
   rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}
@@ -486,4 +534,6 @@ service SysDB {
   rpc ListCollectionsToGc(ListCollectionsToGcRequest) returns (ListCollectionsToGcResponse) {}
   rpc MarkVersionForDeletion(MarkVersionForDeletionRequest) returns (MarkVersionForDeletionResponse) {}
   rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
+  rpc BatchGetCollectionVersionFilePaths(BatchGetCollectionVersionFilePathsRequest) returns (BatchGetCollectionVersionFilePathsResponse) {}
+  rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
 }

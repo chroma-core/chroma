@@ -41,6 +41,14 @@ const sidebarConfig: AppSection[] = [
             name: "Telemetry",
           },
           {
+            id: "migration",
+            name: "Migration",
+          },
+          {
+            id: "troubleshooting",
+            name: "Troubleshooting",
+          },
+          {
             id: "about",
             name: "About",
           },
@@ -54,6 +62,7 @@ const sidebarConfig: AppSection[] = [
           { id: "persistent-client", name: "Persistent Client" },
           { id: "client-server", name: "Client-Server Mode" },
           { id: "python-http-client", name: "Python HTTP-Only Client" },
+          { id: "cloud-client", name: "Cloud Client" },
         ],
       },
       {
@@ -156,11 +165,23 @@ const sidebarConfig: AppSection[] = [
     name: "CLI",
     default: "install",
     icon: SquareTerminalIcon,
-    pages: [
-      { id: "install", name: "Installing the CLI" },
-      { id: "run", name: "Run a Chroma Server" },
-      { id: "sample-apps", name: "Sample Apps" },
-      { id: "vacuum", name: "Vacuum" },
+    pages: [{ id: "install", name: "Installing the CLI" }],
+    subsections: [
+      {
+        id: "commands",
+        name: "Commands",
+        pages: [
+          { id: "browse", name: "Browse Collections" },
+          { id: "copy", name: "Copy Collections" },
+          { id: "db", name: "DB Management" },
+          { id: "install", name: "Install Sample Apps" },
+          { id: "login", name: "Login" },
+          { id: "profile", name: "Profile Management" },
+          { id: "run", name: "Run a Chroma Server" },
+          { id: "update", name: "Update the CLI" },
+          { id: "vacuum", name: "Vacuum" },
+        ],
+      },
     ],
   },
   {

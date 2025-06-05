@@ -27,9 +27,11 @@ chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
+chroma-tracing = { workspace = true }
 chroma-distance = { workspace = true }
 itertools = { workspace = true }
 hnswlib = { workspace = true }
+opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 
 [dev-dependencies]
 rayon = { workspace = true }

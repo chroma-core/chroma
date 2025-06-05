@@ -50,7 +50,7 @@ export class VoyageAIEmbeddingFunction implements IEmbeddingFunction {
   constructor({
     api_key,
     model,
-    api_key_env_var = "VOYAGE_API_KEY",
+    api_key_env_var = "CHROMA_VOYAGE_API_KEY",
   }: {
     api_key?: string;
     model: string;

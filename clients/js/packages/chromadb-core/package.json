@@ -1,6 +1,6 @@
 {
   "name": "@internal/chromadb-core",
-  "version": "2.3.0",
+  "version": "2.4.7",
   "private": true,
   "description": "Core functionality for ChromaDB JavaScript client",
   "license": "Apache-2.0",

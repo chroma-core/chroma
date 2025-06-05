@@ -48,7 +48,7 @@ func (suite *CollectionDbTestSuite) TearDownSuite() {
 func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	collectionName := "test_collection_get_collections"
 	dim := int32(128)
-	collectionID, err := CreateTestCollection(suite.db, collectionName, dim, suite.databaseId)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, dim, suite.databaseId, nil)
 	suite.NoError(err)
 
 	testKey := "test"
@@ -70,7 +70,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 		suite.NoError(err)
 		suite.Equal(collectionID, scanedCollectionID)
 	}
-	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
+	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
@@ -92,22 +92,22 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Equal(collections[0].Collection.IsDeleted, false)
 
 	// Test when filtering by ID
-	collections, err = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
+	collections, err = suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
 
 	// Test when filtering by name
-	collections, err = suite.collectionDb.GetCollections(nil, &collectionName, suite.tenantName, suite.databaseName, nil, nil)
+	collections, err = suite.collectionDb.GetCollections(nil, &collectionName, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
 
-	collectionID2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId)
+	collectionID2, err := CreateTestCollection(suite.db, "test_collection_get_collections2", 128, suite.databaseId, nil)
 	suite.NoError(err)
 
 	// Test order by. Collections are ordered by create time so collectionID2 should be second
-	allCollections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
+	allCollections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(allCollections, 2)
 	suite.Equal(collectionID, allCollections[0].Collection.ID)
@@ -116,18 +116,18 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	// Test limit and offset
 	limit := int32(1)
 	offset := int32(1)
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, nil)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, nil, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(allCollections[0].Collection.ID, collections[0].Collection.ID)
 
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(allCollections[1].Collection.ID, collections[0].Collection.ID)
 
 	offset = int32(2)
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset, false)
 	suite.NoError(err)
 	suite.Equal(len(collections), 0)
 
@@ -137,10 +137,10 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.NoError(err)
 
 	// Create two collections in the new database.
-	collectionID3, err := CreateTestCollection(suite.db, "test_collection_get_collections3", 128, DbId)
+	collectionID3, err := CreateTestCollection(suite.db, "test_collection_get_collections3", 128, DbId, nil)
 	suite.NoError(err)
 
-	collectionID4, err := CreateTestCollection(suite.db, "test_collection_get_collections4", 128, DbId)
+	collectionID4, err := CreateTestCollection(suite.db, "test_collection_get_collections4", 128, DbId, nil)
 	suite.NoError(err)
 
 	// Test count collections
@@ -174,9 +174,10 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionTotalRecordsAndLogicalSize() {
 	collectionName := "test_collection_get_collections"
-	collectionID, _ := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, _ := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	ids := []string{collectionID}
 	// verify default values
-	collections, err := suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
+	collections, err := suite.collectionDb.GetCollections(ids, nil, "", "", nil, nil, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(int64(0), collections[0].Collection.LogPosition)
@@ -186,7 +187,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionTot
 	version, err := suite.collectionDb.UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID, int64(10), 0, uint64(100), uint64(1000), uint64(10), "test_tenant2")
 	suite.NoError(err)
 	suite.Equal(int32(1), version)
-	collections, _ = suite.collectionDb.GetCollections(&collectionID, nil, "", "", nil, nil)
+	collections, _ = suite.collectionDb.GetCollections(ids, nil, "", "", nil, nil, false)
 	suite.Len(collections, 1)
 	suite.Equal(int64(10), collections[0].Collection.LogPosition)
 	suite.Equal(int32(1), collections[0].Collection.Version)
@@ -212,7 +213,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionTot
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 	// Ensure there are no collections from before.
-	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
+	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	if len(collections) != 0 {
 		suite.FailNow(fmt.Sprintf(
@@ -227,9 +228,9 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 	// Create 2 collections.
 	collectionName1 := "test_collection_soft_delete1"
 	collectionName2 := "test_collection_soft_delete2"
-	collectionID1, err := CreateTestCollection(suite.db, collectionName1, 128, suite.databaseId)
+	collectionID1, err := CreateTestCollection(suite.db, collectionName1, 128, suite.databaseId, nil)
 	suite.NoError(err)
-	collectionID2, err := CreateTestCollection(suite.db, collectionName2, 128, suite.databaseId)
+	collectionID2, err := CreateTestCollection(suite.db, collectionName2, 128, suite.databaseId, nil)
 	suite.NoError(err)
 
 	// Soft delete collection 1 by Updating the is_deleted column
@@ -242,7 +243,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 	suite.NoError(err)
 
 	// Verify normal get collections only returns non-deleted collection
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID2, collections[0].Collection.ID)
@@ -264,7 +265,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollectionSize() {
 	collectionName := "test_collection_get_collection_size"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
 	suite.NoError(err)
 
 	total_records_post_compaction, err := suite.collectionDb.GetCollectionSize(collectionID)

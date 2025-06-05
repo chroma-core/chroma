@@ -1,4 +1,4 @@
-use crate::grpc_log::GrpcLog;
+use crate::grpc_log::{GrpcLog, GrpcSealLogError};
 use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
@@ -30,9 +30,10 @@ pub enum Log {
 }
 
 impl Log {
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn read(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
@@ -44,7 +45,7 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .read(collection_id, offset, batch_size, end_timestamp)
+                .read(tenant, collection_id, offset, batch_size, end_timestamp)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => Ok(log
@@ -54,9 +55,10 @@ impl Log {
     }
 
     // ScoutLogs returns the offset of the next record to be inserted into the log.
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn scout_logs(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         starting_offset: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
@@ -66,7 +68,7 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .scout_logs(collection_id, starting_offset)
+                .scout_logs(tenant, collection_id, starting_offset)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => log
@@ -76,9 +78,10 @@ impl Log {
         }
     }
 
-    #[tracing::instrument(skip(self, records))]
+    #[tracing::instrument(skip(self, records), err(Display))]
     pub async fn push_logs(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
     ) -> Result<(), Box<dyn ChromaError>> {
@@ -88,30 +91,31 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .push_logs(collection_id, records)
+                .push_logs(tenant, collection_id, records)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(_) => unimplemented!(),
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn fork_logs(
         &mut self,
+        tenant: &str,
         source_collection_id: CollectionUuid,
         target_collection_id: CollectionUuid,
     ) -> Result<ForkLogsResponse, ForkCollectionError> {
         match self {
             Log::Sqlite(_) => Err(ForkCollectionError::Local),
             Log::Grpc(log) => log
-                .fork_logs(source_collection_id, target_collection_id)
+                .fork_logs(tenant, source_collection_id, target_collection_id)
                 .await
                 .map_err(|err| err.boxed().into()),
             Log::InMemory(_) => Err(ForkCollectionError::Local),
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
@@ -129,9 +133,10 @@ impl Log {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn update_collection_log_offset(
         &mut self,
+        tenant: &str,
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), Box<dyn ChromaError>> {
@@ -141,7 +146,7 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .update_collection_log_offset(collection_id, new_offset)
+                .update_collection_log_offset(tenant, collection_id, new_offset)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => {
@@ -153,7 +158,7 @@ impl Log {
     }
 
     /// Only supported in distributed. Sqlite has a different workflow.
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), err(Display))]
     pub async fn purge_dirty_for_collection(
         &mut self,
         collection_id: CollectionUuid,
@@ -203,6 +208,18 @@ impl Log {
             Log::Sqlite(log) => log.reset().await,
             Log::Grpc(_) => Ok(ResetResponse {}),
             Log::InMemory(_) => Ok(ResetResponse {}),
+        }
+    }
+
+    pub async fn seal_log(
+        &mut self,
+        _: &str,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GrpcSealLogError> {
+        match self {
+            Log::Grpc(log) => log.seal_log(collection_id).await,
+            Log::Sqlite(_) => unimplemented!(),
+            Log::InMemory(_) => unimplemented!(),
         }
     }
 }

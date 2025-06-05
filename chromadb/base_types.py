@@ -1,9 +1,9 @@
-from typing import Dict, List, Mapping, Sequence, Union
+from typing import Dict, List, Mapping, Optional, Sequence, Union
 from typing_extensions import Literal
 import numpy as np
 from numpy.typing import NDArray
 
-Metadata = Mapping[str, Union[str, int, float, bool]]
+Metadata = Mapping[str, Optional[Union[str, int, float, bool]]]
 UpdateMetadata = Mapping[str, Union[int, float, str, bool, None]]
 PyVector = Union[Sequence[float], Sequence[int]]
 Vector = NDArray[Union[np.int32, np.float32]]  # TODO: Specify that the vector is 1D
@@ -29,6 +29,10 @@ Where = Dict[
 ]
 
 WhereDocumentOperator = Union[
-    Literal["$contains"], Literal["$not_contains"], LogicalOperator
+    Literal["$contains"],
+    Literal["$not_contains"],
+    Literal["$regex"],
+    Literal["$not_regex"],
+    LogicalOperator,
 ]
 WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]

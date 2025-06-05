@@ -109,7 +109,7 @@ def count(collection: Collection, record_set: RecordSet) -> None:
     count = collection.count()
     normalized_record_set = wrap_all(record_set)
     if count != len(normalized_record_set["ids"]):
-        print('count mismatch:', count, '=!', len(normalized_record_set["ids"]))
+        print("count mismatch:", count, "=!", len(normalized_record_set["ids"]))
     assert count == len(normalized_record_set["ids"])
 
 
@@ -245,6 +245,7 @@ def fd_not_exceeding_threadpool_size(threadpool_size: int) -> None:
         len([p.path for p in open_files if "sqlite3" in p.path]) - 1 <= threadpool_size
     )
 
+
 def get_space(collection: Collection):
     # TODO: this is a hack to get the space
     # We should update the tests to not pass space via metadata instead use collection
@@ -254,12 +255,21 @@ def get_space(collection: Collection):
         space = collection.metadata["hnsw:space"]
     if collection._model.configuration_json is None:
         return space
-    if 'spann' in collection._model.configuration_json and collection._model.configuration_json.get('spann') is not None and 'space' in collection._model.configuration_json.get('spann'):
-        space = collection._model.configuration_json.get('spann').get('space')
-    elif 'hnsw' in collection._model.configuration_json and collection._model.configuration_json.get('hnsw') is not None and 'space' in collection._model.configuration_json.get('hnsw'):
+    if (
+        "spann" in collection._model.configuration_json
+        and collection._model.configuration_json.get("spann") is not None
+        and "space" in collection._model.configuration_json.get("spann")
+    ):
+        space = collection._model.configuration_json.get("spann").get("space")
+    elif (
+        "hnsw" in collection._model.configuration_json
+        and collection._model.configuration_json.get("hnsw") is not None
+        and "space" in collection._model.configuration_json.get("hnsw")
+    ):
         if space is None:
-            space = collection._model.configuration_json.get('hnsw').get('space')
+            space = collection._model.configuration_json.get("hnsw").get("space")
     return space
+
 
 def ann_accuracy(
     collection: Collection,
@@ -284,7 +294,7 @@ def ann_accuracy(
         assert isinstance(normalized_record_set["documents"], list)
         # Compute the embeddings for the documents
         embeddings = embedding_function(normalized_record_set["documents"])
-    
+
     space = get_space(collection)
     if space is None:
         distance_function = distance_functions.l2

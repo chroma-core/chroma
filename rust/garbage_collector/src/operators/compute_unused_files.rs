@@ -4,8 +4,9 @@ use chroma_cache::nop::NopCache;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::chroma_proto::{
-    CollectionSegmentInfo, CollectionVersionFile, VersionListForCollection,
+use chroma_types::{
+    chroma_proto::{CollectionSegmentInfo, CollectionVersionFile, VersionListForCollection},
+    HNSW_PATH,
 };
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
@@ -73,7 +74,7 @@ impl ComputeUnusedFilesOperator {
         for segment_compaction_info in older_segment_info.segment_compaction_info.iter() {
             for (file_type, file_paths) in &segment_compaction_info.file_paths {
                 // For hnsw_index files, just add it without comparing with newer version.
-                if file_type == "hnsw_index" {
+                if file_type == "hnsw_index" || file_type == HNSW_PATH {
                     unused_hnsw_prefixes.extend(file_paths.paths.clone());
                     continue;
                 }
@@ -92,7 +93,7 @@ impl ComputeUnusedFilesOperator {
         let mut newer_si_ids = Vec::new();
         for segment_compaction_info in newer_segment_info.segment_compaction_info.iter() {
             for (file_type, file_paths) in &segment_compaction_info.file_paths {
-                if file_type == "hnsw_index" {
+                if file_type == "hnsw_index" || file_type == HNSW_PATH {
                     continue;
                 }
 
@@ -346,7 +347,10 @@ mod tests {
     ) -> Result<Uuid, Box<dyn ChromaError>> {
         // Use the test utility function to create a sparse index
         let root_id = sparse_index_test_utils::create_test_sparse_index(
-            storage, block_ids, None, // Use default "test" prefix
+            storage,
+            Uuid::new_v4(),
+            block_ids,
+            None, // Use default "test" prefix
         )
         .await?;
 

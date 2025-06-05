@@ -1420,11 +1420,12 @@ def test_0dim_embedding_validation() -> None:
 def test_no_op_compaction(client: ClientAPI) -> None:
     reset(client)
     coll = client.create_collection(name="noop")
+    initial_version = get_collection_version(client, coll.name)
     for batch in range(0, 5000, 100):
         coll.delete(ids=[str(i) for i in range(batch, batch + 100)])
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, coll.name, get_collection_version(client, coll.name), VERSION_INCREASE_WAIT_TIME
+            client, coll.name, initial_version, VERSION_INCREASE_WAIT_TIME
         )
 
 
@@ -1433,6 +1434,7 @@ def test_add_then_purge(client: ClientAPI) -> None:
     record_count = 5000
     batch_count = 100
     coll = client.create_collection(name="add_then_purge")
+    witness_version = get_collection_version(client, coll.name)
 
     # Add records and wait for compaction
     for batch in range(0, record_count, batch_count):
@@ -1443,17 +1445,18 @@ def test_add_then_purge(client: ClientAPI) -> None:
         )
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, coll.name, get_collection_version(client, coll.name), VERSION_INCREASE_WAIT_TIME
+            client, coll.name, witness_version, VERSION_INCREASE_WAIT_TIME
         )
 
     # Purge records and wait for compaction
+    witness_version = get_collection_version(client, coll.name)
     for batch in range(0, record_count, batch_count):
         record_id_vals = [i for i in range(batch, batch + batch_count)]
         record_ids = [str(i) for i in record_id_vals]
         coll.delete(ids=record_ids)
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, coll.name, get_collection_version(client, coll.name), VERSION_INCREASE_WAIT_TIME
+            client, coll.name, witness_version, VERSION_INCREASE_WAIT_TIME
         )
 
     # There should be no records left
@@ -1464,6 +1467,7 @@ def test_encompassing_delete(client: ClientAPI) -> None:
     reset(client)
 
     col = client.create_collection("encompassing_delete")
+    initial_version = get_collection_version(client, col.name)
 
     id_start = 0
     # Add and then Delete 6 records
@@ -1476,8 +1480,9 @@ def test_encompassing_delete(client: ClientAPI) -> None:
 
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, col.name, get_collection_version(client, col.name), VERSION_INCREASE_WAIT_TIME
+            client, col.name, initial_version, VERSION_INCREASE_WAIT_TIME
         )
+    initial_version = get_collection_version(client, col.name)
 
     # Add and then delete and then add 16
     len_to_add = 16
@@ -1490,7 +1495,7 @@ def test_encompassing_delete(client: ClientAPI) -> None:
 
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, col.name, get_collection_version(client, col.name), VERSION_INCREASE_WAIT_TIME
+            client, col.name, initial_version, VERSION_INCREASE_WAIT_TIME
         )
 
     # Ensure we can get all

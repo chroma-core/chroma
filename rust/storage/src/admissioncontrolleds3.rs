@@ -10,6 +10,7 @@ use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::{future::Shared, stream, FutureExt, StreamExt};
 use std::{
@@ -206,10 +207,10 @@ impl AdmissionControlledS3Storage {
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
         priority: Arc<AtomicUsize>,
-        channel_receiver: tokio::sync::mpsc::Receiver<()>,
+        channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         // Acquire permit.
-        let _permit = rate_limiter.enter(priority, Some(channel_receiver)).await;
+        let _permit = rate_limiter.enter(priority, channel_receiver).await;
         storage
             .get_with_e_tag(&key)
             .instrument(tracing::trace_span!(parent: Span::current(), "S3 get"))
@@ -277,6 +278,9 @@ impl AdmissionControlledS3Storage {
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        if options.requires_strong_consistency {
+            return self.strongly_consistent_get_with_e_tag(key, options).await;
+        }
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.
@@ -298,7 +302,7 @@ impl AdmissionControlledS3Storage {
                         self.rate_limiter.clone(),
                         key.to_string(),
                         atomic_priority.clone(),
-                        rx,
+                        Some(rx),
                     )
                     .boxed()
                     .shared();
@@ -321,6 +325,22 @@ impl AdmissionControlledS3Storage {
             requests.remove(key);
         }
         res
+    }
+
+    pub async fn strongly_consistent_get_with_e_tag(
+        &self,
+        key: &str,
+        options: GetOptions,
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+        AdmissionControlledS3Storage::read_from_storage(
+            self.storage.clone(),
+            self.rate_limiter.clone(),
+            key.to_string(),
+            atomic_priority,
+            None,
+        )
+        .await
     }
 
     async fn oneshot_upload(
@@ -506,8 +526,29 @@ impl RateLimitPolicy {
 }
 
 #[derive(Debug)]
+pub struct CountBasedPolicyMetrics {
+    // The delay in milliseconds before a request is allowed to proceed.
+    pub nac_delay_ms: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl Default for CountBasedPolicyMetrics {
+    fn default() -> Self {
+        Self {
+            nac_delay_ms: opentelemetry::global::meter("chroma.storage.admission_control")
+                .u64_histogram("nac_delay_ms")
+                .with_description(
+                    "The delay in milliseconds before a request is allowed to proceed.",
+                )
+                .with_unit("ms")
+                .build(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct CountBasedPolicy {
     remaining_tokens: Vec<Semaphore>,
+    metrics: CountBasedPolicyMetrics,
 }
 
 impl CountBasedPolicy {
@@ -518,7 +559,10 @@ impl CountBasedPolicy {
                 (max_allowed_outstanding as f32 * allocation).ceil() as usize,
             ));
         }
-        Self { remaining_tokens }
+        Self {
+            remaining_tokens,
+            metrics: CountBasedPolicyMetrics::default(),
+        }
     }
 
     async fn acquire(
@@ -526,6 +570,7 @@ impl CountBasedPolicy {
         priority: Arc<AtomicUsize>,
         mut channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
+        let _stopwatch = Stopwatch::new(&self.metrics.nac_delay_ms, &[]);
         loop {
             let current_priority = priority.load(Ordering::SeqCst);
             let current_priority: StorageRequestPriority = current_priority.into();
@@ -548,9 +593,19 @@ impl CountBasedPolicy {
             match &mut channel_receiver {
                 Some(rx) => {
                     select! {
-                        _ = rx.recv() => {
+                        did_recv = rx.recv() => {
                             // Reevaluate priority if we got a notification.
-                            continue;
+                            match did_recv {
+                                Some(_) => {
+                                    // If we got a notification, continue to acquire.
+                                    continue;
+                                }
+                                None => {
+                                    // If the channel was closed, break out of the loop.
+                                    channel_receiver = None;
+                                    continue;
+                                }
+                            }
                         }
                         token = self.remaining_tokens[current_priority.as_usize()].acquire() => {
                             match token {

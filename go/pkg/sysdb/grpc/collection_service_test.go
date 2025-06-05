@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -347,14 +348,11 @@ func (suite *CollectionServiceTestSuite) TestCreateCollection() {
 func (suite *CollectionServiceTestSuite) TestServer_GetCollection() {
 	// Create a test collection
 	collectionName := "test_get_collection"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
 	suite.NoError(err)
 
-	// Enable soft delete mode
-	suite.s.coordinator.SetDeleteMode(coordinator.SoftDelete)
-
 	// Soft delete the collection
-	err = suite.s.coordinator.DeleteCollection(context.Background(), &model.DeleteCollection{
+	err = suite.s.coordinator.SoftDeleteCollection(context.Background(), &model.DeleteCollection{
 		ID:           types.MustParse(collectionID),
 		DatabaseName: suite.databaseName,
 		TenantID:     suite.tenantName,
@@ -381,7 +379,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	log.Info("TestServer_FlushCollectionCompaction")
 	// create test collection
 	collectionName := "collection_service_test_flush_collection_compaction"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
 	suite.NoError(err)
 
 	// flush collection compaction
@@ -531,10 +529,9 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	// Send FlushCollectionCompaction for a collection that is soft deleted.
 	// It should fail with a failed precondition error.
 	// Create collection and soft-delete it.
-	suite.s.coordinator.SetDeleteMode(coordinator.SoftDelete)
-	collectionID, err = dao.CreateTestCollection(suite.db, "test_flush_collection_compaction_soft_delete", 128, suite.databaseId)
+	collectionID, err = dao.CreateTestCollection(suite.db, "test_flush_collection_compaction_soft_delete", 128, suite.databaseId, nil)
 	suite.NoError(err)
-	suite.s.coordinator.DeleteCollection(context.Background(), &model.DeleteCollection{
+	suite.s.coordinator.SoftDeleteCollection(context.Background(), &model.DeleteCollection{
 		ID:           types.MustParse(collectionID),
 		DatabaseName: suite.databaseName,
 		TenantID:     suite.tenantName,
@@ -558,7 +555,7 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 
 func (suite *CollectionServiceTestSuite) TestGetCollectionSize() {
 	collectionName := "collection_service_test_get_collection_size"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId)
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
 	suite.NoError(err)
 
 	req := coordinatorpb.GetCollectionSizeRequest{
@@ -570,6 +567,130 @@ func (suite *CollectionServiceTestSuite) TestGetCollectionSize() {
 
 	err = dao.CleanUpTestCollection(suite.db, collectionID)
 	suite.NoError(err)
+}
+
+func (suite *CollectionServiceTestSuite) TestCountForks() {
+	collectionName := "collection_service_test_count_forks"
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	suite.NoError(err)
+
+	req := coordinatorpb.CountForksRequest{
+		SourceCollectionId: collectionID,
+	}
+	res, err := suite.s.CountForks(context.Background(), &req)
+	suite.NoError(err)
+	suite.Equal(uint64(0), res.Count)
+
+	var forkedCollectionIDs []string
+
+	// Create 5 forks
+	for i := 0; i < 5; i++ {
+		forkCollectionReq := &coordinatorpb.ForkCollectionRequest{
+			SourceCollectionId:                   collectionID,
+			SourceCollectionLogCompactionOffset:  0,
+			SourceCollectionLogEnumerationOffset: 0,
+			TargetCollectionId:                   types.NewUniqueID().String(),
+			TargetCollectionName:                 fmt.Sprintf("test_fork_collection_fork_%d", i),
+		}
+		forkedCollection, err := suite.s.ForkCollection(context.Background(), forkCollectionReq)
+		suite.NoError(err)
+		forkedCollectionIDs = append(forkedCollectionIDs, forkedCollection.Collection.Id)
+	}
+
+	res, err = suite.s.CountForks(context.Background(), &req)
+	suite.NoError(err)
+	suite.Equal(uint64(5), res.Count)
+
+	// Check that each forked collection has 5 forks as well
+	for _, forkedCollectionID := range forkedCollectionIDs {
+		res, err = suite.s.CountForks(context.Background(), &coordinatorpb.CountForksRequest{
+			SourceCollectionId: forkedCollectionID,
+		})
+		suite.NoError(err)
+		suite.Equal(uint64(5), res.Count)
+	}
+
+	err = dao.CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
+func (suite *CollectionServiceTestSuite) TestFork() {
+	collectionName := "collection_service_test_forks"
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	suite.NoError(err)
+	targetCollectionID := types.NewUniqueID()
+
+	req := coordinatorpb.ForkCollectionRequest{
+		SourceCollectionId:                   collectionID,
+		SourceCollectionLogEnumerationOffset: 0,
+		SourceCollectionLogCompactionOffset:  0,
+		TargetCollectionId:                   targetCollectionID.String(),
+		TargetCollectionName:                 "test_fork_collection",
+	}
+	res, err := suite.s.ForkCollection(context.Background(), &req)
+	suite.NoError(err)
+	suite.Equal(res.Collection.Id, targetCollectionID.String())
+	suite.Equal(len(res.Segments), 2)
+
+	fork2CollectionId := types.NewUniqueID()
+	// Create fork of fork
+	forkCollectionReq := &coordinatorpb.ForkCollectionRequest{
+		SourceCollectionId:                   targetCollectionID.String(),
+		SourceCollectionLogCompactionOffset:  0,
+		SourceCollectionLogEnumerationOffset: 0,
+		TargetCollectionId:                   fork2CollectionId.String(),
+		TargetCollectionName:                 "test_fork_collection_fork",
+	}
+	forkedCollection2, err := suite.s.ForkCollection(context.Background(), forkCollectionReq)
+	suite.NoError(err)
+	suite.Equal(forkedCollection2.Collection.Id, fork2CollectionId.String())
+	suite.Equal(len(forkedCollection2.Segments), 2)
+
+	// Delete the root.
+	deleteReq := model.DeleteCollection{
+		ID:           types.MustParse(collectionID),
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+		Ts:           time.Now().Unix(),
+	}
+	err = suite.s.coordinator.SoftDeleteCollection(context.Background(), &deleteReq)
+	suite.NoError(err)
+
+	// Fork should still succeed.
+	fork3CollectionId := types.NewUniqueID()
+	fork3CollectionReq := &coordinatorpb.ForkCollectionRequest{
+		SourceCollectionId:                   fork2CollectionId.String(),
+		SourceCollectionLogCompactionOffset:  0,
+		SourceCollectionLogEnumerationOffset: 0,
+		TargetCollectionId:                   fork3CollectionId.String(),
+		TargetCollectionName:                 "test_fork_collection_fork_fork",
+	}
+	forkedCollection3, err := suite.s.ForkCollection(context.Background(), fork3CollectionReq)
+	suite.NoError(err)
+	suite.Equal(forkedCollection3.Collection.Id, fork3CollectionId.String())
+	suite.Equal(len(forkedCollection2.Segments), 2)
+
+	// Deleting the source and fork should not succeed.
+	deleteReq2 := model.DeleteCollection{
+		ID:           fork3CollectionId,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+		Ts:           time.Now().Unix(),
+	}
+	err = suite.s.coordinator.SoftDeleteCollection(context.Background(), &deleteReq2)
+	suite.NoError(err)
+
+	// Fork should not succeed.
+	fork4CollectionId := types.NewUniqueID()
+	fork4CollectionReq := &coordinatorpb.ForkCollectionRequest{
+		SourceCollectionId:                   fork3CollectionId.String(),
+		SourceCollectionLogCompactionOffset:  0,
+		SourceCollectionLogEnumerationOffset: 0,
+		TargetCollectionId:                   fork4CollectionId.String(),
+		TargetCollectionName:                 "test_fork_collection_fork_fork_fork",
+	}
+	_, err = suite.s.ForkCollection(context.Background(), fork4CollectionReq)
+	suite.Error(err)
 }
 
 func TestCollectionServiceTestSuite(t *testing.T) {

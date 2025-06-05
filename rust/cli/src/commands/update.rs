@@ -2,6 +2,7 @@ use crate::utils::CliError;
 use colored::Colorize;
 use regex::Regex;
 use semver::Version;
+use serde::Deserialize;
 use std::error::Error;
 use thiserror::Error;
 
@@ -19,25 +20,26 @@ pub enum UpdateError {
     UpdateFailed,
 }
 
+#[derive(Debug, Deserialize)]
+struct Release {
+    tag_name: String,
+}
+
 async fn version_check(current_version: Version) -> Result<(), Box<dyn Error>> {
     let client = reqwest::Client::new();
-    let response = client
+    let releases = client
         .get(GITHUB_RELEASES_URL)
         .header("User-Agent", "reqwest")
         .send()
+        .await?
+        .json::<Vec<Release>>()
         .await?;
-
-    if !response.status().is_success() {
-        return Err(UpdateError::FailedVersionFetch.into());
-    }
-
-    let releases: Vec<String> = response.json().await?;
 
     let cli_version_pattern = Regex::new(r"^cli-(\d+\.\d+\.\d+)$")?;
     let mut cli_versions = Vec::new();
 
     for release in releases {
-        if let Some(caps) = cli_version_pattern.captures(&release) {
+        if let Some(caps) = cli_version_pattern.captures(&release.tag_name) {
             if let Some(ver_match) = caps.get(1) {
                 let ver_str = ver_match.as_str();
                 if let Ok(ver) = Version::parse(ver_str) {

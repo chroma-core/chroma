@@ -18,7 +18,11 @@ import type {
   UserIdentity,
 } from "./types";
 import { validateTenantDatabase, wrapCollection } from "./utils";
-import { loadApiCollectionConfigurationFromCreateCollectionConfiguration } from "./CollectionConfiguration";
+import {
+  loadApiCollectionConfigurationFromCreateCollectionConfiguration,
+  loadCollectionConfigurationFromJson,
+  hasEmbeddingFunctionConflict,
+} from "./CollectionConfiguration";
 import { warn } from "console";
 const DEFAULT_TENANT = "default_tenant";
 const DEFAULT_DATABASE = "default_database";
@@ -228,6 +232,22 @@ export class ChromaClient {
     configuration,
   }: CreateCollectionParams): Promise<Collection> {
     await this.init();
+    if (!configuration) {
+      configuration = {};
+    }
+    if (
+      hasEmbeddingFunctionConflict(
+        embeddingFunction,
+        configuration.embedding_function,
+      )
+    ) {
+      throw new Error(
+        "Multiple embedding functions provided. Please provide only one.",
+      );
+    }
+    if (embeddingFunction && !configuration.embedding_function) {
+      configuration.embedding_function = embeddingFunction;
+    }
     let collectionConfiguration: Api.CollectionConfiguration | undefined =
       undefined;
     if (configuration) {
@@ -293,10 +313,24 @@ export class ChromaClient {
     configuration,
   }: GetOrCreateCollectionParams): Promise<Collection> {
     await this.init();
-
+    if (!configuration) {
+      configuration = {};
+    }
+    if (
+      hasEmbeddingFunctionConflict(
+        embeddingFunction,
+        configuration.embedding_function,
+      )
+    ) {
+      throw new Error(
+        "Multiple embedding functions provided. Please provide only one.",
+      );
+    }
+    if (embeddingFunction && !configuration.embedding_function) {
+      configuration.embedding_function = embeddingFunction;
+    }
     let collectionConfiguration: Api.CollectionConfiguration | undefined =
       undefined;
-
     if (configuration) {
       collectionConfiguration =
         loadApiCollectionConfigurationFromCreateCollectionConfiguration(
@@ -461,14 +495,25 @@ export class ChromaClient {
       );
     }
 
+    const configObj = loadCollectionConfigurationFromJson(config);
+    if (
+      hasEmbeddingFunctionConflict(
+        embeddingFunction,
+        configObj.embedding_function,
+      )
+    ) {
+      throw new Error(
+        "Multiple embedding functions provided. Please provide only one.",
+      );
+    }
+
+    const ef = configObj.embedding_function ?? embeddingFunction;
+
     return wrapCollection(this, {
       id: response.id,
       name: response.name,
       metadata: response.metadata as CollectionMetadata | undefined,
-      embeddingFunction:
-        embeddingFunction !== undefined
-          ? embeddingFunction
-          : new DefaultEmbeddingFunction(),
+      embeddingFunction: ef ?? new DefaultEmbeddingFunction(),
       configuration: config,
     });
   }

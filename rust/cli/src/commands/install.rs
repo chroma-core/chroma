@@ -1,5 +1,6 @@
+use crate::ui_utils::read_secret;
 use crate::utils::UtilsError::UserInputFailed;
-use crate::utils::{read_config, read_secret, write_config, CliConfig, CliError, SELECTION_LIMIT};
+use crate::utils::{read_config, write_config, CliConfig, CliError, SELECTION_LIMIT};
 use clap::Parser;
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
@@ -389,7 +390,7 @@ async fn get_app(
         Version::parse(&app.cli_version).map_err(|_| InstallError::ListingFailed)?;
     let cli_version =
         Version::parse(env!("CARGO_PKG_VERSION")).map_err(|_| InstallError::ListingFailed)?;
-    if app_cli_version < cli_version {
+    if app_cli_version > cli_version {
         return Err(
             InstallError::VersionMismatch(app_name.clone(), app_cli_version.to_string()).into(),
         );

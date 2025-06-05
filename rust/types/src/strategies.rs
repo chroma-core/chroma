@@ -1,10 +1,11 @@
 use crate::{
-    Collection, CollectionAndSegments, CollectionUuid, DocumentExpression, DocumentOperator,
-    IncludeList, LogRecord, Metadata, MetadataComparison, MetadataExpression, MetadataValue,
-    Operation, OperationRecord, PrimitiveOperator, ScalarEncoding, Segment, SegmentType,
-    SegmentUuid, SetOperator, UpdateMetadata, UpdateMetadataValue, Where,
+    regex::hir::ChromaHir, Collection, CollectionAndSegments, CollectionUuid, DocumentExpression,
+    DocumentOperator, IncludeList, LogRecord, Metadata, MetadataComparison, MetadataExpression,
+    MetadataValue, Operation, OperationRecord, PrimitiveOperator, ScalarEncoding, Segment,
+    SegmentType, SegmentUuid, SetOperator, UpdateMetadata, UpdateMetadataValue, Where,
 };
-use proptest::{collection, prelude::*, sample::SizeRange};
+use proptest::{collection, prelude::*, sample::SizeRange, string::string_regex};
+use regex_syntax::hir::{ClassUnicode, ClassUnicodeRange};
 
 /**
  * Strategy for metadata.
@@ -308,7 +309,7 @@ impl Arbitrary for TestWhereFilter {
             (doc_string, doc_operator).prop_map(|(text, operator)| {
                 Where::Document(DocumentExpression {
                     operator,
-                    text: text.to_string(),
+                    pattern: text.to_string(),
                 })
             });
 
@@ -420,4 +421,108 @@ pub fn any_collection_data_and_where_filter(
             }),
         )
     })
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ArbitraryChromaHirParameters {
+    pub recursive: bool,
+}
+
+impl Arbitrary for ChromaHir {
+    type Parameters = ArbitraryChromaHirParameters;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        let literal = r"[a-zA-Z0-9_]{3,}".prop_map(Self::Literal);
+        let char_class = prop_oneof![
+            2 => Just(Self::Class(ClassUnicode::new([
+                ClassUnicodeRange::new('a', 'z'),
+                ClassUnicodeRange::new('A', 'Z'),
+                ClassUnicodeRange::new('0', '9'),
+                ClassUnicodeRange::new('_', '_'),
+            ]))),
+            1 => r"[a-z]".prop_map(|mut word_char| {
+                let wchr = word_char.pop().unwrap();
+                Self::Class(ClassUnicode::new([
+                    ClassUnicodeRange::new(wchr.to_ascii_lowercase(), wchr.to_ascii_lowercase()),
+                    ClassUnicodeRange::new(wchr.to_ascii_uppercase(), wchr.to_ascii_uppercase()),
+                ]))
+            })
+        ];
+        let primitive = prop_oneof![
+            2 => literal,
+            1 => char_class,
+        ];
+        if args.recursive {
+            primitive
+                .prop_recursive(3, 12, 3, |inner| {
+                    prop_oneof![
+                        2 => collection::vec(inner.clone(), 2..4).prop_map(Self::Concat),
+                        3 => collection::vec(inner.clone(), 2..4).prop_map(Self::Alternation),
+                        1 => inner.prop_map(|hir| Self::Repetition {
+                            min: 0,
+                            max: None,
+                            sub: Box::new(hir)
+                        }),
+                    ]
+                })
+                .boxed()
+        } else {
+            primitive.boxed()
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ChromaRegexTestDocuments {
+    pub documents: Vec<String>,
+    pub hir: ChromaHir,
+}
+
+#[derive(Clone, Debug)]
+pub struct ArbitraryChromaRegexTestDocumentsParameters {
+    pub recursive_hir: bool,
+    pub total_document_count: usize,
+}
+
+impl Default for ArbitraryChromaRegexTestDocumentsParameters {
+    fn default() -> Self {
+        Self {
+            recursive_hir: true,
+            total_document_count: 100,
+        }
+    }
+}
+
+impl Arbitrary for ChromaRegexTestDocuments {
+    type Parameters = ArbitraryChromaRegexTestDocumentsParameters;
+    type Strategy = BoxedStrategy<Self>;
+
+    fn arbitrary_with(args: Self::Parameters) -> Self::Strategy {
+        ChromaHir::arbitrary_with(ArbitraryChromaHirParameters {
+            recursive: args.recursive_hir,
+        })
+        .prop_flat_map(move |hir| {
+            let doc_count = args.total_document_count;
+            let pattern_str = String::from(hir.clone());
+            collection::vec(
+                prop_oneof![
+                    string_regex(&pattern_str)
+                        .unwrap()
+                        .prop_map(|doc| if doc.len() < 3 {
+                            format!("^|{doc}|$")
+                        } else {
+                            doc
+                        }),
+                    DOCUMENT_TEXT_STRATEGY
+                ],
+                doc_count..=doc_count,
+            )
+            .prop_map(move |documents| ChromaRegexTestDocuments {
+                documents,
+                hir: hir.clone(),
+            })
+        })
+        .boxed()
+    }
 }

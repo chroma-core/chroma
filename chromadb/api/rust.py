@@ -17,7 +17,6 @@ from chromadb.api.collection_configuration import (
     UpdateCollectionConfiguration,
     create_collection_configuration_to_json_str,
     update_collection_configuration_to_json_str,
-    load_collection_configuration_from_json,
 )
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
@@ -191,9 +190,7 @@ class RustBindingsAPI(ServerAPI):
             CollectionModel(
                 id=collection.id,
                 name=collection.name,
-                configuration=load_collection_configuration_from_json(
-                    collection.configuration
-                ),
+                configuration_json=collection.configuration,
                 metadata=collection.metadata,
                 dimension=collection.dimension,
                 tenant=collection.tenant,
@@ -233,9 +230,7 @@ class RustBindingsAPI(ServerAPI):
         collection_model = CollectionModel(
             id=collection.id,
             name=collection.name,
-            configuration=load_collection_configuration_from_json(
-                collection.configuration
-            ),
+            configuration_json=collection.configuration,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -254,9 +249,7 @@ class RustBindingsAPI(ServerAPI):
         return CollectionModel(
             id=collection.id,
             name=collection.name,
-            configuration=load_collection_configuration_from_json(
-                collection.configuration
-            ),
+            configuration_json=collection.configuration,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -313,7 +306,9 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        raise NotImplementedError("Collection forking is not implemented for Local Chroma")
+        raise NotImplementedError(
+            "Collection forking is not implemented for Local Chroma"
+        )
 
     @override
     def _count(
@@ -333,7 +328,7 @@ class RustBindingsAPI(ServerAPI):
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         return self._get(
-            str(collection_id),
+            collection_id,
             limit=n,
             tenant=tenant,
             database=database,

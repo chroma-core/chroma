@@ -1,10 +1,8 @@
-use std::iter::once;
-
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
-use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannMetrics};
 use chroma_log::Log;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
@@ -20,6 +18,7 @@ use chroma_types::{
     CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
+use std::iter::once;
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::{trace_span, Instrument};
@@ -39,7 +38,7 @@ use crate::{
 #[derive(Clone)]
 pub struct WorkerServer {
     // System
-    system: Option<System>,
+    system: System,
     // Component dependencies
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Service dependencies
@@ -53,13 +52,14 @@ pub struct WorkerServer {
 }
 
 #[async_trait]
-impl Configurable<QueryServiceConfig> for WorkerServer {
+impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
     async fn try_from_config(
-        config: &QueryServiceConfig,
+        config: &(QueryServiceConfig, System),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let (config, system) = config;
         let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
-        let log = Log::try_from_config(&config.log, registry).await?;
+        let log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let blockfile_provider = BlockfileProvider::try_from_config(
             &(config.blockfile_provider.clone(), storage.clone()),
@@ -73,7 +73,7 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
         .await?;
         Ok(WorkerServer {
             dispatcher: None,
-            system: None,
+            system: system.clone(),
             _sysdb: sysdb,
             log,
             hnsw_index_provider,
@@ -124,10 +124,6 @@ impl WorkerServer {
         self.dispatcher = Some(dispatcher);
     }
 
-    pub(crate) fn set_system(&mut self, system: System) {
-        self.system = Some(system);
-    }
-
     fn fetch_log(
         &self,
         collection_and_segments: &CollectionAndSegments,
@@ -142,6 +138,7 @@ impl WorkerServer {
                 .unwrap_or_default(),
             maximum_fetch_count: None,
             collection_uuid: collection_and_segments.collection.collection_id,
+            tenant: collection_and_segments.collection.tenant.clone(),
         }
     }
 
@@ -166,7 +163,7 @@ impl WorkerServer {
             fetch_log,
         );
 
-        match count_orchestrator.run(self.clone_system()?).await {
+        match count_orchestrator.run(self.system.clone()).await {
             Ok((count, pulled_log_bytes)) => Ok(Response::new(CountResult {
                 count,
                 pulled_log_bytes,
@@ -208,7 +205,7 @@ impl WorkerServer {
             projection.into(),
         );
 
-        match get_orchestrator.run(self.clone_system()?).await {
+        match get_orchestrator.run(self.system.clone()).await {
             Ok((result, pulled_log_bytes)) => Ok(Response::new(GetResult {
                 records: result
                     .records
@@ -226,7 +223,7 @@ impl WorkerServer {
         knn: Request<KnnPlan>,
     ) -> Result<Response<KnnBatchResult>, Status> {
         let dispatcher = self.clone_dispatcher()?;
-        let system = self.clone_system()?;
+        let system = self.system.clone();
 
         let knn_inner = knn.into_inner();
 
@@ -297,6 +294,7 @@ impl WorkerServer {
                 hnsw_provider: self.hnsw_index_provider.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
                 garbage_collection_context: None,
+                metrics: SpannMetrics::default(),
             };
             let knn_orchestrator_futures = from_proto_knn(knn)?
                 .into_iter()
@@ -358,13 +356,6 @@ impl WorkerServer {
         self.dispatcher
             .as_ref()
             .ok_or(Status::internal("Dispatcher is not initialized"))
-            .cloned()
-    }
-
-    fn clone_system(&self) -> Result<System, Status> {
-        self.system
-            .as_ref()
-            .ok_or(Status::internal("System is not initialized"))
             .cloned()
     }
 }
@@ -443,7 +434,6 @@ mod tests {
     use chroma_log::in_memory_log::InMemoryLog;
     use chroma_segment::test::TestDistributedSegment;
     use chroma_sysdb::TestSysDb;
-    use chroma_system::system;
     use chroma_system::DispatcherConfig;
     use chroma_types::chroma_proto;
     #[cfg(debug_assertions)]
@@ -453,13 +443,14 @@ mod tests {
 
     fn run_server() -> String {
         let sysdb = TestSysDb::new();
+        let system = System::new();
         let log = InMemoryLog::new();
         let segments = TestDistributedSegment::default();
         let port = random_port::PortPicker::new().random(true).pick().unwrap();
 
         let mut server = WorkerServer {
             dispatcher: None,
-            system: None,
+            system: system.clone(),
             _sysdb: SysDb::Test(sysdb),
             log: Log::InMemory(log),
             hnsw_index_provider: test_hnsw_index_provider(),
@@ -468,7 +459,6 @@ mod tests {
             fetch_log_batch_size: 100,
         };
 
-        let system: system::System = system::System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 4,
             task_queue_limit: 10,
@@ -477,8 +467,6 @@ mod tests {
             active_io_tasks: 10,
         });
         let dispatcher_handle = system.start_component(dispatcher);
-
-        server.set_system(system);
         server.set_dispatcher(dispatcher_handle);
 
         tokio::spawn(async move {
@@ -499,11 +487,7 @@ mod tests {
                 dimension: None,
                 tenant: "test-tenant".to_string(),
                 database: "test-database".to_string(),
-                log_position: 0,
-                version: 0,
-                total_records_post_compaction: 0,
-                size_bytes_post_compaction: 0,
-                last_compaction_time_secs: 0,
+                ..Default::default()
             }),
             knn: Some(chroma_proto::Segment {
                 id: Uuid::new_v4().to_string(),
@@ -604,11 +588,7 @@ mod tests {
             dimension: None,
             tenant: "test-tenant".to_string(),
             database: "test-database".to_string(),
-            log_position: 0,
-            version: 0,
-            total_records_post_compaction: 0,
-            size_bytes_post_compaction: 0,
-            last_compaction_time_secs: 0,
+            ..Default::default()
         });
         let request = chroma_proto::GetPlan {
             scan: Some(scan_operator.clone()),

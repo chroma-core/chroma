@@ -1,8 +1,6 @@
 sysdb:
   flags:
     version-file-enabled: true
-    soft-delete-max-age: 1s
-    soft-delete-cleanup-interval: 2s
     s3-endpoint: "http://minio:9000"
     s3-access-key-id: "minio"
     s3-secret-access-key: "minio123"
@@ -20,11 +18,6 @@ rustFrontendService:
     - name: CONFIG_PATH
       value: "tilt_config.yaml"
 
-frontendService:
-  otherEnvConfig: |
-    - name: CHROMA_ALLOW_RESET
-      value: "true"
-
 queryService:
   env:
     - name: RUST_BACKTRACE
@@ -38,3 +31,6 @@ compactionService:
       value: 'value: "1"'
     - name: CONFIG_PATH
       value: 'value: "/tilt_config.yaml"'
+
+rustLogService:
+  replicaCount: 1

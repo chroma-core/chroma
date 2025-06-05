@@ -27,15 +27,19 @@ func (s *collectionDb) DeleteAll() error {
 	return s.db.Where("1 = 1").Delete(&dbmodel.Collection{}).Error
 }
 
-func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *string) (*dbmodel.Collection, error) {
+func (s *collectionDb) GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*dbmodel.Collection, error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, databases.tenant_id, collections.version, collections.version_file_name, collections.root_collection_id").
+		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, collections.tenant, collections.version, collections.version_file_name, NULLIF(collections.root_collection_id, '') AS root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("collections.id = ?", collectionID)
 
 	if databaseName != nil && *databaseName != "" {
 		query = query.Where("databases.name = ?", databaseName)
+	}
+
+	if softDeletedFlag != nil {
+		query = query.Where("collections.is_deleted = ?", *softDeletedFlag)
 	}
 
 	err := query.Find(&collections).Error
@@ -49,24 +53,46 @@ func (s *collectionDb) GetCollectionEntry(collectionID *string, databaseName *st
 }
 
 func (s *collectionDb) GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	return s.getCollections(id, name, tenantID, databaseName, limit, offset, true)
+	ids := []string{}
+	if id != nil {
+		ids = append(ids, *id)
+	}
+	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, nil)
 }
 
-func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	return s.getCollections(id, name, tenantID, databaseName, limit, offset, false)
+func (s *collectionDb) GetCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*dbmodel.CollectionAndMetadata, error) {
+	isDeleted := false
+	isDeletedPtr := &isDeleted
+	if includeSoftDeleted {
+		isDeletedPtr = nil
+	}
+
+	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, isDeletedPtr)
 }
 
-func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64) ([]*dbmodel.CollectionToGc, error) {
-	var collections []*dbmodel.CollectionToGc
-	// Use the read replica for this so as to not overwhelm the writer.
-	query := s.read_db.Table("collections").
-		Select("collections.id, collections.name, collections.version, collections.version_file_name, collections.oldest_version_ts, collections.num_versions, databases.tenant_id").
-		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Where("version > 0").
+func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*dbmodel.CollectionToGc, error) {
+	// There are three types of collections:
+	// 1. Regular: a collection created by a normal call to create_collection(). Does not have a root_collection_id or a lineage_file_name.
+	// 2. Root of fork tree: a collection created by a call to create_collection() which was later the source of a fork with fork(). Has a lineage_file_name.
+	// 3. Fork of a root: a collection created by a call to fork(). Has a root_collection_id.
+	//
+	// For the purposes of this method, we group by fork "trees". A fork tree is a root collection and all its forks (or, in the case of regular collections, a single collection). For every fork tree, we check if at least one collection in the tree meets the GC requirements. If so, we return the root collection of the tree. We ignore forks in the response as the garbage collector will GC forks when run on the root collection.
+
+	sub := s.read_db.Table("collections").
+		Select("COALESCE(NULLIF(root_collection_id, ''), id) AS id, MIN(oldest_version_ts) AS min_oldest_version_ts").
+		Group("COALESCE(NULLIF(root_collection_id, ''), id)").
 		Where("version_file_name IS NOT NULL").
-		Where("version_file_name != ''").
-		Where("root_collection_id IS NULL OR root_collection_id = ''").
-		Where("lineage_file_name IS NULL OR lineage_file_name = ''")
+		Where("version_file_name != ''")
+
+	if tenantID != nil {
+		sub = sub.Where("tenant = ?", *tenantID)
+	}
+
+	query := s.read_db.Table("collections").
+		Select("collections.id, collections.name, collections.version_file_name, sub.min_oldest_version_ts AS oldest_version_ts, databases.tenant_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
+		Joins("INNER JOIN databases ON collections.database_id = databases.id").
+		Joins("INNER JOIN (?) AS sub ON collections.id = sub.id", sub)
+
 	// Apply cutoff time filter only if provided
 	if cutoffTimeSecs != nil {
 		cutoffTime := time.Unix(int64(*cutoffTimeSecs), 0)
@@ -80,6 +106,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		query = query.Limit(int(*limit))
 	}
 
+	var collections []*dbmodel.CollectionToGc
 	err := query.Find(&collections).Error
 	if err != nil {
 		return nil, err
@@ -88,7 +115,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	return collections, nil
 }
 
-func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
+func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	type Result struct {
 		// Collection fields
 		CollectionId               string     `gorm:"column:collection_id"`
@@ -103,8 +130,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 		LogPosition                int64      `gorm:"column:log_position"`
 		Version                    int32      `gorm:"column:version"`
 		VersionFileName            string     `gorm:"column:version_file_name"`
-		RootCollectionId           string     `gorm:"column:root_collection_id"`
-		LineageFileName            string     `gorm:"column:lineage_file_name"`
+		RootCollectionId           *string    `gorm:"column:root_collection_id"`
+		LineageFileName            *string    `gorm:"column:lineage_file_name"`
 		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
 		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
 		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
@@ -123,7 +150,7 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	}
 
 	query := s.db.Table("collections").
-		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, collections.lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
+		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -133,13 +160,15 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	if tenantID != "" {
 		query = query.Where("databases.tenant_id = ?", tenantID)
 	}
-	if id != nil {
-		query = query.Where("collections.id = ?", *id)
+	if ids != nil && len(ids) > 0 {
+		query = query.Where("collections.id IN ?", ids)
 	}
 	if name != nil {
 		query = query.Where("collections.name = ?", *name)
 	}
-	query = query.Where("collections.is_deleted = ?", is_deleted)
+	if is_deleted != nil {
+		query = query.Where("collections.is_deleted = ?", *is_deleted)
+	}
 
 	if limit != nil {
 		query = query.Limit(int(*limit))
@@ -306,7 +335,12 @@ func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
 }
 
 func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	return s.getCollections(collectionID, nil, tenantID, databaseName, &limit, nil, true)
+	isDeleted := true
+	ids := []string{}
+	if collectionID != nil {
+		ids = append(ids, *collectionID)
+	}
+	return s.getCollections(ids, nil, tenantID, databaseName, &limit, nil, &isDeleted)
 }
 
 // NOTE: This is the only method to do a hard delete of a single collection.
@@ -319,7 +353,7 @@ func (s *collectionDb) DeleteCollectionByID(collectionID string) (int, error) {
 func (s *collectionDb) Insert(in *dbmodel.Collection) error {
 	err := s.db.Create(&in).Error
 	if err != nil {
-		log.Error("create collection failed", zap.Error(err))
+		log.Error("Insert collection failed", zap.Error(err))
 		var pgErr *pgconn.PgError
 		ok := errors.As(err, &pgErr)
 		if ok {
@@ -335,6 +369,29 @@ func (s *collectionDb) Insert(in *dbmodel.Collection) error {
 		return err
 	}
 	return nil
+}
+
+// InsertOnConflictDoNothing inserts a collection into the database, ignoring any conflicts.
+// It returns true if the collection was inserted, false if it already existed.
+// It returns an error if there was a problem with the insert.
+// This is used for upstream get_or_create
+func (s *collectionDb) InsertOnConflictDoNothing(in *dbmodel.Collection) (didInsert bool, err error) {
+	// Ignore conflict on (name, database_id) since we have "idx_name" unique index on it in migration 20240411201006
+	tx := s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "name"}, {Name: "database_id"}},
+		DoNothing: true,
+	}).Create(&in)
+	if tx.Error != nil {
+		log.Error("InsertOnConflictDoNothing collection failed", zap.Error(err))
+		return false, err
+	}
+	if tx.RowsAffected == 0 {
+		log.Debug("InsertOnConflictDoNothing collection already exists")
+		return false, nil
+	} else {
+		log.Debug("InsertOnConflictDoNothing collection inserted")
+		return true, nil
+	}
 }
 
 func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]interface{} {
@@ -384,6 +441,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	totalRecordsPostCompaction uint64,
 	sizeBytesPostCompaction uint64,
 	lastCompactionTimeSecs uint64,
+	numVersions uint64,
 ) (int64, error) {
 	// TODO(rohitcp): Investigate if we need to hold the lock using "UPDATE"
 	// strength, or if we can use "SELECT FOR UPDATE" or some other less
@@ -401,6 +459,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 			"total_records_post_compaction": totalRecordsPostCompaction,
 			"size_bytes_post_compaction":    sizeBytesPostCompaction,
 			"last_compaction_time_secs":     lastCompactionTimeSecs,
+			"num_versions":                  numVersions,
 		})
 	if result.Error != nil {
 		return 0, result.Error
@@ -460,17 +519,17 @@ func (s *collectionDb) UpdateVersionRelatedFields(collectionID, existingVersionF
 	return result.RowsAffected, nil
 }
 
-func (s *collectionDb) LockCollection(collectionID string) error {
+func (s *collectionDb) LockCollection(collectionID string) (*bool, error) {
 	var collections []dbmodel.Collection
 	err := s.db.Model(&dbmodel.Collection{}).
 		Where("collections.id = ?", collectionID).Clauses(clause.Locking{
 		Strength: "UPDATE",
 	}).Find(&collections).Error
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(collections) == 0 {
-		return common.ErrCollectionNotFound
+		return nil, common.ErrCollectionNotFound
 	}
 
 	err = s.db.Model(&dbmodel.CollectionMetadata{}).
@@ -478,7 +537,7 @@ func (s *collectionDb) LockCollection(collectionID string) error {
 		Strength: "UPDATE",
 	}).Find(nil).Error
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var segments []*dbmodel.Segment
@@ -487,7 +546,7 @@ func (s *collectionDb) LockCollection(collectionID string) error {
 		Strength: "UPDATE",
 	}).Find(&segments).Error
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var segmentIDs []*string
@@ -500,17 +559,51 @@ func (s *collectionDb) LockCollection(collectionID string) error {
 		Strength: "UPDATE",
 	}).Find(nil).Error
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &collections[0].IsDeleted, nil
 }
 
-func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFileName string, newLineageFileName string) error {
+func (s *collectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFileName *string, newLineageFileName string) error {
 	return s.db.Model(&dbmodel.Collection{}).
 		Where("id = ? AND (lineage_file_name IS NULL OR lineage_file_name = ?)", collectionID, currentLineageFileName).
 		Updates(map[string]interface{}{
 			"lineage_file_name": newLineageFileName,
 		}).Error
 
+}
+
+func (s *collectionDb) BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error) {
+	var collections []dbmodel.Collection
+	err := s.read_db.Model(&dbmodel.Collection{}).
+		Select("id, version_file_name").
+		Where("id IN ?", collectionIDs).
+		Find(&collections).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]string)
+	for _, collection := range collections {
+		result[collection.ID] = collection.VersionFileName
+	}
+	return result, nil
+}
+
+func (s *collectionDb) BatchGetCollectionSoftDeleteStatus(collectionIDs []string) (map[string]bool, error) {
+	var collections []dbmodel.Collection
+	err := s.read_db.Model(&dbmodel.Collection{}).
+		Select("id, is_deleted").
+		Where("id IN ?", collectionIDs).
+		Find(&collections).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]bool)
+	for _, collection := range collections {
+		result[collection.ID] = collection.IsDeleted
+	}
+	return result, nil
 }

@@ -4,7 +4,7 @@ use std::str::FromStr;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_log::{CollectionInfo, CollectionRecord, Log};
 use chroma_memberlist::memberlist_provider::Memberlist;
-use chroma_sysdb::SysDb;
+use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_types::CollectionUuid;
 use figment::providers::Env;
 use figment::Figment;
@@ -99,11 +99,13 @@ impl Scheduler {
                 );
                 continue;
             }
-            let collection_id = Some(collection_info.collection_id);
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collections(collection_id, None, None, None, None, 0)
+                .get_collections(GetCollectionsOptions {
+                    collection_id: Some(collection_info.collection_id),
+                    ..Default::default()
+                })
                 .await;
 
             match result {
@@ -118,7 +120,10 @@ impl Scheduler {
                             .purge_dirty_for_collection(collection_info.collection_id)
                             .await
                         {
-                            tracing::error!(
+                            // NOTE(rescrv):  This is something we ideally want to know about, but
+                            // cannot act on except to skip the collection.  Some day we'll have
+                            // something by which we can say, "Watch for this condition."
+                            tracing::warn!(
                                 "Error purging dirty records for collection: {:?}, error: {:?}",
                                 collection_info.collection_id,
                                 err
@@ -128,7 +133,7 @@ impl Scheduler {
                     }
 
                     // TODO: make querying the last compaction time in batch
-                    let log_position_in_collecion = collection[0].log_position;
+                    let log_position_in_collection = collection[0].log_position;
                     let tenant_ids = vec![collection[0].tenant.clone()];
                     let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
 
@@ -149,14 +154,17 @@ impl Scheduler {
                     // offset in log is the first offset in the log that has not been compacted. Note that
                     // since the offset is the first offset of log we get from the log service, we should
                     // use this offset to pull data from the log service.
-                    if log_position_in_collecion + 1 < offset {
+                    if log_position_in_collection + 1 < offset {
                         panic!(
-                            "offset in sysdb is less than offset in log, this should not happen!"
+                            "offset in sysdb ({}) is less than offset in log ({}) for {}",
+                            log_position_in_collection + 1,
+                            offset,
+                            collection[0].collection_id,
                         )
                     } else {
                         // The offset in sysdb is the last offset that has been compacted.
                         // We need to start from the next offset.
-                        offset = log_position_in_collecion + 1;
+                        offset = log_position_in_collection + 1;
                     }
 
                     collection_records.push(CollectionRecord {
@@ -495,9 +503,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(
-        expected = "offset in sysdb is less than offset in log, this should not happen!"
-    )]
+    #[should_panic(expected = "is less than offset")]
     async fn test_scheduler_panic() {
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
@@ -592,7 +598,9 @@ mod tests {
                 },
             },
         );
-        let _ = log.update_collection_log_offset(collection_uuid_1, 2).await;
+        let _ = log
+            .update_collection_log_offset(&tenant_1, collection_uuid_1, 2)
+            .await;
 
         let mut sysdb = SysDb::Test(TestSysDb::new());
 

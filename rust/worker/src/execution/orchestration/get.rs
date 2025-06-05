@@ -8,6 +8,7 @@ use chroma_system::{
 use chroma_types::CollectionAndSegments;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
+use tracing::Span;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
@@ -176,8 +177,14 @@ impl Orchestrator for GetOrchestrator {
         self.dispatcher.clone()
     }
 
-    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
-        vec![wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver())]
+    async fn initial_tasks(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+    ) -> Vec<(TaskMessage, Option<Span>)> {
+        vec![(
+            wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver()),
+            Some(Span::current()),
+        )]
     }
 
     fn queue_size(&self) -> usize {
@@ -221,7 +228,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
             },
             ctx.receiver(),
         );
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 }
 
@@ -253,7 +260,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
             },
             ctx.receiver(),
         );
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 }
 
@@ -289,12 +296,12 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             ctx.receiver(),
         );
 
-        if !self.send(prefetch_task, ctx).await {
+        if !self.send(prefetch_task, ctx, Some(Span::current())).await {
             return;
         }
 
         let task = wrap(Box::new(self.projection.clone()), input, ctx.receiver());
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 }
 
