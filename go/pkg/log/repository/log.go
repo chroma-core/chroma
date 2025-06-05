@@ -214,7 +214,7 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		ID:                              targetCollectionID,
 		RecordCompactionOffsetPosition:  int64(compactionOffset),
 		RecordEnumerationOffsetPosition: int64(enumerationOffset),
-		IsSealed: 						 sourceInfo.IsSealed,
+		IsSealed:                        sourceInfo.IsSealed,
 	})
 	if err != nil {
 		trace_log.Error("Error in updating offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
