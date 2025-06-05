@@ -168,11 +168,11 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		}
 	}()
 
+	// NOTE(rescrv):  Only sourceInfo.IsSealed should be used on this struct.
 	var sourceInfo log.Collection
 	sourceInfo, err = queriesWithTx.GetCollection(ctx, sourceCollectionID)
 	if err != nil {
-		trace_log.Error("Error in getting collection", zap.Error(err), zap.String("collectionId", sourceCollectionID))
-		return
+		sourceInfo.IsSealed = false
 	}
 
 	var sourceBounds log.GetBoundsForCollectionRow
