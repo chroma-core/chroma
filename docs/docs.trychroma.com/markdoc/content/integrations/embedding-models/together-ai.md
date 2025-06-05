@@ -27,9 +27,11 @@ ef(input=["This is my first text to embed", "This is my second document"])
 {% Tab label="typescript" %}
 
 ```typescript
-import { TogetherAIEmbeddingFunction } from 'chromadb';
+// npm install @chroma-core/together-ai
 
-process.env.CHROMA_TOGETHER_AI_API_KEY = "<INSERT API KEY HERE>"
+import { TogetherAIEmbeddingFunction } from '@chroma-core/together-ai';
+
+process.env.TOGETHER_AI_API_KEY = "<INSERT API KEY HERE>"
 
 const embedder = new TogetherAIEmbeddingFunction({
     model_name: "togethercomputer/m2-bert-80M-32k-retrieval",

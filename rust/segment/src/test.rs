@@ -29,10 +29,11 @@ use std::{
     ops::{BitAnd, BitOr},
     sync::atomic::AtomicU32,
 };
+use tempfile::TempDir;
 use thiserror::Error;
 
-#[derive(Clone)]
 pub struct TestDistributedSegment {
+    pub temp_dirs: Vec<TempDir>,
     pub blockfile_provider: BlockfileProvider,
     pub hnsw_provider: HnswIndexProvider,
     pub spann_provider: SpannProvider,
@@ -46,10 +47,11 @@ impl TestDistributedSegment {
     pub fn new_with_dimension(dimension: usize) -> Self {
         let collection = Collection::test_collection(dimension as i32);
         let collection_uuid = collection.collection_id;
-        let blockfile_provider = test_arrow_blockfile_provider(2 << 22);
-        let hnsw_provider = test_hnsw_index_provider();
+        let (blockfile_dir, blockfile_provider) = test_arrow_blockfile_provider(2 << 22);
+        let (hnsw_dir, hnsw_provider) = test_hnsw_index_provider();
 
         Self {
+            temp_dirs: vec![blockfile_dir, hnsw_dir],
             blockfile_provider: blockfile_provider.clone(),
             hnsw_provider: hnsw_provider.clone(),
             spann_provider: SpannProvider {
@@ -135,13 +137,13 @@ impl TestDistributedSegment {
     }
 }
 
-impl From<TestDistributedSegment> for CollectionAndSegments {
-    fn from(value: TestDistributedSegment) -> Self {
+impl From<&TestDistributedSegment> for CollectionAndSegments {
+    fn from(value: &TestDistributedSegment) -> Self {
         Self {
-            collection: value.collection,
-            metadata_segment: value.metadata_segment,
-            record_segment: value.record_segment,
-            vector_segment: value.vector_segment,
+            collection: value.collection.clone(),
+            metadata_segment: value.metadata_segment.clone(),
+            record_segment: value.record_segment.clone(),
+            vector_segment: value.vector_segment.clone(),
         }
     }
 }

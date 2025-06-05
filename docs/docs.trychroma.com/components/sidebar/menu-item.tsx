@@ -10,7 +10,7 @@ const MenuItem: React.FC<{ section: AppSection; active: boolean }> = ({
 
   return (
     <Link
-     className={`border-b-4 h-12 px-3 pt-3 pr-5 text-gray-700/80 ${active ? "border-chroma-orange " : "border-transparent hover:border-gray-100"} ${!section.disable && "hover:text-gray-800"} dark:text-gray-400/80 dark:hover:text-gray-300`}
+     className={`border-b-4 h-12 px-3 pt-3 pr-5 text-gray-700/80 ${active ? "border-chroma-orange " : "border-transparent hover:border-gray-100 dark:hover:border-gray-300"} ${!section.disable && "hover:text-gray-800"} dark:text-gray-400/80 dark:hover:text-gray-300 text-nowrap`}
       href={
         section.disable
           ? ""

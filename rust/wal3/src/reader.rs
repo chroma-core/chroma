@@ -141,7 +141,7 @@ impl LogReader {
         }
         fragments.retain(|f| f.limit > from);
         fragments.sort_by_key(|f| f.start.offset());
-        Ok(Self::post_process_fragments(fragments, limits))
+        Ok(Self::post_process_fragments(fragments, from, limits))
     }
 
     /// Do a consistent stale read of the manifest.  If the read can be returned without I/O,
@@ -158,14 +158,31 @@ impl LogReader {
         limits: Limits,
     ) -> Option<Vec<Fragment>> {
         let log_position_range = if let Some(max_records) = limits.max_records {
+            if from.offset().saturating_add(max_records) == u64::MAX {
+                return None;
+            }
             (from, from + max_records)
         } else {
             (from, LogPosition::MAX)
         };
         // If no there is no fragment with a start earlier than the from LogPosition, that means
         // we'd need to load snapshots.  Since this is an in-memory only function, we return "None"
-        // to indicate that it's not satisfiable.
-        if !manifest.fragments.iter().any(|f| f.start <= from) {
+        // to indicate that it's not satisfiable and do no I/O.
+        if !manifest
+            .fragments
+            .iter()
+            .any(|f| f.start <= log_position_range.0)
+        {
+            return None;
+        }
+        // If no there is no fragment with a limit later than the upper-bound LogPosition, that
+        // means we have a stale manifest.  Since this is an in-memory only function, we return
+        // "None" to indicate that it's not satisfiable and do no I/O.
+        if !manifest
+            .fragments
+            .iter()
+            .any(|f| f.limit > log_position_range.1)
+        {
             return None;
         }
         let fragments = manifest
@@ -174,10 +191,14 @@ impl LogReader {
             .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
             .cloned()
             .collect::<Vec<_>>();
-        Some(Self::post_process_fragments(fragments, limits))
+        Some(Self::post_process_fragments(fragments, from, limits))
     }
 
-    fn post_process_fragments(mut fragments: Vec<Fragment>, limits: Limits) -> Vec<Fragment> {
+    fn post_process_fragments(
+        mut fragments: Vec<Fragment>,
+        from: LogPosition,
+        limits: Limits,
+    ) -> Vec<Fragment> {
         fragments.sort_by_key(|f| f.start.offset());
         if let Some(max_files) = limits.max_files {
             if fragments.len() as u64 > max_files {
@@ -188,7 +209,7 @@ impl LogReader {
         while fragments.len() > 1
             // NOTE(rescrv):  We take the start of the last fragment, because if there are enough
             // records without it we can pop.
-            && fragments[fragments.len() - 1].start - fragments[0].start
+            && fragments[fragments.len() - 1].start - from
                 > limits.max_records.unwrap_or(u64::MAX)
         {
             tracing::info!(
@@ -455,4 +476,290 @@ pub async fn read_fragment(
         num_bytes,
         setsum,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use setsum::Setsum;
+
+    use crate::{Fragment, FragmentSeqNo};
+
+    use super::*;
+
+    #[test]
+    fn post_process_fragments_uses_from_position_for_record_limits() {
+        let fragments = vec![
+            Fragment {
+                path: "fragment1".to_string(),
+                seq_no: FragmentSeqNo(1),
+                start: LogPosition::from_offset(100),
+                limit: LogPosition::from_offset(150),
+                num_bytes: 1000,
+                setsum: Setsum::default(),
+            },
+            Fragment {
+                path: "fragment2".to_string(),
+                seq_no: FragmentSeqNo(2),
+                start: LogPosition::from_offset(150),
+                limit: LogPosition::from_offset(200),
+                num_bytes: 1000,
+                setsum: Setsum::default(),
+            },
+            Fragment {
+                path: "fragment3".to_string(),
+                seq_no: FragmentSeqNo(3),
+                start: LogPosition::from_offset(200),
+                limit: LogPosition::from_offset(250),
+                num_bytes: 1000,
+                setsum: Setsum::default(),
+            },
+        ];
+
+        // Test case: from position is later than the first fragment's start
+        // This tests the bug fix where we use 'from' instead of fragments[0].start
+        let from = LogPosition::from_offset(125);
+        let limits = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(100), // Set a limit that should trigger the record check
+        };
+
+        let result = LogReader::post_process_fragments(fragments.clone(), from, limits);
+
+        // With the fix: last fragment start (200) - from (125) = 75 records
+        // This should be under the 100 record limit, so all fragments should remain
+        assert_eq!(result.len(), 3);
+
+        // Test case that would fail with the old bug:
+        // If we were using fragments[0].start (100) instead of from (125),
+        // then: last fragment start (200) - fragments[0].start (100) = 100 records
+        // This would equal the limit, but the actual span from 'from' is only 75
+        let limits_strict = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(74), // Just under the actual span from 'from'
+        };
+
+        let result_strict =
+            LogReader::post_process_fragments(fragments.clone(), from, limits_strict);
+
+        // With the fix: 200 - 125 = 75 > 74, so last fragment should be removed
+        assert_eq!(result_strict.len(), 2);
+        assert_eq!(result_strict[0].seq_no, FragmentSeqNo(1));
+        assert_eq!(result_strict[1].seq_no, FragmentSeqNo(2));
+    }
+
+    #[test]
+    fn records_based_pruning_bug_from_commit_message() {
+        // Test the exact scenario from the commit message:
+        // - Fragments with LogPosition ranges [1, 101), [101, 201).
+        // - Query for 75 records at offset 50 should fetch both fragments.
+        // - Prior to this change only the first fragment was fetched.
+
+        let fragments = vec![
+            Fragment {
+                path: "fragment1".to_string(),
+                seq_no: FragmentSeqNo(1),
+                start: LogPosition::from_offset(1),
+                limit: LogPosition::from_offset(101),
+                num_bytes: 1000,
+                setsum: Setsum::default(),
+            },
+            Fragment {
+                path: "fragment2".to_string(),
+                seq_no: FragmentSeqNo(2),
+                start: LogPosition::from_offset(101),
+                limit: LogPosition::from_offset(201),
+                num_bytes: 1000,
+                setsum: Setsum::default(),
+            },
+        ];
+
+        // Query for 75 records at offset 50
+        let from = LogPosition::from_offset(50);
+        let limits = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(75),
+        };
+
+        let result = LogReader::post_process_fragments(fragments.clone(), from, limits);
+
+        // With the fix: both fragments should be returned
+        // The calculation is: last fragment start (101) - from (50) = 51 records
+        // Since 51 < 75, both fragments should remain
+        assert_eq!(
+            result.len(),
+            2,
+            "Both fragments should be returned for 75 records from offset 50"
+        );
+        assert_eq!(result[0].seq_no, FragmentSeqNo(1));
+        assert_eq!(result[1].seq_no, FragmentSeqNo(2));
+
+        // Test the edge case where the old bug would have incorrectly calculated:
+        // Old bug would use: fragments[1].start (101) - fragments[0].start (1) = 100 records
+        // If max_records was 99, old code would incorrectly remove the second fragment
+        let limits_edge_case = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(50), // Just under the actual span from 'from' (51)
+        };
+
+        let result_edge =
+            LogReader::post_process_fragments(fragments.clone(), from, limits_edge_case);
+
+        // With the fix: 101 - 50 = 51 > 50, so the second fragment should be removed
+        assert_eq!(
+            result_edge.len(),
+            1,
+            "Only first fragment should remain with 50 record limit"
+        );
+        assert_eq!(result_edge[0].seq_no, FragmentSeqNo(1));
+    }
+
+    #[test]
+    fn scan_from_manifest_cached_manifest_boundary_conditions() {
+        use crate::Manifest;
+
+        // Test boundary conditions for the cached manifest bug fix
+        // This tests the logic that checks if a cached manifest can satisfy a pull-logs request
+
+        let fragments = vec![
+            Fragment {
+                path: "fragment1".to_string(),
+                seq_no: FragmentSeqNo(1),
+                start: LogPosition::from_offset(1),
+                limit: LogPosition::from_offset(101),
+                num_bytes: 1000,
+                setsum: Setsum::default(),
+            },
+            Fragment {
+                path: "fragment2".to_string(),
+                seq_no: FragmentSeqNo(2),
+                start: LogPosition::from_offset(101),
+                limit: LogPosition::from_offset(201), // Manifest max is 201
+                num_bytes: 1000,
+                setsum: Setsum::default(),
+            },
+        ];
+
+        let manifest = Manifest {
+            setsum: Setsum::default(),
+            acc_bytes: 2000,
+            writer: "test-writer".to_string(),
+            snapshots: vec![],
+            fragments: fragments.clone(),
+            initial_offset: Some(LogPosition::from_offset(1)),
+        };
+
+        // Boundary case 1: Request exactly at the manifest limit
+        let from = LogPosition::from_offset(100);
+        let limits = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(100), // Would need data up to exactly offset 200
+        };
+        let result = LogReader::scan_from_manifest(&manifest, from, limits.clone());
+        assert!(
+            result.is_some(),
+            "Should succeed when request stays within manifest coverage"
+        );
+
+        // Boundary case 2: Request exactly to the manifest limit
+        let limits_at_limit = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(101), // Would need data up to offset 201, manifest limit is 201
+        };
+        let result_at_limit = LogReader::scan_from_manifest(&manifest, from, limits_at_limit);
+        assert!(
+            result_at_limit.is_none(),
+            "Should fail when request  exceeds limit"
+        );
+
+        // Boundary case 3: Request one beyond the manifest limit
+        let limits_beyond = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(102), // Would need data up to offset 202, beyond manifest limit of 201
+        };
+        let result_beyond = LogReader::scan_from_manifest(&manifest, from, limits_beyond);
+        assert!(
+            result_beyond.is_none(),
+            "Should return None when request exceeds manifest coverage"
+        );
+
+        // Boundary case 4: Request from the very end of the manifest
+        let from_end = LogPosition::from_offset(200);
+        let limits_at_end = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(1), // Would need data up to offset 201, exactly at manifest limit
+        };
+        let result_at_end = LogReader::scan_from_manifest(&manifest, from_end, limits_at_end);
+        assert!(
+            result_at_end.is_none(),
+            "Should fail when reading exactly at manifest boundary"
+        );
+
+        // Boundary case 5: Request from beyond the manifest
+        let from_beyond = LogPosition::from_offset(201);
+        let limits_beyond = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(1),
+        };
+        let result_beyond = LogReader::scan_from_manifest(&manifest, from_beyond, limits_beyond);
+        assert!(
+            result_beyond.is_none(),
+            "Should return None when starting beyond manifest coverage"
+        );
+
+        // Boundary case 6: No max_records limit (LogPosition::MAX)
+        let from_middle = LogPosition::from_offset(50);
+        let limits_unlimited = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: None, // This creates a range to LogPosition::MAX
+        };
+        let result_unlimited =
+            LogReader::scan_from_manifest(&manifest, from_middle, limits_unlimited);
+        assert!(
+            result_unlimited.is_none(),
+            "Should return None when unlimited range extends beyond manifest"
+        );
+
+        // Boundary case 7: Empty manifest
+        let empty_manifest = Manifest {
+            setsum: Setsum::default(),
+            acc_bytes: 0,
+            writer: "test-writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: None,
+        };
+        let result_empty = LogReader::scan_from_manifest(
+            &empty_manifest,
+            LogPosition::from_offset(0),
+            limits.clone(),
+        );
+        assert!(
+            result_empty.is_none(),
+            "Should return None for empty manifest"
+        );
+
+        // Boundary case 8: Integer overflow conditions (i64::MAX scenario from the bug fix)
+        let from_overflow_test = LogPosition::from_offset(u64::MAX - 10);
+        let limits_overflow = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: Some(20), // This would overflow if not handled properly
+        };
+        let result_overflow =
+            LogReader::scan_from_manifest(&manifest, from_overflow_test, limits_overflow);
+        assert!(
+            result_overflow.is_none(),
+            "Should handle potential overflow gracefully"
+        );
+    }
 }

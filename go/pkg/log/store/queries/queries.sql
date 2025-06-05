@@ -4,6 +4,11 @@ FROM collection
 WHERE id = $1
 FOR UPDATE;
 
+-- name: GetCollection :one
+SELECT *
+FROM collection
+WHERE id = $1;
+
 -- name: InsertRecord :copyfrom
 INSERT INTO record_log (collection_id, "offset", record, timestamp) values($1, $2, $3, $4);
 
@@ -30,7 +35,7 @@ UPDATE collection set record_compaction_offset_position = $2 where id = $1;
 UPDATE collection set record_enumeration_offset_position = $2 where id = $1;
 
 -- name: InsertCollection :one
-INSERT INTO collection (id, record_enumeration_offset_position, record_compaction_offset_position) values($1, $2, $3) returning *;
+INSERT INTO collection (id, record_enumeration_offset_position, record_compaction_offset_position, is_sealed) values($1, $2, $3, $4) returning *;
 
 -- name: PurgeRecords :exec
 DELETE FROM record_log r using collection c where r.collection_id = c.id and r.offset <= c.record_compaction_offset_position;

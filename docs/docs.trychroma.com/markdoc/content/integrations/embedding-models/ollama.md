@@ -33,7 +33,9 @@ embeddings = ollama_ef(["This is my first text to embed",
 {% Tab label="typescript" %}
 
 ```typescript
-import { OllamaEmbeddingFunction } from "chromadb";
+// npm install @chroma-core/ollama
+
+import { OllamaEmbeddingFunction } from "@chroma-core/ollama";
 const embedder = new OllamaEmbeddingFunction({
     url: "http://127.0.0.1:11434/",
     model: "llama2"
