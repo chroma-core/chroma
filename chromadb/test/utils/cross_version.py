@@ -5,10 +5,15 @@ import tempfile
 from types import ModuleType
 from typing import Dict, List
 
-base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
+base_install_dir = (
+    tempfile.gettempdir()
+    + f"/worker-{os.environ.get('PYTEST_XDIST_WORKER', 'unknown')}"
+    + "/persistence_test_chromadb_versions"
+)
 
 
 def get_path_to_version_install(version: str) -> str:
+    sys.stderr.write(f"path for worker {base_install_dir}\n")
     return base_install_dir + "/" + version
 
 
@@ -48,6 +53,8 @@ def install_version(version: str, dep_overrides: Dict[str, str]) -> None:
 
 
 def install(pkg: str, path: str, dep_overrides: Dict[str, str]) -> int:
+    os.makedirs(path, exist_ok=True)
+
     # -q -q to suppress pip output to ERROR level
     # https://pip.pypa.io/en/stable/cli/pip/#quiet
     command = [sys.executable, "-m", "pip", "-q", "-q", "install", pkg]
