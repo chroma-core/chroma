@@ -126,7 +126,7 @@ export async function getPostReplies(id: string): Promise<TweetModel[]> {
 export async function semanticSearch(query: string): Promise<TweetModel[]> {
   const posts = await chromaCollection.query({
     queryTexts: [query],
-    nResults: 5,
+    nResults: 10,
   });
   return chromaQueryResultsToPostModels(posts);
 }

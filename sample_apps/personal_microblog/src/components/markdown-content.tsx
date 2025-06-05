@@ -6,6 +6,7 @@ import rehypeReact from "rehype-react";
 import styles from "./markdown-content.module.css";
 import { AnchorTag, Strong } from "@/markdown";
 import { readStreamableValue, StreamableValue } from "ai/rsc";
+import { useAnimatedText } from "./animated-text";
 
 const markdownPipeline = remark()
   .use(remarkPluginReplaceMatch(/@assistant/, (match) => {

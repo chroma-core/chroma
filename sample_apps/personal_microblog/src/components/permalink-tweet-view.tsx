@@ -1,15 +1,14 @@
 "use client";
 
-import { publishNewUserPost, semanticSearch } from "@/actions";
+import { publishNewUserPost } from "@/actions";
 import { TweetModel } from "@/types";
-import { unixTimestampNow } from "@/util";
 import { useEffect, useState } from "react";
-import { MarkdownContent } from "./markdown-content";
 import TweetPrompt from "./tweet-prompt";
 import { Tweet } from "./tweet";
 import { BiReply, BiLinkAlt } from "react-icons/bi";
 import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from 'next/navigation'
+import TweetBody from "./tweet-body";
 
 export default function PermalinkTweetView({ post, parentPosts, existingReplies }: { post: TweetModel, parentPosts: TweetModel[], existingReplies: TweetModel[] }) {
   const [replies, setReplies] = useState<TweetModel[]>(existingReplies);
@@ -24,6 +23,16 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
     getRelatedPosts();
   }, [post]);
 
+  useEffect(() => {
+    if (parentPosts.length === 0) {
+      return;
+    }
+    const mainTweet = document.getElementById("main-tweet-autoscroll");
+    if (mainTweet) {
+      mainTweet.scrollIntoView({ behavior: "instant" });
+    }
+  }, []);
+
   function handleSubmit(input: string) {
     const postReply = async () => {
       if (!post) {
@@ -35,27 +44,34 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
     postReply();
   }
 
-  if (!post) {
-    return <div>Loading...</div>;
-  }
+  const headerComponent = (<div className="flex flex-row font-ui justify-between sticky top-0 bg-[var(--background)] py-4">
+    <a href="/">← Feed</a>
+    <div className="flex flex-row gap-2">
+      {post.threadParentId && <a href={`/post/${post.threadParentId}`}>Parent</a>}
+      <a href={`/post/${post.id}`}>Permalink</a>
+    </div>
+  </div>);
+
+  const relatedPostsComponent = relatedPosts.length > 0 && (
+    <>
+      <h2 className="ml-[15px] font-ui pb-4 pt-6">Related Posts</h2>
+      <div>
+        {relatedPosts.map((p) => (
+          <Tweet key={p.id} tweet={p} />
+        ))}
+      </div>
+    </>
+  );
 
   return (
     <div className="flex flex-col items-center py-20">
       <div className="w-[600px] max-w-[calc(100dvw-32px)]">
-        <div className="flex flex-row font-ui justify-between">
-          <a href="/">← Feed</a>
-          <div className="flex flex-row gap-2">
-            {post.threadParentId && <a href={`/post/${post.threadParentId}`}>Parent</a>}
-            <a href={`/post/${post.id}`}>Permalink</a>
-          </div>
-        </div>
         <div className="py-4">
+          {headerComponent}
           <div className="bg-[#fafafa] py-12 px-4">
-            {parentPosts.map((p) => <div key={p.id} className="bg-gray-100 p-2 w-full">
-              <MarkdownContent content={p.body} className="text-[1.15em]/5 font-body" />
-            </div>)}
-            <MarkdownContent content={post.body} className="text-[1.15em]/5 font-body" />
-            <PermalinkTweetCitations citationIds={post.citations} />
+            <ParentPosts parentPosts={parentPosts} />
+            <div id="main-tweet-autoscroll" className="relative top-[-.1em]"></div>
+            <TweetBody body={post.body} citations={post.citations} className="text-[1.15em]/5 font-body" />
           </div>
           <TweetPrompt placeholder="Continue your thoughts..." onSubmit={handleSubmit} animate={false} />
           <div className='h-12' />
@@ -63,44 +79,33 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
             <PermalinkReply key={r.id} reply={r} />
           ))}
         </div>
-        {relatedPosts.length > 0 && (
-          <>
-            <h2 className="ml-[15px] font-ui pb-4 pt-6">Related Posts</h2>
-            <div>
-              {relatedPosts.map((p) => (
-                <Tweet key={p.id} tweet={p} />
-              ))}
-            </div>
-          </>
-        )}
+        <div className="min-h-[100dvh]">
+          {relatedPostsComponent}
+        </div>
       </div>
     </div>
   );
 }
 
-function PermalinkTweetCitations({ citationIds }: { citationIds: string[] }) {
-  const [loading, setLoading] = useState(true);
-  const [citations, setCitations] = useState<TweetModel[]>([]);
+function ParentPosts({ parentPosts }: { parentPosts: TweetModel[] }) {
+  if (parentPosts.length === 0) {
+    return null;
+  }
 
-  useEffect(() => {
-    const getCitations = async () => {
-      const results = await Promise.all(citationIds.map(async (id) => {
-        const res = await fetch(`/api/post/${id}`);
-        return res.json();
-      }));
-      console.log(results);
-      setCitations(results);
-      setLoading(false);
-    };
-    getCitations();
-  }, []);
-  console.log(loading, citations);
+  const router = useRouter();
+
+  function goToPostPage(id: string) {
+    router.push(`/post/${id}`);
+  }
+
   return (
-    (!loading && citations.length > 0) && (<div className="mt-4 flex flex-row gap-2">
-      {citations.map((c) => <div key={c.id} className="bg-gray-100 p-2 w-full">
-        <MarkdownContent content={c.body} className="text-[1.15em]/5 font-body" />
-      </div>)}
-    </div>)
+    <div className="pb-6 text-sm text-gray-700">
+      {parentPosts.map((p) => (
+        <div key={p.id} className="p-2 pl-4 pb-4 last:pb-16 w-full border-l cursor-pointer" onClick={() => goToPostPage(p.id)}>
+          <TweetBody body={p.body} citations={p.citations} className="font-body" />
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -123,7 +128,7 @@ function PermalinkReply({ reply }: { reply: TweetModel }) {
       className="border-b"
     >
       <div className="pt-4 px-4 cursor-pointer" onClick={() => router.push(`/post/${reply.id}`)}>
-        <MarkdownContent content={reply.body} className={`font-body ${reply.role === "assistant" ? "bold text-blue-600" : ""}`} />
+        <TweetBody body={reply.body} citations={reply.citations} className={`font-body ${reply.role === "assistant" ? "bold text-blue-600" : ""}`} />
         <motion.div
           className="flex flex-row items-center gap-2 py-2 w-full"
           initial={{ opacity: 0 }}

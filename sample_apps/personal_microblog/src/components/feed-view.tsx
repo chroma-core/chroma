@@ -110,7 +110,7 @@ function Tweets({ newMessages }: { newMessages: { userPost: TweetModel, assistan
     return <TweetSkeleton />;
   }
 
-  if (!loading && oldMessages.length === 0 && newMessages.length === 0) {
+  if (!initialLoading && !loading && oldMessages.length === 0 && newMessages.length === 0) {
     return <div className="flex flex-row font-ui justify-center py-20 mb-48">
       <div>
         <p>No posts yet... Make your first post!</p>

@@ -39,5 +39,5 @@ async function getParentPosts(post: TweetModel): Promise<TweetModel[]> {
       break;
     }
   }
-  return parentPosts;
+  return parentPosts.reverse();
 }
