@@ -155,7 +155,6 @@ impl SqliteDb {
         }
 
         let unapplied = source_migrations[applied_migrations.len()..].to_vec();
-
         Ok(unapplied)
     }
 
