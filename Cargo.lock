@@ -1748,26 +1748,18 @@ name = "chroma-metering"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "chroma-metering-macros",
  "chroma-system",
+ "heck 0.5.0",
  "once_cell",
  "parking_lot",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "chroma-metering-macros"
-version = "0.1.0"
-dependencies = [
- "heck 0.5.0",
  "proc-macro2 1.0.95",
  "quote 1.0.40",
  "serde",
  "serde_json",
  "syn 2.0.101",
  "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

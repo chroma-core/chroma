@@ -3,12 +3,23 @@ name = "chroma-metering"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+proc-macro = true
+
 [dependencies]
+heck = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
+syn = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 async-trait = { workspace = true }
-once_cell = { workspace = true }
-parking_lot = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
-chroma-metering-core = { workspace = true }
-chroma-metering-macros = { workspace = true }
+once_cell = { workspace = true } 
+parking_lot = { workspace = true } 
 chroma-system = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true }

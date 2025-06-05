@@ -1,22 +1,26 @@
-#[chroma_metering_macros::attribute(name = "example_my_attribute")]
-type ExampleMyAttribute = Option<u8>;
+chroma_metering::initialize_metering! {
+    #[attribute(name = "example_my_attribute")]
+    type ExampleMyAttribute = Option<u8>;
 
-#[chroma_metering_macros::event]
-struct MyMeteringEventExample {
-    test_constant_field: Option<u8>,
-    #[field(attribute = "example_my_attribute", mutator = "my_mutator")]
-    test_annotated_field: Option<u8>,
+    #[event]
+    #[derive(Debug, Default, Clone)]
+    pub struct MyMeteringEventExample {
+        test_constant_field: Option<u8>,
+        #[field(attribute = "example_my_attribute", mutator = "my_mutator")]
+        test_annotated_field: Option<u8>,
+    }
+
+    #[event]
+    #[derive(Debug, Default, Clone)]
+    pub struct MyOtherMeteringEventExample {
+        other_test_constant_field: Option<u8>,
+        #[field(attribute = "example_my_attribute", mutator = "my_other_mutator")]
+        other_test_annotated_field: Option<u8>,
+    }
 }
 
 fn my_mutator(event: &mut MyMeteringEventExample, value: Option<u8>) {
     event.test_annotated_field = value;
-}
-
-#[chroma_metering_macros::event]
-struct MyOtherMeteringEventExample {
-    other_test_constant_field: Option<u8>,
-    #[field(attribute = "example_my_attribute", mutator = "my_other_mutator")]
-    other_test_annotated_field: Option<u8>,
 }
 
 fn my_other_mutator(event: &mut MyOtherMeteringEventExample, value: Option<u8>) {
