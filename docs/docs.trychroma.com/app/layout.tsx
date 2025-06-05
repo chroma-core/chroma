@@ -52,7 +52,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body data-invert-bg="true" className={`${inter.className} antialiased bg-white bg-[url(/composite_noise.jpg)] bg-repeat relative ext-[#27201C] dark:text-white dark:backdrop-invert`}>
+      <body data-invert-bg="true" className={`${inter.className} antialiased bg-white bg-[url(/composite_noise.jpg)] bg-repeat relative text-[#27201C] dark:text-white dark:backdrop-invert`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
