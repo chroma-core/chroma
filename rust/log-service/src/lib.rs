@@ -947,6 +947,7 @@ impl LogServer {
             .record(total_uncompacted as f64, &[]);
         self.set_backpressure(&backpressure);
         let mut need_to_compact = self.need_to_compact.lock();
+        println!(">>>>>> Updated dirty logs: {rollups:?}");
         std::mem::swap(&mut *need_to_compact, &mut rollups);
         Ok(())
     }
@@ -1131,6 +1132,18 @@ impl LogServer {
                     }
                 }
             }
+            let log_reader = LogReader::new(
+                self.config.reader.clone(),
+                Arc::clone(&self.storage),
+                prefix,
+            );
+            println!(
+                ">>>>>> Manifest after push: {:?}",
+                log_reader
+                    .manifest()
+                    .await
+                    .expect("Manifest should be present")
+            );
             Ok(Response::new(PushLogsResponse {
                 record_count,
                 log_is_sealed: false,
@@ -1157,6 +1170,7 @@ impl LogServer {
                 Arc::clone(&self.storage),
                 prefix,
             );
+            println!(">>>>>> Scout Manifest: {:?}", log_reader.manifest().await.expect("Manifest should be present"));
             let (start_position, limit_position) = match log_reader.manifest().await {
                 Ok(Some(manifest)) => (
                     manifest.minimum_log_position(),
@@ -2153,7 +2167,7 @@ pub async fn log_entrypoint() {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{str::FromStr, sync::Arc};
 
     use super::*;
     use crate::state_hash_table::Value;
@@ -3337,9 +3351,49 @@ mod tests {
         }
     }
 
+    async fn mock_compact_on_server(server: &LogServer, collection_id: CollectionUuid) {
+        let offsets = server
+            .scout_logs(Request::new(ScoutLogsRequest {
+                collection_id: collection_id.to_string(),
+            }))
+            .await
+            .expect("Scout Logs should not fail")
+            .into_inner();
+        server
+            .update_collection_log_offset(Request::new(UpdateCollectionLogOffsetRequest {
+                collection_id: collection_id.to_string(),
+                log_offset: offsets.first_uninserted_record_offset.saturating_sub(1),
+            }))
+            .await
+            .expect("Update Compaction Offset should not fail");
+    }
+
+    async fn validate_dirty_log_on_server(server: &LogServer, collection_ids: &[CollectionUuid]) {
+        server
+            .roll_dirty_log()
+            .await
+            .expect("Roll Dirty Logs should not fail");
+        let dirty_collections = server
+            .cached_get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {
+                min_compaction_size: 0,
+            })
+            .await
+            .expect("Get Dirty Collections should not fail")
+            .into_inner()
+            .all_collection_info;
+        let expected_collection_ids: HashSet<_> =
+            HashSet::from_iter(collection_ids.iter().cloned());
+        let got_collection_ids: HashSet<_> =
+            HashSet::from_iter(dirty_collections.iter().map(|info| {
+                CollectionUuid::from_str(&info.collection_id)
+                    .expect("Collection Uuid should be valid")
+            }));
+        assert_eq!(got_collection_ids, expected_collection_ids);
+    }
+
     proptest! {
         #[test]
-         fn test_k8s_integration_rust_log_service_push_pull_logs(
+        fn test_k8s_integration_rust_log_service_push_pull_logs(
             read_offset in 1usize..=100,
             batch_size in 1usize..=150,
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=100)
@@ -3360,11 +3414,18 @@ mod tests {
                         ))
                         .await
                         .expect("Seal log should not fail");
+
+                    validate_dirty_log_on_server(&log_server, &Vec::new()).await;
+
+                    println!("[DEBUG-PROP] Pushing {} log to server", operations.len());
                     for chunk in operations.chunks(100) {
                         push_log_to_server(&log_server, collection_id, chunk).await;
                     }
 
+                    validate_dirty_log_on_server(&log_server, &vec![collection_id]).await;
                     validate_log_on_server(&log_server, collection_id, &operations, read_offset, batch_size).await;
+                    mock_compact_on_server(&log_server, collection_id).await;
+                    validate_dirty_log_on_server(&log_server, &Vec::new()).await;
                 });
             })
             .expect("Thread should be spawnable")
