@@ -13,6 +13,8 @@ use crate::{
     events::{collect_event_definition_tokens, process_event_definition_tokens, Event},
 };
 
+/// Processes the full token stream that is passed into [`crate::initialize_metering`] by
+/// attempting to parse out vectors of attributes and events.
 pub fn process_token_stream(
     token_stream: &TokenStream,
 ) -> Result<(Vec<Attribute>, Vec<Event>), MeteringMacrosError> {
@@ -22,32 +24,37 @@ pub fn process_token_stream(
     let mut events: Vec<Event> = Vec::new();
     let mut registered_attributes: HashMap<String, Attribute> = HashMap::new();
 
-    let mut i = 0;
-    while i < tokens.len() {
-        match &tokens[i] {
-            TokenTree::Punct(punct)
-                if punct.as_char() == '#' && punct.spacing() == Spacing::Alone =>
+    let mut current_token_index = 0;
+    while current_token_index < tokens.len() {
+        match &tokens[current_token_index] {
+            TokenTree::Punct(expected_hashtag_punct)
+                if expected_hashtag_punct.as_char() == '#'
+                    && expected_hashtag_punct.spacing() == Spacing::Alone =>
             {
-                let (ann_type, ann_tokens, ann_consumed) = collect_annotation_tokens(&tokens[i..])?;
+                let (annotation_level, annotation_tokens, tokens_consumed_by_annotation) =
+                    collect_annotation_tokens(&tokens[current_token_index..])?;
 
-                if let AnnotationLevel::Secondary = ann_type {
+                if let AnnotationLevel::Secondary = annotation_level {
                     return Err(MeteringMacrosError::ParseError(
                         "Found `#[field(...)]` outside of an event".into(),
                     ));
                 }
 
-                let primary = process_primary_annotation_tokens(&ann_tokens)?;
-                match primary {
+                let primary_annotation = process_primary_annotation_tokens(&annotation_tokens)?;
+                match primary_annotation {
                     PrimaryAnnotation::Attribute {
                         attribute_name_string,
                     } => {
-                        let start = i + ann_consumed;
+                        let attribute_definition_start_token_index =
+                            current_token_index + tokens_consumed_by_annotation;
 
-                        let (def_tokens, def_consumed) =
-                            collect_attribute_definition_tokens(&tokens[start..])?;
+                        let (attribute_definition_tokens, tokens_consumed_by_attribute_definition) =
+                            collect_attribute_definition_tokens(
+                                &tokens[attribute_definition_start_token_index..],
+                            )?;
 
                         let attribute = process_attribute_definition_tokens(
-                            def_tokens,
+                            attribute_definition_tokens,
                             attribute_name_string.clone(),
                         )?;
 
@@ -55,26 +62,33 @@ pub fn process_token_stream(
                             .insert(attribute_name_string.clone(), attribute.clone());
                         attributes.push(attribute);
 
-                        i = start + def_consumed;
+                        current_token_index = attribute_definition_start_token_index
+                            + tokens_consumed_by_attribute_definition;
                     }
                     PrimaryAnnotation::Event => {
-                        let start = i + ann_consumed;
+                        let event_definition_start_token_index =
+                            current_token_index + tokens_consumed_by_annotation;
 
-                        let (def_tokens, def_consumed) =
-                            collect_event_definition_tokens(&tokens[start..])?;
+                        let (event_definition_tokens, tokens_consumed_by_event_definition) =
+                            collect_event_definition_tokens(
+                                &tokens[event_definition_start_token_index..],
+                            )?;
 
-                        let event =
-                            process_event_definition_tokens(def_tokens, &registered_attributes)?;
+                        let event = process_event_definition_tokens(
+                            event_definition_tokens,
+                            &registered_attributes,
+                        )?;
                         events.push(event);
 
-                        i = start + def_consumed;
+                        current_token_index = event_definition_start_token_index
+                            + tokens_consumed_by_event_definition;
                     }
                 }
             }
-            other => {
+            unexpected => {
                 return Err(MeteringMacrosError::ParseError(format!(
                     "Unexpected token at top level: {:?}",
-                    other
+                    unexpected
                 )));
             }
         }
@@ -83,22 +97,24 @@ pub fn process_token_stream(
     Ok((attributes, events))
 }
 
-pub fn generate_compile_error(error_message: &str) -> proc_macro::TokenStream {
-    let mut token_stream = TokenStream::new();
-    token_stream.extend([TokenTree::Ident(Ident::new(
+/// Generates a compiler error at the macro call site given a string.
+pub fn generate_compile_error(error_message_string: &str) -> proc_macro::TokenStream {
+    let mut compile_error_token_stream = TokenStream::new();
+    compile_error_token_stream.extend([TokenTree::Ident(Ident::new(
         "compile_error",
         Span::call_site(),
     ))]);
 
-    token_stream.extend([TokenTree::Punct(Punct::new('!', Spacing::Alone))]);
+    compile_error_token_stream.extend([TokenTree::Punct(Punct::new('!', Spacing::Alone))]);
 
-    let literal = Literal::string(error_message);
-    let mut inner = TokenStream::new();
-    inner.extend([TokenTree::Literal(literal)]);
-    let group = Group::new(Delimiter::Parenthesis, inner);
-    token_stream.extend([TokenTree::Group(group)]);
+    let error_message_literal = Literal::string(error_message_string);
+    let mut compile_error_arguments_token_stream = TokenStream::new();
+    compile_error_arguments_token_stream.extend([TokenTree::Literal(error_message_literal)]);
+    let compile_error_arguments_group =
+        Group::new(Delimiter::Parenthesis, compile_error_arguments_token_stream);
+    compile_error_token_stream.extend([TokenTree::Group(compile_error_arguments_group)]);
 
-    token_stream.extend([TokenTree::Punct(Punct::new(';', Spacing::Alone))]);
+    compile_error_token_stream.extend([TokenTree::Punct(Punct::new(';', Spacing::Alone))]);
 
-    return proc_macro::TokenStream::from(token_stream);
+    return proc_macro::TokenStream::from(compile_error_token_stream);
 }

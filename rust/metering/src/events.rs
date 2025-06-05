@@ -1,7 +1,6 @@
-use std::{collections::HashMap, iter::Peekable};
-
 use proc_macro2::{Delimiter, Ident, Spacing, TokenStream, TokenTree};
 use quote::quote;
+use std::{collections::HashMap, iter::Peekable};
 
 use crate::{
     annotations::{process_secondary_annotation_tokens, SecondaryAnnotation},
@@ -10,32 +9,36 @@ use crate::{
     fields::{generate_field_definition_token_stream, process_field_definition_tokens, Field},
 };
 
+/// Represents a user-defined metering event.
 pub struct Event {
     pub foreign_macro_token_streams: Vec<TokenStream>,
-    pub visibility_modifier_ident: Option<Ident>,
+    pub maybe_visibility_modifier_token_stream: Option<TokenStream>,
     pub event_name_ident: Ident,
     pub fields: Vec<Field>,
 }
 
+/// Accepts tokens from the [`crate::utils::process_token_stream`]'s current token to the end
+/// of the input tokens and attempts to return a slice that is known to contain an event definition,
+/// given that the last-processed set of tokens was an event annotation.
 pub fn collect_event_definition_tokens(
     tokens: &[TokenTree],
 ) -> Result<(Vec<TokenTree>, usize), MeteringMacrosError> {
-    let mut def_tokens: Vec<TokenTree> = Vec::new();
-    let mut seen_struct = false;
+    let mut event_definition_tokens: Vec<TokenTree> = Vec::new();
+    let mut struct_keyword_ident = None;
 
-    for (j, tt) in tokens.iter().enumerate() {
-        def_tokens.push(tt.clone());
+    for (token_index, current_token) in tokens.iter().enumerate() {
+        event_definition_tokens.push(current_token.clone());
 
-        if !seen_struct {
-            if let TokenTree::Ident(ident) = tt {
-                if ident == "struct" {
-                    seen_struct = true;
+        if struct_keyword_ident.is_none() {
+            if let TokenTree::Ident(expected_struct_keyword_ident) = current_token {
+                if expected_struct_keyword_ident == "struct" {
+                    struct_keyword_ident = Some(expected_struct_keyword_ident.clone());
                 }
             }
         } else {
-            if let TokenTree::Group(g) = tt {
-                if g.delimiter() == Delimiter::Brace {
-                    return Ok((def_tokens, j + 1));
+            if let TokenTree::Group(expected_braces_group) = current_token {
+                if expected_braces_group.delimiter() == Delimiter::Brace {
+                    return Ok((event_definition_tokens, token_index + 1));
                 }
             }
         }
@@ -46,31 +49,40 @@ pub fn collect_event_definition_tokens(
     ))
 }
 
+/// Accepts a slice of tokens that is known to contain a (possibly invalid) [`crate::events::Event`],
+/// not including its annotation, and attempts to validate and parse out a representative object.
 pub fn process_event_definition_tokens(
-    def_tokens: Vec<TokenTree>,
+    event_definition_tokens: Vec<TokenTree>,
     registered_attributes: &HashMap<String, Attribute>,
 ) -> Result<Event, MeteringMacrosError> {
-    let mut iter: Peekable<_> = def_tokens.into_iter().peekable();
+    let mut event_definition_tokens_iter: Peekable<_> =
+        event_definition_tokens.into_iter().peekable();
     let mut foreign_macro_token_streams: Vec<TokenStream> = Vec::new();
-    let mut visibility_modifier_ident: Option<Ident> = None;
 
     loop {
-        if let Some(TokenTree::Punct(punct)) = iter.peek() {
-            if punct.as_char() == '#' && punct.spacing() == Spacing::Alone {
-                let hash_tt = iter.next().unwrap();
+        if let Some(TokenTree::Punct(expected_hashtag_punct)) = event_definition_tokens_iter.peek()
+        {
+            if expected_hashtag_punct.as_char() == '#'
+                && expected_hashtag_punct.spacing() == Spacing::Alone
+            {
+                let hashtag_punct = event_definition_tokens_iter.next().unwrap();
 
-                match iter.next() {
-                    Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
-                        let mut ts = TokenStream::new();
-                        ts.extend(std::iter::once(hash_tt.clone()));
-                        ts.extend(std::iter::once(TokenTree::Group(group.clone())));
-                        foreign_macro_token_streams.push(ts);
+                match event_definition_tokens_iter.next() {
+                    Some(TokenTree::Group(expected_foreign_macro_group))
+                        if expected_foreign_macro_group.delimiter() == Delimiter::Bracket =>
+                    {
+                        let mut foreign_macro_token_stream = TokenStream::new();
+                        foreign_macro_token_stream.extend(std::iter::once(hashtag_punct.clone()));
+                        foreign_macro_token_stream.extend(std::iter::once(TokenTree::Group(
+                            expected_foreign_macro_group.clone(),
+                        )));
+                        foreign_macro_token_streams.push(foreign_macro_token_stream);
                         continue;
                     }
-                    Some(other) => {
+                    Some(unexpected) => {
                         return Err(MeteringMacrosError::ParseError(format!(
                             "Expected a bracket group after `#` (for a foreign macro), found: {:?}",
-                            other
+                            unexpected
                         )));
                     }
                     None => {
@@ -85,145 +97,166 @@ pub fn process_event_definition_tokens(
         break;
     }
 
-    if let Some(TokenTree::Ident(ident)) = iter.peek() {
-        if ident == "pub" {
-            if let TokenTree::Ident(i) = iter.next().unwrap() {
-                visibility_modifier_ident = Some(Ident::new(&i.to_string(), i.span()));
+    let mut maybe_visibility_modifier_token_stream = None;
+    if let Some(TokenTree::Ident(expected_pub_ident)) = event_definition_tokens_iter.peek() {
+        if expected_pub_ident == "pub" {
+            let mut visibility_modifier_token_stream = TokenStream::new();
+            if let TokenTree::Ident(expected_pub_ident) =
+                event_definition_tokens_iter.next().unwrap()
+            {
+                visibility_modifier_token_stream.extend(std::iter::once(TokenTree::Ident(
+                    expected_pub_ident.clone(),
+                )));
             }
 
-            if let Some(TokenTree::Group(group)) = iter.peek() {
-                if group.delimiter() == Delimiter::Parenthesis {
-                    let _ = iter.next().unwrap();
+            if let Some(TokenTree::Group(expected_visibility_modifier_group)) =
+                event_definition_tokens_iter.peek()
+            {
+                if expected_visibility_modifier_group.delimiter() == Delimiter::Parenthesis {
+                    if let TokenTree::Group(expected_visibility_modifier_group) =
+                        event_definition_tokens_iter.next().unwrap()
+                    {
+                        visibility_modifier_token_stream.extend(std::iter::once(TokenTree::Group(
+                            expected_visibility_modifier_group.clone(),
+                        )));
+                    }
                 }
             }
+
+            maybe_visibility_modifier_token_stream = Some(visibility_modifier_token_stream);
         }
     }
 
-    match iter.next() {
-        Some(TokenTree::Ident(ident)) if ident == "struct" => {}
-        other => {
+    match event_definition_tokens_iter.next() {
+        Some(TokenTree::Ident(expected_struct_keyword_ident))
+            if expected_struct_keyword_ident == "struct" => {}
+        unexpected => {
             return Err(MeteringMacrosError::ParseError(format!(
                 "Expected `struct` in event definition, found: {:?}",
-                other
+                unexpected
             )));
         }
     }
 
-    let event_name_ident = match iter.next() {
-        Some(TokenTree::Ident(ident)) => Ident::new(&ident.to_string(), ident.span()),
-        other => {
+    let event_name_ident = match event_definition_tokens_iter.next() {
+        Some(TokenTree::Ident(expected_event_name_ident)) => Ident::new(
+            &expected_event_name_ident.to_string(),
+            expected_event_name_ident.span(),
+        ),
+        unexpected => {
             return Err(MeteringMacrosError::ParseError(format!(
                 "Expected event (struct) name, found: {:?}",
-                other
+                unexpected
             )));
         }
     };
 
-    let fields_group = match iter.next() {
-        Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Brace => group,
-        other => {
+    let field_group = match event_definition_tokens_iter.next() {
+        Some(TokenTree::Group(expected_field_group))
+            if expected_field_group.delimiter() == Delimiter::Brace =>
+        {
+            expected_field_group
+        }
+        unexpected => {
             return Err(MeteringMacrosError::ParseError(format!(
-                "Expected a brace‐delimited field list after event name, found: {:?}",
-                other
+                "Expected a brace-delimited field list after event name, found: {:?}",
+                unexpected
             )));
         }
     };
 
-    let inner_tokens: Vec<TokenTree> = fields_group.stream().into_iter().collect();
-    let mut inner_iter: Peekable<_> = inner_tokens.into_iter().peekable();
+    let field_tokens: Vec<TokenTree> = field_group.stream().into_iter().collect();
+    let mut field_tokens_iter: Peekable<_> = field_tokens.into_iter().peekable();
     let mut fields = Vec::new();
 
-    while inner_iter.peek().is_some() {
-        if let Some(TokenTree::Punct(p)) = inner_iter.peek() {
-            if p.as_char() == ',' {
-                inner_iter.next();
+    while field_tokens_iter.peek().is_some() {
+        if let Some(TokenTree::Punct(expected_comma_punct)) = field_tokens_iter.peek() {
+            if expected_comma_punct.as_char() == ',' {
+                field_tokens_iter.next();
                 continue;
             }
         }
 
-        if let Some(TokenTree::Punct(p)) = inner_iter.peek() {
-            if p.as_char() == '#' {
-                let _hash = inner_iter.next().unwrap();
+        if let Some(TokenTree::Punct(expected_hashtag_punct)) = field_tokens_iter.peek() {
+            if expected_hashtag_punct.as_char() == '#' {
+                let hashtag = field_tokens_iter.next().unwrap();
 
-                let ann_group = inner_iter.next().unwrap();
-                let annotation_tokens = vec![_hash.clone(), ann_group.clone()];
+                let field_annotation_group = field_tokens_iter.next().unwrap();
+                let field_annotation_tokens = vec![hashtag.clone(), field_annotation_group.clone()];
 
-                let secondary = process_secondary_annotation_tokens(&annotation_tokens)?;
-
-                let mut field_def_tokens = Vec::new();
-                while let Some(next_tt) = inner_iter.peek() {
-                    if let TokenTree::Punct(p2) = next_tt {
-                        if p2.as_char() == ',' {
-                            break;
-                        }
-                    }
-                    field_def_tokens.push(inner_iter.next().unwrap());
-                }
-
-                let mut field = process_field_definition_tokens(field_def_tokens)?;
-
-                if let SecondaryAnnotation::Field {
+                let SecondaryAnnotation::Field {
                     attribute_name_string,
                     custom_mutator_name_ident,
-                } = secondary
-                {
-                    if !registered_attributes.contains_key(&attribute_name_string) {
-                        return Err(MeteringMacrosError::ParseError(format!(
-                            "Field references unknown attribute `{}`",
-                            attribute_name_string
-                        )));
-                    }
+                } = process_secondary_annotation_tokens(&field_annotation_tokens)?;
 
-                    let attribute = registered_attributes
-                        .get(&attribute_name_string)
-                        .unwrap()
-                        .clone();
-                    field.attribute = Some(attribute);
-                    field.custom_mutator_name_ident = Some(custom_mutator_name_ident);
-                    fields.push(field);
-                }
-            } else {
-                let mut field_def_tokens = Vec::new();
-                while let Some(next_tt) = inner_iter.peek() {
-                    if let TokenTree::Punct(p2) = next_tt {
-                        if p2.as_char() == ',' {
+                let mut field_definition_tokens = Vec::new();
+                while let Some(next_token) = field_tokens_iter.peek() {
+                    if let TokenTree::Punct(expected_comma_punct) = next_token {
+                        if expected_comma_punct.as_char() == ',' {
                             break;
                         }
                     }
-                    field_def_tokens.push(inner_iter.next().unwrap());
+                    field_definition_tokens.push(field_tokens_iter.next().unwrap());
                 }
-                let field = process_field_definition_tokens(field_def_tokens)?;
+
+                let mut field = process_field_definition_tokens(field_definition_tokens)?;
+
+                if !registered_attributes.contains_key(&attribute_name_string) {
+                    return Err(MeteringMacrosError::ParseError(format!(
+                        "Field references unknown attribute `{}`",
+                        attribute_name_string
+                    )));
+                }
+                let attribute = registered_attributes
+                    .get(&attribute_name_string)
+                    .unwrap()
+                    .clone();
+                field.attribute = Some(attribute);
+                field.custom_mutator_name_ident = Some(custom_mutator_name_ident);
+                fields.push(field);
+            } else {
+                let mut field_definition_tokens = Vec::new();
+                while let Some(next_token) = field_tokens_iter.peek() {
+                    if let TokenTree::Punct(expected_comma_punct) = next_token {
+                        if expected_comma_punct.as_char() == ',' {
+                            break;
+                        }
+                    }
+                    field_definition_tokens.push(field_tokens_iter.next().unwrap());
+                }
+                let field = process_field_definition_tokens(field_definition_tokens)?;
                 fields.push(field);
             }
         } else {
-            let mut field_def_tokens = Vec::new();
-            while let Some(next_tt) = inner_iter.peek() {
-                if let TokenTree::Punct(p2) = next_tt {
-                    if p2.as_char() == ',' {
+            let mut field_definition_tokens = Vec::new();
+            while let Some(next_token) = field_tokens_iter.peek() {
+                if let TokenTree::Punct(expected_comma_punct) = next_token {
+                    if expected_comma_punct.as_char() == ',' {
                         break;
                     }
                 }
-                field_def_tokens.push(inner_iter.next().unwrap());
+                field_definition_tokens.push(field_tokens_iter.next().unwrap());
             }
-            let field = process_field_definition_tokens(field_def_tokens)?;
+            let field = process_field_definition_tokens(field_definition_tokens)?;
             fields.push(field);
         }
     }
 
     Ok(Event {
         foreign_macro_token_streams,
-        visibility_modifier_ident,
+        maybe_visibility_modifier_token_stream,
         event_name_ident,
         fields,
     })
 }
 
+/// Generates the output tokens required for a user-defined metering event.
 pub fn generate_event_definition_token_stream(event: &Event) -> TokenStream {
     let Event {
-        foreign_macro_token_streams: foreign_macro_token_streams,
-        visibility_modifier_ident: visibility_modifier_ident,
-        event_name_ident: event_name_ident,
-        fields: fields,
+        foreign_macro_token_streams,
+        maybe_visibility_modifier_token_stream,
+        event_name_ident,
+        fields,
     } = event;
 
     let field_definition_token_streams: Vec<TokenStream> = fields
@@ -231,10 +264,10 @@ pub fn generate_event_definition_token_stream(event: &Event) -> TokenStream {
         .map(|field| generate_field_definition_token_stream(field))
         .collect();
 
-    let event_definition_token_stream = if visibility_modifier_ident.is_some() {
+    let event_definition_token_stream = if maybe_visibility_modifier_token_stream.is_some() {
         quote! {
             #( #foreign_macro_token_streams )*
-            #visibility_modifier_ident struct #event_name_ident {
+            #maybe_visibility_modifier_token_stream struct #event_name_ident {
                 #( #field_definition_token_streams )*
             }
         }

@@ -6,7 +6,7 @@ use crate::attributes::Attribute;
 pub fn generate_noop_mutator_definition_token_stream(attribute: &Attribute) -> TokenStream {
     let Attribute {
         foreign_macro_token_streams: _foreign_macro_token_streams,
-        visibility_modifier_ident: _visibility_modifier_ident,
+        maybe_visibility_modifier_token_stream: _maybe_maybe_visibility_modifier_token_stream,
         attribute_type_alias_ident: _attribute_type_alias_ident,
         attribute_name_string: _attribute_name_string,
         attribute_name_ident,
