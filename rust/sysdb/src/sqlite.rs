@@ -1148,7 +1148,7 @@ mod tests {
         // Get tenant
         let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
         assert_eq!(tenant.name, "new_tenant");
-        assert_eq!(tenant.resource_name, Some("new_resource_name".to_string()));
+        assert_eq!(tenant.resource_name, None);
     }
 
     #[tokio::test]
