@@ -21,20 +21,47 @@ pub enum FieldMutability {
     Mutable,
 }
 
+/// Represents a field within a struct that implements `MeteringEvent`.
 #[derive(Debug)]
 pub struct Field {
+    /// Whether the field is constant or mutable.
     pub field_mutability: FieldMutability,
+
+    /// The identifier for the name of the field.
     pub field_name_ident: Ident,
+
+    /// If the field is annotated, this stores the name of the attribute onto which the field is mapped.
     pub attribute_name_literal: Option<Literal>,
+
+    //// Stores the tokens that comprise the type definition for the field.
     pub field_type_token_stream: TokenStream,
 }
 
+/// Contains the result of parsing an event struct that is annotated with [`crate::event`].
 pub struct EventBodyParseResult {
+    /// The identifier for the name of the event.
     pub event_name_ident: Ident,
+
+    /// A vector of [`Field`] objects for all of the event's fields.
     pub fields: Vec<Field>,
+
+    /// A mapping of the names of annotated fields to the names of their custom mutators.
     pub field_name_ident_to_mutator_name_literal: HashMap<Ident, Literal>,
 }
 
+/// Parses and validates the tokens provided to the [`crate::event`] macro.
+///
+/// # Overview
+/// This function expects the input token stream to match the pattern:
+/// `struct <EventName> { ... }`. If valid, it returns an [`EventBodyParseResult`].
+/// If invalid, it returns a [`MeteringMacrosError`].
+///
+/// # Arguments
+/// * `token_stream` - A reference to the token stream passed to the macro invocation.
+///
+/// # Returns
+/// * `Ok(EventBodyParseResult)` - When the input matches the expected pattern.
+/// * `Err(MeteringMacrosError)` - If the input is malformed or does not match expectations.
 pub fn parse_event_body(
     token_stream: &TokenStream,
 ) -> Result<EventBodyParseResult, MeteringMacrosError> {
@@ -60,6 +87,29 @@ pub fn parse_event_body(
 
     // If we are out of tokens after ignoring macro invocations, then
     // we do not have a valid struct.
+    if current_token_index >= tokens_iter.len() {
+        return Err(MeteringMacrosError::EventBodyError);
+    }
+
+    // Optionally skip a visibility qualifier "pub" or "pub(...)".
+    {
+        // Check if the next token is `pub`.
+        if let TokenTree::Ident(ident) = &tokens_iter[current_token_index] {
+            if ident.to_string() == "pub" {
+                current_token_index += 1;
+                // If it was `pub(...)`, skip that group too.
+                if current_token_index < tokens_iter.len() {
+                    if let TokenTree::Group(group) = &tokens_iter[current_token_index] {
+                        if group.delimiter() == Delimiter::Parenthesis {
+                            current_token_index += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Now we expect at least three tokens: "struct", event name, and a brace group.
     if current_token_index + 2 >= tokens_iter.len() {
         return Err(MeteringMacrosError::EventBodyError);
     }
@@ -139,7 +189,7 @@ pub fn parse_event_body(
                     {
                         group
                     }
-                    _ => return Err(MeteringMacrosError::EventBodyError),
+                    _ => return Err(MeteringMacrosError::FieldAnnotationError),
                 };
 
                 // Pass the annotation's arguments to a helper function to extract the attribute
@@ -181,6 +231,11 @@ pub fn parse_event_body(
                     }
                 }
 
+                // NOTE(c-gamble): We skip validating that the type assigned to the field is the same as the
+                // type stored for the attribute in the registry to avoid false postivies because compilation
+                // hasn't happened yet, so we don't know which aliases may be used in the field or mutator
+                // definition that actually reconcile to the same type.
+
                 // Construct a field object and push it into our final fields vector.
                 fields.push(Field {
                     // We know this field is mutable because it is annotated.
@@ -198,7 +253,7 @@ pub fn parse_event_body(
             }
         }
 
-        // If we are not looking at an annotation field, then we expect to see a valid field name
+        // If we are not looking at an annotated field, then we expect to see a valid field name
         // for a constant (non-annotated) field.
         let field_name_ident = if let TokenTree::Ident(ident) = current_token_tree {
             ident
@@ -240,7 +295,7 @@ pub fn parse_event_body(
             field_mutability: FieldMutability::Constant,
             field_name_ident: field_name_ident.clone(),
             attribute_name_literal: None,
-            field_type_token_stream: field_type_token_stream.clone(),
+            field_type_token_stream: field_type_token_stream,
         });
     }
 

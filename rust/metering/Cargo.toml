@@ -7,8 +7,8 @@ edition = "2021"
 async-trait = { workspace = true }
 once_cell = { workspace = true }
 parking_lot = { workspace = true }
-thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tracing = { workspace = true }
-chroma-metering-macros = { path = "../metering-macros" }
-chroma-system = { path = "../system" }
+chroma-metering-core = { workspace = true }
+chroma-metering-macros = { workspace = true }
+chroma-system = { workspace = true }
