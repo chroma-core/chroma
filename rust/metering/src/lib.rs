@@ -262,6 +262,8 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
 
 #[cfg(test)]
 mod tests {
+    use super::initialize_metering;
+
     #[test]
     fn test_register_custom_receiver() {}
 
