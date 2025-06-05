@@ -30,11 +30,15 @@ func (suite *LogTestSuite) SetupSuite() {
 	connectionString, err := libs2.StartPgContainer(ctx)
 	config.DATABASE_URL = connectionString
 	assert.NoError(suite.t, err, "Failed to start pg container")
+
+	err = libs2.RunMigration(ctx, connectionString)
+	assert.NoError(suite.t, err, "Failed to run migration")
+
+	// Create connection AFTER migration to ensure schema visibility
 	var conn *pgxpool.Pool
 	conn, err = libs2.NewPgConnection(ctx, config)
 	assert.NoError(suite.t, err, "Failed to create new pg connection")
-	err = libs2.RunMigration(ctx, connectionString)
-	assert.NoError(suite.t, err, "Failed to run migration")
+
 	suite.sysDb = sysdb.NewMockSysDB()
 	suite.lr = NewLogRepository(conn, suite.sysDb)
 }
