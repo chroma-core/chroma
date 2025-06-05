@@ -35,9 +35,15 @@ import {
  * Interface for collection operations using collection ID.
  * Provides methods for adding, querying, updating, and deleting records.
  */
-export interface CollectionAPI {
+export interface Collection {
   /** Unique identifier for the collection */
   id: string;
+  /** Name of the collection */
+  name: string;
+  /** Collection-level metadata */
+  metadata: CollectionMetadata | undefined;
+  /** Collection configuration settings */
+  configuration: CollectionConfiguration;
   /** Optional embedding function. Must match the one used to create the collection. */
   embeddingFunction?: EmbeddingFunction;
   /** Gets the total number of records in the collection */
@@ -173,18 +179,6 @@ export interface CollectionAPI {
 }
 
 /**
- * A Chroma collection retrieved by name, with its metadata and configuration.
- */
-export interface Collection extends CollectionAPI {
-  /** Human-readable name of the collection */
-  name: string;
-  /** Collection-level metadata */
-  metadata: CollectionMetadata | undefined;
-  /** Collection configuration settings */
-  configuration: CollectionConfiguration;
-}
-
-/**
  * Arguments for creating a Collection instance.
  */
 export interface CollectionArgs {
@@ -208,10 +202,13 @@ export interface CollectionArgs {
  * Implementation of CollectionAPI for ID-based collection operations.
  * Provides core functionality for interacting with collections using their ID.
  */
-export class CollectionAPIImpl implements CollectionAPI {
+export class CollectionImpl implements Collection {
   protected readonly chromaClient: ChromaClient;
   protected readonly apiClient: ReturnType<typeof createClient>;
   public readonly id: string;
+  private _name: string;
+  private _metadata: CollectionMetadata | undefined;
+  private _configuration: CollectionConfiguration;
   protected _embeddingFunction: EmbeddingFunction | undefined;
 
   /**
@@ -222,17 +219,42 @@ export class CollectionAPIImpl implements CollectionAPI {
     chromaClient,
     apiClient,
     id,
+    name,
+    metadata,
+    configuration,
     embeddingFunction,
-  }: {
-    chromaClient: ChromaClient;
-    apiClient: ReturnType<typeof createClient>;
-    id: string;
-    embeddingFunction?: EmbeddingFunction;
-  }) {
+  }: CollectionArgs) {
     this.chromaClient = chromaClient;
     this.apiClient = apiClient;
     this.id = id;
+    this._name = name;
+    this._metadata = metadata;
+    this._configuration = configuration;
     this._embeddingFunction = embeddingFunction;
+  }
+
+  public get name(): string {
+    return this._name;
+  }
+
+  private set name(name: string) {
+    this._name = name;
+  }
+
+  public get configuration(): CollectionConfiguration {
+    return this._configuration;
+  }
+
+  private set configuration(configuration: CollectionConfiguration) {
+    this._configuration = configuration;
+  }
+
+  public get metadata(): CollectionMetadata | undefined {
+    return this._metadata;
+  }
+
+  private set metadata(metadata: CollectionMetadata | undefined) {
+    this._metadata = metadata;
   }
 
   public get embeddingFunction(): EmbeddingFunction | undefined {
@@ -499,19 +521,17 @@ export class CollectionAPIImpl implements CollectionAPI {
     metadata?: CollectionMetadata;
     configuration?: UpdateCollectionConfiguration;
   }): Promise<void> {
-    const { data } = await Api.getCollection({
-      client: this.apiClient,
-      path: await this.path(),
-    });
+    if (name) this.name = name;
 
     if (metadata) {
       validateMetadata(metadata);
+      this.metadata = metadata;
     }
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-          collectionName: data.name,
-          currentConfiguration: data.configuration_json,
+          collectionName: this.name,
+          currentConfiguration: this.configuration,
           newConfiguration: configuration,
           currentEmbeddingFunction: this.embeddingFunction,
         })
@@ -519,6 +539,14 @@ export class CollectionAPIImpl implements CollectionAPI {
 
     if (updateEmbeddingFunction) {
       this.embeddingFunction = updateEmbeddingFunction;
+    }
+
+    if (updateConfiguration) {
+      this.configuration = {
+        hnsw: { ...this.configuration.hnsw, ...updateConfiguration.hnsw },
+        spann: { ...this.configuration.spann, ...updateConfiguration.spann },
+        embeddingFunction: updateConfiguration.embedding_function,
+      };
     }
 
     await Api.updateCollection({
@@ -544,12 +572,7 @@ export class CollectionAPIImpl implements CollectionAPI {
       apiClient: this.apiClient,
       name: data.name,
       id: data.name,
-      embeddingFunction: this._embeddingFunction
-        ? this._embeddingFunction
-        : await getEmbeddingFunction(
-            data.name,
-            data.configuration_json.embedding_function ?? undefined,
-          ),
+      embeddingFunction: this._embeddingFunction,
       metadata: data.metadata ?? undefined,
       configuration: data.configuration_json,
     });
@@ -646,126 +669,6 @@ export class CollectionAPIImpl implements CollectionAPI {
         where,
         where_document: whereDocument,
       },
-    });
-  }
-}
-
-/**
- * Full implementation of Collection interface with name and metadata.
- * Extends CollectionAPIImpl with additional properties for named collections.
- */
-export class CollectionImpl extends CollectionAPIImpl implements Collection {
-  private _name: string;
-  private _metadata: CollectionMetadata | undefined;
-  private _configuration: CollectionConfiguration;
-
-  /**
-   * Creates a new CollectionImpl instance.
-   * @param args - Collection configuration arguments
-   */
-  constructor({
-    chromaClient,
-    apiClient,
-    name,
-    id,
-    embeddingFunction,
-    metadata,
-    configuration,
-  }: CollectionArgs) {
-    super({ chromaClient, apiClient, id });
-    this._name = name;
-    this._embeddingFunction = embeddingFunction;
-    this._metadata = metadata;
-    this._configuration = configuration;
-  }
-
-  public get name(): string {
-    return this._name;
-  }
-
-  private set name(name: string) {
-    this._name = name;
-  }
-
-  public get configuration(): CollectionConfiguration {
-    return this._configuration;
-  }
-
-  private set configuration(configuration: CollectionConfiguration) {
-    this._configuration = configuration;
-  }
-
-  public get metadata(): CollectionMetadata | undefined {
-    return this._metadata;
-  }
-
-  private set metadata(metadata: CollectionMetadata | undefined) {
-    this._metadata = metadata;
-  }
-
-  override async modify({
-    name,
-    metadata,
-    configuration,
-  }: {
-    name?: string;
-    metadata?: CollectionMetadata;
-    configuration?: UpdateCollectionConfiguration;
-  }): Promise<void> {
-    if (name) this.name = name;
-
-    if (metadata) {
-      validateMetadata(metadata);
-      this.metadata = metadata;
-    }
-
-    const { updateConfiguration, updateEmbeddingFunction } = configuration
-      ? await processUpdateCollectionConfig({
-          collectionName: this.name,
-          currentConfiguration: this.configuration,
-          newConfiguration: configuration,
-          currentEmbeddingFunction: this.embeddingFunction,
-        })
-      : {};
-
-    if (updateEmbeddingFunction) {
-      this.embeddingFunction = updateEmbeddingFunction;
-    }
-
-    if (updateConfiguration) {
-      this.configuration = {
-        hnsw: { ...this.configuration.hnsw, ...updateConfiguration.hnsw },
-        spann: { ...this.configuration.spann, ...updateConfiguration.spann },
-        embeddingFunction: updateConfiguration.embedding_function,
-      };
-    }
-
-    await Api.updateCollection({
-      client: this.apiClient,
-      path: await this.path(),
-      body: {
-        new_name: name,
-        new_metadata: metadata,
-        new_configuration: updateConfiguration,
-      },
-    });
-  }
-
-  override async fork({ name }: { name: string }): Promise<Collection> {
-    const { data } = await Api.forkCollection({
-      client: this.apiClient,
-      path: await this.path(),
-      body: { new_name: name },
-    });
-
-    return new CollectionImpl({
-      chromaClient: this.chromaClient,
-      apiClient: this.apiClient,
-      name: data.name,
-      id: data.name,
-      embeddingFunction: this._embeddingFunction,
-      metadata: data.metadata ?? undefined,
-      configuration: data.configuration_json,
     });
   }
 }

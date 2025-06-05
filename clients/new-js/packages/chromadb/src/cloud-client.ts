@@ -1,7 +1,7 @@
 import { ChromaClient } from "./chroma-client";
 import * as process from "node:process";
 import { AdminClient } from "./admin-client";
-import { ChromaValueError } from "./errors";
+import { ChromaUnauthorizedError, ChromaValueError } from "./errors";
 
 /**
  * ChromaDB cloud client for connecting to hosted Chroma instances.
@@ -47,6 +47,25 @@ export class CloudClient extends ChromaClient {
     // Override from ChromaClient construction in case undefined. This will trigger auto-resolution in the "path" function
     this.tenant = tenant;
     this.database = database;
+  }
+
+  override async _path(): Promise<{ tenant: string; database: string }> {
+    if (!this.tenant || !this.database) {
+      const { tenant, databases } = await this.getUserIdentity();
+      this.tenant = tenant;
+      if (databases.length === 0) {
+        throw new ChromaUnauthorizedError(
+          `Your API key does not have access to any DBs for tenant ${this.tenant}`,
+        );
+      }
+      if (databases.length > 1 || databases[0] === "*") {
+        throw new ChromaValueError(
+          "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
+        );
+      }
+      this.database = databases[0];
+    }
+    return super._path();
   }
 }
 
