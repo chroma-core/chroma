@@ -1,18 +1,7 @@
-//! This crate contains the implementation of the procedural macros used in
-//! Chroma's metering library. There are three primary exports:
-//!     - [`crate::attribute`] is a procedural attribute macro that
-//!       parses definitions for metering attributes and
-//!       registers them in the application's metering registry.
-//!     - [`crate::event`] is a procedural attribute macro that parses
-//!       a metering event definition, registers the event, and
-//!       generates the necessary trait implementations for the
-//!       event.
-//!     - [`crate::generate_noop_mutators`] is a procedural functional
-//!       macro that is used by the `chroma-metering` crate (it is not
-//!       intended for use in applications) to generate definitions
-//!       of no-op mutators on the `MeteringEvent` trait.
-
 extern crate proc_macro;
+
+use proc_macro2::TokenStream;
+use quote::quote;
 
 use crate::{
     attributes::generate_attribute_definition_token_stream,
@@ -20,8 +9,6 @@ use crate::{
     mutators::generate_noop_mutator_definition_token_stream,
     utils::{generate_compile_error, process_token_stream},
 };
-use proc_macro2::TokenStream;
-use quote::quote;
 
 mod annotations;
 mod attributes;
@@ -31,6 +18,8 @@ mod fields;
 mod mutators;
 mod utils;
 
+/// This is the only user-facing export of `chroma_metering`. It is responsible for registering attributes and
+/// events by producing the code necessary to allow users to interact with the metering library.
 #[proc_macro]
 pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let token_stream = TokenStream::from(raw_token_stream);
@@ -273,6 +262,7 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
 
 #[cfg(test)]
 mod tests {
+    #[test]
     fn test_register_custom_receiver() {}
 
     #[tokio::test]

@@ -4,39 +4,49 @@ use std::iter::Peekable;
 
 use crate::{attributes::Attribute, errors::MeteringMacrosError};
 
+/// Represents a field within a user-defined metering event.
 pub struct Field {
     pub foreign_macro_token_streams: Vec<TokenStream>,
-    pub visibility_modifier_ident: Option<Ident>,
+    pub maybe_visibility_modifier_token_stream: Option<TokenStream>,
     pub field_name_ident: Ident,
     pub field_type_token_stream: TokenStream,
     pub attribute: Option<Attribute>,
     pub custom_mutator_name_ident: Option<Ident>,
 }
 
+/// Accepts a slice of tokens that contains a (possibly invalid) field definition,
+/// not including its annotation, and attempts to parse out a [`crate::fields::Field`].
 pub fn process_field_definition_tokens(
-    field_tokens: Vec<TokenTree>,
+    field_definition_tokens: Vec<TokenTree>,
 ) -> Result<Field, MeteringMacrosError> {
-    let mut iter: Peekable<_> = field_tokens.into_iter().peekable();
+    let mut field_definition_tokens_iter: Peekable<_> =
+        field_definition_tokens.into_iter().peekable();
     let mut foreign_macro_token_streams: Vec<TokenStream> = Vec::new();
-    let mut visibility_modifier_ident: Option<Ident> = None;
 
     loop {
-        if let Some(TokenTree::Punct(punct)) = iter.peek() {
-            if punct.as_char() == '#' && punct.spacing() == Spacing::Alone {
-                let hash_tt = iter.next().unwrap();
+        if let Some(TokenTree::Punct(expected_hashtag_punct)) = field_definition_tokens_iter.peek()
+        {
+            if expected_hashtag_punct.as_char() == '#'
+                && expected_hashtag_punct.spacing() == Spacing::Alone
+            {
+                let hashtag_punct = field_definition_tokens_iter.next().unwrap();
 
-                match iter.next() {
-                    Some(TokenTree::Group(group)) if group.delimiter() == Delimiter::Bracket => {
-                        let mut ts = TokenStream::new();
-                        ts.extend(std::iter::once(hash_tt.clone()));
-                        ts.extend(std::iter::once(TokenTree::Group(group.clone())));
-                        foreign_macro_token_streams.push(ts);
+                match field_definition_tokens_iter.next() {
+                    Some(TokenTree::Group(expected_foreign_macro_group))
+                        if expected_foreign_macro_group.delimiter() == Delimiter::Bracket =>
+                    {
+                        let mut foreign_macro_token_stream = TokenStream::new();
+                        foreign_macro_token_stream.extend(std::iter::once(hashtag_punct.clone()));
+                        foreign_macro_token_stream.extend(std::iter::once(TokenTree::Group(
+                            expected_foreign_macro_group.clone(),
+                        )));
+                        foreign_macro_token_streams.push(foreign_macro_token_stream);
                         continue;
                     }
-                    Some(other) => {
+                    Some(unexpected) => {
                         return Err(MeteringMacrosError::ParseError(format!(
                             "Expected `#[...]` for foreign macro, found: {:?}",
-                            other
+                            unexpected
                         )));
                     }
                     None => {
@@ -50,70 +60,91 @@ pub fn process_field_definition_tokens(
         break;
     }
 
-    if let Some(TokenTree::Ident(ident)) = iter.peek() {
-        if ident == "pub" {
-            if let TokenTree::Ident(i) = iter.next().unwrap() {
-                visibility_modifier_ident = Some(Ident::new(&i.to_string(), i.span()));
+    let mut maybe_visibility_modifier_token_stream = None;
+    if let Some(TokenTree::Ident(expected_pub_ident)) = field_definition_tokens_iter.peek() {
+        if expected_pub_ident == "pub" {
+            let mut visibility_modifier_token_stream = TokenStream::new();
+            if let TokenTree::Ident(expected_pub_ident) =
+                field_definition_tokens_iter.next().unwrap()
+            {
+                visibility_modifier_token_stream.extend(std::iter::once(TokenTree::Ident(
+                    expected_pub_ident.clone(),
+                )));
             }
 
-            if let Some(TokenTree::Group(group)) = iter.peek() {
-                if group.delimiter() == Delimiter::Parenthesis {
-                    let _ = iter.next().unwrap();
+            if let Some(TokenTree::Group(expected_visibility_modifier_group)) =
+                field_definition_tokens_iter.peek()
+            {
+                if expected_visibility_modifier_group.delimiter() == Delimiter::Parenthesis {
+                    if let TokenTree::Group(expected_visibility_modifier_group) =
+                        field_definition_tokens_iter.next().unwrap()
+                    {
+                        visibility_modifier_token_stream.extend(std::iter::once(TokenTree::Group(
+                            expected_visibility_modifier_group.clone(),
+                        )));
+                    }
                 }
             }
+
+            maybe_visibility_modifier_token_stream = Some(visibility_modifier_token_stream);
         }
     }
 
-    let field_name_ident = match iter.next() {
-        Some(TokenTree::Ident(ident)) => Ident::new(&ident.to_string(), ident.span()),
-        other => {
+    let field_name_ident = match field_definition_tokens_iter.next() {
+        Some(TokenTree::Ident(expected_field_name_ident)) => Ident::new(
+            &expected_field_name_ident.to_string(),
+            expected_field_name_ident.span(),
+        ),
+        unexpected => {
             return Err(MeteringMacrosError::ParseError(format!(
                 "Expected field name, found: {:?}",
-                other
+                unexpected
             )));
         }
     };
 
-    match iter.next() {
-        Some(TokenTree::Punct(p)) if p.as_char() == ':' => {}
-        other => {
+    match field_definition_tokens_iter.next() {
+        Some(TokenTree::Punct(expected_colon_punct)) if expected_colon_punct.as_char() == ':' => {}
+        unexpected => {
             return Err(MeteringMacrosError::ParseError(format!(
                 "Expected `:` after field name, found: {:?}",
-                other
+                unexpected
             )));
         }
     }
 
-    let mut ty_tokens: Vec<TokenTree> = Vec::new();
-    while let Some(tt) = iter.next() {
-        ty_tokens.push(tt.clone());
+    let mut field_type_tokens: Vec<TokenTree> = Vec::new();
+    while let Some(current_token) = field_definition_tokens_iter.next() {
+        field_type_tokens.push(current_token.clone());
     }
-    let ty_ts: TokenStream = ty_tokens.into_iter().collect();
+    let field_type_token_stream: TokenStream = field_type_tokens.into_iter().collect();
 
     Ok(Field {
         foreign_macro_token_streams,
-        visibility_modifier_ident,
+        maybe_visibility_modifier_token_stream,
         field_name_ident,
-        field_type_token_stream: ty_ts,
+        field_type_token_stream,
+        // These are populated upstream for annotated fields
         attribute: None,
         custom_mutator_name_ident: None,
     })
 }
 
+/// Generates the output tokens for an individual field within a struct that defines a metering event.
 pub fn generate_field_definition_token_stream(field: &Field) -> TokenStream {
     let Field {
         foreign_macro_token_streams,
-        visibility_modifier_ident,
+        maybe_visibility_modifier_token_stream,
         field_name_ident,
         field_type_token_stream,
         attribute,
         custom_mutator_name_ident: _custom_mutator_name_ident,
     } = field;
 
-    let field_definition_token_stream = if visibility_modifier_ident.is_some() {
+    let field_definition_token_stream = if maybe_visibility_modifier_token_stream.is_some() {
         if let Some(Attribute {
             foreign_macro_token_streams: _foreign_macro_token_streams,
-            visibility_modifier_ident: _visibility_modifier_ident,
+            maybe_visibility_modifier_token_stream: _maybe_visibility_modifier_token_stream,
             attribute_type_alias_ident,
             attribute_name_string: _attribute_name_string,
             attribute_name_ident: _attribute_name_ident,
@@ -123,18 +154,18 @@ pub fn generate_field_definition_token_stream(field: &Field) -> TokenStream {
         {
             quote! {
                 #( #foreign_macro_token_streams )*
-                #visibility_modifier_ident #field_name_ident: #attribute_type_alias_ident,
+                #maybe_visibility_modifier_token_stream #field_name_ident: #attribute_type_alias_ident,
             }
         } else {
             quote! {
                 #( #foreign_macro_token_streams )*
-                #visibility_modifier_ident #field_name_ident: #field_type_token_stream,
+                #maybe_visibility_modifier_token_stream #field_name_ident: #field_type_token_stream,
             }
         }
     } else {
         if let Some(Attribute {
             foreign_macro_token_streams: _foreign_macro_token_streams,
-            visibility_modifier_ident: _visibility_modifier_ident,
+            maybe_visibility_modifier_token_stream: _maybe_visibility_modifier_token_stream,
             attribute_type_alias_ident,
             attribute_name_string: _attribute_name_string,
             attribute_name_ident: _attribute_name_ident,
@@ -144,12 +175,12 @@ pub fn generate_field_definition_token_stream(field: &Field) -> TokenStream {
         {
             quote! {
                 #( #foreign_macro_token_streams )*
-                #visibility_modifier_ident #field_name_ident: #attribute_type_alias_ident,
+                #maybe_visibility_modifier_token_stream #field_name_ident: #attribute_type_alias_ident,
             }
         } else {
             quote! {
                 #( #foreign_macro_token_streams )*
-                #visibility_modifier_ident #field_name_ident: #field_type_token_stream,
+                #maybe_visibility_modifier_token_stream #field_name_ident: #field_type_token_stream,
             }
         }
     };
