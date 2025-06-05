@@ -476,11 +476,9 @@ impl CheckRecord for DocumentExpression {
     fn eval(&self, record: &ProjectionRecord) -> bool {
         let document = record.document.as_ref();
         match self.operator {
-            DocumentOperator::Contains => {
-                document.is_some_and(|doc| doc.contains(&self.pattern.replace("%", "")))
-            }
+            DocumentOperator::Contains => document.is_some_and(|doc| doc.contains(&self.pattern)),
             DocumentOperator::NotContains => {
-                !document.is_some_and(|doc| doc.contains(&self.pattern.replace("%", "")))
+                !document.is_some_and(|doc| doc.contains(&self.pattern))
             }
             DocumentOperator::Regex => {
                 document.is_some_and(|doc| Regex::new(&self.pattern).unwrap().is_match(doc))
