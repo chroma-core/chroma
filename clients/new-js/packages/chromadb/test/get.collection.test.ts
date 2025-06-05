@@ -136,15 +136,4 @@ describe("get collections", () => {
     expect(results.records[0].embedding).toBeUndefined();
     expect(results.records[0].metadata?.test).toEqual("test1");
   });
-
-  test("it should return results in row format", async () => {
-    const client = new CloudClient({
-      apiKey: "ck-9yeGJ2qT2asSCXgTLVAG33KeGmsHqD94h35fZRpivWN7",
-      tenant: "e1080701-ff2b-494d-8a60-0fc95100d51e",
-      database: "taylor",
-    });
-
-    const collection = await client.createCollection({ name: "test" });
-    await collection.add({ ids: ["1"], embeddings: [[1]] });
-  });
 });
