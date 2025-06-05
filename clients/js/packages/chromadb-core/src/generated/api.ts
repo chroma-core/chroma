@@ -1197,22 +1197,22 @@ export const ApiApiFetchParamCreator = function (
       };
     },
     /**
-     * @summary Returns an existing tenant by name.
-     * @param {string} tenantName <p>Tenant name or ID to retrieve</p>
+     * @summary Returns an existing tenant by ID.
+     * @param {string} tenant <p>ID of the tenant to retrieve</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
-    getTenant(tenantName: string, options: RequestInit = {}): FetchArgs {
-      // verify required parameter 'tenantName' is not null or undefined
-      if (tenantName === null || tenantName === undefined) {
+    getTenant(tenant: string, options: RequestInit = {}): FetchArgs {
+      // verify required parameter 'tenant' is not null or undefined
+      if (tenant === null || tenant === undefined) {
         throw new RequiredError(
-          "tenantName",
-          "Required parameter tenantName was null or undefined when calling getTenant.",
+          "tenant",
+          "Required parameter tenant was null or undefined when calling getTenant.",
         );
       }
-      let localVarPath = `/api/v2/tenants/{tenant_name}`.replace(
-        "{tenant_name}",
-        encodeURIComponent(String(tenantName)),
+      let localVarPath = `/api/v2/tenants/{tenant}`.replace(
+        "{tenant}",
+        encodeURIComponent(String(tenant)),
       );
       const localVarPathQueryStart = localVarPath.indexOf("?");
       const localVarRequestOptions: RequestInit = Object.assign(
@@ -1600,6 +1600,70 @@ export const ApiApiFetchParamCreator = function (
       const localVarPathQueryStart = localVarPath.indexOf("?");
       const localVarRequestOptions: RequestInit = Object.assign(
         { method: "PUT" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarHeaderParameter.set("Content-Type", "application/json");
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      if (request !== undefined) {
+        localVarRequestOptions.body = JSON.stringify(request || {});
+      }
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
+     * @summary Updates an existing tenant by ID.
+     * @param {string} tenant <p>ID of the tenant to update</p>
+     * @param {Api.UpdateTenantPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    updateTenant(
+      tenant: string,
+      request: Api.UpdateTenantPayload,
+      options: RequestInit = {},
+    ): FetchArgs {
+      // verify required parameter 'tenant' is not null or undefined
+      if (tenant === null || tenant === undefined) {
+        throw new RequiredError(
+          "tenant",
+          "Required parameter tenant was null or undefined when calling updateTenant.",
+        );
+      }
+      // verify required parameter 'request' is not null or undefined
+      if (request === null || request === undefined) {
+        throw new RequiredError(
+          "request",
+          "Required parameter request was null or undefined when calling updateTenant.",
+        );
+      }
+      let localVarPath = `/api/v2/tenants/{tenant}`.replace(
+        "{tenant}",
+        encodeURIComponent(String(tenant)),
+      );
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "PATCH" },
         options,
       );
       const localVarHeaderParameter: Headers = options.headers
@@ -2540,18 +2604,18 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Returns an existing tenant by name.
-     * @param {string} tenantName <p>Tenant name or ID to retrieve</p>
+     * @summary Returns an existing tenant by ID.
+     * @param {string} tenant <p>ID of the tenant to retrieve</p>
      * @param {RequestInit} [options] Override http request option.
      * @throws {RequiredError}
      */
     getTenant(
-      tenantName: string,
+      tenant: string,
       options?: RequestInit,
     ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.GetTenantResponse> {
       const localVarFetchArgs = ApiApiFetchParamCreator(
         configuration,
-      ).getTenant(tenantName, options);
+      ).getTenant(tenant, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
         return fetch(
           basePath + localVarFetchArgs.url,
@@ -2901,6 +2965,62 @@ export const ApiApiFp = function (configuration?: Configuration) {
       const localVarFetchArgs = ApiApiFetchParamCreator(
         configuration,
       ).updateCollection(tenant, database, collectionId, request, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
+     * @summary Updates an existing tenant by ID.
+     * @param {string} tenant <p>ID of the tenant to update</p>
+     * @param {Api.UpdateTenantPayload} request
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    updateTenant(
+      tenant: string,
+      request: Api.UpdateTenantPayload,
+      options?: RequestInit,
+    ): (
+      fetch?: FetchAPI,
+      basePath?: string,
+    ) => Promise<Api.UpdateTenantResponse> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).updateTenant(tenant, request, options);
       return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
         return fetch(
           basePath + localVarFetchArgs.url,
@@ -3346,13 +3466,13 @@ export class ApiApi extends BaseAPI {
   }
 
   /**
-   * @summary Returns an existing tenant by name.
-   * @param {string} tenantName <p>Tenant name or ID to retrieve</p>
+   * @summary Returns an existing tenant by ID.
+   * @param {string} tenant <p>ID of the tenant to retrieve</p>
    * @param {RequestInit} [options] Override http request option.
    * @throws {RequiredError}
    */
-  public getTenant(tenantName: string, options?: RequestInit) {
-    return ApiApiFp(this.configuration).getTenant(tenantName, options)(
+  public getTenant(tenant: string, options?: RequestInit) {
+    return ApiApiFp(this.configuration).getTenant(tenant, options)(
       this.fetch,
       this.basePath,
     );
@@ -3485,6 +3605,25 @@ export class ApiApi extends BaseAPI {
       tenant,
       database,
       collectionId,
+      request,
+      options,
+    )(this.fetch, this.basePath);
+  }
+
+  /**
+   * @summary Updates an existing tenant by ID.
+   * @param {string} tenant <p>ID of the tenant to update</p>
+   * @param {Api.UpdateTenantPayload} request
+   * @param {RequestInit} [options] Override http request option.
+   * @throws {RequiredError}
+   */
+  public updateTenant(
+    tenant: string,
+    request: Api.UpdateTenantPayload,
+    options?: RequestInit,
+  ) {
+    return ApiApiFp(this.configuration).updateTenant(
+      tenant,
       request,
       options,
     )(this.fetch, this.basePath);
