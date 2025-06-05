@@ -930,7 +930,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn errors_on_empty_file_paths() {
-        let storage = test_storage();
+        let (_storage_dir, storage) = test_storage();
         let mut test_sysdb = TestSysDb::new();
         test_sysdb.set_storage(Some(storage.clone()));
         let mut sysdb = chroma_sysdb::SysDb::Test(test_sysdb);
