@@ -896,6 +896,14 @@ impl LogServer {
         self.metrics
             .dirty_log_records_read
             .add(dirty_markers.len() as u64, &[]);
+        let Some((last_record_inserted, _)) = dirty_markers.last() else {
+            let backpressure = vec![];
+            self.set_backpressure(&backpressure);
+            let mut need_to_compact = self.need_to_compact.lock();
+            let mut rollups = HashMap::new();
+            std::mem::swap(&mut *need_to_compact, &mut rollups);
+            return Ok(());
+        };
         let mut rollups = DirtyMarker::coalesce_markers(&dirty_markers)?;
         self.enrich_dirty_log(&mut rollups).await?;
         let mut markers = vec![];
@@ -919,7 +927,8 @@ impl LogServer {
             markers.push(serde_json::to_string(&DirtyMarker::Cleared).map(Vec::from)?);
         }
         let mut new_cursor = cursor.clone();
-        new_cursor.position = self.dirty_log.append_many(markers).await?;
+        self.dirty_log.append_many(markers).await?;
+        new_cursor.position = *last_record_inserted + 1u64;
         let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
             return Err(Error::CouldNotGetDirtyLogCursors);
         };
@@ -1212,23 +1221,11 @@ impl LogServer {
                 max_bytes: None,
                 max_records: Some(pull_logs.batch_size as u64),
             };
-            // NOTE(rescrv):  Log records are immutable, so if a manifest includes our range we can
-            // serve it directly from the scan_from_manifest call.
-            let (manifest_start, manifest_limit) = (
-                manifest.minimum_log_position().offset() as i64,
-                manifest.maximum_log_position().offset() as i64,
-            );
-            if manifest_start <= pull_logs.start_from_offset
-                && pull_logs.start_from_offset + pull_logs.batch_size as i64 <= manifest_limit
-            {
-                LogReader::scan_from_manifest(
-                    &manifest,
-                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
-                    limits,
-                )
-            } else {
-                None
-            }
+            LogReader::scan_from_manifest(
+                &manifest,
+                LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                limits,
+            )
         } else {
             None
         }
@@ -1289,7 +1286,7 @@ impl LogServer {
                     let prefix = storage_prefix_for_log(collection_id);
                     if let Some(cache) = self.cache.as_ref() {
                         let cache_key = format!("{collection_id}::{}", fragment.path);
-                        let cache_span = tracing::info_span!("cache get");
+                        let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
                         if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
                         {
                             return Ok(Arc::new(answer.bytes));

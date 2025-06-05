@@ -168,6 +168,13 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		}
 	}()
 
+	// NOTE(rescrv):  Only sourceInfo.IsSealed should be used on this struct.
+	var sourceInfo log.Collection
+	sourceInfo, err = queriesWithTx.GetCollection(ctx, sourceCollectionID)
+	if err != nil {
+		sourceInfo.IsSealed = false
+	}
+
 	var sourceBounds log.GetBoundsForCollectionRow
 	sourceBounds, err = queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
 	if err != nil {
@@ -207,6 +214,7 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		ID:                              targetCollectionID,
 		RecordCompactionOffsetPosition:  int64(compactionOffset),
 		RecordEnumerationOffsetPosition: int64(enumerationOffset),
+		IsSealed:                        sourceInfo.IsSealed,
 	})
 	if err != nil {
 		trace_log.Error("Error in updating offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
