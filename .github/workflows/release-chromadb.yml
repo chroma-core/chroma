@@ -42,12 +42,19 @@ jobs:
         id: version
         run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
 
-  python-tests:
+  python-tests-linux:
     uses: ./.github/workflows/_python-tests.yml
     secrets: inherit
     with:
       python_versions: '["3.9", "3.10", "3.11", "3.12"]'
       property_testing_preset: 'normal'
+
+  python-tests-windows:
+    uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
+    with:
+      property_testing_preset: 'normal'
+      platform: '16core-64gb-windows-latest'
 
   javascript-client-tests:
     name: JavaScript client tests
@@ -68,7 +75,8 @@ jobs:
     needs:
       - check-tag
       - get-version
-      - python-tests
+      - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
@@ -83,7 +91,8 @@ jobs:
     needs:
       - check-tag
       - get-version
-      - python-tests
+      - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
@@ -99,7 +108,8 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2204
     needs:
       - check-tag
-      - python-tests
+      - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests

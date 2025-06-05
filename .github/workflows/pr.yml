@@ -166,7 +166,6 @@ jobs:
     secrets: inherit
     with:
       property_testing_preset: 'normal'
-      platform: 'blacksmith-8vcpu-ubuntu-2204'
 
   python-vulnerability-scan:
     name: Python vulnerability scan
