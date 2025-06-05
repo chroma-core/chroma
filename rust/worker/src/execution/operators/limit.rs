@@ -298,23 +298,28 @@ mod tests {
     async fn setup_limit_input(
         log_offset_ids: SignedRoaringBitmap,
         compact_offset_ids: SignedRoaringBitmap,
-    ) -> LimitInput {
+    ) -> (TestDistributedSegment, LimitInput) {
         let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;
-        LimitInput {
-            logs: upsert_generator.generate_chunk(31..=60),
-            blockfile_provider: test_segment.blockfile_provider,
-            record_segment: test_segment.record_segment,
-            log_offset_ids,
-            compact_offset_ids,
-        }
+        let blockfile_provider = test_segment.blockfile_provider.clone();
+        let record_segment = test_segment.record_segment.clone();
+        (
+            test_segment,
+            LimitInput {
+                logs: upsert_generator.generate_chunk(31..=60),
+                blockfile_provider,
+                record_segment,
+                log_offset_ids,
+                compact_offset_ids,
+            },
+        )
     }
 
     #[tokio::test]
     async fn test_trivial_limit() {
-        let limit_input = setup_limit_input(
+        let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::full(),
             SignedRoaringBitmap::Exclude((31..=60).collect()),
         )
@@ -335,7 +340,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_overskip() {
-        let limit_input = setup_limit_input(
+        let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::full(),
             SignedRoaringBitmap::Exclude((31..=60).collect()),
         )
@@ -356,7 +361,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_overfetch() {
-        let limit_input = setup_limit_input(
+        let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::full(),
             SignedRoaringBitmap::Exclude((31..=60).collect()),
         )
@@ -377,7 +382,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_range() {
-        let limit_input = setup_limit_input(
+        let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::full(),
             SignedRoaringBitmap::Exclude((31..=60).collect()),
         )
@@ -398,7 +403,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_complex_limit() {
-        let limit_input = setup_limit_input(
+        let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::Include((31..=60).filter(|offset| offset % 2 == 0).collect()),
             SignedRoaringBitmap::Exclude((21..=80).collect()),
         )
@@ -425,7 +430,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_returns_last_offset() {
-        let limit_input =
+        let (_test_segment, limit_input) =
             setup_limit_input(SignedRoaringBitmap::empty(), SignedRoaringBitmap::full()).await;
 
         let limit_operator = LimitOperator {
