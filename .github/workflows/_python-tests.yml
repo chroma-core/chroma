@@ -17,11 +17,6 @@ on:
         required: false
         default: 'blacksmith-8vcpu-ubuntu-2204'
         type: string
-      env-file:
-        description: 'Environment file to use'
-        required: false
-        default: 'compose-env.linux'
-        type: string
 
 jobs:
   test-rust-bindings:
@@ -94,7 +89,7 @@ jobs:
       run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
       shell: bash
       env:
-        ENV_FILE: ${{ inputs.env-file }}
+        ENV_FILE: ${{ contains(inputs.platform, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-rust-thin-client:
@@ -122,7 +117,7 @@ jobs:
         shell: bash
         env:
           CHROMA_THIN_CLIENT: "1"
-          ENV_FILE: ${{ inputs.env-file }}
+          ENV_FILE: ${{ contains(inputs.platform, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-cluster-rust-frontend:
@@ -247,5 +242,5 @@ jobs:
       run: python -m pytest "chromadb/test/test_cli.py"
       shell: bash
       env:
-        ENV_FILE: ${{ inputs.env-file }}
+        ENV_FILE: ${{ contains(inputs.platform, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
