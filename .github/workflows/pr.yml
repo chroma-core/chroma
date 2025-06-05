@@ -173,7 +173,7 @@ jobs:
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     strategy:
       matrix:
-        python: [ 3.9, 3.10, 3.11, 3.12 ]
+        python: [ "3.9", "3.10", "3.11", "3.12" ]
     runs-on: 16core-64gb-windows-latest
     steps:
       - name: Checkout
