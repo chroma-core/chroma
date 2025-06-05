@@ -55,7 +55,7 @@ jobs:
     with:
       python_versions: '["3.9", "3.10", "3.11", "3.12"]'
       property_testing_preset: 'normal'
-      platform: '16core-64gb-windows-latest'
+      runner: '16core-64gb-windows-latest'
 
   javascript-client-tests:
     name: JavaScript client tests

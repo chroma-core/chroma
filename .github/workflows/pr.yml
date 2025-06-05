@@ -171,11 +171,19 @@ jobs:
     name: Python Windows smoke test
     needs: change-detection
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
-    uses: ./.github/workflows/_python-tests-rust-bindings.yml
-    secrets: inherit
-    with:
-      platform: '16core-64gb-windows-latest'
-      property_testing_preset: 'normal'
+    strategy:
+      matrix:
+        python: [ 3.9, 3.10, 3.11, 3.12 ]
+    runs-on: 16core-64gb-windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run tests
+        run: uv run pytest chromadb/test/test_api.py
 
   python-vulnerability-scan:
     name: Python vulnerability scan
