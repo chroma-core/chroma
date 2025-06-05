@@ -3344,8 +3344,8 @@ mod tests {
             batch_size in 1usize..=100,
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=100)
         ) {
-            // NOTE: Somehow it overflow the stack if we directly run it
-            std::thread::spawn(move || {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || {
                 let runtime = Runtime::new().unwrap();
                 let log_server = runtime.block_on(setup_log_server());
 
@@ -3367,6 +3367,7 @@ mod tests {
                     validate_log_on_server(&log_server, collection_id, &operations, read_offset, batch_size).await;
                 });
             })
+            .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
         }
