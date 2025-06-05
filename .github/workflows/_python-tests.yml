@@ -20,46 +20,12 @@ on:
 
 jobs:
   test-rust-bindings:
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ${{fromJson(inputs.python_versions)}}
-        test-globs:
-          - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
-          - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
-          - "chromadb/test/property/test_cross_version_persist.py"
-        include:
-          - test-globs: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
-            parallelized: true
-          - test-globs: "chromadb/test/property/test_cross_version_persist.py"
-            parallelized: true
-
-    runs-on: ${{ inputs.platform }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Python
-        uses: ./.github/actions/python
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Setup Rust
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Build Rust bindings
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-      - name: Install built wheel
-        shell: bash
-        run: pip install --no-index --find-links target/wheels/ chromadb
-      - name: Test
-        run: python -m pytest ${{ matrix.test-globs }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
-        shell: bash
-        env:
-          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
-          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
-          RUST_BACKTRACE: 1
+    uses: ./.github/workflows/_python-tests-rust-bindings.yml
+    secrets: inherit
+    with:
+      python_versions: ${{ inputs.python_versions }}
+      platform: ${{ inputs.platform }}
+      property_testing_preset: ${{ inputs.property_testing_preset }}
 
   test-rust-single-node-integration:
     strategy:

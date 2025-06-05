@@ -167,6 +167,16 @@ jobs:
     with:
       property_testing_preset: 'normal'
 
+  python-windows-smoke-test:
+    name: Python Windows smoke test
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    uses: ./.github/workflows/_python-tests-rust-bindings.yml
+    secrets: inherit
+    with:
+      platform: '16core-64gb-windows-latest'
+      property_testing_preset: 'normal'
+
   python-vulnerability-scan:
     name: Python vulnerability scan
     needs: change-detection
