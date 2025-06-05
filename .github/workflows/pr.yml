@@ -173,7 +173,8 @@ jobs:
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     strategy:
       matrix:
-        python: [ "3.9", "3.10", "3.11", "3.12" ]
+        # excluding 3.9 here because onnxruntime 1.20.x does not have a wheel for it
+        python: [ "3.10", "3.11", "3.12" ]
     runs-on: 16core-64gb-windows-latest
     steps:
       - name: Checkout
