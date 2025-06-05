@@ -3,9 +3,9 @@ use tokio::time::{sleep, Duration};
 use tracing::Span;
 
 use chroma_metering::{
-    attribute, close, create, current, event, register_receiver, MeteredFutureExt, MeteringEvent,
-    SubmitExt,
+    attribute, close, create, current, event, register_receiver, MeteredFutureExt, SubmitExt,
 };
+use chroma_metering_core::MeteringEvent;
 
 use async_trait::async_trait;
 use std::fmt::Debug;
@@ -149,7 +149,7 @@ async fn main() {
     let collector = CollectingReceiver {
         seen: Arc::new(StdMutex::new(Vec::new())),
     };
-    register_receiver(Box::new(collector.clone())).unwrap();
+    register_receiver(Box::new(collector.clone()));
 
     println!("=== Phase 1: Testing nested parent/child scopes ===");
     parent_scope(collector.clone()).await;

@@ -1,7 +1,7 @@
-#[chroma_metering::attribute(name = "example_my_attribute")]
+#[chroma_metering_macros::attribute(name = "example_my_attribute")]
 type ExampleMyAttribute = Option<u8>;
 
-#[chroma_metering::event]
+#[chroma_metering_macros::event]
 struct MyMeteringEventExample {
     test_constant_field: Option<u8>,
     #[field(attribute = "example_my_attribute", mutator = "my_mutator")]
@@ -12,7 +12,7 @@ fn my_mutator(event: &mut MyMeteringEventExample, value: Option<u8>) {
     event.test_annotated_field = value;
 }
 
-#[chroma_metering::event]
+#[chroma_metering_macros::event]
 struct MyOtherMeteringEventExample {
     other_test_constant_field: Option<u8>,
     #[field(attribute = "example_my_attribute", mutator = "my_other_mutator")]

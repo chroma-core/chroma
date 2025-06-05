@@ -2,6 +2,7 @@ use proc_macro2::{Delimiter, Group, Ident, Literal, Punct, Spacing, Span, TokenS
 
 use crate::errors::MeteringMacrosError;
 
+/// Generates a token stream for a compile error given an error message.
 pub fn generate_compile_error(error_message: &str) -> proc_macro::TokenStream {
     let mut token_stream = TokenStream::new();
     token_stream.extend([TokenTree::Ident(Ident::new(
@@ -22,10 +23,12 @@ pub fn generate_compile_error(error_message: &str) -> proc_macro::TokenStream {
     return proc_macro::TokenStream::from(token_stream);
 }
 
+/// Converts a literal into a string.
 pub fn literal_to_string(literal: &Literal) -> String {
     return literal.to_string().trim_matches('\"').to_string();
 }
 
+/// Handles parsing a field annotation.
 pub fn parse_field_annotation(
     token_stream: &TokenStream,
 ) -> Result<(Literal, Literal), MeteringMacrosError> {
@@ -33,38 +36,38 @@ pub fn parse_field_annotation(
 
     match tokens_iter.next() {
         Some(TokenTree::Ident(id)) if id == "attribute" => {}
-        _ => return Err(MeteringMacrosError::EventBodyError),
+        _ => return Err(MeteringMacrosError::FieldAnnotationError),
     }
     match tokens_iter.next() {
         Some(TokenTree::Punct(punct))
             if punct.as_char() == '=' && punct.spacing() == Spacing::Alone => {}
-        _ => return Err(MeteringMacrosError::EventBodyError),
+        _ => return Err(MeteringMacrosError::FieldAnnotationError),
     }
     let field_attribute_name_literal = match tokens_iter.next() {
         Some(TokenTree::Literal(literal)) => literal,
-        _ => return Err(MeteringMacrosError::EventBodyError),
+        _ => return Err(MeteringMacrosError::FieldAnnotationError),
     };
     match tokens_iter.next() {
         Some(TokenTree::Punct(punct))
             if punct.as_char() == ',' && punct.spacing() == Spacing::Alone => {}
-        _ => return Err(MeteringMacrosError::EventBodyError),
+        _ => return Err(MeteringMacrosError::FieldAnnotationError),
     }
     match tokens_iter.next() {
         Some(TokenTree::Ident(id)) if id == "mutator" => {}
-        _ => return Err(MeteringMacrosError::EventBodyError),
+        _ => return Err(MeteringMacrosError::FieldAnnotationError),
     }
     match tokens_iter.next() {
         Some(TokenTree::Punct(punct))
             if punct.as_char() == '=' && punct.spacing() == Spacing::Alone => {}
-        _ => return Err(MeteringMacrosError::EventBodyError),
+        _ => return Err(MeteringMacrosError::FieldAnnotationError),
     }
     let field_mutator_name_literal = match tokens_iter.next() {
         Some(TokenTree::Literal(literal)) => literal,
-        _ => return Err(MeteringMacrosError::EventBodyError),
+        _ => return Err(MeteringMacrosError::FieldAnnotationError),
     };
 
     if tokens_iter.next().is_some() {
-        return Err(MeteringMacrosError::EventBodyError);
+        return Err(MeteringMacrosError::FieldAnnotationError);
     }
 
     Ok((field_attribute_name_literal, field_mutator_name_literal))
