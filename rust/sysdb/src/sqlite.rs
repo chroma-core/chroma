@@ -218,7 +218,7 @@ impl SqliteSysDb {
     }
 
     pub(crate) async fn get_tenant(&self, name: &str) -> Result<GetTenantResponse, GetTenantError> {
-        sqlx::query("SELECT id, resource_name FROM tenants WHERE id = $1")
+        sqlx::query("SELECT id FROM tenants WHERE id = $1")
             .bind(name)
             .fetch_one(self.db.get_conn())
             .await
@@ -228,25 +228,16 @@ impl SqliteSysDb {
             })
             .map(|row| GetTenantResponse {
                 name: row.get(0),
-                resource_name: row.get(1),
+                resource_name: None,
             })
     }
 
     pub(crate) async fn update_tenant(
         &self,
-        tenant_id: String,
-        resource_name: String,
+        _tenant_id: String,
+        _resource_name: String,
     ) -> Result<UpdateTenantResponse, UpdateTenantError> {
-        sqlx::query("UPDATE tenants SET resource_name = $1 WHERE id = $2")
-            .bind(resource_name)
-            .bind(tenant_id.clone())
-            .execute(self.db.get_conn())
-            .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => UpdateTenantError::NotFound(tenant_id.to_string()),
-                _ => UpdateTenantError::Internal(e.into()),
-            })
-            .map(|_| UpdateTenantResponse {})
+        Ok(UpdateTenantResponse {})
     }
 
     ////////////////////////// Collection Methods ////////////////////////
