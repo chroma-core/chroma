@@ -27,7 +27,7 @@ use worker::{
 };
 
 fn trivial_knn_filter(
-    test_segments: TestDistributedSegment,
+    test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -45,7 +45,7 @@ fn trivial_knn_filter(
 }
 
 fn always_true_knn_filter(
-    test_segments: TestDistributedSegment,
+    test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -63,7 +63,7 @@ fn always_true_knn_filter(
 }
 
 fn always_false_knn_filter(
-    test_segments: TestDistributedSegment,
+    test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -81,7 +81,7 @@ fn always_false_knn_filter(
 }
 
 fn knn(
-    test_segments: TestDistributedSegment,
+    test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
     knn_filter_output: KnnFilterOutput,
     query: Vec<f32>,
@@ -151,7 +151,7 @@ fn bench_query(criterion: &mut Criterion) {
     let trivial_knn_setup = || {
         (
             system.clone(),
-            trivial_knn_filter(test_segments.clone(), dispatcher_handle.clone().clone()),
+            trivial_knn_filter(&test_segments, dispatcher_handle.clone().clone()),
             |knn_filter_output: KnnFilterOutput| {
                 sift1m_queries
                     .iter()
@@ -159,7 +159,7 @@ fn bench_query(criterion: &mut Criterion) {
                     .map(|(query, expected)| {
                         (
                             knn(
-                                test_segments.clone(),
+                                &test_segments,
                                 dispatcher_handle.clone(),
                                 knn_filter_output.clone(),
                                 query.clone(),
@@ -175,7 +175,7 @@ fn bench_query(criterion: &mut Criterion) {
     let true_filter_knn_setup = || {
         (
             system.clone(),
-            always_true_knn_filter(test_segments.clone(), dispatcher_handle.clone().clone()),
+            always_true_knn_filter(&test_segments, dispatcher_handle.clone().clone()),
             |knn_filter_output: KnnFilterOutput| {
                 sift1m_queries
                     .iter()
@@ -183,7 +183,7 @@ fn bench_query(criterion: &mut Criterion) {
                     .map(|(query, expected)| {
                         (
                             knn(
-                                test_segments.clone(),
+                                &test_segments,
                                 dispatcher_handle.clone(),
                                 knn_filter_output.clone(),
                                 query.clone(),
@@ -199,7 +199,7 @@ fn bench_query(criterion: &mut Criterion) {
     let false_filter_knn_setup = || {
         (
             system.clone(),
-            always_false_knn_filter(test_segments.clone(), dispatcher_handle.clone().clone()),
+            always_false_knn_filter(&test_segments, dispatcher_handle.clone().clone()),
             |knn_filter_output: KnnFilterOutput| {
                 sift1m_queries
                     .iter()
@@ -207,7 +207,7 @@ fn bench_query(criterion: &mut Criterion) {
                     .map(|(query, _)| {
                         (
                             knn(
-                                test_segments.clone(),
+                                &test_segments,
                                 dispatcher_handle.clone(),
                                 knn_filter_output.clone(),
                                 query.clone(),

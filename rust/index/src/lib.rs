@@ -15,16 +15,16 @@ pub use hnsw::*;
 use hnsw_provider::HnswIndexProvider;
 #[allow(unused_imports)]
 pub use spann::*;
-use tempfile::tempdir;
+use tempfile::TempDir;
 pub use types::*;
 
-pub fn test_hnsw_index_provider() -> HnswIndexProvider {
-    HnswIndexProvider::new(
-        test_storage(),
-        tempdir()
-            .expect("Should be able to create a temporary directory")
-            .into_path(),
+pub fn test_hnsw_index_provider() -> (TempDir, HnswIndexProvider) {
+    let (temp_dir, storage) = test_storage();
+    let provider = HnswIndexProvider::new(
+        storage,
+        temp_dir.path().to_path_buf(),
         new_non_persistent_cache_for_test(),
         16,
-    )
+    );
+    (temp_dir, provider)
 }

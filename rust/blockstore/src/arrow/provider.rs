@@ -640,7 +640,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cached() {
-        let manager = BlockManager::new(test_storage(), 100, new_cache_for_test());
+        let (_temp_dir, storage) = test_storage();
+        let manager = BlockManager::new(storage, 100, new_cache_for_test());
         assert!(!manager.cached(&Uuid::new_v4()).await);
 
         let delta = manager.create::<&str, String, UnorderedBlockDelta>();

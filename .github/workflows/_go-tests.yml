@@ -20,7 +20,8 @@ jobs:
         with:
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: ./.github/actions/tilt
+      - name: Start Tilt services
+        uses: ./.github/actions/tilt
       - run: bin/cluster-test.sh bash -c 'cd go && make test'
       - name: Save service logs to artifact
         if: always()

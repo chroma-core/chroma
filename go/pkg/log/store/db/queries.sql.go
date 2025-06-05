@@ -138,6 +138,24 @@ func (q *Queries) GetBoundsForCollection(ctx context.Context, id string) (GetBou
 	return i, err
 }
 
+const getCollection = `-- name: GetCollection :one
+SELECT id, record_compaction_offset_position, record_enumeration_offset_position, is_sealed
+FROM collection
+WHERE id = $1
+`
+
+func (q *Queries) GetCollection(ctx context.Context, id string) (Collection, error) {
+	row := q.db.QueryRow(ctx, getCollection, id)
+	var i Collection
+	err := row.Scan(
+		&i.ID,
+		&i.RecordCompactionOffsetPosition,
+		&i.RecordEnumerationOffsetPosition,
+		&i.IsSealed,
+	)
+	return i, err
+}
+
 const getCollectionForUpdate = `-- name: GetCollectionForUpdate :one
 SELECT id, record_compaction_offset_position, record_enumeration_offset_position, is_sealed
 FROM collection
@@ -239,17 +257,23 @@ func (q *Queries) GetTotalUncompactedRecordsCount(ctx context.Context) (int64, e
 }
 
 const insertCollection = `-- name: InsertCollection :one
-INSERT INTO collection (id, record_enumeration_offset_position, record_compaction_offset_position) values($1, $2, $3) returning id, record_compaction_offset_position, record_enumeration_offset_position, is_sealed
+INSERT INTO collection (id, record_enumeration_offset_position, record_compaction_offset_position, is_sealed) values($1, $2, $3, $4) returning id, record_compaction_offset_position, record_enumeration_offset_position, is_sealed
 `
 
 type InsertCollectionParams struct {
 	ID                              string
 	RecordEnumerationOffsetPosition int64
 	RecordCompactionOffsetPosition  int64
+	IsSealed                        bool
 }
 
 func (q *Queries) InsertCollection(ctx context.Context, arg InsertCollectionParams) (Collection, error) {
-	row := q.db.QueryRow(ctx, insertCollection, arg.ID, arg.RecordEnumerationOffsetPosition, arg.RecordCompactionOffsetPosition)
+	row := q.db.QueryRow(ctx, insertCollection,
+		arg.ID,
+		arg.RecordEnumerationOffsetPosition,
+		arg.RecordCompactionOffsetPosition,
+		arg.IsSealed,
+	)
 	var i Collection
 	err := row.Scan(
 		&i.ID,

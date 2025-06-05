@@ -116,17 +116,17 @@ func (suite *LogTestSuite) TestUniqueConstraintPushLogs() {
 func (suite *LogTestSuite) TestSealedLogWontPush() {
 	ctx := context.Background()
 	collectionId := types.NewUniqueID()
-	params := log.InsertCollectionParams {
-		ID: collectionId.String(),
+	params := log.InsertCollectionParams{
+		ID:                              collectionId.String(),
 		RecordEnumerationOffsetPosition: 1,
-		RecordCompactionOffsetPosition: 0,
+		RecordCompactionOffsetPosition:  0,
 	}
 	_, err := suite.lr.queries.InsertCollection(ctx, params)
 	assert.NoError(suite.t, err, "Initializing log should not fail.")
 	_, err = suite.lr.queries.SealLog(ctx, collectionId.String())
 	assert.NoError(suite.t, err, "Sealing log should not fail.")
 	var isSealed bool
-	_, isSealed, err = suite.lr.InsertRecords(ctx, collectionId.String(), [][]byte{{1,2,3}})
+	_, isSealed, err = suite.lr.InsertRecords(ctx, collectionId.String(), [][]byte{{1, 2, 3}})
 	assert.NoError(suite.t, err, "Failed to push logs")
 	assert.True(suite.t, isSealed, "Did not report was sealed")
 }

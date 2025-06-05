@@ -566,7 +566,7 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn test_simple_graph() {
-        let storage = test_storage();
+        let (_storage_dir, storage) = test_storage();
 
         let system = System::new();
         let sysdb = SysDb::Test(TestSysDb::new());
@@ -608,7 +608,7 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn test_graph_with_lineage() {
-        let storage = test_storage();
+        let (_storage_dir, storage) = test_storage();
 
         let system = System::new();
         let mut sysdb = SysDb::Test(TestSysDb::new());

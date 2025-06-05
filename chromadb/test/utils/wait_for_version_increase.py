@@ -23,7 +23,8 @@ def wait_for_version_increase(
     while curr_version == initial_version:
         time.sleep(TIMEOUT_INTERVAL)
         if time.time() - initial_time > timeout:
-            raise TimeoutError("Model was not updated in time")
+            collection_id = client.get_collection(collection_name).id
+            raise TimeoutError(f"Model was not updated in time for {collection_id}")
         curr_version = get_collection_version(client, collection_name)
 
     return curr_version

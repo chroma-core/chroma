@@ -3,37 +3,8 @@ description: "This action starts Tilt services"
 runs:
   using: "composite"
   steps:
-    - name: Install Tilt
-      shell: bash
-      run: |
-        TILT_VERSION="0.34.2"
-        curl -fsSL https://github.com/tilt-dev/tilt/releases/download/v$TILT_VERSION/tilt.$TILT_VERSION.linux.x86_64.tar.gz | \
-          tar -xzv -C /usr/local/bin tilt
-    - name: Set up kind
-      uses: Wandalen/wretry.action@v3.7.0
-      with:
-        action: helm/kind-action@v1
-        attempt_limit: 3
-        attempt_delay: 2000
-        with: |
-          registry: true
-          registry_name: my-registry
-          registry_port: 5001
-          registry_enable_delete: true
-    - name: Add blacksmith registry mirror
-      shell: bash
-      run: |
-        REGISTRY_DIR="/etc/containerd/certs.d/docker.io"
-        for node in $(kind get nodes -n chart-testing); do
-          docker exec "${node}" mkdir -p "${REGISTRY_DIR}"
-          cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${REGISTRY_DIR}/hosts.toml"
-        server = "http://192.168.127.1:5000"
-        [host."http://192.168.127.1:5000"]
-          capabilities = ["pull", "resolve"]
-        EOF
-          echo "Added registry mirror to ${node}:"
-          docker exec "${node}" cat "${REGISTRY_DIR}/hosts.toml"
-        done
+    - name: Tilt Setup & Pre-Build
+      uses: ./.github/actions/tilt-setup-prebuild
     - name: Start Tilt
       shell: bash
       run: tilt ci

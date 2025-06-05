@@ -639,22 +639,28 @@ mod tests {
     /// It generates 120 log records, where the first 60 is compacted:
     /// - Log: Delete [11..=20], add [51..=100]
     /// - Compacted: Delete [1..=10] deletion, add [11..=50]
-    async fn setup_filter_input() -> FilterInput {
+    async fn setup_filter_input() -> (TestDistributedSegment, FilterInput) {
         let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(60, add_delete_generator)
             .await;
-        FilterInput {
-            logs: add_delete_generator.generate_chunk(61..=120),
-            blockfile_provider: test_segment.blockfile_provider,
-            metadata_segment: test_segment.metadata_segment,
-            record_segment: test_segment.record_segment,
-        }
+        let blockfile_provider = test_segment.blockfile_provider.clone();
+        let metadata_segment = test_segment.metadata_segment.clone();
+        let record_segment = test_segment.record_segment.clone();
+        (
+            test_segment,
+            FilterInput {
+                logs: add_delete_generator.generate_chunk(61..=120),
+                blockfile_provider,
+                metadata_segment,
+                record_segment,
+            },
+        )
     }
 
     #[tokio::test]
     async fn test_trivial_filter() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let filter_operator = FilterOperator {
             query_ids: None,
@@ -675,7 +681,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_user_allowed_ids() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let filter_operator = FilterOperator {
             query_ids: Some((0..30).map(int_as_id).collect()),
@@ -696,7 +702,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_eq() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Metadata(MetadataExpression {
             key: "is_even".to_string(),
@@ -728,7 +734,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_ne() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
@@ -765,7 +771,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_in() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Metadata(MetadataExpression {
             key: "is_even".to_string(),
@@ -797,7 +803,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_nin() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
@@ -834,7 +840,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_gt() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Metadata(MetadataExpression {
             key: "id".to_string(),
@@ -866,7 +872,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_contains() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::Contains,
@@ -895,7 +901,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_not_contains() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::NotContains,
@@ -929,7 +935,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_and() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_sub_clause_1 = Where::Metadata(MetadataExpression {
             key: "id".to_string(),
@@ -974,7 +980,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_or() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_sub_clause_1 = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
@@ -1019,7 +1025,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_complex_filter() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_sub_clause_1 = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::NotContains,
@@ -1289,7 +1295,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_regex_short_circuit() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &filter_input.record_segment,

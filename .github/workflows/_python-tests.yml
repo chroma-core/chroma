@@ -126,7 +126,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["blacksmith-16vcpu-ubuntu-2204"]
+        platform: ["blacksmith-8vcpu-ubuntu-2204"]
         test-globs: ["chromadb/test/api",
                     "chromadb/test/api/test_collection.py",
                     "chromadb/test/api/test_limit_offset.py",
@@ -154,7 +154,8 @@ jobs:
         with:
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: ./.github/actions/tilt
+      - name: Start Tilt services
+        uses: ./.github/actions/tilt
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}" --durations 10'
         shell: bash

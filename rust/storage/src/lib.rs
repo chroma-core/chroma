@@ -351,14 +351,13 @@ impl Configurable<StorageConfig> for Storage {
     }
 }
 
-pub fn test_storage() -> Storage {
-    Storage::Local(LocalStorage::new(
-        TempDir::new()
-            .expect("Should be able to create a temporary directory.")
-            .into_path()
-            .to_str()
-            .expect("Should be able to convert temporary directory path to string"),
-    ))
+pub fn test_storage() -> (TempDir, Storage) {
+    let temp_dir = TempDir::new().expect("Should be able to create a temporary directory.");
+    let storage =
+        Storage::Local(LocalStorage::new(temp_dir.path().to_str().expect(
+            "Should be able to convert temporary directory path to string",
+        )));
+    (temp_dir, storage)
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]

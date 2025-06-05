@@ -38,6 +38,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "wal3",
                 "worker",
                 "garbage_collector",
+                "continuous_verification",
             ]
             .into_iter()
             .map(|s| s.to_string() + "=trace")
@@ -147,6 +148,10 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                     .module_path()
                     .unwrap_or("")
                     .starts_with("hosted-frontend")
+                || metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("continuous_verification")
         }))
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
         .boxed()
