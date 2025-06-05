@@ -3320,19 +3320,19 @@ mod tests {
             .iter()
             .zip(read_logs)
         {
-            // let expected_metadata = reference_operation.metadata.clone().unwrap_or_default();
-            // let received_metadata = got_log.record.metadata.clone().unwrap();
+            let expected_metadata = reference_operation.metadata.clone().unwrap_or_default();
+            let received_metadata = got_log.record.metadata.clone().unwrap_or_default();
 
             assert!(got_log.record.id == reference_operation.id);
             assert!(got_log.record.embedding == reference_operation.embedding);
             assert!(got_log.record.encoding == reference_operation.encoding);
-            // assert!(
-            //     are_update_metadatas_close_to_equal(&received_metadata, &expected_metadata),
-            //     "{:?} != {:?}",
-            //     received_metadata,
-            //     expected_metadata
-            // );
-            // assert!(got_log.record.document == reference_operation.document);
+            assert!(
+                are_update_metadatas_close_to_equal(&received_metadata, &expected_metadata),
+                "{:?} != {:?}",
+                received_metadata,
+                expected_metadata
+            );
+            assert!(got_log.record.document == reference_operation.document);
             assert!(got_log.record.operation == reference_operation.operation);
         }
     }

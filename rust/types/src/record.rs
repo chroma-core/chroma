@@ -98,7 +98,18 @@ impl TryFrom<OperationRecord> for chroma_proto::OperationRecord {
             None => None,
         };
 
-        let metadata = operation_record.metadata.map(|metadata| metadata.into());
+        let mut metadata = operation_record.metadata;
+
+        if let Some(doc) = operation_record.document {
+            let mut patched_metdata = metadata.take().unwrap_or_default();
+            patched_metdata.insert(
+                CHROMA_DOCUMENT_KEY.to_string(),
+                UpdateMetadataValue::Str(doc),
+            );
+            metadata = Some(patched_metdata);
+        }
+
+        let proto_metadata = metadata.map(Into::into);
 
         let proto_vector = match vector {
             Some(vector) => Some(vector.try_into()?),
@@ -108,7 +119,7 @@ impl TryFrom<OperationRecord> for chroma_proto::OperationRecord {
         Ok(chroma_proto::OperationRecord {
             id: operation_record.id,
             vector: proto_vector,
-            metadata,
+            metadata: proto_metadata,
             operation: operation_record.operation as i32,
         })
     }
