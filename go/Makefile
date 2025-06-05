@@ -29,7 +29,7 @@ build: proto
 
 test: build
 	go clean -testcache
-	go test -race -cover ./...
+	go test -v -race -cover ./...
 
 
 lint:
