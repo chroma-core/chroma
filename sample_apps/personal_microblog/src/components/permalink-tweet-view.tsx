@@ -23,16 +23,6 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
     getRelatedPosts();
   }, [post]);
 
-  useEffect(() => {
-    if (parentPosts.length === 0) {
-      return;
-    }
-    const mainTweet = document.getElementById("main-tweet-autoscroll");
-    if (mainTweet) {
-      mainTweet.scrollIntoView({ behavior: "instant" });
-    }
-  }, []);
-
   function handleSubmit(input: string) {
     const postReply = async () => {
       if (!post) {
@@ -70,7 +60,6 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
           {headerComponent}
           <div className="bg-[#fafafa] py-12 px-4">
             <ParentPosts parentPosts={parentPosts} />
-            <div id="main-tweet-autoscroll" className="relative top-[-.1em]"></div>
             <TweetBody body={post.body} citations={post.citations} className="text-[1.15em]/5 font-body" />
           </div>
           <TweetPrompt placeholder="Continue your thoughts..." onSubmit={handleSubmit} animate={false} />
