@@ -1,12 +1,10 @@
-
-import React from "react";
+import React, { useEffect, useLayoutEffect } from "react";
 import sidebarConfig from "@/markdoc/content/sidebar-config";
 import PageIndex from "@/components/sidebar/page-index";
 import path from "path";
 import fs from "fs";
 import matter from "gray-matter";
 import ScrollableContent from "./scrollable-content";
-import AppContext from "@/context/app-context";
 
 const generatePages = (slug: string[]): { id: string; name: string }[] => {
   const dirPath = path.join(process.cwd(), "markdoc", "content", ...slug);
@@ -29,8 +27,8 @@ const generatePages = (slug: string[]): { id: string; name: string }[] => {
   return pages;
 };
 
-const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
-  path,
+const Sidebar: React.FC<{ path: string[]; mobile?: boolean; }> = ({
+  path, mobile
 }) => {
   const currentSection = sidebarConfig.find((section) =>
     path.join("").startsWith(section.id),
@@ -50,10 +48,9 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
     /* set to full height and overflow-y auto for scrolling */
   return (
     <div
-    data-closed
-      className={"left-0 top-0 data-closed:translate-x-[-300px] md:translate-x-0 bg-white bg-[url(/composite_noise.jpg)] bg-repeat z-100"} 
+      className={`${mobile ? '' : 'hidden md:block'} relative h-full overflow-y-auto`} 
     >
-      <div className="text-sm flex flex-col overflow-y-scroll w-64 p-5 border-r-[1px] shrink-0 dark:border-gray-700">
+      <div className={`text-sm flex flex-col overflow-y-scroll min-w-64 p-5 ${mobile ? '' : 'border-r-[1px]'} shrink-0 dark:border-gray-700 dark:backdrop-invert`}>
         <ScrollableContent pagesIndex={allSectionPages}>
           {currentSection.pages && (
             <div className="flex flex-col gap-2">

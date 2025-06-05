@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import React from "react";
 import ThemeProvider from "@/components/ui/theme-provider";
@@ -36,7 +36,11 @@ export const metadata: Metadata = {
     creatorId: '1507488634458439685',
     images: ['https://docs.trychroma.com/og.png'], // must be an absolute url
   },
-  viewport: 'width=device-width, initial-scale=1',
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 }
 
 const inter = Inter({ subsets: ["latin"] });
@@ -48,7 +52,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} antialiased bg-white bg-[url(/composite_noise.jpg)] bg-repeat relative`}>
+      <body data-invert-bg="true" className={`${inter.className} antialiased bg-white bg-[url(/composite_noise.jpg)] bg-repeat relative ext-[#27201C] dark:text-white dark:backdrop-invert`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

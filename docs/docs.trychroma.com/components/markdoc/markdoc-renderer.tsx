@@ -1,6 +1,6 @@
 import fs from "fs";
 import path from "path";
-import React, { useEffect, useState } from "react";
+import React from "react";
 import Markdoc from "@markdoc/markdoc";
 import markdocConfig from "@/markdoc/config";
 import { notFound } from "next/navigation";
@@ -91,28 +91,29 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
 
   return (
     <MarkdocPage>
-      <div className="py-10 relative pr-10 marker:text-black dark:marker:text-gray-200">
-        <SidebarToggle path={slug} />
-        {/* <AskAI content={source} /> */}
-        {output}
-        <div className="flex items-center justify-between mt-5">
-          {prev ? (
-            <PageNav slug={prev.slug || ""} name={prev.name} type="prev" />
-          ) : (
-            <div />
-          )}
-          {next ? (
-            <PageNav slug={next.slug || ""} name={next.name} type="next" />
-          ) : (
-            <div />
-          )}
+      <div className="flex max-w-6xl 2xl:max-w-7xl mx-auto">
+        <div className="py-10 relative pr-10 marker:text-black dark:marker:text-gray-200 grow max-w-6xl w-full grow-4 prose dark:prose-invert ">
+          <SidebarToggle path={slug} />
+          {output}
+          <div className="flex items-center justify-between mt-5">
+            {prev ? (
+              <PageNav slug={prev.slug || ""} name={prev.name} type="prev" />
+            ) : (
+              <div />
+            )}
+            {next ? (
+              <PageNav slug={next.slug || ""} name={next.name} type="next" />
+            ) : (
+              <div />
+            )}
+          </div>
+          <div className="flex items-center gap-2 mt-5 max-w-6xl">
+            <GitHubLogoIcon className="w-5 h-5" />
+            <Link href={GitHubLink}>Edit this page on GitHub</Link>
+          </div>
         </div>
-        <div className="flex items-center gap-2 mt-5">
-          <GitHubLogoIcon className="w-5 h-5" />
-          <Link href={GitHubLink}>Edit this page on GitHub</Link>
-        </div>
+        <TableOfContents toc={toc} />
       </div>
-      <TableOfContents toc={toc} />
     </MarkdocPage>
   );
 };
