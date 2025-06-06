@@ -276,7 +276,19 @@ def test_cycle_versions(
     collection_strategy.embedding_function = None
     collection_strategy.known_metadata_keys = {}
 
-    # Run the task in a separate process to avoid polluting the current process
+    # Clear versioned modules from parent process before spawning subprocess
+    # to prevent NumPy CPU dispatcher conflicts
+    import sys
+
+    modules_to_clear = []
+    for module_name in sys.modules.copy():
+        if any(
+            module_name.startswith(vm) or module_name == vm for vm in VERSIONED_MODULES
+        ):
+            modules_to_clear.append(module_name)
+    for module_name in modules_to_clear:
+        del sys.modules[module_name]
+
     # with the old version. Using spawn instead of fork to avoid sharing the
     # current process memory which would cause the old version to be loaded
     ctx = multiprocessing.get_context("spawn")
