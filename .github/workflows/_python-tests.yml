@@ -66,7 +66,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-        test-globs:
+        test-glob:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property/test_add.py"
           - "chromadb/test/property/test_collections.py"
@@ -87,7 +87,7 @@ jobs:
       with:
           github-token: ${{ github.token }}
     - name: Rust Integration Test
-      run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
+      run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
       shell: bash
       env:
         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
@@ -97,7 +97,7 @@ jobs:
     strategy:
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-        test-globs:
+        test-glob:
           - "chromadb/test/property/test_add.py"
           - "chromadb/test/property/test_collections.py"
           - "chromadb/test/property/test_collections_with_database_tenant.py"
@@ -116,7 +116,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
       - name: Test
-        run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
+        run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
         shell: bash
         env:
           CHROMA_THIN_CLIENT: "1"
