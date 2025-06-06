@@ -22,7 +22,7 @@ def create_batches(
     offset = 0
     if len(ids) > max_batch_size:
         while offset < len(ids):
-            batch_size = random.randint(1, max_batch_size):
+            batch_size = random.randint(1, max_batch_size)
             _batches.append(
                 (  # type: ignore
                     ids[offset : offset + batch_size],
