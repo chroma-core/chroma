@@ -2,11 +2,11 @@
 
 import { useEffect, useState, useRef } from "react";
 import { AnimatePresence, m, motion } from "framer-motion";
-import { Tweet, TweetSkeleton } from "@/components/tweet";
-import TweetPrompt from "@/components/tweet-prompt";
+import { Tweet, TweetSkeleton } from "@/components/tweet/tweet";
+import TweetPrompt from "@/components/tweet/tweet-prompt";
 import { EnrichedTweetModel, PartialAssistantPost, TweetModelBase } from "@/types";
 import { publishNewUserPost } from "@/actions";
-import Logo from "./logo";
+import Logo from "../ui/common/logo";
 
 export default function FeedView() {
   const [newMessages, setNewMessages] = useState<Array<{ userPost: TweetModelBase, assistantPost?: PartialAssistantPost }>>([]);

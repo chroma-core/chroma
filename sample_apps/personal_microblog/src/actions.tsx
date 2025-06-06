@@ -217,7 +217,7 @@ function getAssistantResponse(userInput: string, parentThreadId: string): Partia
  * looks cooler.
  */
 async function processAssistantResponse(userInput: string, post: PartialAssistantPost, stream: any) {
-  const cleanedUserInput = userInput.replace(/@assistant/g, "").trim();
+  const cleanedUserInput = userInput.replace(/@assistant|\[\[[a-zA-Z0-9]+\]\]/g, "").trim();
 
   try {
     stream.update("--BEGIN--");
@@ -253,10 +253,29 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
         },
       });
       context.push(...chromaQueryResultsToPostModels(temporalContext));
-      context = context.filter((post, index, self) =>
-        index === self.findIndex((t) => t.id === post.id)
-      );
     }
+
+    stream.update("Generating full text search terms...");
+    const searchTerms = await generateFullTextSearchTerms(cleanedUserInput);
+
+    if (searchTerms.length > 0) {
+      stream.update("Performing full text search...");
+      const ftsFilter = searchTerms.length > 1
+        ? { "$or": searchTerms.map(term => ({ "$contains": term })) }
+        : { "$contains": searchTerms[0] };
+      const fullTextSearchContext = await chromaCollection.query({
+        queryTexts: [cleanedUserInput],
+        nResults: 10,
+        whereDocument: ftsFilter,
+      });
+      context.push(...chromaQueryResultsToPostModels(fullTextSearchContext));
+    }
+
+    let citationIds = context.map((p) => p.id).filter((id) => id != post.id);
+    citationIds = Array.from(new Set(citationIds));
+    // Only take the top 5 citations in order to avoid Metadata quota limits
+    citationIds = citationIds.slice(0, 5);
+    post.citations = citationIds;
 
     stream.update("Reranking context...");
     const rerankedContext = await rerank(userInput, context);
@@ -264,12 +283,6 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
     const formattedContext = rerankedContext.map((post, i) => {
       return `${new Date(post.date * 1000).toISOString()}: ${post.body}`;
     }).join("\n\n");
-
-    let citationIds = rerankedContext.map((p) => p.id).filter((id) => id != post.id);
-    citationIds = Array.from(new Set(citationIds));
-    // Only take the top 5 citations in order to avoid Metadata quota limits
-    citationIds = citationIds.slice(0, 5);
-    post.citations = citationIds;
 
     stream.update("--CITATIONS--");
 
@@ -315,6 +328,7 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
     console.error('Error generating assistant response:', error);
     post.body = "Sorry, I encountered an error while processing your request.";
     post.status = "error";
+    stream.update("--ERROR--");
   } finally {
     stream.done();
   }
@@ -378,6 +392,46 @@ async function generateQueryRange(userInput: string): Promise<QueryRange> {
     start: object.start ? new Date(object.start).getTime() / 1000 : undefined,
     end: object.end ? new Date(object.end).getTime() / 1000 : undefined,
   };
+}
+
+async function generateFullTextSearchTerms(userInput: string): Promise<string[]> {
+  const { object } = await generateObject({
+    model: llmModel,
+    output: "array",
+    schema: jsonSchema<string>({
+      type: "string",
+    }),
+    messages: [
+      {
+        role: 'system',
+        content: `
+        You are a helpful assistant that generates specific search terms for full-text search based on a user's query.
+        Generate 3-5 key terms or phrases that would help find relevant posts in a personal microblog.
+        Focus on:
+        - Key nouns and important concepts
+        - Specific activities or topics mentioned
+        - Important keywords that would appear in relevant posts
+
+        Return an array of search terms as strings.
+
+        Examples:
+        User: "What did I learn about machine learning last month?"
+        Response: ["machine learning", "ML"]
+
+        User: "Show me posts about cooking dinner"
+        Response: ["cooking", "dinner", "recipe", "food", "kitchen"]
+
+        User: "What meetings did I have?"
+        Response: ["meeting", "call", "conference", "discussion", "scheduled"]
+        `
+      },
+      {
+        role: 'user',
+        content: userInput
+      }
+    ],
+  });
+  return object;
 }
 
 async function rerank(userInput: string, posts: TweetModelBase[]): Promise<TweetModelBase[]> {

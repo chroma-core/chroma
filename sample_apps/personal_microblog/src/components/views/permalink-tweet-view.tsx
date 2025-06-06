@@ -3,12 +3,12 @@
 import { publishNewUserPost } from "@/actions";
 import { EnrichedTweetModel, TweetModelBase } from "@/types";
 import { useEffect, useState } from "react";
-import TweetPrompt from "./tweet-prompt";
-import { Tweet } from "./tweet";
+import TweetPrompt from "../tweet/tweet-prompt";
+import { Tweet } from "../tweet/tweet";
 import { BiReply, BiLinkAlt } from "react-icons/bi";
 import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from 'next/navigation'
-import TweetBody from "./tweet-body";
+import TweetBody from "../tweet/tweet-body";
 
 export default function PermalinkTweetView({ post, parentPosts, existingReplies }: { post: TweetModelBase, parentPosts: TweetModelBase[], existingReplies: TweetModelBase[] }) {
   const [replies, setReplies] = useState<TweetModelBase[]>(existingReplies);
@@ -51,7 +51,7 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
       <div className="w-[600px] max-w-[calc(100dvw-32px)]">
         <div className="py-4">
           {headerComponent}
-          <div className="bg-[#fafafa] py-12 px-4">
+          <div className="py-12 px-4">
             <ParentPosts parentPosts={parentPosts} />
             <TweetBody body={post.body} citations={post.citations} className="text-[1.15em]/5 font-body" />
           </div>
@@ -60,10 +60,10 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
           {replies.map((r) => (
             <PermalinkReply key={r.id} reply={r} />
           ))}
-                  </div>
-          <div className="min-h-[100dvh]">
-            <RelatedPosts searchTerm={post.body} currentPostId={post.id} />
-          </div>
+        </div>
+        <div className="min-h-[100dvh]">
+          <RelatedPosts searchTerm={post.body} currentPostId={post.id} />
+        </div>
       </div>
     </div>
   );
@@ -81,10 +81,11 @@ function ParentPosts({ parentPosts }: { parentPosts: TweetModelBase[] }) {
   }
 
   return (
-    <div className="pb-6 text-sm text-gray-700">
+    <div className="pb-6">
       {parentPosts.map((p) => (
-        <div key={p.id} className="p-2 pl-4 pb-4 last:pb-16 w-full border-l cursor-pointer" onClick={() => goToPostPage(p.id)}>
-          <TweetBody body={p.body} citations={p.citations} className="font-body" />
+        <div key={p.id} className="grid grid-cols-[2px_auto] last:pb-16 w-full border-l cursor-pointer" onClick={() => goToPostPage(p.id)}>
+          <div className="border-l-[1.5px] border-gray-400 h-[1.2em] mt-3 ml-[-1.5px]"></div>
+          <TweetBody body={p.body} citations={p.citations} className="opacity-70 p-2 pl-4 pb-4" />
         </div>
       ))}
     </div>

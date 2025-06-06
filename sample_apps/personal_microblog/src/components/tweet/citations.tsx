@@ -4,7 +4,8 @@ import { TweetModelBase } from "@/types";
 import { formatDate } from "@/util";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import AnimatedNumber from "./animated-number";
+import AnimatedNumber from "../ui/animations/animated-number";
+import { useRouter } from "next/navigation";
 
 interface CitationsProps {
   citations: string[] | TweetModelBase[];
@@ -62,6 +63,8 @@ export default function Citations({ citations, collapsedByDefault = false }: Cit
     citationsComponent = `Show ${citations.length} citation${citations.length === 1 ? '' : 's'}`;
   }
 
+  let router = useRouter();
+
   /*
    * Initially, when switching the state of `collapsed`, this element would make a jank motion
    * because its height would potentially suddenly change from 1em to 0, then to something large.
@@ -83,15 +86,18 @@ export default function Citations({ citations, collapsedByDefault = false }: Cit
             setCollapsed(false);
           }}
           onHoverStart={() => collapsed && fetchCitations()}
-          className={`cursor-pointer col-[1] row-[1]`}>{citationsComponent}</motion.div>
+          className={`cursor-pointer col-[1] row-[1] z-10`}>{citationsComponent}</motion.div>
         {!collapsed && (
           <motion.div
             key="citation-list-element"
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
-            className="flex flex-col gap-2 col-[1] row-[1]">
+            className="flex flex-col gap-2 col-[1] row-[1] z-20"
+          >
             {loadedCitations.map((citation) => (
-              <Citation key={citation.id} tweet={citation} />
+              <div key={citation.id} onClick={() => { router.push(`/post/${citation.id}`) }}>
+                <Citation key={citation.id} tweet={citation} />
+              </div>
             ))}
           </motion.div>
         )}
@@ -101,7 +107,7 @@ export default function Citations({ citations, collapsedByDefault = false }: Cit
 }
 
 function Citation({ tweet }: { tweet: TweetModelBase }) {
-  const snippet = tweet.body?.split('\n')[0]?.slice(0, 100);
+  const snippet = tweet.body?.replace(/(!?\[.*?\])\(.*?\)/g, '$1(...)').split('\n')[0]?.slice(0, 100);
   const hasMore = snippet?.length && snippet.length < (tweet.body?.length ?? 0);
   return (
     <motion.div

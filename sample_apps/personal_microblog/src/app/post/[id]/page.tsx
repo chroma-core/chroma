@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import PermalinkTweetView from "@/components/permalink-tweet-view";
+import PermalinkTweetView from "@/components/views/permalink-tweet-view";
 import { getPostById, getPostReplies, semanticSearch } from "@/actions";
 import { TweetModelBase } from "@/types";
 

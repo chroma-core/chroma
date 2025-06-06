@@ -1,6 +1,6 @@
 "use server";
 
-import FeedView from "@/components/feed-view";
+import FeedView from "@/components/views/feed-view";
 
 export default async function Home() {
   return (

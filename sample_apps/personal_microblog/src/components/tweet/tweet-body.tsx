@@ -1,10 +1,10 @@
 import { readStreamableValue, StreamableValue } from "ai/rsc";
-import { MarkdownContent, StreamedMarkdownContent } from "./markdown-content";
+import { MarkdownContent, StreamedMarkdownContent } from "../ui/content/markdown-content";
 import Citations from "./citations";
-import SlidingText from "./sliding-text";
+import SlidingText from "../ui/animations/sliding-text";
 import { TweetModelBase, TweetStreamStates } from "@/types";
 import { useEffect, useRef, useState } from "react";
-import { useAnimatedText } from "./animated-text";
+import { useAnimatedText } from "../ui/animations/animated-text";
 
 interface TweetBodyProps {
   body?: string;
@@ -37,11 +37,15 @@ export default function TweetBody({
   }
 
   const usingStream = stream != undefined;
-  const readingStreamLockRef = useRef(false);
+
+  // These states only matter if usingStream is true, otherwise this component
+  // will just use its props as its data
   const [streamState, setStreamState] = useState<TweetStreamStates | undefined>(undefined);
-  const [streamStateMessage, setStreamStateMessage] = useState<string>("");
+  const [streamStateMessage, setStreamStateMessage] = useState<string>("Initializing...");
   const [streamedBody, setStreamedBody] = useState<string>("");
   const [streamedCitationIds, setStreamedCitationIds] = useState<string[]>([]);
+  // This lock is used to prevent the stream from being read multiple times
+  const readingStreamLockRef = useRef(false);
 
   useEffect(() => {
     async function loadDataFromStream() {
@@ -63,6 +67,8 @@ export default function TweetBody({
             currentStreamState = "--CITATIONS--";
           } else if (res == "--BODY--") {
             currentStreamState = "--BODY--";
+          } else if (res == "--ERROR--") {
+            currentStreamState = "--ERROR--";
           } else if (currentStreamState == "--BEGIN--") {
             setStreamStateMessage(res);
           } else if (currentStreamState == "--CITATIONS--") {
@@ -74,6 +80,7 @@ export default function TweetBody({
           }
           setStreamState(currentStreamState);
         }
+        setStreamState("--END--");
       } catch (error) {
         console.error('Streaming error:', error);
       } finally {
@@ -87,13 +94,20 @@ export default function TweetBody({
   const interpolatedText = useAnimatedText(streamedBody);
   if (!usingStream) {
     bodyComponent = <MarkdownContent content={body ?? ""} className={bodyClassName} />;
-  } else if (streamState == "--BEGIN--" || streamState == "--CITATIONS--") {
-    bodyComponent = <SlidingText text={streamStateMessage} className={bodyClassName} />;
-  } else if (streamState == "--BODY--") {
+  } else if (!streamState || streamState == "--BEGIN--" || streamState == "--CITATIONS--" || streamState == "--ERROR--") {
+    let message = streamStateMessage;
+    if (streamState == "--ERROR--") {
+      message = "Sorry, I encountered an error while processing your request.";
+    }
+    bodyComponent = <SlidingText text={message} className={bodyClassName} />;
+  } else if (streamState == "--BODY--" || streamState == "--END--") {
     bodyComponent = <MarkdownContent content={interpolatedText} placeholder={"Generating..."} className={bodyClassName} />;
   }
 
-  const citationsComponent = <Citations citations={usingStream ? streamedCitationIds : citations ?? []} collapsedByDefault={citationsCollapsedByDefault} />;
+  const citationsComponent = <Citations
+    citations={usingStream ? streamedCitationIds : citations ?? []}
+    collapsedByDefault={citationsCollapsedByDefault}
+  />;
 
   return (
     <div className={`${className}`}>
