@@ -664,6 +664,7 @@ impl InMemoryFrontend {
     pub fn healthcheck(&self) -> chroma_types::HealthCheckResponse {
         chroma_types::HealthCheckResponse {
             is_executor_ready: true,
+            is_log_client_ready: true,
         }
     }
 }

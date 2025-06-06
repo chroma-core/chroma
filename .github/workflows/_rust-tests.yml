@@ -7,7 +7,7 @@ jobs:
   test:
     strategy:
       matrix:
-        platform: [blacksmith-4vcpu-ubuntu-2204]
+        platform: [blacksmith-8vcpu-ubuntu-2204]
     runs-on: ${{ matrix.platform }}
     env:
       CARGO_TERM_COLOR: always
@@ -22,9 +22,9 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Test
-        run: cargo nextest run --no-capture --profile ci
+        run: cargo nextest run --profile ci
   test-long:
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-8vcpu-ubuntu-2204
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
@@ -35,10 +35,8 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - name: Build CLI
-        run: cargo build --bin chroma
       - name: Test
-        run: cargo nextest run --no-capture --profile ci_long_running
+        run: cargo nextest run --profile ci_long_running
 
   test-integration:
     strategy:
