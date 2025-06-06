@@ -198,6 +198,13 @@ message GetCollectionsResponse {
   reserved "status";
 }
 
+message GetCollectionByResourceNameRequest {
+  string id = 1;
+  optional string tenant_resource_name = 2;
+  optional string database = 3;
+  optional string name = 4;
+}
+
 message CountCollectionsRequest {
   string tenant = 4;
   optional string database = 5;
@@ -535,6 +542,7 @@ service SysDB {
   rpc FinishCollectionDeletion(FinishCollectionDeletionRequest) returns (FinishCollectionDeletionResponse) {}
   rpc GetCollection(GetCollectionRequest) returns (GetCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
+  rpc GetCollectionByResourceName(GetCollectionByResourceNameRequest) returns (GetCollectionResponse) {}
   rpc CountCollections(CountCollectionsRequest) returns (CountCollectionsResponse) {}
   rpc GetCollectionWithSegments(GetCollectionWithSegmentsRequest) returns (GetCollectionWithSegmentsResponse) {}
   rpc CheckCollections(CheckCollectionsRequest) returns (CheckCollectionsResponse) {}
