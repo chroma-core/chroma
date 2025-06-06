@@ -259,29 +259,3 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         impl<F: std::future::Future + Unpin> Unpin for MeteredFuture<F> {}
     });
 }
-
-#[cfg(test)]
-mod tests {
-    use super::initialize_metering;
-
-    #[test]
-    fn test_register_custom_receiver() {}
-
-    #[tokio::test]
-    async fn test_single_metering_event() {}
-
-    #[tokio::test]
-    async fn test_many_metering_events_uniform_type_single_context() {}
-
-    #[tokio::test]
-    async fn test_many_metering_events_varying_type_single_context() {}
-
-    #[tokio::test]
-    async fn test_many_metering_events_uniform_type_multi_context() {}
-
-    #[tokio::test]
-    async fn test_many_metering_events_varying_type_multi_context() {}
-
-    #[tokio::test]
-    async fn test_metered_future() {}
-}
