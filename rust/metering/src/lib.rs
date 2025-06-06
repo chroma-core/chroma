@@ -45,6 +45,7 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         .collect();
 
     proc_macro::TokenStream::from(quote! {
+        /// The primary trait used in the metering library that contains no-op mutators for every attribute.
         pub trait MeteringEvent: std::fmt::Debug + std::any::Any + Send + 'static {
             #( #noop_mutator_definition_token_streams )*
         }
@@ -155,19 +156,6 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
             }
         }
 
-        /// Creates a metering event of type `E` and pushes it onto the stack.
-        pub fn create<E: MeteringEvent>(metering_event: E) -> MeteringEventGuard {
-            let type_id = std::any::TypeId::of::<E>();
-            let boxed_metering_event: Box<dyn MeteringEvent> =
-                Box::new(metering_event);
-            EVENT_STACK.with(|event_stack| {
-                event_stack
-                    .borrow_mut()
-                    .push((type_id, boxed_metering_event));
-            });
-            MeteringEventGuard
-        }
-
         thread_local! {
             /// A thread-local pointer to an empty metering event such that if the stack is empty
             /// method invocations won't fail.
@@ -190,21 +178,34 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         /// The blank metering event has no custom mutators, so everything is a no-op.
         impl MeteringEvent for BlankMeteringEvent {}
 
+        /// Creates a metering event of type `E` and pushes it onto the stack.
+        pub fn create<E: MeteringEvent>(metering_event: E) -> MeteringEventGuard {
+            let type_id = std::any::TypeId::of::<E>();
+            let boxed_metering_event: Box<dyn MeteringEvent> =
+                Box::new(metering_event);
+            EVENT_STACK.with(|event_stack| {
+                event_stack
+                    .borrow_mut()
+                    .push((type_id, boxed_metering_event));
+            });
+            MeteringEventGuard
+        }
+
         /// Returns a pointer to the metering event at the top of the stack.
         pub fn current() -> &'static mut dyn MeteringEvent {
-            if let Some(raw_ptr) = EVENT_STACK.with(|event_stack| {
-                let mut vec = event_stack.borrow_mut();
-                if let Some((_, boxed_metering_event)) = vec.last_mut() {
-                    let raw: *mut dyn MeteringEvent =
+            if let Some(raw_metering_event_pointer) = EVENT_STACK.with(|event_stack| {
+                let mut mutable_event_stack = event_stack.borrow_mut();
+                if let Some((_, boxed_metering_event)) = mutable_event_stack.last_mut() {
+                    let raw_pointer: *mut dyn MeteringEvent =
                         &mut **boxed_metering_event as *mut dyn MeteringEvent;
-                    Some(raw)
+                    Some(raw_pointer)
                 } else {
                     None
                 }
             }) {
-                unsafe { &mut *raw_ptr }
+                unsafe { &mut *raw_metering_event_pointer }
             } else {
-                BLANK_METERING_EVENT_POINTER.with(|p| unsafe { &mut *(*p) })
+                BLANK_METERING_EVENT_POINTER.with(|pointer| unsafe { &mut *(*pointer) })
             }
         }
 
@@ -227,35 +228,69 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
             })
         }
 
-        /// A trait that allows futures to be metered to pass events between async contexts.
+        /// A trait that allows futures to be “thread-hopping-aware.”
+        /// When a user calls `.metered(guard)`, we immediately take the top event off the current stack,
+        /// stash it in the returned `MeteredFuture`, and then on the first `poll()` push it into whichever
+        /// thread is currently running the future. Finally, when that `MeteredFuture` is dropped at the end,
+        /// its `MeteringEventGuard` drop will pop from that thread’s stack.
         pub trait MeteredFutureExt: std::future::Future + Sized {
-            fn metered(self, _metering_event_guard: MeteringEventGuard) -> MeteredFuture<Self> {
-                MeteredFuture { inner: self }
+            fn metered(self, guard: MeteringEventGuard) -> MeteredFuture<Self> {
+                let (moved_type_id, moved_boxed) = EVENT_STACK.with(|event_stack| {
+                    event_stack
+                        .borrow_mut()
+                        .pop()
+                        .expect("`.metered()` called but no MeteringEventGuard had pushed any event")
+                });
+
+                MeteredFuture {
+                    inner: self,
+                    moved_type_id: Some(moved_type_id),
+                    moved_boxed: Some(moved_boxed),
+                    pushed: false,
+                    _guard: guard,
+                }
             }
         }
 
         /// Blanket-impl of the `MeteredFutureExt` trait for futures.
         impl<F: std::future::Future> MeteredFutureExt for F {}
 
-        /// The struct that holds the inner future for metered futures.
+        /// The struct that holds the inner future for metered futures. Once the future is actually polled
+        /// on the new thread, we do a one-time `push` there. If the future is never polled (or ends immediately),
+        /// the `Drop` of `_guard` will pop it from whichever `EVENT_STACK` still sees it.
         pub struct MeteredFuture<F: std::future::Future> {
             inner: F,
+            moved_type_id: Option<std::any::TypeId>,
+            moved_boxed: Option<Box<dyn MeteringEvent>>,
+            pushed: bool,
+            _guard: MeteringEventGuard,
         }
 
-        /// Implementation of the `Future` trait for `MeteredFuture`.
+
         impl<F: std::future::Future> std::future::Future for MeteredFuture<F> {
             type Output = F::Output;
 
-            fn poll(mut self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-                let inner_future = unsafe {
-                    self.as_mut()
-                        .map_unchecked_mut(|metered_future| &mut metered_future.inner)
-                };
-                inner_future.poll(context)
+            fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+                let this: &mut MeteredFuture<F> = unsafe { self.get_unchecked_mut() };
+
+                if !this.pushed {
+                    if let (Some(type_id), Some(boxed_evt)) =
+                        (this.moved_type_id.take(), this.moved_boxed.take())
+                    {
+                        EVENT_STACK.with(|stack| {
+                            stack.borrow_mut().push((type_id, boxed_evt));
+                        });
+                        this.pushed = true;
+                    }
+                }
+
+                let inner_pin: std::pin::Pin<&mut F> = unsafe { std::pin::Pin::new_unchecked(&mut this.inner) };
+                inner_pin.poll(cx)
             }
         }
 
-        /// Implementation of `Unpin` for metered future.
+        // We rely on the guard's Drop to pop the event when either the future finishes and is dropped,
+        // or someone explicitly calls `close::<E>()`.
         impl<F: std::future::Future + Unpin> Unpin for MeteredFuture<F> {}
     })
 }
