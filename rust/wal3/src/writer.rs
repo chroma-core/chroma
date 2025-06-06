@@ -630,6 +630,7 @@ pub async fn upload_parquet(
                     return Err(Error::StorageError(Arc::new(err)));
                 }
                 let mut backoff = exp_backoff.next();
+                // TODO(rescrv):  Magic constant.
                 if backoff > Duration::from_secs(3_600) {
                     backoff = Duration::from_secs(3_600);
                 }
@@ -668,6 +669,7 @@ pub async fn copy_parquet(
                     return Err(Error::StorageError(Arc::new(err)));
                 }
                 let mut backoff = exp_backoff.next();
+                // TODO(rescrv):  Magic constant.
                 if backoff > Duration::from_secs(3_600) {
                     backoff = Duration::from_secs(3_600);
                 }
