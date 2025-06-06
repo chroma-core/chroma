@@ -22,7 +22,7 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Test
-        run: cargo nextest run --no-capture --profile ci
+        run: cargo nextest run --profile ci
   test-long:
     runs-on: blacksmith-4vcpu-ubuntu-2204
     env:
@@ -38,7 +38,7 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Test
-        run: cargo nextest run --no-capture --profile ci_long_running
+        run: cargo nextest run --profile ci_long_running
 
   test-integration:
     strategy:
