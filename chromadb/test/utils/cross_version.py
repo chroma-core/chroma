@@ -13,7 +13,6 @@ base_install_dir = (
 
 
 def get_path_to_version_install(version: str) -> str:
-    sys.stderr.write(f"path for worker {base_install_dir}\n")
     return base_install_dir + "/" + version
 
 
