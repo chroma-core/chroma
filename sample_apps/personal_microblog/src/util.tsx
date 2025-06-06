@@ -1,8 +1,8 @@
 import { Collection } from "chromadb";
-import { TweetModel } from "./types";
+import { TweetModelBase } from "./types";
 import { customAlphabet } from 'nanoid'
 
-export function chromaQueryResultsToPostModels(queryResult: any): TweetModel[] {
+export function chromaQueryResultsToPostModels(queryResult: any): TweetModelBase[] {
   if (queryResult.ids.length !== 1) {
     throw new Error("Expected 1 query, got " + queryResult.ids.length);
   }
@@ -14,7 +14,7 @@ export function chromaQueryResultsToPostModels(queryResult: any): TweetModel[] {
   return chromaGetResultsToPostModels(getResult);
 }
 
-export function chromaGetResultsToPostModels(getResult: any): TweetModel[] {
+export function chromaGetResultsToPostModels(getResult: any): TweetModelBase[] {
   var postModels = getResult.ids.map(function (id: string, i: number) {
     return {
       id: id,
@@ -38,7 +38,7 @@ export function splitCitations(citations: string): string[] {
 }
 
 export async function addPostModelToChromaCollection(
-  post: TweetModel,
+  post: TweetModelBase,
   collection: Collection
 ) {
   if (post.body.length === 0) {
@@ -77,4 +77,12 @@ export function formatDate(date: number): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+export function getReferencedPostsIds(post: TweetModelBase): string[] {
+  const ids = [...post.citations];
+  if (post.aiReplyId) {
+    ids.push(post.aiReplyId);
+  }
+  return ids;
 }

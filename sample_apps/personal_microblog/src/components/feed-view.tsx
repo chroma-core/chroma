@@ -4,12 +4,12 @@ import { useEffect, useState, useRef } from "react";
 import { AnimatePresence, m, motion } from "framer-motion";
 import { Tweet, TweetSkeleton } from "@/components/tweet";
 import TweetPrompt from "@/components/tweet-prompt";
-import { PartialAssistantPost, TweetModel } from "@/types";
+import { EnrichedTweetModel, PartialAssistantPost, TweetModelBase } from "@/types";
 import { publishNewUserPost } from "@/actions";
 import Logo from "./logo";
 
 export default function FeedView() {
-  const [newMessages, setNewMessages] = useState<Array<{ userPost: TweetModel, assistantPost?: PartialAssistantPost }>>([]);
+  const [newMessages, setNewMessages] = useState<Array<{ userPost: TweetModelBase, assistantPost?: PartialAssistantPost }>>([]);
 
   return (
     <>
@@ -37,7 +37,9 @@ function IntroTweet() {
   return (
     <div className="w-full flex flex-row gap-2 mt-4 mx-2">
       <div className="pt-[.2em] text-gray-700">
-        <Logo size={24} />
+        <a href="https://trychroma.com">
+          <Logo size={24} />
+        </a>
       </div>
       <div className="flex flex-col w-full items-stretch gap-2">
         <div className="font-ui text-sm">
@@ -48,8 +50,8 @@ function IntroTweet() {
   );
 }
 
-function Tweets({ newMessages }: { newMessages: { userPost: TweetModel, assistantPost?: PartialAssistantPost }[] }) {
-  const [oldMessages, setOldMessages] = useState<TweetModel[]>([]);
+function Tweets({ newMessages }: { newMessages: { userPost: TweetModelBase, assistantPost?: PartialAssistantPost }[] }) {
+  const [oldMessages, setOldMessages] = useState<EnrichedTweetModel[]>([]);
 
   // These states are used for infinite scroll pagination
   // we have `page` to keep track of how many "pages" we've loaded and to
@@ -57,16 +59,16 @@ function Tweets({ newMessages }: { newMessages: { userPost: TweetModel, assistan
   // `loading` acts like a mutex to prevent multiple requests being made at the same time
   // `cursor` is specific to the pagination implementation
   const [initialLoading, setInitialLoading] = useState<boolean>(true);
-  const [loading, setLoading] = useState<boolean>(false);
+  const loadingRef = useRef<boolean>(false);
   const [page, setPage] = useState<number>(0);
   const [cursor, setCursor] = useState<number>(-1);
   const [hasMore, setHasMore] = useState<boolean>(true);
 
   useEffect(() => {
-    if (loading || !hasMore) return;
+    if (loadingRef.current || !hasMore) return;
 
     const loadMorePosts = async () => {
-      setLoading(true);
+      loadingRef.current = true;
       try {
         let url;
         if (initialLoading) {
@@ -85,7 +87,7 @@ function Tweets({ newMessages }: { newMessages: { userPost: TweetModel, assistan
       } catch (error) {
         console.error('Error loading more posts:', error);
       } finally {
-        setLoading(false);
+        loadingRef.current = false;
       }
     };
 
@@ -95,7 +97,7 @@ function Tweets({ newMessages }: { newMessages: { userPost: TweetModel, assistan
   // Window scroll event listener for infinite scroll
   useEffect(() => {
     const onScroll = () => {
-      if (!hasMore || loading) return;
+      if (!hasMore || loadingRef.current) return;
       const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
       if (scrollTop + clientHeight >= scrollHeight - 100) {
         setPage((prevPage) => prevPage + 1);
@@ -106,11 +108,11 @@ function Tweets({ newMessages }: { newMessages: { userPost: TweetModel, assistan
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  if (loading && oldMessages.length === 0 && newMessages.length === 0) {
+  if (loadingRef.current && oldMessages.length === 0 && newMessages.length === 0) {
     return <TweetSkeleton />;
   }
 
-  if (!initialLoading && !loading && oldMessages.length === 0 && newMessages.length === 0) {
+  if (!initialLoading && !loadingRef.current && oldMessages.length === 0 && newMessages.length === 0) {
     return <div className="flex flex-row font-ui justify-center py-20 mb-48">
       <div>
         <p>No posts yet... Make your first post!</p>
@@ -133,7 +135,7 @@ function Tweets({ newMessages }: { newMessages: { userPost: TweetModel, assistan
 
         <li className="flex flex-col">
           {oldMessages.map((p) => (
-            <Tweet key={p.id} tweet={p} />
+            <Tweet key={p.id} tweet={p} aiReply={p.enrichedAiReply} />
           ))}
         </li>
       </AnimatePresence>

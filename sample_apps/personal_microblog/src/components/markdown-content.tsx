@@ -23,14 +23,14 @@ const markdownPipeline = remark()
     }
   })
 
-export function MarkdownContent({ content, className }: { content: string, className?: string }) {
+export function MarkdownContent({ content, placeholder, className }: { content: string, placeholder?: string, className?: string }) {
   const [rendering, setRendering] = useState(true);
   const [htmlBody, setHtmlBody] = useState(<></>);
   const [estimatedLines, setEstimatedLines] = useState(3);
 
   useEffect(() => {
     markdownPipeline
-      .process(content)
+      .process(content ?? placeholder ?? "")
       .then((result: { result: any }) => {
         setRendering(false);
         setHtmlBody(result.result);
@@ -43,7 +43,9 @@ export function MarkdownContent({ content, className }: { content: string, class
           </>
         );
       });
-    setEstimatedLines(content.length / 30);
+    const lines = content.split("\n");
+    const estimatedLineCount = Math.max(1, Math.floor(lines.reduce((acc, line) => acc + (line.length / 30), 0)));
+    setEstimatedLines(estimatedLineCount);
   }, [content]);
 
   if (rendering) {

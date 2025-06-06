@@ -162,7 +162,7 @@ export default function TweetPrompt(props: TweetPromptProps) {
       <div className={`font-ui flex flex-col gap-2 relative items-end w-full bg-zinc-100 px-2 py-1.5 w-full outline-none text-zinc-800 ${DEBUG_MODE ? styles.debugLayers : ""}`}>
         <InputWithSyntaxHighlighting ref={textareaRef} input={input} setInput={setInput} onKeyDown={handleKeyDown} placeholder={props.placeholder} />
         <div className="flex flex-row gap-1">
-          <motion.div className="px-2 py-1 text-xs text-zinc-500" animate={visibilityVariants}>{input.length}</motion.div>
+          <motion.div className="px-2 py-1 text-xs text-zinc-500 opacity-0" animate={visibilityVariants}>{input.length}</motion.div>
           <button className={`px-2 py-1 text-xs text-zinc-500 ${input.length > 0 ? "text-zinc-800" : "cursor-not-allowed"}`} onClick={handleSubmit}>Send</button>
         </div>
       </div>

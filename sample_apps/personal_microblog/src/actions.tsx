@@ -1,6 +1,6 @@
 "use server";
 
-import { PartialAssistantPost, TweetModel, TweetStatus } from "@/types";
+import { EnrichedTweetModel, PartialAssistantPost, TweetModelBase, TweetStatus } from "@/types";
 import { openai } from '@ai-sdk/openai';
 import { createStreamableValue, StreamableValue } from 'ai/rsc';
 import { generateText, generateObject, jsonSchema, streamText } from 'ai';
@@ -9,6 +9,7 @@ import {
   chromaGetResultsToPostModels,
   chromaQueryResultsToPostModels,
   generateId,
+  getReferencedPostsIds,
   unixTimestampNow,
 } from "./util";
 
@@ -64,7 +65,7 @@ const llmModel = openai('gpt-4-turbo')
  * Returns the posts from `cursor` to `cursor - pageSize`, inclusive
  * The new cursor is `cursor - pageSize - 1`
  */
-export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], cursor: number }> {
+export async function getPosts(cursor?: number): Promise<{ posts: EnrichedTweetModel[], cursor: number }> {
   if (cursor != undefined && cursor <= -1) {
     return {
       posts: [],
@@ -72,41 +73,43 @@ export async function getPosts(cursor?: number): Promise<{ posts: TweetModel[], 
     };
   }
   const pageSize = 25;
+  let basePosts: TweetModelBase[] = [];
+  let newCursor: number = -1;
   if (cursor != undefined) {
     let start = cursor - pageSize + 1;
     if (start < 0) {
       start = 0;
     }
-    const posts = await chromaCollection.get({
+    const chromaResult = await chromaCollection.get({
       where: { "role": "user" },
       include: ["documents", "metadatas"],
       limit: cursor - start + 1,
       offset: start,
     });
-    const postModels = chromaGetResultsToPostModels(posts);
-    return {
-      posts: postModels.reverse(),
-      cursor: start - 1,
-    };
+    basePosts = chromaGetResultsToPostModels(chromaResult).reverse();
+    newCursor = start - 1;
   } else {
-    const posts = await chromaCollection.get({
+    const chromaResult = await chromaCollection.get({
       where: { "role": "user" },
       include: ["documents", "metadatas"],
     });
-    const postModels = chromaGetResultsToPostModels(posts);
+    const postModels = chromaGetResultsToPostModels(chromaResult);
     const count = postModels.length;
     let start = count - pageSize + 1;
     if (start < 0) {
       start = 0;
     }
-    return {
-      posts: postModels.slice(start).reverse(),
-      cursor: start - 1,
-    };
+    basePosts = postModels.slice(start).reverse();
+    newCursor = start - 1;
   }
+  const enrichedPosts = await enrichPosts(basePosts);
+  return {
+    posts: enrichedPosts,
+    cursor: newCursor,
+  };
 }
 
-export async function getPostById(id: string): Promise<TweetModel | undefined> {
+export async function getPostById(id: string): Promise<TweetModelBase | undefined> {
   const post = await chromaCollection.get({
     ids: [id],
   });
@@ -114,7 +117,14 @@ export async function getPostById(id: string): Promise<TweetModel | undefined> {
   return res.length > 0 ? res[0] : undefined;
 }
 
-export async function getPostReplies(id: string): Promise<TweetModel[]> {
+async function getPostsByIds(ids: string[]): Promise<TweetModelBase[]> {
+  const posts = await chromaCollection.get({
+    ids: ids,
+  });
+  return chromaGetResultsToPostModels(posts);
+}
+
+export async function getPostReplies(id: string): Promise<TweetModelBase[]> {
   const posts = await chromaCollection.get({
     where: {
       "threadParentId": id,
@@ -123,17 +133,39 @@ export async function getPostReplies(id: string): Promise<TweetModel[]> {
   return chromaGetResultsToPostModels(posts);
 }
 
-export async function semanticSearch(query: string): Promise<TweetModel[]> {
-  const posts = await chromaCollection.query({
+async function enrichPosts(posts: TweetModelBase[]): Promise<EnrichedTweetModel[]> {
+  let referencedPostsIds: string[] = posts.flatMap(getReferencedPostsIds);
+  if (referencedPostsIds.length == 0) {
+    return posts.map((post) => ({
+      ...post,
+      enrichedCitations: [],
+    }));
+  }
+  referencedPostsIds = Array.from(new Set(referencedPostsIds));
+  const referencedPosts = await getPostsByIds(referencedPostsIds);
+  const referencedPostsMap = new Map(referencedPosts.map((p) => [p.id, p]));
+  const enrichedPosts: EnrichedTweetModel[] = posts.map((post) => {
+    return {
+      ...post,
+      enrichedAiReply: post.aiReplyId ? referencedPostsMap.get(post.aiReplyId) : undefined,
+      enrichedCitations: post.citations.map((citationId) => referencedPostsMap.get(citationId)).filter((p) => p != undefined),
+    };
+  });
+  return enrichedPosts;
+}
+
+export async function semanticSearch(query: string): Promise<EnrichedTweetModel[]> {
+  const chromaResult = await chromaCollection.query({
     queryTexts: [query],
     nResults: 10,
   });
-  return chromaQueryResultsToPostModels(posts);
+  const posts = chromaQueryResultsToPostModels(chromaResult);
+  return await enrichPosts(posts);
 }
 
-export async function publishNewUserPost(rawBody: string, threadParentId?: string): Promise<{ userPost: TweetModel, assistantPost: PartialAssistantPost | undefined }> {
+export async function publishNewUserPost(rawBody: string, threadParentId?: string): Promise<{ userPost: TweetModelBase, assistantPost: PartialAssistantPost | undefined }> {
   const { citationIds, newBody } = extractTweetCitations(rawBody);
-  const newPost: TweetModel = {
+  const newPost: TweetModelBase = {
     id: generateId(),
     threadParentId: threadParentId,
     role: "user",
@@ -151,7 +183,7 @@ export async function publishNewUserPost(rawBody: string, threadParentId?: strin
   return { userPost: newPost, assistantPost: partialAssistantPost };
 }
 
-function extractTweetCitations(body: string): {citationIds: string[], newBody: string} {
+function extractTweetCitations(body: string): { citationIds: string[], newBody: string } {
   const citationIds: string[] = [];
   const newBody = body.replace(/\[\[([a-zA-Z0-9]+)\]\]/g, (_, p1) => {
     citationIds.push(p1);
@@ -163,8 +195,7 @@ function extractTweetCitations(body: string): {citationIds: string[], newBody: s
 
 function getAssistantResponse(userInput: string, parentThreadId: string): PartialAssistantPost {
   const id = generateId();
-  const bodyStream = createStreamableValue<string, any>();
-  const citationStream = createStreamableValue<string, any>();
+  const stream = createStreamableValue<string, any>();
   const assistantPost: PartialAssistantPost = {
     id,
     threadParentId: parentThreadId,
@@ -174,30 +205,35 @@ function getAssistantResponse(userInput: string, parentThreadId: string): Partia
     date: unixTimestampNow(),
     status: "processing",
 
-    bodyStream: bodyStream.value,
-    citationStream: citationStream.value,
+    stream: stream.value,
   };
   addPostModelToChromaCollection(assistantPost, chromaCollection).catch(console.error);
-  processAssistantResponse(userInput, assistantPost, bodyStream, citationStream).catch(console.error); // Run in background
+  processAssistantResponse(userInput, assistantPost, stream).catch(console.error); // Run in background
   return assistantPost;
 }
 
-async function processAssistantResponse(userInput: string, post: PartialAssistantPost, bodyStream: any, citationStream: any) {
+/*
+ * All of this could easily be made concurrent, but I negelected to do that so the state stream
+ * looks cooler.
+ */
+async function processAssistantResponse(userInput: string, post: PartialAssistantPost, stream: any) {
   const cleanedUserInput = userInput.replace(/@assistant/g, "").trim();
+
   try {
-    const [semanticContext, queryRange] = await Promise.all([
-      chromaCollection.query({
-        queryTexts: [cleanedUserInput],
-        nResults: 10,
-        where: {
-          "role": "user",
-        }
-      }),
-      generateQueryRange(userInput),
-    ]);
+    stream.update("--BEGIN--");
+    stream.update("Doing vector search for related posts...");
+    const semanticContext = await chromaCollection.query({
+      queryTexts: [cleanedUserInput],
+      nResults: 10,
+      where: {
+        "role": "user",
+      }
+    });
+    stream.update("Generating time range query...");
+    const queryRange = await generateQueryRange(userInput);
     let context = chromaQueryResultsToPostModels(semanticContext);
 
-    if (false && queryRange.start != null && queryRange.end != null) {
+    if (queryRange.start != null && queryRange.end != null) {
       const temporalContext = await chromaCollection.query({
         queryTexts: [cleanedUserInput],
         nResults: 10,
@@ -222,11 +258,25 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
       );
     }
 
+    stream.update("Reranking context...");
     const rerankedContext = await rerank(userInput, context);
 
     const formattedContext = rerankedContext.map((post, i) => {
       return `${new Date(post.date * 1000).toISOString()}: ${post.body}`;
     }).join("\n\n");
+
+    let citationIds = rerankedContext.map((p) => p.id).filter((id) => id != post.id);
+    citationIds = Array.from(new Set(citationIds));
+    // Only take the top 5 citations in order to avoid Metadata quota limits
+    citationIds = citationIds.slice(0, 5);
+    post.citations = citationIds;
+
+    stream.update("--CITATIONS--");
+
+    for (const citation of post.citations) {
+      stream.update(citation);
+    }
+
 
     const { textStream } = await streamText({
       model: llmModel,
@@ -252,22 +302,11 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
       maxTokens: 240,
     });
 
+    stream.update("--BODY--");
     let text = "";
     for await (const textPart of textStream) {
       text += textPart;
-      bodyStream.update(text);
-    }
-
-    // Only take the top 5 citations in order to avoid Metadata quota limits
-    post.citations = rerankedContext.map((p) => p.id).slice(0, 5);
-
-
-    try {
-      for (const citation of post.citations) {
-        citationStream.update(citation);
-      }
-    } catch (error) {
-      console.error("Error updating citation stream:", error);
+      stream.update(text);
     }
 
     post.body = text;
@@ -277,8 +316,7 @@ async function processAssistantResponse(userInput: string, post: PartialAssistan
     post.body = "Sorry, I encountered an error while processing your request.";
     post.status = "error";
   } finally {
-    bodyStream.done();
-    citationStream.done();
+    stream.done();
   }
 
   addPostModelToChromaCollection(post, chromaCollection).catch(console.error);
@@ -342,7 +380,7 @@ async function generateQueryRange(userInput: string): Promise<QueryRange> {
   };
 }
 
-async function rerank(userInput: string, posts: TweetModel[]): Promise<TweetModel[]> {
+async function rerank(userInput: string, posts: TweetModelBase[]): Promise<TweetModelBase[]> {
   const { object } = await generateObject({
     model: llmModel,
     output: "array",

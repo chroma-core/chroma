@@ -1,4 +1,4 @@
-import { TweetModel } from "./types";
+import { TweetModelBase } from "./types";
 
 export default function remember(query: string, chromaCollection: any): string[] {
     const results = chromaCollection.query({

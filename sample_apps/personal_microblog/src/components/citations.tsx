@@ -1,72 +1,72 @@
 "use client";
 
-import { TweetModel } from "@/types";
+import { TweetModelBase } from "@/types";
 import { formatDate } from "@/util";
-import { readStreamableValue, StreamableValue } from "ai/rsc";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import AnimatedNumber from "./animated-number";
 
-export default function Citations({ citationIds, citationStream, collapsedByDefault = false }: { citationIds?: string[], citationStream?: StreamableValue<string, any>, collapsedByDefault?: boolean }) {
-  if (citationIds == undefined && citationStream == undefined) {
-    throw new Error("Either citations or citationStream must be provided");
-  } else if (citationIds && citationStream) {
-    throw new Error("Only one of citations or citationStream must be provided");
-  }
+interface CitationsProps {
+  citations: string[] | TweetModelBase[];
+  collapsedByDefault?: boolean;
+}
 
-  const [internalCitationIds, setInternalCitationIds] = useState<string[]>(citationIds ?? []);
+export default function Citations({ citations, collapsedByDefault = false }: CitationsProps) {
+  const onlyProvidedIds = Array.isArray(citations) && citations.every((citation) => typeof citation === 'string');
   const [collapsed, setCollapsed] = useState(collapsedByDefault);
-  const [isLoading, setIsLoading] = useState(!collapsedByDefault);
-  const [loadedCitations, setLoadedCitations] = useState<TweetModel[]>([]);
+  const [loadedCitations, setLoadedCitations] = useState<TweetModelBase[]>(onlyProvidedIds ? [] : citations);
+  const isLoadingRef = useRef(false);
 
-  useEffect(() => {
-    async function loadCitationsFromStream() {
-      if (!citationStream) {
-        return;
-      }
-      setIsLoading(true);
-      try {
-        for await (const citationId of readStreamableValue(citationStream)) {
-          if (citationId) {
-            setInternalCitationIds((prev) => [...prev, citationId]);
-          }
-        }
-      } catch (error) {
-        console.error('Streaming error:', error);
-      }
-      setIsLoading(false);
-    }
-    loadCitationsFromStream();
-  }, [citationStream]);
-
-  async function prefetchCitations() {
-    if (isLoading || loadedCitations.length > 0) {
+  const fetchCitations = useCallback(async () => {
+    if (!onlyProvidedIds || isLoadingRef.current || loadedCitations.length >= citations.length) {
       return;
     }
-    await Promise.all(internalCitationIds.map(async (id) => {
-      const res = await fetch(`/api/post/${id}`);
-      const json = await res.json();
-      return json;
-    })).then((citations) => {
-      setLoadedCitations(citations);
-    });
-  }
+
+    // Set loading immediately to prevent race conditions
+    isLoadingRef.current = true;
+
+    try {
+      const idsToFetch = citations.slice(loadedCitations.length);
+      const fetchedCitations = await Promise.all(idsToFetch.map(async (id) => {
+        const res = await fetch(`/api/post/${id}`);
+        const json = await res.json();
+        return json;
+      }));
+
+      // Use functional update to prevent duplicates
+      setLoadedCitations((prev) => {
+        const existingIds = new Set(prev.map(citation => citation.id));
+        const newCitations = fetchedCitations.filter(citation => !existingIds.has(citation.id));
+        return [...prev, ...newCitations];
+      });
+    } finally {
+      isLoadingRef.current = false;
+    }
+  }, [onlyProvidedIds, citations, loadedCitations.length]);
 
   useEffect(() => {
     if (collapsed) {
       return;
     }
-    setIsLoading(true);
-    prefetchCitations();
-    setIsLoading(false);
-  }, [collapsed, internalCitationIds]);
+    fetchCitations();
+  }, [collapsed, citations]);
 
-  if (internalCitationIds.length === 0) {
+  if (citations.length === 0) {
     return null;
   }
 
+  let citationsComponent = undefined;
+  if (onlyProvidedIds) {
+    citationsComponent = <>Show {citations.length > 0 && <AnimatedNumber number={citations.length} />} citation{citations.length === 1 ? '' : 's'}</>;
+  } else {
+    citationsComponent = `Show ${citations.length} citation${citations.length === 1 ? '' : 's'}`;
+  }
+
   /*
+   * Initially, when switching the state of `collapsed`, this element would make a jank motion
+   * because its height would potentially suddenly change from 1em to 0, then to something large.
    * citation-count-element and citation-list-element are in the same grid cell
-   * to make them render on top of each other. This eliminates jank when switching
+   * to make them render on top of each other. This eliminates the jank when switching
    * between the two elements.
    * This effectively makes the height of the container max(citation-count-element, citation-list-element),
    * which makes for a smoother transition when `collapsed` is toggled.
@@ -82,8 +82,8 @@ export default function Citations({ citationIds, citationStream, collapsedByDefa
             e.stopPropagation();
             setCollapsed(false);
           }}
-          onHoverStart={() => prefetchCitations()}
-          className={`cursor-pointer col-[1] row-[1]`}>Show {internalCitationIds.length} citations</motion.div>
+          onHoverStart={() => collapsed && fetchCitations()}
+          className={`cursor-pointer col-[1] row-[1]`}>{citationsComponent}</motion.div>
         {!collapsed && (
           <motion.div
             key="citation-list-element"
@@ -100,7 +100,7 @@ export default function Citations({ citationIds, citationStream, collapsedByDefa
   );
 }
 
-function Citation({ tweet }: { tweet: TweetModel }) {
+function Citation({ tweet }: { tweet: TweetModelBase }) {
   const snippet = tweet.body?.split('\n')[0]?.slice(0, 100);
   const hasMore = snippet?.length && snippet.length < (tweet.body?.length ?? 0);
   return (

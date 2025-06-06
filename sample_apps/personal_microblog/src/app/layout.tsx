@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Gelasio } from "next/font/google";
 import "./globals.css";
 
+import Search from "@/components/search";
+
 const gelasio = Gelasio({
   variable: "--font-gelasio",
   subsets: ["latin"],
@@ -23,6 +25,7 @@ export default function RootLayout({
       <body
         className={`${gelasio.variable} antialiased`}
       >
+        <Search />
         {children}
       </body>
     </html>

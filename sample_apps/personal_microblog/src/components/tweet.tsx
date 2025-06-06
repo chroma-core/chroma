@@ -3,20 +3,20 @@
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 
-import { PartialAssistantPost, TweetModel } from "@/types";
+import { PartialAssistantPost, TweetModelBase } from "@/types";
 
 import { useEffect, useState } from "react";
 import TweetBody from "./tweet-body";
 
 interface TweetProps {
-  tweet: TweetModel;
-  aiReply?: PartialAssistantPost;
+  tweet: TweetModelBase;
+  aiReply?: PartialAssistantPost | TweetModelBase;
   className?: string;
 }
 
 export function Tweet({ tweet, aiReply, className = "" }: TweetProps) {
   const router = useRouter();
-  const [reply, setReply] = useState<PartialAssistantPost | undefined>(undefined);
+  const [reply, setReply] = useState<PartialAssistantPost | TweetModelBase | undefined>(undefined);
 
   useEffect(() => {
     if (aiReply) {
@@ -41,8 +41,17 @@ export function Tweet({ tweet, aiReply, className = "" }: TweetProps) {
     router.push(`/post/${tweet.id}`);
   };
 
+  let aiReplyComponent = null;
+  const aiReplyClassName = "text-sm text-gray-500 font-ui mt-2 min-h-[1em]";
+  const aiReplyProps = { className: aiReplyClassName, citationsCollapsedByDefault: true };
+  if (reply && 'stream' in reply) {
+    aiReplyComponent = <TweetBody stream={reply.stream} {...aiReplyProps} /> ;
+  } else if (reply) {
+    aiReplyComponent = <TweetBody body={reply.body} citations={reply.citations} {...aiReplyProps} />;
+  }
+
   return (
-    <motion.div
+    <div
       className={`grid grid-cols-[120px_1fr] hover:bg-gray-100 cursor-pointer ${className}`}
       onClick={goToPostPage}
     >
@@ -51,9 +60,15 @@ export function Tweet({ tweet, aiReply, className = "" }: TweetProps) {
       </div>
       <div className={`pt-4 pb-4 pl-4 pr-4 border-l-[.5px]`}>
         <TweetBody body={tweet.body} citations={tweet.citations} className={className} />
-        {reply && <div className="mt-2"><TweetBody body={reply.bodyStream ?? reply.body} citations={reply.citationStream ?? reply.citations} className={"text-sm text-gray-500 font-ui"} citationsCollapsedByDefault={true} /></div>}
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          transition={{ duration: 0.2, ease: "easeOut" }}
+        >
+        {reply && aiReplyComponent}
+        </motion.div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { publishNewUserPost } from "@/actions";
-import { TweetModel } from "@/types";
+import { EnrichedTweetModel, TweetModelBase } from "@/types";
 import { useEffect, useState } from "react";
 import TweetPrompt from "./tweet-prompt";
 import { Tweet } from "./tweet";
@@ -10,18 +10,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from 'next/navigation'
 import TweetBody from "./tweet-body";
 
-export default function PermalinkTweetView({ post, parentPosts, existingReplies }: { post: TweetModel, parentPosts: TweetModel[], existingReplies: TweetModel[] }) {
-  const [replies, setReplies] = useState<TweetModel[]>(existingReplies);
-  const [relatedPosts, setRelatedPosts] = useState<TweetModel[]>([]);
-
-  useEffect(() => {
-    const getRelatedPosts = async () => {
-      const response = await fetch(`/api/search?q=${encodeURIComponent(post.body)}`);
-      const relatedPosts = await response.json();
-      setRelatedPosts(relatedPosts.filter((p: TweetModel) => p.id !== post.id));
-    };
-    getRelatedPosts();
-  }, [post]);
+export default function PermalinkTweetView({ post, parentPosts, existingReplies }: { post: TweetModelBase, parentPosts: TweetModelBase[], existingReplies: TweetModelBase[] }) {
+  const [replies, setReplies] = useState<TweetModelBase[]>(existingReplies);
 
   function handleSubmit(input: string) {
     const postReply = async () => {
@@ -56,17 +46,6 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
     </div>
   </div>);
 
-  const relatedPostsComponent = relatedPosts.length > 0 && (
-    <>
-      <h2 className="ml-[15px] font-ui pb-4 pt-6">Related Posts</h2>
-      <div>
-        {relatedPosts.map((p) => (
-          <Tweet key={p.id} tweet={p} />
-        ))}
-      </div>
-    </>
-  );
-
   return (
     <div className="flex flex-col items-center py-20">
       <div className="w-[600px] max-w-[calc(100dvw-32px)]">
@@ -81,16 +60,16 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
           {replies.map((r) => (
             <PermalinkReply key={r.id} reply={r} />
           ))}
-        </div>
-        <div className="min-h-[100dvh]">
-          {relatedPostsComponent}
-        </div>
+                  </div>
+          <div className="min-h-[100dvh]">
+            <RelatedPosts searchTerm={post.body} currentPostId={post.id} />
+          </div>
       </div>
     </div>
   );
 }
 
-function ParentPosts({ parentPosts }: { parentPosts: TweetModel[] }) {
+function ParentPosts({ parentPosts }: { parentPosts: TweetModelBase[] }) {
   if (parentPosts.length === 0) {
     return null;
   }
@@ -112,7 +91,7 @@ function ParentPosts({ parentPosts }: { parentPosts: TweetModel[] }) {
   );
 }
 
-function PermalinkReply({ reply }: { reply: TweetModel }) {
+function PermalinkReply({ reply }: { reply: TweetModelBase }) {
   const [isHovered, setIsHovered] = useState(false);
   const [isReplying, setIsReplying] = useState(false);
 
@@ -178,5 +157,41 @@ function PermalinkReplyButton({ icon, onClick }: { icon: React.ReactNode, onClic
         {icon}
       </div>
     </div>
+  );
+}
+
+function RelatedPosts({ searchTerm, currentPostId }: { searchTerm: string, currentPostId: string }) {
+  const [relatedPosts, setRelatedPosts] = useState<EnrichedTweetModel[]>([]);
+
+  useEffect(() => {
+    const getRelatedPosts = async () => {
+      const response = await fetch('/api/search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: searchTerm
+        })
+      });
+      const relatedPosts = await response.json();
+      setRelatedPosts(relatedPosts.filter((p: EnrichedTweetModel) => p.id !== currentPostId));
+    };
+    getRelatedPosts();
+  }, [searchTerm, currentPostId]);
+
+  if (relatedPosts.length === 0) {
+    return null;
+  }
+
+  return (
+    <>
+      <h2 className="ml-[15px] font-ui pb-4 pt-6">Related Posts</h2>
+      <div>
+        {relatedPosts.map((p) => (
+          <Tweet key={p.id} tweet={p} aiReply={p.enrichedAiReply} />
+        ))}
+      </div>
+    </>
   );
 }

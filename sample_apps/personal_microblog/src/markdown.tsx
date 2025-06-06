@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { TweetModel } from "./types";
+import { TweetModelBase } from "./types";
 import { useEffect, useState } from "react";
 
 export const Strong: React.FC<React.HTMLProps<HTMLSpanElement>> = ({ children, ...props }) => {
@@ -41,7 +41,7 @@ export const AnchorTag: React.FC = ({
 };
 
 function TweetReference({ children, id }: { children: React.ReactNode, id: string }) {
-  const [post, setPost] = useState<TweetModel | null>(null);
+  const [post, setPost] = useState<TweetModelBase | null>(null);
 
   useEffect(() => {
     fetch(`/api/post/${id}`).then(async (res) => {

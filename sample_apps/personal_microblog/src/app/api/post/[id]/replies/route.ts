@@ -1,4 +1,4 @@
-import { TweetModel } from "@/types";
+import { TweetModelBase } from "@/types";
 import { chromaClient, chromaCollection } from "@/clients";
 import {
   chromaGetResultsToPostModels,

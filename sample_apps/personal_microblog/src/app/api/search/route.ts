@@ -1,14 +1,10 @@
 import { semanticSearch } from "@/actions";
-import {
-  chromaQueryResultsToPostModels,
-} from "@/util";
 import { NextRequest, NextResponse } from "next/server";
 
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-
+export async function POST(request: NextRequest) {
   try {
-    const query = searchParams.get('q');
+    const body = await request.json();
+    const { query } = body;
 
     if (!query) {
       return NextResponse.json({ error: 'Search query is required' }, { status: 400 });

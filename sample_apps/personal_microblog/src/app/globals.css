@@ -14,3 +14,25 @@ body {
   font-family: var(--font-ui);
   border-color: black;
 }
+
+.background-gradient::before {
+  position: sticky;
+  background-image: radial-gradient(circle 400px at 70px 200px, rgba(147, 51, 234, 0.3), transparent 80%), radial-gradient(circle 300px at calc(100% - 30px) 300px, rgba(29, 78, 216, 0.2), transparent 80%), radial-gradient(circle 400px at right center, rgba(14, 165, 233, 0.2), transparent 80%), radial-gradient(circle 400px at right bottom, rgba(125, 211, 252, 0.15), transparent 80%), radial-gradient(circle 400px at calc(50% - 600px) calc(100% - 100px), rgba(244, 114, 182, 0.2), rgba(252, 231, 243, 0.1), transparent 80%);
+  filter: blur(40px);
+  z-index: -10000;
+}
+
+.background-gradient::after {
+  z-index: -1;
+  opacity: .2;
+  filter: invert(1);
+}
+
+.background-gradient::after,
+.background-gradient::before {
+  position: absolute;
+  content: "";
+  width: 100%;
+  height: 100%;
+  top: 0;
+}
