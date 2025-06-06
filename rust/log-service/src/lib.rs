@@ -947,7 +947,6 @@ impl LogServer {
             .record(total_uncompacted as f64, &[]);
         self.set_backpressure(&backpressure);
         let mut need_to_compact = self.need_to_compact.lock();
-        println!(">>>>>> Updated dirty logs: {rollups:?}");
         std::mem::swap(&mut *need_to_compact, &mut rollups);
         Ok(())
     }
@@ -1132,18 +1131,6 @@ impl LogServer {
                     }
                 }
             }
-            let log_reader = LogReader::new(
-                self.config.reader.clone(),
-                Arc::clone(&self.storage),
-                prefix,
-            );
-            println!(
-                ">>>>>> Manifest after push: {:?}",
-                log_reader
-                    .manifest()
-                    .await
-                    .expect("Manifest should be present")
-            );
             Ok(Response::new(PushLogsResponse {
                 record_count,
                 log_is_sealed: false,
@@ -1170,7 +1157,6 @@ impl LogServer {
                 Arc::clone(&self.storage),
                 prefix,
             );
-            println!(">>>>>> Scout Manifest: {:?}", log_reader.manifest().await.expect("Manifest should be present"));
             let (start_position, limit_position) = match log_reader.manifest().await {
                 Ok(Some(manifest)) => (
                     manifest.minimum_log_position(),
@@ -3351,18 +3337,27 @@ mod tests {
         }
     }
 
-    async fn mock_compact_on_server(server: &LogServer, collection_id: CollectionUuid) {
-        let offsets = server
+    async fn get_enum_offset_on_server(server: &LogServer, collection_id: CollectionUuid) -> i64 {
+        server
             .scout_logs(Request::new(ScoutLogsRequest {
                 collection_id: collection_id.to_string(),
             }))
             .await
             .expect("Scout Logs should not fail")
-            .into_inner();
+            .into_inner()
+            .first_uninserted_record_offset
+            .saturating_sub(1)
+    }
+
+    async fn mock_compact_on_server(
+        server: &LogServer,
+        collection_id: CollectionUuid,
+        compact_offset: i64,
+    ) {
         server
             .update_collection_log_offset(Request::new(UpdateCollectionLogOffsetRequest {
                 collection_id: collection_id.to_string(),
-                log_offset: offsets.first_uninserted_record_offset.saturating_sub(1),
+                log_offset: compact_offset,
             }))
             .await
             .expect("Update Compaction Offset should not fail");
@@ -3391,10 +3386,86 @@ mod tests {
         assert_eq!(got_collection_ids, expected_collection_ids);
     }
 
+    fn test_push_pull_logs(
+        read_offset: usize,
+        batch_size: usize,
+        operations: Vec<OperationRecord>,
+    ) {
+        let runtime = Runtime::new().unwrap();
+
+        runtime.block_on(async move {
+            let log_server = setup_log_server().await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
+
+            let collection_id = CollectionUuid::new();
+            log_server
+                .proxy
+                .clone()
+                .expect("Legacy log service should be present")
+                .seal_log(Request::new(SealLogRequest {
+                    collection_id: collection_id.to_string(),
+                }))
+                .await
+                .expect("Seal log should not fail");
+
+            for chunk in operations.chunks(100) {
+                push_log_to_server(&log_server, collection_id, chunk).await;
+            }
+
+            validate_dirty_log_on_server(&log_server, &[collection_id]).await;
+            validate_log_on_server(
+                &log_server,
+                collection_id,
+                &operations,
+                read_offset,
+                batch_size,
+            )
+            .await;
+            let enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
+            mock_compact_on_server(&log_server, collection_id, enum_offset).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
+        });
+    }
+
+    fn test_dirty_logs(operations: Vec<(usize, OperationRecord)>) {
+        let runtime = Runtime::new().unwrap();
+
+        runtime.block_on(async move {
+            let log_server = setup_log_server().await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
+
+            let mut collection_id_with_ord = Vec::new();
+            for (index, operation) in operations {
+                let collection_id = CollectionUuid::new();
+                collection_id_with_ord.push((index, collection_id));
+                log_server
+                    .proxy
+                    .clone()
+                    .expect("Legacy log service should be present")
+                    .seal_log(Request::new(SealLogRequest {
+                        collection_id: collection_id.to_string(),
+                    }))
+                    .await
+                    .expect("Seal log should not fail");
+                push_log_to_server(&log_server, collection_id, &[operation]).await;
+                let enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
+                assert_eq!(enum_offset, 1);
+            }
+
+            collection_id_with_ord.sort_by_key(|(index, _)| *index);
+            let mut collection_ids = collection_id_with_ord
+                .into_iter()
+                .map(|(_, id)| id)
+                .collect::<Vec<_>>();
+
+            while let Some(collection_id) = collection_ids.pop() {
+                mock_compact_on_server(&log_server, collection_id, 1).await;
+                validate_dirty_log_on_server(&log_server, &collection_ids).await;
+            }
+        });
+    }
+
     proptest! {
-        #![proptest_config(ProptestConfig {
-            cases: 1, .. ProptestConfig::default()
-        })]
         #[test]
         fn test_k8s_integration_rust_log_service_push_pull_logs(
             read_offset in 1usize..=100,
@@ -3402,35 +3473,18 @@ mod tests {
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=100)
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
-            std::thread::Builder::new().stack_size(1 << 22).spawn(move || {
-                let runtime = Runtime::new().unwrap();
-                let log_server = runtime.block_on(setup_log_server());
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_push_pull_logs(read_offset, batch_size, operations))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
 
-                let collection_id = CollectionUuid::new();
-                runtime.block_on(async move {
-                    log_server
-                        .proxy
-                        .clone()
-                        .expect("Legacy log service should be present")
-                        .seal_log(Request::new(
-                            SealLogRequest { collection_id: collection_id.to_string() }
-                        ))
-                        .await
-                        .expect("Seal log should not fail");
-
-                    validate_dirty_log_on_server(&log_server, &Vec::new()).await;
-
-                    println!("[DEBUG-PROP] Pushing {} log to server", operations.len());
-                    for chunk in operations.chunks(100) {
-                        push_log_to_server(&log_server, collection_id, chunk).await;
-                    }
-
-                    validate_dirty_log_on_server(&log_server, &[collection_id]).await;
-                    validate_log_on_server(&log_server, collection_id, &operations, read_offset, batch_size).await;
-                    mock_compact_on_server(&log_server, collection_id).await;
-                    validate_dirty_log_on_server(&log_server, &Vec::new()).await;
-                });
-            })
+        #[test]
+        fn test_k8s_integration_rust_log_service_dirty_logs(
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=5).prop_map(|ops| ops.into_iter().enumerate().collect()).prop_shuffle()
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_dirty_logs(operations))
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
