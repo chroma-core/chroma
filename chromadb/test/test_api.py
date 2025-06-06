@@ -19,11 +19,13 @@ from chromadb.config import Settings
 from chromadb.errors import ChromaError, InvalidArgumentError, NotFoundError
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
-persist_dir = tempfile.mkdtemp()
-
 
 @pytest.fixture
-def local_persist_api():
+def persist_dir():
+    return tempfile.mkdtemp()
+
+@pytest.fixture
+def local_persist_api(persist_dir):
     client = chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
@@ -44,7 +46,7 @@ def local_persist_api():
 
 # https://docs.pytest.org/en/6.2.x/fixture.html#fixtures-can-be-requested-more-than-once-per-test-return-values-are-cached
 @pytest.fixture
-def local_persist_api_cache_bust():
+def local_persist_api_cache_bust(persist_dir):
     client = chromadb.Client(
         Settings(
             chroma_api_impl="chromadb.api.segment.SegmentAPI",
