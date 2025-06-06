@@ -115,7 +115,7 @@ function Citation({ tweet }: { tweet: TweetModelBase }) {
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: 'auto' }}
     >
-      <div>({formatDate(tweet.date)}) {snippet}{hasMore && '...'}</div>
+      <div>{snippet}{hasMore && '...'}</div>
     </motion.div>
   );
 }

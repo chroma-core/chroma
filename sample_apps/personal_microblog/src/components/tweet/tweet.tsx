@@ -42,7 +42,7 @@ export function Tweet({ tweet, aiReply, className = "" }: TweetProps) {
   };
 
   let aiReplyComponent = null;
-  const aiReplyClassName = "text-sm text-gray-500 font-ui mt-2 min-h-[1em]";
+  const aiReplyClassName = `text-sm font-ui mt-2 min-h-[1em] text-[var(--accent)]`;
   const aiReplyProps = { className: aiReplyClassName, citationsCollapsedByDefault: true };
   if (reply && 'stream' in reply) {
     aiReplyComponent = <TweetBody stream={reply.stream} {...aiReplyProps} /> ;

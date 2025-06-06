@@ -112,7 +112,7 @@ export default function TweetBody({
   return (
     <div className={`${className}`}>
       {bodyComponent}
-      <div className="mt-2">
+      <div className="mt-2 text-gray-500">
         {citationsComponent}
       </div>
     </div>

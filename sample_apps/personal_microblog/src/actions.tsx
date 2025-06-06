@@ -163,6 +163,18 @@ export async function semanticSearch(query: string): Promise<EnrichedTweetModel[
   return await enrichPosts(posts);
 }
 
+export async function fullTextSearch(query: string): Promise<EnrichedTweetModel[]> {
+  const chromaResult = await chromaCollection.query({
+    queryTexts: [query],
+    nResults: 10,
+    whereDocument: {
+      "$contains": query
+    }
+  });
+  const posts = chromaQueryResultsToPostModels(chromaResult);
+  return await enrichPosts(posts);
+}
+
 export async function publishNewUserPost(rawBody: string, threadParentId?: string): Promise<{ userPost: TweetModelBase, assistantPost: PartialAssistantPost | undefined }> {
   const { citationIds, newBody } = extractTweetCitations(rawBody);
   const newPost: TweetModelBase = {
