@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
+        python: ${{ fromJson(inputs.python_versions) }}
         test-glob:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
@@ -60,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
+        python: ${{ fromJson(inputs.python_versions) }}
         test-globs:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property/test_add.py"
@@ -91,7 +91,7 @@ jobs:
   test-rust-thin-client:
     strategy:
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
+        python: ${{ fromJson(inputs.python_versions) }}
         test-globs:
           - "chromadb/test/property/test_add.py"
           - "chromadb/test/property/test_collections.py"
@@ -123,7 +123,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
+        python: ${{ fromJson(inputs.python_versions) }}
         test-glob:
           - "chromadb/test/api"
           - "chromadb/test/api/test_collection.py"
@@ -189,8 +189,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
-    runs-on: ${{ inputs.runner}}
+        python: ${{ fromJson(inputs.python_versions) }}
+    runs-on: ${{ inputs.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -220,7 +220,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
+        python: ${{ fromJson(inputs.python_versions) }}
     runs-on: ${{ inputs.runner }}
     steps:
     - name: Checkout
@@ -251,7 +251,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
+        python: ${{ fromJson(inputs.python_versions) }}
         run_number: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 ]
     runs-on: 16core-64gb-windows-latest
     steps:
