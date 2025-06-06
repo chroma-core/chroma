@@ -149,6 +149,103 @@ func TestCatalog_GetCollections(t *testing.T) {
 	mockMetaDomain.AssertExpectations(t)
 }
 
+func TestCatalog_GetCollectionByResourceName(t *testing.T) {
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockCollectionDb := &mocks.ICollectionDb{}
+
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
+
+	tenantID := "test_tenant"
+	databaseID := types.NewUniqueID().String()
+	tenantResourceName := "test_tenant_resource_name"
+	collectionID := "00000000-0000-0000-0000-000000000001"
+	collectionName := "test_collection"
+	configurationJson := "{test_config}"
+	dim := int32(128)
+
+	mockCollectionEntry := &dbmodel.CollectionAndMetadata{
+		Collection: &dbmodel.Collection{
+			ID:                   collectionID,
+			Name:                 &collectionName,
+			ConfigurationJsonStr: &configurationJson,
+			Dimension:            &dim,
+			DatabaseID:           databaseID,
+			Ts:                   types.Timestamp(0),
+			IsDeleted:            false,
+			CreatedAt:            time.Now(),
+			UpdatedAt:            time.Now(),
+			Tenant:               tenantID,
+		},
+		CollectionMetadata: []*dbmodel.CollectionMetadata{},
+		TenantID:           tenantID,
+		DatabaseName:       "test_database",
+	}
+
+	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
+	mockCollectionDb.On("GetCollectionByResourceName", tenantResourceName, tenantID, databaseID).Return(mockCollectionEntry, nil)
+
+	result, err := catalog.GetCollectionByResourceName(context.Background(), tenantResourceName, tenantID, databaseID)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, collectionID, result.ID.String())
+	assert.Equal(t, collectionName, result.Name)
+	assert.Equal(t, configurationJson, result.ConfigurationJsonStr)
+	assert.Equal(t, dim, *result.Dimension)
+	assert.Equal(t, databaseID, result.DatabaseId.String())
+
+	mockMetaDomain.AssertExpectations(t)
+	mockCollectionDb.AssertExpectations(t)
+}
+
+func TestCatalog_GetCollectionByResourceName_NotFound(t *testing.T) {
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockCollectionDb := &mocks.ICollectionDb{}
+
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
+
+	tenantID := "test_tenant"
+	databaseID := types.NewUniqueID().String()
+	tenantResourceName := "non_existent_tenant_resource_name"
+
+	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
+	mockCollectionDb.On("GetCollectionByResourceName", tenantResourceName, tenantID, databaseID).Return((*dbmodel.CollectionAndMetadata)(nil), nil)
+
+	result, err := catalog.GetCollectionByResourceName(context.Background(), tenantResourceName, tenantID, databaseID)
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
+
+	mockMetaDomain.AssertExpectations(t)
+	mockCollectionDb.AssertExpectations(t)
+}
+
+func TestCatalog_GetCollectionByResourceName_DbError(t *testing.T) {
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockCollectionDb := &mocks.ICollectionDb{}
+
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
+
+	tenantID := "test_tenant"
+	databaseID := types.NewUniqueID().String()
+	tenantResourceName := "test_tenant_resource_name"
+
+	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
+	mockCollectionDb.On("GetCollectionByResourceName", tenantResourceName, tenantID, databaseID).Return((*dbmodel.CollectionAndMetadata)(nil), assert.AnError)
+
+	result, err := catalog.GetCollectionByResourceName(context.Background(), tenantResourceName, tenantID, databaseID)
+
+	assert.Error(t, err)
+	assert.Equal(t, assert.AnError, err)
+	assert.Nil(t, result)
+
+	mockMetaDomain.AssertExpectations(t)
+	mockCollectionDb.AssertExpectations(t)
+}
+
 func TestCatalog_GetCollectionSize(t *testing.T) {
 	mockMetaDomain := &mocks.IMetaDomain{}
 	catalog := NewTableCatalog(nil, mockMetaDomain, nil, false)

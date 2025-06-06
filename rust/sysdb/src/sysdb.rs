@@ -688,7 +688,6 @@ impl GrpcSysDb {
     ) -> Result<GetTenantResponse, GetTenantError> {
         let req = chroma_proto::GetTenantRequest {
             name: tenant_name.clone(),
-            ..Default::default()
         };
         match self.client.get_tenant(req).await {
             Ok(resp) => Ok(GetTenantResponse {

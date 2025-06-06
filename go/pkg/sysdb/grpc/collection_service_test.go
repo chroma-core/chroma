@@ -375,6 +375,74 @@ func (suite *CollectionServiceTestSuite) TestServer_GetCollection() {
 	suite.NoError(err)
 }
 
+func (suite *CollectionServiceTestSuite) TestServer_GetCollectionByResourceName() {
+	tenantResourceName := "test_tenant_resource_name"
+	tenantID := "test_tenant_id"
+	databaseName := "test_database"
+	collectionName := "test_collection"
+	dim := int32(128)
+
+	databaseID, err := dao.CreateTestTenantAndDatabase(suite.db, tenantID, databaseName)
+	suite.NoError(err)
+
+	err = dao.SetTestTenantResourceName(suite.db, tenantID, tenantResourceName)
+	suite.NoError(err)
+
+	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, dim, databaseID, nil)
+	suite.NoError(err)
+
+	req := &coordinatorpb.GetCollectionByResourceNameRequest{
+		TenantResourceName: &tenantResourceName,
+		Database:           &databaseName,
+		Name:               &collectionName,
+	}
+	resp, err := suite.s.GetCollectionByResourceName(context.Background(), req)
+	suite.NoError(err)
+	suite.NotNil(resp)
+	suite.NotNil(resp.Collection)
+	suite.Equal(collectionID, resp.Collection.Id)
+	suite.Equal(collectionName, resp.Collection.Name)
+	suite.Equal(tenantID, resp.Collection.Tenant)
+	suite.Equal(databaseName, resp.Collection.Database)
+
+	nonExistentCollectionName := "non_existent_collection"
+	req = &coordinatorpb.GetCollectionByResourceNameRequest{
+		TenantResourceName: &tenantResourceName,
+		Database:           &databaseName,
+		Name:               &nonExistentCollectionName,
+	}
+	resp, err = suite.s.GetCollectionByResourceName(context.Background(), req)
+	suite.Error(err)
+	suite.Nil(resp.Collection)
+
+	nonExistentDatabaseName := "non_existent_database"
+	req = &coordinatorpb.GetCollectionByResourceNameRequest{
+		TenantResourceName: &tenantResourceName,
+		Database:           &nonExistentDatabaseName,
+		Name:               &collectionName,
+	}
+	resp, err = suite.s.GetCollectionByResourceName(context.Background(), req)
+	suite.Error(err)
+	suite.Nil(resp.Collection)
+
+	nonExistentTenantResourceName := "non_existent_resource_name"
+	req = &coordinatorpb.GetCollectionByResourceNameRequest{
+		TenantResourceName: &nonExistentTenantResourceName,
+		Database:           &databaseName,
+		Name:               &collectionName,
+	}
+	resp, err = suite.s.GetCollectionByResourceName(context.Background(), req)
+	suite.Error(err)
+	suite.Nil(resp.Collection)
+
+	err = dao.CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+	err = dao.CleanUpTestDatabase(suite.db, tenantID, databaseName)
+	suite.NoError(err)
+	err = dao.CleanUpTestTenant(suite.db, tenantID)
+	suite.NoError(err)
+}
+
 func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() {
 	log.Info("TestServer_FlushCollectionCompaction")
 	// create test collection

@@ -478,6 +478,23 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionIDs []types.Uni
 	return collections, nil
 }
 
+func (tc *Catalog) GetCollectionByResourceName(ctx context.Context, tenantResourceName string, databaseName string, collectionName string) (*model.Collection, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.GetCollectionByResourceName")
+		defer span.End()
+	}
+
+	collectionAndMetadata, err := tc.metaDomain.CollectionDb(ctx).GetCollectionByResourceName(tenantResourceName, databaseName, collectionName)
+	if err != nil {
+		return nil, err
+	}
+	if collectionAndMetadata == nil {
+		return nil, common.ErrCollectionNotFound
+	}
+	return convertCollectionToModel([]*dbmodel.CollectionAndMetadata{collectionAndMetadata})[0], nil
+}
+
 func (tc *Catalog) CountCollections(ctx context.Context, tenantID string, databaseName *string) (uint64, error) {
 	tracer := otel.Tracer
 	if tracer != nil {

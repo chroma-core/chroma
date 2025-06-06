@@ -70,6 +70,29 @@ func (s *collectionDb) GetCollections(ids []string, name *string, tenantID strin
 	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, isDeletedPtr)
 }
 
+func (s *collectionDb) GetCollectionByResourceName(tenantResourceName string, databaseName string, collectionName string) (*dbmodel.CollectionAndMetadata, error) {
+	var tenant dbmodel.Tenant
+	err := s.db.Table("tenants").Where("resource_name = ?", tenantResourceName).First(&tenant).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, common.ErrCollectionNotFound
+		}
+		return nil, err
+	}
+
+	isDeleted := false
+	isDeletedPtr := &isDeleted
+
+	collections, err := s.getCollections([]string{}, &collectionName, tenant.ID, databaseName, nil, nil, isDeletedPtr)
+	if err != nil {
+		return nil, err
+	}
+	if len(collections) == 0 {
+		return nil, common.ErrCollectionNotFound
+	}
+	return collections[0], nil
+}
+
 func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*dbmodel.CollectionToGc, error) {
 	// There are three types of collections:
 	// 1. Regular: a collection created by a normal call to create_collection(). Does not have a root_collection_id or a lineage_file_name.

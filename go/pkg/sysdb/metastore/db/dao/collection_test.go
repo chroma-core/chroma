@@ -276,6 +276,61 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollectionSize() {
 	suite.NoError(err)
 }
 
+func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollectionByResourceName() {
+	tenantResourceName := "test_tenant_resource_name"
+	tenantID := "test_tenant_id"
+
+	tenantDb := &tenantDb{
+		db: suite.db,
+	}
+	// Create tenant first
+	err := tenantDb.Insert(&dbmodel.Tenant{
+		ID: tenantID,
+	})
+	suite.NoError(err)
+
+	// Set tenant resource name
+	err = tenantDb.SetTenantResourceName(tenantID, tenantResourceName)
+	suite.NoError(err)
+
+	databaseName := "test_database"
+	databaseID, err := CreateTestDatabase(suite.db, tenantID, databaseName)
+	suite.NoError(err)
+
+	collectionName := "test_collection"
+	dim := int32(128)
+	collectionID, err := CreateTestCollection(suite.db, collectionName, dim, databaseID, nil)
+	suite.NoError(err)
+
+	collection, err := suite.collectionDb.GetCollectionByResourceName(tenantResourceName, databaseName, collectionName)
+	suite.NoError(err)
+	suite.NotNil(collection)
+	suite.Equal(collectionID, collection.Collection.ID)
+	suite.Equal(collectionName, *collection.Collection.Name)
+	suite.Equal(databaseID, collection.Collection.DatabaseID)
+	suite.Equal(tenantID, collection.TenantID)
+	suite.Equal(databaseName, collection.DatabaseName)
+
+	nonExistentCollection, err := suite.collectionDb.GetCollectionByResourceName(tenantResourceName, databaseName, "non_existent_collection")
+	suite.Error(err, "collection not found")
+	suite.Nil(nonExistentCollection)
+
+	nonExistentCollection, err = suite.collectionDb.GetCollectionByResourceName(tenantResourceName, "non_existent_database", collectionName)
+	suite.Error(err, "collection not found")
+	suite.Nil(nonExistentCollection)
+
+	nonExistentCollection, err = suite.collectionDb.GetCollectionByResourceName("non_existent_resource_name", databaseName, collectionName)
+	suite.Error(err, "collection not found")
+	suite.Nil(nonExistentCollection)
+
+	err = CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+	err = CleanUpTestDatabase(suite.db, tenantID, databaseName)
+	suite.NoError(err)
+	err = suite.db.Delete(&dbmodel.Tenant{}, "id = ?", tenantID).Error
+	suite.NoError(err)
+}
+
 func TestCollectionDbTestSuiteSuite(t *testing.T) {
 	testSuite := new(CollectionDbTestSuite)
 	suite.Run(t, testSuite)
