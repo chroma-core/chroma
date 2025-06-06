@@ -171,19 +171,20 @@ jobs:
     name: Python Windows smoke test
     needs: change-detection
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
-    # strategy:
-    #   fail-fast: false
-    #   matrix:
-    #     # excluding 3.9 here because onnxruntime 1.20.x does not have a wheel for it
-    #     python: [ "3.10", "3.11", "3.12" ]
-    runs-on: 16core-64gb-windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        run_number: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ]
+        python: [ "3.9", "3.10", "3.11", "3.12" ]
+        runner: [ "32core-128gb-windows-latest", "16core-64gb-windows-latest" ]
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup Python
         uses: ./.github/actions/python
         with:
-          python-version: "3.9"
+          python-version: ${{ matrix.python }}
       - name: Setup Rust
         uses: ./.github/actions/rust
         with:
@@ -202,6 +203,7 @@ jobs:
           PROPERTY_TESTING_PRESET: 'normal'
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
           RUST_BACKTRACE: 1
+          RUN_NUMBER: ${{ matrix.run_number }}
         # run: uv run pytest chromadb/test/test_api.py -n auto --dist worksteal -v --color=yes
 
   python-vulnerability-scan:
