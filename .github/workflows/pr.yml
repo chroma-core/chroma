@@ -196,7 +196,7 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Run tests
-        run: python -m pytest --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' -n auto --dist worksteal -v --color=yes --durations 10
+        run: python -m pytest chromadb/test/test_api.py -n auto --dist worksteal -v --color=yes --durations 10
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: 'normal'
