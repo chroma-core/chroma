@@ -92,6 +92,7 @@ func TestCatalog_GetCollections(t *testing.T) {
 	collectionName := "test_collection"
 
 	// create a mock collection and metadata list
+	now := time.Now()
 	name := "test_collection"
 	testKey := "test_key"
 	testValue := "test_value"
@@ -105,6 +106,7 @@ func TestCatalog_GetCollections(t *testing.T) {
 				ConfigurationJsonStr: &collectionConfigurationJsonStr,
 				Ts:                   types.Timestamp(1234567890),
 				DatabaseID:           dbId.String(),
+				UpdatedAt:            now,
 			},
 			CollectionMetadata: []*dbmodel.CollectionMetadata{
 				{
@@ -139,6 +141,7 @@ func TestCatalog_GetCollections(t *testing.T) {
 			Ts:                   types.Timestamp(1234567890),
 			Metadata:             metadata,
 			DatabaseId:           dbId,
+			UpdatedAt:            now.Unix(),
 		},
 	}, collections)
 
