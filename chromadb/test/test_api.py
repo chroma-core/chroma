@@ -1387,6 +1387,12 @@ def test_multiple_collections(client):
     results1 = coll1.query(query_embeddings=embeddings1[0], n_results=1)
     results2 = coll2.query(query_embeddings=embeddings2[0], n_results=1)
 
+    # progressively check the results are what we expect so we can debug when/if flakes happen
+    assert len(results1["ids"]) > 0
+    assert len(results2["ids"]) > 0
+    assert len(results1["ids"][0]) > 0
+    assert len(results2["ids"][0]) > 0
+
     assert results1["ids"][0][0] == ids1[0]
     assert results2["ids"][0][0] == ids2[0]
 
