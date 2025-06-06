@@ -1,6 +1,6 @@
 use super::test_sysdb::TestSysDb;
 use crate::sqlite::SqliteSysDb;
-use crate::GrpcSysDbConfig;
+use crate::{GetCollectionsOptions, GrpcSysDbConfig};
 use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
@@ -139,27 +139,12 @@ impl SysDb {
 
     pub async fn get_collections(
         &mut self,
-        collection_id: Option<CollectionUuid>,
-        name: Option<String>,
-        tenant: Option<String>,
-        database: Option<String>,
-        limit: Option<u32>,
-        offset: u32,
+        options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         match self {
-            SysDb::Grpc(grpc) => {
-                grpc.get_collections(collection_id, name, tenant, database, limit, offset)
-                    .await
-            }
-            SysDb::Sqlite(sqlite) => {
-                sqlite
-                    .get_collections(collection_id, name, tenant, database, limit, offset)
-                    .await
-            }
-            SysDb::Test(test) => {
-                test.get_collections(collection_id, name, tenant, database)
-                    .await
-            }
+            SysDb::Grpc(grpc) => grpc.get_collections(options).await,
+            SysDb::Sqlite(sqlite) => sqlite.get_collections(options).await,
+            SysDb::Test(test) => test.get_collections(options).await,
         }
     }
 
@@ -172,12 +157,20 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.count_collections(tenant, database).await,
             SysDb::Sqlite(sqlite) => Ok(sqlite
-                .get_collections(None, None, Some(tenant), database, None, 0)
+                .get_collections(GetCollectionsOptions {
+                    tenant: Some(tenant),
+                    database,
+                    ..Default::default()
+                })
                 .await
                 .map_err(|_| CountCollectionsError::Internal)?
                 .len()),
             SysDb::Test(test) => Ok(test
-                .get_collections(None, None, Some(tenant), database)
+                .get_collections(GetCollectionsOptions {
+                    tenant: Some(tenant),
+                    database,
+                    ..Default::default()
+                })
                 .await
                 .map_err(|_| CountCollectionsError::Internal)?
                 .len()),
@@ -272,6 +265,7 @@ impl SysDb {
                     version_file_path: None,
                     root_collection_id: None,
                     lineage_file_path: None,
+                    updated_at: SystemTime::now(),
                 };
 
                 test_sysdb.add_collection(collection.clone());
@@ -835,20 +829,31 @@ impl GrpcSysDb {
 
     async fn get_collections(
         &mut self,
-        collection_id: Option<CollectionUuid>,
-        name: Option<String>,
-        tenant: Option<String>,
-        database: Option<String>,
-        limit: Option<u32>,
-        offset: u32,
+        options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
+        let GetCollectionsOptions {
+            collection_id,
+            collection_ids,
+            include_soft_deleted,
+            name,
+            tenant,
+            database,
+            limit,
+            offset,
+        } = options;
+
         // TODO: move off of status into our own error type
         let collection_id_str = collection_id.map(|id| String::from(id.0));
         let res = self
             .client
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
+                ids_filter: collection_ids.map(|ids| {
+                    let ids = ids.into_iter().map(|id| id.0.to_string()).collect();
+                    chroma_proto::CollectionIdsFilter { ids }
+                }),
                 name,
+                include_soft_deleted: Some(include_soft_deleted),
                 limit: limit.map(|l| l as i32),
                 offset: Some(offset as i32),
                 tenant: tenant.unwrap_or("".to_string()),

@@ -1,11 +1,7 @@
-use crate::{
-    config::GarbageCollectorConfig, garbage_collector_orchestrator::GarbageCollectorOrchestrator,
-};
-use crate::{
-    garbage_collector_orchestrator::{GarbageCollectorError, GarbageCollectorResponse},
-    types::CleanupMode,
-};
+use crate::types::CleanupMode;
+use crate::{config::GarbageCollectorConfig, types::GarbageCollectorResponse};
 use async_trait::async_trait;
+use chroma_blockstore::RootManager;
 use chroma_config::{
     assignment::assignment_policy::AssignmentPolicy, registry::Registry, Configurable,
 };
@@ -33,7 +29,8 @@ use uuid::Uuid;
 #[allow(dead_code)]
 pub(crate) struct GarbageCollector {
     gc_interval_mins: u64,
-    relative_cutoff_time: Duration,
+    relative_version_cutoff_time: Duration,
+    collection_soft_delete_grace_period: Duration,
     max_collections_to_gc: u32,
     disabled_collections: HashSet<CollectionUuid>,
     sysdb_client: SysDb,
@@ -45,6 +42,7 @@ pub(crate) struct GarbageCollector {
     my_member_id: String,
     default_cleanup_mode: CleanupMode,
     tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
+    root_manager: RootManager,
     total_jobs_metric: Counter<u64>,
     job_duration_ms_metric: Histogram<u64>,
     total_files_deleted_metric: Counter<u64>,
@@ -62,14 +60,17 @@ enum GarbageCollectCollectionError {
     #[error("Uninitialized: missing dispatcher or system")]
     Uninitialized,
     #[error("Failed to run garbage collection orchestrator: {0}")]
-    OrchestratorError(#[from] GarbageCollectorError),
+    OrchestratorError(#[from] crate::garbage_collector_orchestrator::GarbageCollectorError),
+    #[error("Failed to run garbage collection orchestrator: {0}")]
+    OrchestratorV2Error(#[from] crate::garbage_collector_orchestrator_v2::GarbageCollectorError),
 }
 
 #[allow(clippy::too_many_arguments)]
 impl GarbageCollector {
     pub fn new(
         gc_interval_mins: u64,
-        relative_cutoff_time: Duration,
+        relative_version_cutoff_time: Duration,
+        collection_soft_delete_grace_period: Duration,
         max_collections_to_gc: u32,
         disabled_collections: HashSet<CollectionUuid>,
         sysdb_client: SysDb,
@@ -78,12 +79,14 @@ impl GarbageCollector {
         tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
         assignment_policy: Box<dyn AssignmentPolicy>,
         my_member_id: String,
+        root_manager: RootManager,
     ) -> Self {
         let meter = opentelemetry::global::meter("chroma");
 
         Self {
             gc_interval_mins,
-            relative_cutoff_time,
+            relative_version_cutoff_time,
+            collection_soft_delete_grace_period,
             max_collections_to_gc,
             disabled_collections,
             sysdb_client,
@@ -95,6 +98,7 @@ impl GarbageCollector {
             assignment_policy,
             memberlist: Memberlist::default(),
             my_member_id,
+            root_manager,
             total_jobs_metric: meter
                 .u64_counter("garbage_collector.total_jobs")
                 .with_description("Total number of garbage collection jobs executed")
@@ -126,48 +130,94 @@ impl GarbageCollector {
     #[instrument]
     async fn garbage_collect_collection(
         &self,
-        absolute_cutoff_time: DateTime<Utc>,
+        version_absolute_cutoff_time: DateTime<Utc>,
+        collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
         collection: CollectionToGcInfo,
         cleanup_mode: CleanupMode,
     ) -> Result<GarbageCollectorResponse, GarbageCollectCollectionError> {
-        if let Some(dispatcher) = self.dispatcher.as_ref() {
-            let orchestrator = GarbageCollectorOrchestrator::new(
-                collection.id,
-                collection.version_file_path,
-                absolute_cutoff_time,
-                self.sysdb_client.clone(),
-                dispatcher.clone(),
-                self.storage.clone(),
-                cleanup_mode,
+        let dispatcher = self
+            .dispatcher
+            .as_ref()
+            .ok_or(GarbageCollectCollectionError::Uninitialized)?;
+        let system = self
+            .system
+            .as_ref()
+            .ok_or(GarbageCollectCollectionError::Uninitialized)?;
+
+        if cleanup_mode.is_v2() {
+            let orchestrator =
+                crate::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator::new(
+                    collection.id,
+                    collection.version_file_path,
+                    collection.lineage_file_path,
+                    version_absolute_cutoff_time,
+                    collection_soft_delete_absolute_cutoff_time,
+                    self.sysdb_client.clone(),
+                    dispatcher.clone(),
+                    system.clone(),
+                    self.storage.clone(),
+                    self.root_manager.clone(),
+                    cleanup_mode,
+                    2,
+                );
+
+            let started_at = SystemTime::now();
+            let result = orchestrator.run(system.clone()).await?;
+            let duration_ms = started_at
+                .elapsed()
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            self.job_duration_ms_metric.record(duration_ms, &[]);
+            self.total_files_deleted_metric.add(
+                result.num_files_deleted as u64,
+                &[opentelemetry::KeyValue::new(
+                    "cleanup_mode",
+                    format!("{:?}", cleanup_mode),
+                )],
+            );
+            self.total_versions_deleted_metric.add(
+                result.num_versions_deleted as u64,
+                &[opentelemetry::KeyValue::new(
+                    "cleanup_mode",
+                    format!("{:?}", cleanup_mode),
+                )],
             );
 
-            if let Some(system) = self.system.as_ref() {
-                let started_at = SystemTime::now();
-                let result = orchestrator.run(system.clone()).await?;
-                let duration_ms = started_at
-                    .elapsed()
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0);
-                self.job_duration_ms_metric.record(duration_ms, &[]);
-                self.total_files_deleted_metric.add(
-                    result.deletion_list.len() as u64,
-                    &[opentelemetry::KeyValue::new(
-                        "cleanup_mode",
-                        format!("{:?}", cleanup_mode),
-                    )],
-                );
-                self.total_versions_deleted_metric.add(
-                    result.num_versions_deleted as u64,
-                    &[opentelemetry::KeyValue::new(
-                        "cleanup_mode",
-                        format!("{:?}", cleanup_mode),
-                    )],
-                );
-                return Ok(result);
-            }
+            return Ok(result);
         }
 
-        Err(GarbageCollectCollectionError::Uninitialized)
+        let orchestrator = crate::garbage_collector_orchestrator::GarbageCollectorOrchestrator::new(
+            collection.id,
+            collection.version_file_path,
+            version_absolute_cutoff_time,
+            self.sysdb_client.clone(),
+            dispatcher.clone(),
+            self.storage.clone(),
+            cleanup_mode,
+        );
+
+        let started_at = SystemTime::now();
+        let result = orchestrator.run(system.clone()).await?;
+        let duration_ms = started_at
+            .elapsed()
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        self.job_duration_ms_metric.record(duration_ms, &[]);
+        self.total_files_deleted_metric.add(
+            result.num_files_deleted as u64,
+            &[opentelemetry::KeyValue::new(
+                "cleanup_mode",
+                format!("{:?}", cleanup_mode),
+            )],
+        );
+        self.total_versions_deleted_metric.add(
+            result.num_versions_deleted as u64,
+            &[opentelemetry::KeyValue::new(
+                "cleanup_mode",
+                format!("{:?}", cleanup_mode),
+            )],
+        );
+        Ok(result)
     }
 }
 
@@ -251,6 +301,7 @@ struct GarbageCollectResult {
     num_completed_jobs: u32,
     num_failed_jobs: u32,
     num_skipped_jobs: u32,
+    num_hard_deleted_databases: u32,
 }
 
 #[derive(Debug)]
@@ -267,12 +318,22 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         message: GarbageCollectMessage,
         ctx: &ComponentContext<Self>,
     ) -> Self::Result {
-        let absolute_cutoff_time =
-            DateTime::<Utc>::from(SystemTime::now() - self.relative_cutoff_time);
-        tracing::info!(
-            "Using absolute cutoff time: {} (relative cutoff time: {:?})",
-            absolute_cutoff_time,
-            self.relative_cutoff_time
+        let now = SystemTime::now();
+
+        let version_absolute_cutoff_time =
+            DateTime::<Utc>::from(now - self.relative_version_cutoff_time);
+        tracing::debug!(
+            "Using absolute cutoff time: {} for versions (relative cutoff time: {:?})",
+            version_absolute_cutoff_time,
+            self.relative_version_cutoff_time
+        );
+
+        let collection_soft_delete_absolute_cutoff_time =
+            DateTime::<Utc>::from(now - self.collection_soft_delete_grace_period);
+        tracing::debug!(
+            "Using absolute cutoff time: {} for soft deleted collections (grace period: {:?})",
+            collection_soft_delete_absolute_cutoff_time,
+            self.collection_soft_delete_grace_period
         );
 
         // Get all collections to gc and create gc orchestrator for each.
@@ -280,7 +341,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         let collections_to_gc = self
             .sysdb_client
             .get_collections_to_gc(
-                Some(absolute_cutoff_time.into()),
+                Some(version_absolute_cutoff_time.into()),
                 Some(self.max_collections_to_gc.into()),
                 message.tenant.clone(),
             )
@@ -292,6 +353,8 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             "Filtered to {} collections to garbage collect",
             collections_to_gc.len()
         );
+
+        let mut sysdb = self.sysdb_client.clone();
 
         let mut jobs = FuturesUnordered::new();
 
@@ -306,9 +369,18 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 continue;
             }
 
-            if collection.lineage_file_path.is_some() {
+            let cleanup_mode = if let Some(tenant_mode_overrides) = &self.tenant_mode_overrides {
+                tenant_mode_overrides
+                    .get(&collection.tenant)
+                    .cloned()
+                    .unwrap_or(self.default_cleanup_mode)
+            } else {
+                self.default_cleanup_mode
+            };
+
+            if collection.lineage_file_path.is_some() && !cleanup_mode.is_v2() {
                 tracing::debug!(
-                    "Skipping garbage collection for root of fork tree: {}",
+                    "Skipping garbage collection for root of fork tree because GC v1 cannot handle fork trees: {}",
                     collection.id
                 );
                 num_skipped_jobs += 1;
@@ -322,23 +394,17 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 collection.version_file_path
             );
 
-            let cleanup_mode = if let Some(tenant_mode_overrides) = &self.tenant_mode_overrides {
-                tenant_mode_overrides
-                    .get(&collection.tenant)
-                    .cloned()
-                    .unwrap_or(self.default_cleanup_mode)
-            } else {
-                self.default_cleanup_mode
-            };
-
-            tracing::info!("Creating gc orchestrator for collection: {}", collection.id);
-
             let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job", collection_id = ?collection.id, tenant_id = %collection.tenant, cleanup_mode = ?cleanup_mode);
             instrumented_span.follows_from(Span::current());
 
             jobs.push(
-                self.garbage_collect_collection(absolute_cutoff_time, collection, cleanup_mode)
-                    .instrument(instrumented_span),
+                self.garbage_collect_collection(
+                    version_absolute_cutoff_time,
+                    collection_soft_delete_absolute_cutoff_time,
+                    collection,
+                    cleanup_mode,
+                )
+                .instrument(instrumented_span),
             );
         }
         tracing::info!("GC {} jobs", jobs.len());
@@ -347,7 +413,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         while let Some(job) = jobs.next().await {
             match job {
                 Ok(result) => {
-                    tracing::info!("Garbage collection completed. Deleted {} files over {} versions for collection {}.", result.deletion_list.len(), result.num_versions_deleted, result.collection_id);
+                    tracing::info!("Garbage collection completed. Deleted {} files over {} versions for collection {}.", result.num_files_deleted, result.num_versions_deleted, result.collection_id);
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
@@ -371,6 +437,20 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             &[opentelemetry::KeyValue::new("status", "failure")],
         );
 
+        let num_hard_deleted_databases = match sysdb
+            .finish_database_deletion(version_absolute_cutoff_time.into())
+            .await
+        {
+            Ok(num_deleted) => {
+                tracing::debug!("Hard deleted {} databases", num_deleted);
+                num_deleted
+            }
+            Err(err) => {
+                tracing::error!("Call to FinishDatabaseDeletion failed: {:?}", err);
+                0
+            }
+        };
+
         // Schedule next run
         ctx.scheduler.schedule(
             GarbageCollectMessage {
@@ -385,6 +465,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             num_completed_jobs,
             num_failed_jobs,
             num_skipped_jobs,
+            num_hard_deleted_databases: num_hard_deleted_databases as u32,
         };
     }
 }
@@ -416,9 +497,14 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment_policy, registry)
                 .await?;
 
+        let root_manager_cache =
+            chroma_cache::from_config_persistent(&config.root_cache_config).await?;
+        let root_manager = RootManager::new(storage.clone(), root_manager_cache);
+
         Ok(GarbageCollector::new(
             config.gc_interval_mins as u64,
-            config.relative_cutoff_time,
+            config.version_cutoff_time,
+            config.collection_soft_delete_grace_period,
             config.max_collections_to_gc,
             disabled_collections,
             sysdb_client,
@@ -427,6 +513,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             config.tenant_mode_overrides.clone(),
             assignment_policy,
             config.my_member_id.clone(),
+            root_manager,
         ))
     }
 }
@@ -439,7 +526,7 @@ mod tests {
     use chroma_storage::config::{
         ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
     };
-    use chroma_sysdb::{GrpcSysDb, GrpcSysDbConfig};
+    use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig};
     use chroma_system::{DispatcherConfig, System};
     use tracing_test::traced_test;
 
@@ -595,7 +682,7 @@ mod tests {
 
         let collection_id = CollectionUuid::from_str(&collection_id).unwrap();
 
-        (collection_id, tenant_id)
+        (collection_id, database_name)
     }
 
     #[tokio::test]
@@ -607,7 +694,8 @@ mod tests {
         let config = GarbageCollectorConfig {
             service_name: "gc".to_string(),
             otel_endpoint: "none".to_string(),
-            relative_cutoff_time: Duration::from_secs(1),
+            version_cutoff_time: Duration::from_secs(1),
+            collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
             gc_interval_mins: 10,
             disallow_collections: vec![],
@@ -634,6 +722,7 @@ mod tests {
             my_member_id: "test-gc".to_string(),
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
             port: 50055,
+            root_cache_config: Default::default(),
         };
         let registry = Registry::new();
 
@@ -647,7 +736,10 @@ mod tests {
                 .unwrap(),
         );
         let collections = sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let collection = collections.first().unwrap();
@@ -710,7 +802,8 @@ mod tests {
             GarbageCollectResult {
                 num_completed_jobs: 0,
                 num_failed_jobs: 0,
-                num_skipped_jobs: 1
+                num_skipped_jobs: 1,
+                num_hard_deleted_databases: 0,
             }
         );
     }
@@ -728,7 +821,8 @@ mod tests {
         let config = GarbageCollectorConfig {
             service_name: "gc".to_string(),
             otel_endpoint: "none".to_string(),
-            relative_cutoff_time: Duration::from_secs(1),
+            version_cutoff_time: Duration::from_secs(1),
+            collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
             gc_interval_mins: 10,
             disallow_collections: vec![],
@@ -755,6 +849,7 @@ mod tests {
             my_member_id: "test-gc".to_string(),
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
             port: 50055,
+            root_cache_config: Default::default(),
         };
         let registry = Registry::new();
 
@@ -865,6 +960,220 @@ mod tests {
                 .iter()
                 .all(|v| !v.marked_for_deletion),
             "Expected no versions to be marked for deletion in delete mode"
+        );
+    }
+
+    async fn run_garbage_collection(
+        config: &GarbageCollectorConfig,
+        registry: &Registry,
+        tenant_id: String,
+    ) -> GarbageCollectResult {
+        let mut garbage_collector_component = GarbageCollector::try_from_config(config, registry)
+            .await
+            .unwrap();
+
+        let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config, registry)
+            .await
+            .unwrap();
+
+        let system = System::new();
+        let mut dispatcher_handle = system.start_component(dispatcher);
+
+        garbage_collector_component.set_dispatcher(dispatcher_handle.clone());
+        garbage_collector_component.set_system(system.clone());
+        let mut garbage_collector_handle = system.start_component(garbage_collector_component);
+
+        garbage_collector_handle
+            .send(
+                vec![Member {
+                    member_id: "test-gc".to_string(),
+                    member_ip: "0.0.0.0".to_string(),
+                    member_node_name: "test-gc-node".to_string(),
+                }],
+                None,
+            )
+            .await
+            .unwrap();
+
+        let result = garbage_collector_handle
+            .request(
+                GarbageCollectMessage {
+                    tenant: Some(tenant_id),
+                },
+                Some(Span::current()),
+            )
+            .await
+            .unwrap();
+
+        garbage_collector_handle.stop();
+        garbage_collector_handle.join().await.unwrap();
+        dispatcher_handle.stop();
+        dispatcher_handle.join().await.unwrap();
+
+        result
+    }
+
+    #[tokio::test]
+    #[traced_test]
+    async fn test_k8s_integration_gc_v2_and_database_hard_delete() {
+        // Setup
+        let tenant_id = format!("tenant-delete-mode-{}", Uuid::new_v4());
+
+        let config = GarbageCollectorConfig {
+            service_name: "gc".to_string(),
+            otel_endpoint: "none".to_string(),
+            version_cutoff_time: Duration::from_secs(1),
+            collection_soft_delete_grace_period: Duration::from_secs(1),
+            max_collections_to_gc: 100,
+            gc_interval_mins: 10,
+            disallow_collections: vec![],
+            sysdb_config: GrpcSysDbConfig {
+                host: "localhost".to_string(),
+                port: 50051,
+                connect_timeout_ms: 5000,
+                request_timeout_ms: 10000,
+                num_channels: 1,
+            },
+            dispatcher_config: DispatcherConfig::default(),
+            storage_config: StorageConfig::ObjectStore(ObjectStoreConfig {
+                bucket: ObjectStoreBucketConfig {
+                    name: "chroma-storage".to_string(),
+                    r#type: ObjectStoreType::Minio,
+                },
+                upload_part_size_bytes: 1024 * 1024,   // 1MB
+                download_part_size_bytes: 1024 * 1024, // 1MB
+                max_concurrent_requests: 10,
+            }),
+            default_mode: CleanupMode::DeleteV2,
+            tenant_mode_overrides: None,
+            assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
+            my_member_id: "test-gc".to_string(),
+            memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
+            port: 50055,
+            root_cache_config: Default::default(),
+        };
+        let registry = Registry::new();
+
+        // Create collections
+        let mut clients = ChromaGrpcClients::new().await.unwrap();
+        let mut sysdb = SysDb::Grpc(
+            GrpcSysDb::try_from_config(&config.sysdb_config, &registry)
+                .await
+                .unwrap(),
+        );
+
+        let collection_handle = tokio::spawn({
+            let mut clients = clients.clone();
+            let tenant_id = tenant_id.clone();
+            async move { create_test_collection(tenant_id, &mut clients).await }
+        });
+        let (collection_id, database_name) = collection_handle.await.unwrap();
+
+        // Fork collection to give it a lineage file (only GC v2 can handle fork trees)
+        {
+            let source_collection = sysdb
+                .get_collections(GetCollectionsOptions {
+                    collection_id: Some(collection_id),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let source_collection = source_collection.first().unwrap();
+
+            sysdb
+                .fork_collection(
+                    collection_id,
+                    source_collection.total_records_post_compaction,
+                    source_collection.total_records_post_compaction,
+                    CollectionUuid::new(),
+                    "test-fork".to_string(),
+                )
+                .await
+                .unwrap();
+        }
+
+        // Wait 1 second for cutoff time
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // Run garbage collection
+        run_garbage_collection(&config, &registry, tenant_id.clone()).await;
+
+        let versions = clients
+            .list_collection_versions(
+                collection_id.0.to_string(),
+                tenant_id.clone(),
+                None,
+                None,
+                None,
+                Some(true),
+            )
+            .await
+            .unwrap();
+
+        // There should be 2 versions left, since the versions 0 and 1 should have been deleted.
+        assert_eq!(
+            versions.versions.len(),
+            2,
+            "Expected 2 versions in delete mode, found {:#?}",
+            versions.versions
+        );
+        assert!(
+            versions.versions.iter().all(|v| !v.marked_for_deletion),
+            "Expected no versions to be marked for deletion in delete mode"
+        );
+
+        // Delete database
+        sysdb
+            .delete_database(database_name, tenant_id.clone())
+            .await
+            .unwrap();
+
+        // Wait 1s for cutoff time
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // Soft deleted collection should not be hard deleted if still inside grace period
+        let config_with_large_collection_grace_period = GarbageCollectorConfig {
+            collection_soft_delete_grace_period: Duration::from_secs(60 * 60 * 24), // 1 day
+            ..config.clone()
+        };
+
+        let result = run_garbage_collection(
+            &config_with_large_collection_grace_period,
+            &registry,
+            tenant_id.clone(),
+        )
+        .await;
+        assert_eq!(
+            result,
+            GarbageCollectResult {
+                num_completed_jobs: 1,
+                num_failed_jobs: 0,
+                num_skipped_jobs: 0,
+                num_hard_deleted_databases: 0, // The database should not have been hard deleted yet
+            }
+        );
+
+        // Double check that the collection is still soft deleted
+        let statuses = sysdb
+            .batch_get_collection_soft_delete_status(vec![collection_id])
+            .await
+            .unwrap();
+        assert_eq!(
+            statuses.get(&collection_id),
+            Some(&true),
+            "Collection should still be soft deleted"
+        );
+
+        // If outside the grace period, the collection should be hard deleted
+        let result = run_garbage_collection(&config, &registry, tenant_id.clone()).await;
+        assert_eq!(
+            result,
+            GarbageCollectResult {
+                num_completed_jobs: 1,
+                num_failed_jobs: 0,
+                num_skipped_jobs: 0,
+                num_hard_deleted_databases: 1, // The database should have been hard deleted
+            }
         );
     }
 }

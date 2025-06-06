@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 import os
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import cast
+import warnings
 
 BASE_URL = "https://api.cloudflare.com/client/v4/accounts"
 GATEWAY_BASE_URL = "https://gateway.ai.cloudflare.com/v1"
@@ -42,6 +43,13 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
         except ImportError:
             raise ValueError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
+            )
+
+        if api_key is not None:
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
             )
         self.model_name = model_name
         self.account_id = account_id

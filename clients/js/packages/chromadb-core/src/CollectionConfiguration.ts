@@ -359,3 +359,33 @@ export function loadApiUpdateCollectionConfigurationFromUpdateCollectionConfigur
     config,
   ) as Api.UpdateCollectionConfiguration;
 }
+
+/**
+ * Checks if there are conflicting embedding functions between function parameter
+ * and collection configuration.
+ *
+ * @param embeddingFunction - The embedding function provided as a parameter
+ * @param configurationEmbeddingFunction - The embedding function from collection configuration
+ * @returns true if there is a conflict, false otherwise
+ */
+export function hasEmbeddingFunctionConflict(
+  embeddingFunction?: IEmbeddingFunction | null,
+  configurationEmbeddingFunction?: IEmbeddingFunction | null,
+): boolean {
+  // If ef provided in function params and collection config, check if they are the same
+  // If not, there's a conflict
+  // ef is by default "default" if not provided, so ignore that case.
+  if (
+    embeddingFunction &&
+    embeddingFunction.name !== "default" &&
+    configurationEmbeddingFunction
+  ) {
+    const efConfig = embeddingFunction.getConfig?.();
+    const collConfigEfConfig = configurationEmbeddingFunction.getConfig?.();
+
+    if (embeddingFunction.name !== configurationEmbeddingFunction.name) {
+      return true;
+    }
+  }
+  return false;
+}

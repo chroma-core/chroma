@@ -1,5 +1,6 @@
 from typing import Dict, Optional, Sequence, Tuple, TypedDict, Union, cast
 from uuid import UUID
+import json
 
 import numpy as np
 from numpy.typing import NDArray
@@ -7,7 +8,6 @@ from numpy.typing import NDArray
 import chromadb.proto.chroma_pb2 as chroma_pb
 import chromadb.proto.query_executor_pb2 as query_pb
 from chromadb.api.collection_configuration import (
-    load_collection_configuration_from_json_str,
     collection_configuration_to_json_str,
 )
 from chromadb.api.types import Embedding, Where, WhereDocument
@@ -239,9 +239,7 @@ def from_proto_collection(collection: chroma_pb.Collection) -> Collection:
     return Collection(
         id=UUID(hex=collection.id),
         name=collection.name,
-        configuration=load_collection_configuration_from_json_str(
-            collection.configuration_json_str
-        ),
+        configuration_json=json.loads(collection.configuration_json_str),
         metadata=from_proto_metadata(collection.metadata)
         if collection.HasField("metadata")
         else None,

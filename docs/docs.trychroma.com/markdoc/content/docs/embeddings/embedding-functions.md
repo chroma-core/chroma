@@ -15,6 +15,7 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          |
 | [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai.md)    | ✓      | ✓          |
 | [Together AI](../../integrations/embedding-models/together-ai.md)                        | ✓      | ✓          |
+| [Mistral](../../integrations/embedding-models/mistral.md)                                | ✓      | -          |
 
 We welcome pull requests to add new Embedding Functions to the community.
 
@@ -80,7 +81,7 @@ sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFuncti
 
 {% Tab label="typescript" %}
 ```typescript
-import { DefaultEmbeddingFunction } from "chromadb";
+import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 const modelName = "all-MiniLM-L6-v2";
 const defaultEF = new DefaultEmbeddingFunction(modelName);
 ```

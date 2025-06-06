@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 import logging
 from chromadb.api.client import Client as ClientCreator
 from chromadb.api.client import AdminClient as AdminClientCreator
@@ -26,6 +26,7 @@ from chromadb.api.types import (
     WhereDocument,
     UpdateCollectionMetadata,
 )
+from pathlib import Path
 
 # Re-export types from chromadb.types
 __all__ = [
@@ -53,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "1.0.11"
+__version__ = "1.0.12"
 
 
 # Workaround to deal with Colab's old sqlite3 version
@@ -135,7 +136,7 @@ def EphemeralClient(
 
 
 def PersistentClient(
-    path: str = "./chroma",
+    path: Union[str, Path] = "./chroma",
     settings: Optional[Settings] = None,
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
@@ -151,7 +152,7 @@ def PersistentClient(
     """
     if settings is None:
         settings = Settings()
-    settings.persist_directory = path
+    settings.persist_directory = str(path)
     settings.is_persistent = True
 
     # Make sure paramaters are the correct types -- users can pass anything.

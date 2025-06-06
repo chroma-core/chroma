@@ -39,7 +39,7 @@
 
 use std::fmt::{Debug, Formatter};
 
-use crate::types::CleanupMode;
+use crate::types::{CleanupMode, GarbageCollectorResponse};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
@@ -99,15 +99,6 @@ impl Debug for GarbageCollectorOrchestrator {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GarbageCollector").finish()
     }
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct GarbageCollectorResponse {
-    pub collection_id: CollectionUuid,
-    pub version_file_path: String,
-    pub num_versions_deleted: u32,
-    pub deletion_list: Vec<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -299,9 +290,9 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
             tracing::info!("No versions to delete, terminating garbage collection early");
             let response = GarbageCollectorResponse {
                 collection_id: self.collection_id,
-                version_file_path: self.version_file_path.clone(),
                 num_versions_deleted: 0,
-                deletion_list: Vec::new(),
+                num_files_deleted: 0,
+                ..Default::default()
             };
             tracing::info!(?response, "Garbage collection completed early");
             self.terminate_with_result(Ok(response), ctx).await;
@@ -447,9 +438,9 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
             tracing::info!("Dry run mode, skipping actual deletion");
             let response = GarbageCollectorResponse {
                 collection_id: self.collection_id,
-                version_file_path: self.version_file_path.clone(),
                 num_versions_deleted: 0,
-                deletion_list: Vec::new(),
+                num_files_deleted: 0,
+                ..Default::default()
             };
             self.terminate_with_result(Ok(response), ctx).await;
             return;
@@ -515,10 +506,11 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
             None => return,
         };
 
+        #[expect(deprecated)]
         let response = GarbageCollectorResponse {
             collection_id: self.collection_id,
-            version_file_path: self.version_file_path.clone(),
             num_versions_deleted: self.num_versions_deleted,
+            num_files_deleted: self.deletion_list.len() as u32,
             deletion_list: self.deletion_list.clone(),
         };
 

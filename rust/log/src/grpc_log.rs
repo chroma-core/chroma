@@ -531,17 +531,31 @@ impl GrpcLog {
         &mut self,
         min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
-        let mut norm = self
+        let mut norm = match self
             ._get_collections_with_new_data(false, min_compaction_size)
-            .await?;
+            .await
+        {
+            Ok(colls) => colls,
+            Err(err) => {
+                tracing::error!("could not contact old log: {err:?}");
+                vec![]
+            }
+        };
         if self.config.alt_host_threshold.is_some()
             || !self.config.use_alt_for_tenants.is_empty()
             || !self.config.use_alt_for_collections.is_empty()
         {
-            let alt = self
+            let alt = match self
                 ._get_collections_with_new_data(true, min_compaction_size)
-                .await?;
-            norm.extend(alt)
+                .await
+            {
+                Ok(alt) => alt,
+                Err(err) => {
+                    tracing::error!("could not contact new log: {err:?}");
+                    vec![]
+                }
+            };
+            norm.extend(alt);
         }
         norm.sort_by_key(|n| n.collection_id);
         norm.dedup_by_key(|n| n.collection_id);
@@ -554,6 +568,7 @@ impl GrpcLog {
         min_compaction_size: u64,
     ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
         let mut combined_response = Vec::new();
+        let mut error = None;
 
         if use_alt_log {
             // Iterate over all alt clients and gather collections
@@ -567,14 +582,25 @@ impl GrpcLog {
                 }
                 for mut alt_client in all_alt_clients.drain(..) {
                     // We error if any subrequest errors
-                    let response = alt_client
+                    match alt_client
                         .get_all_collection_info_to_compact(
                             chroma_proto::GetAllCollectionInfoToCompactRequest {
                                 min_compaction_size,
                             },
                         )
-                        .await?;
-                    combined_response.push(response.into_inner());
+                        .await
+                    {
+                        Ok(response) => {
+                            combined_response.push(response.into_inner());
+                        }
+                        Err(err) => {
+                            tracing::error!("could not get all collection info to compact: {err}");
+                            if error.is_none() {
+                                error = Some(err);
+                            }
+                            continue;
+                        }
+                    };
                 }
             } else {
                 tracing::warn!(
@@ -583,16 +609,32 @@ impl GrpcLog {
                 return Ok(vec![]);
             }
         } else {
-            let response = self
+            match self
                 .client
                 .get_all_collection_info_to_compact(
                     chroma_proto::GetAllCollectionInfoToCompactRequest {
                         min_compaction_size,
                     },
                 )
-                .await?;
-            combined_response.push(response.into_inner());
+                .await
+            {
+                Ok(response) => {
+                    combined_response.push(response.into_inner());
+                }
+                Err(err) => {
+                    tracing::error!("could not get all collection info to compact: {err}");
+                    if error.is_none() {
+                        error = Some(err);
+                    }
+                }
+            };
         };
+
+        if let Some(status) = error {
+            if combined_response.is_empty() {
+                return Err(status.into());
+            }
+        }
 
         let mut all_collections = Vec::new();
         for response in combined_response {

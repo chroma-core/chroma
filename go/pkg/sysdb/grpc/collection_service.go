@@ -167,13 +167,39 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 
 	res := &coordinatorpb.GetCollectionsResponse{}
 
+	collectionIDs := ([]types.UniqueID)(nil)
 	parsedCollectionID, err := types.ToUniqueID(collectionID)
 	if err != nil {
 		log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
+	if parsedCollectionID != types.NilUniqueID() {
+		collectionIDs = []types.UniqueID{parsedCollectionID}
+	}
 
-	collections, err := s.coordinator.GetCollections(ctx, parsedCollectionID, collectionName, tenantID, databaseName, limit, offset)
+	if req.IdsFilter != nil {
+		if collectionIDs == nil {
+			collectionIDs = make([]types.UniqueID, 0, len(req.IdsFilter.Ids))
+		}
+
+		for _, id := range req.IdsFilter.Ids {
+			parsedCollectionID, err := types.ToUniqueID(&id)
+			if err != nil {
+				log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", &id), zap.Stringp("collection_name", collectionName))
+				return res, grpcutils.BuildInternalGrpcError(err.Error())
+			}
+			if parsedCollectionID != types.NilUniqueID() {
+				collectionIDs = append(collectionIDs, parsedCollectionID)
+			}
+		}
+	}
+
+	includeSoftDeleted := false
+	if req.IncludeSoftDeleted != nil {
+		includeSoftDeleted = *req.IncludeSoftDeleted
+	}
+
+	collections, err := s.coordinator.GetCollections(ctx, collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 	if err != nil {
 		log.Error("GetCollections failed. ", zap.Error(err), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())

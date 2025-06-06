@@ -168,7 +168,15 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		}
 	}()
 
-	sourceBounds, err := queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
+	// NOTE(rescrv):  Only sourceInfo.IsSealed should be used on this struct.
+	var sourceInfo log.Collection
+	sourceInfo, err = queriesWithTx.GetCollection(ctx, sourceCollectionID)
+	if err != nil {
+		sourceInfo.IsSealed = false
+	}
+
+	var sourceBounds log.GetBoundsForCollectionRow
+	sourceBounds, err = queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
 	if err != nil {
 		trace_log.Error("Error in getting compaction and enumeration offset for source collection", zap.Error(err), zap.String("collectionId", sourceCollectionID))
 		return
@@ -206,6 +214,7 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		ID:                              targetCollectionID,
 		RecordCompactionOffsetPosition:  int64(compactionOffset),
 		RecordEnumerationOffsetPosition: int64(enumerationOffset),
+		IsSealed:                        sourceInfo.IsSealed,
 	})
 	if err != nil {
 		trace_log.Error("Error in updating offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
@@ -230,6 +239,7 @@ func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCo
 	if err != nil {
 		trace_log.Error("Error in getting collections to compact from record_log table", zap.Error(err))
 	}
+	trace_log.Info("GetAllCollectionInfoToCompact", zap.Int64("collections", int64(len(collectionToCompact))))
 	return
 }
 

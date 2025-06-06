@@ -12,6 +12,7 @@ use std::sync::Arc;
 use super::sysdb::FlushCompactionError;
 use super::sysdb::GetLastCompactionTimeError;
 use crate::sysdb::VERSION_FILE_S3_PREFIX;
+use crate::GetCollectionsOptions;
 use chroma_storage::PutOptions;
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
 use chroma_types::chroma_proto::CollectionInfoImmutable;
@@ -150,11 +151,19 @@ impl TestSysDb {
 
     pub(crate) async fn get_collections(
         &mut self,
-        collection_id: Option<CollectionUuid>,
-        name: Option<String>,
-        tenant: Option<String>,
-        database: Option<String>,
+        options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
+        let GetCollectionsOptions {
+            collection_id,
+            collection_ids: _,
+            include_soft_deleted: _,
+            name,
+            tenant,
+            database,
+            limit: _,
+            offset: _,
+        } = options;
+
         let inner = self.inner.lock();
         let mut collections = Vec::new();
         for collection in inner.collections.values() {

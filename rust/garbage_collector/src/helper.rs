@@ -193,6 +193,7 @@ impl ChromaGrpcClients {
                     version_file_path: None,
                     root_collection_id: None,
                     lineage_file_path: None,
+                    updated_at: None,
                 }),
                 knn: None,
                 metadata: None,

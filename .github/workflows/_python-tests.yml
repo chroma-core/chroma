@@ -24,10 +24,11 @@ jobs:
         test-globs:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
-          # TODO(@codetheweb): this test should be parallelized, but it frequently flakes in CI when parallelized. We have not been able to reproduce the failure locally. See https://github.com/chroma-core/chroma/issues/4263.
           - "chromadb/test/property/test_cross_version_persist.py"
         include:
           - test-globs: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
+            parallelized: true
+          - test-globs: "chromadb/test/property/test_cross_version_persist.py"
             parallelized: true
 
     runs-on: ${{ matrix.platform }}
@@ -125,7 +126,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{fromJson(inputs.python_versions)}}
-        platform: ["blacksmith-16vcpu-ubuntu-2204"]
+        platform: ["blacksmith-8vcpu-ubuntu-2204"]
         test-globs: ["chromadb/test/api",
                     "chromadb/test/api/test_collection.py",
                     "chromadb/test/api/test_limit_offset.py",
@@ -153,7 +154,8 @@ jobs:
         with:
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: ./.github/actions/tilt
+      - name: Start Tilt services
+        uses: ./.github/actions/tilt
       - name: Test
         run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}" --durations 10'
         shell: bash

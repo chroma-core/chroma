@@ -149,7 +149,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 mod tests {
     use super::*;
     use chroma_log::in_memory_log::InMemoryLog;
-    use chroma_sysdb::TestSysDb;
+    use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
     use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
     use std::collections::HashMap;
     use std::str::FromStr;
@@ -273,7 +273,10 @@ mod tests {
         );
 
         let collections = sysdb
-            .get_collections(Some(collection_uuid_1), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_uuid_1),
+                ..Default::default()
+            })
             .await;
 
         assert!(collections.is_ok());

@@ -36,6 +36,7 @@ def test_get_builtins_holds() -> None:
         "HuggingFaceEmbeddingServer",
         "InstructorEmbeddingFunction",
         "JinaEmbeddingFunction",
+        "MistralEmbeddingFunction",
         "ONNXMiniLM_L6_V2",
         "OllamaEmbeddingFunction",
         "OpenAIEmbeddingFunction",

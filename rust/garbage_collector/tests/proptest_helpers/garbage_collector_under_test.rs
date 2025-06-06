@@ -9,7 +9,7 @@ use chroma_storage::config::{
     ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
 };
 use chroma_storage::{GetOptions, Storage};
-use chroma_sysdb::{GrpcSysDb, GrpcSysDbConfig, SysDb};
+use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig, SysDb};
 use chroma_system::Orchestrator;
 use chroma_system::{Dispatcher, DispatcherConfig, System};
 use chroma_types::chroma_proto::CollectionVersionFile;
@@ -300,20 +300,23 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             let dispatcher = Dispatcher::new(DispatcherConfig::default());
                             let mut dispatcher_handle = system.start_component(dispatcher);
 
+                            let one_second_from_now = DateTime::from_timestamp(
+                                SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs() as i64
+                                    + 1,
+                                0,
+                            )
+                            .unwrap();
+
                             let orchestrator = GarbageCollectorOrchestrator::new(
                                 collection_id,
                                 collection_to_gc.version_file_path.clone(),
                                 collection_to_gc.lineage_file_path.clone(),
                                 // This proptest does not test the cutoff time as the timestamps created by the SysDb (e.g. collection.created_at and timestamps in version files) cannot currently be faked/overridden.
-                                DateTime::from_timestamp(
-                                    SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_secs() as i64
-                                        + 1,
-                                    0,
-                                )
-                                .unwrap(),
+                                one_second_from_now,
+                                one_second_from_now,
                                 state.sysdb.clone(),
                                 dispatcher_handle.clone(),
                                 system.clone(),
@@ -410,7 +413,11 @@ impl StateMachineTest for GarbageCollectorUnderTest {
 
                         async move {
                             let collections = sysdb
-                                .get_collections(Some(collection_id), None, None, None, None, 0)
+                                .get_collections(
+                                   GetCollectionsOptions {
+                                        collection_id: Some(collection_id),
+                                        ..Default::default()
+                                })
                                 .await
                                 .unwrap();
 

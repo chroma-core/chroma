@@ -21,24 +21,26 @@ use crate::operators::mark_versions_at_sysdb::{
     MarkVersionsAtSysDbError, MarkVersionsAtSysDbInput, MarkVersionsAtSysDbOperator,
     MarkVersionsAtSysDbOutput,
 };
-use crate::types::{version_graph_to_collection_dependency_graph, CleanupMode, VersionGraph};
+use crate::types::{
+    version_graph_to_collection_dependency_graph, CleanupMode, GarbageCollectorResponse,
+    VersionGraph,
+};
 use async_trait::async_trait;
 use chroma_blockstore::RootManager;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
-use chroma_sysdb::SysDb;
+use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, System, TaskError, TaskResult,
 };
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
-use chroma_types::{
-    BatchGetCollectionSoftDeleteStatusError, CollectionUuid, DeleteCollectionError,
-};
+use chroma_types::{CollectionUuid, DeleteCollectionError};
 use chrono::{DateTime, Utc};
 use petgraph::algo::toposort;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
+use std::time::SystemTime;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
@@ -48,7 +50,8 @@ pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
     lineage_file_path: Option<String>,
-    absolute_cutoff_time: DateTime<Utc>,
+    version_absolute_cutoff_time: DateTime<Utc>,
+    collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
     sysdb_client: SysDb,
     dispatcher: ComponentHandle<Dispatcher>,
     system: System,
@@ -72,19 +75,14 @@ pub struct GarbageCollectorOrchestrator {
     num_versions_deleted: u32,
 }
 
-#[derive(Debug)]
-pub struct GarbageCollectorResponse {
-    pub num_versions_deleted: u32,
-    pub num_files_deleted: u32,
-}
-
 #[allow(clippy::too_many_arguments)]
 impl GarbageCollectorOrchestrator {
     pub fn new(
         collection_id: CollectionUuid,
         version_file_path: String,
         lineage_file_path: Option<String>,
-        absolute_cutoff_time: DateTime<Utc>,
+        version_absolute_cutoff_time: DateTime<Utc>,
+        collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
         sysdb_client: SysDb,
         dispatcher: ComponentHandle<Dispatcher>,
         system: System,
@@ -97,7 +95,8 @@ impl GarbageCollectorOrchestrator {
             collection_id,
             version_file_path,
             lineage_file_path,
-            absolute_cutoff_time,
+            version_absolute_cutoff_time,
+            collection_soft_delete_absolute_cutoff_time,
             sysdb_client,
             dispatcher,
             system,
@@ -136,8 +135,6 @@ pub enum GarbageCollectorError {
     #[error("The task was aborted because resources were exhausted")]
     Aborted,
 
-    #[error("Failed to get collection soft delete status: {0}")]
-    BatchGetCollectionSoftDeleteStatus(#[from] BatchGetCollectionSoftDeleteStatusError),
     #[error("Failed to construct version graph: {0}")]
     ConstructVersionGraph(#[from] ConstructVersionGraphError),
     #[error("Failed to compute versions to delete: {0}")]
@@ -159,6 +156,8 @@ pub enum GarbageCollectorError {
     UnparsableUuid(#[from] uuid::Error),
     #[error("Collection deletion failed: {0}")]
     CollectionDeletionFailed(#[from] DeleteCollectionError),
+    #[error("SysDb method failed: {0}")]
+    SysDbMethodFailed(String),
 }
 
 impl ChromaError for GarbageCollectorError {
@@ -216,6 +215,55 @@ impl Orchestrator for GarbageCollectorOrchestrator {
 }
 
 impl GarbageCollectorOrchestrator {
+    async fn get_eligible_soft_deleted_collections_to_gc(
+        &mut self,
+        all_collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashSet<CollectionUuid>, GarbageCollectorError> {
+        let soft_delete_statuses = self
+            .sysdb_client
+            .batch_get_collection_soft_delete_status(all_collection_ids.clone())
+            .await
+            .map_err(|e| GarbageCollectorError::SysDbMethodFailed(e.to_string()))?;
+
+        let all_collection_ids: HashSet<CollectionUuid> = all_collection_ids.into_iter().collect();
+
+        let soft_deleted_collections_to_gc = soft_delete_statuses
+            .iter()
+            .filter_map(|(collection_id, status)| {
+                if *status && all_collection_ids.contains(collection_id) {
+                    Some(*collection_id)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                collection_ids: Some(soft_deleted_collections_to_gc),
+                include_soft_deleted: true,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| GarbageCollectorError::SysDbMethodFailed(e.to_string()))?;
+
+        let mut eligible_ids = HashSet::new();
+        let cutoff_time: SystemTime = self.collection_soft_delete_absolute_cutoff_time.into();
+        for collection in collections {
+            if collection.updated_at < cutoff_time {
+                eligible_ids.insert(collection.collection_id);
+            } else {
+                tracing::trace!(
+                    "Will not transition soft-deleted collection {} because it was updated after the cutoff time.",
+                    collection.collection_id
+                );
+            }
+        }
+
+        Ok(eligible_ids)
+    }
+
     async fn handle_construct_version_graph_request(
         &mut self,
         ctx: &ComponentContext<Self>,
@@ -231,22 +279,15 @@ impl GarbageCollectorOrchestrator {
         let output = orchestrator.run(self.system.clone()).await?;
 
         let collection_ids = output.version_files.keys().cloned().collect::<Vec<_>>();
-        let soft_delete_statuses = self
-            .sysdb_client
-            .batch_get_collection_soft_delete_status(collection_ids)
+
+        self.soft_deleted_collections_to_gc = self
+            .get_eligible_soft_deleted_collections_to_gc(collection_ids)
             .await?;
-        self.soft_deleted_collections_to_gc = soft_delete_statuses
-            .iter()
-            .filter_map(
-                |(collection_id, status)| {
-                    if *status {
-                        Some(*collection_id)
-                    } else {
-                        None
-                    }
-                },
-            )
-            .collect();
+
+        tracing::debug!(
+            "Soft deleted collections to GC: {:#?}",
+            self.soft_deleted_collections_to_gc
+        );
 
         self.version_files = output.version_files;
         self.graph = Some(output.graph.clone());
@@ -256,7 +297,7 @@ impl GarbageCollectorOrchestrator {
             ComputeVersionsToDeleteInput {
                 graph: output.graph,
                 soft_deleted_collections: self.soft_deleted_collections_to_gc.clone(),
-                cutoff_time: self.absolute_cutoff_time,
+                cutoff_time: self.version_absolute_cutoff_time,
                 min_versions_to_keep: self.min_versions_to_keep,
             },
             ctx.receiver(),
@@ -279,6 +320,8 @@ impl GarbageCollectorOrchestrator {
             let response = GarbageCollectorResponse {
                 num_versions_deleted: 0,
                 num_files_deleted: 0,
+                collection_id: self.collection_id,
+                ..Default::default()
             };
             self.terminate_with_result(Ok(response), ctx).await;
             return Ok(());
@@ -609,6 +652,8 @@ impl GarbageCollectorOrchestrator {
             let response = GarbageCollectorResponse {
                 num_versions_deleted: 0,
                 num_files_deleted: 0,
+                collection_id: self.collection_id,
+                ..Default::default()
             };
             self.terminate_with_result(Ok(response), ctx).await;
             return Ok(());
@@ -655,6 +700,8 @@ impl GarbageCollectorOrchestrator {
             let response = GarbageCollectorResponse {
                 num_versions_deleted: 0,
                 num_files_deleted: 0,
+                collection_id: self.collection_id,
+                ..Default::default()
             };
             self.terminate_with_result(Ok(response), ctx).await;
             return Ok(());
@@ -781,6 +828,8 @@ impl GarbageCollectorOrchestrator {
             let response = GarbageCollectorResponse {
                 num_files_deleted: self.num_files_deleted,
                 num_versions_deleted: self.num_versions_deleted,
+                collection_id: self.collection_id,
+                ..Default::default()
             };
 
             self.terminate_with_result(Ok(response), ctx).await;
@@ -915,7 +964,7 @@ mod tests {
     use chroma_blockstore::RootManager;
     use chroma_cache::nop::NopCache;
     use chroma_storage::test_storage;
-    use chroma_sysdb::TestSysDb;
+    use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
     use chroma_system::{Dispatcher, Orchestrator, System};
     use chroma_types::{
         CollectionUuid, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
@@ -925,7 +974,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn errors_on_empty_file_paths() {
-        let storage = test_storage();
+        let (_storage_dir, storage) = test_storage();
         let mut test_sysdb = TestSysDb::new();
         test_sysdb.set_storage(Some(storage.clone()));
         let mut sysdb = chroma_sysdb::SysDb::Test(test_sysdb);
@@ -983,22 +1032,27 @@ mod tests {
 
         // Should fail
         let mut collections = sysdb
-            .get_collections(Some(root_collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(root_collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let root_collection = collections.pop().unwrap();
+        let now = DateTime::from_timestamp(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
+            0,
+        )
+        .unwrap();
         let orchestrator = GarbageCollectorOrchestrator::new(
             root_collection_id,
             root_collection.version_file_path.unwrap(),
             None,
-            DateTime::from_timestamp(
-                SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64,
-                0,
-            )
-            .unwrap(),
+            now,
+            now,
             sysdb,
             dispatcher_handle,
             system.clone(),

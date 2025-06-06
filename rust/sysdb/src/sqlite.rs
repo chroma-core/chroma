@@ -1,4 +1,4 @@
-use crate::SqliteSysDbConfig;
+use crate::{GetCollectionsOptions, SqliteSysDbConfig};
 use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
@@ -22,6 +22,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::Row;
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::time::SystemTime;
 use uuid::Uuid;
 
 //////////////////////// SqliteSysDb ////////////////////////
@@ -341,6 +342,7 @@ impl SqliteSysDb {
             version_file_path: None,
             root_collection_id: None,
             lineage_file_path: None,
+            updated_at: SystemTime::UNIX_EPOCH,
         })
     }
 
@@ -477,13 +479,18 @@ impl SqliteSysDb {
 
     pub(crate) async fn get_collections(
         &self,
-        collection_id: Option<CollectionUuid>,
-        name: Option<String>,
-        tenant: Option<String>,
-        database: Option<String>,
-        limit: Option<u32>,
-        offset: u32,
+        options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
+        let GetCollectionsOptions {
+            collection_id,
+            name,
+            tenant,
+            database,
+            limit,
+            offset,
+            ..
+        } = options;
+
         self.get_collections_with_conn(
             self.db.get_conn(),
             collection_id,
@@ -730,6 +737,7 @@ impl SqliteSysDb {
                     version_file_path: None,
                     root_collection_id: None,
                     lineage_file_path: None,
+                    updated_at: SystemTime::UNIX_EPOCH,
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
@@ -1145,7 +1153,10 @@ mod tests {
             .unwrap();
 
         let collections = sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let collection = collections.first().unwrap();
@@ -1297,7 +1308,10 @@ mod tests {
             .unwrap();
 
         let collections = sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let collection = collections.first().unwrap();
@@ -1365,7 +1379,10 @@ mod tests {
 
         // Should no longer exist
         let result = sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         assert_eq!(result.len(), 0);
@@ -1512,7 +1529,10 @@ mod tests {
 
         // Fetching the collection should not error and the config should be the default
         let collections = sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let collection = collections.first().unwrap();

@@ -47,7 +47,10 @@ const legacyPathsMapping: Record<string, string> = {
   "/reference/js-client": "/reference/js/client",
   "/reference/js-collection": "/reference/js/collection",
   "/reference/cli": "/cli/run",
-  "/troubleshooting": "/updates/troubleshooting",
+  "/troubleshooting": "/docs/overview/troubleshooting",
+  "/updates/troubleshooting": "/docs/overview/troubleshooting",
+  "/updates/migration": "/docs/overview/migration",
+  "/migration": "/docs/overview/migration",
 };
 
 export const middleware = (request: NextRequest) => {

@@ -188,7 +188,7 @@ func (tc *Catalog) DeleteDatabase(ctx context.Context, deleteDatabase *model.Del
 			return err
 		}
 
-		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, nil, deleteDatabase.Tenant, deleteDatabase.Name, nil, nil)
+		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, nil, deleteDatabase.Tenant, deleteDatabase.Name, nil, nil, false)
 		if err != nil {
 			return err
 		}
@@ -285,7 +285,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	}
 
 	collectionName := createCollection.Name
-	existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName, nil, nil)
+	existing, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName, nil, nil, false)
 	if err != nil {
 		log.Error("error getting collection", zap.Error(err))
 		return nil, false, err
@@ -367,7 +367,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 	}
 
 	// Get the inserted collection (by name, to handle the case where some other request created the collection)
-	collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName, nil, nil)
+	collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(nil, &collectionName, tenantID, databaseName, nil, nil, false)
 	// It is possible, under read-commited isolation that someone else deleted the collection
 	// in between writing the collection and reading it back, in that case this will return empty, and we should throw an error
 	if err != nil {
@@ -455,14 +455,22 @@ func (tc *Catalog) GetCollection(ctx context.Context, collectionID types.UniqueI
 	return collection[0], nil
 }
 
-func (tc *Catalog) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
+func (tc *Catalog) GetCollections(ctx context.Context, collectionIDs []types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*model.Collection, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
 		_, span := tracer.Start(ctx, "Catalog.GetCollections")
 		defer span.End()
 	}
 
-	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(types.FromUniqueID(collectionID), collectionName, tenantID, databaseName, limit, offset)
+	ids := ([]string)(nil)
+	if collectionIDs != nil {
+		ids = make([]string, 0, len(collectionIDs))
+		for _, id := range collectionIDs {
+			ids = append(ids, id.String())
+		}
+	}
+
+	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(ids, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 	if err != nil {
 		return nil, err
 	}
@@ -680,7 +688,7 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 	log.Info("Soft deleting collection", zap.Any("softDeleteCollection", deleteCollection))
 	return tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if collection exists
-		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(deleteCollection.ID), nil, deleteCollection.TenantID, deleteCollection.DatabaseName, nil, nil)
+		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections([]string{deleteCollection.ID.String()}, nil, deleteCollection.TenantID, deleteCollection.DatabaseName, nil, nil, false)
 		if err != nil {
 			return err
 		}
@@ -849,12 +857,13 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if collection exists
 		collections, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(
-			types.FromUniqueID(updateCollection.ID),
+			[]string{updateCollection.ID.String()},
 			nil,
 			updateCollection.TenantID,
 			updateCollection.DatabaseName,
 			nil,
 			nil,
+			false,
 		)
 		if err != nil {
 			return err
@@ -918,7 +927,7 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 		}
 		databaseName := updateCollection.DatabaseName
 		tenantID := updateCollection.TenantID
-		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections(types.FromUniqueID(updateCollection.ID), nil, tenantID, databaseName, nil, nil)
+		collectionList, err := tc.metaDomain.CollectionDb(txCtx).GetCollections([]string{updateCollection.ID.String()}, nil, tenantID, databaseName, nil, nil, false)
 		if err != nil {
 			return err
 		}
@@ -1052,9 +1061,11 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		// t2: Fork source collection in sysdb, the latest source collection compaction offset is 400. If we add new logs, it will start after offset 300, and the data is lost after compaction.
 		latestSourceCompactionOffset := uint64(sourceCollection.LogPosition)
 		if forkCollection.SourceCollectionLogEnumerationOffset < latestSourceCompactionOffset {
+			log.Error("CollectionLogPositionStale", zap.Uint64("latestSourceCompactionOffset", latestSourceCompactionOffset), zap.Uint64("forkCollection.SourceCollectionLogEnumerationOffset ", forkCollection.SourceCollectionLogEnumerationOffset))
 			return common.ErrCollectionLogPositionStale
 		}
 		if latestSourceCompactionOffset < forkCollection.SourceCollectionLogCompactionOffset {
+			log.Error("CompactionOffsetSomehowAhead", zap.Uint64("latestSourceCompactionOffset", latestSourceCompactionOffset), zap.Uint64("forkCollection.SourceCollectionLogCompactionOffset", forkCollection.SourceCollectionLogCompactionOffset))
 			return common.ErrCompactionOffsetSomehowAhead
 		}
 
@@ -1165,7 +1176,7 @@ func (tc *Catalog) CountForks(ctx context.Context, sourceCollectionID types.Uniq
 	}
 
 	limit := int32(1)
-	collections, err := tc.GetCollections(ctx, rootCollectionID, nil, "", "", &limit, nil)
+	collections, err := tc.GetCollections(ctx, []types.UniqueID{rootCollectionID}, nil, "", "", &limit, nil, false)
 	if err != nil {
 		return 0, err
 	}
@@ -1804,6 +1815,8 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			return nil, err
 		}
 
+		numActiveVersions := tc.getNumberOfActiveVersions(existingVersionFilePb)
+
 		txErr := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 			// NOTE: DO NOT move UpdateTenantLastCompactionTime & RegisterFilePaths to the end of the transaction.
 			//		 Keep both these operations before the UpdateLogPositionAndVersionInfo.
@@ -1847,6 +1860,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 				// SAFETY(hammadb): This int64 to uint64 conversion is ok because we always are in post-epoch time.
 				// and the value is always positive.
 				uint64(lastCompactionTime),
+				uint64(numActiveVersions),
 			)
 			if err != nil {
 				return err
