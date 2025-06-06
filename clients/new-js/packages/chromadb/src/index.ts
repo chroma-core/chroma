@@ -6,7 +6,7 @@
 // Apply Deno compatibility patch
 import "./deno";
 
-export { Collection, CollectionAPI } from "./collection";
+export { Collection } from "./collection";
 export { withChroma } from "./next";
 export * from "./types";
 export * from "./admin-client";

@@ -22,6 +22,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::Row;
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::time::SystemTime;
 use uuid::Uuid;
 
 //////////////////////// SqliteSysDb ////////////////////////
@@ -341,6 +342,7 @@ impl SqliteSysDb {
             version_file_path: None,
             root_collection_id: None,
             lineage_file_path: None,
+            updated_at: SystemTime::UNIX_EPOCH,
         })
     }
 
@@ -735,6 +737,7 @@ impl SqliteSysDb {
                     version_file_path: None,
                     root_collection_id: None,
                     lineage_file_path: None,
+                    updated_at: SystemTime::UNIX_EPOCH,
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;

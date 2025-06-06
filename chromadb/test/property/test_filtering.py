@@ -20,7 +20,6 @@ from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
-import re
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 import numpy as np
 
@@ -95,20 +94,10 @@ def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
     if key == "$contains":
         if not doc:
             return False
-        # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
-        # treat them as wildcards
-        if "%" in expr or "_" in expr:
-            expr = expr.replace("%", ".").replace("_", ".")
-            return re.search(expr, doc) is not None
         return expr in doc
     elif key == "$not_contains":
         if not doc:
             return True
-        # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
-        # treat them as wildcards
-        if "%" in expr or "_" in expr:
-            expr = expr.replace("%", ".").replace("_", ".")
-            return re.search(expr, doc) is None
         return expr not in doc
     else:
         raise ValueError("Unknown operator: {}".format(key))

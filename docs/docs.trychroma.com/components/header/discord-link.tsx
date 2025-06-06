@@ -14,6 +14,8 @@ const DiscordLink: React.FC = async () => {
 
   return (
     <Link
+      // hide by default on small screens
+      className="hidden sm:block"
       href="https://discord.gg/MMeYNTmh3x"
       target="_blank"
       rel="noopener noreferrer"

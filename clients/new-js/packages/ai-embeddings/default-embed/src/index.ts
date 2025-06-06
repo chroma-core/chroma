@@ -15,6 +15,8 @@ export type DType =
 
 export type Quantization = DType | Record<string, DType>;
 
+export type EmbeddingFunctionSpace = "cosine" | "l2" | "ip";
+
 export interface DefaultEmbeddingFunctionConfig {
   model_name?: string;
   revision?: string;
@@ -85,11 +87,11 @@ export class DefaultEmbeddingFunction {
     return output.tolist();
   }
 
-  public defaultSpace(): string {
+  public defaultSpace(): EmbeddingFunctionSpace {
     return "cosine";
   }
 
-  public supportedSpaces(): string[] {
+  public supportedSpaces(): EmbeddingFunctionSpace[] {
     return ["cosine", "l2", "ip"];
   }
 

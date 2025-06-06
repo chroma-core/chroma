@@ -300,20 +300,23 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             let dispatcher = Dispatcher::new(DispatcherConfig::default());
                             let mut dispatcher_handle = system.start_component(dispatcher);
 
+                            let one_second_from_now = DateTime::from_timestamp(
+                                SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs() as i64
+                                    + 1,
+                                0,
+                            )
+                            .unwrap();
+
                             let orchestrator = GarbageCollectorOrchestrator::new(
                                 collection_id,
                                 collection_to_gc.version_file_path.clone(),
                                 collection_to_gc.lineage_file_path.clone(),
                                 // This proptest does not test the cutoff time as the timestamps created by the SysDb (e.g. collection.created_at and timestamps in version files) cannot currently be faked/overridden.
-                                DateTime::from_timestamp(
-                                    SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_secs() as i64
-                                        + 1,
-                                    0,
-                                )
-                                .unwrap(),
+                                one_second_from_now,
+                                one_second_from_now,
                                 state.sysdb.clone(),
                                 dispatcher_handle.clone(),
                                 system.clone(),

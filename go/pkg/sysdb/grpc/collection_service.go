@@ -167,24 +167,30 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 
 	res := &coordinatorpb.GetCollectionsResponse{}
 
-	collectionIDs := []types.UniqueID{}
+	collectionIDs := ([]types.UniqueID)(nil)
 	parsedCollectionID, err := types.ToUniqueID(collectionID)
 	if err != nil {
 		log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	if parsedCollectionID != types.NilUniqueID() {
-		collectionIDs = append(collectionIDs, parsedCollectionID)
+		collectionIDs = []types.UniqueID{parsedCollectionID}
 	}
 
-	for _, id := range req.Ids {
-		parsedCollectionID, err := types.ToUniqueID(&id)
-		if err != nil {
-			log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", &id), zap.Stringp("collection_name", collectionName))
-			return res, grpcutils.BuildInternalGrpcError(err.Error())
+	if req.IdsFilter != nil {
+		if collectionIDs == nil {
+			collectionIDs = make([]types.UniqueID, 0, len(req.IdsFilter.Ids))
 		}
-		if parsedCollectionID != types.NilUniqueID() {
-			collectionIDs = append(collectionIDs, parsedCollectionID)
+
+		for _, id := range req.IdsFilter.Ids {
+			parsedCollectionID, err := types.ToUniqueID(&id)
+			if err != nil {
+				log.Error("GetCollections failed. collection id format error", zap.Error(err), zap.Stringp("collection_id", &id), zap.Stringp("collection_name", collectionName))
+				return res, grpcutils.BuildInternalGrpcError(err.Error())
+			}
+			if parsedCollectionID != types.NilUniqueID() {
+				collectionIDs = append(collectionIDs, parsedCollectionID)
+			}
 		}
 	}
 

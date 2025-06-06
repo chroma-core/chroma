@@ -160,7 +160,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 	if tenantID != "" {
 		query = query.Where("databases.tenant_id = ?", tenantID)
 	}
-	if ids != nil && len(ids) > 0 {
+	if ids != nil {
 		query = query.Where("collections.id IN ?", ids)
 	}
 	if name != nil {
@@ -219,6 +219,8 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
 				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
 				Tenant:                     r.Tenant,
+				UpdatedAt:                  *r.CollectionUpdatedAt,
+				CreatedAt:                  *r.CollectionCreatedAt,
 			}
 			if r.CollectionTs != nil {
 				col.Ts = *r.CollectionTs
@@ -336,9 +338,9 @@ func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
 
 func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
 	isDeleted := true
-	ids := []string{}
+	ids := ([]string)(nil)
 	if collectionID != nil {
-		ids = append(ids, *collectionID)
+		ids = []string{*collectionID}
 	}
 	return s.getCollections(ids, nil, tenantID, databaseName, &limit, nil, &isDeleted)
 }

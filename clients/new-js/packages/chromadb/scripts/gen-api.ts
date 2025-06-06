@@ -1,6 +1,6 @@
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { rm } from "node:fs/promises";
+import { rm, readFile, writeFile } from "node:fs/promises";
 import { createClient } from "@hey-api/openapi-ts";
 import { startChromaServer } from "./start-chroma.js";
 
@@ -29,6 +29,19 @@ const main = async () => {
     });
 
     console.log("✅ API client generated and normalized!");
+
+    // Fix HashMap type definition
+    const typesPath = join(__dirname, "../src/api/types.gen.ts");
+    let typesContent = await readFile(typesPath, "utf-8");
+    
+    // Fix the HashMap type to include null and remove duplicate number
+    typesContent = typesContent.replace(
+      /export type HashMap = \{\s*\[key: string\]: boolean \| number \| number \| string;\s*\};/,
+      "export type HashMap = {\n  [key: string]: boolean | number | string | null;\n};"
+    );
+    
+    await writeFile(typesPath, typesContent);
+    console.log("✅ Fixed HashMap type definition!");
   } finally {
     server.stop();
     console.log("Server stopped");

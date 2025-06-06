@@ -462,9 +462,12 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionIDs []types.Uni
 		defer span.End()
 	}
 
-	ids := make([]string, 0, len(collectionIDs))
-	for _, id := range collectionIDs {
-		ids = append(ids, id.String())
+	ids := ([]string)(nil)
+	if collectionIDs != nil {
+		ids = make([]string, 0, len(collectionIDs))
+		for _, id := range collectionIDs {
+			ids = append(ids, id.String())
+		}
 	}
 
 	collectionAndMetadataList, err := tc.metaDomain.CollectionDb(ctx).GetCollections(ids, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)

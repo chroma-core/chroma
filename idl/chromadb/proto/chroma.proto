@@ -4,6 +4,8 @@ package chroma;
 
 option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
+import "google/protobuf/timestamp.proto";
+
 // Types here should mirror chromadb/types.py
 enum Operation {
     ADD = 0;
@@ -61,6 +63,7 @@ message Collection {
   optional string version_file_path = 13;
   optional string root_collection_id = 14;
   optional string lineage_file_path = 15;
+  google.protobuf.Timestamp updated_at = 16;
 }
 
 message Database {

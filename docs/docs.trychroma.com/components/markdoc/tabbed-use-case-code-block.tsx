@@ -44,7 +44,6 @@ const TabbedUseCaseCodeBlock: React.FC<{
           ))}
         </div>
       </div>
-      <div>
         {children.map((tab) => (
           <TabsContent
             key={`${tab.props.label}-content`}
@@ -60,7 +59,6 @@ const TabbedUseCaseCodeBlock: React.FC<{
               : tab}
           </TabsContent>
         ))}
-      </div>
     </Tabs>
   );
 };

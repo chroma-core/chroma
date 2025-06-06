@@ -1433,6 +1433,7 @@ impl ServiceBasedFrontend {
     pub async fn healthcheck(&self) -> HealthCheckResponse {
         HealthCheckResponse {
             is_executor_ready: self.executor.is_ready().await,
+            is_log_client_ready: self.log_client.is_ready(),
         }
     }
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "@jest/globals";
-import { ChromaClient } from "../src";
+import { ChromaClient, CloudClient } from "../src";
 import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./utils/data";
 import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 
@@ -130,10 +130,9 @@ describe("get collections", () => {
     const results = (
       await collection.get({ include: ["documents", "metadatas"] })
     ).rows();
-    expect(results.records.length).toEqual(IDS.length);
-    expect(results.include).toEqual(["documents", "metadatas"]);
-    expect(results.records[0].document).toEqual("This is a test");
-    expect(results.records[0].embedding).toBeUndefined();
-    expect(results.records[0].metadata?.test).toEqual("test1");
+    expect(results.length).toEqual(IDS.length);
+    expect(results[0].document).toEqual("This is a test");
+    expect(results[0].embedding).toBeUndefined();
+    expect(results[0].metadata?.test).toEqual("test1");
   });
 });

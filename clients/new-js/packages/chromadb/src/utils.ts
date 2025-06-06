@@ -529,3 +529,21 @@ export const validateNResults = (nResults: number) => {
     throw new ChromaValueError("Number of requested results has to positive");
   }
 };
+
+export const parseConnectionPath = (path: string) => {
+  try {
+    const url = new URL(path);
+
+    const ssl = url.protocol === "https:";
+    const host = url.hostname;
+    const port = url.port;
+
+    return {
+      ssl,
+      host,
+      port: Number(port),
+    };
+  } catch {
+    throw new ChromaValueError(`Invalid URL: ${path}`);
+  }
+};

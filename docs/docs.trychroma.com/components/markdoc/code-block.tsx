@@ -48,7 +48,7 @@ const CodeBlock: React.FC<{
       {showHeader && language && (
         <CodeBlockHeader language={language} content={content} />
       )}
-      <pre className={`rounded-none rounded-b-sm m-0 ${className}`}>
+      <pre className={`rounded-none rounded-b-sm m-0 ${className ? className : ""}`}>
         <div dangerouslySetInnerHTML={{ __html: highlightedCode.toString() }} />
       </pre>
     </div>

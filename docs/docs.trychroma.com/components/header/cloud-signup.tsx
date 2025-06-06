@@ -44,7 +44,7 @@ const CloudSignUp: React.FC = () => {
   return (
     open && (
       <div
-        className={`absolute bottom-4 z-20 right-4 bg-white border border-black h-48 w-[400px] flex flex-col gap-0 sm:rounded-none p-0 dark:border-white dark:border dark:bg-gray-950 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+        className={`hidden md:block absolute bottom-4 z-20 right-4 bg-white border border-black h-48 w-[400px] flex flex-col gap-0 sm:rounded-none p-0 dark:border-white dark:border dark:bg-gray-950 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
       >
         <Header84 title="NEW">
           <CloseButton84 onClick={handleDialogClose} />

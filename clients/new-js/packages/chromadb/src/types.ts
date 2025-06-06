@@ -9,13 +9,16 @@ export type UserIdentity = GetUserIdentityResponse;
  * Metadata that can be associated with a collection.
  * Values must be boolean, number, or string types.
  */
-export type CollectionMetadata = Record<string, boolean | number | string>;
+export type CollectionMetadata = Record<
+  string,
+  boolean | number | string | null
+>;
 
 /**
  * Metadata that can be associated with individual records.
  * Values must be boolean, number, or string types.
  */
-export type Metadata = Record<string, boolean | number | string>;
+export type Metadata = Record<string, boolean | number | string | null>;
 
 /**
  * Base interface for record sets containing optional fields.
@@ -171,24 +174,21 @@ export class GetResult<TMeta extends Metadata = Metadata> {
    * @returns Object containing include fields and array of record objects
    */
   public rows() {
-    return {
-      include: this.include,
-      records: this.ids.map((id, index) => {
-        return {
-          id,
-          document: this.include.includes("documents")
-            ? this.documents[index]
-            : undefined,
-          embedding: this.include.includes("embeddings")
-            ? this.embeddings[index]
-            : undefined,
-          metadata: this.include.includes("metadatas")
-            ? this.metadatas[index]
-            : undefined,
-          uri: this.include.includes("uris") ? this.uris[index] : undefined,
-        };
-      }),
-    };
+    return this.ids.map((id, index) => {
+      return {
+        id,
+        document: this.include.includes("documents")
+          ? this.documents[index]
+          : undefined,
+        embedding: this.include.includes("embeddings")
+          ? this.embeddings[index]
+          : undefined,
+        metadata: this.include.includes("metadatas")
+          ? this.metadatas[index]
+          : undefined,
+        uri: this.include.includes("uris") ? this.uris[index] : undefined,
+      };
+    });
   }
 }
 
@@ -197,23 +197,18 @@ export class GetResult<TMeta extends Metadata = Metadata> {
  * @template TMeta - The type of metadata associated with records
  */
 export interface QueryRowResult<TMeta extends Metadata = Metadata> {
-  /** Fields included in the query results */
-  include: Include[];
-  /** Array of query results, with each query returning an array of matches */
-  queries: {
-    /** Similarity distance to the query (if included) */
-    distance?: number | null;
-    /** Document text content (if included) */
-    document?: string | null;
-    /** Embedding vector (if included) */
-    embedding?: number[] | null;
-    /** Unique record identifier */
-    id: string;
-    /** Record metadata (if included) */
-    metadata?: TMeta | null;
-    /** Record URI (if included) */
-    uri?: string | null;
-  }[][];
+  /** Similarity distance to the query (if included) */
+  distance?: number | null;
+  /** Document text content (if included) */
+  document?: string | null;
+  /** Embedding vector (if included) */
+  embedding?: number[] | null;
+  /** Unique record identifier */
+  id: string;
+  /** Record metadata (if included) */
+  metadata?: TMeta | null;
+  /** Record URI (if included) */
+  uri?: string | null;
 }
 
 /**
@@ -263,7 +258,7 @@ export class QueryResult<TMeta extends Metadata = Metadata> {
    * Converts the query result to a row-based format for easier iteration.
    * @returns Object containing include fields and structured query results
    */
-  public rows(): QueryRowResult<TMeta> {
+  public rows(): QueryRowResult<TMeta>[][] {
     const queries: {
       distance?: number | null;
       document?: string | null;
@@ -296,9 +291,6 @@ export class QueryResult<TMeta extends Metadata = Metadata> {
       queries.push(records);
     }
 
-    return {
-      include: this.include,
-      queries,
-    };
+    return queries;
   }
 }

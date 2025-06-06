@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use super::{
     ConversionError, Operation, OperationConversionError, ScalarEncoding,
     ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
@@ -7,7 +9,7 @@ use crate::{chroma_proto, CHROMA_DOCUMENT_KEY};
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct OperationRecord {
     pub id: String,
     pub embedding: Option<Vec<f32>>, // NOTE: we only support float32 embeddings for now so this ignores the encoding
@@ -46,6 +48,18 @@ impl OperationRecord {
                 .sum::<usize>();
         }
         size_byte as u64
+    }
+}
+
+impl Debug for OperationRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OperationRecord")
+            .field("id", &self.id)
+            .field("document", &self.document.as_ref().map(|_| "..."))
+            .field("embedding", &self.embedding.as_ref().map(|_| "[...]"))
+            .field("metadata", &self.metadata)
+            .field("operation", &self.operation)
+            .finish()
     }
 }
 

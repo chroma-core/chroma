@@ -38,6 +38,7 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 			IsDeleted:                  collectionAndMetadata.Collection.IsDeleted,
 			VersionFileName:            collectionAndMetadata.Collection.VersionFileName,
 			CreatedAt:                  collectionAndMetadata.Collection.CreatedAt,
+			UpdatedAt:                  collectionAndMetadata.Collection.UpdatedAt.Unix(),
 			DatabaseId:                 types.MustParse(collectionAndMetadata.Collection.DatabaseID),
 		}
 		collection.Metadata = convertCollectionMetadataToModel(collectionAndMetadata.CollectionMetadata)

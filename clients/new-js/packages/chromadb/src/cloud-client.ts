@@ -1,7 +1,7 @@
 import { ChromaClient } from "./chroma-client";
 import * as process from "node:process";
 import { AdminClient } from "./admin-client";
-import { ChromaValueError } from "./errors";
+import { ChromaUnauthorizedError, ChromaValueError } from "./errors";
 
 /**
  * ChromaDB cloud client for connecting to hosted Chroma instances.
