@@ -79,14 +79,13 @@ pub fn process_event_definition_tokens(
                     }
                     Some(unexpected) => {
                         return Err(MeteringMacrosError::ParseError(format!(
-                            "Expected a bracket group after `#` (for a foreign macro), found: {:?}",
+                            "Expected `#[...]` for foreign macro, found: {:?}",
                             unexpected
                         )));
                     }
                     None => {
                         return Err(MeteringMacrosError::ParseError(
-                            "Unexpected end of tokens after `#` while collecting foreign macro"
-                                .into(),
+                            "Unexpected end after `#` when parsing foreign macro".into(),
                         ));
                     }
                 }
@@ -126,8 +125,7 @@ pub fn process_event_definition_tokens(
     }
 
     match event_definition_tokens_iter.next() {
-        Some(TokenTree::Ident(expected_struct_keyword_ident))
-            if expected_struct_keyword_ident == "struct" => {}
+        Some(TokenTree::Ident(expected_struct_ident)) if expected_struct_ident == "struct" => {}
         unexpected => {
             return Err(MeteringMacrosError::ParseError(format!(
                 "Expected `struct` in event definition, found: {:?}",
@@ -168,74 +166,120 @@ pub fn process_event_definition_tokens(
     let mut fields = Vec::new();
 
     while field_tokens_iter.peek().is_some() {
-        if let Some(TokenTree::Punct(expected_comma_punct)) = field_tokens_iter.peek() {
-            if expected_comma_punct.as_char() == ',' {
-                field_tokens_iter.next();
-                continue;
+        let mut field_foreign_macro_token_streams: Vec<TokenStream> = Vec::new();
+        let mut expected_field_annotation_tokens: Option<(TokenTree, TokenTree)> = None;
+        let mut first_non_annotation_token: Option<TokenTree> = None;
+
+        loop {
+            match field_tokens_iter.next() {
+                Some(TokenTree::Punct(expected_hashtag_punct))
+                    if expected_hashtag_punct.as_char() == '#'
+                        && expected_hashtag_punct.spacing() == Spacing::Alone =>
+                {
+                    match field_tokens_iter.next() {
+                        Some(TokenTree::Group(expected_annotation_group)) => {
+                            let mut annotation_tokens_iter =
+                                expected_annotation_group.stream().into_iter();
+                            if let Some(TokenTree::Ident(expected_field_ident)) =
+                                annotation_tokens_iter.next()
+                            {
+                                if expected_field_ident == "field" {
+                                    expected_field_annotation_tokens = Some((
+                                        TokenTree::Punct(expected_hashtag_punct.clone()),
+                                        TokenTree::Group(expected_annotation_group.clone()),
+                                    ));
+                                    break;
+                                }
+                            }
+                            let mut annotation_token_stream = TokenStream::new();
+                            annotation_token_stream.extend(std::iter::once(TokenTree::Punct(
+                                expected_hashtag_punct.clone(),
+                            )));
+                            annotation_token_stream.extend(std::iter::once(TokenTree::Group(
+                                expected_annotation_group.clone(),
+                            )));
+                            field_foreign_macro_token_streams.push(annotation_token_stream);
+                            continue;
+                        }
+                        _ => {
+                            return Err(MeteringMacrosError::ParseError(
+                                "Expected `[...]` after `#` when collecting annotations".into(),
+                            ));
+                        }
+                    }
+                }
+                Some(other_token) => {
+                    first_non_annotation_token = Some(other_token.clone());
+                    break;
+                }
+                None => {
+                    break;
+                }
             }
         }
 
-        if let Some(TokenTree::Punct(expected_hashtag_punct)) = field_tokens_iter.peek() {
-            if expected_hashtag_punct.as_char() == '#' {
-                let hashtag = field_tokens_iter.next().unwrap();
-
-                let field_annotation_group = field_tokens_iter.next().unwrap();
-                let field_annotation_tokens = vec![hashtag.clone(), field_annotation_group.clone()];
-
-                let SecondaryAnnotation::Field {
-                    attribute_name_string,
-                    custom_mutator_name_ident,
-                } = process_secondary_annotation_tokens(&field_annotation_tokens)?;
-
-                let mut field_definition_tokens = Vec::new();
-                while let Some(next_token) = field_tokens_iter.peek() {
-                    if let TokenTree::Punct(expected_comma_punct) = next_token {
-                        if expected_comma_punct.as_char() == ',' {
-                            break;
-                        }
-                    }
-                    field_definition_tokens.push(field_tokens_iter.next().unwrap());
-                }
-
-                let mut field = process_field_definition_tokens(field_definition_tokens)?;
-
-                if !registered_attributes.contains_key(&attribute_name_string) {
-                    return Err(MeteringMacrosError::ParseError(format!(
-                        "Field references unknown attribute `{}`",
-                        attribute_name_string
-                    )));
-                }
-                let attribute = registered_attributes
-                    .get(&attribute_name_string)
-                    .unwrap()
-                    .clone();
-                field.attribute = Some(attribute);
-                field.custom_mutator_name_ident = Some(custom_mutator_name_ident);
-                fields.push(field);
+        if first_non_annotation_token.is_none() && expected_field_annotation_tokens.is_some() {
+            if let Some(expected_field_name_token) = field_tokens_iter.next() {
+                first_non_annotation_token = Some(expected_field_name_token);
             } else {
-                let mut field_definition_tokens = Vec::new();
-                while let Some(next_token) = field_tokens_iter.peek() {
-                    if let TokenTree::Punct(expected_comma_punct) = next_token {
-                        if expected_comma_punct.as_char() == ',' {
-                            break;
-                        }
-                    }
-                    field_definition_tokens.push(field_tokens_iter.next().unwrap());
-                }
-                let field = process_field_definition_tokens(field_definition_tokens)?;
-                fields.push(field);
+                return Err(MeteringMacrosError::ParseError(
+                    "Expected a field name after `#[field(...)]`, but found none".into(),
+                ));
             }
+        }
+
+        let mut field_definition_tokens = Vec::new();
+        if let Some(first_field_definition_token) = first_non_annotation_token.take() {
+            field_definition_tokens.push(first_field_definition_token);
         } else {
-            let mut field_definition_tokens = Vec::new();
-            while let Some(next_token) = field_tokens_iter.peek() {
-                if let TokenTree::Punct(expected_comma_punct) = next_token {
-                    if expected_comma_punct.as_char() == ',' {
-                        break;
-                    }
+            return Err(MeteringMacrosError::ParseError(
+                "Expected a field definition (e.g. `foo: u64`), but found none".into(),
+            ));
+        }
+
+        while let Some(next_token) = field_tokens_iter.peek() {
+            if let TokenTree::Punct(expected_comma_punct) = next_token {
+                if expected_comma_punct.as_char() == ',' {
+                    break;
                 }
-                field_definition_tokens.push(field_tokens_iter.next().unwrap());
             }
-            let field = process_field_definition_tokens(field_definition_tokens)?;
+            field_definition_tokens.push(field_tokens_iter.next().unwrap());
+        }
+
+        if let Some(TokenTree::Punct(expected_comma_punct)) = field_tokens_iter.peek() {
+            if expected_comma_punct.as_char() == ',' {
+                field_tokens_iter.next();
+            }
+        }
+
+        if let Some((expected_hashtag_punct, secondary_annotation_group)) =
+            expected_field_annotation_tokens.take()
+        {
+            let field_annotation_tokens = vec![
+                expected_hashtag_punct.clone(),
+                secondary_annotation_group.clone(),
+            ];
+            let SecondaryAnnotation::Field {
+                attribute_name_string,
+                custom_mutator_name_ident,
+            } = process_secondary_annotation_tokens(&field_annotation_tokens)?;
+
+            let mut field = process_field_definition_tokens(field_definition_tokens)?;
+            field.foreign_macro_token_streams = field_foreign_macro_token_streams;
+
+            if let Some(registered_attribute) = registered_attributes.get(&attribute_name_string) {
+                field.attribute = Some(registered_attribute.clone());
+            } else {
+                return Err(MeteringMacrosError::ParseError(format!(
+                    "Unknown attribute `{}`",
+                    attribute_name_string
+                )));
+            }
+            field.custom_mutator_name_ident = Some(custom_mutator_name_ident);
+            fields.push(field);
+        } else {
+            let mut field = process_field_definition_tokens(field_definition_tokens)?;
+            field.foreign_macro_token_streams = field_foreign_macro_token_streams;
             fields.push(field);
         }
     }
