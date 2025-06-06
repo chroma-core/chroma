@@ -184,6 +184,17 @@ jobs:
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+      - name: Install built wheel
+        shell: bash
+        run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Run tests
         run: python -m pytest --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'
         # run: uv run pytest chromadb/test/test_api.py -n auto --dist worksteal -v --color=yes
