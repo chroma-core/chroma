@@ -7,6 +7,8 @@ from chromadb.errors import ChromaError, UniqueConstraintError
 def test_duplicate_collection_create(
     client: ClientAPI,
 ) -> None:
+    client.reset()
+
     client.create_collection(
         name="test",
         metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
