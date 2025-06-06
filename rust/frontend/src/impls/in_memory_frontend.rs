@@ -687,6 +687,7 @@ impl InMemoryFrontend {
         tracing::info!("InMemoryFrontend::healthcheck called");
         chroma_types::HealthCheckResponse {
             is_executor_ready: true,
+            is_log_client_ready: true,
         }
     }
 }
