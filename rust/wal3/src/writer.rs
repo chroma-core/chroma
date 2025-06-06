@@ -518,9 +518,7 @@ impl OnceLogWriter {
             log_position,
             messages,
         );
-        let fut2 = self
-            .mark_dirty
-            .mark_dirty(log_position + messages_len, messages_len);
+        let fut2 = self.mark_dirty.mark_dirty(log_position, messages_len);
         let (res1, res2) = futures::future::join(fut1, fut2).await;
         res2?;
         let (path, setsum, num_bytes) = res1?;
