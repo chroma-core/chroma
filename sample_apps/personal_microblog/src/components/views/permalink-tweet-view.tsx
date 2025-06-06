@@ -83,7 +83,7 @@ function ParentPosts({ parentPosts }: { parentPosts: TweetModelBase[] }) {
   return (
     <div className="pb-6">
       {parentPosts.map((p) => (
-        <div key={p.id} className="grid grid-cols-[2px_auto] last:pb-16 w-full border-l cursor-pointer" onClick={() => goToPostPage(p.id)}>
+        <div key={p.id} className="grid grid-cols-[2px_auto] last:pb-8 w-full border-l cursor-pointer" onClick={() => goToPostPage(p.id)}>
           <div className="border-l-[1.5px] border-gray-400 h-[1.2em] mt-3 ml-[-1.5px]"></div>
           <TweetBody body={p.body} citations={p.citations} className="opacity-70 p-2 pl-4 pb-4" />
         </div>

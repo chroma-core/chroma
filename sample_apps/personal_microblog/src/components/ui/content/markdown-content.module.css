@@ -26,8 +26,8 @@
 
 .markdown code {
   background-color: #f6f8fa;
-  padding: 0.2em 0.4em;
-  border-radius: 6px;
+  padding: 0.05em 0.1em;
+  border-radius: 3px;
 }
 
 .markdown ul {

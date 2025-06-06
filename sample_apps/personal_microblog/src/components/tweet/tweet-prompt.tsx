@@ -156,7 +156,7 @@ export default function TweetPrompt(props: TweetPromptProps) {
       transition={{
         duration: 0.3,
       }}
-      className={`cursor-text border ${glow ? animate ? styles.shadow : " border-blue-200" : "border-zinc-100"}`}
+      className={`cursor-text border rounded-sm ${glow ? animate ? styles.shadow : " border-blue-200" : "border-zinc-100"}`}
       onClick={handleContainerClick}
     >
       <div className={`font-ui flex flex-col gap-2 relative items-end w-full bg-zinc-100 px-2 py-1.5 w-full outline-none text-zinc-800 ${DEBUG_MODE ? styles.debugLayers : ""}`}>

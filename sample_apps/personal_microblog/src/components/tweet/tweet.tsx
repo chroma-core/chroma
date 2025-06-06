@@ -42,8 +42,7 @@ export function Tweet({ tweet, aiReply, className = "" }: TweetProps) {
   };
 
   let aiReplyComponent = null;
-  const aiReplyClassName = `text-sm font-ui mt-2 min-h-[1em] text-[var(--accent)]`;
-  const aiReplyProps = { className: aiReplyClassName, citationsCollapsedByDefault: true };
+  const aiReplyProps = { className: 'text-sm font-ui mt-2 min-h-[1em] opacity-80 text-[var(--accent)]', citationsProps: { className: 'text-[var(--foreground)]', collapsedByDefault: true, animate: true } };
   if (reply && 'stream' in reply) {
     aiReplyComponent = <TweetBody stream={reply.stream} {...aiReplyProps} /> ;
   } else if (reply) {
@@ -59,7 +58,7 @@ export function Tweet({ tweet, aiReply, className = "" }: TweetProps) {
         <div className={`font-ui pl-2 pr-4 pt-4 mt-[.0em] pb-4 text-gray-600 text-sm`}>{formattedDate}</div>
       </div>
       <div className={`pt-4 pb-4 pl-4 pr-4 border-l-[.5px]`}>
-        <TweetBody body={tweet.body} citations={tweet.citations} className={className} />
+        <TweetBody body={tweet.body} citations={tweet.citations} className={className} citationsProps={{ animate: false }} />
         <motion.div
           initial={{ opacity: 0, height: 0 }}
           animate={{ opacity: 1, height: 'auto' }}

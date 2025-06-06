@@ -11,9 +11,8 @@ interface TweetBodyProps {
   citations?: string[] | TweetModelBase[];
   stream?: StreamableValue<string, any>;
   className?: string;
-  bodyClassName?: string;
-  citationsClassName?: string;
-  citationsCollapsedByDefault?: boolean;
+  bodyProps?: object;
+  citationsProps?: object;
 }
 
 export default function TweetBody({
@@ -21,9 +20,8 @@ export default function TweetBody({
   citations,
   stream,
   className = "",
-  bodyClassName = "",
-  citationsClassName = "",
-  citationsCollapsedByDefault = false
+  bodyProps = {},
+  citationsProps = {}
 }: TweetBodyProps) {
   if (body == undefined && stream == undefined) {
     throw new Error("Either body or stream must be provided");
@@ -93,20 +91,20 @@ export default function TweetBody({
   let bodyComponent = null;
   const interpolatedText = useAnimatedText(streamedBody);
   if (!usingStream) {
-    bodyComponent = <MarkdownContent content={body ?? ""} className={bodyClassName} />;
+    bodyComponent = <MarkdownContent content={body ?? ""} {...bodyProps} />;
   } else if (!streamState || streamState == "--BEGIN--" || streamState == "--CITATIONS--" || streamState == "--ERROR--") {
     let message = streamStateMessage;
     if (streamState == "--ERROR--") {
       message = "Sorry, I encountered an error while processing your request.";
     }
-    bodyComponent = <SlidingText text={message} className={bodyClassName} />;
+    bodyComponent = <SlidingText text={message} {...bodyProps} />;
   } else if (streamState == "--BODY--" || streamState == "--END--") {
-    bodyComponent = <MarkdownContent content={interpolatedText} placeholder={"Generating..."} className={bodyClassName} />;
+    bodyComponent = <MarkdownContent content={interpolatedText} placeholder={"Generating..."} {...bodyProps} />;
   }
 
   const citationsComponent = <Citations
     citations={usingStream ? streamedCitationIds : citations ?? []}
-    collapsedByDefault={citationsCollapsedByDefault}
+    {...citationsProps}
   />;
 
   return (
