@@ -244,3 +244,36 @@ jobs:
       env:
         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+
+  test-windows-smoke:
+    # only run windows smoke tests when the runner isn't already windows
+    if: ${{ !contains(inputs.runner, 'windows') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ${{fromJson(inputs.python_versions)}}
+    runs-on: 16core-64gb-windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: ./.github/actions/python
+        with:
+          python-version: "3.9"
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+      - name: Install built wheel
+        shell: bash
+        run: pip install --no-index --find-links target/wheels/ chromadb
+      - name: Run tests
+        run: python -m pytest chromadb/test/test_api.py -n auto --dist worksteal -v --color=yes --durations 10
+        shell: bash
+        env:
+          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
+          RUST_BACKTRACE: 1
