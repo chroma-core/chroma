@@ -65,8 +65,6 @@ message CreateTenantResponse {
 
 message GetTenantRequest {
   string name = 1;
-  optional string id = 2;
-  optional string resource_name = 3;
 }
 
 message GetTenantResponse {
