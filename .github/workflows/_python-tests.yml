@@ -29,6 +29,11 @@ jobs:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
           - "chromadb/test/property/test_cross_version_persist.py"
+        include:
+          - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
+            parallelized: true
+          - test-glob: "chromadb/test/property/test_cross_version_persist.py"
+            parallelized: true
 
     runs-on: ${{ inputs.runner }}
     steps:
@@ -49,7 +54,7 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
-        run: python -m pytest ${{ matrix.test-glob }} -n auto --dist worksteal -v --color=yes --durations 10
+        run: python -m pytest ${{ matrix.test-glob }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
