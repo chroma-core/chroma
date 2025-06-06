@@ -302,6 +302,15 @@ impl Storage {
         }
     }
 
+    pub async fn delete_many(&self, keys: Vec<String>) -> Result<(), StorageError> {
+        match self {
+            Storage::ObjectStore(object_store) => object_store.delete_many(keys).await,
+            Storage::S3(s3) => s3.delete_many(keys).await,
+            Storage::Local(_) => unimplemented!(),
+            Storage::AdmissionControlledS3(_) => unimplemented!(),
+        }
+    }
+
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.rename(src_key, dst_key).await,

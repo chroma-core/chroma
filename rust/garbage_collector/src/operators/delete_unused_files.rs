@@ -147,27 +147,30 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
             CleanupMode::Delete | CleanupMode::DeleteV2 => {
                 // Hard delete - remove the file
                 if !all_files.is_empty() {
-                    let mut delete_stream = futures::stream::iter(all_files.clone())
-                        .map(move |file_path| self.delete_with_path(file_path))
-                        .buffer_unordered(100);
+                    // let mut delete_stream = futures::stream::iter(all_files.clone())
+                    //     .map(move |file_path| self.delete_with_path(file_path))
+                    //     .buffer_unordered(100);
 
-                    // Process any errors that occurred
-                    while let Some(result) = delete_stream.next().await {
-                        if let Err(e) = result {
-                            match e {
-                                StorageError::NotFound { path, source } => {
-                                    tracing::info!("Rename file {path} not found: {source}")
-                                }
-                                err => tracing::error!("Failed to delete: {err}"),
-                            }
-                        }
-                    }
+                    // // Process any errors that occurred
+                    // while let Some(result) = delete_stream.next().await {
+                    //     if let Err(e) = result {
+                    //         match e {
+                    //             StorageError::NotFound { path, source } => {
+                    //                 tracing::info!("Rename file {path} not found: {source}")
+                    //             }
+                    //             err => tracing::error!("Failed to delete: {err}"),
+                    //         }
+                    //     }
+                    // }
+
+                    self.storage.delete_many(all_files).await.unwrap();
                 }
             }
         }
 
         Ok(DeleteUnusedFilesOutput {
-            deleted_files: all_files.into_iter().collect(),
+            // deleted_files: all_files.into_iter().collect(),
+            deleted_files: HashSet::new(),
         })
     }
 }

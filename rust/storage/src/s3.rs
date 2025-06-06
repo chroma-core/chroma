@@ -647,6 +647,49 @@ impl S3Storage {
         }
     }
 
+    pub async fn delete_many(&self, keys: Vec<String>) -> Result<(), StorageError> {
+        tracing::debug!(keys = ?keys, "Deleting multiple objects from S3");
+
+        // batch by 1000 keys as per S3 limits
+        let mut futures = Vec::new();
+        for chunk in keys.chunks(1000) {
+            let delete_req = self.client.delete_objects().bucket(&self.bucket).delete(
+                aws_sdk_s3::types::Delete::builder()
+                    .set_objects(Some(
+                        chunk
+                            .iter()
+                            .map(|key| {
+                                aws_sdk_s3::types::ObjectIdentifier::builder()
+                                    .key(key)
+                                    .build()
+                                    .unwrap()
+                            })
+                            .collect::<Vec<_>>(),
+                    ))
+                    .build()
+                    .unwrap(),
+            );
+
+            futures.push(delete_req.send());
+        }
+        let results = futures::future::join_all(futures).await;
+        for res in results {
+            match res {
+                Ok(_) => {
+                    tracing::debug!("Successfully deleted objects from S3");
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to delete objects from S3");
+                    return Err(StorageError::Generic {
+                        source: Arc::new(e.into_service_error()),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object in S3");
 

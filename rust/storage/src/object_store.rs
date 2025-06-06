@@ -284,6 +284,30 @@ impl ObjectStore {
         }
     }
 
+    pub async fn delete_many(&self, keys: Vec<String>) -> Result<(), StorageError> {
+        let mut locations = Vec::new();
+        for key in keys {
+            locations.push(Ok(Path::from(key)));
+        }
+
+        let mut stream = self
+            .object_store
+            .delete_stream(futures::stream::iter(locations).boxed());
+
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(_) => {
+                    tracing::info!("Successfully deleted object");
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to delete object");
+                    return Err(e.into());
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object");
 
