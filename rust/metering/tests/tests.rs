@@ -24,6 +24,7 @@ mod tests {
             #[derive(Default, Debug, Clone)]
             pub struct TestEventA {
                 // This field is not read in the tests
+                #[allow(dead_code)]
                 test_unannotated_field: u64,
                 #[field(attribute = "test_attribute", mutator = "test_mutator_a")]
                 pub test_annotated_field: Option<String>
@@ -33,7 +34,7 @@ mod tests {
             #[derive(Default, Debug, Clone)]
             pub struct TestEventB {
                 // This field is not read in the tests
-                // #[allow(dead_code)]
+                #[allow(dead_code)]
                 test_unannotated_field: u64,
                 #[field(attribute = "test_attribute", mutator = "test_mutator_b")]
                 pub test_annotated_field: Option<String>
