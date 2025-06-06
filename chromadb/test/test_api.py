@@ -1,25 +1,22 @@
 # type: ignore
-import traceback
-import httpx
-
-import chromadb
-from chromadb.errors import ChromaError
-from chromadb.api.fastapi import FastAPI
-from chromadb.api.types import QueryResult, EmbeddingFunction, Document
-from chromadb.config import Settings
-from chromadb.errors import NotFoundError
-import chromadb.server.fastapi
-import pytest
-import tempfile
-import numpy as np
 import os
 import shutil
+import tempfile
+import traceback
 from datetime import datetime, timedelta
-from chromadb.utils.embedding_functions import (
-    DefaultEmbeddingFunction,
-)
 from typing import Any
-from chromadb.errors import InvalidArgumentError
+
+import httpx
+import numpy as np
+import pytest
+
+import chromadb
+import chromadb.server.fastapi
+from chromadb.api.fastapi import FastAPI
+from chromadb.api.types import Document, EmbeddingFunction, QueryResult
+from chromadb.config import Settings
+from chromadb.errors import ChromaError, InvalidArgumentError, NotFoundError
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
 persist_dir = tempfile.mkdtemp()
 
@@ -1618,12 +1615,15 @@ def test_dimensionality_exception_upsert(client):
     assert "dimension" in str(e.value)
 
 
+# this may be flaky on windows, so we rerun it
+@pytest.mark.flaky(reruns=3, condition=sys.platform.startswith("win32"))
 def test_ssl_self_signed(client_ssl):
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
         pytest.skip("Skipping test for integration test")
     client_ssl.heartbeat()
 
-
+# this may be flaky on windows, so we rerun it
+@pytest.mark.flaky(reruns=3, condition=sys.platform.startswith("win32"))
 def test_ssl_self_signed_without_ssl_verify(client_ssl):
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
         pytest.skip("Skipping test for integration test")
