@@ -896,6 +896,14 @@ impl LogServer {
         self.metrics
             .dirty_log_records_read
             .add(dirty_markers.len() as u64, &[]);
+        let Some((last_record_inserted, _)) = dirty_markers.last() else {
+            let backpressure = vec![];
+            self.set_backpressure(&backpressure);
+            let mut need_to_compact = self.need_to_compact.lock();
+            let mut rollups = HashMap::new();
+            std::mem::swap(&mut *need_to_compact, &mut rollups);
+            return Ok(());
+        };
         let mut rollups = DirtyMarker::coalesce_markers(&dirty_markers)?;
         self.enrich_dirty_log(&mut rollups).await?;
         let mut markers = vec![];
@@ -919,7 +927,8 @@ impl LogServer {
             markers.push(serde_json::to_string(&DirtyMarker::Cleared).map(Vec::from)?);
         }
         let mut new_cursor = cursor.clone();
-        new_cursor.position = self.dirty_log.append_many(markers).await?;
+        self.dirty_log.append_many(markers).await?;
+        new_cursor.position = *last_record_inserted + 1u64;
         let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
             return Err(Error::CouldNotGetDirtyLogCursors);
         };
@@ -1212,23 +1221,11 @@ impl LogServer {
                 max_bytes: None,
                 max_records: Some(pull_logs.batch_size as u64),
             };
-            // NOTE(rescrv):  Log records are immutable, so if a manifest includes our range we can
-            // serve it directly from the scan_from_manifest call.
-            let (manifest_start, manifest_limit) = (
-                manifest.minimum_log_position().offset() as i64,
-                manifest.maximum_log_position().offset() as i64,
-            );
-            if manifest_start <= pull_logs.start_from_offset
-                && pull_logs.start_from_offset + pull_logs.batch_size as i64 <= manifest_limit
-            {
-                LogReader::scan_from_manifest(
-                    &manifest,
-                    LogPosition::from_offset(pull_logs.start_from_offset as u64),
-                    limits,
-                )
-            } else {
-                None
-            }
+            LogReader::scan_from_manifest(
+                &manifest,
+                LogPosition::from_offset(pull_logs.start_from_offset as u64),
+                limits,
+            )
         } else {
             None
         }
@@ -1289,7 +1286,7 @@ impl LogServer {
                     let prefix = storage_prefix_for_log(collection_id);
                     if let Some(cache) = self.cache.as_ref() {
                         let cache_key = format!("{collection_id}::{}", fragment.path);
-                        let cache_span = tracing::info_span!("cache get");
+                        let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
                         if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
                         {
                             return Ok(Arc::new(answer.bytes));
@@ -2156,8 +2153,17 @@ pub async fn log_entrypoint() {
 
 #[cfg(test)]
 mod tests {
+    use std::{str::FromStr, sync::Arc};
+
     use super::*;
     use crate::state_hash_table::Value;
+
+    use chroma_storage::s3::s3_client_for_test_with_bucket_name;
+    use chroma_types::{are_update_metadatas_close_to_equal, OperationRecord};
+    use opentelemetry::global::meter;
+    use proptest::prelude::*;
+    use tokio::runtime::Runtime;
+    use wal3::SnapshotOptions;
 
     #[test]
     fn unsafe_constants() {
@@ -3217,5 +3223,369 @@ mod tests {
         let fragment = CachedBytes::default();
         assert_eq!(0, fragment.weight());
         assert!(fragment.bytes.is_empty());
+    }
+
+    async fn setup_log_server() -> LogServer {
+        let legacy_log_client = GrpcLog::primary_client_from_config(&GrpcLogConfig {
+            host: "localhost".to_string(),
+            port: 50052,
+            ..Default::default()
+        })
+        .await
+        .expect("Legacy log service should be present");
+        let storage = Arc::new(s3_client_for_test_with_bucket_name("rust-log-proptest").await);
+        let dirty_log = Arc::new(
+            LogWriter::open_or_initialize(
+                LogWriterOptions {
+                    snapshot_manifest: SnapshotOptions {
+                        snapshot_rollover_threshold: 3,
+                        fragment_rollover_threshold: 3,
+                    },
+                    ..Default::default()
+                },
+                storage.clone(),
+                "test-rust-log-service",
+                "test-dirty-log-writer",
+                (),
+            )
+            .await
+            .expect("Dirty log should be initializable"),
+        );
+        LogServer {
+            storage,
+            dirty_log,
+            proxy: Some(legacy_log_client),
+            metrics: Metrics::new(meter("test-rust-log-service")),
+            config: Default::default(),
+            open_logs: Default::default(),
+            rolling_up: Default::default(),
+            backpressure: Default::default(),
+            need_to_compact: Default::default(),
+            cache: Default::default(),
+        }
+    }
+
+    async fn push_log_to_server(
+        server: &LogServer,
+        collection_id: CollectionUuid,
+        logs: &[OperationRecord],
+    ) {
+        let proto_push_log_req = Request::new(PushLogsRequest {
+            collection_id: collection_id.to_string(),
+            records: logs
+                .iter()
+                .cloned()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()
+                .expect("Logs should be valid"),
+        });
+        server
+            .push_logs(proto_push_log_req)
+            .await
+            .expect("Push Logs should not fail");
+    }
+
+    async fn validate_log_on_server(
+        server: &LogServer,
+        collection_id: CollectionUuid,
+        reference_logs: &[OperationRecord],
+        read_offset: usize,
+        batch_size: usize,
+    ) {
+        let read_logs = server
+            .pull_logs(Request::new(PullLogsRequest {
+                collection_id: collection_id.to_string(),
+                start_from_offset: read_offset as i64,
+                batch_size: batch_size as i32,
+                end_timestamp: i64::MAX,
+            }))
+            .await
+            .expect("Pull Logs should not fail")
+            .into_inner()
+            .records
+            .into_iter()
+            .map(chroma_types::LogRecord::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("Logs should be valid");
+
+        // NOTE: Log offset always starts with 1.
+        let ref_start_offset = read_offset.saturating_sub(1).min(reference_logs.len());
+        let ref_end_offset = ref_start_offset
+            .saturating_add(batch_size)
+            .min(reference_logs.len());
+
+        assert_eq!(read_logs.len(), ref_end_offset - ref_start_offset);
+
+        for (reference_operation, got_log) in reference_logs[ref_start_offset..ref_end_offset]
+            .iter()
+            .zip(read_logs)
+        {
+            let expected_metadata = reference_operation.metadata.clone().unwrap_or_default();
+            let received_metadata = got_log.record.metadata.clone().unwrap_or_default();
+
+            assert!(got_log.record.id == reference_operation.id);
+            assert!(got_log.record.embedding == reference_operation.embedding);
+            assert!(got_log.record.encoding == reference_operation.encoding);
+            assert!(
+                are_update_metadatas_close_to_equal(&received_metadata, &expected_metadata),
+                "{:?} != {:?}",
+                received_metadata,
+                expected_metadata
+            );
+            assert!(got_log.record.document == reference_operation.document);
+            assert!(got_log.record.operation == reference_operation.operation);
+        }
+    }
+
+    async fn get_enum_offset_on_server(server: &LogServer, collection_id: CollectionUuid) -> i64 {
+        server
+            .scout_logs(Request::new(ScoutLogsRequest {
+                collection_id: collection_id.to_string(),
+            }))
+            .await
+            .expect("Scout Logs should not fail")
+            .into_inner()
+            .first_uninserted_record_offset
+            .saturating_sub(1)
+    }
+
+    async fn mock_compact_on_server(
+        server: &LogServer,
+        collection_id: CollectionUuid,
+        compact_offset: i64,
+    ) {
+        server
+            .update_collection_log_offset(Request::new(UpdateCollectionLogOffsetRequest {
+                collection_id: collection_id.to_string(),
+                log_offset: compact_offset,
+            }))
+            .await
+            .expect("Update Compaction Offset should not fail");
+    }
+
+    async fn validate_dirty_log_on_server(server: &LogServer, collection_ids: &[CollectionUuid]) {
+        server
+            .roll_dirty_log()
+            .await
+            .expect("Roll Dirty Logs should not fail");
+        let dirty_collections = server
+            .cached_get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {
+                min_compaction_size: 0,
+            })
+            .await
+            .expect("Get Dirty Collections should not fail")
+            .into_inner()
+            .all_collection_info;
+        let expected_collection_ids: HashSet<_> =
+            HashSet::from_iter(collection_ids.iter().cloned());
+        let got_collection_ids: HashSet<_> =
+            HashSet::from_iter(dirty_collections.iter().map(|info| {
+                CollectionUuid::from_str(&info.collection_id)
+                    .expect("Collection Uuid should be valid")
+            }));
+        assert_eq!(got_collection_ids, expected_collection_ids);
+    }
+
+    fn test_push_pull_logs(
+        read_offset: usize,
+        batch_size: usize,
+        operations: Vec<OperationRecord>,
+    ) {
+        let runtime = Runtime::new().unwrap();
+
+        runtime.block_on(async move {
+            let log_server = setup_log_server().await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
+
+            let collection_id = CollectionUuid::new();
+            log_server
+                .proxy
+                .clone()
+                .expect("Legacy log service should be present")
+                .seal_log(Request::new(SealLogRequest {
+                    collection_id: collection_id.to_string(),
+                }))
+                .await
+                .expect("Seal log should not fail");
+
+            for chunk in operations.chunks(100) {
+                push_log_to_server(&log_server, collection_id, chunk).await;
+            }
+
+            validate_dirty_log_on_server(&log_server, &[collection_id]).await;
+            validate_log_on_server(
+                &log_server,
+                collection_id,
+                &operations,
+                read_offset,
+                batch_size,
+            )
+            .await;
+            let enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
+            mock_compact_on_server(&log_server, collection_id, enum_offset).await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
+        });
+    }
+
+    fn test_dirty_logs(operations: Vec<(usize, OperationRecord)>) {
+        let runtime = Runtime::new().unwrap();
+
+        runtime.block_on(async move {
+            let log_server = setup_log_server().await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
+
+            let mut collection_id_with_ord = Vec::new();
+            for (index, operation) in operations {
+                let collection_id = CollectionUuid::new();
+                collection_id_with_ord.push((index, collection_id));
+                log_server
+                    .proxy
+                    .clone()
+                    .expect("Legacy log service should be present")
+                    .seal_log(Request::new(SealLogRequest {
+                        collection_id: collection_id.to_string(),
+                    }))
+                    .await
+                    .expect("Seal log should not fail");
+                push_log_to_server(&log_server, collection_id, &[operation]).await;
+                let enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
+                assert_eq!(enum_offset, 1);
+            }
+
+            collection_id_with_ord.sort_by_key(|(index, _)| *index);
+            let mut collection_ids = collection_id_with_ord
+                .into_iter()
+                .map(|(_, id)| id)
+                .collect::<Vec<_>>();
+
+            while let Some(collection_id) = collection_ids.pop() {
+                mock_compact_on_server(&log_server, collection_id, 1).await;
+                validate_dirty_log_on_server(&log_server, &collection_ids).await;
+            }
+        });
+    }
+
+    fn test_fork_logs(
+        initial_operations: Vec<OperationRecord>,
+        source_operations: Vec<OperationRecord>,
+        fork_operations: Vec<OperationRecord>,
+    ) {
+        let runtime = Runtime::new().unwrap();
+
+        runtime.block_on(async move {
+            let log_server = setup_log_server().await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
+
+            let source_collection_id = CollectionUuid::new();
+            let fork_collection_id = CollectionUuid::new();
+
+            log_server
+                .proxy
+                .clone()
+                .expect("Legacy log service should be present")
+                .seal_log(Request::new(SealLogRequest {
+                    collection_id: source_collection_id.to_string(),
+                }))
+                .await
+                .expect("Seal log should not fail");
+
+            if !initial_operations.is_empty() {
+                push_log_to_server(&log_server, source_collection_id, &initial_operations).await;
+            }
+
+            log_server
+                .fork_logs(Request::new(ForkLogsRequest {
+                    source_collection_id: source_collection_id.to_string(),
+                    target_collection_id: fork_collection_id.to_string(),
+                }))
+                .await
+                .expect("Fork Logs should not fail");
+
+            if !source_operations.is_empty() {
+                push_log_to_server(&log_server, source_collection_id, &source_operations).await;
+            }
+
+            if !fork_operations.is_empty() {
+                push_log_to_server(&log_server, fork_collection_id, &fork_operations).await;
+            }
+
+            let mut expected_source = initial_operations.clone();
+            expected_source.extend(source_operations);
+
+            let mut expected_fork = initial_operations;
+            expected_fork.extend(fork_operations);
+
+            let mut dirty_collection_ids = Vec::new();
+            if !expected_source.is_empty() {
+                dirty_collection_ids.push(source_collection_id);
+            }
+            if !expected_fork.is_empty() {
+                dirty_collection_ids.push(fork_collection_id);
+            }
+
+            validate_dirty_log_on_server(&log_server, &dirty_collection_ids).await;
+            validate_log_on_server(
+                &log_server,
+                source_collection_id,
+                &expected_source,
+                1,
+                10000,
+            )
+            .await;
+            validate_log_on_server(&log_server, fork_collection_id, &expected_fork, 1, 10000).await;
+
+            if !expected_source.is_empty() {
+                let source_enum_offset =
+                    get_enum_offset_on_server(&log_server, source_collection_id).await;
+                assert_eq!(source_enum_offset, expected_source.len() as i64);
+                mock_compact_on_server(&log_server, source_collection_id, source_enum_offset).await;
+            }
+            if !expected_fork.is_empty() {
+                let fork_enum_offset =
+                    get_enum_offset_on_server(&log_server, fork_collection_id).await;
+                assert_eq!(fork_enum_offset, expected_fork.len() as i64);
+                mock_compact_on_server(&log_server, fork_collection_id, fork_enum_offset).await;
+            }
+            validate_dirty_log_on_server(&log_server, &[]).await;
+        });
+    }
+
+    proptest! {
+        #[test]
+        fn test_k8s_integration_rust_log_service_push_pull_logs(
+            read_offset in 1usize..=100,
+            batch_size in 1usize..=150,
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=100)
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_push_pull_logs(read_offset, batch_size, operations))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+
+        #[test]
+        fn test_k8s_integration_rust_log_service_dirty_logs(
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=5).prop_map(|ops| ops.into_iter().enumerate().collect()).prop_shuffle()
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_dirty_logs(operations))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+
+        #[test]
+        fn test_k8s_integration_rust_log_service_fork_logs(
+            initial_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+            source_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+            fork_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_fork_logs(initial_operations, source_operations, fork_operations))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
     }
 }

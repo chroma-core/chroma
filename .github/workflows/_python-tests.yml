@@ -128,6 +128,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+<<<<<<< HEAD
         python: ${{ fromJson(inputs.python_versions) }}
         test-glob:
           - "chromadb/test/api"
@@ -143,6 +144,40 @@ jobs:
           - "chromadb/test/distributed/test_sanity.py"
           - "chromadb/test/distributed/test_log_failover.py"
     runs-on: blacksmith-8vcpu-ubuntu-2204
+||||||| 2d451d37e
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: ["blacksmith-8vcpu-ubuntu-2204"]
+        test-globs: ["chromadb/test/api",
+                    "chromadb/test/api/test_collection.py",
+                    "chromadb/test/api/test_limit_offset.py",
+                    "chromadb/test/property/test_collections.py",
+                    "chromadb/test/property/test_add.py",
+                    "chromadb/test/property/test_filtering.py",
+                    "chromadb/test/property/test_fork.py",
+                    "chromadb/test/property/test_embeddings.py",
+                    "chromadb/test/property/test_collections_with_database_tenant.py",
+                    "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+                    "chromadb/test/distributed/test_sanity.py",
+                    "chromadb/test/distributed/test_log_failover.py"]
+    runs-on: ${{ matrix.platform }}
+=======
+        python: ${{fromJson(inputs.python_versions)}}
+        platform: ["blacksmith-8vcpu-ubuntu-2204"]
+        test-globs: ["chromadb/test/api",
+                    "chromadb/test/api/test_collection.py",
+                    "chromadb/test/api/test_limit_offset.py",
+                    "chromadb/test/property/test_collections.py",
+                    "chromadb/test/property/test_add.py",
+                    "chromadb/test/property/test_filtering.py",
+                    "chromadb/test/property/test_fork.py",
+                    "chromadb/test/property/test_embeddings.py",
+                    "chromadb/test/property/test_collections_with_database_tenant.py",
+                    "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
+                    "chromadb/test/distributed/test_sanity.py",
+                    "chromadb/test/distributed/test_log_backpressure.py",
+                    "chromadb/test/distributed/test_log_failover.py"]
+    runs-on: ${{ matrix.platform }}
+>>>>>>> main
     # OIDC token auth for AWS
     permissions:
       contents: read

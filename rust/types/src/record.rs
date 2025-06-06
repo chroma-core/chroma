@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use super::{
     ConversionError, Operation, OperationConversionError, ScalarEncoding,
     ScalarEncodingConversionError, UpdateMetadata, UpdateMetadataValue,
@@ -7,7 +9,7 @@ use crate::{chroma_proto, CHROMA_DOCUMENT_KEY};
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct OperationRecord {
     pub id: String,
     pub embedding: Option<Vec<f32>>, // NOTE: we only support float32 embeddings for now so this ignores the encoding
@@ -46,6 +48,18 @@ impl OperationRecord {
                 .sum::<usize>();
         }
         size_byte as u64
+    }
+}
+
+impl Debug for OperationRecord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OperationRecord")
+            .field("id", &self.id)
+            .field("document", &self.document.as_ref().map(|_| "..."))
+            .field("embedding", &self.embedding.as_ref().map(|_| "[...]"))
+            .field("metadata", &self.metadata)
+            .field("operation", &self.operation)
+            .finish()
     }
 }
 
@@ -98,7 +112,19 @@ impl TryFrom<OperationRecord> for chroma_proto::OperationRecord {
             None => None,
         };
 
-        let metadata = operation_record.metadata.map(|metadata| metadata.into());
+        let mut metadata = operation_record.metadata;
+
+        if let Some(doc) = operation_record.document {
+            // NOTE: The proto record does not have a document field so we need to hide document in metadata
+            let mut patched_metdata = metadata.take().unwrap_or_default();
+            patched_metdata.insert(
+                CHROMA_DOCUMENT_KEY.to_string(),
+                UpdateMetadataValue::Str(doc),
+            );
+            metadata = Some(patched_metdata);
+        }
+
+        let proto_metadata = metadata.map(Into::into);
 
         let proto_vector = match vector {
             Some(vector) => Some(vector.try_into()?),
@@ -108,7 +134,7 @@ impl TryFrom<OperationRecord> for chroma_proto::OperationRecord {
         Ok(chroma_proto::OperationRecord {
             id: operation_record.id,
             vector: proto_vector,
-            metadata,
+            metadata: proto_metadata,
             operation: operation_record.operation as i32,
         })
     }
@@ -137,6 +163,7 @@ impl TryFrom<chroma_proto::OperationRecord> for OperationRecord {
         let (metadata, document) = match operation_record_proto.metadata {
             Some(proto_metadata) => match UpdateMetadata::try_from(proto_metadata) {
                 Ok(mut metadata) => {
+                    // NOTE: The proto record does not have a document field so we need to extract document from metadata
                     let document = metadata.remove(CHROMA_DOCUMENT_KEY);
                     match document {
                         Some(UpdateMetadataValue::Str(document)) => {

@@ -16,15 +16,22 @@ where
     Ok(Duration::from_secs(secs))
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, serde::Deserialize, Clone)]
 pub(super) struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
     #[serde(
-        rename = "relative_cutoff_time_seconds",
+        rename = "collection_soft_delete_grace_period_seconds",
+        deserialize_with = "deserialize_duration_from_seconds",
+        default = "GarbageCollectorConfig::default_collection_soft_delete_grace_period"
+    )]
+    pub(super) collection_soft_delete_grace_period: Duration,
+    #[serde(
+        rename = "version_relative_cutoff_time_seconds",
+        alias = "relative_cutoff_time_seconds",
         deserialize_with = "deserialize_duration_from_seconds"
     )]
-    pub(super) relative_cutoff_time: Duration,
+    pub(super) version_cutoff_time: Duration,
     pub(super) max_collections_to_gc: u32,
     pub(super) gc_interval_mins: u32,
     pub(super) disallow_collections: Vec<String>,
@@ -69,6 +76,10 @@ impl GarbageCollectorConfig {
     fn default_port() -> u16 {
         50055
     }
+
+    fn default_collection_soft_delete_grace_period() -> Duration {
+        Duration::from_secs(60 * 60 * 24) // 1 day
+    }
 }
 
 #[cfg(test)]
@@ -83,7 +94,7 @@ mod tests {
         assert_eq!(config.service_name, "garbage-collector");
         assert_eq!(config.otel_endpoint, "http://otel-collector:4317");
         assert_eq!(
-            config.relative_cutoff_time,
+            config.version_cutoff_time,
             Duration::from_secs(12 * 60 * 60)
         ); // 12 hours
         assert_eq!(config.max_collections_to_gc, 1000);

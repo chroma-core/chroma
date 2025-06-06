@@ -138,22 +138,27 @@ mod tests {
     /// - Compacted: Upsert [1..=100]
     async fn setup_knn_projection_input(
         record_distances: Vec<RecordDistance>,
-    ) -> KnnProjectionInput {
+    ) -> (TestDistributedSegment, KnnProjectionInput) {
         let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;
-        KnnProjectionInput {
-            logs: upsert_generator.generate_chunk(81..=120),
-            blockfile_provider: test_segment.blockfile_provider,
-            record_segment: test_segment.record_segment,
-            record_distances,
-        }
+        let blockfile_provider = test_segment.blockfile_provider.clone();
+        let record_segment = test_segment.record_segment.clone();
+        (
+            test_segment,
+            KnnProjectionInput {
+                logs: upsert_generator.generate_chunk(81..=120),
+                blockfile_provider,
+                record_segment,
+                record_distances,
+            },
+        )
     }
 
     #[tokio::test]
     async fn test_trivial_knn_projection() {
-        let knn_projection_input = setup_knn_projection_input(
+        let (_test_segment, knn_projection_input) = setup_knn_projection_input(
             (71..=90)
                 .rev()
                 .map(|offset_id| RecordDistance {
@@ -194,7 +199,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_knn_projection() {
-        let knn_projection_input = setup_knn_projection_input(
+        let (_test_segment, knn_projection_input) = setup_knn_projection_input(
             (71..=90)
                 .rev()
                 .map(|offset_id| RecordDistance {

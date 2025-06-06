@@ -175,6 +175,10 @@ message GetCollectionResponse {
   Collection collection = 1;
 }
 
+message CollectionIdsFilter {
+  repeated string ids = 1;
+}
+
 message GetCollectionsRequest {
   optional string id = 1;
   optional string name = 2;
@@ -182,7 +186,7 @@ message GetCollectionsRequest {
   string database = 5;
   optional int32 limit = 6;
   optional int32 offset = 7;
-  repeated string ids = 8;
+  optional CollectionIdsFilter ids_filter = 8;
   optional bool include_soft_deleted = 9;
 }
 

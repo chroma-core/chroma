@@ -222,4 +222,12 @@ impl Log {
             Log::InMemory(_) => unimplemented!(),
         }
     }
+
+    pub fn is_ready(&self) -> bool {
+        match self {
+            Log::Sqlite(_) => true,
+            Log::Grpc(log) => log.is_ready(),
+            Log::InMemory(_) => true,
+        }
+    }
 }

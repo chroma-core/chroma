@@ -15,6 +15,7 @@ serde = { workspace = true }
 sqlx = { workspace = true }
 serde-pickle = "1.2.0"
 tantivy = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -35,7 +36,6 @@ chroma-types = { workspace = true }
 proptest = { workspace = true }
 shuttle = { workspace = true }
 tokio = { workspace = true }
-tempfile = { workspace = true }
 
 chroma-cache = { workspace = true }
 chroma-log = { workspace = true }

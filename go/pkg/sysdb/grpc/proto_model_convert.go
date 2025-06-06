@@ -9,6 +9,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func convertCollectionMetadataToModel(collectionMetadata *coordinatorpb.UpdateMetadata) (*model.CollectionMetadata[model.CollectionMetadataValueType], error) {
@@ -55,6 +56,10 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 		LastCompactionTimeSecs:     collection.LastCompactionTimeSecs,
 		VersionFilePath:            &collection.VersionFileName,
 		LineageFilePath:            collection.LineageFileName,
+		UpdatedAt: &timestamppb.Timestamp{
+			Seconds: collection.UpdatedAt,
+			Nanos:   0,
+		},
 	}
 
 	if collection.RootCollectionID != nil {

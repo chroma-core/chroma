@@ -430,7 +430,6 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use chroma_index::test_hnsw_index_provider;
     use chroma_log::in_memory_log::InMemoryLog;
     use chroma_segment::test::TestDistributedSegment;
     use chroma_sysdb::TestSysDb;
@@ -453,7 +452,7 @@ mod tests {
             system: system.clone(),
             _sysdb: SysDb::Test(sysdb),
             log: Log::InMemory(log),
-            hnsw_index_provider: test_hnsw_index_provider(),
+            hnsw_index_provider: segments.hnsw_provider,
             blockfile_provider: segments.blockfile_provider,
             port,
             fetch_log_batch_size: 100,
