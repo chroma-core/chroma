@@ -176,7 +176,8 @@ jobs:
     #   matrix:
     #     # excluding 3.9 here because onnxruntime 1.20.x does not have a wheel for it
     #     python: [ "3.10", "3.11", "3.12" ]
-    runs-on: 16core-64gb-windows-latest
+    # runs-on: 16core-64gb-windows-latest
+    runs-on:  32core-128gb-windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
