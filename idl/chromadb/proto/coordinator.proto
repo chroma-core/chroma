@@ -192,6 +192,13 @@ message GetCollectionsResponse {
   reserved "status";
 }
 
+message GetCollectionByResourceNameRequest {
+  string id = 1;
+  optional string tenant_resource_name = 2;
+  optional string database = 3;
+  optional string name = 4;
+}
+
 message CountCollectionsRequest {
   string tenant = 4;
   optional string database = 5;
@@ -275,6 +282,16 @@ message GetLastCompactionTimeForTenantResponse {
 
 message SetLastCompactionTimeForTenantRequest {
   TenantLastCompactionTime tenant_last_compaction_time = 1;
+}
+
+message SetTenantResourceNameRequest {
+  string id = 1;
+  string resource_name = 2;
+}
+
+message SetTenantResourceNameResponse {
+  reserved 1;
+  reserved "status";
 }
 
 message FlushSegmentCompactionInfo {
@@ -509,6 +526,7 @@ service SysDB {
   rpc FinishDatabaseDeletion(FinishDatabaseDeletionRequest) returns (FinishDatabaseDeletionResponse) {}
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
+  rpc SetTenantResourceName(SetTenantResourceNameRequest) returns (SetTenantResourceNameResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}
   rpc DeleteSegment(DeleteSegmentRequest) returns (DeleteSegmentResponse) {}
   rpc GetSegments(GetSegmentsRequest) returns (GetSegmentsResponse) {}
@@ -518,6 +536,7 @@ service SysDB {
   rpc FinishCollectionDeletion(FinishCollectionDeletionRequest) returns (FinishCollectionDeletionResponse) {}
   rpc GetCollection(GetCollectionRequest) returns (GetCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
+  rpc GetCollectionByResourceName(GetCollectionByResourceNameRequest) returns (GetCollectionResponse) {}
   rpc CountCollections(CountCollectionsRequest) returns (CountCollectionsResponse) {}
   rpc GetCollectionWithSegments(GetCollectionWithSegmentsRequest) returns (GetCollectionWithSegmentsResponse) {}
   rpc CheckCollections(CheckCollectionsRequest) returns (CheckCollectionsResponse) {}

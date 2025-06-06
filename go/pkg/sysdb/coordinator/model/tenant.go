@@ -3,7 +3,8 @@ package model
 import "github.com/chroma-core/chroma/go/pkg/types"
 
 type Tenant struct {
-	Name string
+	Name         string
+	ResourceName *string
 }
 
 type CreateTenant struct {
