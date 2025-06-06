@@ -278,4 +278,30 @@ mod tests {
         let expected_none = metering::close::<metering::TestEventA>();
         assert!(expected_none.is_none());
     }
+
+    #[tokio::test]
+    async fn test_nested_mutation_then_close_multi_thread() {
+        // Define an asynchronous helper function that sets a value for `test_attribute`
+        async fn async_helper_fn() {
+            metering::current().test_attribute(Some("async_helper".to_string()));
+            let expected_metering_event = metering::close::<metering::TestEventA>();
+            assert!(expected_metering_event.is_some());
+        }
+
+        // Create a metering event of type `TestEventA`
+        let metering_event_guard =
+            metering::create::<metering::TestEventA>(metering::TestEventA::new(100u64));
+
+        // Call the helper function in another process, passing the context through `metered`
+        let handle = tokio::spawn(async move {
+            async_helper_fn().metered(metering_event_guard).await;
+        });
+
+        // Wait for the handle to resolve. The event should be removed from the stack
+        handle.await.unwrap();
+
+        // Verify that the stack is empty
+        let expected_none = metering::close::<metering::TestEventA>();
+        assert!(expected_none.is_none());
+    }
 }
