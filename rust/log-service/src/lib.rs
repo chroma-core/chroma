@@ -228,6 +228,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
     mark_dirty: MarkDirty,
 ) -> Result<LogRef<'a>, wal3::Error> {
     if active.log.is_some() {
+        // TODO(rescrv): Magic constant.
         active.keep_alive(Duration::from_secs(60));
     }
     if let Some(log) = active.log.as_ref() {
@@ -245,6 +246,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
         mark_dirty.clone(),
     )
     .await?;
+    // TODO(rescrv): Magic constant.
     active.keep_alive(Duration::from_secs(60));
     tracing::info!("Opened log at {}", prefix);
     let opened = Arc::new(opened);
@@ -580,6 +582,7 @@ impl LogServer {
             ));
         }
         tracing::info!("scouted {collection_id} start={start} limit={limit}");
+        // TODO(rescrv):  Magic constant.
         const STEP: u64 = 100;
         let num_steps = (limit.saturating_sub(start) + STEP - 1) / STEP;
         let actual_steps = (0..num_steps)
@@ -719,6 +722,7 @@ impl LogServer {
                 .await?
                 .into_inner();
             if resp.log_is_sealed {
+                // TODO(rescrv):  Magic constant.
                 self.effectuate_log_transfer(collection_id, proxy.clone(), 3)
                     .await?;
                 Box::pin(self.push_logs(Request::new(request))).await
@@ -828,7 +832,7 @@ impl LogServer {
             epoch_us: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map_err(|_| wal3::Error::Internal)
-                .unwrap()
+                .expect("time should never move to before UNIX epoch")
                 .as_micros() as u64,
             writer: "TODO".to_string(),
         };
@@ -867,6 +871,7 @@ impl LogServer {
         request: GetAllCollectionInfoToCompactRequest,
     ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
         // TODO(rescrv):  Realistically we could make this configurable.
+        // TODO(rescrv):  Magic constant.
         const MAX_COLLECTION_INFO_NUMBER: usize = 10000;
         let mut selected_rollups = Vec::with_capacity(MAX_COLLECTION_INFO_NUMBER);
         // Do a non-allocating pass here.
@@ -995,6 +1000,7 @@ impl LogServer {
         if dirty_fragments.is_empty() {
             return Ok((witness, cursor, vec![]));
         }
+        // TODO(rescrv):  Magic constant.
         if dirty_fragments.len() >= 1_000 {
             tracing::error!("Too many dirty fragments: {}", dirty_fragments.len());
         }
@@ -1555,6 +1561,7 @@ impl LogServer {
         let dirty_fragments = reader
             .scan(
                 cursor.position,
+                // TODO(rescrv):  Magic constant.
                 Limits {
                     max_files: Some(1_000_000),
                     max_bytes: Some(1_000_000_000),

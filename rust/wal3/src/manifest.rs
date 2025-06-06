@@ -197,6 +197,7 @@ impl Snapshot {
                     err => {
                         let backoff = exp_backoff.next();
                         tokio::time::sleep(backoff).await;
+                        // TODO(rescrv):  Magic constant.
                         if retries >= 3 {
                             return Err(Error::StorageError(Arc::new(err.clone())));
                         }
@@ -241,6 +242,7 @@ impl Snapshot {
                 Err(e) => {
                     tracing::error!("error uploading manifest: {e:?}");
                     let mut backoff = exp_backoff.next();
+                    // TODO(rescrv):  Magic constant.
                     if backoff > Duration::from_secs(3_600) {
                         backoff = Duration::from_secs(3_600);
                     }
