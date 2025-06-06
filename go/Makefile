@@ -27,9 +27,12 @@ build: proto
 	go build -v -o bin/coordinator ./cmd/coordinator/
 	go build -v -o bin/logservice ./cmd/logservice/
 
+# -p 1 runs tests sequentially. If run in parallel tests are pretty flaky in CI.
+# I believe this is caused by go/script/migrate_up_test.sh, which creates the possibility (observed during CI runs) of running multiple `atlas schema apply --dev-url "docker://postgres/15/dev" ...` in parallel.
+# This command spins up a new Docker container, so my theory is that there's a race condition inside atlas when used this way.
+# Instead of specifying -p 1, it might be possible to add a cross-process lock to guarantee that only one instance of atlas is running at a time.
 test: build
-	go clean -testcache
-	go test -p 1 -v -race -cover ./...
+	go test -p 1 -race -cover ./...
 
 
 lint:
