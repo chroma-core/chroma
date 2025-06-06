@@ -185,7 +185,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - name: Run tests
-        run: uv run pytest chromadb/test/test_api.py
+        run: uv run pytest chromadb/test/test_api.py -n auto --dist worksteal -v --color=yes
 
   python-vulnerability-scan:
     name: Python vulnerability scan
