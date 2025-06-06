@@ -2,7 +2,6 @@ import sys
 import subprocess
 import os
 import tempfile
-import shutil
 from types import ModuleType
 from typing import Dict, List
 
@@ -56,44 +55,18 @@ def install_version(version: str, dep_overrides: Dict[str, str]) -> None:
 def install(pkg: str, path: str, dep_overrides: Dict[str, str]) -> int:
     os.makedirs(path, exist_ok=True)
 
-    # Check if uv is available
-    uv_available = shutil.which("uv") is not None
+    # -q -q to suppress pip output to ERROR level
+    # https://pip.pypa.io/en/stable/cli/pip/#quiet
+    command = [sys.executable, "-m", "pip", "-q", "-q", "install", pkg]
 
-    if uv_available:
-        # Use uv for installation
-        command = ["uv", "pip", "install", pkg]
+    for dep, operator_version in dep_overrides.items():
+        command.append(f"{dep}{operator_version}")
 
-        for dep, operator_version in dep_overrides.items():
-            command.append(f"{dep}{operator_version}")
+    # Only add --no-binary=chroma-hnswlib if it's in the dependencies
+    if "chroma-hnswlib" in pkg or any("chroma-hnswlib" in dep for dep in dep_overrides):
+        command.append("--no-binary=chroma-hnswlib")
 
-        # Only add --no-binary=chroma-hnswlib if it's in the dependencies
-        if "chroma-hnswlib" in pkg or any(
-            "chroma-hnswlib" in dep for dep in dep_overrides
-        ):
-            command.append("--no-binary=chroma-hnswlib")
+    command.append(f"--target={path}")
 
-        command.append(f"--target={path}")
-
-        print(f"Installing chromadb version {pkg} to {path} using uv")
-    else:
-        # Fall back to pip
-        # -q -q to suppress pip output to ERROR level
-        # https://pip.pypa.io/en/stable/cli/pip/#quiet
-        command = [sys.executable, "-m", "pip", "-q", "-q", "install", pkg]
-
-        for dep, operator_version in dep_overrides.items():
-            command.append(f"{dep}{operator_version}")
-
-        # Only add --no-binary=chroma-hnswlib if it's in the dependencies
-        if "chroma-hnswlib" in pkg or any(
-            "chroma-hnswlib" in dep for dep in dep_overrides
-        ):
-            command.append("--no-binary=chroma-hnswlib")
-
-        command.append(f"--target={path}")
-
-        print(f"Installing chromadb version {pkg} to {path} using pip")
-
-    sys.stderr.write(f"Running command: {' '.join(command)}\n")
-
+    print(f"Installing chromadb version {pkg} to {path}")
     return subprocess.check_call(command)
