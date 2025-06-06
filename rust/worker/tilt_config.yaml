@@ -169,7 +169,7 @@ compaction_service:
             policy: "full_rebuild"
 
 log_service:
-    num_records_before_backpressure: 10000
+    num_records_before_backpressure: 100000
     opentelemetry:
         service_name: "rust-log-service"
         endpoint: "http://otel-collector:4317"

@@ -17,7 +17,7 @@ from chromadb.test.conftest import (
 from chromadb.test.property import invariants
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 
-RECORDS = 200000
+RECORDS = 2000000
 BATCH_SIZE = 100
 
 @skip_if_not_cluster()
