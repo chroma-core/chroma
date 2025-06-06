@@ -176,8 +176,7 @@ jobs:
     #   matrix:
     #     # excluding 3.9 here because onnxruntime 1.20.x does not have a wheel for it
     #     python: [ "3.10", "3.11", "3.12" ]
-    # runs-on: 16core-64gb-windows-latest
-    runs-on:  32core-128gb-windows-latest
+    runs-on: 16core-64gb-windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -197,7 +196,12 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Run tests
-        run: python -m pytest --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*' -n auto --dist worksteal -v --color=yes --durations 10
+        run: python -m pytest --ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*' -n auto --dist worksteal -v --color=yes --durations 10
+        shell: bash
+        env:
+          PROPERTY_TESTING_PRESET: 'normal'
+          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
+          RUST_BACKTRACE: 1
         # run: uv run pytest chromadb/test/test_api.py -n auto --dist worksteal -v --color=yes
 
   python-vulnerability-scan:
