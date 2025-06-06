@@ -3465,6 +3465,91 @@ mod tests {
         });
     }
 
+    fn test_fork_logs(
+        initial_operations: Vec<OperationRecord>,
+        source_operations: Vec<OperationRecord>,
+        fork_operations: Vec<OperationRecord>,
+    ) {
+        let runtime = Runtime::new().unwrap();
+
+        runtime.block_on(async move {
+            let log_server = setup_log_server().await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
+
+            let source_collection_id = CollectionUuid::new();
+            let fork_collection_id = CollectionUuid::new();
+
+            log_server
+                .proxy
+                .clone()
+                .expect("Legacy log service should be present")
+                .seal_log(Request::new(SealLogRequest {
+                    collection_id: source_collection_id.to_string(),
+                }))
+                .await
+                .expect("Seal log should not fail");
+
+            if !initial_operations.is_empty() {
+                push_log_to_server(&log_server, source_collection_id, &initial_operations).await;
+            }
+
+            log_server
+                .fork_logs(Request::new(ForkLogsRequest {
+                    source_collection_id: source_collection_id.to_string(),
+                    target_collection_id: fork_collection_id.to_string(),
+                }))
+                .await
+                .expect("Fork Logs should not fail");
+
+            if !source_operations.is_empty() {
+                push_log_to_server(&log_server, source_collection_id, &source_operations).await;
+            }
+
+            if !fork_operations.is_empty() {
+                push_log_to_server(&log_server, fork_collection_id, &fork_operations).await;
+            }
+
+            let mut expected_source = initial_operations.clone();
+            expected_source.extend(source_operations);
+
+            let mut expected_fork = initial_operations;
+            expected_fork.extend(fork_operations);
+
+            let mut dirty_collection_ids = Vec::new();
+            if !expected_source.is_empty() {
+                dirty_collection_ids.push(source_collection_id);
+            }
+            if !expected_fork.is_empty() {
+                dirty_collection_ids.push(fork_collection_id);
+            }
+
+            validate_dirty_log_on_server(&log_server, &dirty_collection_ids).await;
+            validate_log_on_server(
+                &log_server,
+                source_collection_id,
+                &expected_source,
+                1,
+                10000,
+            )
+            .await;
+            validate_log_on_server(&log_server, fork_collection_id, &expected_fork, 1, 10000).await;
+
+            if !expected_source.is_empty() {
+                let source_enum_offset =
+                    get_enum_offset_on_server(&log_server, source_collection_id).await;
+                assert_eq!(source_enum_offset, expected_source.len() as i64);
+                mock_compact_on_server(&log_server, source_collection_id, source_enum_offset).await;
+            }
+            if !expected_fork.is_empty() {
+                let fork_enum_offset =
+                    get_enum_offset_on_server(&log_server, fork_collection_id).await;
+                assert_eq!(fork_enum_offset, expected_fork.len() as i64);
+                mock_compact_on_server(&log_server, fork_collection_id, fork_enum_offset).await;
+            }
+            validate_dirty_log_on_server(&log_server, &[]).await;
+        });
+    }
+
     proptest! {
         #[test]
         fn test_k8s_integration_rust_log_service_push_pull_logs(
@@ -3485,6 +3570,19 @@ mod tests {
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
             std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_dirty_logs(operations))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+
+        #[test]
+        fn test_k8s_integration_rust_log_service_fork_logs(
+            initial_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+            source_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+            fork_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_fork_logs(initial_operations, source_operations, fork_operations))
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
