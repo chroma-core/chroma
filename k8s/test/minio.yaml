@@ -16,7 +16,9 @@ spec:
     spec:
       volumes:
         - name: minio
-          emptyDir: {}
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
       containers:
         - name: minio
           image: minio/minio:latest
@@ -46,7 +48,7 @@ metadata:
 spec:
   ports:
     - name: http
-    # Put the lb on a different port so we can run minio locally since the port is already in use
+      # Put the lb on a different port so we can run minio locally since the port is already in use
       port: 9001
       targetPort: 9000
   selector:
