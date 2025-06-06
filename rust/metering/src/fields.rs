@@ -114,7 +114,7 @@ pub fn process_field_definition_tokens(
     }
 
     let mut field_type_tokens: Vec<TokenTree> = Vec::new();
-    while let Some(current_token) = field_definition_tokens_iter.next() {
+    for current_token in field_definition_tokens_iter {
         field_type_tokens.push(current_token.clone());
     }
     let field_type_token_stream: TokenStream = field_type_tokens.into_iter().collect();
@@ -141,7 +141,7 @@ pub fn generate_field_definition_token_stream(field: &Field) -> TokenStream {
         custom_mutator_name_ident: _custom_mutator_name_ident,
     } = field;
 
-    let field_definition_token_stream = if maybe_visibility_modifier_token_stream.is_some() {
+    if maybe_visibility_modifier_token_stream.is_some() {
         if let Some(Attribute {
             foreign_macro_token_streams: _foreign_macro_token_streams,
             maybe_visibility_modifier_token_stream: _maybe_visibility_modifier_token_stream,
@@ -161,29 +161,25 @@ pub fn generate_field_definition_token_stream(field: &Field) -> TokenStream {
                 #( #foreign_macro_token_streams )*
                 #maybe_visibility_modifier_token_stream #field_name_ident: #field_type_token_stream,
             }
+        }
+    } else if let Some(Attribute {
+        foreign_macro_token_streams: _foreign_macro_token_streams,
+        maybe_visibility_modifier_token_stream: _maybe_visibility_modifier_token_stream,
+        attribute_type_alias_ident,
+        attribute_name_string: _attribute_name_string,
+        attribute_name_ident: _attribute_name_ident,
+        attribute_type_string: _attribute_type_string,
+        attribute_type_token_stream: _attribute_type_token_stream,
+    }) = attribute
+    {
+        quote! {
+            #( #foreign_macro_token_streams )*
+            #maybe_visibility_modifier_token_stream #field_name_ident: #attribute_type_alias_ident,
         }
     } else {
-        if let Some(Attribute {
-            foreign_macro_token_streams: _foreign_macro_token_streams,
-            maybe_visibility_modifier_token_stream: _maybe_visibility_modifier_token_stream,
-            attribute_type_alias_ident,
-            attribute_name_string: _attribute_name_string,
-            attribute_name_ident: _attribute_name_ident,
-            attribute_type_string: _attribute_type_string,
-            attribute_type_token_stream: _attribute_type_token_stream,
-        }) = attribute
-        {
-            quote! {
-                #( #foreign_macro_token_streams )*
-                #maybe_visibility_modifier_token_stream #field_name_ident: #attribute_type_alias_ident,
-            }
-        } else {
-            quote! {
-                #( #foreign_macro_token_streams )*
-                #maybe_visibility_modifier_token_stream #field_name_ident: #field_type_token_stream,
-            }
+        quote! {
+            #( #foreign_macro_token_streams )*
+            #maybe_visibility_modifier_token_stream #field_name_ident: #field_type_token_stream,
         }
-    };
-
-    return field_definition_token_stream;
+    }
 }

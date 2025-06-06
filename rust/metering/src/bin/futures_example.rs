@@ -63,6 +63,7 @@ async fn parent_scope(_collector: CollectingReceiver) {
     println!("[parent_scope] after mutator: {:?}", current());
 
     if let Some(event) = close::<ParentEvent>() {
+        println!("parent_value: {:?}", event.parent_value);
         event.submit().await;
     }
 
@@ -76,6 +77,7 @@ async fn parent_scope(_collector: CollectingReceiver) {
         println!("[child task] after child mutator: {:?}", current());
 
         if let Some(event) = close::<ChildEvent>() {
+            println!("child_value: {:?}", event.child_value);
             event.submit().await;
         }
     });

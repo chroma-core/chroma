@@ -151,7 +151,7 @@ pub fn process_attribute_definition_tokens(
 
     let mut attribute_type_tokens = Vec::new();
     let mut semicolon_punct = None;
-    while let Some(current_token) = attribute_definition_tokens_iter.next() {
+    for current_token in attribute_definition_tokens_iter {
         if let TokenTree::Punct(expected_semicolon_punct) = &current_token {
             if expected_semicolon_punct.as_char() == ';' {
                 semicolon_punct = Some(expected_semicolon_punct.clone());
@@ -178,7 +178,7 @@ pub fn process_attribute_definition_tokens(
         attribute_name_string,
         attribute_name_ident,
         attribute_type_string,
-        attribute_type_token_stream: attribute_type_token_stream,
+        attribute_type_token_stream,
     })
 }
 
@@ -194,7 +194,7 @@ pub fn generate_attribute_definition_token_stream(attribute: &Attribute) -> Toke
         attribute_type_token_stream,
     } = attribute;
 
-    let attribute_definition_token_stream = if maybe_visibility_modifier_token_stream.is_some() {
+    if maybe_visibility_modifier_token_stream.is_some() {
         quote! {
             #( #foreign_macro_token_streams )*
             #maybe_visibility_modifier_token_stream type #attribute_type_alias_ident = #attribute_type_token_stream;
@@ -204,7 +204,5 @@ pub fn generate_attribute_definition_token_stream(attribute: &Attribute) -> Toke
             #( #foreign_macro_token_streams )*
             type #attribute_type_alias_ident = #attribute_type_token_stream;
         }
-    };
-
-    return attribute_definition_token_stream;
+    }
 }

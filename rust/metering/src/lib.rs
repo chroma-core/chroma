@@ -31,20 +31,20 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
 
     let noop_mutator_definition_token_streams: Vec<TokenStream> = attributes
         .iter()
-        .map(|attribute| generate_noop_mutator_definition_token_stream(attribute))
+        .map(generate_noop_mutator_definition_token_stream)
         .collect();
 
     let attribute_definition_token_streams: Vec<TokenStream> = attributes
         .iter()
-        .map(|attribute| generate_attribute_definition_token_stream(attribute))
+        .map(generate_attribute_definition_token_stream)
         .collect();
 
     let event_definition_token_streams: Vec<TokenStream> = events
         .iter()
-        .map(|event| generate_event_definition_token_stream(event))
+        .map(generate_event_definition_token_stream)
         .collect();
 
-    return proc_macro::TokenStream::from(quote! {
+    proc_macro::TokenStream::from(quote! {
         pub trait MeteringEvent: std::fmt::Debug + std::any::Any + Send + 'static {
             #( #noop_mutator_definition_token_streams )*
         }
@@ -213,14 +213,14 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         pub fn close<E: MeteringEvent>() -> Option<E> {
             EVENT_STACK.with(|event_stack| {
                 let mut vec = event_stack.borrow_mut();
-                if let Some((type_id, _boxed_evt)) = vec.last() {
+                if let Some((type_id, _)) = vec.last() {
                     if *type_id == std::any::TypeId::of::<E>() {
-                        let (_type_id, boxed_any) = vec.pop().unwrap();
-                        let raw_evt: *mut dyn MeteringEvent =
-                            Box::into_raw(boxed_any);
-                        let raw_e: *mut E = raw_evt as *mut E;
-                        let boxed_e: Box<E> = unsafe { Box::from_raw(raw_e) };
-                        return Some(*boxed_e);
+                        let (_type_id, boxed_generic_metering_event) = vec.pop().unwrap();
+                        let raw_generic_metering_event: *mut dyn MeteringEvent =
+                            Box::into_raw(boxed_generic_metering_event);
+                        let raw_metering_event: *mut E = raw_generic_metering_event as *mut E;
+                        let boxed_metering_event: Box<E> = unsafe { Box::from_raw(raw_metering_event) };
+                        return Some(*boxed_metering_event);
                     }
                 }
                 None
@@ -257,5 +257,5 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
 
         /// Implementation of `Unpin` for metered future.
         impl<F: std::future::Future + Unpin> Unpin for MeteredFuture<F> {}
-    });
+    })
 }
