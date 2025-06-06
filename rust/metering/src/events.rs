@@ -35,11 +35,9 @@ pub fn collect_event_definition_tokens(
                     struct_keyword_ident = Some(expected_struct_keyword_ident.clone());
                 }
             }
-        } else {
-            if let TokenTree::Group(expected_braces_group) = current_token {
-                if expected_braces_group.delimiter() == Delimiter::Brace {
-                    return Ok((event_definition_tokens, token_index + 1));
-                }
+        } else if let TokenTree::Group(expected_braces_group) = current_token {
+            if expected_braces_group.delimiter() == Delimiter::Brace {
+                return Ok((event_definition_tokens, token_index + 1));
             }
         }
     }
@@ -261,14 +259,14 @@ pub fn generate_event_definition_token_stream(event: &Event) -> TokenStream {
 
     let field_definition_token_streams: Vec<TokenStream> = fields
         .iter()
-        .map(|field| generate_field_definition_token_stream(field))
+        .map(generate_field_definition_token_stream)
         .collect();
 
     let event_definition_token_stream = if maybe_visibility_modifier_token_stream.is_some() {
         quote! {
             #( #foreign_macro_token_streams )*
             #maybe_visibility_modifier_token_stream struct #event_name_ident {
-                #( #field_definition_token_streams )*
+                #(#field_definition_token_streams )*
             }
         }
     } else {
@@ -312,11 +310,10 @@ pub fn generate_event_definition_token_stream(event: &Event) -> TokenStream {
 
     let custom_mutator_name_idents: Vec<&Ident> = fields
         .iter()
-        .filter(|field| field.custom_mutator_name_ident.is_some())
-        .map(|field| field.custom_mutator_name_ident.as_ref().unwrap())
+        .filter_map(|field| field.custom_mutator_name_ident.as_ref())
         .collect();
 
-    return quote! {
+    quote! {
         #event_definition_token_stream
 
         impl #event_name_ident {
@@ -338,5 +335,5 @@ pub fn generate_event_definition_token_stream(event: &Event) -> TokenStream {
                 }
             )*
         }
-    };
+    }
 }

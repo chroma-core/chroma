@@ -116,5 +116,5 @@ pub fn generate_compile_error(error_message_string: &str) -> proc_macro::TokenSt
 
     compile_error_token_stream.extend([TokenTree::Punct(Punct::new(';', Spacing::Alone))]);
 
-    return proc_macro::TokenStream::from(compile_error_token_stream);
+    proc_macro::TokenStream::from(compile_error_token_stream)
 }
