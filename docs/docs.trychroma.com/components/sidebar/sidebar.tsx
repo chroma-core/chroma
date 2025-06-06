@@ -48,9 +48,9 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean; }> = ({
     /* set to full height and overflow-y auto for scrolling */
   return (
     <div
-      className={`${mobile ? '' : 'hidden md:block'} relative h-full overflow-y-auto`} 
+      className={`${mobile ? '' : 'hidden md:block'} relative h-full overflow-y-auto dark:bg-black`} 
     >
-      <div className={`text-sm flex flex-col overflow-y-scroll min-w-64 p-5 ${mobile ? '' : 'border-r-[1px]'} shrink-0 dark:border-gray-700 dark:backdrop-invert`}>
+      <div className={`text-sm flex flex-col overflow-y-scroll min-w-64 p-5 ${mobile ? '' : 'border-r-[1px]'} shrink-0 dark:border-gray-700 dark:backdrop-invert dark:bg-black`}>
         <ScrollableContent pagesIndex={allSectionPages}>
           {currentSection.pages && (
             <div className="flex flex-col gap-2">
