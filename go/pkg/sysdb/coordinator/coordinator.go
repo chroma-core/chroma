@@ -111,6 +111,10 @@ func (s *Coordinator) GetCollections(ctx context.Context, collectionIDs []types.
 	return s.catalog.GetCollections(ctx, collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 }
 
+func (s *Coordinator) GetCollectionByResourceName(ctx context.Context, tenantResourceName string, databaseName string, collectionName string) (*model.Collection, error) {
+	return s.catalog.GetCollectionByResourceName(ctx, tenantResourceName, databaseName, collectionName)
+}
+
 func (s *Coordinator) CountCollections(ctx context.Context, tenantID string, databaseName *string) (uint64, error) {
 	return s.catalog.CountCollections(ctx, tenantID, databaseName)
 }
