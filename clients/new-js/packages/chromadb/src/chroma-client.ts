@@ -3,19 +3,19 @@ import {
   defaultChromaClientArgs as defaultArgs,
   HttpMethod,
   normalizeMethod,
+  parseConnectionPath,
 } from "./utils";
 import { DefaultService as Api } from "./api";
 import { CollectionMetadata, UserIdentity } from "./types";
-import {
-  Collection,
-  CollectionAPI,
-  CollectionAPIImpl,
-  CollectionImpl,
-} from "./collection";
+import { Collection, CollectionImpl } from "./collection";
 import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
 import { chromaFetch } from "./chroma-fetch";
 import * as process from "node:process";
-import { ChromaUnauthorizedError, ChromaValueError } from "./errors";
+import {
+  ChromaConnectionError,
+  ChromaUnauthorizedError,
+  ChromaValueError,
+} from "./errors";
 import {
   CreateCollectionConfiguration,
   processCreateCollectionConfig,
@@ -39,6 +39,10 @@ export interface ChromaClientArgs {
   headers?: Record<string, string>;
   /** Additional fetch options for HTTP requests */
   fetchOptions?: RequestInit;
+  /** @deprecated Use host, port, and ssl instead */
+  path?: string;
+  /** @deprecated */
+  auth?: Record<string, string>;
 }
 
 /**
@@ -55,7 +59,7 @@ export class ChromaClient {
    * @param args - Configuration options for the client
    */
   constructor(args: Partial<ChromaClientArgs> = {}) {
-    const {
+    let {
       host = defaultArgs.host,
       port = defaultArgs.port,
       ssl = defaultArgs.ssl,
@@ -64,6 +68,32 @@ export class ChromaClient {
       headers = defaultArgs.headers,
       fetchOptions = defaultArgs.fetchOptions,
     } = args;
+
+    if (args.path) {
+      console.warn(
+        "The 'path' argument is deprecated. Please use 'ssl', 'host', and 'port' instead",
+      );
+      const parsedPath = parseConnectionPath(args.path);
+      ssl = parsedPath.ssl;
+      host = parsedPath.host;
+      port = parsedPath.port;
+    }
+
+    if (args.auth) {
+      console.warn(
+        "The 'auth' argument is deprecated. Please use 'headers' instead",
+      );
+      if (!headers) {
+        headers = {};
+      }
+      if (
+        !headers["x-chroma-token"] &&
+        headers["X_CHROMA_TOKEN"] &&
+        headers.credentials
+      ) {
+        headers["x-chroma-token"] = headers.credentials;
+      }
+    }
 
     const baseUrl = `${ssl ? "https" : "http"}://${host}:${port}`;
 
@@ -109,18 +139,19 @@ export class ChromaClient {
   public async _path(): Promise<{ tenant: string; database: string }> {
     if (!this._tenant || !this._database) {
       const { tenant, databases } = await this.getUserIdentity();
+      const uniqueDBs = [...new Set(databases)];
       this._tenant = tenant;
-      if (databases.length === 0) {
+      if (uniqueDBs.length === 0) {
         throw new ChromaUnauthorizedError(
-          `Your API key does not have access to any DBs for tenant ${this._tenant}`,
+          `Your API key does not have access to any DBs for tenant ${this.tenant}`,
         );
       }
-      if (databases.length > 1 || databases[0] === "*") {
+      if (uniqueDBs.length > 1 || uniqueDBs[0] === "*") {
         throw new ChromaValueError(
           "Your API key is scoped to more than 1 DB. Please provide a DB name to the CloudClient constructor",
         );
       }
-      this._database = databases[0];
+      this._database = uniqueDBs[0];
     }
     return { tenant: this._tenant, database: this._database };
   }
@@ -296,7 +327,7 @@ export class ChromaClient {
    */
   public async getCollections(
     items: string[] | { name: string; embeddingFunction?: EmbeddingFunction }[],
-  ) {
+  ): Promise<Collection[]> {
     if (items.length === 0) return [];
 
     let requestedCollections = items;
@@ -313,7 +344,7 @@ export class ChromaClient {
 
     return Promise.all(
       collections.map(async (collection) => {
-        await this.getCollection({ ...collection });
+        return this.getCollection({ ...collection });
       }),
     );
   }
@@ -402,60 +433,5 @@ export class ChromaClient {
       client: this.apiClient,
     });
     return data;
-  }
-
-  /**
-   * Creates a thin CollectionAPI instance for direct collection operations by ID.
-   * @param options - Collection API options
-   * @param options.id - The collection ID
-   * @param options.embeddingFunction - Optional embedding function to use
-   * @returns A CollectionAPI instance for the specified collection
-   */
-  public getCollectionById({
-    id,
-    embeddingFunction,
-  }: {
-    id: string;
-    embeddingFunction?: EmbeddingFunction;
-  }): CollectionAPI {
-    return new CollectionAPIImpl({
-      chromaClient: this,
-      apiClient: this.apiClient,
-      id,
-      embeddingFunction,
-    });
-  }
-
-  /**
-   * Creates multiple thin CollectionAPI instances for direct collection operations by ID.
-   * @param items - Array of collection IDs or objects with ID and optional embedding function
-   * @returns Array of CollectionAPI instances
-   */
-  public getCollectionsById(
-    items: string[] | { id: string; embeddingFunction?: EmbeddingFunction }[],
-  ) {
-    if (items.length === 0) return [];
-
-    let requestedCollections = items;
-    if (typeof items[0] === "string") {
-      requestedCollections = (items as string[]).map((item) => {
-        return { id: item, embeddingFunction: undefined };
-      });
-    }
-
-    return (
-      requestedCollections as {
-        id: string;
-        embeddingFunction?: EmbeddingFunction;
-      }[]
-    ).map(
-      (requestedCollection) =>
-        new CollectionAPIImpl({
-          chromaClient: this,
-          apiClient: this.apiClient,
-          id: requestedCollection.id,
-          embeddingFunction: requestedCollection.embeddingFunction,
-        }),
-    );
   }
 }

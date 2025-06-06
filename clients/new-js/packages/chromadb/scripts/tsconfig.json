@@ -1,7 +1,7 @@
 {
   "extends": "../../../tsconfig.base.json",
   "compilerOptions": {
-    "module": "ESNext",
+    "module": "es2020",
     "moduleResolution": "NodeNext",
     "noEmit": true,
     "composite": false,
