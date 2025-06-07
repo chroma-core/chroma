@@ -258,7 +258,6 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-        run_number: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20 ]
     runs-on: 16core-64gb-windows-latest
     steps:
       - name: Checkout
@@ -284,4 +283,3 @@ jobs:
         env:
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
           RUST_BACKTRACE: 1
-          RUN_NUMBER: ${{ matrix.run_number }}
