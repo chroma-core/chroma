@@ -17,7 +17,7 @@ func (s *Server) CreateSegment(ctx context.Context, req *coordinatorpb.CreateSeg
 
 	res := &coordinatorpb.CreateSegmentResponse{}
 
-	segment, err := convertProtoSegment(segmentpb)
+	segment, err := convertSegmentToModel(segmentpb)
 	if err != nil {
 		log.Error("CreateSegment failed. convert segment to model error", zap.Error(err), zap.String("request", segmentpb.String()))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
