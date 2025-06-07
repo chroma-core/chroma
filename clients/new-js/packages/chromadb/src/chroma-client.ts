@@ -88,10 +88,10 @@ export class ChromaClient {
       }
       if (
         !headers["x-chroma-token"] &&
-        headers["X_CHROMA_TOKEN"] &&
-        headers.credentials
+        args.auth.tokenHeaderType === "X_CHROMA_TOKEN" &&
+        args.auth.credentials
       ) {
-        headers["x-chroma-token"] = headers.credentials;
+        headers["x-chroma-token"] = args.auth.credentials;
       }
     }
 
