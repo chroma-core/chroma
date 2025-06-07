@@ -31,7 +31,9 @@ from chromadb.base_types import (
 from inspect import signature
 from tenacity import retry
 from abc import abstractmethod
-
+import pybase64
+from functools import lru_cache
+import struct
 
 # Re-export types from chromadb.types
 __all__ = [
@@ -69,6 +71,20 @@ Embedding = Vector
 Embeddings = List[Embedding]
 
 Space = Literal["cosine", "l2", "ip"]
+
+
+@lru_cache(maxsize=64)
+def _get_struct(vector_length: int) -> struct.Struct:
+    return struct.Struct(f"<{vector_length}f")
+
+
+def embeddings_to_base64_bytes(pyEmbeddings: PyEmbeddings) -> list[Union[str, None]]:
+    return [
+        pybase64.b64encode_as_string(_get_struct(len(embedding)).pack(*embedding))
+        if embedding is not None
+        else None
+        for embedding in pyEmbeddings
+    ]
 
 
 def normalize_embeddings(
