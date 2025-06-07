@@ -3,6 +3,8 @@ from chromadb.api import ClientAPI
 
 
 def test_invalid_update(client: ClientAPI) -> None:
+    client.reset()
+
     collection = client.create_collection("test")
 
     # Update is invalid because ID does not exist

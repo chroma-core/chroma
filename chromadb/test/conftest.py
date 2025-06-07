@@ -62,7 +62,7 @@ hypothesis.settings.register_profile(
         hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
-    verbosity=hypothesis.Verbosity.verbose
+    verbosity=hypothesis.Verbosity.verbose,
 )
 
 hypothesis.settings.register_profile(
@@ -882,12 +882,10 @@ def client(system: System) -> Generator[ClientAPI, None, None]:
 
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
         client = cast(Any, AsyncClientCreatorSync.from_system_async(system))
-        client.reset()
         yield client
         client.clear_system_cache()
     else:
         client = ClientCreator.from_system(system)
-        client.reset()
         yield client
         client.clear_system_cache()
 
