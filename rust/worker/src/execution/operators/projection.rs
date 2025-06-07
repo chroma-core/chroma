@@ -8,16 +8,14 @@ use chroma_segment::{
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
-use chroma_types::{Chunk, LogRecord, Metadata, Segment};
+use chroma_types::{
+    operator::{Projection, ProjectionOutput, ProjectionRecord},
+    Chunk, LogRecord, Segment,
+};
 use thiserror::Error;
 use tracing::{error, trace, Instrument, Span};
 
-/// The `ProjectionOperator` retrieves record content by offset ids
-///
-/// # Parameters
-/// - `document`: Whether to retrieve document
-/// - `embedding`: Whether to retrieve embedding
-/// - `metadata`: Whether to retrieve metadata
+/// The `Projection` operator retrieves record content by offset ids
 ///
 /// # Inputs
 /// - `logs`: The latest logs of the collection
@@ -32,33 +30,11 @@ use tracing::{error, trace, Instrument, Span};
 /// It can be used to retrieve record contents as user requested
 /// It should be run as the last step of an orchestrator
 #[derive(Clone, Debug)]
-pub struct ProjectionOperator {
-    pub document: bool,
-    pub embedding: bool,
-    pub metadata: bool,
-}
-
-#[derive(Clone, Debug)]
 pub struct ProjectionInput {
     pub logs: Chunk<LogRecord>,
     pub blockfile_provider: BlockfileProvider,
     pub record_segment: Segment,
     pub offset_ids: Vec<u32>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProjectionRecord {
-    pub id: String,
-    pub document: Option<String>,
-    pub embedding: Option<Vec<f32>>,
-    pub metadata: Option<Metadata>,
-}
-
-impl Eq for ProjectionRecord {}
-
-#[derive(Debug, PartialEq, Eq)]
-pub struct ProjectionOutput {
-    pub records: Vec<ProjectionRecord>,
 }
 
 #[derive(Error, Debug)]
@@ -88,7 +64,7 @@ impl ChromaError for ProjectionError {
 }
 
 #[async_trait]
-impl Operator<ProjectionInput, ProjectionOutput> for ProjectionOperator {
+impl Operator<ProjectionInput, ProjectionOutput> for Projection {
     type Error = ProjectionError;
 
     async fn run(&self, input: &ProjectionInput) -> Result<ProjectionOutput, ProjectionError> {
@@ -183,12 +159,11 @@ mod tests {
     use chroma_log::test::{int_as_id, upsert_generator, LoadFromGenerator, LogGenerator};
     use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
-
-    use crate::execution::operators::projection::ProjectionOperator;
+    use chroma_types::operator::Projection;
 
     use super::ProjectionInput;
 
-    /// The unit tests for `ProjectionOperator` uses the following test data
+    /// The unit tests for `Projection` operator uses the following test data
     /// It first generates 100 log records and compact them,
     /// then generate 20 log records that overwrite the compacted data,
     /// and finally generate 20 log records of new data:
@@ -219,7 +194,7 @@ mod tests {
     async fn test_trivial_projection() {
         let (_test_segment, projection_input) = setup_projection_input((1..=120).collect()).await;
 
-        let projection_operator = ProjectionOperator {
+        let projection_operator = Projection {
             document: false,
             embedding: false,
             metadata: false,
@@ -243,7 +218,7 @@ mod tests {
     async fn test_full_projection() {
         let (_test_segment, projection_input) = setup_projection_input((1..=120).collect()).await;
 
-        let projection_operator = ProjectionOperator {
+        let projection_operator = Projection {
             document: true,
             embedding: true,
             metadata: true,

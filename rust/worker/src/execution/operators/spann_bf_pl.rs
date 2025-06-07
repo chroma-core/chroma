@@ -4,12 +4,10 @@ use async_trait::async_trait;
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::spann::types::SpannPosting;
-use chroma_types::SignedRoaringBitmap;
+use chroma_types::{operator::RecordDistance, SignedRoaringBitmap};
 use thiserror::Error;
 
 use chroma_system::Operator;
-
-use super::knn::RecordDistance;
 
 // Public fields for testing.
 #[derive(Debug)]

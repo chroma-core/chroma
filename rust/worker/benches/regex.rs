@@ -7,6 +7,7 @@ use chroma_benchmark::datasets::wikipedia::WikipediaDataset;
 use chroma_log::test::{int_as_id, random_embedding};
 use chroma_segment::test::TestDistributedSegment;
 use chroma_system::Operator;
+use chroma_types::operator::Filter;
 use chroma_types::{
     Chunk, DocumentExpression, DocumentOperator, LogRecord, Operation, OperationRecord,
     ScalarEncoding, SignedRoaringBitmap, Where,
@@ -18,7 +19,7 @@ use indicatif::ProgressIterator;
 use regex::Regex;
 use roaring::RoaringBitmap;
 use tokio::time::Instant;
-use worker::execution::operators::filter::{FilterInput, FilterOperator};
+use worker::execution::operators::filter::FilterInput;
 
 const LOG_CHUNK_SIZE: usize = 10000;
 const DOCUMENT_SIZE: usize = 100000;
@@ -110,7 +111,7 @@ fn bench_regex(criterion: &mut Criterion) {
     };
 
     for pattern in REGEX_PATTERNS {
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(Where::Document(DocumentExpression {
                 operator: DocumentOperator::Regex,
@@ -119,7 +120,7 @@ fn bench_regex(criterion: &mut Criterion) {
         };
 
         let routine = |(op, input, expected): (
-            FilterOperator,
+            Filter,
             FilterInput,
             HashMap<String, RoaringBitmap>,
         )| async move {
