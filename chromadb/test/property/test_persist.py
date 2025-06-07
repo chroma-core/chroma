@@ -52,7 +52,7 @@ configurations = (
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
     else [
         Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",

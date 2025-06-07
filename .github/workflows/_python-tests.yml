@@ -250,5 +250,6 @@ jobs:
       run: python -m pytest ${{ matrix.test-globs }}
       shell: bash
       env:
+        CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
         ENV_FILE: ${{ matrix.env-file }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
