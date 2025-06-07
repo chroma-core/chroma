@@ -16,6 +16,8 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         api_key: Optional[str] = None,
         model_name: str = "voyage-large-2",
         api_key_env_var: str = "CHROMA_VOYAGE_API_KEY",
+        input_type: Optional[str] = None,
+        truncation: bool = True,
     ):
         """
         Initialize the VoyageAIEmbeddingFunction.
@@ -26,6 +28,10 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
             model_name (str, optional): The name of the model to use for text embeddings.
                 Defaults to "voyage-large-2".
             api_key (str, optional): API key for the VoyageAI API. If not provided, will look for it in the environment variable.
+            input_type (str, optional): The type of input to use for the VoyageAI API.
+                Defaults to None.
+            truncation (bool): Whether to truncate the input text.
+                Defaults to True.
         """
         try:
             import voyageai
@@ -47,7 +53,8 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 
         self.model_name = model_name
-
+        self.input_type = input_type
+        self.truncation = truncation
         self._client = voyageai.Client(api_key=self.api_key)
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -60,7 +67,12 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         Returns:
             Embeddings for the documents.
         """
-        embeddings = self._client.embed(texts=input, model=self.model_name)
+        embeddings = self._client.embed(
+            texts=input,
+            model=self.model_name,
+            input_type=self.input_type,
+            truncation=self.truncation,
+        )
 
         # Convert to numpy arrays
         return [
@@ -81,16 +93,26 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
+        input_type = config.get("input_type")
+        truncation = config.get("truncation")
 
         if api_key_env_var is None or model_name is None:
             assert False, "This code should not be reached"
 
         return VoyageAIEmbeddingFunction(
-            api_key_env_var=api_key_env_var, model_name=model_name
+            api_key_env_var=api_key_env_var,
+            model_name=model_name,
+            input_type=input_type,
+            truncation=truncation if truncation is not None else True,
         )
 
     def get_config(self) -> Dict[str, Any]:
-        return {"api_key_env_var": self.api_key_env_var, "model_name": self.model_name}
+        return {
+            "api_key_env_var": self.api_key_env_var,
+            "model_name": self.model_name,
+            "input_type": self.input_type,
+            "truncation": self.truncation,
+        }
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]

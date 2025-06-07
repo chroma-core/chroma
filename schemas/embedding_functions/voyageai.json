@@ -12,6 +12,14 @@
     "api_key_env_var": {
       "type": "string",
       "description": "Parameter api_key_env_var for the voyageai embedding function"
+    },
+    "input_type": {
+      "type": "string",
+      "description": "Parameter input_type for the voyageai embedding function"
+    },
+    "truncation": {
+      "type": "boolean",
+      "description": "Parameter truncation for the voyageai embedding function"
     }
   },
   "required": [
