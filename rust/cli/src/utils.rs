@@ -34,6 +34,9 @@ pub const CHROMA_DIR: &str = ".chroma";
 pub const CREDENTIALS_FILE: &str = "credentials";
 const CONFIG_FILE: &str = "config.json";
 pub const SELECTION_LIMIT: usize = 5;
+pub const CHROMA_API_KEY_ENV_VAR: &str = "CHROMA_API_KEY";
+pub const CHROMA_TENANT_ENV_VAR: &str = "CHROMA_TENANT";
+pub const CHROMA_DATABASE_ENV_VAR: &str = "CHROMA_DATABASE";
 
 #[derive(Debug, Error)]
 pub enum CliError {
