@@ -72,7 +72,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         limits = httpx.Limits(max_keepalive_connections=self.keepalive_secs)
         self._session = httpx.Client(timeout=None, limits=limits)
 
-        self._header = system.settings.chroma_server_headers or {}
+        self._header = (self._settings.chroma_server_headers or {}).copy()
         self._header["Content-Type"] = "application/json"
         self._header["User-Agent"] = (
             "Chroma Python Client v"

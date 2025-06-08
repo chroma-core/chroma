@@ -62,8 +62,8 @@ class SharedSystemClient:
             "chromadb.api.fastapi.FastAPI",
             "chromadb.api.async_fastapi.AsyncFastAPI",
         ]:
-            # FastAPI clients can all use unique system identifiers since their configurations can be independent, e.g. different auth tokens
-            identifier = str(uuid.uuid4())
+            # FastAPI clients can all use hash-based identifier over all settings since their configurations can be independent, e.g. different auth tokens
+            identifier = settings.hash()
         else:
             raise ValueError(f"Unsupported Chroma API implementation {api_impl}")
 
