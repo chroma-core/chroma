@@ -33,17 +33,27 @@ permissions:
 env:
   GHCR_IMAGE_NAME: "ghcr.io/chroma-core/chroma"
   DOCKERHUB_IMAGE_NAME: "chromadb/chroma"
-  PLATFORMS: linux/amd64,linux/arm64 #linux/riscv64, linux/arm/v7
 
 jobs:
   build:
-    name: Build and publish container image
+    name: Build image for ${{ matrix.platform }}
     runs-on: blacksmith-16vcpu-ubuntu-2204
+    strategy:
+      matrix:
+        platform: [amd64, arm64]
+        include:
+          - platform: amd64
+            runner: blacksmith-16vcpu-ubuntu-2204
+            docker_platform: linux/amd64
+          - platform: arm64
+            runner: blacksmith-16vcpu-ubuntu-2204-arm
+            docker_platform: linux/arm64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Set up Docker
         uses: ./.github/actions/docker
         with:
@@ -51,16 +61,22 @@ jobs:
           ghcr-password: ${{ secrets.GITHUB_TOKEN }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Compute tags
-        shell: bash
-        id: compute_tags
-        run: |
-          tags="${{ env.GHCR_IMAGE_NAME }}:${{ inputs.tag }},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ inputs.tag }}"
-          if [ "${{ inputs.tag_as_latest }}" = "true" ]; then
-            tags="${tags},${{ env.GHCR_IMAGE_NAME }}:latest,${{ env.DOCKERHUB_IMAGE_NAME }}:latest"
-          fi
 
-          echo "tags=${tags}" >> $GITHUB_OUTPUT
+      - name: Compute arch-specific tags
+        id: tags
+        shell: bash
+        run: |
+          arch_tag="${{ inputs.tag }}-${{ matrix.platform }}"
+          ghcr="${{ env.GHCR_IMAGE_NAME }}:${arch_tag}"
+          dhub="${{ env.DOCKERHUB_IMAGE_NAME }}:${arch_tag}"
+          echo "arch_tag=$arch_tag"      >> $GITHUB_OUTPUT
+
+          # expose *matrix-unique* step outputs
+          echo "ghcr_tag_${{ matrix.platform }}=$ghcr"         >> $GITHUB_OUTPUT
+          echo "dockerhub_tag_${{ matrix.platform }}=$dhub"    >> $GITHUB_OUTPUT
+
+          # these two tags are what the build-push action will publish for *this* arch
+          echo "tags=$ghcr,$dhub" >> $GITHUB_OUTPUT
 
       - name: Build and push image
         uses: useblacksmith/build-push-action@v1.1
@@ -68,8 +84,55 @@ jobs:
           context: .
           file: rust/Dockerfile
           target: cli
-          platforms: ${{ env.PLATFORMS }}
+          platforms: ${{ matrix.docker_platform }}
           push: true
           build-args: |
             RELEASE_MODE=1
-          tags: ${{ steps.compute_tags.outputs.tags }}
+          tags: ${{ steps.tags.outputs.tags }}
+    outputs:
+      ghcr_tag_amd64:      ${{ steps.tags.outputs.ghcr_tag_amd64 }}
+      ghcr_tag_arm64:      ${{ steps.tags.outputs.ghcr_tag_arm64 }}
+      dockerhub_tag_amd64: ${{ steps.tags.outputs.dockerhub_tag_amd64 }}
+      dockerhub_tag_arm64: ${{ steps.tags.outputs.dockerhub_tag_arm64 }}
+
+  merge:
+    name: Merge platform manifests
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    needs:
+      - build
+    steps:
+      - name: Set up Docker
+        uses: ./.github/actions/docker
+        with:
+          ghcr-username: ${{ github.actor }}
+          ghcr-password: ${{ secrets.GITHUB_TOKEN }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and push manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Pull the per-arch tags from job-level outputs
+          ghcr_amd64='${{ needs.build.outputs.ghcr_tag_amd64 }}'
+          ghcr_arm64='${{ needs.build.outputs.ghcr_tag_arm64 }}'
+          dhub_amd64='${{ needs.build.outputs.dockerhub_tag_amd64 }}'
+          dhub_arm64='${{ needs.build.outputs.dockerhub_tag_arm64 }}'
+
+          base_tag='${{ inputs.tag }}'
+          ghcr_base="${{ env.GHCR_IMAGE_NAME }}:${base_tag}"
+          dhub_base="${{ env.DOCKERHUB_IMAGE_NAME }}:${base_tag}"
+
+          docker buildx imagetools create --tag "$ghcr_base" $ghcr_amd64 $ghcr_arm64
+          docker buildx imagetools create --tag "$dhub_base"  $dhub_amd64 $dhub_arm64
+
+          if [[ "${{ inputs.tag_as_latest }}" == "true" ]]; then
+            docker buildx imagetools create --tag "${{ env.GHCR_IMAGE_NAME }}:latest"  $ghcr_amd64 $ghcr_arm64
+            docker buildx imagetools create --tag "${{ env.DOCKERHUB_IMAGE_NAME }}:latest" $dhub_amd64 $dhub_arm64
+          fi
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.GHCR_IMAGE_NAME }}:${{ inputs.tag }}
+          docker buildx imagetools inspect ${{ env.DOCKERHUB_IMAGE_NAME }}:${{ inputs.tag }}
