@@ -1,6 +1,14 @@
 import { Collection } from "chromadb";
 import { TweetModelBase } from "./types";
-import { customAlphabet } from 'nanoid'
+import { customAlphabet } from 'nanoid';
+import TimeAgo from 'javascript-time-ago'
+import en from 'javascript-time-ago/locale/en'
+
+
+TimeAgo.addDefaultLocale(en)
+
+const timeAgo = new TimeAgo('en-US')
+
 
 export function chromaQueryResultsToPostModels(queryResult: any): TweetModelBase[] {
   if (queryResult.ids.length !== 1) {
@@ -73,11 +81,20 @@ export function generateId(): string {
 }
 
 export function formatDate(date: number): string {
-  return new Date(date * 1000).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+  const now = Date.now();
+  const dateMs = date * 1000;
+  const daysInMs = 1000 * 60 * 60 * 24;
+  const daysDiff = Math.abs(now - dateMs) / daysInMs;
+
+  if (daysDiff <= 7) {
+    return timeAgo.format(dateMs);
+  } else {
+    return new Date(dateMs).toLocaleDateString('en-US', {
+      month: '2-digit',
+      day: '2-digit',
+      year: 'numeric'
+    });
+  }
 }
 
 export function getReferencedPostsIds(post: TweetModelBase): string[] {

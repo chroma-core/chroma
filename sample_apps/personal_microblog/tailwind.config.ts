@@ -63,13 +63,7 @@ export default {
   			'serif'
   		],
   		body: [
-  			'system-ui',
-  			'-apple-system',
-  			'system-ui',
-  			'Segoe UI',
-  			'Roboto',
-  			'sans-serif',
-  			'var(--font-gelasio)',
+  			'var(--font-pt-serif)',
   			'serif'
   		],
   		ui: [

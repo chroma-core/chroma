@@ -7,6 +7,7 @@ import { PartialAssistantPost, TweetModel, TweetModelBase } from "@/types";
 
 import { useEffect, useState } from "react";
 import TweetBody from "./tweet-body";
+import { formatDate } from "@/util";
 
 interface TweetProps {
   tweet: TweetModel;
@@ -16,11 +17,7 @@ interface TweetProps {
 export function Tweet({ tweet, className = "" }: TweetProps) {
   const [reply, setReply] = useState<PartialAssistantPost | TweetModelBase | undefined>(undefined);
 
-  const formattedDate = new Date(tweet.date * 1000).toLocaleDateString('en-US', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  });
+  const formattedDate = formatDate(tweet.date);
 
   const router = useRouter();
   const goToPostPage = () => {
@@ -31,7 +28,7 @@ export function Tweet({ tweet, className = "" }: TweetProps) {
 
 
   let mainBodyProps: object = {
-    className: 'font-ui mt-2 min-h-[1em]',
+    className: 'font-body mt-2 min-h-[1em]',
   };
   let mainCitationProps: object = {
     animate: false,
@@ -45,7 +42,7 @@ export function Tweet({ tweet, className = "" }: TweetProps) {
       animate: true,
       collapsedByDefault: true,
       style: "endnote",
-      className: 'text-[var(--accent)] text-sm'
+      className: 'font-ui text-[var(--accent)] text-xs'
     };
   }
 
@@ -72,7 +69,7 @@ export function Tweet({ tweet, className = "" }: TweetProps) {
 
   let aiReplyComponent = null;
   const aiReplyProps = {
-    className: 'text-sm font-ui mt-2 min-h-[1em] opacity-80 text-[var(--accent)]',
+    className: 'text-[.85em]/5 font-ui mt-2 min-h-[1em] opacity-80 text-[var(--accent)]',
     citationsProps: {
       collapsedByDefault: true,
       animate: true,
@@ -87,11 +84,11 @@ export function Tweet({ tweet, className = "" }: TweetProps) {
 
   return (
     <div
-      className={`grid grid-cols-[120px_1fr] hover:bg-gray-100 cursor-pointer ${className}`}
+      className={`grid grid-cols-[140px_1fr] hover:bg-gray-100 cursor-pointer ${className}`}
       onClick={goToPostPage}
     >
       <div className="flex flex-col items-end">
-        <div className={`font-ui pl-2 pr-4 pt-4 mt-[.0em] pb-4 text-gray-600 text-sm`}>{formattedDate}</div>
+        <div className={`font-ui pl-2 pr-4 pt-4 mt-[.6em] pb-4 text-gray-600 text-sm`}>{formattedDate}</div>
       </div>
       <div className={`pt-4 pb-4 pl-4 pr-4 border-l-[.5px]`}>
         <TweetBody body={tweet.body} citations={tweet.citations} className={className} bodyProps={mainBodyProps} citationsProps={mainCitationProps} />

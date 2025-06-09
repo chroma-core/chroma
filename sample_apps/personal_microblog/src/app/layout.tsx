@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
-import { Gelasio } from "next/font/google";
+import { PT_Serif } from "next/font/google";
 import "./globals.css";
 
 import Search from "@/components/ui/common/search";
 
-const gelasio = Gelasio({
-  variable: "--font-gelasio",
+const ptSerif = PT_Serif({
+  variable: "--font-pt-serif",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "700"],
 });
 
 export const metadata: Metadata = {
@@ -23,7 +23,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${gelasio.variable} antialiased`}
+        className={`${ptSerif.variable} antialiased`}
       >
         <div className="flex flex-col items-center py-20">
           <div className="w-[600px] max-w-[calc(100dvw-32px)]">
