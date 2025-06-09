@@ -136,6 +136,7 @@ impl Garbage {
         storage: &Storage,
         prefix: &str,
     ) -> Result<(), Error> {
+        self.install_new_snapshots(storage, prefix, options).await?;
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
             options.headroom as f64,
@@ -367,6 +368,50 @@ impl Garbage {
             paths.extend(prefixed_paths_for_action(prefix, action));
         }
         paths.into_iter()
+    }
+
+    pub async fn install_new_snapshots(
+        &self,
+        storage: &Storage,
+        prefix: &str,
+        throttle: &ThrottleOptions,
+    ) -> Result<(), Error> {
+        for action in self.actions.iter() {
+            self.install_new_snapshots_from_action(storage, prefix, throttle, action)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn install_new_snapshots_from_action(
+        &self,
+        storage: &Storage,
+        prefix: &str,
+        throttle: &ThrottleOptions,
+        action: &GarbageAction,
+    ) -> Result<(), Error> {
+        match action {
+            GarbageAction::DropSnapshot { .. } | GarbageAction::DropFragment { .. } => {
+                // NOTE(rescrv):  Because each snapshot and fragment has exactly one path from the
+                // root, there is no need to process any of this snapshot's snapshots or fragments;
+                // they are all dropped.
+                Ok(())
+            }
+            GarbageAction::ReplaceSnapshot {
+                new_snapshot,
+                children,
+                ..
+            } => {
+                new_snapshot.install(throttle, storage, prefix).await?;
+                for child in children {
+                    Box::pin(
+                        self.install_new_snapshots_from_action(storage, prefix, throttle, child),
+                    )
+                    .await?;
+                }
+                Ok(())
+            }
+        }
     }
 }
 
