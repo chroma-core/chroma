@@ -186,7 +186,8 @@ impl FrontendServer {
         }
     }
 
-    pub async fn run(self) {
+    /// Accepts an optional `ready_tx` channel that emits the bound port when the server is ready.
+    pub async fn run(self, ready_tx: Option<tokio::sync::oneshot::Sender<u16>>) {
         let system = self.system.clone();
 
         let FrontendServerConfig {
@@ -313,6 +314,15 @@ impl FrontendServer {
         let addr = format!("{}:{}", listen_address, port);
         println!("Listening on {addr}");
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let bound_port = listener
+            .local_addr()
+            .expect("Failed to get local address of server")
+            .port();
+        if let Some(ready_tx) = ready_tx {
+            ready_tx
+                .send(bound_port)
+                .expect("Failed to send bound port. Receiver has been dropped.");
+        }
         if circuit_breaker.enabled() {
             let service = AdmissionControlledService::new(circuit_breaker, app);
             axum::serve(listener, service.into_make_service())
@@ -1906,14 +1916,12 @@ mod tests {
     use chroma_system::System;
     use std::sync::Arc;
 
-    async fn test_server() -> u16 {
+    async fn test_server(mut config: FrontendServerConfig) -> u16 {
         let registry = Registry::new();
         let system = System::new();
 
-        let port = random_port::PortPicker::new().random(true).pick().unwrap();
-
-        let mut config = FrontendServerConfig::single_node_default();
-        config.port = port;
+        // Binding to port 0 will let the OS choose an available port. This avoids port conflicts when running tests in parallel.
+        config.port = 0;
 
         let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
             .await
@@ -1926,38 +1934,23 @@ mod tests {
             Arc::new(()),
             System::new(),
         );
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+
         tokio::task::spawn(async move {
-            app.run().await;
+            app.run(Some(ready_tx)).await;
         });
 
-        port
+        // Wait for port
+        ready_rx.await.unwrap()
     }
 
     #[tokio::test]
     async fn test_cors() {
-        let registry = Registry::new();
-        let system = System::new();
-
-        let port = random_port::PortPicker::new().pick().unwrap();
-
         let mut config = FrontendServerConfig::single_node_default();
-        config.port = port;
         config.cors_allow_origins = Some(vec!["http://localhost:3000".to_string()]);
 
-        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
-            .await
-            .unwrap();
-        let app = FrontendServer::new(
-            config,
-            frontend,
-            vec![],
-            Arc::new(()),
-            Arc::new(()),
-            System::new(),
-        );
-        tokio::task::spawn(async move {
-            app.run().await;
-        });
+        let port = test_server(config).await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -1983,29 +1976,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_cors_wildcard() {
-        let registry = Registry::new();
-        let system = System::new();
-
-        let port = random_port::PortPicker::new().pick().unwrap();
-
         let mut config = FrontendServerConfig::single_node_default();
-        config.port = port;
         config.cors_allow_origins = Some(vec!["*".to_string()]);
 
-        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
-            .await
-            .unwrap();
-        let app = FrontendServer::new(
-            config,
-            frontend,
-            vec![],
-            Arc::new(()),
-            Arc::new(()),
-            System::new(),
-        );
-        tokio::task::spawn(async move {
-            app.run().await;
-        });
+        let port = test_server(config).await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -2031,7 +2005,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_defaults_to_json_content_type() {
-        let port = test_server().await;
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
 
         // We don't send a content-type header
         let client = reqwest::Client::new();
@@ -2047,7 +2021,7 @@ mod tests {
     #[tokio::test]
     async fn test_plaintext_error_conversion() {
         // By default, axum returns plaintext errors for some errors. This asserts that there's middleware to ensure all errors are returned as JSON.
-        let port = test_server().await;
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
 
         let client = reqwest::Client::new();
         let res = client
