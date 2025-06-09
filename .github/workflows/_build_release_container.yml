@@ -3,6 +3,11 @@ name: Build and publish container image to Docker and GitHub Container Registry
 on:
   workflow_dispatch:
     inputs:
+      push:
+        description: 'Push the built image to registries'
+        required: true
+        default: false
+        type: boolean
       tag:
         description: 'Tag to publish'
         required: true
@@ -15,6 +20,11 @@ on:
 
   workflow_call:
     inputs:
+      push:
+        description: 'Push the built image to registries'
+        required: true
+        default: false
+        type: boolean
       tag:
         description: 'Tag to publish'
         required: true
@@ -85,7 +95,7 @@ jobs:
           file: rust/Dockerfile
           target: cli
           platforms: ${{ matrix.docker_platform }}
-          push: true
+          push: ${{ inputs.push }}
           build-args: |
             RELEASE_MODE=1
           tags: ${{ steps.tags.outputs.tags }}
@@ -98,6 +108,7 @@ jobs:
   merge:
     name: Merge platform manifests
     runs-on: blacksmith-4vcpu-ubuntu-2204
+    if: ${{ inputs.push == 'true' }}
     needs:
       - build
     steps:
