@@ -135,7 +135,7 @@ proptest::proptest! {
         let cache = TestingSnapshotCache::default();
         for offset in start.offset()..limit.offset() {
             let position = LogPosition::from_offset(offset);
-            let garbage = rt.block_on(Garbage::new(&storage, "manifests_gargage".to_string(), &manifest, &throttle, &cache, position)).unwrap();
+            let garbage = rt.block_on(Garbage::new(&storage, "manifests_gargage", &manifest, &throttle, &cache, position)).unwrap();
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.scrub().unwrap();
             assert!(garbage.is_empty() || !manifest.has_collected_garbage(&garbage));
@@ -185,7 +185,7 @@ proptest::proptest! {
         };
         for offset in start.offset()..limit.offset() {
             let position = LogPosition::from_offset(offset);
-            let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_gargage".to_string(), &manifest, &throttle, &cache, position)).unwrap();
+            let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_gargage", &manifest, &throttle, &cache, position)).unwrap();
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.scrub().unwrap();
             assert!(garbage.is_empty() || !manifest.has_collected_garbage(&garbage));

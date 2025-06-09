@@ -583,7 +583,8 @@ impl OnceLogWriter {
         self.manifest_manager.heartbeat().await?;
         let garbage = self
             .manifest_manager
-            .compute_garbage(options, cutoff)
+            // TODO(rescrv):  Evaluate putting a cache in here.
+            .compute_garbage(options, cutoff, &())
             .await?;
         if garbage.is_empty() {
             tracing::info!("no garbage to collect");

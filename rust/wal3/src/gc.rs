@@ -2,7 +2,6 @@ use std::ops::Add;
 use std::sync::Arc;
 use std::time::Duration;
 
-use chroma_storage::Storage;
 use setsum::Setsum;
 
 use chroma_storage::{
@@ -29,12 +28,12 @@ pub struct Garbage {
 
 impl Garbage {
     #[allow(clippy::result_large_err)]
-    pub async fn new<C: SnapshotCache>(
+    pub async fn new(
         storage: &Storage,
-        prefix: String,
+        prefix: &str,
         manifest: &Manifest,
         throttle: &ThrottleOptions,
-        snapshots: &C,
+        snapshots: &dyn SnapshotCache,
         first_to_keep: LogPosition,
     ) -> Result<Self, Error> {
         let dropped_snapshots = manifest
@@ -59,7 +58,7 @@ impl Garbage {
         }
         for snap in dropped_snapshots {
             actions.push(
-                Self::drop_snapshot(storage, &prefix, snap, throttle, snapshots, &mut drop_acc)
+                Self::drop_snapshot(storage, prefix, snap, throttle, snapshots, &mut drop_acc)
                     .await?,
             );
         }
@@ -67,7 +66,7 @@ impl Garbage {
             actions.push(
                 Self::replace_snapshot(
                     storage,
-                    &prefix,
+                    prefix,
                     snap,
                     throttle,
                     snapshots,
@@ -189,12 +188,12 @@ impl Garbage {
     }
 
     #[allow(clippy::result_large_err)]
-    async fn drop_snapshot<C: SnapshotCache>(
+    async fn drop_snapshot(
         storage: &Storage,
         prefix: &str,
         ptr: &SnapshotPointer,
         throttle: &ThrottleOptions,
-        snapshots: &C,
+        snapshots: &dyn SnapshotCache,
         drop_acc: &mut Setsum,
     ) -> Result<GarbageAction, Error> {
         let snapshot = match snapshots.get(ptr).await? {
@@ -239,12 +238,12 @@ impl Garbage {
     }
 
     #[allow(clippy::result_large_err)]
-    async fn replace_snapshot<C: SnapshotCache>(
+    async fn replace_snapshot(
         storage: &Storage,
         prefix: &str,
         ptr: &SnapshotPointer,
         throttle: &ThrottleOptions,
-        snapshots: &C,
+        snapshots: &dyn SnapshotCache,
         first_to_keep: LogPosition,
         drop_acc: &mut Setsum,
     ) -> Result<GarbageAction, Error> {
