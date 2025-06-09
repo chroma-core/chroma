@@ -1,3 +1,4 @@
+import random
 from typing import Optional, Tuple, List
 from chromadb.api import BaseAPI
 from chromadb.api.types import (
