@@ -13,14 +13,6 @@ runs:
       with:
         enable-cache: true
     - name: Set up Python 3.9 for protos
-      uses: useblacksmith/setup-python@v6
-      # NOTE(hammadb) Blacksmith does not support windows, so we use the official action for windows and
-      # skip it on other platforms
-      if: runner.os != 'Windows'
-      with:
-        python-version: "3.9"
-    - name: Set up Python 3.9 for protos (Windows)
-      if: runner.os == 'Windows'
       uses: actions/setup-python@v5
       with:
         python-version: "3.9"
@@ -42,11 +34,6 @@ runs:
         uv pip uninstall --system grpcio grpcio-tools
       shell: bash
     - name: Set up Python ${{ inputs.python-version }}
-      uses: useblacksmith/setup-python@v6
-      with:
-        python-version: ${{ inputs.python-version }}
-    - name: Set up Python ${{ inputs.python-version }} (Windows)
-      if: runner.os == 'Windows'
       uses: actions/setup-python@v5
       with:
         python-version: ${{ inputs.python-version }}
