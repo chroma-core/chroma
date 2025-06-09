@@ -153,6 +153,7 @@ pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                     .module_path()
                     .unwrap_or("")
                     .starts_with("continuous_verification")
+                || metadata.module_path().unwrap_or("").starts_with("billing")
         }))
         .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
         .boxed()
