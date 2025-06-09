@@ -274,3 +274,32 @@ jobs:
       with:
         jobs: ${{ toJSON(needs) }}
         allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests,check-helm-version-bump,delete-helm-comment
+
+  notify-slack-on-failure:
+    name: Notify Slack on Test Failure
+    if: github.ref == 'refs/heads/main' && failure()
+    needs:
+    - python-tests
+    - python-vulnerability-scan
+    - javascript-client-tests
+    - rust-tests
+    - go-tests
+    - check-title
+    - lint
+    - check-helm-version-bump
+    - delete-helm-comment
+    runs-on: blacksmith-2vcpu-ubuntu-2204
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *Test failure on main branch after PR merge!*
+              *Workflow:* ${{ github.workflow }}
+              *Commit:* <https://github.com/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Author:* ${{ github.actor }}
