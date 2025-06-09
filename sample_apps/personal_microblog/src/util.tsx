@@ -17,6 +17,7 @@ export function chromaQueryResultsToPostModels(queryResult: any): TweetModelBase
 export function chromaGetResultsToPostModels(getResult: any): TweetModelBase[] {
   var postModels = getResult.ids.map(function (id: string, i: number) {
     return {
+      type: 'base',
       id: id,
       threadParentId: getResult.metadatas[i]?.threadParentId,
       body: getResult.documents[i],

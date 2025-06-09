@@ -9,8 +9,6 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandSeparator,
-  CommandShortcut,
 } from "@/components/ui/command"
 import { DialogTitle } from "@/components/ui/dialog"
 import { EnrichedTweetModel } from "@/types"
@@ -23,6 +21,9 @@ export default function Search() {
   const [searchResults, setSearchResults] = React.useState<EnrichedTweetModel[]>([])
   const [isLoading, setIsLoading] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+
+  const abortControllerRef = React.useRef<AbortController | null>(null)
+
   const router = useRouter()
 
   const [debouncedQuery, setDebouncedQuery] = React.useState("")
@@ -35,15 +36,28 @@ export default function Search() {
     return () => clearTimeout(timer)
   }, [query])
 
-  // Perform search when debounced query changes
+  React.useEffect(() => {
+    if (query.trim() === "") {
+      setSearchResults([])
+      setError(null);
+    }
+  }, [query])
+
   React.useEffect(() => {
     if (debouncedQuery.trim() === "") {
-      setSearchResults([])
-      setError(null)
       return
     }
 
     const performSearch = async () => {
+      // Cancel any existing request
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+
+      // Create new AbortController for this request
+      const abortController = new AbortController()
+      abortControllerRef.current = abortController
+
       setIsLoading(true)
       setError(null)
 
@@ -55,21 +69,29 @@ export default function Search() {
           },
           body: JSON.stringify({
             query: debouncedQuery
-          })
-        })
+          }),
+          signal: abortController.signal
+        });
 
         if (!response.ok) {
-          throw new Error(`Search failed: ${response.statusText}`)
+          throw new Error(`Search failed: ${response.statusText}`);
         }
 
-        const results = await response.json()
-        console.log(results)
-        setSearchResults(results)
+        const results = await response.json();
+        setSearchResults(results);
+        console.log("set search", results);
       } catch (err) {
+        // Don't show error if request was aborted
+        if (err instanceof Error && err.name === 'AbortError') {
+          return
+        }
         setError(err instanceof Error ? err.message : 'Search failed')
         setSearchResults([])
       } finally {
-        setIsLoading(false)
+        // Only update loading state if this controller hasn't been aborted
+        if (!abortController.signal.aborted) {
+          setIsLoading(false)
+        }
       }
     }
 
@@ -102,6 +124,19 @@ export default function Search() {
     return null;
   }
 
+  const emptyQuery = query.trim() === "";
+
+  let message = <>Start typing to search...</>
+  if (!isLoading && debouncedQuery.trim() !== "" && searchResults.length === 0) {
+    message = <>No results found.</>
+  } else if (isLoading || !emptyQuery) {
+    message = <>Loading...</>;
+  } else if (error) {
+    message = <>Error loading results.</>
+  }
+
+  console.log(query, debouncedQuery, searchResults, searchResults.length);
+
   return (
     <>
       <CommandDialog open={open} onOpenChange={setOpen}>
@@ -112,14 +147,15 @@ export default function Search() {
           onValueChange={setQuery}
         />
         <CommandList>
-          <CommandEmpty>No results found.</CommandEmpty>
-          <CommandGroup>
-            {searchResults.map((post) => {
-              const output = <CommandItem
+          {(emptyQuery || searchResults.length === 0) && (
+            <div className="p-4 text-sm text-muted-foreground">{message}</div>
+          )}
+          <div>
+            {!emptyQuery && searchResults.map((post) => (
+              <div
                 key={post.id}
-                value={post.body}
-                onSelect={() => handleResultClick(post)}
-                className="flex flex-col items-start gap-1 p-3"
+                onClick={() => handleResultClick(post)}
+                className="flex flex-col items-start gap-1 p-3 cursor-pointer hover:bg-gray-100"
               >
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span>{formatDate(post.date)}</span>
@@ -127,11 +163,9 @@ export default function Search() {
                 <div className="text-sm">
                   {truncateText(post.body, 150)}
                 </div>
-              </CommandItem>
-              console.log(output);
-              return output;
-            })}
-          </CommandGroup>
+              </div>
+            ))}
+          </div>
         </CommandList>
       </CommandDialog>
     </>

@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import PermalinkTweetView from "@/components/views/permalink-tweet-view";
-import { getPostById, getPostReplies, semanticSearch } from "@/actions";
+import { getPostById, getPostReplies } from "@/actions";
 import { TweetModelBase } from "@/types";
+import { Suspense } from "react";
+import PermalinkSkeleton from "@/components/ui/permalink-skeleton";
 
 export default async function PostPermalinkPage({
   params,
@@ -9,6 +11,13 @@ export default async function PostPermalinkPage({
   params: { id: string };
 }) {
   const id = (await params).id;
+
+  return <Suspense fallback={<PermalinkSkeleton />}>
+    <PostPermalinkPageImpl id={id} />
+  </Suspense>;
+}
+
+async function PostPermalinkPageImpl({ id }: { id: string }) {
   const post = await getPostById(id);
 
   if (!post) {

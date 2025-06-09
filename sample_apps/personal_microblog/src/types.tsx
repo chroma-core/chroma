@@ -8,6 +8,7 @@ export type Role = "user" | "assistant";
  * A post. 1:1 correspondence with an entry in the Chroma collection.
  */
 export interface TweetModelBase {
+  type: 'base';
   threadParentId?: string
   id: string;
   role: Role;
@@ -34,7 +35,16 @@ export interface PartialAssistantPost extends TweetModelBase {
  * This is returned by certain API endpoints such that the client
  * doesn't have to make additional requests to get the related posts.
  */
-export interface EnrichedTweetModel extends TweetModelBase {
+export interface EnrichedTweetModel extends Omit<TweetModelBase, 'type'> {
+  type: 'enriched';
   enrichedAiReply?: TweetModelBase;
   enrichedCitations: TweetModelBase[];
 }
+
+export interface UserWithStreamingAIResponseTweetModel extends Omit<TweetModelBase, 'type'> {
+  type: 'streaming';
+  aiReply?: PartialAssistantPost | undefined;
+}
+
+export type TweetModel = TweetModelBase | EnrichedTweetModel | UserWithStreamingAIResponseTweetModel;
+export type NewPostResponseTweetModel = TweetModelBase | UserWithStreamingAIResponseTweetModel;

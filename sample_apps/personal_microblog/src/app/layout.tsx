@@ -25,8 +25,12 @@ export default function RootLayout({
       <body
         className={`${gelasio.variable} antialiased`}
       >
-        <Search />
-        {children}
+        <div className="flex flex-col items-center py-20">
+          <div className="w-[600px] max-w-[calc(100dvw-32px)]">
+            <Search />
+            {children}
+          </div>
+        </div>
       </body>
     </html>
   );

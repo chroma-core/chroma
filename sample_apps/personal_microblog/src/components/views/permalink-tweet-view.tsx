@@ -1,25 +1,31 @@
 "use client";
 
 import { publishNewUserPost } from "@/actions";
-import { EnrichedTweetModel, TweetModelBase } from "@/types";
+import { EnrichedTweetModel, NewPostResponseTweetModel, TweetModelBase, UserWithStreamingAIResponseTweetModel } from "@/types";
 import { useEffect, useState } from "react";
 import TweetPrompt from "../tweet/tweet-prompt";
 import { Tweet } from "../tweet/tweet";
-import { BiReply, BiLinkAlt } from "react-icons/bi";
-import { AnimatePresence, motion } from "framer-motion";
 import { useRouter } from 'next/navigation'
 import TweetBody from "../tweet/tweet-body";
+import { formatDate } from "@/util";
+import { motion } from "framer-motion";
 
-export default function PermalinkTweetView({ post, parentPosts, existingReplies }: { post: TweetModelBase, parentPosts: TweetModelBase[], existingReplies: TweetModelBase[] }) {
-  const [replies, setReplies] = useState<TweetModelBase[]>(existingReplies);
+interface PermalinkTweetViewProps {
+  post: TweetModelBase;
+  parentPosts: TweetModelBase[];
+  existingReplies: EnrichedTweetModel[];
+}
+
+export default function PermalinkTweetView({ post, parentPosts, existingReplies }: PermalinkTweetViewProps) {
+  const [newReplies, setNewReplies] = useState<NewPostResponseTweetModel[]>([]);
 
   function handleSubmit(input: string) {
     const postReply = async () => {
       if (!post) {
         return;
       }
-      const { userPost } = await publishNewUserPost(input, post.id);
-      setReplies([...replies, userPost]);
+      const reply: NewPostResponseTweetModel = await publishNewUserPost(input, post.id);
+      setNewReplies([...newReplies, reply]);
     }
     postReply();
   }
@@ -39,6 +45,8 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
     });
   }
 
+  const omitIds = [post.id, ...existingReplies.map((r) => r.id), ...newReplies.flatMap((r) => r.aiReplyId ? [r.id, r.aiReplyId] : [r.id])];
+
   const headerComponent = (<div className="flex flex-row font-ui justify-between sticky top-0 bg-[var(--background)] py-4">
     <a href="/">← Feed</a>
     <div className="flex flex-row gap-2">
@@ -46,26 +54,40 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
     </div>
   </div>);
 
+  const isAiReply = post.role === "assistant";
+
   return (
-    <div className="flex flex-col items-center py-20">
-      <div className="w-[600px] max-w-[calc(100dvw-32px)]">
-        <div className="py-4">
+    <>
+      <div className="py-4">
+        <div>
           {headerComponent}
-          <div className="py-12 px-4">
-            <ParentPosts parentPosts={parentPosts} />
-            <TweetBody body={post.body} citations={post.citations} className="text-[1.15em]/5 font-body" />
+          <div className="pb-12 px-4 pt-4">
+            <div className="pt-4">
+              <ParentPosts parentPosts={parentPosts} />
+            </div>
+            {post.date && <div className="text-sm text-gray-500 pb-2">{formatDate(post.date)}</div>}
+            <TweetBody
+              body={post.body}
+              citations={post.citations}
+              className="text-[1.15em]/7 font-body"
+              bodyProps={{ className: isAiReply ? "text-[var(--accent)]" : "" }}
+              citationsProps={{ animate: false, style: isAiReply ? "endnote" : "block" }}
+            />
           </div>
-          <TweetPrompt placeholder="Continue your thoughts..." onSubmit={handleSubmit} animate={false} />
-          <div className='h-12' />
-          {replies.map((r) => (
-            <PermalinkReply key={r.id} reply={r} />
-          ))}
         </div>
-        <div className="min-h-[100dvh]">
-          <RelatedPosts searchTerm={post.body} currentPostId={post.id} />
-        </div>
+        <TweetPrompt placeholder="Continue your thoughts..." onSubmit={handleSubmit} animate={false} />
+        <div className='h-12' />
+        {existingReplies.map((r) => (
+          <PermalinkReply key={r.id} reply={r} />
+        ))}
+        {newReplies.map((r) => (
+          <NewReply key={r.id} reply={r} />
+        ))}
       </div>
-    </div>
+      <div className="min-h-[100dvh]">
+        <RelatedPosts searchTerm={post.body} omitIds={omitIds} />
+      </div>
+    </>
   );
 }
 
@@ -84,84 +106,37 @@ function ParentPosts({ parentPosts }: { parentPosts: TweetModelBase[] }) {
     <div className="pb-6">
       {parentPosts.map((p) => (
         <div key={p.id} className="grid grid-cols-[2px_auto] last:pb-8 w-full border-l cursor-pointer" onClick={() => goToPostPage(p.id)}>
-          <div className="border-l-[1.5px] border-gray-400 h-[1.2em] mt-3 ml-[-1.5px]"></div>
-          <TweetBody body={p.body} citations={p.citations} className="opacity-70 p-2 pl-4 pb-4" />
+          <div className="border-l-[1.5px] border-gray-400 h-[1.2em] mt-2 ml-[-1.5px]"></div>
+          <div className="p-2 pl-4 pb-4">
+            <div className="text-sm text-gray-500 pb-2">{formatDate(p.date)}</div>
+            <TweetBody body={p.body} citations={p.citations} className="opacity-70" />
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
-function PermalinkReply({ reply }: { reply: TweetModelBase }) {
-  const [isHovered, setIsHovered] = useState(false);
-  const [isReplying, setIsReplying] = useState(false);
-
+function PermalinkReply({ reply }: { reply: EnrichedTweetModel }) {
   const router = useRouter()
 
-  function handleSubmit(input: string) {
-    publishNewUserPost(input, reply.id).then(({ userPost }) => {
-      router.push(`/post/${userPost.id}`);
-    });
-  }
-
   return (
-    <div
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className="border-b"
-    >
-      <div className="pt-4 px-4 cursor-pointer" onClick={() => router.push(`/post/${reply.id}`)}>
-        <TweetBody body={reply.body} citations={reply.citations} className={`font-body ${reply.role === "assistant" ? "bold text-blue-600" : ""}`} />
-        <motion.div
-          className="flex flex-row items-center gap-2 py-2 w-full"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: isHovered ? 1 : 0 }}
-          transition={{ duration: 0.2, ease: "easeInOut" }}
-        >
-          <PermalinkReplyButton icon={<BiReply className={`w-5 h-5`} />} onClick={(e) => { setIsReplying((prev) => !prev); e.stopPropagation() }} />
-          <PermalinkReplyButton icon={<BiLinkAlt className={`w-[18px] h-[18px]`} />} onClick={(e) => { setIsReplying((prev) => !prev); e.stopPropagation() }} />
-        </motion.div>
-      </div>
-      <AnimatePresence>
-        {isReplying && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.2, ease: "easeInOut" }}
-          >
-            <TweetPrompt placeholder="Reply to this post..." onSubmit={handleSubmit} animate={false} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+    <div className="cursor-pointer" onClick={() => router.push(`/post/${reply.id}`)}>
+      <Tweet tweet={reply} />
     </div>
   );
 }
 
-function PermalinkReplyButton({ icon, onClick }: { icon: React.ReactNode, onClick: (event: React.MouseEvent<HTMLDivElement>) => void }) {
-  const [isHovered, setIsHovered] = useState(false);
-
+function NewReply({ reply }: { reply: NewPostResponseTweetModel }) {
+  const router = useRouter();
   return (
-    <div
-      className="relative flex flex-row items-center gap-2 py-2 text-gray-500 hover:text-black overflow-hidden rounded-full"
-      onClick={onClick}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-    >
-      <motion.div
-        className="absolute inset-0 bg-gray-200 rounded-full"
-        initial={{ scale: 0, opacity: 0 }}
-        animate={{ scale: isHovered ? .8 : 0, opacity: isHovered ? 1 : 0 }}
-        transition={{ duration: 0.2, ease: "easeInOut" }}
-      />
-      <div className="relative z-10">
-        {icon}
-      </div>
+    <div className="cursor-pointer" onClick={() => router.push(`/post/${reply.id}`)}>
+      <Tweet tweet={reply} />
     </div>
   );
 }
 
-function RelatedPosts({ searchTerm, currentPostId }: { searchTerm: string, currentPostId: string }) {
+function RelatedPosts({ searchTerm, omitIds }: { searchTerm: string, omitIds: string[] }) {
   const [relatedPosts, setRelatedPosts] = useState<EnrichedTweetModel[]>([]);
 
   useEffect(() => {
@@ -176,23 +151,27 @@ function RelatedPosts({ searchTerm, currentPostId }: { searchTerm: string, curre
         })
       });
       const relatedPosts = await response.json();
-      setRelatedPosts(relatedPosts.filter((p: EnrichedTweetModel) => p.id !== currentPostId));
+      setRelatedPosts(relatedPosts.filter((p: EnrichedTweetModel) => !omitIds.includes(p.id)));
     };
     getRelatedPosts();
-  }, [searchTerm, currentPostId]);
+  }, [searchTerm, omitIds]);
 
   if (relatedPosts.length === 0) {
     return null;
   }
 
   return (
-    <>
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.1, ease: "easeOut" }}
+    >
       <h2 className="ml-[15px] font-ui pb-4 pt-6">Related Posts</h2>
       <div>
         {relatedPosts.map((p) => (
-          <Tweet key={p.id} tweet={p} aiReply={p.enrichedAiReply} />
+          <Tweet key={p.id} tweet={p} />
         ))}
       </div>
-    </>
+    </motion.div>
   );
 }

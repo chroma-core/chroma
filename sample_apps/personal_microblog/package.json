@@ -27,6 +27,7 @@
     "react-icons": "^5.5.0",
     "rehype-react": "^8.0.0",
     "remark": "^15.0.1",
+    "remark-gfm": "^4.0.1",
     "remark-html": "^16.0.1",
     "remark-rehype": "^11.1.2",
     "tailwind-merge": "^3.3.0",

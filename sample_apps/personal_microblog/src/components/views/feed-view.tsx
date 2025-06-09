@@ -4,12 +4,12 @@ import { useEffect, useState, useRef } from "react";
 import { AnimatePresence, m, motion } from "framer-motion";
 import { Tweet, TweetSkeleton } from "@/components/tweet/tweet";
 import TweetPrompt from "@/components/tweet/tweet-prompt";
-import { EnrichedTweetModel, PartialAssistantPost, TweetModelBase } from "@/types";
+import { EnrichedTweetModel, NewPostResponseTweetModel } from "@/types";
 import { publishNewUserPost } from "@/actions";
 import Logo from "../ui/common/logo";
 
 export default function FeedView() {
-  const [newMessages, setNewMessages] = useState<Array<{ userPost: TweetModelBase, assistantPost?: PartialAssistantPost }>>([]);
+  const [newMessages, setNewMessages] = useState<NewPostResponseTweetModel[]>([]);
 
   return (
     <>
@@ -19,8 +19,8 @@ export default function FeedView() {
         </div>
         <TweetPrompt
           onSubmit={(input) => {
-            publishNewUserPost(input).then(({ userPost, assistantPost }) => {
-              setNewMessages((tweets) => [{ userPost, assistantPost }, ...tweets]);
+            publishNewUserPost(input).then((tweet) => {
+              setNewMessages((tweets) => [tweet, ...tweets]);
             });
           }}
           animate={true}
@@ -50,7 +50,7 @@ function IntroTweet() {
   );
 }
 
-function Tweets({ newMessages }: { newMessages: { userPost: TweetModelBase, assistantPost?: PartialAssistantPost }[] }) {
+function Tweets({ newMessages }: { newMessages: NewPostResponseTweetModel[] }) {
   const [oldMessages, setOldMessages] = useState<EnrichedTweetModel[]>([]);
 
   // These states are used for infinite scroll pagination
@@ -108,7 +108,7 @@ function Tweets({ newMessages }: { newMessages: { userPost: TweetModelBase, assi
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  if (loadingRef.current && oldMessages.length === 0 && newMessages.length === 0) {
+  if (initialLoading || loadingRef.current && oldMessages.length === 0 && newMessages.length === 0) {
     return <TweetSkeleton />;
   }
 
@@ -123,19 +123,19 @@ function Tweets({ newMessages }: { newMessages: { userPost: TweetModelBase, assi
   return (
     <div>
       <AnimatePresence>
-        {newMessages.map(({ userPost, assistantPost }, i) => (
+        {newMessages.map((tweet, i) => (
           <motion.li
-            key={userPost.id}
+            key={tweet.id}
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: "auto" }}
           >
-            <Tweet tweet={userPost} aiReply={assistantPost} />
+            <Tweet tweet={tweet} />
           </motion.li>
         ))}
 
         <li className="flex flex-col">
           {oldMessages.map((p) => (
-            <Tweet key={p.id} tweet={p} aiReply={p.enrichedAiReply} />
+            <Tweet key={p.id} tweet={p} />
           ))}
         </li>
       </AnimatePresence>

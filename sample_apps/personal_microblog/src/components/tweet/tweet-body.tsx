@@ -103,14 +103,14 @@ export default function TweetBody({
   }
 
   const citationsComponent = <Citations
-    citations={usingStream ? streamedCitationIds : citations ?? []}
     {...citationsProps}
+    citations={usingStream ? streamedCitationIds : citations ?? []}
   />;
 
   return (
     <div className={`${className}`}>
       {bodyComponent}
-      <div className="mt-2 text-gray-500">
+      <div className="mt-2">
         {citationsComponent}
       </div>
     </div>

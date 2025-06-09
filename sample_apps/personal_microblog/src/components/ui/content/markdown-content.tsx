@@ -6,13 +6,39 @@ import rehypeReact from "rehype-react";
 import styles from "./markdown-content.module.css";
 import { AnchorTag, Strong } from "@/markdown";
 import { readStreamableValue, StreamableValue } from "ai/rsc";
-import { useAnimatedText } from "../animations/animated-text";
 
 const markdownPipeline = remark()
   .use(remarkPluginReplaceMatch(/@assistant/, (match) => {
     return {
       type: "strong",
       children: [{ type: "text", value: match }],
+    }
+  }))
+  .use(remarkPluginReplaceMatch(/\[($|\^($|(\d+)($|\])))/, (match) => {
+    // This matches citation references like [^1], [^2], etc.
+    // This also matches all prefixes of it like [, [^, or [^ in the case
+    // that when the AI's response is being streamed, it only gives us part
+    // of the citation reference.
+    // There is an edge case where the backend is streaming text and it only
+    // sends part of the citation reference. If this happens, the user will see
+    // something like [^ for a split second before it can properly be parsed
+    // and rendered.
+    // We want to hide partial potential citation references, and only show
+    // the citation reference when we know for sure it's a citation reference,
+    // or hide it until more information is streamed.
+
+    const citationMatch = match.match(/\[\^(\d+)\]/);
+    if (citationMatch) {
+      return {
+        type: "link",
+        url: `#citation-${citationMatch[1]}`,
+        children: [{ type: "text", value: citationMatch[0] }],
+      }
+    } else {
+      return {
+        type: "text",
+        value: "",
+      }
     }
   }))
   .use(remarkRehype)
@@ -155,11 +181,17 @@ function replaceMatches(body: string, find: RegExp, replace: (match: string) => 
     return [];
   }
 
-  if (!find.test(body)) {
+  const globalFind = find.global ? find : new RegExp(find.source, find.flags + 'g');
+
+  if (!globalFind.test(body)) {
     return [{ type: "text", value: body }];
   }
 
-  body.replace(find, (match, offset) => {
+  // Reset lastIndex since we used test() above
+  globalFind.lastIndex = 0;
+
+  body.replace(globalFind, (match, ...args) => {
+    const offset = args[args.length - 2];
     // Push text before
     if (lastIndex < offset) {
       const content = body.slice(lastIndex, offset);

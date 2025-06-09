@@ -1,20 +1,28 @@
 "use client";
 
 import { TweetModelBase } from "@/types";
-import { formatDate } from "@/util";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import AnimatedNumber from "../ui/animations/animated-number";
 import { useRouter } from "next/navigation";
 
-interface CitationsProps {
-  citations: string[] | TweetModelBase[];
+type CitationStyle = "endnote" | "block";
+
+export interface CitationsProps {
+  citations: string[] | TweetModelBase[]
   animate?: boolean;
   collapsedByDefault?: boolean;
   className?: string;
+  style?: CitationStyle;
 }
 
-export default function Citations({ citations, animate = true, collapsedByDefault = false, className = "" }: CitationsProps) {
+export default function Citations({
+  citations,
+  animate = true,
+  collapsedByDefault = false,
+  className = "",
+  style = "block",
+}: CitationsProps) {
   const onlyProvidedIds = Array.isArray(citations) && citations.every((citation) => typeof citation === 'string');
   const [collapsed, setCollapsed] = useState(collapsedByDefault);
   const [loadedCitations, setLoadedCitations] = useState<TweetModelBase[]>(onlyProvidedIds ? [] : citations);
@@ -59,12 +67,59 @@ export default function Citations({ citations, animate = true, collapsedByDefaul
   }
 
   let citationsComponent = undefined;
-  if (onlyProvidedIds) {
+  if (animate) {
     citationsComponent = <>Show {citations.length > 0 && <AnimatedNumber number={citations.length} />} citation{citations.length === 1 ? '' : 's'}</>;
   } else {
     citationsComponent = `Show ${citations.length} citation${citations.length === 1 ? '' : 's'}`;
   }
 
+  /*
+   * Initially, when switching the state of `collapsed`, this element would make a jank motion
+   * because its height would potentially suddenly change from 1em to 0, then to something large.
+   * citation-count-element and citation-list-element are in the same grid cell
+   * to make them render on top of each other. This eliminates the jank when switching
+   * between the two elements.
+   * This effectively makes the height of the container max(citation-count-element, citation-list-element),
+   * which makes for a smoother transition when `collapsed` is toggled.
+   */
+  return (
+    <div className={`grid grid-cols-1 grid-rows-1 ${className}`}>
+      <AnimatePresence>
+        <motion.div
+          key="citation-count-element"
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: collapsed ? 1 : 0, height: 'auto' }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setCollapsed(false);
+          }}
+          onHoverStart={() => collapsed && fetchCitations()}
+          className={`cursor-pointer col-[1] row-[1] z-10`}>{citationsComponent}</motion.div>
+        {!collapsed && (
+          <motion.ol
+            key="citation-list-element"
+            initial={animate ? { opacity: 0, height: 0 } : {}}
+            animate={animate ? { opacity: 1, height: 'auto' } : {}}
+            className="flex flex-col gap-2 col-[1] row-[1] z-20"
+          >
+            {loadedCitations.map((citation, index) => (
+              <Citation key={citation.id} tweet={citation} index={index} animate={animate} style={style} />
+            ))}
+          </motion.ol>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+interface CitationProps {
+  tweet: TweetModelBase;
+  index: number;
+  animate?: boolean;
+  style?: CitationStyle;
+}
+
+function Citation({ tweet, index, animate = true, style = "endnote" }: CitationProps) {
   let router = useRouter();
 
   const animateCitationProps = (index: number) => animate ? {
@@ -72,62 +127,26 @@ export default function Citations({ citations, animate = true, collapsedByDefaul
     animate: { opacity: 1, y: 0, transition: { delay: index * 0.1 } },
     whileHover: { scale: 1.02, y: -2, transition: { duration: 0.2, ease: "easeOut" } },
   } : {};
-
-/*
- * Initially, when switching the state of `collapsed`, this element would make a jank motion
- * because its height would potentially suddenly change from 1em to 0, then to something large.
- * citation-count-element and citation-list-element are in the same grid cell
- * to make them render on top of each other. This eliminates the jank when switching
- * between the two elements.
- * This effectively makes the height of the container max(citation-count-element, citation-list-element),
- * which makes for a smoother transition when `collapsed` is toggled.
- */
-return (
-  <div className={`grid grid-cols-1 grid-rows-1 ${className}`}>
-    <AnimatePresence>
-      <motion.div
-        key="citation-count-element"
-        initial={{ opacity: 0, height: 0 }}
-        animate={{ opacity: collapsed ? 1 : 0, height: 'auto' }}
-        onClick={(e) => {
-          e.stopPropagation();
-          setCollapsed(false);
-        }}
-        onHoverStart={() => collapsed && fetchCitations()}
-        className={`cursor-pointer col-[1] row-[1] z-10`}>{citationsComponent}</motion.div>
-      {!collapsed && (
-        <motion.div
-          key="citation-list-element"
-          initial={{ opacity: 0, height: 0 }}
-          animate={{ opacity: 1, height: 'auto' }}
-          className="flex flex-col col-[1] row-[1] z-20"
-        >
-          {loadedCitations.map((citation, index) => (
-            <motion.div key={citation.id} onClick={() => { router.push(`/post/${citation.id}`) }}
-              {...animateCitationProps(index)}
-              whileHover={{
-                scale: 1.02,
-                y: -2,
-                transition: { duration: 0.2, ease: "easeOut" }
-              }}>
-              <Citation key={citation.id} tweet={citation} />
-            </motion.div>
-          ))}
-        </motion.div>
-      )}
-    </AnimatePresence>
-  </div>
-);
-}
-
-function Citation({ tweet }: { tweet: TweetModelBase }) {
   const cleanedBody = tweet.body?.replace(/(!?\[.*?\])\(.*?\)/g, '$1(...)');
   const snippetLines = cleanedBody?.split('\n');
   const snippet = snippetLines?.[0];
   const hasMore = snippetLines?.length && snippetLines.length > 1;
+  const body = `${snippet}${hasMore ? '...' : ''}`;
   return (
-    <div className="p-2 cursor-pointer">
-      <div className="line-clamp-1">{snippet}{hasMore && '...'}</div>
-    </div>
+    <motion.li key={tweet.id} onClick={(e) => {
+      e.stopPropagation();
+      router.push(`/post/${tweet.id}`);
+    }}
+      {...animateCitationProps(index)}
+      className={`${style === "endnote" ? "list-decimal mx-5" : "border p-4"}`}
+      whileHover={{
+        scale: 1.02,
+        y: -2,
+        transition: { duration: 0.2, ease: "easeOut" }
+      }}>
+      <div className="cursor-pointer">
+        <div className="line-clamp-1">{body}</div>
+      </div>
+    </motion.li>
   );
 }

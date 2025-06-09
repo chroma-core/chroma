@@ -25,7 +25,6 @@ const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: str
       const esc = (str: string) => str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       return esc(text)
         .replace(/(@assistant)($|\s|&nbsp;)/g, `<span class="text-blue-600 bg-blue-100">$1</span>$2`)
-        .replace(/(#[\w-]+)/g, '<span class="text-green-600">$1</span>')
         .replace(/\n/g, '<br />');
     }
 
@@ -91,6 +90,7 @@ const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: str
           className="relative w-full min-h-[2.5em] resize-none bg-transparent text-transparent caret-black z-20 font-inherit p-2 outline-none overflow-hidden"
           spellCheck={true}
           autoFocus={true}
+          tabIndex={0}
           placeholder={placeholder ?? "What's happening?"}
           rows={1}
           onKeyDown={handleKeyDown}
@@ -138,8 +138,8 @@ export default function TweetPrompt(props: TweetPromptProps) {
     }
   }
   const outlineVariants = {
-    backgroundSize: animate && glow ? "200%" : 0,
-    y: animate && glow ? -2 : 0,
+    backgroundSize: glow ? "200%" : 0,
+    y: glow ? -2 : 0,
   };
 
   const visibilityVariants = {
@@ -150,9 +150,11 @@ export default function TweetPrompt(props: TweetPromptProps) {
     textareaRef.current?.focus();
   }
 
+  const allowedToSubmit = input.length > 0;
+
   return (
     <motion.div
-      animate={outlineVariants}
+      animate={animate ? outlineVariants : {}}
       transition={{
         duration: 0.3,
       }}
@@ -163,7 +165,10 @@ export default function TweetPrompt(props: TweetPromptProps) {
         <InputWithSyntaxHighlighting ref={textareaRef} input={input} setInput={setInput} onKeyDown={handleKeyDown} placeholder={props.placeholder} />
         <div className="flex flex-row gap-1">
           <motion.div className="px-2 py-1 text-xs text-zinc-500 opacity-0" animate={visibilityVariants}>{input.length}</motion.div>
-          <button className={`px-2 py-1 text-xs text-zinc-500 ${input.length > 0 ? "text-zinc-800" : "cursor-not-allowed"}`} onClick={handleSubmit}>Send</button>
+          <button
+            className={`px-2 py-1 text-xs text-zinc-500 rounded-sm ${allowedToSubmit ? "text-zinc-800 hover:bg-zinc-200" : "cursor-not-allowed"}`}
+            onClick={allowedToSubmit ? handleSubmit : undefined}
+          >Send</button>
         </div>
       </div>
     </motion.div>
