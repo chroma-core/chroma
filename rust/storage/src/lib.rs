@@ -311,6 +311,15 @@ impl Storage {
         }
     }
 
+    pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        match self {
+            Storage::ObjectStore(_) => Err(StorageError::NotImplemented),
+            Storage::S3(s3) => s3.copy(src_key, dst_key).await,
+            Storage::Local(local) => local.copy(src_key, dst_key).await,
+            Storage::AdmissionControlledS3(_) => Err(StorageError::NotImplemented),
+        }
+    }
+
     pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
         match self {
             Storage::Local(local) => local.list_prefix(prefix).await,
