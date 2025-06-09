@@ -743,6 +743,7 @@ mod tests {
 
         let manifest = Manifest {
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 2000,
             writer: "test-writer".to_string(),
             snapshots: vec![],
@@ -830,6 +831,7 @@ mod tests {
         // Boundary case 7: Empty manifest
         let empty_manifest = Manifest {
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             writer: "test-writer".to_string(),
             snapshots: vec![],
@@ -865,6 +867,7 @@ mod tests {
     fn obo_in_manifest_code() {
         let manifest = Manifest {
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 35837467,
             writer: "log writer".to_string(),
             snapshots: vec![],

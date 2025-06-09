@@ -1181,6 +1181,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -1202,6 +1203,7 @@ mod tests {
         let manifest_with_fragment = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment],
@@ -1218,6 +1220,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -1239,6 +1242,7 @@ mod tests {
         let manifest_with_fragment = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment],
@@ -1272,6 +1276,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 125,
             snapshots: vec![snapshot],
             fragments: vec![fragment],
@@ -1293,6 +1298,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -1310,6 +1316,7 @@ mod tests {
         let manifest_none = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -1327,6 +1334,7 @@ mod tests {
         let mut manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -1351,6 +1359,7 @@ mod tests {
         let expected_manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: fragment.setsum,
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment],
@@ -1383,6 +1392,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
@@ -1421,6 +1431,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment],
@@ -1454,6 +1465,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
@@ -1472,6 +1484,7 @@ mod tests {
         let empty_manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
