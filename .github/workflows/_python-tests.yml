@@ -140,6 +140,9 @@ jobs:
                     "chromadb/test/distributed/test_sanity.py",
                     "chromadb/test/distributed/test_log_backpressure.py",
                     "chromadb/test/distributed/test_log_failover.py"]
+        include:
+          - test-globs: "chromadb/test/property/test_add.py"
+            parallelized: true
     runs-on: ${{ matrix.platform }}
     # OIDC token auth for AWS
     permissions:
@@ -158,7 +161,7 @@ jobs:
       - name: Start Tilt services
         uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}" --durations 10'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}" ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} --durations 10'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
