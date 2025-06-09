@@ -314,6 +314,9 @@ def test_out_of_order_ids(client: ClientAPI) -> None:
 
 def test_add_partial(client: ClientAPI) -> None:
     """Tests adding a record set with some of the fields set to None."""
+
+    create_isolated_database(client)
+
     if (
         client.get_settings().chroma_api_impl
         == "chromadb.api.async_fastapi.AsyncFastAPI"
