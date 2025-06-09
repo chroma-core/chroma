@@ -1,10 +1,11 @@
 use std::ops::Add;
 
+use chroma_storage::Storage;
 use setsum::Setsum;
 
 use crate::{
-    deserialize_setsum, serialize_setsum, Fragment, LogPosition, Manifest, ScrubError, Snapshot,
-    SnapshotPointer,
+    deserialize_setsum, serialize_setsum, Error, Fragment, LogPosition, Manifest, ScrubError,
+    Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
@@ -18,11 +19,14 @@ pub struct Garbage {
 
 impl Garbage {
     #[allow(clippy::result_large_err)]
-    pub fn new(
+    pub async fn new<C: SnapshotCache>(
+        storage: &Storage,
+        prefix: String,
         manifest: &Manifest,
-        snapshots: &[Snapshot],
+        throttle: &ThrottleOptions,
+        snapshots: &C,
         first_to_keep: LogPosition,
-    ) -> Result<Self, ScrubError> {
+    ) -> Result<Self, Error> {
         let dropped_snapshots = manifest
             .snapshots
             .iter()
@@ -44,15 +48,24 @@ impl Garbage {
             actions.push(Self::drop_fragment(frag, &mut drop_acc)?);
         }
         for snap in dropped_snapshots {
-            actions.push(Self::drop_snapshot(snap, snapshots, &mut drop_acc)?);
+            actions.push(
+                Self::drop_snapshot(storage, &prefix, snap, throttle, snapshots, &mut drop_acc)
+                    .await?,
+            );
         }
         for snap in replaced_snapshots {
-            actions.push(Self::replace_snapshot(
-                snap,
-                snapshots,
-                first_to_keep,
-                &mut drop_acc,
-            )?);
+            actions.push(
+                Self::replace_snapshot(
+                    storage,
+                    &prefix,
+                    snap,
+                    throttle,
+                    snapshots,
+                    first_to_keep,
+                    &mut drop_acc,
+                )
+                .await?,
+            );
         }
         let cutoff = first_to_keep;
         let garbage = Garbage {
@@ -69,12 +82,12 @@ impl Garbage {
     }
 
     #[allow(clippy::result_large_err)]
-    pub fn scrub(&self) -> Result<Setsum, ScrubError> {
+    pub fn scrub(&self) -> Result<Setsum, Error> {
         scrub(&self.actions, self.dropped_setsum)
     }
 
     #[allow(clippy::result_large_err)]
-    fn drop_fragment(frag: &Fragment, drop_acc: &mut Setsum) -> Result<GarbageAction, ScrubError> {
+    fn drop_fragment(frag: &Fragment, drop_acc: &mut Setsum) -> Result<GarbageAction, Error> {
         *drop_acc += frag.setsum;
         Ok(GarbageAction::DropFragment {
             path_to_fragment: frag.path.clone(),
@@ -83,15 +96,25 @@ impl Garbage {
     }
 
     #[allow(clippy::result_large_err)]
-    fn drop_snapshot(
+    async fn drop_snapshot<C: SnapshotCache>(
+        storage: &Storage,
+        prefix: &str,
         ptr: &SnapshotPointer,
-        snapshots: &[Snapshot],
+        throttle: &ThrottleOptions,
+        snapshots: &C,
         drop_acc: &mut Setsum,
-    ) -> Result<GarbageAction, ScrubError> {
-        let Some(snapshot) = snapshots.iter().find(|snap| snap.setsum == ptr.setsum) else {
-            return Err(ScrubError::MissingSnapshot {
-                reference: ptr.clone(),
-            });
+    ) -> Result<GarbageAction, Error> {
+        let snapshot = match snapshots.get(ptr).await? {
+            Some(snapshot) => snapshot,
+            None => match Snapshot::load(throttle, storage, prefix, ptr).await? {
+                Some(snapshot) => snapshot,
+                None => {
+                    return Err(Box::new(ScrubError::MissingSnapshot {
+                        reference: ptr.clone(),
+                    })
+                    .into())
+                }
+            },
         };
         *drop_acc += snapshot.setsum;
         let mut children = vec![];
@@ -103,11 +126,17 @@ impl Garbage {
             children.push(Self::drop_fragment(frag, &mut Setsum::default())?);
         }
         for snap in snapshot.snapshots.iter() {
-            children.push(Self::drop_snapshot(
-                snap,
-                snapshots,
-                &mut Setsum::default(),
-            )?);
+            children.push(
+                Box::pin(Self::drop_snapshot(
+                    storage,
+                    prefix,
+                    snap,
+                    throttle,
+                    snapshots,
+                    &mut Setsum::default(),
+                ))
+                .await?,
+            );
         }
         Ok(GarbageAction::DropSnapshot {
             path_to_snapshot: snapshot.path.clone(),
@@ -117,16 +146,26 @@ impl Garbage {
     }
 
     #[allow(clippy::result_large_err)]
-    fn replace_snapshot(
+    async fn replace_snapshot<C: SnapshotCache>(
+        storage: &Storage,
+        prefix: &str,
         ptr: &SnapshotPointer,
-        snapshots: &[Snapshot],
+        throttle: &ThrottleOptions,
+        snapshots: &C,
         first_to_keep: LogPosition,
         drop_acc: &mut Setsum,
-    ) -> Result<GarbageAction, ScrubError> {
-        let Some(snapshot) = snapshots.iter().find(|snap| snap.setsum == ptr.setsum) else {
-            return Err(ScrubError::MissingSnapshot {
-                reference: ptr.clone(),
-            });
+    ) -> Result<GarbageAction, Error> {
+        let snapshot = match snapshots.get(ptr).await? {
+            Some(snapshot) => snapshot,
+            None => match Snapshot::load(throttle, storage, prefix, ptr).await? {
+                Some(snapshot) => snapshot,
+                None => {
+                    return Err(Box::new(ScrubError::MissingSnapshot {
+                        reference: ptr.clone(),
+                    })
+                    .into())
+                }
+            },
         };
         let mut ret_snapshot = snapshot.clone();
         let mut ret_children = vec![];
@@ -140,7 +179,10 @@ impl Garbage {
         }
         for snap in std::mem::take(&mut ret_snapshot.snapshots).into_iter() {
             if snap.limit <= first_to_keep {
-                ret_children.push(Self::drop_snapshot(&snap, snapshots, drop_acc)?);
+                ret_children.push(
+                    Self::drop_snapshot(storage, prefix, &snap, throttle, snapshots, drop_acc)
+                        .await?,
+                );
                 ret_snapshot.setsum -= snap.setsum;
             } else if (snap.start..snap.limit).contains(&first_to_keep) {
                 let drop_acc_preserved = *drop_acc;
@@ -149,19 +191,30 @@ impl Garbage {
                     old_snapshot_setsum,
                     new_snapshot,
                     children,
-                } = Self::replace_snapshot(&snap, snapshots, first_to_keep, drop_acc)?
+                } = Box::pin(Self::replace_snapshot(
+                    storage,
+                    prefix,
+                    &snap,
+                    throttle,
+                    snapshots,
+                    first_to_keep,
+                    drop_acc,
+                ))
+                .await?
                 else {
-                    return Err(ScrubError::Internal(
+                    return Err(Box::new(ScrubError::Internal(
                         "replace snapshot failed to generate a replace snapshot".to_string(),
-                    ));
+                    ))
+                    .into());
                 };
                 if *drop_acc - drop_acc_preserved != new_snapshot.setsum - old_snapshot_setsum {
-                    return Err(ScrubError::CorruptSnapshotReplace {
+                    return Err(Box::new(ScrubError::CorruptSnapshotReplace {
                         lhs_before: drop_acc_preserved,
                         lhs_after: *drop_acc,
                         rhs_before: old_snapshot_setsum,
                         rhs_after: new_snapshot.setsum,
-                    });
+                    })
+                    .into());
                 }
                 ret_children.push(GarbageAction::ReplaceSnapshot {
                     old_path_to_snapshot,
@@ -219,7 +272,7 @@ pub enum GarbageAction {
 
 impl GarbageAction {
     #[allow(clippy::result_large_err)]
-    pub fn scrub(&self) -> Result<Setsum, ScrubError> {
+    pub fn scrub(&self) -> Result<Setsum, Error> {
         match self {
             Self::DropFragment {
                 fragment_setsum,
@@ -243,17 +296,18 @@ impl GarbageAction {
 /////////////////////////////////////////////// util ///////////////////////////////////////////////
 
 #[allow(clippy::result_large_err)]
-fn scrub(actions: &[GarbageAction], expected_setsum: Setsum) -> Result<Setsum, ScrubError> {
+fn scrub(actions: &[GarbageAction], expected_setsum: Setsum) -> Result<Setsum, Error> {
     let to_drop = actions
         .iter()
         .map(GarbageAction::scrub)
-        .collect::<Result<Vec<_>, ScrubError>>()?;
+        .collect::<Result<Vec<_>, Error>>()?;
     let dropped_setsum = to_drop.into_iter().fold(Setsum::default(), Setsum::add);
     if dropped_setsum != expected_setsum {
-        return Err(ScrubError::CorruptGarbage {
+        return Err(Box::new(ScrubError::CorruptGarbage {
             expected_setsum,
             returned_setsum: dropped_setsum,
-        });
+        })
+        .into());
     }
     Ok(dropped_setsum)
 }

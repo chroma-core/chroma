@@ -14,7 +14,7 @@ use chroma_storage::{
 
 use crate::{
     parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ScrubError,
-    ScrubSuccess, Snapshot,
+    ScrubSuccess, Snapshot, SnapshotCache,
 };
 
 fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
@@ -33,14 +33,17 @@ pub struct Limits {
 pub struct LogReader {
     options: LogReaderOptions,
     storage: Arc<Storage>,
+    cache: Option<Arc<dyn SnapshotCache>>,
     pub(crate) prefix: String,
 }
 
 impl LogReader {
     pub fn new(options: LogReaderOptions, storage: Arc<Storage>, prefix: String) -> Self {
+        let cache = None;
         Self {
             options,
             storage,
+            cache,
             prefix,
         }
     }
@@ -50,11 +53,17 @@ impl LogReader {
         storage: Arc<Storage>,
         prefix: String,
     ) -> Result<Self, Error> {
+        let cache = None;
         Ok(Self {
             options,
             storage,
+            cache,
             prefix,
         })
+    }
+
+    pub fn with_cache(&mut self, cache: Arc<dyn SnapshotCache>) {
+        self.cache = Some(cache);
     }
 
     pub async fn manifest(&self) -> Result<Option<Manifest>, Error> {
@@ -119,7 +128,22 @@ impl LogReader {
                 .map(|s| {
                     let options = self.options.clone();
                     let storage = Arc::clone(&self.storage);
-                    async move { Snapshot::load(&options.throttle, &storage, &self.prefix, s).await }
+                    let cache = self.cache.as_ref().map(Arc::clone);
+                    async move {
+                        if let Some(cache) = cache {
+                            if let Some(snapshot) = cache.get(s).await? {
+                                return Ok(Some(snapshot));
+                            }
+                            let snap = Snapshot::load(&options.throttle, &storage, &self.prefix, s)
+                                .await?;
+                            if let Some(snap) = snap.as_ref() {
+                                cache.put(s, snap).await?;
+                            }
+                            Ok(snap)
+                        } else {
+                            Snapshot::load(&options.throttle, &storage, &self.prefix, s).await
+                        }
+                    }
                 })
                 .collect::<Vec<_>>();
             let resolved = futures::future::try_join_all(futures).await?;

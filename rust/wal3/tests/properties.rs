@@ -1,9 +1,34 @@
+use chroma_storage::s3_client_for_test_with_new_bucket;
+
 use setsum::Setsum;
 
 use proptest::prelude::{ProptestConfig, Strategy};
 use rand::RngCore;
 
-use wal3::{Fragment, FragmentSeqNo, Garbage, LogPosition, Manifest, SnapshotOptions};
+use wal3::{
+    Error, Fragment, FragmentSeqNo, Garbage, LogPosition, Manifest, Snapshot, SnapshotOptions,
+    SnapshotPointer, ThrottleOptions,
+};
+
+#[derive(Default)]
+pub struct TestingSnapshotCache {
+    snapshots: Vec<Snapshot>,
+}
+
+#[async_trait::async_trait]
+impl wal3::SnapshotCache for TestingSnapshotCache {
+    async fn get(&self, ptr: &SnapshotPointer) -> Result<Option<Snapshot>, Error> {
+        Ok(self
+            .snapshots
+            .iter()
+            .find(|x| x.setsum == ptr.setsum)
+            .cloned())
+    }
+
+    async fn put(&self, _: &SnapshotPointer, _: &Snapshot) -> Result<(), Error> {
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct FragmentDelta {
@@ -93,6 +118,9 @@ proptest::proptest! {
 
     #[test]
     fn manifests_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 75)) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let storage = rt.block_on(s3_client_for_test_with_new_bucket());
+        let throttle = ThrottleOptions::default();
         let mut manifest = Manifest::new_empty("test");
         println!("deltas = {deltas:#?}");
         let fragments = deltas_to_fragment_sequence(&deltas);
@@ -104,9 +132,10 @@ proptest::proptest! {
         eprintln!("starting manifest = {manifest:#?}");
         let start = manifest.oldest_timestamp().unwrap();
         let limit = manifest.newest_timestamp().unwrap();
+        let cache = TestingSnapshotCache::default();
         for offset in start.offset()..limit.offset() {
             let position = LogPosition::from_offset(offset);
-            let garbage = Garbage::new(&manifest, &[], position).unwrap();
+            let garbage = rt.block_on(Garbage::new(&storage, "manifests_gargage".to_string(), &manifest, &throttle, &cache, position)).unwrap();
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.scrub().unwrap();
             assert!(garbage.is_empty() || !manifest.has_collected_garbage(&garbage));
@@ -129,6 +158,9 @@ proptest::proptest! {
 
     #[test]
     fn manifests_with_snapshots_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1000), snapshot_rollover_threshold in 2..20usize, fragment_rollover_threshold in 2..20usize) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let storage = rt.block_on(s3_client_for_test_with_new_bucket());
+        let throttle = ThrottleOptions::default();
         let mut manifest = Manifest::new_empty("test");
         println!("deltas = {deltas:#?}");
         let fragments = deltas_to_fragment_sequence(&deltas);
@@ -148,9 +180,12 @@ proptest::proptest! {
         eprintln!("starting manifest = {manifest:#?}");
         let start = manifest.oldest_timestamp().unwrap();
         let limit = manifest.newest_timestamp().unwrap();
+        let cache = TestingSnapshotCache {
+            snapshots: snapshots.clone(),
+        };
         for offset in start.offset()..limit.offset() {
             let position = LogPosition::from_offset(offset);
-            let garbage = Garbage::new(&manifest, &snapshots, position).unwrap();
+            let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_gargage".to_string(), &manifest, &throttle, &cache, position)).unwrap();
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.scrub().unwrap();
             assert!(garbage.is_empty() || !manifest.has_collected_garbage(&garbage));

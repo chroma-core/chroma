@@ -13,6 +13,7 @@ mod gc;
 mod manifest;
 mod manifest_manager;
 mod reader;
+mod snapshot_cache;
 mod writer;
 
 pub use backoff::ExponentialBackoff;
@@ -23,6 +24,7 @@ pub use gc::{Garbage, GarbageAction};
 pub use manifest::{Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
+pub use snapshot_cache::SnapshotCache;
 pub use writer::{upload_parquet, LogWriter, MarkDirty};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
