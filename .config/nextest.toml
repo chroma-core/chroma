@@ -15,14 +15,14 @@ test-group = "against-tilt"
 path = "junit.xml"
 
 [profile.ci_k8s_integration]
-default-filter = "test(/test_k8s_integration_/) and not test(test_k8s_integration_garbage_collection) and not test(test_k8s_integration_rust_log_service_dirty_logs)"
+default-filter = "test(/test_k8s_integration_/) and not test(test_k8s_integration_garbage_collection)"
 
 [[profile.ci_k8s_integration.overrides]]
 filter = "all()"
 test-group = "against-tilt"
 
 [profile.ci_k8s_integration_slow]
-default-filter = "test(test_k8s_integration_garbage_collection) or test(test_k8s_integration_rust_log_service_dirty_logs)"
+default-filter = "test(test_k8s_integration_garbage_collection)"
 
 [[profile.ci_k8s_integration_slow.overrides]]
 filter = "all()"

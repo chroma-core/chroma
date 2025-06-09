@@ -74,7 +74,7 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
-        run: cargo nextest run --profile ${{ matrix.nextest_profile }} --partition ${{ matrix.partition_method }}:${{ matrix.partition }}/2
+        run: cargo nextest run --profile ${{ matrix.nextest_profile }} --partition ${{ matrix.partition_method }}:${{ matrix.partition }}/2 --no-tests warn
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
