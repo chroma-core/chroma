@@ -895,12 +895,10 @@ def client(system: System) -> Generator[ClientAPI, None, None]:
 
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
         client = cast(Any, AsyncClientCreatorSync.from_system_async(system))
-        create_isolated_database(client)
         yield client
         client.clear_system_cache()
     else:
         client = ClientCreator.from_system(system)
-        create_isolated_database(client)
         yield client
         client.clear_system_cache()
 
