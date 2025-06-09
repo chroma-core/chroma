@@ -88,6 +88,15 @@ jobs:
           # these two tags are what the build-push action will publish for *this* arch
           echo "tags=$ghcr,$dhub" >> $GITHUB_OUTPUT
 
+      - name: Pre-pull base images
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Pre-pull base images to speed up the build
+          docker pull --platform ${{ matrix.docker_platform }} rust:1.81.0
+          docker pull --platform ${{ matrix.docker_platform }} debian:stable-slim
+
       - name: Build and push image
         uses: useblacksmith/build-push-action@v1.1
         with:
