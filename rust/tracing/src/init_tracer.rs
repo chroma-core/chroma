@@ -39,6 +39,7 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "worker",
                 "garbage_collector",
                 "continuous_verification",
+                "billing-service",
             ]
             .into_iter()
             .map(|s| s.to_string() + "=trace")
