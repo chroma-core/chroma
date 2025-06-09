@@ -146,6 +146,8 @@ jobs:
         include:
           - test-glob: "chromadb/test/distributed/test_log_backpressure.py"
             parallelized: true
+          - test-glob: "chromadb/test/property/test_embeddings.py"
+            parallelized: true
     runs-on: blacksmith-8vcpu-ubuntu-2204
     # OIDC token auth for AWS
     permissions:

@@ -8,6 +8,7 @@ import hypothesis.strategies as st
 from hypothesis import given, settings, HealthCheck
 from typing import Dict, Set, cast, Union, DefaultDict, Any, List
 from dataclasses import dataclass
+from chromadb.api.client import AdminClient
 from chromadb.api.types import (
     ID,
     Embeddings,
@@ -35,7 +36,7 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
-from chromadb.test.conftest import is_client_in_process, reset, NOT_CLUSTER_ONLY
+from chromadb.test.conftest import is_client_in_process, NOT_CLUSTER_ONLY
 import numpy as np
 import uuid
 from chromadb.test.utils.wait_for_version_increase import (
@@ -68,6 +69,18 @@ dtype_shared_st: st.SearchStrategy[
 dimension_shared_st: st.SearchStrategy[int] = st.shared(
     st.integers(min_value=2, max_value=2048), key="dimension"
 )
+
+
+def create_isolated_database(client: ClientAPI) -> None:
+    """Create an isolated database for the test."""
+    admin_settings = client.get_settings()
+    if admin_settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
+        admin_settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
+
+    admin = AdminClient(admin_settings)
+    database = "test_embeddings_" + str(uuid.uuid4())
+    admin.create_database(database)
+    client.set_database(database)
 
 
 @dataclass
@@ -378,8 +391,10 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
                 current_version,
             )
             new_version = wait_for_version_increase(
-                self.client, self.collection.name, current_version,
-                additional_time=VERSION_INCREASE_WAIT_TIME
+                self.client,
+                self.collection.name,
+                current_version,
+                additional_time=VERSION_INCREASE_WAIT_TIME,
             )
             # Everything got compacted.
             self.log_operation_count = 0
@@ -462,6 +477,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
 
 
 def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
+    create_isolated_database(client)
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(client),
@@ -473,7 +489,8 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -
 
 
 def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
-    client.reset()
+    create_isolated_database(client)
+    # client.reset()
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
@@ -527,7 +544,8 @@ def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
 
 
 def test_embeddings_flake1(client: ClientAPI) -> None:
-    client.reset()
+    create_isolated_database(client)
+    # client.reset()
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
@@ -1067,7 +1085,8 @@ def test_embeddings_flake1(client: ClientAPI) -> None:
 
 
 def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
-    client.reset()
+    create_isolated_database(client)
+    # client.reset()
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
@@ -1122,7 +1141,8 @@ def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
 
 
 def test_add_delete_add(client: ClientAPI) -> None:
-    client.reset()
+    create_isolated_database(client)
+    # client.reset()
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
@@ -1252,7 +1272,8 @@ def test_add_delete_add(client: ClientAPI) -> None:
 
 
 def test_multi_add(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
+    # reset(client)
     coll = client.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])  # type: ignore[arg-type]
     assert coll.count() == 1
@@ -1271,7 +1292,8 @@ def test_multi_add(client: ClientAPI) -> None:
 
 
 def test_dup_add(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
+    # reset(client)
     coll = client.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])  # type: ignore[arg-type]
@@ -1280,7 +1302,8 @@ def test_dup_add(client: ClientAPI) -> None:
 
 
 def test_query_without_add(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
+    # reset(client)
     coll = client.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]  # type: ignore[list-item]
     N = np.random.randint(1, 2000)
@@ -1296,7 +1319,8 @@ def test_query_without_add(client: ClientAPI) -> None:
 
 
 def test_get_non_existent(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
+    # reset(client)
     coll = client.create_collection(name="foo")
     result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])  # type: ignore[list-item]
     assert len(result["ids"]) == 0
@@ -1308,7 +1332,8 @@ def test_get_non_existent(client: ClientAPI) -> None:
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
 def test_escape_chars_in_ids(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
+    # reset(client)
     id = "\x1f"
     coll = client.create_collection(name="foo")
     coll.add(ids=[id], embeddings=[[0.0]])  # type: ignore[arg-type]
@@ -1318,7 +1343,8 @@ def test_escape_chars_in_ids(client: ClientAPI) -> None:
 
 
 def test_delete_empty_fails(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
+    # reset(client)
     coll = client.create_collection(name="foo")
     with pytest.raises(ValueError):
         coll.delete()
@@ -1340,7 +1366,8 @@ def test_delete_empty_fails(client: ClientAPI) -> None:
     ],
 )
 def test_delete_success(client: ClientAPI, kwargs: Any) -> None:
-    reset(client)
+    create_isolated_database(client)
+    # reset(client)
     coll = client.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)
@@ -1418,7 +1445,8 @@ def test_0dim_embedding_validation() -> None:
 
 
 def test_no_op_compaction(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
+    # reset(client)
     coll = client.create_collection(name="noop")
     initial_version = get_collection_version(client, coll.name)
     for batch in range(0, 5000, 100):
@@ -1430,7 +1458,8 @@ def test_no_op_compaction(client: ClientAPI) -> None:
 
 
 def test_add_then_purge(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
+    # reset(client)
     record_count = 5000
     batch_count = 100
     coll = client.create_collection(name="add_then_purge")
@@ -1464,7 +1493,8 @@ def test_add_then_purge(client: ClientAPI) -> None:
 
 
 def test_encompassing_delete(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
+    # reset(client)
 
     col = client.create_collection("encompassing_delete")
     initial_version = get_collection_version(client, col.name)
