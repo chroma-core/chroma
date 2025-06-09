@@ -100,7 +100,7 @@ mod tests {
                 .iter()
                 .map(|record| record.offset_id)
                 .collect::<Vec<_>>(),
-            vec![1, 2, 3, 4, 7, 7, 10, 10, 12, 13]
+            vec![1, 2, 3, 4, 7, 10, 12, 13, 16, 17]
         );
     }
 }
