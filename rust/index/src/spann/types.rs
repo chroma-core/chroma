@@ -296,6 +296,7 @@ pub struct SpannIndexWriter {
     pub params: InternalSpannConfiguration,
     pub gc_context: GarbageCollectionContext,
     pub collection_id: CollectionUuid,
+    pub prefix_path: String,
     metrics: SpannMetrics,
     stats: WriteStats,
 }
@@ -421,6 +422,7 @@ impl SpannIndexWriter {
         gc_context: GarbageCollectionContext,
         collection_id: CollectionUuid,
         metrics: SpannMetrics,
+        prefix_path: String,
     ) -> Self {
         SpannIndexWriter {
             hnsw_index,
@@ -436,6 +438,7 @@ impl SpannIndexWriter {
             collection_id,
             metrics,
             stats: WriteStats::default(),
+            prefix_path,
         }
     }
 
@@ -675,6 +678,7 @@ impl SpannIndexWriter {
             gc_context,
             *collection_id,
             metrics,
+            prefix_path.to_string(),
         ))
     }
 
@@ -2206,8 +2210,6 @@ impl SpannIndexWriter {
             "collection_id",
             self.collection_id.to_string(),
         )];
-        // TODO(Sanket-temp): Change this suitably
-        let prefix_path = String::from("");
         let pl_flusher = {
             let stopwatch = Stopwatch::new(&self.metrics.pl_commit_latency, attribute);
             let pl_writer_clone = self.posting_list_writer.lock().await.clone();
@@ -2227,7 +2229,7 @@ impl SpannIndexWriter {
         let versions_map_flusher = {
             let stopwatch = Stopwatch::new(&self.metrics.versions_map_commit_latency, attribute);
             // Versions map. Create a writer, write all the data and commit.
-            let mut bf_options = BlockfileWriterOptions::new(prefix_path.clone());
+            let mut bf_options = BlockfileWriterOptions::new(self.prefix_path.clone());
             bf_options = bf_options.unordered_mutations();
             let versions_map_bf_writer = self
                 .blockfile_provider
@@ -2269,7 +2271,7 @@ impl SpannIndexWriter {
             versions_map_flusher
         };
         // Next head.
-        let mut bf_options = BlockfileWriterOptions::new(prefix_path);
+        let mut bf_options = BlockfileWriterOptions::new(self.prefix_path.clone());
         bf_options = bf_options.unordered_mutations();
         let max_head_id_bf = self
             .blockfile_provider

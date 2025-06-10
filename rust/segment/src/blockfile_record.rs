@@ -1,3 +1,5 @@
+use crate::types::ChromaSegmentFlusher;
+
 use super::distributed_spann::SpannSegmentWriterError;
 use super::types::{HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult};
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
@@ -615,10 +617,9 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     USER_ID_TO_OFFSET_ID.to_string(),
-                    vec![format!(
-                        "{}/{}",
-                        prefix_path.clone(),
-                        user_id_to_id_bf_id.to_string()
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &prefix_path,
+                        &user_id_to_id_bf_id,
                     )],
                 );
             }
@@ -631,10 +632,9 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_USER_ID.to_string(),
-                    vec![format!(
-                        "{}/{}",
-                        prefix_path.clone(),
-                        id_to_user_id_bf_id.to_string()
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &prefix_path,
+                        &id_to_user_id_bf_id,
                     )],
                 );
             }
@@ -647,10 +647,9 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_DATA.to_string(),
-                    vec![format!(
-                        "{}/{}",
-                        prefix_path.clone(),
-                        id_to_data_bf_id.to_string()
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &prefix_path,
+                        &id_to_data_bf_id,
                     )],
                 );
             }
@@ -663,10 +662,9 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     MAX_OFFSET_ID.to_string(),
-                    vec![format!(
-                        "{}/{}",
-                        prefix_path.clone(),
-                        max_offset_id_bf_id.to_string()
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &prefix_path,
+                        &max_offset_id_bf_id,
                     )],
                 );
             }

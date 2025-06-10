@@ -1,3 +1,5 @@
+use crate::types::ChromaSegmentFlusher;
+
 use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::{
@@ -373,34 +375,30 @@ impl SpannSegmentFlusher {
                 let mut index_id_map = HashMap::new();
                 index_id_map.insert(
                     HNSW_PATH.to_string(),
-                    vec![format!(
-                        "{}/{}",
-                        index_ids.prefix_path.clone(),
-                        index_ids.hnsw_id.to_string()
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &index_ids.prefix_path,
+                        &index_ids.hnsw_id.0,
                     )],
                 );
                 index_id_map.insert(
                     VERSION_MAP_PATH.to_string(),
-                    vec![format!(
-                        "{}/{}",
-                        index_ids.prefix_path.clone(),
-                        index_ids.versions_map_id.to_string()
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &index_ids.prefix_path,
+                        &index_ids.versions_map_id,
                     )],
                 );
                 index_id_map.insert(
                     POSTING_LIST_PATH.to_string(),
-                    vec![format!(
-                        "{}/{}",
-                        index_ids.prefix_path.clone(),
-                        index_ids.pl_id.to_string()
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &index_ids.prefix_path,
+                        &index_ids.pl_id,
                     )],
                 );
                 index_id_map.insert(
                     MAX_HEAD_ID_BF_PATH.to_string(),
-                    vec![format!(
-                        "{}/{}",
-                        index_ids.prefix_path.clone(),
-                        index_ids.max_head_id_id.to_string()
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &index_ids.prefix_path,
+                        &index_ids.max_head_id_id,
                     )],
                 );
                 tracing::info!(
