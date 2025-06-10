@@ -1175,7 +1175,7 @@ mod tests {
         // Update document with same content, should be a noop
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
-                BlockfileWriterOptions::new(prefix_path)
+                BlockfileWriterOptions::new(prefix_path.clone())
                     .ordered_mutations()
                     .fork(pl_blockfile_id),
             )
@@ -1195,10 +1195,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
