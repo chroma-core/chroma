@@ -144,7 +144,7 @@ jobs:
           - "chromadb/test/distributed/test_log_backpressure.py"
           - "chromadb/test/distributed/test_log_failover.py"
         include:
-          - test-glob: "chromadb/test/distributed/test_add.py"
+          - test-glob: "chromadb/test/property/test_add.py"
             parallelized: true
     runs-on: blacksmith-8vcpu-ubuntu-2204
     # OIDC token auth for AWS
