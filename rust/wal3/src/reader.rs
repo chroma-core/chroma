@@ -22,11 +22,19 @@ fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPositio
 }
 
 /// Limits allows encoding things like offset, timestamp, and byte size limits for the read.
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+#[derive(Copy, Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct Limits {
     pub max_files: Option<u64>,
     pub max_bytes: Option<u64>,
     pub max_records: Option<u64>,
+}
+
+impl Limits {
+    pub const UNLIMITED: Limits = Limits {
+        max_files: None,
+        max_bytes: None,
+        max_records: None,
+    };
 }
 
 /// LogReader is a reader for the log.
@@ -757,7 +765,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(100), // Would need data up to exactly offset 200
         };
-        let result = LogReader::scan_from_manifest(&manifest, from, limits.clone());
+        let result = LogReader::scan_from_manifest(&manifest, from, limits);
         assert!(
             result.is_some(),
             "Should succeed when request stays within manifest coverage"
@@ -836,11 +844,8 @@ mod tests {
             fragments: vec![],
             initial_offset: None,
         };
-        let result_empty = LogReader::scan_from_manifest(
-            &empty_manifest,
-            LogPosition::from_offset(0),
-            limits.clone(),
-        );
+        let result_empty =
+            LogReader::scan_from_manifest(&empty_manifest, LogPosition::from_offset(0), limits);
         assert!(
             result_empty.is_none(),
             "Should return None for empty manifest"
