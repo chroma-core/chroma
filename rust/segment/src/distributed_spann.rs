@@ -1,6 +1,3 @@
-use crate::types::construct_prefix_path;
-use crate::types::extract_prefix_and_id;
-
 use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::{
@@ -116,7 +113,7 @@ impl SpannSegmentWriter {
         let (hnsw_id, segment_prefix_hnsw) = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_path) => {
-                    let (prefix, index_id) = extract_prefix_and_id(index_path);
+                    let (prefix, index_id) = Segment::extract_prefix_and_id(index_path);
                     let index_uuid = match Uuid::parse_str(index_id) {
                         Ok(uuid) => uuid,
                         Err(e) => {
@@ -134,7 +131,7 @@ impl SpannSegmentWriter {
         let (versions_map_id, segment_prefix_vf) = match segment.file_path.get(VERSION_MAP_PATH) {
             Some(version_map_paths) => match version_map_paths.first() {
                 Some(version_map_path) => {
-                    let (prefix, version_map_id) = extract_prefix_and_id(version_map_path);
+                    let (prefix, version_map_id) = Segment::extract_prefix_and_id(version_map_path);
                     let version_map_uuid = match Uuid::parse_str(version_map_id) {
                         Ok(uuid) => uuid,
                         Err(e) => {
@@ -155,7 +152,8 @@ impl SpannSegmentWriter {
         let (posting_list_id, segment_prefix_pl) = match segment.file_path.get(POSTING_LIST_PATH) {
             Some(posting_list_paths) => match posting_list_paths.first() {
                 Some(posting_list_path) => {
-                    let (prefix, posting_list_id) = extract_prefix_and_id(posting_list_path);
+                    let (prefix, posting_list_id) =
+                        Segment::extract_prefix_and_id(posting_list_path);
                     let posting_list_uuid = match Uuid::parse_str(posting_list_id) {
                         Ok(uuid) => uuid,
                         Err(e) => {
@@ -179,7 +177,7 @@ impl SpannSegmentWriter {
                 Some(max_head_id_bf_paths) => match max_head_id_bf_paths.first() {
                     Some(max_head_id_bf_path) => {
                         let (prefix, max_head_id_bf_id) =
-                            extract_prefix_and_id(max_head_id_bf_path);
+                            Segment::extract_prefix_and_id(max_head_id_bf_path);
                         let max_head_id_bf_uuid = match Uuid::parse_str(max_head_id_bf_id) {
                             Ok(uuid) => uuid,
                             Err(e) => {
@@ -200,12 +198,7 @@ impl SpannSegmentWriter {
 
         let prefix_path = match segment_prefix_hnsw {
             Some(prefix) => prefix,
-            None => construct_prefix_path(
-                &collection.tenant,
-                &collection.database_id,
-                &collection.collection_id,
-                &segment.id,
-            ),
+            None => segment.construct_prefix_path(&collection.tenant, &collection.database_id),
         };
         let index_writer = match SpannIndexWriter::from_id(
             hnsw_provider,
@@ -472,7 +465,7 @@ impl<'me> SpannSegmentReader<'me> {
         let (hnsw_id, segment_prefix_hnsw) = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_path) => {
-                    let (prefix, index_id) = extract_prefix_and_id(index_path);
+                    let (prefix, index_id) = Segment::extract_prefix_and_id(index_path);
                     let index_uuid = match Uuid::parse_str(index_id) {
                         Ok(uuid) => uuid,
                         Err(e) => {
@@ -490,7 +483,7 @@ impl<'me> SpannSegmentReader<'me> {
         let (versions_map_id, segment_prefix_vf) = match segment.file_path.get(VERSION_MAP_PATH) {
             Some(version_map_paths) => match version_map_paths.first() {
                 Some(version_map_path) => {
-                    let (prefix, version_map_id) = extract_prefix_and_id(version_map_path);
+                    let (prefix, version_map_id) = Segment::extract_prefix_and_id(version_map_path);
                     let version_map_uuid = match Uuid::parse_str(version_map_id) {
                         Ok(uuid) => uuid,
                         Err(e) => {
@@ -511,7 +504,8 @@ impl<'me> SpannSegmentReader<'me> {
         let (posting_list_id, segment_prefix_pl) = match segment.file_path.get(POSTING_LIST_PATH) {
             Some(posting_list_paths) => match posting_list_paths.first() {
                 Some(posting_list_path) => {
-                    let (prefix, posting_list_id) = extract_prefix_and_id(posting_list_path);
+                    let (prefix, posting_list_id) =
+                        Segment::extract_prefix_and_id(posting_list_path);
                     let posting_list_uuid = match Uuid::parse_str(posting_list_id) {
                         Ok(uuid) => uuid,
                         Err(e) => {
@@ -532,12 +526,7 @@ impl<'me> SpannSegmentReader<'me> {
 
         let prefix_path = match segment_prefix_hnsw {
             Some(prefix) => prefix,
-            None => construct_prefix_path(
-                &collection.tenant,
-                &collection.database_id,
-                &collection.collection_id,
-                &segment.id,
-            ),
+            None => segment.construct_prefix_path(&collection.tenant, &collection.database_id),
         };
 
         let index_reader = match SpannIndexReader::from_id(

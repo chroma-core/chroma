@@ -748,6 +748,8 @@ mod tests {
         (collection_id, tenant_id)
     }
 
+    // NOTE(Sanket): This orchestrator should be deleted.
+    // Prefix path has not been changed here due to this reason.
     async fn get_hnsw_index_ids(storage: &Storage) -> Vec<Uuid> {
         storage
             .list_prefix("hnsw", GetOptions::default())

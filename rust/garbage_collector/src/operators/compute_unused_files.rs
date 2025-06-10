@@ -1,12 +1,15 @@
 use async_trait::async_trait;
-use chroma_blockstore::{arrow::provider::RootManagerError, RootManager};
+use chroma_blockstore::{
+    arrow::provider::{BlockManager, RootManagerError},
+    RootManager,
+};
 use chroma_cache::nop::NopCache;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     chroma_proto::{CollectionSegmentInfo, CollectionVersionFile, VersionListForCollection},
-    HNSW_PATH,
+    Segment, HNSW_PATH,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -146,13 +149,14 @@ impl ComputeUnusedFilesOperator {
     ) -> Result<Vec<String>, ComputeUnusedFilesError> {
         let mut s3_files = Vec::new();
 
-        for si_id in si_ids {
-            let uuid = Uuid::parse_str(&si_id).map_err(|e| {
+        for si_path in si_ids {
+            let (prefix, si_id) = Segment::extract_prefix_and_id(&si_path);
+            let uuid = Uuid::parse_str(si_id).map_err(|e| {
                 tracing::error!(error = %e, "Failed to parse UUID");
-                ComputeUnusedFilesError::InvalidUuid(e, si_id.clone())
+                ComputeUnusedFilesError::InvalidUuid(e, si_id.to_string())
             })?;
 
-            let block_ids = match self.root_manager.get_all_block_ids(&uuid).await {
+            let block_ids = match self.root_manager.get_all_block_ids(&uuid, prefix).await {
                 Ok(ids) => ids,
                 Err(e) => {
                     tracing::error!(error = %e, "Failed to get block IDs");
@@ -165,8 +169,11 @@ impl ComputeUnusedFilesOperator {
                 si_id,
                 block_ids
             );
-            // TODO(rohitcp): Use const from the crate instead of hardcoding the prefix.
-            s3_files.extend(block_ids.iter().map(|id| format!("block/{}", id)));
+            s3_files.extend(
+                block_ids
+                    .iter()
+                    .map(|id| BlockManager::format_key(prefix, id)),
+            );
         }
         Ok(s3_files)
     }
@@ -392,7 +399,7 @@ mod tests {
 
         // Create version_to_segment_info map
         let mut version_to_segment_info = HashMap::new();
-
+        let prefix_path = "";
         // Older version has files 1 and 2
         version_to_segment_info.insert(
             1,
@@ -427,15 +434,18 @@ mod tests {
 
         // Check that file1's blocks are marked as unused
         for block_id in block_ids1 {
-            assert!(unused_files.contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(unused_files.contains(&s3_key));
         }
         // Check that file2's blocks are not marked as unused
         for block_id in block_ids2 {
-            assert!(!unused_files.contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(!unused_files.contains(&s3_key));
         }
         // Check that file3's blocks are not marked as unused
         for block_id in block_ids3 {
-            assert!(!unused_files.contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(!unused_files.contains(&s3_key));
         }
         // Check that hnsw1 is marked as unused
         assert!(unused_hnsw_prefixes.contains(&"hnsw1".to_string()));
@@ -536,28 +546,25 @@ mod tests {
 
         let result = operator.run(&input).await.unwrap();
 
+        let prefix_path = "";
         // Verify results - check all block IDs from uuid1 and uuid2 are marked unused
         for block_id in block_ids1 {
-            assert!(result
-                .unused_block_ids
-                .contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(result.unused_block_ids.contains(&s3_key));
         }
         for block_id in block_ids2 {
-            assert!(result
-                .unused_block_ids
-                .contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(result.unused_block_ids.contains(&s3_key));
         }
         // Check uuid3's blocks are not marked as unused
         for block_id in block_ids3 {
-            assert!(!result
-                .unused_block_ids
-                .contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(!result.unused_block_ids.contains(&s3_key));
         }
         // Check uuid4's blocks are not marked as unused
         for block_id in block_ids4 {
-            assert!(!result
-                .unused_block_ids
-                .contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(!result.unused_block_ids.contains(&s3_key));
         }
         assert!(result.unused_hnsw_prefixes.contains(&"hnsw1".to_string()));
     }

@@ -99,6 +99,7 @@ fn new_or_forked_sparse_index_strategy(
     let new_block_paths_strategy = (1..10).prop_map(|num| {
         let mut block_paths = vec![];
         for _ in 0..num {
+            // TODO(Sanket-temp): Update this to use prefix.
             block_paths.push(format!("block/{}", Uuid::new_v4()));
         }
         block_paths
@@ -135,6 +136,7 @@ fn new_or_forked_sparse_index_strategy(
     block_paths_strategy
         .prop_map(|block_paths| {
             let sparse_index_id = Uuid::new_v4();
+            // TODO(Sanket-temp): Update this.
             let sparse_index = FileReference::SparseIndex {
                 path: format!("sparse_index/{}", sparse_index_id),
                 block_paths: block_paths.into_iter().collect(),
