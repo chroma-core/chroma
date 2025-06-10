@@ -44,7 +44,7 @@ async fn compact_log_and_get_reader<'a>(
     blockfile_provider: &BlockfileProvider,
     mut chunked_mutations: Vec<Vec<DocumentMutation<'a>>>,
 ) -> Result<FullTextIndexReader<'a>> {
-    let prefix_path = String::from("block/");
+    let prefix_path = String::from("");
     let postings_blockfile_writer = blockfile_provider
         .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path).ordered_mutations())
         .await
