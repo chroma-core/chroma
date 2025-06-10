@@ -5,7 +5,10 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
+use chroma_types::{
+    chroma_proto::{CollectionVersionFile, VersionListForCollection},
+    Segment,
+};
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 use uuid::Uuid;
@@ -38,8 +41,8 @@ impl ComputeUnusedBetweenVersionsOperator {
         for file_path in version_files.keys() {
             tracing::info!(file_path = %file_path, "Processing sparse index file");
 
-            // Extract UUID from the file path since it's in the format "sparse_index/<uuid>"
-            let id = match Uuid::parse_str(file_path) {
+            let (prefix, id) = Segment::extract_prefix_and_id(file_path);
+            let id = match Uuid::parse_str(id) {
                 Ok(id) => {
                     tracing::debug!(uuid = %id, "Successfully parsed UUID from file path");
                     id
@@ -58,7 +61,7 @@ impl ComputeUnusedBetweenVersionsOperator {
             };
 
             // Use RootManager to get block IDs
-            let block_ids = match root_manager.get_all_block_ids(&id).await {
+            let block_ids = match root_manager.get_all_block_ids(&id, prefix).await {
                 Ok(ids) => {
                     tracing::debug!(
                         uuid = %id,
@@ -81,7 +84,7 @@ impl ComputeUnusedBetweenVersionsOperator {
             // Convert block IDs to S3 paths and add them to the set
             let s3_paths: Vec<String> = block_ids
                 .into_iter()
-                .map(|id| format!("block/{}", id))
+                .map(|id| RootManager::get_storage_key(prefix, &id))
                 .collect();
 
             tracing::info!(

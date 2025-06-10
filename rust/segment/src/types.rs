@@ -1,8 +1,8 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    logical_size_of_metadata, Chunk, CollectionUuid, DataRecord, DatabaseUuid, DeletedMetadata,
-    LogRecord, MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue,
-    MetadataValueConversionError, Operation, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
+    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, LogRecord,
+    MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
+    Operation, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
@@ -18,25 +18,6 @@ use super::blockfile_record::{
     RecordSegmentReaderCreationError, RecordSegmentWriter,
 };
 use super::distributed_hnsw::DistributedHNSWSegmentWriter;
-
-pub(super) fn construct_prefix_path(
-    tenant: &str,
-    database_id: &DatabaseUuid,
-    collection_id: &CollectionUuid,
-    segment_id: &SegmentUuid,
-) -> String {
-    format!(
-        "{}/{}/{}/{}",
-        tenant, database_id, collection_id, segment_id
-    )
-}
-
-pub(super) fn extract_prefix_and_id(path: &str) -> (&str, &str) {
-    match path.rfind('/') {
-        Some(pos) => (&path[..pos], &path[pos + 1..]),
-        None => ("", path),
-    }
-}
 
 // Materializes metadata from update metadata, populating the delete list
 // and upsert list.
@@ -1201,6 +1182,9 @@ mod tests {
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
+                            }
                         }
                     }
                 };
@@ -1491,6 +1475,9 @@ mod tests {
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
+                            }
                         }
                     }
                 };
@@ -1772,6 +1759,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -2069,6 +2059,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }

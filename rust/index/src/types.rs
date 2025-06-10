@@ -2,8 +2,6 @@ use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use uuid::Uuid;
 
-pub const HNSW_INDEX_S3_PREFIX: &str = "hnsw/";
-
 #[derive(Clone, Debug)]
 pub struct IndexConfig {
     pub dimensionality: i32,

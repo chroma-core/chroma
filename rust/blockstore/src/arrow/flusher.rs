@@ -50,7 +50,7 @@ impl ArrowBlockfileFlusher {
         // number of futures is high.
         let mut futures = Vec::new();
         for block in &self.blocks {
-            futures.push(self.block_manager.flush(block));
+            futures.push(self.block_manager.flush(block, &self.root.prefix_path));
         }
         let num_futures = futures.len();
         // buffer_unordered hangs with 0 futures.
