@@ -376,7 +376,7 @@ impl ManifestManager {
 
     pub async fn compute_garbage(
         &self,
-        _: &GarbageCollectionOptions,
+        options: &GarbageCollectionOptions,
         first_to_keep: LogPosition,
         cache: &dyn SnapshotCache,
     ) -> Result<Garbage, Error> {
@@ -389,7 +389,7 @@ impl ManifestManager {
             &self.storage,
             &self.prefix,
             &stable,
-            &self.throttle,
+            &options.throttle,
             cache,
             first_to_keep,
         )

@@ -65,7 +65,7 @@ pub enum Error {
     CorruptGarbage(String),
     #[error("missing cursor: {0}")]
     NoSuchCursor(String),
-    #[error("missing cursor: {0}")]
+    #[error("garbage collection: {0}")]
     GarbageCollection(String),
     #[error("scrub error: {0}")]
     ScrubError(#[from] Box<ScrubError>),
