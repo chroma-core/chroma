@@ -79,4 +79,8 @@ impl ArrowBlockfileFlusher {
     pub(crate) fn num_entries(&self) -> usize {
         self.blocks.iter().fold(0, |acc, block| acc + block.len())
     }
+
+    pub(crate) fn prefix_path(&self) -> String {
+        self.root.prefix_path.clone()
+    }
 }

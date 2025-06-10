@@ -799,6 +799,7 @@ impl Debug for MetadataSegmentFlusher {
 
 impl MetadataSegmentFlusher {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        let prefix_path = self.full_text_index_flusher.prefix_path();
         let full_text_pls_id = self.full_text_index_flusher.pls_id();
         let string_metadata_id = self.string_metadata_index_flusher.id();
         let bool_metadata_id = self.bool_metadata_index_flusher.id();
@@ -813,7 +814,11 @@ impl MetadataSegmentFlusher {
         }
         flushed.insert(
             FULL_TEXT_PLS.to_string(),
-            vec![full_text_pls_id.to_string()],
+            vec![format!(
+                "{}/{}",
+                prefix_path.clone(),
+                full_text_pls_id.to_string()
+            )],
         );
 
         match self.bool_metadata_index_flusher.flush().await {
@@ -822,20 +827,38 @@ impl MetadataSegmentFlusher {
         }
         flushed.insert(
             BOOL_METADATA.to_string(),
-            vec![bool_metadata_id.to_string()],
+            vec![format!(
+                "{}/{}",
+                prefix_path.clone(),
+                bool_metadata_id.to_string()
+            )],
         );
 
         match self.f32_metadata_index_flusher.flush().await {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
-        flushed.insert(F32_METADATA.to_string(), vec![f32_metadata_id.to_string()]);
+        flushed.insert(
+            F32_METADATA.to_string(),
+            vec![format!(
+                "{}/{}",
+                prefix_path.clone(),
+                f32_metadata_id.to_string()
+            )],
+        );
 
         match self.u32_metadata_index_flusher.flush().await {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
-        flushed.insert(U32_METADATA.to_string(), vec![u32_metadata_id.to_string()]);
+        flushed.insert(
+            U32_METADATA.to_string(),
+            vec![format!(
+                "{}/{}",
+                prefix_path.clone(),
+                u32_metadata_id.to_string()
+            )],
+        );
 
         match self.string_metadata_index_flusher.flush().await {
             Ok(_) => {}
@@ -843,7 +866,11 @@ impl MetadataSegmentFlusher {
         }
         flushed.insert(
             STRING_METADATA.to_string(),
-            vec![string_metadata_id.to_string()],
+            vec![format!(
+                "{}/{}",
+                prefix_path.clone(),
+                string_metadata_id.to_string()
+            )],
         );
 
         Ok(flushed)

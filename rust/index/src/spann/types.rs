@@ -2371,6 +2371,7 @@ pub struct SpannIndexIds {
     pub versions_map_id: Uuid,
     pub max_head_id_id: Uuid,
     pub hnsw_id: IndexUuid,
+    pub prefix_path: String,
 }
 
 impl SpannIndexFlusher {
@@ -2380,6 +2381,7 @@ impl SpannIndexFlusher {
             versions_map_id: self.versions_map_flusher.id(),
             max_head_id_id: self.max_head_id_flusher.id(),
             hnsw_id: self.hnsw_flusher.index_id,
+            prefix_path: self.max_head_id_flusher.prefix_path(),
         };
         let attribute = &[KeyValue::new(
             "collection_id",

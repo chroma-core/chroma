@@ -371,18 +371,37 @@ impl SpannSegmentFlusher {
             Err(e) => Err(Box::new(e)),
             Ok(index_ids) => {
                 let mut index_id_map = HashMap::new();
-                index_id_map.insert(HNSW_PATH.to_string(), vec![index_ids.hnsw_id.to_string()]);
+                index_id_map.insert(
+                    HNSW_PATH.to_string(),
+                    vec![format!(
+                        "{}/{}",
+                        index_ids.prefix_path.clone(),
+                        index_ids.hnsw_id.to_string()
+                    )],
+                );
                 index_id_map.insert(
                     VERSION_MAP_PATH.to_string(),
-                    vec![index_ids.versions_map_id.to_string()],
+                    vec![format!(
+                        "{}/{}",
+                        index_ids.prefix_path.clone(),
+                        index_ids.versions_map_id.to_string()
+                    )],
                 );
                 index_id_map.insert(
                     POSTING_LIST_PATH.to_string(),
-                    vec![index_ids.pl_id.to_string()],
+                    vec![format!(
+                        "{}/{}",
+                        index_ids.prefix_path.clone(),
+                        index_ids.pl_id.to_string()
+                    )],
                 );
                 index_id_map.insert(
                     MAX_HEAD_ID_BF_PATH.to_string(),
-                    vec![index_ids.max_head_id_id.to_string()],
+                    vec![format!(
+                        "{}/{}",
+                        index_ids.prefix_path.clone(),
+                        index_ids.max_head_id_id.to_string()
+                    )],
                 );
                 tracing::info!(
                     "Flushed file paths for spann segment flusher {:?}",

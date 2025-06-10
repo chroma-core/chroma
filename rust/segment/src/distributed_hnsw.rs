@@ -277,10 +277,11 @@ impl DistributedHNSWSegmentWriter {
             Ok(_) => {}
             Err(e) => return Err(e),
         }
-        // TODO(Sanket-temp): Use path prefix here as well so that can register
-        // with sysdb correctly.
         let mut flushed_files = HashMap::new();
-        flushed_files.insert(HNSW_INDEX.to_string(), vec![hnsw_index_id.to_string()]);
+        flushed_files.insert(
+            HNSW_INDEX.to_string(),
+            vec![format!("{}/{}", prefix_path, hnsw_index_id.to_string())],
+        );
         Ok(flushed_files)
     }
 
