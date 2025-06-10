@@ -110,7 +110,6 @@ mod tests {
     use chroma_blockstore::test_arrow_blockfile_provider;
     use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentWriter};
     use chroma_segment::types::materialize_logs;
-    use chroma_storage::test_storage;
     use chroma_types::{
         Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
     };
@@ -119,7 +118,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_loads_blocks_into_cache() {
-        let cache = new_cache_for_test();
         let (_blockfile_dir, blockfile_provider) = test_arrow_blockfile_provider(1000);
         let tenant = String::from("test_tenant");
         let database_id = DatabaseUuid::new();
