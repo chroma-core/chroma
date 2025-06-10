@@ -1,3 +1,5 @@
+use crate::types::ChromaSegmentFlusher;
+
 use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::MaterializeLogsResult;
@@ -814,10 +816,9 @@ impl MetadataSegmentFlusher {
         }
         flushed.insert(
             FULL_TEXT_PLS.to_string(),
-            vec![format!(
-                "{}/{}",
-                prefix_path.clone(),
-                full_text_pls_id.to_string()
+            vec![ChromaSegmentFlusher::flush_key(
+                &prefix_path,
+                &full_text_pls_id,
             )],
         );
 
@@ -827,10 +828,9 @@ impl MetadataSegmentFlusher {
         }
         flushed.insert(
             BOOL_METADATA.to_string(),
-            vec![format!(
-                "{}/{}",
-                prefix_path.clone(),
-                bool_metadata_id.to_string()
+            vec![ChromaSegmentFlusher::flush_key(
+                &prefix_path,
+                &bool_metadata_id,
             )],
         );
 
@@ -840,10 +840,9 @@ impl MetadataSegmentFlusher {
         }
         flushed.insert(
             F32_METADATA.to_string(),
-            vec![format!(
-                "{}/{}",
-                prefix_path.clone(),
-                f32_metadata_id.to_string()
+            vec![ChromaSegmentFlusher::flush_key(
+                &prefix_path,
+                &f32_metadata_id,
             )],
         );
 
@@ -853,10 +852,9 @@ impl MetadataSegmentFlusher {
         }
         flushed.insert(
             U32_METADATA.to_string(),
-            vec![format!(
-                "{}/{}",
-                prefix_path.clone(),
-                u32_metadata_id.to_string()
+            vec![ChromaSegmentFlusher::flush_key(
+                &prefix_path,
+                &u32_metadata_id,
             )],
         );
 
@@ -866,10 +864,9 @@ impl MetadataSegmentFlusher {
         }
         flushed.insert(
             STRING_METADATA.to_string(),
-            vec![format!(
-                "{}/{}",
-                prefix_path.clone(),
-                string_metadata_id.to_string()
+            vec![ChromaSegmentFlusher::flush_key(
+                &prefix_path,
+                &string_metadata_id,
             )],
         );
 
