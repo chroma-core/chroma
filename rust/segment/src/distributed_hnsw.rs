@@ -1,5 +1,3 @@
-use crate::types::{construct_prefix_path, extract_prefix_and_id};
-
 use super::blockfile_record::{ApplyMaterializedLogError, RecordSegmentReader};
 use super::types::MaterializeLogsResult;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -103,13 +101,6 @@ impl DistributedHNSWSegmentWriter {
             .map_err(DistributedHNSWSegmentFromSegmentError::InvalidHnswConfiguration)?
             .ok_or(DistributedHNSWSegmentFromSegmentError::MissingHnswConfiguration)?;
 
-        let prefix_path = construct_prefix_path(
-            &collection.tenant,
-            &collection.database_id,
-            &collection.collection_id,
-            &segment.id,
-        );
-
         // TODO: this is hacky, we use the presence of files to determine if we need to load or create the index
         // ideally, an explicit state would be better. When we implement distributed HNSW segments,
         // we can introduce a state in the segment metadata for this
@@ -132,7 +123,7 @@ impl DistributedHNSWSegmentWriter {
                 }
             };
 
-            let (prefix_path, index_id) = extract_prefix_and_id(index_path);
+            let (prefix_path, index_id) = Segment::extract_prefix_and_id(index_path);
             let index_uuid = match Uuid::parse_str(index_id) {
                 Ok(uuid) => uuid,
                 Err(_) => {
@@ -168,6 +159,8 @@ impl DistributedHNSWSegmentWriter {
                 segment.id,
             )))
         } else {
+            let prefix_path =
+                segment.construct_prefix_path(&collection.tenant, &collection.database_id);
             let index = match hnsw_index_provider
                 .create(
                     &segment.collection,
@@ -350,7 +343,7 @@ impl DistributedHNSWSegmentReader {
                 }
             };
 
-            let (prefix_path, index_id) = extract_prefix_and_id(index_path);
+            let (prefix_path, index_id) = Segment::extract_prefix_and_id(index_path);
             let index_uuid = match Uuid::parse_str(index_id) {
                 Ok(uuid) => uuid,
                 Err(_) => {

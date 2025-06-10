@@ -7,6 +7,7 @@ use std::{
 };
 
 use chroma_blockstore::{
+    arrow::provider::BlockfileReaderOptions,
     provider::{BlockfileProvider, CreateError, OpenError},
     BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
 };
@@ -509,10 +510,12 @@ impl SpannIndexWriter {
     async fn load_versions_map(
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
+        prefix_path: &str,
     ) -> Result<VersionsMapInner, SpannIndexWriterError> {
         // Create a reader for the blockfile. Load all the data into the versions map.
         let mut versions_map = HashMap::new();
-        let reader = match blockfile_provider.read::<u32, u32>(blockfile_id).await {
+        let reader_options = BlockfileReaderOptions::new(*blockfile_id, prefix_path.to_string());
+        let reader = match blockfile_provider.read::<u32, u32>(reader_options).await {
             Ok(reader) => reader,
             Err(e) => {
                 tracing::error!(
@@ -627,7 +630,7 @@ impl SpannIndexWriter {
         // Load the versions map.
         let versions_map = match versions_map_id {
             Some(versions_map_id) => {
-                Self::load_versions_map(versions_map_id, blockfile_provider).await?
+                Self::load_versions_map(versions_map_id, blockfile_provider, prefix_path).await?
             }
             None => VersionsMapInner {
                 versions_map: HashMap::new(),
@@ -643,9 +646,9 @@ impl SpannIndexWriter {
 
         let max_head_id = match max_head_id_bf_id {
             Some(max_head_id_bf_id) => {
-                let reader = blockfile_provider
-                    .read::<&str, u32>(max_head_id_bf_id)
-                    .await;
+                let reader_options =
+                    BlockfileReaderOptions::new(*max_head_id_bf_id, prefix_path.to_string());
+                let reader = blockfile_provider.read::<&str, u32>(reader_options).await;
                 match reader {
                     Ok(reader) => reader
                         .get("", MAX_HEAD_OFFSET_ID)
@@ -2534,9 +2537,11 @@ impl<'me> SpannIndexReader<'me> {
     async fn posting_list_reader_from_id(
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
+        prefix_path: &str,
     ) -> Result<BlockfileReader<'me, u32, SpannPostingList<'me>>, SpannIndexReaderError> {
+        let reader_options = BlockfileReaderOptions::new(*blockfile_id, prefix_path.to_string());
         match blockfile_provider
-            .read::<u32, SpannPostingList<'me>>(blockfile_id)
+            .read::<u32, SpannPostingList<'me>>(reader_options)
             .await
         {
             Ok(reader) => Ok(reader),
@@ -2552,8 +2557,10 @@ impl<'me> SpannIndexReader<'me> {
     async fn versions_map_reader_from_id(
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
+        prefix_path: &str,
     ) -> Result<BlockfileReader<'me, u32, u32>, SpannIndexReaderError> {
-        match blockfile_provider.read::<u32, u32>(blockfile_id).await {
+        let reader_options = BlockfileReaderOptions::new(*blockfile_id, prefix_path.to_string());
+        match blockfile_provider.read::<u32, u32>(reader_options).await {
             Ok(reader) => Ok(reader),
             Err(e) => {
                 tracing::error!("Error opening versions map reader {}: {}", blockfile_id, e);
@@ -2595,13 +2602,16 @@ impl<'me> SpannIndexReader<'me> {
             }
         };
         let postings_list_reader = match pl_blockfile_id {
-            Some(pl_id) => Self::posting_list_reader_from_id(pl_id, blockfile_provider).await?,
+            Some(pl_id) => {
+                Self::posting_list_reader_from_id(pl_id, blockfile_provider, prefix_path).await?
+            }
             None => return Err(SpannIndexReaderError::UninitializedIndex),
         };
 
         let versions_map_reader = match versions_map_blockfile_id {
             Some(versions_id) => {
-                Self::versions_map_reader_from_id(versions_id, blockfile_provider).await?
+                Self::versions_map_reader_from_id(versions_id, blockfile_provider, prefix_path)
+                    .await?
             }
             None => return Err(SpannIndexReaderError::UninitializedIndex),
         };

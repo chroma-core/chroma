@@ -52,7 +52,7 @@ async fn migrate_v1_to_v1_1(
         }
         for block_id in block_ids.iter() {
             let block = block_manager
-                .get(block_id, StorageRequestPriority::P0)
+                .get(&root.prefix_path, block_id, StorageRequestPriority::P0)
                 .await;
             match block {
                 Ok(Some(block)) => {
