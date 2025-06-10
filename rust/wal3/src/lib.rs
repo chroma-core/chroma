@@ -502,6 +502,15 @@ where
 
 ////////////////////////////////////////// Fragment Paths //////////////////////////////////////////
 
+pub fn prefixed_fragment_path(prefix: &str, fragment_seq_no: FragmentSeqNo) -> String {
+    format!(
+        "{}/log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
+        prefix,
+        fragment_seq_no.bucket(),
+        fragment_seq_no.0,
+    )
+}
+
 pub fn unprefixed_fragment_path(fragment_seq_no: FragmentSeqNo) -> String {
     format!(
         "log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",

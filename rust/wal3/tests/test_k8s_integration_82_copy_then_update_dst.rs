@@ -15,7 +15,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
     Manifest::initialize(
         &LogWriterOptions::default(),
         &storage,
-        "test_k8s_integration_80_copy_source",
+        "test_k8s_integration_82_copy_then_update_dst_source",
         "init",
     )
     .await
@@ -29,7 +29,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
             ..LogWriterOptions::default()
         },
         Arc::clone(&storage),
-        "test_k8s_integration_80_copy_source",
+        "test_k8s_integration_82_copy_then_update_dst_source",
         "load and scrub writer",
         (),
     )
@@ -45,7 +45,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
     let reader = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_80_copy_source".to_string(),
+        "test_k8s_integration_82_copy_then_update_dst_source".to_string(),
     )
     .await
     .unwrap();
@@ -55,7 +55,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         &LogWriterOptions::default(),
         &reader,
         LogPosition::default(),
-        "test_k8s_integration_80_copy_target".to_string(),
+        "test_k8s_integration_82_copy_then_update_dst_target".to_string(),
     )
     .await
     .unwrap();
@@ -63,7 +63,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
     let copied = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_80_copy_target".to_string(),
+        "test_k8s_integration_82_copy_then_update_dst_target".to_string(),
     )
     .await
     .unwrap();
@@ -82,7 +82,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
             ..LogWriterOptions::default()
         },
         Arc::clone(&storage),
-        "test_k8s_integration_80_copy_target",
+        "test_k8s_integration_82_copy_then_update_dst_target",
         "load and scrub writer",
         (),
     )
