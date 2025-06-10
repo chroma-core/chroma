@@ -48,6 +48,9 @@ def install_version(version: str, dep_overrides: Dict[str, str]) -> None:
     if os.path.exists(version_library):
         return
     path = get_path_to_version_install(version)
+    import sys
+
+    sys.stderr.write(f"Installing chromadb version {version} to {path}\n")
     install(f"chromadb=={version}", path, dep_overrides)
 
 
