@@ -27,7 +27,7 @@ pub enum CopyError {
     CollectionAlreadyExists(String),
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 pub struct CopyArgs {
     #[clap(
         long = "all",

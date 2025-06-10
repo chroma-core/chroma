@@ -39,7 +39,7 @@ pub enum VacuumError {
     VacuumFailed,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 pub struct VacuumArgs {
     #[clap(long, help = "The path of your Chroma DB")]
     path: Option<String>,
