@@ -241,9 +241,9 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
 
                 let output = metered_future.inner_future.poll(context);
 
-                // ACTIVE_METERING_CONTEXT_CONTAINER.with(|active_metering_context_container| {
-                //     active_metering_context_container.replace(MeteringContextContainer::default());
-                // });
+                ACTIVE_METERING_CONTEXT_CONTAINER.with(|active_metering_context_container| {
+                    active_metering_context_container.replace(MeteringContextContainer::default());
+                });
 
                 output
             }
