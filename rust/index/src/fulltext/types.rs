@@ -1153,8 +1153,11 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+            )
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1173,7 +1176,7 @@ mod tests {
         // Add document to index
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
-                BlockfileWriterOptions::new()
+                BlockfileWriterOptions::new(prefix_path.clone())
                     .ordered_mutations()
                     .fork(pl_blockfile_id),
             )
@@ -1195,7 +1198,7 @@ mod tests {
         // Update document with same content, should be a noop
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
-                BlockfileWriterOptions::new()
+                BlockfileWriterOptions::new(prefix_path)
                     .ordered_mutations()
                     .fork(pl_blockfile_id),
             )
