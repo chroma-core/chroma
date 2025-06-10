@@ -277,17 +277,17 @@ impl PartialOrd for RecordDistance {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct KnnOutput {
+    pub distances: Vec<RecordDistance>,
+}
+
 /// The `KnnMerge` operator selects the records nearest to target from the batch vectors of records
-/// which are all sorted by distance in ascending order
+/// which are all sorted by distance in ascending order. If the same record occurs multiple times
+/// only one copy will remain in the final result.
 ///
 /// # Parameters
 /// - `fetch`: The total number of records to fetch
-///
-/// # Inputs
-/// - `batch_distances`: The batch vector of records, each sorted by distance in ascending order
-///
-/// # Outputs
-/// - `distances`: The nearest records in either vectors, sorted by distance in ascending order
 ///
 /// # Usage
 /// It can be used to merge the query results from different operators
@@ -296,23 +296,9 @@ pub struct KnnMerge {
     pub fetch: u32,
 }
 
-#[derive(Debug)]
-pub struct KnnMergeInput {
-    pub batch_distances: Vec<Vec<RecordDistance>>,
-}
-
-#[derive(Debug)]
-pub struct KnnMergeOutput {
-    pub distances: Vec<RecordDistance>,
-}
-
 impl KnnMerge {
-    pub fn merge(&self, input: KnnMergeInput) -> KnnMergeOutput {
-        let mut batch_iters = input
-            .batch_distances
-            .into_iter()
-            .map(Vec::into_iter)
-            .collect::<Vec<_>>();
+    pub fn merge(&self, input: Vec<Vec<RecordDistance>>) -> Vec<RecordDistance> {
+        let mut batch_iters = input.into_iter().map(Vec::into_iter).collect::<Vec<_>>();
 
         // NOTE: `BinaryHeap<_>` is a max-heap, so we use `Reverse` to convert it into a min-heap
         let mut heap_dist = batch_iters
@@ -321,10 +307,16 @@ impl KnnMerge {
             .filter_map(|(idx, itr)| itr.next().map(|rec| Reverse((rec, idx))))
             .collect::<BinaryHeap<_>>();
 
-        let mut distances = Vec::new();
+        let mut distances = Vec::<RecordDistance>::with_capacity(self.fetch as usize);
         while distances.len() < self.fetch as usize {
             if let Some(Reverse((rec, idx))) = heap_dist.pop() {
-                distances.push(rec);
+                if distances.last().is_none()
+                    || distances
+                        .last()
+                        .is_some_and(|last_rec| last_rec.offset_id != rec.offset_id)
+                {
+                    distances.push(rec);
+                }
                 if let Some(next_rec) = batch_iters
                     .get_mut(idx)
                     .expect("Enumerated index should be valid")
@@ -336,7 +328,7 @@ impl KnnMerge {
                 break;
             }
         }
-        KnnMergeOutput { distances }
+        distances
     }
 }
 

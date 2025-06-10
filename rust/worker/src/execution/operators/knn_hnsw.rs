@@ -1,24 +1,20 @@
 use async_trait::async_trait;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::SignedRoaringBitmap;
+use chroma_types::{
+    operator::{Knn, KnnOutput, RecordDistance},
+    SignedRoaringBitmap,
+};
 use thiserror::Error;
 
 use chroma_segment::distributed_hnsw::DistributedHNSWSegmentReader;
 use chroma_system::Operator;
-
-use super::knn::{KnnOperator, RecordDistance};
 
 #[derive(Debug)]
 pub struct KnnHnswInput {
     pub(crate) hnsw_reader: Box<DistributedHNSWSegmentReader>,
     pub compact_offset_ids: SignedRoaringBitmap,
     pub distance_function: DistanceFunction,
-}
-
-#[derive(Debug)]
-pub struct KnnHnswOutput {
-    pub record_distances: Vec<RecordDistance>,
 }
 
 #[derive(Error, Debug)]
@@ -36,16 +32,12 @@ impl ChromaError for KnnHnswError {
 }
 
 #[async_trait]
-impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
+impl Operator<KnnHnswInput, KnnOutput> for Knn {
     type Error = KnnHnswError;
 
-    async fn run(&self, input: &KnnHnswInput) -> Result<KnnHnswOutput, KnnHnswError> {
+    async fn run(&self, input: &KnnHnswInput) -> Result<KnnOutput, KnnHnswError> {
         let (allowed, disallowed) = match &input.compact_offset_ids {
-            SignedRoaringBitmap::Include(rbm) if rbm.is_empty() => {
-                return Ok(KnnHnswOutput {
-                    record_distances: Vec::new(),
-                })
-            }
+            SignedRoaringBitmap::Include(rbm) if rbm.is_empty() => return Ok(Default::default()),
             SignedRoaringBitmap::Include(rbm) => (
                 rbm.iter().map(|offset_id| offset_id as usize).collect(),
                 Vec::new(),
@@ -68,8 +60,8 @@ impl Operator<KnnHnswInput, KnnHnswOutput> for KnnOperator {
             input
                 .hnsw_reader
                 .query(embedding, self.fetch as usize, &allowed, &disallowed)?;
-        Ok(KnnHnswOutput {
-            record_distances: offset_ids
+        Ok(KnnOutput {
+            distances: offset_ids
                 .into_iter()
                 .map(|offset_id| offset_id as u32)
                 .zip(distances)

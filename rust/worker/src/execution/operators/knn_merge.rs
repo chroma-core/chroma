@@ -1,39 +1,29 @@
 use async_trait::async_trait;
 
 use chroma_system::Operator;
+use chroma_types::operator::{KnnMerge, RecordDistance};
 use thiserror::Error;
 
-use super::knn::RecordDistance;
-
-/// The `KnnMergeOperator` selects the records nearest to target from the two vectors of records
+/// The `KnnMerge` operator selects the records nearest to target from the two vectors of records
 /// which are both sorted by distance in ascending order
 ///
-/// # Parameters
-/// - `fetch`: The total number of records to fetch
-///
 /// # Inputs
-/// - `first_distances`: The first vector of records, sorted by distance in ascending order
-/// - `second_distances`: The second vector of records, sorted by distance in ascending order
+/// - `batch_distances`: A batch of record vectors, each vector is sorted by distance in ascending order
 ///
 /// # Outputs
 /// - `record_distances`: The nearest records in either vectors, sorted by distance in ascending order
 ///
 /// # Usage
 /// It can be used to merge the nearest results from the log and the vector segment
-#[derive(Clone, Debug)]
-pub struct KnnMergeOperator {
-    pub fetch: u32,
-}
 
 #[derive(Debug)]
 pub struct KnnMergeInput {
-    pub first_distances: Vec<RecordDistance>,
-    pub second_distances: Vec<RecordDistance>,
+    pub batch_distances: Vec<Vec<RecordDistance>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct KnnMergeOutput {
-    pub record_distances: Vec<RecordDistance>,
+    pub distances: Vec<RecordDistance>,
 }
 
 #[derive(Error, Debug)]
@@ -41,78 +31,55 @@ pub struct KnnMergeOutput {
 pub struct KnnMergeError;
 
 #[async_trait]
-impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMergeOperator {
+impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMerge {
     type Error = KnnMergeError;
 
     async fn run(&self, input: &KnnMergeInput) -> Result<KnnMergeOutput, KnnMergeError> {
-        let mut fetch = self.fetch;
-        let mut first_index = 0;
-        let mut second_index = 0;
-
-        let mut merged_distance = Vec::new();
-
-        while fetch > 0 {
-            let first_dist = input.first_distances.get(first_index);
-            let second_dist = input.second_distances.get(second_index);
-
-            match (first_dist, second_dist) {
-                (Some(fdist), Some(sdist)) => {
-                    if fdist.measure < sdist.measure {
-                        merged_distance.push(fdist.clone());
-                        first_index += 1;
-                    } else {
-                        merged_distance.push(sdist.clone());
-                        second_index += 1;
-                    }
-                }
-                (None, Some(dist)) => {
-                    merged_distance.push(dist.clone());
-                    second_index += 1;
-                }
-                (Some(dist), None) => {
-                    merged_distance.push(dist.clone());
-                    first_index += 1;
-                }
-                _ => break,
-            }
-            fetch -= 1;
-        }
-
         Ok(KnnMergeOutput {
-            record_distances: merged_distance,
+            distances: self.merge(input.batch_distances.clone()),
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::execution::operators::{knn::RecordDistance, knn_merge::KnnMergeOperator};
     use chroma_system::Operator;
+    use chroma_types::operator::{KnnMerge, RecordDistance};
 
     use super::KnnMergeInput;
 
-    /// The unit tests for `KnnMergeOperator` uses the following test data
+    /// The unit tests for `KnnMerge` operator uses the following test data
     /// It generates records where the distance to target is the same as value of offset
     /// - First: 4, 8, ..., 100
     /// - Second: 1, 3, ..., 99
     fn setup_knn_merge_input() -> KnnMergeInput {
         KnnMergeInput {
-            first_distances: (1..=100)
-                .filter_map(|offset_id| {
-                    (offset_id % 4 == 0).then_some(RecordDistance {
-                        offset_id,
-                        measure: offset_id as f32,
+            batch_distances: vec![
+                (1..=100)
+                    .filter_map(|offset_id| {
+                        (offset_id % 3 == 1).then_some(RecordDistance {
+                            offset_id,
+                            measure: offset_id as f32,
+                        })
                     })
-                })
-                .collect(),
-            second_distances: (1..=100)
-                .filter_map(|offset_id| {
-                    (offset_id % 2 != 0).then_some(RecordDistance {
-                        offset_id,
-                        measure: offset_id as f32,
+                    .collect(),
+                (1..=100)
+                    .filter_map(|offset_id| {
+                        (offset_id % 5 == 2).then_some(RecordDistance {
+                            offset_id,
+                            measure: offset_id as f32,
+                        })
                     })
-                })
-                .collect(),
+                    .collect(),
+                (1..=100)
+                    .filter_map(|offset_id| {
+                        (offset_id % 7 == 3).then_some(RecordDistance {
+                            offset_id,
+                            measure: offset_id as f32,
+                        })
+                    })
+                    .collect(),
+            ],
         }
     }
 
@@ -120,7 +87,7 @@ mod tests {
     async fn test_simple_merge() {
         let knn_merge_input = setup_knn_merge_input();
 
-        let knn_merge_operator = KnnMergeOperator { fetch: 6 };
+        let knn_merge_operator = KnnMerge { fetch: 10 };
 
         let knn_merge_output = knn_merge_operator
             .run(&knn_merge_input)
@@ -129,11 +96,11 @@ mod tests {
 
         assert_eq!(
             knn_merge_output
-                .record_distances
+                .distances
                 .iter()
                 .map(|record| record.offset_id)
                 .collect::<Vec<_>>(),
-            vec![1, 3, 4, 5, 7, 8]
+            vec![1, 2, 3, 4, 7, 10, 12, 13, 16, 17]
         );
     }
 }
