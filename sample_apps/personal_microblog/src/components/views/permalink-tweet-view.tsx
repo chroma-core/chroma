@@ -71,7 +71,7 @@ export default function PermalinkTweetView({ post, parentPosts, existingReplies 
               citations={post.citations}
               className="text-[1.15em]/7 font-body"
               bodyProps={{ className: isAiReply ? "text-[var(--accent)]" : "" }}
-              citationsProps={{ animate: false, style: isAiReply ? "endnote" : "block" }}
+              citationsProps={{ className: "text-[var(--accent)] ml-2", animate: false, style: isAiReply ? "endnote" : "block" }}
             />
           </div>
         </div>
@@ -151,7 +151,11 @@ function RelatedPosts({ searchTerm, omitIds }: { searchTerm: string, omitIds: st
         })
       });
       const relatedPosts = await response.json();
-      setRelatedPosts(relatedPosts.filter((p: EnrichedTweetModel) => !omitIds.includes(p.id)));
+      setRelatedPosts(
+        relatedPosts
+        .filter((p: EnrichedTweetModel) => !omitIds.includes(p.id))
+        .sort((a: EnrichedTweetModel, b: EnrichedTweetModel) => b.date - a.date)
+        .slice(0, 5));
     };
     getRelatedPosts();
   }, [searchTerm, omitIds]);

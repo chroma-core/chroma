@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
-import { PT_Serif } from "next/font/google";
+import { Exo_2 } from "next/font/google";
 import "./globals.css";
 
 import Search from "@/components/ui/common/search";
 
-const ptSerif = PT_Serif({
-  variable: "--font-pt-serif",
+const exo2 = Exo_2({
+  variable: "--font-exo-2",
+  style: ["normal", "italic"],
   subsets: ["latin"],
   weight: ["400", "700"],
 });
@@ -23,7 +24,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${ptSerif.variable} antialiased`}
+        className={`${exo2.variable} antialiased bg-[var(--background)]`}
       >
         <div className="flex flex-col items-center py-20">
           <div className="w-[600px] max-w-[calc(100dvw-32px)]">

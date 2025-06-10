@@ -100,7 +100,7 @@ export default function Citations({
             key="citation-list-element"
             initial={animate ? { opacity: 0, height: 0 } : {}}
             animate={animate ? { opacity: 1, height: 'auto' } : {}}
-            className="flex flex-col gap-2 col-[1] row-[1] z-20"
+            className="flex flex-col gap-1 col-[1] row-[1] z-20"
           >
             {loadedCitations.map((citation, index) => (
               <Citation key={citation.id} tweet={citation} index={index} animate={animate} style={style} />
@@ -138,7 +138,7 @@ function Citation({ tweet, index, animate = true, style = "endnote" }: CitationP
       router.push(`/post/${tweet.id}`);
     }}
       {...animateCitationProps(index)}
-      className={`${style === "endnote" ? "list-decimal mx-5" : "border p-4"}`}
+      className={`${style === "endnote" ? "list-decimal mx-3 px-1" : "border p-4"}`}
       whileHover={{
         scale: 1.02,
         y: -2,

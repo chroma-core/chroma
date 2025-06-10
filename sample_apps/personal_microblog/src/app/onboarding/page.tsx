@@ -33,7 +33,7 @@ export default function OnboardingPage() {
           Your AI assistant is here to help you remember and organize everything you share.
         </p>
 
-        <div className="bg-gray-50 rounded-lg p-4 mb-6">
+        <div className="bg-[var(--background-secondary)] rounded-lg p-4 mb-6">
           <h2 className="text-lg font-semibold text-gray-800 mb-3">
             How it works:
           </h2>

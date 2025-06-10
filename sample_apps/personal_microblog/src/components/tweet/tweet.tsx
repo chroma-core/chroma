@@ -84,11 +84,11 @@ export function Tweet({ tweet, className = "" }: TweetProps) {
 
   return (
     <div
-      className={`grid grid-cols-[140px_1fr] hover:bg-gray-100 cursor-pointer ${className}`}
+      className={`grid grid-cols-[140px_1fr] hover:bg-[var(--background-secondary)] cursor-pointer ${className}`}
       onClick={goToPostPage}
     >
       <div className="flex flex-col items-end">
-        <div className={`font-ui pl-2 pr-4 pt-4 mt-[.6em] pb-4 text-gray-600 text-sm`}>{formattedDate}</div>
+        <div className={`font-ui pl-2 pr-4 pt-4 mt-[.65em] pb-4 text-gray-600 text-sm`}>{formattedDate}</div>
       </div>
       <div className={`pt-4 pb-4 pl-4 pr-4 border-l-[.5px]`}>
         <TweetBody body={tweet.body} citations={tweet.citations} className={className} bodyProps={mainBodyProps} citationsProps={mainCitationProps} />
@@ -109,18 +109,18 @@ export function TweetSkeleton() {
     <div className={`grid grid-cols-[120px_1fr] animate-pulse`}>
       <div className="flex flex-col items-end">
         <div className="font-ui pl-2 pr-4 pt-4 mt-[.0em] pb-4">
-          <div className="h-4 w-16 bg-gray-200 rounded"></div>
+          <div className="h-4 w-16 bg-[var(--background-secondary)] rounded"></div>
         </div>
       </div>
       <div className={`pt-4 pb-4 pl-4 pr-4 border-l-[.5px]`}>
         <div className="space-y-3">
-          <div className="h-4 bg-gray-200 rounded w-full"></div>
-          <div className="h-4 bg-gray-200 rounded w-5/6"></div>
-          <div className="h-4 bg-gray-200 rounded w-4/6"></div>
+          <div className="h-4 bg-[var(--background-secondary)] rounded w-full"></div>
+          <div className="h-4 bg-[var(--background-secondary)] rounded w-5/6"></div>
+          <div className="h-4 bg-[var(--background-secondary)] rounded w-4/6"></div>
         </div>
         <div className="mt-4 space-y-2">
-          <div className="h-3 bg-gray-100 rounded w-3/4"></div>
-          <div className="h-3 bg-gray-100 rounded w-1/2"></div>
+          <div className="h-3 bg-[var(--background-secondary)] rounded w-3/4"></div>
+          <div className="h-3 bg-[var(--background-secondary)] rounded w-1/2"></div>
         </div>
       </div>
     </div>

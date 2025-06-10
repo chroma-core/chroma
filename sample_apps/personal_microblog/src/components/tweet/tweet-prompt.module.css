@@ -3,31 +3,31 @@
 		45deg,
 		#FFFFFF,
 		#FFFFFF,
-		#0C51D0,
-        #0C51D0,
+		var(--accent),
+        var(--accent),
         #FFFFFF,
-        #DBE9FE,
-        #0C51D0
+        var(--accent-secondary),
+        var(--accent)
 	);
 }
 
 .shadow:before,
 .shadow:after {
-    --border-width: 1.5px;
+    --border-width: 1px;
 	content: "";
 	position: absolute;
 	top: calc(-1 * var(--border-width));
 	left: calc(-1 * var(--border-width));
 	background: var(--gradient-shadow);
 	background-size: 200%;
-	width: calc(100% + var(--border-width));
-	height: calc(100% + var(--border-width));
+	width:  calc(100% + 2*var(--border-width));
+	height: calc(100% + 2*var(--border-width));
 	z-index: -1;
 	animation: animate 20s linear infinite;
 }
 
 .shadow:after {
-	filter: blur(2px);
+	filter: blur(4px);
 }
 
 @keyframes animate {

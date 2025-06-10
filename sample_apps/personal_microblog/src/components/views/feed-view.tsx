@@ -99,7 +99,7 @@ function Tweets({ newMessages }: { newMessages: NewPostResponseTweetModel[] }) {
     const onScroll = () => {
       if (!hasMore || loadingRef.current) return;
       const { scrollTop, scrollHeight, clientHeight } = document.documentElement;
-      if (scrollTop + clientHeight >= scrollHeight - 100) {
+      if (scrollTop + clientHeight >= scrollHeight - 200) {
         setPage((prevPage) => prevPage + 1);
       }
     };

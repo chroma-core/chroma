@@ -63,10 +63,11 @@ export default {
   			'serif'
   		],
   		body: [
-  			'var(--font-pt-serif)',
+  			'var(--font-exo-2)',
   			'serif'
   		],
   		ui: [
+			'var(--font-exo-2)',
   			'system-ui',
   			'-apple-system',
   			'system-ui',

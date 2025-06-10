@@ -24,7 +24,7 @@ const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: str
     function getHighlightedText(text: string) {
       const esc = (str: string) => str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       return esc(text)
-        .replace(/(@assistant)($|\s|&nbsp;)/g, `<span class="text-blue-600 bg-blue-100">$1</span>$2`)
+        .replace(/(@assistant)($|\s|&nbsp;)/g, `<span class="text-[var(--accent)] bg-[var(--accent-secondary)]">$1</span>$2`)
         .replace(/\n/g, '<br />');
     }
 
@@ -74,7 +74,7 @@ const InputWithSyntaxHighlighting = forwardRef<HTMLTextAreaElement, { input: str
         <div
           ref={autoCompleteRef}
           aria-hidden="true"
-          className="absolute top-0 left-0 w-full min-h-[2.5em] whitespace-pre-wrap break-words pointer-events-none z-10 font-inherit p-2 bg-transparent border border-transparent rounded-md select-none text-gray-400"
+          className="absolute top-0 left-0 w-full min-h-[2.5em] whitespace-pre-wrap break-words pointer-events-none z-10 font-inherit p-2 bg-transparent border border-transparent rounded-md select-none text-[var(--foreground)] opacity-50"
           dangerouslySetInnerHTML={{ __html: autoComplete }}
         />
         <div
@@ -158,10 +158,10 @@ export default function TweetPrompt(props: TweetPromptProps) {
       transition={{
         duration: 0.3,
       }}
-      className={`cursor-text border rounded-sm ${glow ? animate ? styles.shadow : " border-blue-200" : "border-zinc-100"}`}
+      className={`cursor-text border rounded-sm ${glow ? animate ? styles.shadow : " border-[var(--accent)]" : "border-zinc-100"}`}
       onClick={handleContainerClick}
     >
-      <div className={`font-ui flex flex-col gap-2 relative items-end w-full bg-zinc-100 px-2 py-1.5 w-full outline-none text-zinc-800 ${DEBUG_MODE ? styles.debugLayers : ""}`}>
+      <div className={`font-ui flex flex-col gap-2 relative items-end w-full px-2 py-1.5 w-full outline-none text-zinc-800 bg-[var(--background-secondary)] ${DEBUG_MODE ? styles.debugLayers : ""}`}>
         <InputWithSyntaxHighlighting ref={textareaRef} input={input} setInput={setInput} onKeyDown={handleKeyDown} placeholder={props.placeholder} />
         <div className="flex flex-row gap-1">
           <motion.div className="px-2 py-1 text-xs text-zinc-500 opacity-0" animate={visibilityVariants}>{input.length}</motion.div>

@@ -25,7 +25,8 @@
 }
 
 .markdown code {
-  background-color: #f6f8fa;
+  background-color: var(--background-secondary);
+  font-family: var(--font-mono);
   padding: 0.05em 0.1em;
   border-radius: 3px;
 }

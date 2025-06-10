@@ -142,7 +142,7 @@ export function StreamedMarkdownContent({ stream, placeholder, className }: { st
 function MarkdownContentSkeleton({ lines, className }: { lines: number, className?: string }) {
   return <div className={`flex flex-col gap-1 w-full ${styles.markdown} ${className}`}>
     {Array.from({ length: lines }).map((_, i) => (
-      <div key={i} className={`h-4 bg-gray-100 rounded-full animate-pulse mr-1`} />
+      <div key={i} className={`h-4 bg-[var(--background-secondary)] rounded-full animate-pulse mr-1`} />
     ))}
   </div>;
 }
