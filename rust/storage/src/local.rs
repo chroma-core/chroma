@@ -138,6 +138,28 @@ impl LocalStorage {
         }
     }
 
+    pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        let src_path = self.path_for_key(src_key);
+        let dst_path = self.path_for_key(dst_key);
+
+        // Create parent directory for destination if it doesn't exist
+        if let Some(parent) = std::path::Path::new(&dst_path).parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::error!(error = %e, path = %parent.display(), "Failed to create parent directory");
+                return Err(StorageError::Generic {
+                    source: Arc::new(e),
+                });
+            }
+        }
+
+        match std::fs::copy(&src_path, &dst_path) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
+        }
+    }
+
     pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
         let search_path = self.path_for_key(prefix);
         if !search_path.exists() {

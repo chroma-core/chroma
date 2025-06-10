@@ -477,6 +477,11 @@ impl AdmissionControlledS3Storage {
         )
         .await
     }
+
+    pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        // Akin to a HEAD request; no AC.
+        self.storage.copy(src_key, dst_key).await
+    }
 }
 
 #[async_trait]
