@@ -162,7 +162,7 @@ impl HnswIndexProvider {
         }
     }
 
-    fn format_key(&self, prefix_path: &str, id: &IndexUuid, file: &str) -> String {
+    pub fn format_key(prefix_path: &str, id: &IndexUuid, file: &str) -> String {
         // For legacy collections, prefix_path will be empty.
         if prefix_path.is_empty() {
             return format!("hnsw/{}/{}", id, file);
@@ -282,7 +282,7 @@ impl HnswIndexProvider {
                 tracing::trace_span!(parent: Span::current(), "Read bytes from s3", file = file);
             let buf = s3_fetch_span
                 .in_scope(|| async {
-                    let key = self.format_key(prefix_path, source_id, file);
+                    let key = Self::format_key(prefix_path, source_id, file);
                     tracing::info!("Loading hnsw index file: {} into directory", key);
                     let bytes_res = self
                         .storage
@@ -485,7 +485,7 @@ impl HnswIndexProvider {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
-            let key = self.format_key(prefix_path, id, file);
+            let key = Self::format_key(prefix_path, id, file);
             let res = self
                 .storage
                 .put_file(

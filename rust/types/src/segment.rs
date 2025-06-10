@@ -2,7 +2,7 @@ use super::{
     CollectionUuid, Metadata, MetadataValueConversionError, SegmentScope,
     SegmentScopeConversionError,
 };
-use crate::chroma_proto;
+use crate::{chroma_proto, DatabaseUuid};
 use chroma_error::{ChromaError, ErrorCodes};
 use std::{collections::HashMap, str::FromStr};
 use thiserror::Error;
@@ -134,6 +134,17 @@ impl Segment {
             _ => {}
         }
         res
+    }
+
+    pub fn extract_prefix_and_id(path: &str) -> (&str, &str) {
+        match path.rfind('/') {
+            Some(pos) => (&path[..pos], &path[pos + 1..]),
+            None => ("", path),
+        }
+    }
+
+    pub fn construct_prefix_path(&self, tenant: &str, database_id: &DatabaseUuid) -> String {
+        format!("{}/{}/{}/{}", tenant, database_id, self.collection, self.id)
     }
 }
 

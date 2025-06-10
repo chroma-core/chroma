@@ -113,6 +113,10 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                     RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
+                    _ => {
+                        tracing::error!("Unexpected error creating record segment reader: {:?}", e);
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
                 }
             }
         };
@@ -292,6 +296,9 @@ mod tests {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            _ => {
                                 panic!("Error creating record segment reader");
                             }
                         }

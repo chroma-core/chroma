@@ -1,8 +1,7 @@
-use crate::types::construct_prefix_path;
-
 use super::blockfile_record::ApplyMaterializedLogError;
 use super::blockfile_record::RecordSegmentReader;
 use super::types::MaterializeLogsResult;
+use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
 use chroma_blockstore::BlockfileWriterOptions;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -106,21 +105,21 @@ impl<'me> MetadataSegmentWriter<'me> {
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
         }
-        let prefix_path =
-            construct_prefix_path(tenant, database_id, &segment.collection, &segment.id);
+        let prefix_path = segment.construct_prefix_path(tenant, database_id);
         let pls_writer = match segment.file_path.get(FULL_TEXT_PLS) {
-            Some(pls_path) => match pls_path.first() {
-                Some(pls_uuid) => {
-                    let pls_uuid = match Uuid::parse_str(pls_uuid) {
+            Some(pls_paths) => match pls_paths.first() {
+                Some(pls_path) => {
+                    let (prefix, pls_id) = Segment::extract_prefix_and_id(pls_path);
+                    let pls_uuid = match Uuid::parse_str(pls_id) {
                         Ok(uuid) => uuid,
                         Err(_) => {
-                            return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
+                            return Err(MetadataSegmentError::UuidParseError(pls_id.to_string()))
                         }
                     };
 
                     blockfile_provider
                         .write::<u32, Vec<u32>>(
-                            BlockfileWriterOptions::new(prefix_path.clone())
+                            BlockfileWriterOptions::new(prefix.to_string())
                                 .fork(pls_uuid)
                                 .ordered_mutations(),
                         )
@@ -146,19 +145,21 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (string_metadata_writer, string_metadata_index_reader) =
             match segment.file_path.get(STRING_METADATA) {
-                Some(string_metadata_path) => match string_metadata_path.first() {
-                    Some(string_metadata_uuid) => {
-                        let string_metadata_uuid = match Uuid::parse_str(string_metadata_uuid) {
+                Some(string_metadata_paths) => match string_metadata_paths.first() {
+                    Some(string_metadata_path) => {
+                        let (prefix, string_metadata_id) =
+                            Segment::extract_prefix_and_id(string_metadata_path);
+                        let string_metadata_uuid = match Uuid::parse_str(string_metadata_id) {
                             Ok(uuid) => uuid,
                             Err(_) => {
                                 return Err(MetadataSegmentError::UuidParseError(
-                                    string_metadata_uuid.to_string(),
+                                    string_metadata_id.to_string(),
                                 ))
                             }
                         };
                         let string_metadata_writer = match blockfile_provider
                             .write::<&str, RoaringBitmap>(
-                                BlockfileWriterOptions::new(prefix_path.clone())
+                                BlockfileWriterOptions::new(prefix.to_string())
                                     .fork(string_metadata_uuid),
                             )
                             .await
@@ -166,8 +167,10 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(writer) => writer,
                             Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                         };
+                        let read_options =
+                            BlockfileReaderOptions::new(string_metadata_uuid, prefix.to_string());
                         let string_metadata_index_reader = match blockfile_provider
-                            .read::<&str, RoaringBitmap>(&string_metadata_uuid)
+                            .read::<&str, RoaringBitmap>(read_options)
                             .await
                         {
                             Ok(reader) => MetadataIndexReader::new_string(reader),
@@ -190,19 +193,21 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (bool_metadata_writer, bool_metadata_index_reader) =
             match segment.file_path.get(BOOL_METADATA) {
-                Some(bool_metadata_path) => match bool_metadata_path.first() {
-                    Some(bool_metadata_uuid) => {
-                        let bool_metadata_uuid = match Uuid::parse_str(bool_metadata_uuid) {
+                Some(bool_metadata_paths) => match bool_metadata_paths.first() {
+                    Some(bool_metadata_path) => {
+                        let (prefix, bool_metadata_id) =
+                            Segment::extract_prefix_and_id(bool_metadata_path);
+                        let bool_metadata_uuid = match Uuid::parse_str(bool_metadata_id) {
                             Ok(uuid) => uuid,
                             Err(_) => {
                                 return Err(MetadataSegmentError::UuidParseError(
-                                    bool_metadata_uuid.to_string(),
+                                    bool_metadata_id.to_string(),
                                 ))
                             }
                         };
                         let bool_metadata_writer = match blockfile_provider
                             .write::<bool, RoaringBitmap>(
-                                BlockfileWriterOptions::new(prefix_path.clone())
+                                BlockfileWriterOptions::new(prefix.to_string())
                                     .fork(bool_metadata_uuid),
                             )
                             .await
@@ -210,8 +215,10 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(writer) => writer,
                             Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                         };
+                        let read_options =
+                            BlockfileReaderOptions::new(bool_metadata_uuid, prefix.to_string());
                         let bool_metadata_index_writer = match blockfile_provider
-                            .read::<bool, RoaringBitmap>(&bool_metadata_uuid)
+                            .read::<bool, RoaringBitmap>(read_options)
                             .await
                         {
                             Ok(reader) => MetadataIndexReader::new_bool(reader),
@@ -234,19 +241,21 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (f32_metadata_writer, f32_metadata_index_reader) =
             match segment.file_path.get(F32_METADATA) {
-                Some(f32_metadata_path) => match f32_metadata_path.first() {
-                    Some(f32_metadata_uuid) => {
-                        let f32_metadata_uuid = match Uuid::parse_str(f32_metadata_uuid) {
+                Some(f32_metadata_paths) => match f32_metadata_paths.first() {
+                    Some(f32_metadata_path) => {
+                        let (prefix, f32_metadata_id) =
+                            Segment::extract_prefix_and_id(f32_metadata_path);
+                        let f32_metadata_uuid = match Uuid::parse_str(f32_metadata_id) {
                             Ok(uuid) => uuid,
                             Err(_) => {
                                 return Err(MetadataSegmentError::UuidParseError(
-                                    f32_metadata_uuid.to_string(),
+                                    f32_metadata_id.to_string(),
                                 ))
                             }
                         };
                         let f32_metadata_writer = match blockfile_provider
                             .write::<f32, RoaringBitmap>(
-                                BlockfileWriterOptions::new(prefix_path.clone())
+                                BlockfileWriterOptions::new(prefix.to_string())
                                     .fork(f32_metadata_uuid),
                             )
                             .await
@@ -254,8 +263,10 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(writer) => writer,
                             Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                         };
+                        let read_options =
+                            BlockfileReaderOptions::new(f32_metadata_uuid, prefix.to_string());
                         let f32_metadata_index_reader = match blockfile_provider
-                            .read::<f32, RoaringBitmap>(&f32_metadata_uuid)
+                            .read::<f32, RoaringBitmap>(read_options)
                             .await
                         {
                             Ok(reader) => MetadataIndexReader::new_f32(reader),
@@ -278,19 +289,21 @@ impl<'me> MetadataSegmentWriter<'me> {
 
         let (u32_metadata_writer, u32_metadata_index_reader) =
             match segment.file_path.get(U32_METADATA) {
-                Some(u32_metadata_path) => match u32_metadata_path.first() {
-                    Some(u32_metadata_uuid) => {
-                        let u32_metadata_uuid = match Uuid::parse_str(u32_metadata_uuid) {
+                Some(u32_metadata_paths) => match u32_metadata_paths.first() {
+                    Some(u32_metadata_path) => {
+                        let (prefix, u32_metadata_id) =
+                            Segment::extract_prefix_and_id(u32_metadata_path);
+                        let u32_metadata_uuid = match Uuid::parse_str(u32_metadata_id) {
                             Ok(uuid) => uuid,
                             Err(_) => {
                                 return Err(MetadataSegmentError::UuidParseError(
-                                    u32_metadata_uuid.to_string(),
+                                    u32_metadata_id.to_string(),
                                 ))
                             }
                         };
                         let u32_metadata_writer = match blockfile_provider
                             .write::<u32, RoaringBitmap>(
-                                BlockfileWriterOptions::new(prefix_path.clone())
+                                BlockfileWriterOptions::new(prefix.to_string())
                                     .fork(u32_metadata_uuid),
                             )
                             .await
@@ -298,8 +311,10 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Ok(writer) => writer,
                             Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
                         };
+                        let read_options =
+                            BlockfileReaderOptions::new(u32_metadata_uuid, prefix.to_string());
                         let u32_metadata_index_reader = match blockfile_provider
-                            .read::<u32, RoaringBitmap>(&u32_metadata_uuid)
+                            .read::<u32, RoaringBitmap>(read_options)
                             .await
                         {
                             Ok(reader) => MetadataIndexReader::new_u32(reader),
@@ -853,16 +868,19 @@ impl MetadataSegmentReader<'_> {
         }
 
         let pls_reader = match segment.file_path.get(FULL_TEXT_PLS) {
-            Some(pls_path) => match pls_path.first() {
-                Some(pls_uuid) => {
-                    let pls_uuid = match Uuid::parse_str(pls_uuid) {
+            Some(pls_paths) => match pls_paths.first() {
+                Some(pls_path) => {
+                    let (prefix_path, pls_id) = Segment::extract_prefix_and_id(pls_path);
+                    let pls_uuid = match Uuid::parse_str(pls_id) {
                         Ok(uuid) => uuid,
                         Err(_) => {
-                            return Err(MetadataSegmentError::UuidParseError(pls_uuid.to_string()))
+                            return Err(MetadataSegmentError::UuidParseError(pls_id.to_string()))
                         }
                     };
 
-                    match blockfile_provider.read::<u32, &[u32]>(&pls_uuid).await {
+                    let reader_options =
+                        BlockfileReaderOptions::new(pls_uuid, prefix_path.to_string());
+                    match blockfile_provider.read::<u32, &[u32]>(reader_options).await {
                         Ok(reader) => Some(reader),
                         Err(e) => return Err(MetadataSegmentError::BlockfileOpenError(*e)),
                     }
@@ -878,18 +896,22 @@ impl MetadataSegmentReader<'_> {
         });
 
         let string_metadata_reader = match segment.file_path.get(STRING_METADATA) {
-            Some(string_metadata_path) => match string_metadata_path.first() {
-                Some(string_metadata_uuid) => {
-                    let string_metadata_uuid = match Uuid::parse_str(string_metadata_uuid) {
+            Some(string_metadata_paths) => match string_metadata_paths.first() {
+                Some(string_metadata_path) => {
+                    let (prefix_path, string_metadata_id) =
+                        Segment::extract_prefix_and_id(string_metadata_path);
+                    let string_metadata_uuid = match Uuid::parse_str(string_metadata_id) {
                         Ok(uuid) => uuid,
                         Err(_) => {
                             return Err(MetadataSegmentError::UuidParseError(
-                                string_metadata_uuid.to_string(),
+                                string_metadata_id.to_string(),
                             ))
                         }
                     };
+                    let reader_options =
+                        BlockfileReaderOptions::new(string_metadata_uuid, prefix_path.to_string());
                     match blockfile_provider
-                        .read::<&str, RoaringBitmap>(&string_metadata_uuid)
+                        .read::<&str, RoaringBitmap>(reader_options)
                         .await
                     {
                         Ok(reader) => Some(reader),
@@ -904,18 +926,22 @@ impl MetadataSegmentReader<'_> {
             string_metadata_reader.map(MetadataIndexReader::new_string);
 
         let bool_metadata_reader = match segment.file_path.get(BOOL_METADATA) {
-            Some(bool_metadata_path) => match bool_metadata_path.first() {
-                Some(bool_metadata_uuid) => {
-                    let bool_metadata_uuid = match Uuid::parse_str(bool_metadata_uuid) {
+            Some(bool_metadata_paths) => match bool_metadata_paths.first() {
+                Some(bool_metadata_path) => {
+                    let (prefix_path, bool_metadata_id) =
+                        Segment::extract_prefix_and_id(bool_metadata_path);
+                    let bool_metadata_uuid = match Uuid::parse_str(bool_metadata_id) {
                         Ok(uuid) => uuid,
                         Err(_) => {
                             return Err(MetadataSegmentError::UuidParseError(
-                                bool_metadata_uuid.to_string(),
+                                bool_metadata_id.to_string(),
                             ))
                         }
                     };
+                    let reader_options =
+                        BlockfileReaderOptions::new(bool_metadata_uuid, prefix_path.to_string());
                     match blockfile_provider
-                        .read::<bool, RoaringBitmap>(&bool_metadata_uuid)
+                        .read::<bool, RoaringBitmap>(reader_options)
                         .await
                     {
                         Ok(reader) => Some(reader),
@@ -928,18 +954,22 @@ impl MetadataSegmentReader<'_> {
         };
         let bool_metadata_index_reader = bool_metadata_reader.map(MetadataIndexReader::new_bool);
         let u32_metadata_reader = match segment.file_path.get(U32_METADATA) {
-            Some(u32_metadata_path) => match u32_metadata_path.first() {
-                Some(u32_metadata_uuid) => {
-                    let u32_metadata_uuid = match Uuid::parse_str(u32_metadata_uuid) {
+            Some(u32_metadata_paths) => match u32_metadata_paths.first() {
+                Some(u32_metadata_path) => {
+                    let (prefix_path, u32_metadata_id) =
+                        Segment::extract_prefix_and_id(u32_metadata_path);
+                    let u32_metadata_uuid = match Uuid::parse_str(u32_metadata_id) {
                         Ok(uuid) => uuid,
                         Err(_) => {
                             return Err(MetadataSegmentError::UuidParseError(
-                                u32_metadata_uuid.to_string(),
+                                u32_metadata_id.to_string(),
                             ))
                         }
                     };
+                    let reader_options =
+                        BlockfileReaderOptions::new(u32_metadata_uuid, prefix_path.to_string());
                     match blockfile_provider
-                        .read::<u32, RoaringBitmap>(&u32_metadata_uuid)
+                        .read::<u32, RoaringBitmap>(reader_options)
                         .await
                     {
                         Ok(reader) => Some(reader),
@@ -952,18 +982,22 @@ impl MetadataSegmentReader<'_> {
         };
         let u32_metadata_index_reader = u32_metadata_reader.map(MetadataIndexReader::new_u32);
         let f32_metadata_reader = match segment.file_path.get(F32_METADATA) {
-            Some(f32_metadata_path) => match f32_metadata_path.first() {
-                Some(f32_metadata_uuid) => {
-                    let f32_metadata_uuid = match Uuid::parse_str(f32_metadata_uuid) {
+            Some(f32_metadata_paths) => match f32_metadata_paths.first() {
+                Some(f32_metadata_path) => {
+                    let (prefix_path, f32_metadata_id) =
+                        Segment::extract_prefix_and_id(f32_metadata_path);
+                    let f32_metadata_uuid = match Uuid::parse_str(f32_metadata_id) {
                         Ok(uuid) => uuid,
                         Err(_) => {
                             return Err(MetadataSegmentError::UuidParseError(
-                                f32_metadata_uuid.to_string(),
+                                f32_metadata_id.to_string(),
                             ))
                         }
                     };
+                    let reader_options =
+                        BlockfileReaderOptions::new(f32_metadata_uuid, prefix_path.to_string());
                     match blockfile_provider
-                        .read::<f32, RoaringBitmap>(&f32_metadata_uuid)
+                        .read::<f32, RoaringBitmap>(reader_options)
                         .await
                     {
                         Ok(reader) => Some(reader),
@@ -1119,6 +1153,9 @@ mod test {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -1438,6 +1475,9 @@ mod test {
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
+                            }
                         }
                     }
                 };
@@ -1696,6 +1736,9 @@ mod test {
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
+                            }
                         }
                     }
                 };
@@ -1922,6 +1965,9 @@ mod test {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
