@@ -645,7 +645,7 @@ impl RootManager {
         if prefix_path.is_empty() {
             return format!("sparse_index/{}", id);
         }
-        format!("{}/sparse_index/{}", prefix_path, id)
+        format!("{}/root/{}", prefix_path, id)
     }
 
     fn should_prefetch(&self, id: &Uuid) -> bool {
