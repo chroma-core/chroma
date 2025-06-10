@@ -12,6 +12,11 @@ on:
         description: 'Property testing preset'
         required: true
         type: string
+      runner:
+        description: 'Runner to test on (string)'
+        required: false
+        default: 'blacksmith-8vcpu-ubuntu-2204'
+        type: string
 
 jobs:
   test-rust-bindings:
@@ -19,19 +24,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
-        platform: [blacksmith-8vcpu-ubuntu-2204, 16core-64gb-windows-latest]
-        test-globs:
+        python: ${{ fromJson(inputs.python_versions) }}
+        test-glob:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
           - "chromadb/test/property/test_cross_version_persist.py"
         include:
-          - test-globs: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
+          - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
             parallelized: true
-          - test-globs: "chromadb/test/property/test_cross_version_persist.py"
+          - test-glob: "chromadb/test/property/test_cross_version_persist.py"
             parallelized: true
 
-    runs-on: ${{ matrix.platform }}
+    runs-on: ${{ inputs.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python
@@ -50,7 +54,7 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
-        run: python -m pytest ${{ matrix.test-globs }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
+        run: python -m pytest ${{ matrix.test-glob }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -61,51 +65,49 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
-        platform: [blacksmith-4vcpu-ubuntu-2204, windows-latest]
-        test-globs: ["--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'",
-                    "chromadb/test/property/test_add.py",
-                    "chromadb/test/property/test_collections.py",
-                    "chromadb/test/property/test_collections_with_database_tenant.py",
-                    "chromadb/test/property/test_cross_version_persist.py",
-                    "chromadb/test/property/test_embeddings.py",
-                    "chromadb/test/property/test_filtering.py",
-                    "chromadb/test/property/test_persist.py",
-                    "chromadb/test/stress"]
-        include:
-          - platform: blacksmith-4vcpu-ubuntu-2204
-            env-file: compose-env.linux
-    runs-on: ${{ matrix.platform }}
+        python: ${{ fromJson(inputs.python_versions) }}
+        test-glob:
+          - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'"
+          - "chromadb/test/property/test_add.py"
+          - "chromadb/test/property/test_collections.py"
+          - "chromadb/test/property/test_collections_with_database_tenant.py"
+          - "chromadb/test/property/test_cross_version_persist.py"
+          - "chromadb/test/property/test_embeddings.py"
+          - "chromadb/test/property/test_filtering.py"
+          - "chromadb/test/property/test_persist.py"
+          - "chromadb/test/stress"
+    runs-on: ${{ inputs.runner }}
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-    - name: Set up Python (${{ matrix.python }})
+    - name: Setup Python (${{ matrix.python }})
       uses: ./.github/actions/python
     - name: Setup Rust
       uses: ./.github/actions/rust
       with:
           github-token: ${{ github.token }}
     - name: Rust Integration Test
-      run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
+      run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
       shell: bash
       env:
-        ENV_FILE: ${{ matrix.env-file }}
+        ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-rust-thin-client:
     strategy:
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
-        platform: [blacksmith-4vcpu-ubuntu-2204, windows-latest]
-        test-globs: ["chromadb/test/property/test_add.py",
-                    "chromadb/test/property/test_collections.py",
-                    "chromadb/test/property/test_collections_with_database_tenant.py",
-                    "chromadb/test/property/test_embeddings.py",
-                    "chromadb/test/property/test_filtering.py"]
-    runs-on: ${{ matrix.platform }}
+        python: ${{ fromJson(inputs.python_versions) }}
+        test-glob:
+          - "chromadb/test/property/test_add.py"
+          - "chromadb/test/property/test_collections.py"
+          - "chromadb/test/property/test_collections_with_database_tenant.py"
+          - "chromadb/test/property/test_embeddings.py"
+          - "chromadb/test/property/test_filtering.py"
+    runs-on: ${{ inputs.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python (${{ matrix.python }})
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
@@ -114,43 +116,51 @@ jobs:
         with:
           github-token: ${{ github.token }}
       - name: Test
-        run: bin/rust-integration-test.sh ${{ matrix.test-globs }}
+        run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
         shell: bash
         env:
           CHROMA_THIN_CLIENT: "1"
-          ENV_FILE: ${{ matrix.env-file }}
+          ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-cluster-rust-frontend:
+    if: ${{ contains(inputs.runner, 'ubuntu') }}
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
-        platform: ["blacksmith-8vcpu-ubuntu-2204"]
-        test-globs: ["chromadb/test/api",
-                    "chromadb/test/api/test_collection.py",
-                    "chromadb/test/api/test_limit_offset.py",
-                    "chromadb/test/property/test_collections.py",
-                    "chromadb/test/property/test_add.py",
-                    "chromadb/test/property/test_filtering.py",
-                    "chromadb/test/property/test_fork.py",
-                    "chromadb/test/property/test_embeddings.py",
-                    "chromadb/test/property/test_collections_with_database_tenant.py",
-                    "chromadb/test/property/test_collections_with_database_tenant_overwrite.py",
-                    "chromadb/test/distributed/test_sanity.py",
-                    "chromadb/test/distributed/test_log_backpressure.py",
-                    "chromadb/test/distributed/test_log_failover.py"]
-    runs-on: ${{ matrix.platform }}
+        python: ${{ fromJson(inputs.python_versions) }}
+        test-glob:
+          - "chromadb/test/api"
+          - "chromadb/test/api/test_collection.py"
+          - "chromadb/test/api/test_limit_offset.py"
+          - "chromadb/test/property/test_collections.py"
+          - "chromadb/test/property/test_add.py"
+          - "chromadb/test/property/test_filtering.py"
+          - "chromadb/test/property/test_fork.py"
+          - "chromadb/test/property/test_embeddings.py"
+          - "chromadb/test/property/test_collections_with_database_tenant.py"
+          - "chromadb/test/property/test_collections_with_database_tenant_overwrite.py"
+          - "chromadb/test/distributed/test_sanity.py"
+          - "chromadb/test/distributed/test_log_backpressure.py"
+          - "chromadb/test/distributed/test_log_failover.py"
+        include:
+          - test-glob: "chromadb/test/property/test_add.py"
+            parallelized: true
+          - test-glob: "chromadb/test/property/test_embeddings.py"
+            parallelized: true
+    runs-on: blacksmith-8vcpu-ubuntu-2204
     # OIDC token auth for AWS
     permissions:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/python
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python (${{ matrix.python }})
+        uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
-      - name: Set up Docker
+      - name: Setup Docker
         uses: ./.github/actions/docker
         with:
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -158,7 +168,7 @@ jobs:
       - name: Start Tilt services
         uses: ./.github/actions/tilt
       - name: Test
-        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-globs }}" --durations 10'
+        run: bin/cluster-test.sh bash -c 'python -m pytest "${{ matrix.test-glob }}" ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} --durations 10'
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -167,7 +177,7 @@ jobs:
       - name: Compute artifact name
         if: always()
         id: compute-artifact-name
-        run: echo "artifact_name=cluster_logs_rust_frontend_$(basename "${{ matrix.test-globs }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+        run: echo "artifact_name=cluster_logs_rust_frontend_$(basename "${{ matrix.test-glob }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
@@ -175,6 +185,7 @@ jobs:
           artifact-name: ${{ steps.compute-artifact-name.outputs.artifact_name }}
 
   merge-cluster-logs:
+    if: ${{ contains(inputs.runner, 'ubuntu') }}
     runs-on: blacksmith-4vcpu-ubuntu-2204
     needs: test-cluster-rust-frontend
     steps:
@@ -189,13 +200,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
-        platform: [blacksmith-16vcpu-ubuntu-2204, 16core-64gb-windows-latest]
-        test-globs: ["chromadb/test/stress"]
-    runs-on: ${{ matrix.platform }}
+        python: ${{ fromJson(inputs.python_versions) }}
+    runs-on: ${{ inputs.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup Python
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python (${{ matrix.python }})
         uses: ./.github/actions/python
         with:
           python-version: ${{ matrix.python }}
@@ -211,7 +221,7 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
-        run: python -m pytest ${{ matrix.test-globs }} --durations 10
+        run: python -m pytest chromadb/test/stress --durations 10
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
@@ -221,19 +231,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ${{fromJson(inputs.python_versions)}}
-        platform: [blacksmith-4vcpu-ubuntu-2204, windows-latest]
-        test-globs: ["chromadb/test/test_cli.py"]
-        include:
-          - platform: blacksmith-4vcpu-ubuntu-2204
-            env-file: compose-env.linux
-          - platform: windows-latest
-            env-file: compose-env.windows
-    runs-on: ${{ matrix.platform }}
+        python: ${{ fromJson(inputs.python_versions) }}
+    runs-on: ${{ inputs.runner }}
     steps:
     - name: Checkout
       uses: actions/checkout@v4
-    - name: Set up Python (${{ matrix.python }})
+    - name: Setup Python (${{ matrix.python }})
       uses: ./.github/actions/python
     - name: Setup Rust
       uses: ./.github/actions/rust
@@ -247,8 +250,41 @@ jobs:
       shell: bash
       run: pip install --no-index --find-links target/wheels/ chromadb
     - name: Integration Test
-      run: python -m pytest ${{ matrix.test-globs }}
+      run: python -m pytest "chromadb/test/test_cli.py"
       shell: bash
       env:
-        ENV_FILE: ${{ matrix.env-file }}
+        ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+
+  test-windows-smoke:
+    # only run windows smoke tests when the runner isn't already windows
+    if: ${{ !contains(inputs.runner, 'windows') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ${{ fromJson(inputs.python_versions) }}
+    runs-on: 16core-64gb-windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: ./.github/actions/python
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Build Rust bindings
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+      - name: Install built wheel
+        shell: bash
+        run: pip install --no-index --find-links target/wheels/ chromadb
+      - name: Run tests
+        run: python -m pytest chromadb/test/test_api.py -n auto --dist worksteal -v --color=yes --durations 10
+        shell: bash
+        env:
+          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
+          RUST_BACKTRACE: 1

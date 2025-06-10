@@ -33,7 +33,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Set up Python
-        uses: useblacksmith/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.9'
       - name: Install setuptools_scm
@@ -42,12 +42,20 @@ jobs:
         id: version
         run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
 
-  python-tests:
+  python-tests-linux:
     uses: ./.github/workflows/_python-tests.yml
     secrets: inherit
     with:
       python_versions: '["3.9", "3.10", "3.11", "3.12"]'
       property_testing_preset: 'normal'
+
+  python-tests-windows:
+    uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
+    with:
+      python_versions: '["3.9", "3.10", "3.11", "3.12"]'
+      property_testing_preset: 'normal'
+      runner: '16core-64gb-windows-latest'
 
   javascript-client-tests:
     name: JavaScript client tests
@@ -68,7 +76,8 @@ jobs:
     needs:
       - check-tag
       - get-version
-      - python-tests
+      - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
@@ -83,7 +92,8 @@ jobs:
     needs:
       - check-tag
       - get-version
-      - python-tests
+      - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
@@ -99,7 +109,8 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2204
     needs:
       - check-tag
-      - python-tests
+      - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
@@ -234,7 +245,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: useblacksmith/setup-node@v5
+      - uses: actions/setup-node@v4
         with:
           node-version: "18.x"
           registry-url: "https://registry.npmjs.org"

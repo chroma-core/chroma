@@ -118,6 +118,7 @@ impl Snapshot {
         }
         for frag in self.fragments.iter() {
             calculated_setsum += frag.setsum;
+            bytes_read += frag.num_bytes;
         }
         if calculated_setsum != self.setsum {
             return Err(ScrubError::CorruptManifest{

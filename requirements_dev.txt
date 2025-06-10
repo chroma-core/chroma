@@ -14,6 +14,7 @@ protobuf==5.28.0 # Later version not compatible with opentelemetry 1.27.0
 psutil
 pytest
 pytest-asyncio
+pytest-rerunfailures
 pytest-xdist
 setuptools_scm
 types-protobuf

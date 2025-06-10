@@ -9,13 +9,13 @@ use chroma_segment::{
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
-use chroma_types::{MaterializedLogOperation, Segment, SignedRoaringBitmap};
+use chroma_types::{
+    operator::{Knn, KnnOutput, RecordDistance},
+    MaterializedLogOperation, Segment, SignedRoaringBitmap,
+};
 use thiserror::Error;
 
-use super::{
-    fetch_log::{FetchLogError, FetchLogOutput},
-    knn::{KnnOperator, RecordDistance},
-};
+use super::fetch_log::{FetchLogError, FetchLogOutput};
 
 #[derive(Clone, Debug)]
 pub struct KnnLogInput {
@@ -24,11 +24,6 @@ pub struct KnnLogInput {
     pub record_segment: Segment,
     pub log_offset_ids: SignedRoaringBitmap,
     pub distance_function: DistanceFunction,
-}
-
-#[derive(Debug)]
-pub struct KnnLogOutput {
-    pub record_distances: Vec<RecordDistance>,
 }
 
 #[derive(Error, Debug)]
@@ -52,10 +47,10 @@ impl ChromaError for KnnLogError {
 }
 
 #[async_trait]
-impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
+impl Operator<KnnLogInput, KnnOutput> for Knn {
     type Error = KnnLogError;
 
-    async fn run(&self, input: &KnnLogInput) -> Result<KnnLogOutput, KnnLogError> {
+    async fn run(&self, input: &KnnLogInput) -> Result<KnnOutput, KnnLogError> {
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
@@ -118,8 +113,8 @@ impl Operator<KnnLogInput, KnnLogOutput> for KnnOperator {
                 }
             }
         }
-        Ok(KnnLogOutput {
-            record_distances: max_heap.into_sorted_vec(),
+        Ok(KnnOutput {
+            distances: max_heap.into_sorted_vec(),
         })
     }
 }
@@ -132,13 +127,11 @@ mod tests {
     };
     use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
-    use chroma_types::SignedRoaringBitmap;
-
-    use crate::execution::operators::knn::KnnOperator;
+    use chroma_types::{operator::Knn, SignedRoaringBitmap};
 
     use super::KnnLogInput;
 
-    /// The unit tests for `KnnLogOperator` uses 100 log records
+    /// The unit tests for `Knn` log operator uses 100 log records
     /// with random embeddings
     fn setup_knn_log_input(
         metric: DistanceFunction,
@@ -159,7 +152,7 @@ mod tests {
         let knn_log_input =
             setup_knn_log_input(DistanceFunction::Euclidean, SignedRoaringBitmap::full());
 
-        let knn_operator = KnnOperator {
+        let knn_operator = Knn {
             embedding: random_embedding(TEST_EMBEDDING_DIMENSION),
             fetch: 6,
         };
@@ -185,9 +178,9 @@ mod tests {
             .await
             .expect("KnnLogOperator should not fail");
 
-        assert_eq!(knn_log_output.record_distances.len(), 6);
+        assert_eq!(knn_log_output.distances.len(), 6);
         assert!(knn_log_output
-            .record_distances
+            .distances
             .iter()
             .zip(brute_force_distances)
             .all(|(record, distance)| record.measure == distance));
@@ -198,7 +191,7 @@ mod tests {
         let knn_log_input =
             setup_knn_log_input(DistanceFunction::Euclidean, SignedRoaringBitmap::full());
 
-        let knn_operator = KnnOperator {
+        let knn_operator = Knn {
             embedding: random_embedding(TEST_EMBEDDING_DIMENSION),
             fetch: 200,
         };
@@ -224,9 +217,9 @@ mod tests {
             .await
             .expect("KnnLogOperator should not fail");
 
-        assert_eq!(knn_log_output.record_distances.len(), 100);
+        assert_eq!(knn_log_output.distances.len(), 100);
         assert!(knn_log_output
-            .record_distances
+            .distances
             .iter()
             .zip(brute_force_distances)
             .all(|(record, distance)| record.measure == distance));
@@ -241,7 +234,7 @@ mod tests {
             ),
         );
 
-        let knn_operator = KnnOperator {
+        let knn_operator = Knn {
             embedding: random_embedding(TEST_EMBEDDING_DIMENSION),
             fetch: 6,
         };
@@ -271,9 +264,9 @@ mod tests {
             .await
             .expect("KnnLogOperator should not fail");
 
-        assert_eq!(knn_log_output.record_distances.len(), 6);
+        assert_eq!(knn_log_output.distances.len(), 6);
         assert!(knn_log_output
-            .record_distances
+            .distances
             .iter()
             .zip(brute_force_distances)
             .all(|(record, distance)| { record.measure == distance }));

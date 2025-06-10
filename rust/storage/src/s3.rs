@@ -649,8 +649,22 @@ impl S3Storage {
 
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object in S3");
-
         // S3 doesn't have a native rename operation, so we need to copy and delete
+        self.copy(src_key, dst_key).await?;
+        match self.delete(src_key).await {
+            Ok(_) => {
+                tracing::info!(src = %src_key, dst = %dst_key, "Successfully renamed object");
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(error = %e, src = %src_key, "Failed to delete source object after copy");
+                Err(e)
+            }
+        }
+    }
+
+    pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        tracing::info!(src = %src_key, dst = %dst_key, "Copying object in S3");
         match self
             .client
             .copy_object()
@@ -660,20 +674,7 @@ impl S3Storage {
             .send()
             .await
         {
-            Ok(_) => {
-                tracing::info!(src = %src_key, dst = %dst_key, "Successfully copied object");
-                // After successful copy, delete the original
-                match self.delete(src_key).await {
-                    Ok(_) => {
-                        tracing::info!(src = %src_key, dst = %dst_key, "Successfully renamed object");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, src = %src_key, "Failed to delete source object after copy");
-                        Err(e)
-                    }
-                }
-            }
+            Ok(_) => Ok(()),
             Err(e) => {
                 tracing::error!(error = %e, src = %src_key, dst = %dst_key, "Failed to copy object");
                 Err(StorageError::Generic {
@@ -1105,5 +1106,26 @@ mod tests {
         assert!(!default.if_not_exists);
         assert_eq!(default.if_match, None);
         assert_eq!(default.priority, StorageRequestPriority::P0);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_copy() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+        storage
+            .oneshot_upload(
+                "test/00",
+                9,
+                |_| Box::pin(ready(Ok(ByteStream::from(Bytes::from("ABC123XYZ"))))) as _,
+                PutOptions {
+                    if_not_exists: true,
+                    if_match: None,
+                    priority: StorageRequestPriority::P0,
+                },
+            )
+            .await
+            .unwrap();
+        storage.copy("test/00", "test2/00").await.unwrap();
+        let bytes = storage.get("test2/00").await.unwrap();
+        assert_eq!("ABC123XYZ".as_bytes(), bytes.as_slice());
     }
 }

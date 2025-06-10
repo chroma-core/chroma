@@ -5,17 +5,20 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::CollectionAndSegments;
+use chroma_types::{
+    operator::{Filter, GetResult, Limit, Projection, ProjectionOutput},
+    CollectionAndSegments,
+};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-    filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
-    limit::{LimitError, LimitInput, LimitOperator, LimitOutput},
+    filter::{FilterError, FilterInput, FilterOutput},
+    limit::{LimitError, LimitInput, LimitOutput},
     prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
-    projection::{ProjectionError, ProjectionInput, ProjectionOperator, ProjectionOutput},
+    projection::{ProjectionError, ProjectionInput},
 };
 
 #[derive(Error, Debug)]
@@ -65,10 +68,6 @@ where
         }
     }
 }
-
-type GetOutput = (ProjectionOutput, u64);
-
-type GetResult = Result<GetOutput, GetError>;
 
 /// The `GetOrchestrator` chains a sequence of operators in sequence to evaluate
 /// a `<collection>.get(...)` query from the user
@@ -133,12 +132,12 @@ pub struct GetOrchestrator {
     fetched_logs: Option<FetchLogOutput>,
 
     // Pipelined operators
-    filter: FilterOperator,
-    limit: LimitOperator,
-    projection: ProjectionOperator,
+    filter: Filter,
+    limit: Limit,
+    projection: Projection,
 
     // Result channel
-    result_channel: Option<Sender<GetResult>>,
+    result_channel: Option<Sender<Result<GetResult, GetError>>>,
 }
 
 impl GetOrchestrator {
@@ -149,9 +148,9 @@ impl GetOrchestrator {
         queue: usize,
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
-        filter: FilterOperator,
-        limit: LimitOperator,
-        projection: ProjectionOperator,
+        filter: Filter,
+        limit: Limit,
+        projection: Projection,
     ) -> Self {
         Self {
             blockfile_provider,
@@ -170,7 +169,7 @@ impl GetOrchestrator {
 
 #[async_trait]
 impl Orchestrator for GetOrchestrator {
-    type Output = GetOutput;
+    type Output = GetResult;
     type Error = GetError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
@@ -191,11 +190,11 @@ impl Orchestrator for GetOrchestrator {
         self.queue
     }
 
-    fn set_result_channel(&mut self, sender: Sender<GetResult>) {
+    fn set_result_channel(&mut self, sender: Sender<Result<GetResult, GetError>>) {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<GetResult> {
+    fn take_result_channel(&mut self) -> Sender<Result<GetResult, GetError>> {
         self.result_channel
             .take()
             .expect("The result channel should be set before take")
@@ -332,7 +331,7 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
             None => return,
         };
 
-        let fetch_log_size_bytes = self
+        let pulled_log_bytes = self
             .fetched_logs
             .as_ref()
             .expect("FetchLogOperator should have finished already")
@@ -340,7 +339,13 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
             .map(|(l, _)| l.size_bytes())
             .sum();
 
-        self.terminate_with_result(Ok((output, fetch_log_size_bytes)), ctx)
-            .await;
+        self.terminate_with_result(
+            Ok(GetResult {
+                pulled_log_bytes,
+                result: output,
+            }),
+            ctx,
+        )
+        .await;
     }
 }

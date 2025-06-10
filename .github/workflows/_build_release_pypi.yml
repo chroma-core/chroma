@@ -78,20 +78,11 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # On Windows, we want to set up Python with the correct architecture
-      - name: Set up Python on Windows
-        if: ${{ matrix.platform.os == 'windows' }}
-        # Blacksmith does not currently support windows, so we use the official action
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: 3.x
           architecture: ${{ matrix.platform.target }}
-
-      - name: Set up Python on non-Windows
-        if: ${{ matrix.platform.os != 'windows' }}
-        uses: useblacksmith/setup-python@v6
-        with:
-          python-version: 3.x
 
       - name: Set version in pyproject.toml
         shell: bash
@@ -118,6 +109,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: ${{ matrix.platform.os == 'linux' && '--zig' || '' }} --release --out dist
           container: "off"
+          sccache: true
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
