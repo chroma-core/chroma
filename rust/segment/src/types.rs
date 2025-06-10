@@ -9,6 +9,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
+use uuid::Uuid;
 
 use crate::distributed_spann::{SpannSegmentFlusher, SpannSegmentWriter};
 
@@ -1039,6 +1040,13 @@ pub enum ChromaSegmentFlusher {
 }
 
 impl ChromaSegmentFlusher {
+    pub fn flush_key(prefix_path: &str, id: &Uuid) -> String {
+        // For legacy collections, prefix_path will be empty.
+        if prefix_path.is_empty() {
+            return id.to_string();
+        }
+        format!("{}/{}", prefix_path, id)
+    }
     pub fn get_id(&self) -> SegmentUuid {
         match self {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.id,

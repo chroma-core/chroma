@@ -144,7 +144,10 @@ impl Segment {
     }
 
     pub fn construct_prefix_path(&self, tenant: &str, database_id: &DatabaseUuid) -> String {
-        format!("{}/{}/{}/{}", tenant, database_id, self.collection, self.id)
+        format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}",
+            tenant, database_id, self.collection, self.id
+        )
     }
 }
 
