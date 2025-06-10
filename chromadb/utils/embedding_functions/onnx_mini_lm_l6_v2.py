@@ -241,6 +241,13 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         so.log_severity_level = 3
         so.graph_optimization_level = self.ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
+        if (
+            self._preferred_providers
+            and "CoreMLExecutionProvider" in self._preferred_providers
+        ):
+            # remove CoreMLExecutionProvider from the list, it is not as well optimized as CPU.
+            self._preferred_providers.remove("CoreMLExecutionProvider")
+
         return self.ort.InferenceSession(
             os.path.join(self.DOWNLOAD_PATH, self.EXTRACTED_FOLDER_NAME, "model.onnx"),
             # Since 1.9 onnyx runtime requires providers to be specified when there are multiple available

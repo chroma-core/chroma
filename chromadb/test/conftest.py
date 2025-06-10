@@ -381,6 +381,7 @@ def fastapi_ssl() -> Generator[System, None, None]:
     )
 
 
+@pytest.fixture()
 def basic_http_client() -> Generator[System, None, None]:
     port = 8000
     host = "localhost"
@@ -548,6 +549,7 @@ users:
             yield item
 
 
+@pytest.fixture()
 def integration() -> Generator[System, None, None]:
     """Fixture generator for returning a client configured via environmenet
     variables, intended for externally configured integration tests
@@ -561,6 +563,7 @@ def integration() -> Generator[System, None, None]:
     system.stop()
 
 
+@pytest.fixture()
 def async_integration() -> Generator[System, None, None]:
     """Fixture generator for returning a client configured via environmenet
     variables, intended for externally configured integration tests
@@ -574,7 +577,8 @@ def async_integration() -> Generator[System, None, None]:
     system.stop()
 
 
-def sqlite_fixture() -> Generator[System, None, None]:
+@pytest.fixture(scope="function")
+def python_sqlite_ephemeral() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using in-memory Sqlite"""
     settings = Settings(
         chroma_api_impl="chromadb.api.segment.SegmentAPI",
@@ -591,7 +595,8 @@ def sqlite_fixture() -> Generator[System, None, None]:
     system.stop()
 
 
-def sqlite_persistent_fixture() -> Generator[System, None, None]:
+@pytest.fixture(scope="function")
+def python_sqlite_persistent() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
@@ -622,7 +627,8 @@ def sqlite_persistent_fixture() -> Generator[System, None, None]:
             raise e
 
 
-def rust_ephemeral_fixture() -> Generator[System, None, None]:
+@pytest.fixture(scope="function")
+def rust_sqlite_ephemeral() -> Generator[System, None, None]:
     """Fixture generator for system using ephemeral Rust bindings"""
     settings = Settings(
         chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
@@ -640,7 +646,8 @@ def rust_ephemeral_fixture() -> Generator[System, None, None]:
     system.stop()
 
 
-def rust_persistent_fixture() -> Generator[System, None, None]:
+@pytest.fixture(scope="function")
+def rust_sqlite_persistent() -> Generator[System, None, None]:
     """Fixture generator for system using Rust bindings"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
@@ -660,53 +667,54 @@ def rust_persistent_fixture() -> Generator[System, None, None]:
 
 
 @pytest.fixture(
-    params=[rust_ephemeral_fixture]
+    params=["rust_sqlite_ephemeral"]
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
-    else [sqlite_fixture]
+    else ["python_sqlite_ephemeral"]
 )
 def sqlite(request: pytest.FixtureRequest) -> Generator[System, None, None]:
-    yield from request.param()
+    return request.getfixturevalue(request.param)
 
 
 @pytest.fixture(
-    params=[rust_persistent_fixture]
+    params=["rust_sqlite_persistent"]
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
-    else [sqlite_persistent_fixture]
+    else ["python_sqlite_persistent"]
 )
 def sqlite_persistent(request: pytest.FixtureRequest) -> Generator[System, None, None]:
-    yield from request.param()
+    return request.getfixturevalue(request.param)
 
 
-def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
+def filtered_fixture_names() -> List[str]:
     fixtures = [
-        fastapi,
-        async_fastapi,
-        fastapi_persistent,
-        sqlite_fixture,
-        sqlite_persistent_fixture,
+        "fastapi",
+        "async_fastapi",
+        "fastapi_persistent",
+        "sqlite_fixture",
+        "sqlite_persistent",
     ]
+
     if "CHROMA_INTEGRATION_TEST" in os.environ:
-        fixtures.append(integration)
-        fixtures.append(async_integration)
+        fixtures.append("integration")
+        fixtures.append("async_integration")
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
-        fixtures = [integration, async_integration]
+        fixtures = ["integration", "async_integration"]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
-        fixtures = [basic_http_client]
+        fixtures = ["basic_http_client"]
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-        fixtures = [rust_ephemeral_fixture, rust_persistent_fixture]
+        fixtures = ["rust_sqlite_ephemeral", "rust_sqlite_persistent"]
     return fixtures
 
 
-def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
+def filtered_http_server_fixture_names() -> List[str]:
     fixtures = [
         fixture
-        for fixture in system_fixtures()
+        for fixture in filtered_fixture_names()
         if fixture
         not in [
-            sqlite_fixture,
-            sqlite_persistent_fixture,
-            rust_ephemeral_fixture,
-            rust_persistent_fixture,
+            "python_sqlite_ephemeral",
+            "python_sqlite_persistent",
+            "rust_sqlite_ephemeral",
+            "rust_sqlite_persistent",
         ]
     ]
     return fixtures
@@ -758,16 +766,16 @@ def system_authn_rbac_authz(
     yield from request.param()
 
 
-@pytest.fixture(scope="module", params=system_http_server_fixtures())
+@pytest.fixture(params=filtered_http_server_fixture_names())
 def system_http_server(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
-    yield from request.param()
+    return request.getfixturevalue(request.param)
 
 
-@pytest.fixture(scope="module", params=system_fixtures())
+@pytest.fixture(scope="function", params=filtered_fixture_names())
 def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield from request.param()
+    return request.getfixturevalue(request.param)
 
 
 @pytest.fixture(scope="module", params=system_fixtures_ssl())
@@ -850,18 +858,26 @@ class ClientFactories:
             self._system.settings.chroma_api_impl
             == "chromadb.api.async_fastapi.AsyncFastAPI"
         ):
-            return cast(AdminClient, AsyncAdminClientSync(*args, **kwargs))
+            client = cast(AdminClient, AsyncAdminClientSync(*args, **kwargs))
+            self._created_clients.append(client)
+            return client
 
-        return AdminClient(*args, **kwargs)
+        client = AdminClient(*args, **kwargs)
+        self._created_clients.append(client)
+        return client
 
     def create_admin_client_from_system(self) -> AdminClient:
         if (
             self._system.settings.chroma_api_impl
             == "chromadb.api.async_fastapi.AsyncFastAPI"
         ):
-            return cast(AdminClient, AsyncAdminClientSync.from_system(self._system))
+            client = cast(AdminClient, AsyncAdminClientSync.from_system(self._system))
+            self._created_clients.append(client)
+            return client
 
-        return AdminClient.from_system(self._system)
+        client = AdminClient.from_system(self._system)
+        self._created_clients.append(client)
+        return client
 
 
 @pytest.fixture(scope="function")

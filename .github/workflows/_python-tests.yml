@@ -144,7 +144,7 @@ jobs:
           - "chromadb/test/distributed/test_log_backpressure.py"
           - "chromadb/test/distributed/test_log_failover.py"
         include:
-          - test-glob: "chromadb/test/distributed/test_log_backpressure.py"
+          - test-glob: "chromadb/test/property/test_add.py"
             parallelized: true
           - test-glob: "chromadb/test/property/test_embeddings.py"
             parallelized: true
