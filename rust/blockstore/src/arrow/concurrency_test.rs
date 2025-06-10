@@ -30,7 +30,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let prefix_path = String::from("block/");
+            let prefix_path = String::from("");
             let writer = future::block_on(
                 blockfile_provider.write::<&str, u32>(BlockfileWriterOptions::new(prefix_path)),
             )
@@ -106,7 +106,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let prefix_path = String::from("block/");
+            let prefix_path = String::from("");
             let reader = future::block_on(async {
                 let writer = blockfile_provider
                     .write::<&str, u32>(BlockfileWriterOptions::new(prefix_path))

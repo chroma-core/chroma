@@ -537,7 +537,7 @@ impl SpannIndexWriter {
         blockfile_provider: &BlockfileProvider,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
         // TODO(Sanket-temp): Change this suitably
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let mut bf_options = BlockfileWriterOptions::new(prefix_path);
         bf_options = bf_options.unordered_mutations();
         bf_options = bf_options.fork(*blockfile_id);
@@ -561,7 +561,7 @@ impl SpannIndexWriter {
         blockfile_provider: &BlockfileProvider,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
         // TODO(Sanket-temp): Change this suitably
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let mut bf_options = BlockfileWriterOptions::new(prefix_path);
         bf_options = bf_options.unordered_mutations();
         match blockfile_provider
@@ -2162,7 +2162,7 @@ impl SpannIndexWriter {
             self.collection_id.to_string(),
         )];
         // TODO(Sanket-temp): Change this suitably
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let pl_flusher = {
             let stopwatch = Stopwatch::new(&self.metrics.pl_commit_latency, attribute);
             let pl_writer_clone = self.posting_list_writer.lock().await.clone();
