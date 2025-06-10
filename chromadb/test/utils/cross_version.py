@@ -69,6 +69,7 @@ def install(pkg: str, path: str, dep_overrides: Dict[str, str]) -> int:
         command.append("--no-binary=chroma-hnswlib")
 
     command.append(f"--target={path}")
+    command.append("--isolated")
 
     print(f"Installing chromadb version {pkg} to {path}")
     return subprocess.check_call(command)
