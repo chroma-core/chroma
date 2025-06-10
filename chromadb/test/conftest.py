@@ -43,6 +43,7 @@ import numpy as np
 from unittest.mock import MagicMock
 from pytest import MonkeyPatch
 from chromadb.api.types import Documents, Embeddings
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -890,6 +891,18 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
         client = factories._created_clients.pop()
         client.clear_system_cache()
         del client
+
+
+def create_isolated_database(client: ClientAPI) -> None:
+    """Create an isolated database for a test and updates the client to use it."""
+    admin_settings = client.get_settings()
+    if admin_settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
+        admin_settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
+
+    admin = AdminClient(admin_settings)
+    database = "test_" + str(uuid.uuid4())
+    admin.create_database(database)
+    client.set_database(database)
 
 
 @pytest.fixture(scope="function")
