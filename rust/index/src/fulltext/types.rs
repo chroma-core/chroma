@@ -285,6 +285,10 @@ impl FullTextIndexFlusher {
     pub fn pls_id(&self) -> Uuid {
         self.posting_lists_blockfile_flusher.id()
     }
+
+    pub fn prefix_path(&self) -> String {
+        self.posting_lists_blockfile_flusher.prefix_path()
+    }
 }
 
 #[derive(Clone)]
