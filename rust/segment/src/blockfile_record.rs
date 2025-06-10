@@ -599,6 +599,7 @@ impl Debug for RecordSegmentFlusher {
 
 impl RecordSegmentFlusher {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        let prefix_path = self.user_id_to_id_flusher.prefix_path();
         let user_id_to_id_bf_id = self.user_id_to_id_flusher.id();
         let id_to_user_id_bf_id = self.id_to_user_id_flusher.id();
         let id_to_data_bf_id = self.id_to_data_flusher.id();
@@ -614,7 +615,11 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     USER_ID_TO_OFFSET_ID.to_string(),
-                    vec![user_id_to_id_bf_id.to_string()],
+                    vec![format!(
+                        "{}/{}",
+                        prefix_path.clone(),
+                        user_id_to_id_bf_id.to_string()
+                    )],
                 );
             }
             Err(e) => {
@@ -626,7 +631,11 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_USER_ID.to_string(),
-                    vec![id_to_user_id_bf_id.to_string()],
+                    vec![format!(
+                        "{}/{}",
+                        prefix_path.clone(),
+                        id_to_user_id_bf_id.to_string()
+                    )],
                 );
             }
             Err(e) => {
@@ -638,7 +647,11 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_DATA.to_string(),
-                    vec![id_to_data_bf_id.to_string()],
+                    vec![format!(
+                        "{}/{}",
+                        prefix_path.clone(),
+                        id_to_data_bf_id.to_string()
+                    )],
                 );
             }
             Err(e) => {
@@ -650,7 +663,11 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     MAX_OFFSET_ID.to_string(),
-                    vec![max_offset_id_bf_id.to_string()],
+                    vec![format!(
+                        "{}/{}",
+                        prefix_path.clone(),
+                        max_offset_id_bf_id.to_string()
+                    )],
                 );
             }
             Err(e) => {
