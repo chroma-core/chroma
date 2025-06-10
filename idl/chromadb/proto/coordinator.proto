@@ -198,9 +198,9 @@ message GetCollectionsResponse {
 
 message GetCollectionByResourceNameRequest {
   string id = 1;
-  optional string tenant_resource_name = 2;
-  optional string database = 3;
-  optional string name = 4;
+  string tenant_resource_name = 2;
+  string database = 3;
+  string name = 4;
 }
 
 message CountCollectionsRequest {
@@ -293,10 +293,7 @@ message SetTenantResourceNameRequest {
   string resource_name = 2;
 }
 
-message SetTenantResourceNameResponse {
-  reserved 1;
-  reserved "status";
-}
+message SetTenantResourceNameResponse {}
 
 message FlushSegmentCompactionInfo {
   string segment_id = 1;

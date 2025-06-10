@@ -4,7 +4,7 @@ import "github.com/chroma-core/chroma/go/pkg/types"
 
 type Tenant struct {
 	Name         string
-	ResourceName *string
+	ResourceName *string // Represents a human readable, globally unique identifier for the tenant.
 }
 
 type CreateTenant struct {
