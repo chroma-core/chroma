@@ -106,7 +106,7 @@ impl DistributedHNSWSegmentWriter {
         // we can introduce a state in the segment metadata for this
         if !segment.file_path.is_empty() {
             // Check if its in the providers cache, if not load the index from the files
-            let index_id = match &segment.file_path.get(HNSW_INDEX) {
+            let index_path = match &segment.file_path.get(HNSW_INDEX) {
                 None => {
                     return Err(Box::new(
                         DistributedHNSWSegmentFromSegmentError::NoHnswFileFound,
@@ -123,7 +123,8 @@ impl DistributedHNSWSegmentWriter {
                 }
             };
 
-            let index_uuid = match Uuid::parse_str(index_id.as_str()) {
+            let (prefix_path, index_id) = Segment::extract_prefix_and_id(index_path);
+            let index_uuid = match Uuid::parse_str(index_id) {
                 Ok(uuid) => uuid,
                 Err(_) => {
                     return Err(Box::new(
@@ -140,6 +141,7 @@ impl DistributedHNSWSegmentWriter {
                     dimensionality as i32,
                     hnsw_configuration.space.clone().into(),
                     hnsw_configuration.ef_search,
+                    prefix_path,
                 )
                 .await
             {
@@ -157,6 +159,8 @@ impl DistributedHNSWSegmentWriter {
                 segment.id,
             )))
         } else {
+            let prefix_path =
+                segment.construct_prefix_path(&collection.tenant, &collection.database_id);
             let index = match hnsw_index_provider
                 .create(
                     &segment.collection,
@@ -165,6 +169,7 @@ impl DistributedHNSWSegmentWriter {
                     hnsw_configuration.ef_search,
                     dimensionality as i32,
                     hnsw_configuration.space.clone().into(),
+                    &prefix_path,
                 )
                 .await
             {
@@ -203,18 +208,22 @@ impl DistributedHNSWSegmentWriter {
                     let embedding = record.merged_embeddings_ref();
 
                     let mut index = self.index.inner.upgradable_read();
-                    let index_len = index.len_with_deleted();
-                    let index_capacity = index.capacity();
+                    let index_len = index.hnsw_index.len_with_deleted();
+                    let index_capacity = index.hnsw_index.capacity();
                     if index_len + 1 > index_capacity {
                         index.with_upgraded(|index| {
                             // Bump allocation by 2x
                             index
+                                .hnsw_index
                                 .resize(index_capacity * 2)
                                 .map(|_| ApplyMaterializedLogError::Allocation)
                         })?;
                     }
 
-                    match index.add(record.get_offset_id() as usize, embedding) {
+                    match index
+                        .hnsw_index
+                        .add(record.get_offset_id() as usize, embedding)
+                    {
                         Ok(_) => {}
                         Err(e) => {
                             return Err(ApplyMaterializedLogError::HnswIndex(e));
@@ -230,6 +239,7 @@ impl DistributedHNSWSegmentWriter {
                         .index
                         .inner
                         .read()
+                        .hnsw_index
                         .delete(record.get_offset_id() as usize)
                     {
                         Ok(_) => {}
@@ -255,18 +265,27 @@ impl DistributedHNSWSegmentWriter {
     }
 
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
-        let hnsw_index_id = self.index.inner.read().id;
-        match self.hnsw_index_provider.flush(&hnsw_index_id).await {
+        let (hnsw_index_id, prefix_path) = {
+            let read_guard = self.index.inner.read();
+            (read_guard.hnsw_index.id, read_guard.prefix_path.clone())
+        };
+        match self
+            .hnsw_index_provider
+            .flush(&prefix_path, &hnsw_index_id)
+            .await
+        {
             Ok(_) => {}
             Err(e) => return Err(e),
         }
+        // TODO(Sanket-temp): Use path prefix here as well so that can register
+        // with sysdb correctly.
         let mut flushed_files = HashMap::new();
         flushed_files.insert(HNSW_INDEX.to_string(), vec![hnsw_index_id.to_string()]);
         Ok(flushed_files)
     }
 
     pub fn index_uuid(&self) -> IndexUuid {
-        self.index.inner.read().id
+        self.index.inner.read().hnsw_index.id
     }
 }
 
@@ -307,7 +326,7 @@ impl DistributedHNSWSegmentReader {
         // we can introduce a state in the segment metadata for this
         if !segment.file_path.is_empty() {
             // Check if its in the providers cache, if not load the index from the files
-            let index_id = match &segment.file_path.get(HNSW_INDEX) {
+            let index_path = match &segment.file_path.get(HNSW_INDEX) {
                 None => {
                     return Err(Box::new(
                         DistributedHNSWSegmentFromSegmentError::NoHnswFileFound,
@@ -324,7 +343,8 @@ impl DistributedHNSWSegmentReader {
                 }
             };
 
-            let index_uuid = match Uuid::parse_str(index_id.as_str()) {
+            let (prefix_path, index_id) = Segment::extract_prefix_and_id(index_path);
+            let index_uuid = match Uuid::parse_str(index_id) {
                 Ok(uuid) => uuid,
                 Err(_) => {
                     return Err(Box::new(
@@ -340,6 +360,7 @@ impl DistributedHNSWSegmentReader {
                     dimensionality as i32,
                     hnsw_configuration.space.clone().into(),
                     hnsw_configuration.ef_search,
+                    prefix_path,
                 )
                 .await
             {
@@ -369,7 +390,9 @@ impl DistributedHNSWSegmentReader {
         disallowd_ids: &[usize],
     ) -> Result<(Vec<usize>, Vec<f32>), Box<dyn ChromaError>> {
         let index = self.index.inner.read();
-        index.query(vector, k, allowed_ids, disallowd_ids)
+        index
+            .hnsw_index
+            .query(vector, k, allowed_ids, disallowd_ids)
     }
 }
 

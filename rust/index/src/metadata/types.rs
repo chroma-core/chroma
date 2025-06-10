@@ -702,7 +702,10 @@ impl<'me> MetadataIndexReader<'me> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
+    use chroma_blockstore::{
+        arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider,
+        BlockfileWriterOptions,
+    };
 
     #[tokio::test]
     async fn test_new_string_writer() {
@@ -753,7 +756,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<&str, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<&str, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -762,8 +765,9 @@ mod test {
         let flusher = md_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<&str, RoaringBitmap>(&writer_id)
+            .read::<&str, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let _reader = MetadataIndexReader::new_string(blockfile_reader);
@@ -774,7 +778,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -783,8 +787,9 @@ mod test {
         let flusher = md_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let _reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -795,7 +800,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -804,8 +809,9 @@ mod test {
         let flusher = md_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let _reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -816,7 +822,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<bool, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<bool, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -825,8 +831,9 @@ mod test {
         let flusher = md_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<bool, RoaringBitmap>(&writer_id)
+            .read::<bool, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let _reader = MetadataIndexReader::new_bool(blockfile_reader);
@@ -837,7 +844,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<&str, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<&str, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -847,8 +854,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<&str, RoaringBitmap>(&writer_id)
+            .read::<&str, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_string(blockfile_reader);
@@ -862,7 +870,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -872,8 +880,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -887,7 +896,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -897,8 +906,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -912,7 +922,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<bool, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<bool, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -922,8 +932,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<bool, RoaringBitmap>(&writer_id)
+            .read::<bool, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_bool(blockfile_reader);
@@ -937,7 +948,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<&str, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<&str, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -950,8 +961,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<&str, RoaringBitmap>(&writer_id)
+            .read::<&str, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_string(blockfile_reader);
@@ -970,7 +982,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -983,8 +995,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -1003,7 +1016,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -1016,8 +1029,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -1036,7 +1050,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<bool, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<bool, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -1049,8 +1063,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<bool, RoaringBitmap>(&writer_id)
+            .read::<bool, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_bool(blockfile_reader);
@@ -1069,7 +1084,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -1083,8 +1098,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -1106,7 +1122,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -1120,8 +1136,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -1144,7 +1161,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -1158,8 +1175,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -1181,7 +1199,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -1195,8 +1213,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<u32, RoaringBitmap>(&writer_id)
+            .read::<u32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_u32(blockfile_reader);
@@ -1219,7 +1238,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -1233,8 +1252,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -1257,7 +1277,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -1271,8 +1291,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -1296,7 +1317,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -1310,8 +1331,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);
@@ -1333,7 +1355,7 @@ mod test {
         let provider = BlockfileProvider::new_memory();
         let prefix_path = String::from("");
         let blockfile_writer = provider
-            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+            .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let writer_id = blockfile_writer.id();
@@ -1347,8 +1369,9 @@ mod test {
         let flusher = writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
+        let reader_options = BlockfileReaderOptions::new(writer_id, prefix_path);
         let blockfile_reader = provider
-            .read::<f32, RoaringBitmap>(&writer_id)
+            .read::<f32, RoaringBitmap>(reader_options)
             .await
             .unwrap();
         let reader = MetadataIndexReader::new_f32(blockfile_reader);

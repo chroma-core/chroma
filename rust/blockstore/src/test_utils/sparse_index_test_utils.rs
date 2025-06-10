@@ -44,7 +44,8 @@ pub async fn create_test_sparse_index(
     sparse_index.set_count(block_ids[0], 1)?;
 
     // Create and save the sparse index file
-    let root_writer = RootWriter::new(Version::V1_1, root_id, sparse_index);
+    let prefix_path = String::from("");
+    let root_writer = RootWriter::new(Version::V1_1, root_id, sparse_index, prefix_path);
     let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
     root_manager.flush::<&str>(&root_writer).await?;
 
@@ -96,7 +97,11 @@ mod tests {
         let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
 
         // Verify all block IDs are present in the sparse index
-        let stored_block_ids = root_manager.get_all_block_ids(&root_id).await.unwrap();
+        let prefix_path = "";
+        let stored_block_ids = root_manager
+            .get_all_block_ids(&root_id, prefix_path)
+            .await
+            .unwrap();
         assert_eq!(stored_block_ids.len(), block_ids.len());
         for block_id in block_ids {
             assert!(stored_block_ids.contains(&block_id));
