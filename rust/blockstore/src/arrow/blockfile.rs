@@ -767,7 +767,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
@@ -808,7 +808,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
 
         // Test no keys
         let writer = blockfile_provider
@@ -882,7 +882,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let prefix_path = String::from("block/");
+            let prefix_path = String::from("");
             let writer = blockfile_provider
                 .write::<&str, u32>(BlockfileWriterOptions::new(prefix_path))
                 .await
@@ -950,7 +950,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let prefix_path = String::from("block/");
+            let prefix_path = String::from("");
             let writer = blockfile_provider
                 .write::<&str, u32>(BlockfileWriterOptions::new(prefix_path))
                 .await
@@ -1108,7 +1108,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
@@ -1149,7 +1149,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
@@ -1267,7 +1267,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
@@ -1313,7 +1313,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
 
         let writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::new(prefix_path))
@@ -1354,7 +1354,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
 
         let writer = provider
             .write::<f32, String>(BlockfileWriterOptions::new(prefix_path))
@@ -1393,7 +1393,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, roaring::RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
             .await
@@ -1444,7 +1444,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<u32, u32>(BlockfileWriterOptions::new(prefix_path))
             .await
@@ -1482,7 +1482,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, &DataRecord>(BlockfileWriterOptions::new(prefix_path))
             .await
@@ -1538,7 +1538,7 @@ mod tests {
             sparse_index_cache,
         );
 
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::new(prefix_path))
             .await
@@ -1579,7 +1579,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
@@ -1650,7 +1650,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
@@ -1690,7 +1690,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
@@ -1786,7 +1786,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
 
         let writer = blockfile_provider
             .write::<&str, u32>(BlockfileWriterOptions::new(prefix_path))
@@ -1945,7 +1945,7 @@ mod tests {
 
         // Test that a v1.1 writer can read a v1 blockfile and dirty a block
         // successfully hydrating counts for ALL blocks it needs to set counts for
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, String>(BlockfileWriterOptions::new(prefix_path).fork(first_write_id))
             .await

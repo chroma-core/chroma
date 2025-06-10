@@ -26,7 +26,7 @@ pub(super) fn construct_prefix_path(
     segment_id: &SegmentUuid,
 ) -> String {
     format!(
-        "{}/{}/{}/{}/",
+        "{}/{}/{}/{}",
         tenant, database_id, collection_id, segment_id
     )
 }

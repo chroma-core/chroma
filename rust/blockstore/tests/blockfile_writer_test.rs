@@ -207,7 +207,7 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
-            let prefix_path = String::from("block/");
+            let prefix_path = String::from("");
             let writer = block_on(
                 provider.write::<&str, Vec<u32>>(
                     BlockfileWriterOptions::new(prefix_path)
@@ -244,7 +244,7 @@ mod tests {
                     let id = state.writer.id();
                     let flusher = block_on(state.writer.commit::<&str, Vec<u32>>()).unwrap();
                     block_on(flusher.flush::<&str, Vec<u32>>()).unwrap();
-                    let prefix_path = String::from("block/");
+                    let prefix_path = String::from("");
                     state.last_blockfile_id = Some(id);
                     state.writer = block_on(
                         state.provider.write::<&str, Vec<u32>>(

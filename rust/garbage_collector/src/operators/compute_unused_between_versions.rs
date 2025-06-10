@@ -344,7 +344,7 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
-        let prefix_path = String::from("block/");
+        let prefix_path = String::from("");
 
         // Create a new blockfile
         let writer = provider

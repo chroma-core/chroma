@@ -134,7 +134,7 @@ fn bench_writer_for_generator_and_size<D: DataGenerator>(
         name, data_byte_size
     );
     let data = generator.data();
-    let prefix = String::from("block/");
+    let prefix = String::from("");
 
     let name_writer_options_data = [
         (
