@@ -685,7 +685,11 @@ mod tests {
 
     use rand::{distributions::Alphanumeric, Rng};
 
-    use crate::{admissioncontrolleds3::AdmissionControlledS3Storage, s3::S3Storage, GetOptions};
+    use crate::{
+        admissioncontrolleds3::AdmissionControlledS3Storage,
+        s3::{S3Storage, S3StorageMetrics},
+        GetOptions,
+    };
 
     fn get_s3_client() -> aws_sdk_s3::Client {
         // Set up credentials assuming minio is running locally
@@ -717,6 +721,7 @@ mod tests {
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: S3StorageMetrics::new(opentelemetry::global::meter("chroma")),
         };
         storage.create_bucket().await.unwrap();
         let admission_controlled_storage =
@@ -768,6 +773,7 @@ mod tests {
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: S3StorageMetrics::new(opentelemetry::global::meter("chroma")),
         };
         storage.create_bucket().await.unwrap();
         let admission_controlled_storage =

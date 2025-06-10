@@ -34,6 +34,7 @@ use futures::stream;
 use futures::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
+use opentelemetry::metrics::Meter;
 use rand::Rng;
 use std::clone::Clone;
 use std::ops::Range;
@@ -42,12 +43,30 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
 
+#[derive(Clone, Debug)]
+pub struct S3StorageMetrics {
+    total_num_get_requests: opentelemetry::metrics::Counter<u64>,
+}
+
+impl S3StorageMetrics {
+    pub fn new(meter: Meter) -> Self {
+        Self {
+            total_num_get_requests: meter
+                .u64_counter("s3_storage_total_num_get_requests")
+                .with_description("The number of GET requests to S3. This does not include metadata HEAD requests or failed requests.")
+                .with_unit("requests")
+                .build(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct S3Storage {
     pub(super) bucket: String,
     pub(super) client: aws_sdk_s3::Client,
     pub(super) upload_part_size_bytes: usize,
     pub(super) download_part_size_bytes: usize,
+    pub(super) metrics: S3StorageMetrics,
 }
 
 impl S3Storage {
@@ -62,6 +81,7 @@ impl S3Storage {
             client,
             upload_part_size_bytes,
             download_part_size_bytes,
+            metrics: S3StorageMetrics::new(opentelemetry::global::meter("chroma")),
         }
     }
 
@@ -125,6 +145,7 @@ impl S3Storage {
         match res {
             Ok(res) => {
                 let byte_stream = res.body;
+                self.metrics.total_num_get_requests.add(1, &[]);
                 Ok((
                     Box::new(S3ByteStream::new(byte_stream)),
                     res.e_tag.map(ETag),
@@ -222,7 +243,10 @@ impl S3Storage {
             .send()
             .await;
         match res {
-            Ok(output) => Ok(output),
+            Ok(output) => {
+                self.metrics.total_num_get_requests.add(1, &[]);
+                Ok(output)
+            }
             Err(e) => {
                 tracing::error!("Error fetching range: {:?}", e);
                 match e {
@@ -860,6 +884,7 @@ mod tests {
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: S3StorageMetrics::new(opentelemetry::global::meter("chroma")),
         };
         storage.create_bucket().await.unwrap();
 
@@ -885,6 +910,7 @@ mod tests {
             client,
             upload_part_size_bytes,
             download_part_size_bytes,
+            metrics: S3StorageMetrics::new(opentelemetry::global::meter("chroma")),
         };
         storage.create_bucket().await.unwrap();
         storage
@@ -932,6 +958,7 @@ mod tests {
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: S3StorageMetrics::new(opentelemetry::global::meter("chroma")),
         };
         storage.create_bucket().await.unwrap();
 
