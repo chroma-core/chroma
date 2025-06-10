@@ -767,8 +767,9 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id = writer.id();
@@ -807,10 +808,11 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
 
         // Test no keys
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
 
@@ -820,7 +822,7 @@ mod tests {
 
         // Test 2 keys
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
 
@@ -839,7 +841,7 @@ mod tests {
 
         // Test add keys after commit, before flush
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
 
@@ -861,7 +863,7 @@ mod tests {
 
         // Test count after flush
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
@@ -880,8 +882,9 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
+            let prefix_path = String::from("");
             let writer = blockfile_provider
-                .write::<&str, u32>(BlockfileWriterOptions::default())
+                .write::<&str, u32>(BlockfileWriterOptions::new(prefix_path))
                 .await
                 .unwrap();
             let id = writer.id();
@@ -947,8 +950,9 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
+            let prefix_path = String::from("");
             let writer = blockfile_provider
-                .write::<&str, u32>(BlockfileWriterOptions::default())
+                .write::<&str, u32>(BlockfileWriterOptions::new(prefix_path))
                 .await
                 .unwrap();
             let id = writer.id();
@@ -1104,8 +1108,9 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id = writer.id();
@@ -1144,8 +1149,9 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1182,7 +1188,7 @@ mod tests {
 
         // Add 5 new entries to the first block
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()).fork(id_1))
             .await
             .unwrap();
         let id_2 = writer.id();
@@ -1217,7 +1223,7 @@ mod tests {
 
         // Add 1200 more entries, causing splits
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path).fork(id_2))
             .await
             .unwrap();
         let id_3 = writer.id();
@@ -1261,8 +1267,9 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1306,9 +1313,10 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
 
         let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::default())
+            .write::<&str, String>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id = writer.id();
@@ -1346,9 +1354,10 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
 
         let writer = provider
-            .write::<f32, String>(BlockfileWriterOptions::default())
+            .write::<f32, String>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id = writer.id();
@@ -1384,8 +1393,9 @@ mod tests {
             sparse_index_cache,
         );
 
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, roaring::RoaringBitmap>(BlockfileWriterOptions::default())
+            .write::<&str, roaring::RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id = writer.id();
@@ -1434,8 +1444,9 @@ mod tests {
             sparse_index_cache,
         );
 
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<u32, u32>(BlockfileWriterOptions::default())
+            .write::<u32, u32>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id = writer.id();
@@ -1471,8 +1482,9 @@ mod tests {
             sparse_index_cache,
         );
 
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, &DataRecord>(BlockfileWriterOptions::default())
+            .write::<&str, &DataRecord>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id = writer.id();
@@ -1526,8 +1538,9 @@ mod tests {
             sparse_index_cache,
         );
 
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::default())
+            .write::<&str, String>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id = writer.id();
@@ -1566,8 +1579,9 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::default())
+            .write::<&str, String>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let id = writer.id();
@@ -1593,7 +1607,7 @@ mod tests {
         }
 
         let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::new().fork(id))
+            .write::<&str, String>(BlockfileWriterOptions::new(prefix_path).fork(id))
             .await
             .unwrap();
         let id = writer.id();
@@ -1636,8 +1650,9 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1675,8 +1690,9 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let id_1 = writer.id();
@@ -1697,7 +1713,7 @@ mod tests {
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
         // Create another writer.
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_1))
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()).fork(id_1))
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Delete everything but the last 10 keys.
@@ -1730,7 +1746,7 @@ mod tests {
         }
 
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new().fork(id_2))
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path).fork(id_2))
             .await
             .expect("BlockfileWriter fork unsuccessful");
         // Add everything back.
@@ -1770,9 +1786,10 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
 
         let writer = blockfile_provider
-            .write::<&str, u32>(BlockfileWriterOptions::default())
+            .write::<&str, u32>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let id = writer.id();
@@ -1928,9 +1945,9 @@ mod tests {
 
         // Test that a v1.1 writer can read a v1 blockfile and dirty a block
         // successfully hydrating counts for ALL blocks it needs to set counts for
-
+        let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::new().fork(first_write_id))
+            .write::<&str, String>(BlockfileWriterOptions::new(prefix_path).fork(first_write_id))
             .await
             .unwrap();
         let second_write_id = writer.id();
