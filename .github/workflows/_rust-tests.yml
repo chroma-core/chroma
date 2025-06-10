@@ -42,9 +42,15 @@ jobs:
     strategy:
       matrix:
         platform: [blacksmith-16vcpu-ubuntu-2204]
+        nextest_profile: [ci_k8s_integration, ci_k8s_integration_slow]
         partition: [1, 2]
+        include:
+          - nextest_profile: ci_k8s_integration
+            partition_method: hash
+          - nextest_profile: ci_k8s_integration_slow
+            partition_method: count
     runs-on: ${{ matrix.platform }}
-    name: Integration test ${{ matrix.partition }}/2
+    name: Integration test ${{ matrix.nextest_profile }} ${{ matrix.partition }}
     # OIDC token auth for AWS
     permissions:
       contents: read
@@ -68,12 +74,12 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
-        run: cargo nextest run --profile ci_k8s_integration --partition hash:${{ matrix.partition }}/2
+        run: cargo nextest run --profile ${{ matrix.nextest_profile }} --partition ${{ matrix.partition_method }}:${{ matrix.partition }}/2 --no-tests warn
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
         with:
-          artifact-name: "rust-integration-test-${{ matrix.partition }}"
+          artifact-name: "rust-integration-test-${{ matrix.nextest_profile }}-${{ matrix.partition }}"
   test-benches:
     strategy:
       matrix:
