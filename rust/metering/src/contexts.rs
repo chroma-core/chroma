@@ -9,25 +9,25 @@ use crate::{
     fields::{generate_field_definition_token_stream, process_field_definition_tokens, Field},
 };
 
-/// Represents a user-defined metering event.
-pub struct Event {
+/// Represents a user-defined metering context.
+pub struct Context {
     pub foreign_macro_token_streams: Vec<TokenStream>,
     pub maybe_visibility_modifier_token_stream: Option<TokenStream>,
-    pub event_name_ident: Ident,
+    pub context_name_ident: Ident,
     pub fields: Vec<Field>,
 }
 
 /// Accepts tokens from the [`crate::utils::process_token_stream`]'s current token to the end
-/// of the input tokens and attempts to return a slice that is known to contain an event definition,
-/// given that the last-processed set of tokens was an event annotation.
-pub fn collect_event_definition_tokens(
+/// of the input tokens and attempts to return a slice that is known to contain an context definition,
+/// given that the last-processed set of tokens was an context annotation.
+pub fn collect_context_definition_tokens(
     tokens: &[TokenTree],
 ) -> Result<(Vec<TokenTree>, usize), MeteringMacrosError> {
-    let mut event_definition_tokens: Vec<TokenTree> = Vec::new();
+    let mut context_definition_tokens: Vec<TokenTree> = Vec::new();
     let mut struct_keyword_ident = None;
 
     for (token_index, current_token) in tokens.iter().enumerate() {
-        event_definition_tokens.push(current_token.clone());
+        context_definition_tokens.push(current_token.clone());
 
         if struct_keyword_ident.is_none() {
             if let TokenTree::Ident(expected_struct_keyword_ident) = current_token {
@@ -37,35 +37,36 @@ pub fn collect_event_definition_tokens(
             }
         } else if let TokenTree::Group(expected_braces_group) = current_token {
             if expected_braces_group.delimiter() == Delimiter::Brace {
-                return Ok((event_definition_tokens, token_index + 1));
+                return Ok((context_definition_tokens, token_index + 1));
             }
         }
     }
 
     Err(MeteringMacrosError::ParseError(
-        "Unterminated event definition: never found `{…}` after `struct`".into(),
+        "Unterminated context definition: never found `{...}` after `struct`".into(),
     ))
 }
 
-/// Accepts a slice of tokens that is known to contain a (possibly invalid) [`crate::events::Event`],
+/// Accepts a slice of tokens that is known to contain a (possibly invalid) [`crate::contexts::Context`],
 /// not including its annotation, and attempts to validate and parse out a representative object.
-pub fn process_event_definition_tokens(
-    event_definition_tokens: Vec<TokenTree>,
+pub fn process_context_definition_tokens(
+    context_definition_tokens: Vec<TokenTree>,
     registered_attributes: &HashMap<String, Attribute>,
-) -> Result<Event, MeteringMacrosError> {
-    let mut event_definition_tokens_iter: Peekable<_> =
-        event_definition_tokens.into_iter().peekable();
+) -> Result<Context, MeteringMacrosError> {
+    let mut context_definition_tokens_iter: Peekable<_> =
+        context_definition_tokens.into_iter().peekable();
     let mut foreign_macro_token_streams: Vec<TokenStream> = Vec::new();
 
     loop {
-        if let Some(TokenTree::Punct(expected_hashtag_punct)) = event_definition_tokens_iter.peek()
+        if let Some(TokenTree::Punct(expected_hashtag_punct)) =
+            context_definition_tokens_iter.peek()
         {
             if expected_hashtag_punct.as_char() == '#'
                 && expected_hashtag_punct.spacing() == Spacing::Alone
             {
-                let hashtag_punct = event_definition_tokens_iter.next().unwrap();
+                let hashtag_punct = context_definition_tokens_iter.next().unwrap();
 
-                match event_definition_tokens_iter.next() {
+                match context_definition_tokens_iter.next() {
                     Some(TokenTree::Group(expected_foreign_macro_group))
                         if expected_foreign_macro_group.delimiter() == Delimiter::Bracket =>
                     {
@@ -95,11 +96,11 @@ pub fn process_event_definition_tokens(
     }
 
     let mut maybe_visibility_modifier_token_stream = None;
-    if let Some(TokenTree::Ident(expected_pub_ident)) = event_definition_tokens_iter.peek() {
+    if let Some(TokenTree::Ident(expected_pub_ident)) = context_definition_tokens_iter.peek() {
         if expected_pub_ident == "pub" {
             let mut visibility_modifier_token_stream = TokenStream::new();
             if let TokenTree::Ident(expected_pub_ident) =
-                event_definition_tokens_iter.next().unwrap()
+                context_definition_tokens_iter.next().unwrap()
             {
                 visibility_modifier_token_stream.extend(std::iter::once(TokenTree::Ident(
                     expected_pub_ident.clone(),
@@ -107,11 +108,11 @@ pub fn process_event_definition_tokens(
             }
 
             if let Some(TokenTree::Group(expected_visibility_modifier_group)) =
-                event_definition_tokens_iter.peek()
+                context_definition_tokens_iter.peek()
             {
                 if expected_visibility_modifier_group.delimiter() == Delimiter::Parenthesis {
                     if let TokenTree::Group(expected_visibility_modifier_group) =
-                        event_definition_tokens_iter.next().unwrap()
+                        context_definition_tokens_iter.next().unwrap()
                     {
                         visibility_modifier_token_stream.extend(std::iter::once(TokenTree::Group(
                             expected_visibility_modifier_group.clone(),
@@ -124,30 +125,30 @@ pub fn process_event_definition_tokens(
         }
     }
 
-    match event_definition_tokens_iter.next() {
+    match context_definition_tokens_iter.next() {
         Some(TokenTree::Ident(expected_struct_ident)) if expected_struct_ident == "struct" => {}
         unexpected => {
             return Err(MeteringMacrosError::ParseError(format!(
-                "Expected `struct` in event definition, found: {:?}",
+                "Expected `struct` in context definition, found: {:?}",
                 unexpected
             )));
         }
     }
 
-    let event_name_ident = match event_definition_tokens_iter.next() {
-        Some(TokenTree::Ident(expected_event_name_ident)) => Ident::new(
-            &expected_event_name_ident.to_string(),
-            expected_event_name_ident.span(),
+    let context_name_ident = match context_definition_tokens_iter.next() {
+        Some(TokenTree::Ident(expected_context_name_ident)) => Ident::new(
+            &expected_context_name_ident.to_string(),
+            expected_context_name_ident.span(),
         ),
         unexpected => {
             return Err(MeteringMacrosError::ParseError(format!(
-                "Expected event (struct) name, found: {:?}",
+                "Expected context (struct) name, found: {:?}",
                 unexpected
             )));
         }
     };
 
-    let field_group = match event_definition_tokens_iter.next() {
+    let field_group = match context_definition_tokens_iter.next() {
         Some(TokenTree::Group(expected_field_group))
             if expected_field_group.delimiter() == Delimiter::Brace =>
         {
@@ -155,7 +156,7 @@ pub fn process_event_definition_tokens(
         }
         unexpected => {
             return Err(MeteringMacrosError::ParseError(format!(
-                "Expected a brace-delimited field list after event name, found: {:?}",
+                "Expected a brace-delimited field list after context name, found: {:?}",
                 unexpected
             )));
         }
@@ -284,39 +285,39 @@ pub fn process_event_definition_tokens(
         }
     }
 
-    Ok(Event {
+    Ok(Context {
         foreign_macro_token_streams,
         maybe_visibility_modifier_token_stream,
-        event_name_ident,
+        context_name_ident,
         fields,
     })
 }
 
-/// Generates the output tokens required for a user-defined metering event.
-pub fn generate_event_definition_token_stream(event: &Event) -> TokenStream {
-    let Event {
+/// Generates the output tokens required for a user-defined metering context.
+pub fn generate_context_definition_token_stream(context: &Context) -> TokenStream {
+    let Context {
         foreign_macro_token_streams,
         maybe_visibility_modifier_token_stream,
-        event_name_ident,
+        context_name_ident,
         fields,
-    } = event;
+    } = context;
 
     let field_definition_token_streams: Vec<TokenStream> = fields
         .iter()
         .map(generate_field_definition_token_stream)
         .collect();
 
-    let event_definition_token_stream = if maybe_visibility_modifier_token_stream.is_some() {
+    let context_definition_token_stream = if maybe_visibility_modifier_token_stream.is_some() {
         quote! {
             #( #foreign_macro_token_streams )*
-            #maybe_visibility_modifier_token_stream struct #event_name_ident {
+            #maybe_visibility_modifier_token_stream struct #context_name_ident {
                 #(#field_definition_token_streams )*
             }
         }
     } else {
         quote! {
             #( #foreign_macro_token_streams )*
-            struct #event_name_ident {
+            struct #context_name_ident {
                 #( #field_definition_token_streams )*
             }
         }
@@ -358,9 +359,9 @@ pub fn generate_event_definition_token_stream(event: &Event) -> TokenStream {
         .collect();
 
     quote! {
-        #event_definition_token_stream
+        #context_definition_token_stream
 
-        impl #event_name_ident {
+        impl #context_name_ident {
             pub fn new( #( #unannotated_field_name_idents: #unannotated_field_type_token_streams ),* ) -> Self {
                 Self { #( #unannotated_field_name_idents ),*, ..std::default::Default::default() }
             }
@@ -372,12 +373,20 @@ pub fn generate_event_definition_token_stream(event: &Event) -> TokenStream {
             )*
         }
 
-        impl MeteringEvent for #event_name_ident {
+        impl MeteringContext for #context_name_ident {
             #(
                 fn #attribute_name_idents(&mut self, value: #attribute_type_token_streams) {
                     #custom_mutator_name_idents(self, value);
                 }
             )*
+
+            fn clone_box(&self) -> Box<dyn MeteringContext> {
+                Box::new(self.clone())
+            }
+
+            fn as_any(&self) -> &dyn ::std::any::Any {
+                self
+            }
         }
     }
 }

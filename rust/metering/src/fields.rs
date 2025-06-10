@@ -4,7 +4,7 @@ use std::iter::Peekable;
 
 use crate::{attributes::Attribute, errors::MeteringMacrosError};
 
-/// Represents a field within a user-defined metering event.
+/// Represents a field within a user-defined metering context.
 pub struct Field {
     pub foreign_macro_token_streams: Vec<TokenStream>,
     pub maybe_visibility_modifier_token_stream: Option<TokenStream>,
@@ -130,7 +130,7 @@ pub fn process_field_definition_tokens(
     })
 }
 
-/// Generates the output tokens for an individual field within a struct that defines a metering event.
+/// Generates the output tokens for an individual field within a struct that defines a metering context.
 pub fn generate_field_definition_token_stream(field: &Field) -> TokenStream {
     let Field {
         foreign_macro_token_streams,

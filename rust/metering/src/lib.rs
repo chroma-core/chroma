@@ -5,26 +5,26 @@ use quote::quote;
 
 use crate::{
     attributes::generate_attribute_definition_token_stream,
-    events::generate_event_definition_token_stream,
+    contexts::generate_context_definition_token_stream,
     mutators::generate_noop_mutator_definition_token_stream,
     utils::{generate_compile_error, process_token_stream},
 };
 
 mod annotations;
 mod attributes;
+mod contexts;
 mod errors;
-mod events;
 mod fields;
 mod mutators;
 mod utils;
 
 /// This is the only user-facing export of `chroma_metering`. It is responsible for registering attributes and
-/// events by producing the code necessary to allow users to interact with the metering library.
+/// contexts by producing the code necessary to allow users to interact with the metering library.
 #[proc_macro]
 pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let token_stream = TokenStream::from(raw_token_stream);
 
-    let (attributes, events) = match process_token_stream(&token_stream) {
+    let (attributes, contexts) = match process_token_stream(&token_stream) {
         Ok(result) => result,
         Err(error) => return generate_compile_error(&error.to_string()),
     };
@@ -39,296 +39,256 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         .map(generate_attribute_definition_token_stream)
         .collect();
 
-    let event_definition_token_streams: Vec<TokenStream> = events
+    let context_definition_token_streams: Vec<TokenStream> = contexts
         .iter()
-        .map(generate_event_definition_token_stream)
+        .map(generate_context_definition_token_stream)
         .collect();
 
     proc_macro::TokenStream::from(quote! {
-        /// The primary trait used in the metering library that contains no-op mutators for every attribute.
-        pub trait MeteringEvent: std::fmt::Debug + std::any::Any + Send + 'static {
+        /// The base trait that is programmatically implemented for all user-defined metering
+        /// contexts
+        pub trait MeteringContext:
+            ::std::fmt::Debug + ::std::any::Any + ::std::marker::Send + 'static
+        {
             #( #noop_mutator_definition_token_streams )*
+
+            fn clone_box(&self) -> Box<dyn MeteringContext>;
+
+            fn as_any(&self) -> &dyn ::std::any::Any;
+        }
+
+        /// An implementation of `Clone` for boxed trait objects of `MeteringContext`
+        impl Clone for Box<dyn MeteringContext> {
+            fn clone(&self) -> Box<dyn MeteringContext> {
+                self.clone_box()
+            }
         }
 
         #( #attribute_definition_token_streams )*
+        #( #context_definition_token_streams )*
 
-        #( #event_definition_token_streams )*
+        /// A blank metering context to use when there is no active metering context
+        #[derive(::std::fmt::Debug, Clone)]
+        struct BlankMeteringContext;
 
-        /// The default receiver registered in the library.
-        #[derive(Clone, std::fmt::Debug)]
+        /// We implement the `MeteringContext` trait for the blank metering context so it can be represented
+        /// in the same way that a user-defined metering context would be internally
+        impl MeteringContext for BlankMeteringContext {
+            fn clone_box(&self) -> Box<dyn MeteringContext> {
+                Box::new(self.clone())
+            }
 
-        pub struct __DefaultReceiver;
+            fn as_any(&self) -> &dyn ::std::any::Any {
+                self
+            }
+        }
 
-        /// The default receiver simply prints out the metering events submitted to it.
-        #[async_trait::async_trait]
-        impl chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>>
-            for __DefaultReceiver
-        {
-            async fn send(
-                &self,
-                message: Box<dyn MeteringEvent>,
-                tracing_context: Option<tracing::Span>,
-            ) -> Result<(), chroma_system::ChannelError> {
-                if let Some(span) = tracing_context {
-                    println!("[metering] span={:?} event={:?}", span, message);
+        /// A runtime error that occurs in the metering library
+        #[derive(Debug, thiserror::Error)]
+        pub enum MeteringError {
+            #[error("The metering context receiver has already been initialized")]
+            ReceiverAlreadyInitializedError,
+            #[error("Requested type is not the same as the active context's type on this thread")]
+            TypeMismatchError,
+            #[error(
+                "Failed to downcast context from std::any::Any to provided type, despite type IDs matching"
+            )]
+            DowncastError,
+        }
+
+        /// A container struct for the active metering context that also stores its TypeId
+        struct MeteringContextContainer {
+            boxed_metering_context: Box<dyn MeteringContext>,
+            metering_context_type_id: std::any::TypeId,
+        }
+
+        /// Default values for the `MeteringContextContainer`
+        impl std::default::Default for MeteringContextContainer {
+            fn default() -> Self {
+                MeteringContextContainer {
+                    boxed_metering_context: Box::new(BlankMeteringContext),
+                    metering_context_type_id: std::any::TypeId::of::<BlankMeteringContext>(),
+                }
+            }
+        }
+
+        /// Thread-local storage of the active metering context
+        ::std::thread_local! {
+            static ACTIVE_METERING_CONTEXT_CONTAINER: ::std::cell::RefCell<MeteringContextContainer> =
+                ::std::cell::RefCell::new(MeteringContextContainer::default());
+        }
+
+        /// Creates a metering context of type `C` and returns a guard for RAII
+        pub fn create<C: MeteringContext>(metering_context: C) -> MeteringContextGuard {
+            let metering_context_type_id = ::std::any::TypeId::of::<C>();
+            let boxed_metering_context: Box<dyn MeteringContext> = Box::new(metering_context);
+
+            ACTIVE_METERING_CONTEXT_CONTAINER.with(|active_metering_context_container| {
+                active_metering_context_container.replace(MeteringContextContainer {
+                    boxed_metering_context: boxed_metering_context.clone(),
+                    metering_context_type_id,
+                });
+            });
+
+            MeteringContextGuard {
+                inner_boxed_metering_context: boxed_metering_context,
+                inner_metering_context_type_id: metering_context_type_id,
+            }
+        }
+
+        /// Allows users to specify a closure to invoke on the current thread's active metering context.
+        /// If no context is active, this will be a no-op because the mutation will be applied to
+        /// `BlankMeteringContext`
+        pub fn with_current(mutator: impl FnOnce(&mut dyn MeteringContext)) {
+            ACTIVE_METERING_CONTEXT_CONTAINER.with(|active_metering_context_container| {
+                let mut mutable_active_metering_context_container = active_metering_context_container.borrow_mut();
+                let active_metering_context: &mut dyn MeteringContext = mutable_active_metering_context_container
+                    .boxed_metering_context
+                    .as_mut();
+                mutator(active_metering_context);
+            });
+        }
+
+        /// Closes the current thread's metering context if it is of type `C`, otherwise returns an error
+        pub fn close<C: MeteringContext + Clone>() -> Result<C, MeteringError> {
+            let metering_context_type_id = std::any::TypeId::of::<C>();
+
+            ACTIVE_METERING_CONTEXT_CONTAINER.with(|active_metering_context_container| {
+                let mut mutable_active_metering_context_container = active_metering_context_container.borrow_mut();
+
+                let active_metering_context = std::mem::replace(
+                    &mut mutable_active_metering_context_container.boxed_metering_context,
+                    Box::new(BlankMeteringContext),
+                );
+                let active_metering_context_type_id = std::mem::replace(
+                    &mut mutable_active_metering_context_container.metering_context_type_id,
+                    std::any::TypeId::of::<BlankMeteringContext>(),
+                );
+
+                if active_metering_context_type_id == metering_context_type_id {
+                    match active_metering_context.as_any().downcast_ref::<C>() {
+                        Some(metering_context) => Ok(metering_context.clone()),
+                        None => Err(MeteringError::DowncastError),
+                    }
                 } else {
-                    println!("[metering] event={:?}", message);
+                    mutable_active_metering_context_container.boxed_metering_context = active_metering_context;
+                    mutable_active_metering_context_container.metering_context_type_id = active_metering_context_type_id;
+                    Err(MeteringError::TypeMismatchError)
                 }
-                Ok(())
+            })
+        }
+
+        /// A guard for RAII that stores a metering context and its type ID
+        pub struct MeteringContextGuard {
+            inner_boxed_metering_context: Box<dyn MeteringContext>,
+            inner_metering_context_type_id: ::std::any::TypeId,
+        }
+
+        /// We implement drop for the guard to get RAII
+        impl Drop for MeteringContextGuard {
+            fn drop(&mut self) {
+                ACTIVE_METERING_CONTEXT_CONTAINER.with(|active_metering_context_container| {
+                    active_metering_context_container.replace(MeteringContextContainer::default());
+                });
             }
         }
 
-        /// The storage slot for the registered receiver.
-        static RECEIVER: once_cell::sync::Lazy<
-            parking_lot::Mutex<Box<dyn chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>>>>,
-        > = once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(Box::new(__DefaultReceiver)));
-
-        /// Allows library users to register their own receivers.
-        pub fn register_receiver(
-            receiver: Box<
-                dyn chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>>,
-            >,
-        ) {
-            let mut receiver_slot = RECEIVER.lock();
-            *receiver_slot = receiver;
+        /// A trait that allows futures to be `metered`, similar to how `tracing` enables futures to be
+        /// `instrumented`
+        pub trait MeteredFutureExt: ::std::future::Future + Sized {
+            fn metered(self, metering_context_guard: MeteringContextGuard) -> MeteredFuture<Self> {
+                MeteredFuture {
+                    inner_future: self,
+                    metering_context_guard,
+                }
+            }
         }
 
-        /// A trait containing a `submit` method to send metering events to the registered receiver.
+        /// A blanket implementation of `metered` for all futures
+        impl<F: ::std::future::Future> MeteredFutureExt for F {}
+
+        /// Similar to `tracing::Instrumented`, this wraps a future and stores the
+        /// active metering context in the thread's local storage
+        #[pin_project::pin_project]
+        pub struct MeteredFuture<F: ::std::future::Future> {
+            #[pin]
+            inner_future: F,
+            metering_context_guard: MeteringContextGuard,
+        }
+
+        /// Handles setting the current thread's active metering context when it is polled and
+        /// unsetting it after the poll is complete
+        impl<F: ::std::future::Future> ::std::future::Future for MeteredFuture<F> {
+            type Output = F::Output;
+
+            fn poll(
+                self: ::std::pin::Pin<&mut Self>,
+                context: &mut ::std::task::Context<'_>,
+            ) -> ::std::task::Poll<Self::Output> {
+                let metered_future = self.project();
+
+                ACTIVE_METERING_CONTEXT_CONTAINER.with(|active_metering_context_container| {
+                    active_metering_context_container.replace(MeteringContextContainer {
+                        boxed_metering_context: metered_future
+                            .metering_context_guard
+                            .inner_boxed_metering_context
+                            .clone(),
+                        metering_context_type_id: metered_future
+                            .metering_context_guard
+                            .inner_metering_context_type_id,
+                    });
+                });
+
+                let output = metered_future.inner_future.poll(context);
+
+                // ACTIVE_METERING_CONTEXT_CONTAINER.with(|active_metering_context_container| {
+                //     active_metering_context_container.replace(MeteringContextContainer::default());
+                // });
+
+                output
+            }
+        }
+
+        /// A global variable that stores the receiver to which metering contexts are sent
+        /// when they are submitted.
+        static RECEIVER: ::std::sync::OnceLock<
+            Box<dyn ::chroma_system::ReceiverForMessage<Box<dyn MeteringContext>>>,
+        > = ::std::sync::OnceLock::new();
+
+        /// Initialize a custom receiver that implements `chroma_system::ReceiverForMessage`.
+        /// Returns a void result if successful, else a `ReceiverAlreadyInitializedError` if
+        /// the receiver has already been initialized.
+        pub fn init_receiver(
+            receiver: Box<dyn ::chroma_system::ReceiverForMessage<Box<dyn MeteringContext>>>,
+        ) -> Result<(), MeteringError> {
+            if RECEIVER.set(receiver).is_err() {
+                return Err(MeteringError::ReceiverAlreadyInitializedError);
+            }
+            Ok(())
+        }
+
+        /// A trait that defines a `submit` function that sends metering contexts to their receiver.
+        /// Emits an error trace if sending is unsuccessful.
         #[async_trait::async_trait]
-        pub trait SubmitExt: MeteringEvent + Sized + Send {
+        pub trait SubmitExt: MeteringContext + Sized {
             async fn submit(self) {
-                let maybe_current_span = Some(tracing::Span::current());
-
-                let receiver: Box<
-                    dyn chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>>,
-                > = {
-                    let lock = RECEIVER.lock();
-                    (*lock).clone()
-                };
-
-                let boxed_metering_event: Box<dyn MeteringEvent> = Box::new(self);
-
-                if let Err(error) = receiver.send(boxed_metering_event, maybe_current_span).await {
-                    tracing::error!("Unable to send meter event: {error}");
+                if let Some(receiver) = RECEIVER.get() {
+                    if let Err(error) = receiver
+                        .send(Box::new(self), Some(::tracing::Span::current()))
+                        .await
+                    {
+                        ::tracing::error!("Unable to send metering context to receiver: {:?}", error);
+                    }
                 }
             }
         }
 
-        /// A blanket-impl of the `submit` method for all metering events.
+        /// A blanket implementation of `SubmitExt` for all types implementing `MeteringContext` that are
+        /// `Send` and `'static`.
         #[async_trait::async_trait]
         impl<T> SubmitExt for T
         where
-            T: MeteringEvent + Send + 'static,
-        {
-            async fn submit(self) {
-                let maybe_current_span = Some(tracing::Span::current());
-                let receiver: Box<
-                    dyn chroma_system::ReceiverForMessage<Box<dyn MeteringEvent>>,
-                > = {
-                    let lock = RECEIVER.lock();
-                    (*lock).clone_box()
-                };
-                let boxed_metering_event: Box<dyn MeteringEvent> = Box::new(self);
-                if let Err(error) = receiver.send(boxed_metering_event, maybe_current_span).await {
-                    tracing::error!("Unable to send meter event: {error}");
-                }
-            }
-        }
-
-        /// A global map stores a map of thread IDs two stacks of metering events.
-        static EVENT_STACKS: once_cell::sync::Lazy<
-            parking_lot::Mutex<std::collections::HashMap<std::thread::ThreadId, Vec<(std::any::TypeId, Box<dyn MeteringEvent>)>>>> =
-            once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(std::collections::HashMap::new()));
-
-        /// Gets a mutable reference to the current thread's event stack.
-        fn get_stack_for_current_thread<'a>(
-            event_stacks: &'a mut std::collections::HashMap<std::thread::ThreadId, Vec<(std::any::TypeId, Box<dyn MeteringEvent>)>>,
-        ) -> &'a mut Vec<(std::any::TypeId, Box<dyn MeteringEvent>)> {
-            let thread_id = std::thread::current().id();
-            event_stacks.entry(thread_id).or_default()
-        }
-
-        /// Pops the top entry (TypeId, Box<dyn MeteringEvent>) from the current thread and returns it.
-        /// If no event exists, returns `None`.
-        fn pop_from_thread(thread_id: std::thread::ThreadId) -> Option<(std::any::TypeId, Box<dyn MeteringEvent>)> {
-            let mut event_stacks = EVENT_STACKS.lock();
-            if let Some(event_stack) = event_stacks.get_mut(&thread_id) {
-                event_stack.pop()
-            } else {
-                None
-            }
-        }
-
-        /// Pushes an entry (TypeId, Box<dyn MeteringEvent>) onto the current thread's stack.
-        fn push_to_thread(thread_id: std::thread::ThreadId, entry: (std::any::TypeId, Box<dyn MeteringEvent>)) {
-            let mut event_stacks = EVENT_STACKS.lock();
-            let event_stack = event_stacks.entry(thread_id).or_default();
-            event_stack.push(entry);
-        }
-
-        /// Peek at the top of the current thread’s stack, returning a raw pointer if an event is present;
-        /// else returns `None`.  If `None`, callers should use a `BlankMeteringEvent`
-        fn peek_current_thread_raw() -> Option<*mut dyn MeteringEvent> {
-            let mut event_stacks = EVENT_STACKS.lock();
-            let thread_id = std::thread::current().id();
-            if let Some(event_stack) = event_stacks.get_mut(&thread_id) {
-                if let Some((_, boxed_metering_event)) = event_stack.last_mut() {
-                    let raw_pointer: *mut dyn MeteringEvent = &mut **boxed_metering_event;
-                    return Some(raw_pointer);
-                }
-            }
-            None
-        }
-
-        thread_local! {
-            /// A thread-local pointer to a  blank event to return if the stack is empty
-            static BLANK_METERING_EVENT_POINTER: *mut dyn MeteringEvent = {
-                let boxed_blank_metering_event = Box::new(BlankMeteringEvent);
-                Box::into_raw(boxed_blank_metering_event) as *mut dyn MeteringEvent
-            };
-        }
-
-        /// A zero-sized metering event if a thread's stack is empty.
-        struct BlankMeteringEvent;
-        impl std::fmt::Debug for BlankMeteringEvent {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "BlankMeteringEvent")
-            }
-        }
-        impl MeteringEvent for BlankMeteringEvent {}
-
-        /// Creates a metering event of type `E` (boxed), and immediately pushes it onto the current thread’s stack.
-        /// Returns a `MeteringEventGuard` whose job is to return that same event to its previous thread.
-        pub fn create<E: MeteringEvent>(metering_event: E) -> MeteringEventGuard {
-            let metering_event_type_id = std::any::TypeId::of::<E>();
-            let boxed_metering_event = Box::new(metering_event) as Box<dyn MeteringEvent>;
-            let thread_id = std::thread::current().id();
-
-            // Push an event onto the current thread's event stack
-            {
-                let mut event_stacks = EVENT_STACKS.lock();
-                let event_stack = event_stacks.entry(thread_id).or_default();
-                event_stack.push((metering_event_type_id, boxed_metering_event));
-            }
-
-            // Return a guard that remembers we pushed onto thread `thread_id`
-            MeteringEventGuard { previous_thread_id: thread_id }
-        }
-
-        /// Return a mutable reference to the metering event at the top of the current thread’s stack,
-        /// or to a blank metering event if no events are present.
-        pub fn current() -> &'static mut dyn MeteringEvent {
-            if let Some(raw_pointer) = peek_current_thread_raw() {
-                // SAFETY(c-gamble): `raw_pointer` came from a boxed MeteringEvent in this thread’s stack.
-                unsafe { &mut *raw_pointer }
-            } else {
-                // No event on this thread. Use a blank event.
-                BLANK_METERING_EVENT_POINTER.with(|ptr| unsafe { &mut *(*ptr) })
-            }
-        }
-
-        /// Pops the top event from the current thread’s stack if it is of type `E`. Otherwise, returns `None`.
-        pub fn close<E: MeteringEvent>() -> Option<E> {
-            let metering_event_type_id = std::any::TypeId::of::<E>();
-            let thread_id = std::thread::current().id();
-
-            let mut event_stacks = EVENT_STACKS.lock();
-            if let Some(event_stack) = event_stacks.get_mut(&thread_id) {
-                if let Some((top_type_id, _)) = event_stack.last() {
-                    if *top_type_id == metering_event_type_id {
-                        // It matches, so pop it and downcast
-                        let (_, boxed_generic_metering_event) = event_stack.pop().unwrap();
-                        let generic_metering_event_raw_pointer: *mut dyn MeteringEvent = Box::into_raw(boxed_generic_metering_event);
-                        let concrete_metering_event_raw_pointer: *mut E = generic_metering_event_raw_pointer as *mut E;
-                        // SAFETY(c-gamble): We know it was an E.
-                        let boxed_metering_event: Box<E> = unsafe { Box::from_raw(concrete_metering_event_raw_pointer) };
-                        return Some(*boxed_metering_event);
-                    }
-                }
-            }
-            None
-        }
-
-        /// A guard that knows the previous thread ID for a metering event.
-        /// When dropped, it will take exactly one event off wherever it currently lives
-        /// and move it back onto the previous thread's stack.
-        pub struct MeteringEventGuard {
-            previous_thread_id: std::thread::ThreadId,
-        }
-
-        impl Drop for MeteringEventGuard {
-            fn drop(&mut self) {
-                // Pop from the thread is currently running this Drop
-                let current_thread_id = std::thread::current().id();
-                if let Some((metering_event_type_id, boxed_metering_event)) = pop_from_thread(current_thread_id) {
-                    push_to_thread(self.previous_thread_id, (metering_event_type_id, boxed_metering_event));
-                }
-                // If there was no event on the current thread’s stack, do nothing
-            }
-        }
-
-        /// A trait for futures to allow moving metering events between threads.
-        pub trait MeteredFutureExt: std::future::Future + Sized {
-            fn metered(self, metering_event_guard: MeteringEventGuard) -> MeteredFuture<Self> {
-                // Pop the top event from the previous thread’s stack immediately:
-                let previous_thread_id = metering_event_guard.previous_thread_id;
-                let (moved_metering_event_type_id, moved_boxed_metering_event) = {
-                    pop_from_thread(previous_thread_id).unwrap_or_else(|| {
-                        panic!(
-                            "`.metered()` called but no MeteringEvent was on thread {:?}",
-                            previous_thread_id
-                        )
-                    })
-                };
-
-                MeteredFuture {
-                    inner: self,
-                    previous_thread_id,
-                    moved_metering_event_type_id: Some(moved_metering_event_type_id),
-                    moved_boxed_metering_event: Some(moved_boxed_metering_event),
-                    new_thread_id: None,
-                }
-            }
-        }
-        impl<F: std::future::Future> MeteredFutureExt for F {}
-
-        /// The wrapper that, on its first poll, pushes an event into the new thread’s stack,
-        /// and on Drop (when the future ends or is cancelled) pops from the new and puts it back on its previous threads.
-        pub struct MeteredFuture<F: std::future::Future> {
-            inner: F,
-            previous_thread_id: std::thread::ThreadId,
-            moved_metering_event_type_id: Option<std::any::TypeId>,
-            moved_boxed_metering_event: Option<Box<dyn MeteringEvent>>,
-            new_thread_id: Option<std::thread::ThreadId>,
-        }
-
-        impl<F: std::future::Future> std::future::Future for MeteredFuture<F> {
-            type Output = F::Output;
-
-            fn poll(self: std::pin::Pin<&mut Self>, context: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
-                // Project `Pin<&mut MeteredFuture<F>>` to `&mut MeteredFuture<F>`
-                let metered_future: &mut MeteredFuture<F> = unsafe { self.get_unchecked_mut() };
-
-                // On the very first poll, if we have an event stashed that we moved, push it into the new thread’s stack:
-                if metered_future.new_thread_id.is_none() {
-                    // We haven’t yet done the previous -> new transfer
-                    if let (Some(thread_id), Some(boxed_metering_event)) =
-                        (metered_future.moved_metering_event_type_id.take(), metered_future.moved_boxed_metering_event.take())
-                    {
-                        // Record which thread is now the the new thread
-                        let current_thread_id = std::thread::current().id();
-                        metered_future.new_thread_id = Some(current_thread_id);
-                        push_to_thread(current_thread_id, (thread_id, boxed_metering_event));
-                    }
-                }
-
-                // Delegate to the inner future
-                let inner_future: std::pin::Pin<&mut F> = unsafe { std::pin::Pin::new_unchecked(&mut metered_future.inner) };
-                inner_future.poll(context)
-            }
-        }
-
-        /// MeteredFuture<F> is Unpin whenever F: Unpin
-        impl<F: std::future::Future + Unpin> Unpin for MeteredFuture<F> {}
+            T: MeteringContext + ::std::marker::Send + 'static,
+        {}
     })
 }

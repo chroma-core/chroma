@@ -55,10 +55,8 @@ opentelemetry-http = { version = "0.27", features = ["reqwest"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
 parquet = "52"
-proc-macro2 = "1.0.95"
 prost = "0.13"
 prost-types = "0.13.5"
-quote = "1.0.40"
 regex = "1.11.1"
 regex-syntax = "0.8.5"
 roaring = "0.10.6"

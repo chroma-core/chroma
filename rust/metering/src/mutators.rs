@@ -3,7 +3,7 @@ use quote::quote;
 
 use crate::attributes::Attribute;
 
-/// Generates a no-op mutator function for the `MeteringEvent` trait.
+/// Generates a no-op mutator function for the `MeteringContext` trait.
 pub fn generate_noop_mutator_definition_token_stream(attribute: &Attribute) -> TokenStream {
     let Attribute {
         foreign_macro_token_streams: _foreign_macro_token_streams,

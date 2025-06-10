@@ -8,9 +8,9 @@ pub enum AnnotationLevel {
     Secondary,
 }
 
-/// An annotation at the outermost syntactic layer. Must be either an event or attribute.
+/// An annotation at the outermost syntactic layer. Must be either an context or attribute.
 pub enum PrimaryAnnotation {
-    Event,
+    Context,
     Attribute { attribute_name_string: String },
 }
 
@@ -67,7 +67,7 @@ pub fn collect_annotation_tokens(
     match expected_annotation_name {
         TokenTree::Ident(expected_primary_annotation_ident)
             if expected_primary_annotation_ident == "attribute"
-                || expected_primary_annotation_ident == "event" =>
+                || expected_primary_annotation_ident == "context" =>
         {
             Ok((AnnotationLevel::Primary, tokens[0..2].to_vec(), 2))
         }
@@ -174,13 +174,13 @@ pub fn process_primary_annotation_tokens(
             })
         }
 
-        Some(TokenTree::Ident(expected_event_ident)) if expected_event_ident == "event" => {
+        Some(TokenTree::Ident(expected_context_ident)) if expected_context_ident == "context" => {
             if annotation_tokens_iter.next().is_some() {
                 return Err(MeteringMacrosError::ParseError(
-                    "`event` annotation takes no arguments".into(),
+                    "`context` annotation takes no arguments".into(),
                 ));
             }
-            Ok(PrimaryAnnotation::Event)
+            Ok(PrimaryAnnotation::Context)
         }
 
         unexpected => Err(MeteringMacrosError::ParseError(format!(
@@ -218,7 +218,7 @@ pub fn process_secondary_annotation_tokens(
         }
         _ => {
             return Err(MeteringMacrosError::ParseError(
-                "Expected `( … )` after `field`".into(),
+                "Expected `( ... )` after `field`".into(),
             ));
         }
     };

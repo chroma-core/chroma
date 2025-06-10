@@ -10,18 +10,18 @@ use crate::{
         collect_attribute_definition_tokens, process_attribute_definition_tokens, Attribute,
     },
     errors::MeteringMacrosError,
-    events::{collect_event_definition_tokens, process_event_definition_tokens, Event},
+    contexts::{collect_context_definition_tokens, process_context_definition_tokens, Context},
 };
 
 /// Processes the full token stream that is passed into [`crate::initialize_metering`] by
-/// attempting to parse out vectors of attributes and events.
+/// attempting to parse out vectors of attributes and contexts.
 pub fn process_token_stream(
     token_stream: &TokenStream,
-) -> Result<(Vec<Attribute>, Vec<Event>), MeteringMacrosError> {
+) -> Result<(Vec<Attribute>, Vec<Context>), MeteringMacrosError> {
     let tokens: Vec<TokenTree> = token_stream.clone().into_iter().collect();
 
     let mut attributes: Vec<Attribute> = Vec::new();
-    let mut events: Vec<Event> = Vec::new();
+    let mut contexts: Vec<Context> = Vec::new();
     let mut registered_attributes: HashMap<String, Attribute> = HashMap::new();
 
     let mut current_token_index = 0;
@@ -36,7 +36,7 @@ pub fn process_token_stream(
 
                 if let AnnotationLevel::Secondary = annotation_level {
                     return Err(MeteringMacrosError::ParseError(
-                        "Found `#[field(...)]` outside of an event".into(),
+                        "Found `#[field(...)]` outside of an context".into(),
                     ));
                 }
 
@@ -65,23 +65,23 @@ pub fn process_token_stream(
                         current_token_index = attribute_definition_start_token_index
                             + tokens_consumed_by_attribute_definition;
                     }
-                    PrimaryAnnotation::Event => {
-                        let event_definition_start_token_index =
+                    PrimaryAnnotation::Context => {
+                        let context_definition_start_token_index =
                             current_token_index + tokens_consumed_by_annotation;
 
-                        let (event_definition_tokens, tokens_consumed_by_event_definition) =
-                            collect_event_definition_tokens(
-                                &tokens[event_definition_start_token_index..],
+                        let (context_definition_tokens, tokens_consumed_by_context_definition) =
+                            collect_context_definition_tokens(
+                                &tokens[context_definition_start_token_index..],
                             )?;
 
-                        let event = process_event_definition_tokens(
-                            event_definition_tokens,
+                        let context = process_context_definition_tokens(
+                            context_definition_tokens,
                             &registered_attributes,
                         )?;
-                        events.push(event);
+                        contexts.push(context);
 
-                        current_token_index = event_definition_start_token_index
-                            + tokens_consumed_by_event_definition;
+                        current_token_index = context_definition_start_token_index
+                            + tokens_consumed_by_context_definition;
                     }
                 }
             }
@@ -94,7 +94,7 @@ pub fn process_token_stream(
         }
     }
 
-    Ok((attributes, events))
+    Ok((attributes, contexts))
 }
 
 /// Generates a compiler error at the macro call site given a string.

@@ -69,7 +69,7 @@ pub fn process_attribute_definition_tokens(
                     }
                     Some(unexpected) => {
                         return Err(MeteringMacrosError::ParseError(format!(
-                            "Expected `#[…]` for foreign macro, found: {:?}",
+                            "Expected `#[...]` for foreign macro, found: {:?}",
                             unexpected
                         )));
                     }

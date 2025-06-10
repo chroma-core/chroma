@@ -4,8 +4,7 @@
 #[cfg(test)]
 use async_trait::async_trait;
 use chroma_metering::initialize_metering;
-use std::sync::{Arc, Mutex};
-use tracing::Span;
+use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
 
 use crate::metering::{MeteredFutureExt, SubmitExt};
 /// Represents a user defining their own metering module.
@@ -16,9 +15,9 @@ mod metering {
         #[attribute(name = "test_attribute")]
         type TestAttribute = Option<String>;
 
-        #[event]
+        #[context]
         #[derive(Default, Debug, Clone)]
-        pub struct TestEventA {
+        pub struct TestContextA {
             // This field is not read in the tests
             #[allow(dead_code)]
             test_unannotated_field: u64,
@@ -26,9 +25,9 @@ mod metering {
             pub test_annotated_field: Option<String>
         }
 
-        #[event]
+        #[context]
         #[derive(Default, Debug, Clone)]
-        pub struct TestEventB {
+        pub struct TestContextB {
             // This field is not read in the tests
             #[allow(dead_code)]
             test_unannotated_field: u64,
@@ -37,262 +36,241 @@ mod metering {
         }
     }
 
-    fn test_mutator_a(event: &mut TestEventA, value: Option<String>) {
-        event.test_annotated_field = value;
+    fn test_mutator_a(context: &mut TestContextA, value: Option<String>) {
+        context.test_annotated_field = value;
     }
 
-    fn test_mutator_b(event: &mut TestEventB, value: Option<String>) {
-        event.test_annotated_field = value;
+    fn test_mutator_b(context: &mut TestContextB, value: Option<String>) {
+        context.test_annotated_field = value;
     }
 }
 
-#[derive(Clone, Debug)]
-struct TestReceiver {
-    messages: Arc<Mutex<Vec<String>>>,
-}
+// NOTE(c-gamble): This needs to be async because `chroma_system::System::start_component` expects
+// to be inside of a Tokio runtime.
+#[tokio::test]
+async fn test_init_custom_receiver() {
+    /// A test component so we can test registering a custom receiver
+    #[derive(Clone, Debug)]
+    struct TestComponent {
+        messages: Vec<String>,
+    }
 
-impl TestReceiver {
-    pub fn new() -> Self {
-        Self {
-            messages: Arc::new(Mutex::new(Vec::new())),
+    /// Implement the `Component` trait for our test component
+    #[async_trait]
+    impl Component for TestComponent {
+        fn get_name() -> &'static str {
+            "TestComponent"
+        }
+
+        fn queue_size(&self) -> usize {
+            100
+        }
+
+        async fn on_start(&mut self, _: &ComponentContext<Self>) {}
+
+        fn on_stop_timeout(&self) -> std::time::Duration {
+            std::time::Duration::from_secs(1)
         }
     }
-}
 
-#[async_trait]
-impl chroma_system::ReceiverForMessage<Box<dyn metering::MeteringEvent>> for TestReceiver {
-    async fn send(
-        &self,
-        message: Box<dyn metering::MeteringEvent>,
-        _tracing_context: Option<Span>,
-    ) -> Result<(), chroma_system::ChannelError> {
-        let mut guard = self.messages.lock().unwrap();
-        guard.push(format!("{:?}", message));
-        Ok(())
+    /// Implement `Handler` for our test component
+    #[async_trait]
+    impl Handler<Box<dyn metering::MeteringContext>> for TestComponent {
+        type Result = Option<()>;
+
+        async fn handle(
+            &mut self,
+            message: Box<dyn metering::MeteringContext>,
+            _context_container: &ComponentContext<Self>,
+        ) -> Self::Result {
+            self.messages.push(format!("{:?}", message));
+            None
+        }
     }
-}
 
-#[test]
-fn test_register_custom_receiver() {
-    let custom_receiver = TestReceiver::new();
-    metering::register_receiver(Box::new(custom_receiver));
-    println!("Custom receiver successfully registered!")
+    // Initialize a new Chroma system
+    let system = System::new();
+
+    // Create a test component
+    let test_component = TestComponent {
+        messages: Vec::new(),
+    };
+
+    // Start the component
+    let component_handle = system.start_component(test_component);
+
+    // Extract the receiver and force its type resolution
+    let custom_receiver: Box<dyn ReceiverForMessage<Box<dyn metering::MeteringContext>>> =
+        component_handle.receiver();
+
+    // Initialize the custom receiver
+    let _ = metering::init_receiver(custom_receiver);
 }
 
 #[tokio::test]
-async fn test_single_metering_event() {
-    // Create a metering event of type `TestEventA`
-    let _metering_event_guard =
-        metering::create::<metering::TestEventA>(metering::TestEventA::new(100u64));
+async fn test_single_metering_context() {
+    // Create a metering context of type `TestContextA`
+    let _metering_context_guard =
+        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Set the value of `test_annotated_field` to "value"
-    metering::current().test_attribute(Some("value".to_string()));
+    metering::with_current(|metering_context| {
+        metering_context.test_attribute(Some("value".to_string()))
+    });
 
-    // Pop the event off of the stack
-    let expected_metering_event = metering::close::<metering::TestEventA>();
-    assert!(expected_metering_event.is_some());
-    let metering_event = expected_metering_event.unwrap(); // only unwrap once
+    // Close the metering context
+    let expected_metering_context = metering::close::<metering::TestContextA>();
+    assert!(expected_metering_context.is_ok());
+    let metering_context = expected_metering_context.unwrap(); // only unwrap once
     assert_eq!(
-        metering_event.test_annotated_field,
+        metering_context.test_annotated_field,
         Some("value".to_string())
     );
 
-    // Submit the event to the receiver
-    metering_event.submit().await;
+    // Submit the context to the receiver
+    metering_context.submit().await;
 
-    // Verify that the stack is empty
-    let expected_none = metering::close::<metering::TestEventA>();
-    assert!(expected_none.is_none());
+    // Verify that the metering context is empty
+    let expected_error = metering::close::<metering::TestContextA>();
+    assert!(expected_error.is_err());
 }
 
 #[test]
-fn test_close_nonexistent_event_type() {
-    // Create a metering event of type `TestEventA`
-    let _metering_event_guard =
-        metering::create::<metering::TestEventA>(metering::TestEventA::new(100u64));
+fn test_close_nonexistent_context_type() {
+    // Create a metering context of type `TestContextA`
+    let _metering_context_guard =
+        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Set the value of `test_annotated_field` to "value"
-    metering::current().test_attribute(Some("value".to_string()));
+    metering::with_current(|metering_context| {
+        metering_context.test_attribute(Some("value".to_string()))
+    });
 
-    // Try to pop event B off of the stack
-    let expected_none_pop_b = metering::close::<metering::TestEventB>();
-    assert!(expected_none_pop_b.is_none());
+    // Try to pop context B off of the stack
+    let expected_none_pop_b = metering::close::<metering::TestContextB>();
+    assert!(expected_none_pop_b.is_err());
 
-    // Pop event A off of of the stack
-    let expected_metering_event = metering::close::<metering::TestEventA>();
-    assert!(expected_metering_event.is_some());
-    assert!(expected_metering_event.unwrap().test_annotated_field == Some("value".to_string()));
+    // Pop context A off of of the stack
+    let expected_metering_context = metering::close::<metering::TestContextA>();
+    assert!(expected_metering_context.is_ok());
+    assert!(expected_metering_context.unwrap().test_annotated_field == Some("value".to_string()));
 
-    // Verify that the stack is empty
-    let expected_none_pop_a = metering::close::<metering::TestEventA>();
-    assert!(expected_none_pop_a.is_none());
-}
-
-#[test]
-fn test_many_metering_events_uniform_type_single_context() {
-    // Create a metering event of type `TestEventA`
-    let _metering_event_1_guard =
-        metering::create::<metering::TestEventA>(metering::TestEventA::new(100u64));
-
-    // Create another metering event of type `TestEventA`
-    let _metering_event_2_guard =
-        metering::create::<metering::TestEventA>(metering::TestEventA::new(50u64));
-
-    // Set the value of `test_annotated_field` on event 2 to be "2"
-    metering::current().test_attribute(Some("2".to_string()));
-
-    // Pop event 2 off of the stack
-    let expected_metering_event_2 = metering::close::<metering::TestEventA>();
-    assert!(expected_metering_event_2.is_some());
-    assert!(expected_metering_event_2.unwrap().test_annotated_field == Some("2".to_string()));
-
-    // Set the value of `test_annotated_field` on event 1 to be "1"
-    metering::current().test_attribute(Some("1".to_string()));
-
-    // Pop event 1 off of the stack
-    let expected_metering_event_1 = metering::close::<metering::TestEventA>();
-    assert!(expected_metering_event_1.is_some());
-    assert!(expected_metering_event_1.unwrap().test_annotated_field == Some("1".to_string()));
-
-    // Verify that the stack is empty
-    let expected_none = metering::close::<metering::TestEventA>();
-    assert!(expected_none.is_none());
-}
-
-#[test]
-fn test_many_metering_events_varying_type_single_context() {
-    // Create a metering event of type `TestEventA`
-    let _metering_event_a_guard =
-        metering::create::<metering::TestEventA>(metering::TestEventA::new(100u64));
-
-    // Create a metering event of type `TestEventB`
-    let _metering_event_b_guard =
-        metering::create::<metering::TestEventB>(metering::TestEventB::new(50u64));
-
-    // Set the value of `test_annotated_field` on event B to be "B"
-    metering::current().test_attribute(Some("B".to_string()));
-
-    // Pop event B off of the stack
-    let expected_metering_event_b = metering::close::<metering::TestEventB>();
-    assert!(expected_metering_event_b.is_some());
-    assert!(expected_metering_event_b.unwrap().test_annotated_field == Some("B".to_string()));
-
-    // Set the value of `test_annotated_field` on event A to be "A"
-    metering::current().test_attribute(Some("A".to_string()));
-
-    // Pop event A off of the stack
-    let expected_metering_event_b = metering::close::<metering::TestEventA>();
-    assert!(expected_metering_event_b.is_some());
-    assert!(expected_metering_event_b.unwrap().test_annotated_field == Some("A".to_string()));
-
-    // Verify that the stack is empty
-    let expected_none = metering::close::<metering::TestEventA>();
-    assert!(expected_none.is_none());
+    // Verify that the metering context is empty
+    let expected_none_pop_a = metering::close::<metering::TestContextA>();
+    assert!(expected_none_pop_a.is_err());
 }
 
 #[test]
 fn test_nested_mutation() {
     // Define a helper function that sets a value for `test_attribute`
     fn helper_fn() {
-        metering::current().test_attribute(Some("helper".to_string()));
+        metering::with_current(|metering_context| {
+            metering_context.test_attribute(Some("helper".to_string()))
+        });
     }
 
-    // Create a metering event of type `TestEventA`
-    let _metering_event_guard =
-        metering::create::<metering::TestEventA>(metering::TestEventA::new(100u64));
+    // Create a metering context of type `TestContextA`
+    let _metering_context_guard =
+        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Call the helper function
     helper_fn();
 
-    // Pop the event off of the stack
-    let expected_metering_event = metering::close::<metering::TestEventA>();
-    assert!(expected_metering_event.is_some());
-    assert!(expected_metering_event.unwrap().test_annotated_field == Some("helper".to_string()));
+    // Close the metering context
+    let expected_metering_context = metering::close::<metering::TestContextA>();
+    assert!(expected_metering_context.is_ok());
+    assert!(expected_metering_context.unwrap().test_annotated_field == Some("helper".to_string()));
 
-    // Verify that the stack is empty
-    let expected_none = metering::close::<metering::TestEventA>();
-    assert!(expected_none.is_none());
+    // Verify that the metering context is empty
+    let expected_error = metering::close::<metering::TestContextA>();
+    assert!(expected_error.is_err());
 }
 
 #[tokio::test]
-async fn test_nested_async_context_single_thread() {
+async fn test_nested_async_context_container_single_thread() {
     // Define an asynchronous helper function that sets a value for `test_attribute`
     async fn async_helper_fn() {
-        metering::current().test_attribute(Some("async_helper".to_string()));
+        metering::with_current(|metering_context| {
+            metering_context.test_attribute(Some("async_helper".to_string()))
+        });
     }
 
-    // Create a metering event of type `TestEventA`
-    let _metering_event_guard =
-        metering::create::<metering::TestEventA>(metering::TestEventA::new(100u64));
+    // Create a metering context of type `TestContextA`
+    let _metering_context_guard =
+        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Call the helper function
     async_helper_fn().await;
 
-    // Pop the event off of the stack
-    let expected_metering_event = metering::close::<metering::TestEventA>();
-    assert!(expected_metering_event.is_some());
+    // Close the metering context
+    let expected_metering_context = metering::close::<metering::TestContextA>();
+    assert!(expected_metering_context.is_ok());
     assert!(
-        expected_metering_event.unwrap().test_annotated_field == Some("async_helper".to_string())
+        expected_metering_context.unwrap().test_annotated_field == Some("async_helper".to_string())
     );
 
-    // Verify that the stack is empty
-    let expected_none = metering::close::<metering::TestEventA>();
-    assert!(expected_none.is_none());
+    // Verify that the metering context is empty
+    let expected_error = metering::close::<metering::TestContextA>();
+    assert!(expected_error.is_err());
 }
 
 #[tokio::test]
 async fn test_nested_mutation_multi_thread() {
     // Define an asynchronous helper function that sets a value for `test_attribute`
     async fn async_helper_fn() {
-        metering::current().test_attribute(Some("async_helper".to_string()));
+        metering::with_current(|metering_context| {
+            metering_context.test_attribute(Some("async_helper".to_string()))
+        });
     }
 
-    // Create a metering event of type `TestEventA`
-    let metering_event_guard =
-        metering::create::<metering::TestEventA>(metering::TestEventA::new(100u64));
+    // Create a metering context of type `TestContextA`
+    let metering_context_guard =
+        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Call the helper function in another process, passing the context through `metered`
     let handle = tokio::spawn(async move {
-        async_helper_fn().metered(metering_event_guard).await;
+        async_helper_fn().metered(metering_context_guard).await;
     });
 
     // Wait for the handle to resolve
     handle.await.unwrap();
 
-    // Pop the event off of the stack
-    let expected_metering_event = metering::close::<metering::TestEventA>();
-    assert!(expected_metering_event.is_some());
+    // Close the metering context
+    let expected_metering_context = metering::close::<metering::TestContextA>();
+    assert!(expected_metering_context.is_ok());
     assert!(
-        expected_metering_event.unwrap().test_annotated_field == Some("async_helper".to_string())
+        expected_metering_context.unwrap().test_annotated_field == Some("async_helper".to_string())
     );
 
-    // Verify that the stack is empty
-    let expected_none = metering::close::<metering::TestEventA>();
-    assert!(expected_none.is_none());
+    // Verify that the metering context is empty
+    let expected_error = metering::close::<metering::TestContextA>();
+    assert!(expected_error.is_err());
 }
 
 #[tokio::test]
 async fn test_nested_mutation_then_close_multi_thread() {
     // Define an asynchronous helper function that sets a value for `test_attribute`
     async fn async_helper_fn() {
-        metering::current().test_attribute(Some("async_helper".to_string()));
-        let expected_metering_event = metering::close::<metering::TestEventA>();
-        assert!(expected_metering_event.is_some());
+        metering::with_current(|metering_context| {
+            metering_context.test_attribute(Some("async_helper".to_string()))
+        });
+        let expected_metering_context = metering::close::<metering::TestContextA>();
+        assert!(expected_metering_context.is_ok());
     }
 
-    // Create a metering event of type `TestEventA`
-    let metering_event_guard =
-        metering::create::<metering::TestEventA>(metering::TestEventA::new(100u64));
+    // Create a metering context of type `TestContextA`
+    let metering_context_guard =
+        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Call the helper function in another process, passing the context through `metered`
     let handle = tokio::spawn(async move {
-        async_helper_fn().metered(metering_event_guard).await;
+        async_helper_fn().metered(metering_context_guard).await;
     });
 
-    // Wait for the handle to resolve. The event should be removed from the stack
+    // Wait for the handle to resolve. The metering context should be cleared
     handle.await.unwrap();
 
-    // Verify that the stack is empty
-    let expected_none = metering::close::<metering::TestEventA>();
-    assert!(expected_none.is_none());
+    // Verify that the metering context is empty
+    let expected_error = metering::close::<metering::TestContextA>();
+    assert!(expected_error.is_err());
 }
