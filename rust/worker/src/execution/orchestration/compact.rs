@@ -1054,6 +1054,7 @@ mod tests {
         operator::{Filter, Limit, Projection},
         DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where,
     };
+    use regex::Regex;
 
     use crate::{
         config::RootConfig,
@@ -1205,13 +1206,13 @@ mod tests {
 
         let mut expected_new_collection = old_cas.collection.clone();
         expected_new_collection.version += 1;
+
+        let version_suffix_re = Regex::new(r"/\d+$").unwrap();
+
         expected_new_collection.version_file_path = Some(
-            old_cas
-                .collection
-                .version_file_path
-                .clone()
-                .unwrap()
-                .replace("/1", "/2"),
+            version_suffix_re
+                .replace(&old_cas.collection.version_file_path.clone().unwrap(), "/2")
+                .to_string(),
         );
         assert_eq!(new_cas.collection, expected_new_collection);
         assert_eq!(new_cas.metadata_segment.id, old_cas.metadata_segment.id);
