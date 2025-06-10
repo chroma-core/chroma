@@ -316,7 +316,7 @@ impl Storage {
             Storage::ObjectStore(_) => Err(StorageError::NotImplemented),
             Storage::S3(s3) => s3.copy(src_key, dst_key).await,
             Storage::Local(local) => local.copy(src_key, dst_key).await,
-            Storage::AdmissionControlledS3(_) => Err(StorageError::NotImplemented),
+            Storage::AdmissionControlledS3(ac) => ac.copy(src_key, dst_key).await,
         }
     }
 
