@@ -9,8 +9,8 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	trace_log "github.com/pingcap/log"
-	"google.golang.org/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 type logServer struct {
@@ -37,7 +37,12 @@ func (s *logServer) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequ
 	}
 	var recordCount int64
 	var isSealed bool
-	recordCount, isSealed, err = s.lr.InsertRecords(ctx, collectionID.String(), recordsContent)
+	for retryCount := 0; retryCount < 3; retryCount++ {
+		recordCount, isSealed, err = s.lr.InsertRecords(ctx, collectionID.String(), recordsContent)
+		if err == nil {
+			break
+		}
+	}
 	if err != nil {
 		return
 	}
@@ -63,9 +68,9 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 	// +1 to convert from the (] bound to a [) bound.
 	res = &logservicepb.ScoutLogsResponse{
 		FirstUncompactedRecordOffset: int64(start + 1),
-		FirstUninsertedRecordOffset: int64(limit + 1),
+		FirstUninsertedRecordOffset:  int64(limit + 1),
 	}
-	trace_log.Info("Scouted Logs", zap.Int64("start", int64(start + 1)), zap.Int64("limit", int64(limit + 1)), zap.String("collectionId", req.CollectionId))
+	trace_log.Info("Scouted Logs", zap.Int64("start", int64(start+1)), zap.Int64("limit", int64(limit+1)), zap.String("collectionId", req.CollectionId))
 	return
 }
 
