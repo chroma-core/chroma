@@ -162,7 +162,13 @@ impl GarbageCollector {
                 );
 
             let started_at = SystemTime::now();
-            let result = orchestrator.run(system.clone()).await?;
+            let result = match orchestrator.run(system.clone()).await {
+                Ok(res) => res,
+                Err(e) => {
+                    tracing::error!("Failed to run garbage collection orchestrator v2: {:?}", e);
+                    return Err(GarbageCollectCollectionError::OrchestratorV2Error(e));
+                }
+            };
             let duration_ms = started_at
                 .elapsed()
                 .map(|d| d.as_millis() as u64)
@@ -417,7 +423,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
-                    tracing::info!("Garbage collection failed: {:?}", e);
+                    tracing::error!("Garbage collection failed: {:?}", e);
                     num_failed_jobs += 1;
                 }
             }

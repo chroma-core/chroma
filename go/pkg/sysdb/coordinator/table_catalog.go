@@ -2037,6 +2037,12 @@ func (tc *Catalog) markVersionForDeletionInSingleCollection(
 }
 
 func (tc *Catalog) MarkVersionForDeletion(ctx context.Context, req *coordinatorpb.MarkVersionForDeletionRequest) (*coordinatorpb.MarkVersionForDeletionResponse, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.MarkVersionForDeletion")
+		defer span.End()
+	}
+
 	result := coordinatorpb.MarkVersionForDeletionResponse{
 		CollectionIdToSuccess: make(map[string]bool),
 	}

@@ -103,7 +103,7 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     #[allow(clippy::type_complexity)]
     async fn get_stream_and_e_tag(
         &self,
@@ -163,7 +163,7 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     #[allow(clippy::type_complexity)]
     pub(super) async fn get_key_ranges(
         &self,
@@ -207,7 +207,7 @@ impl S3Storage {
         Ok((content_length, ranges, e_tag.map(ETag)))
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub(super) async fn fetch_range(
         &self,
         key: String,
@@ -255,7 +255,7 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub(super) async fn get_parallel(
         &self,
         key: &str,
@@ -305,13 +305,13 @@ impl S3Storage {
         Ok((Arc::new(output_buffer), e_tag))
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         self.get_with_e_tag(key).await.map(|(buf, _)| buf)
     }
 
     /// Perform a strongly consistent get and return the e_tag.
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn get_with_e_tag(
         &self,
         key: &str,
@@ -351,7 +351,7 @@ impl S3Storage {
         total_size_bytes < self.upload_part_size_bytes
     }
 
-    #[tracing::instrument(skip(self, bytes))]
+    #[tracing::instrument(skip(self, bytes), level = "trace")]
     pub async fn put_bytes(
         &self,
         key: &str,
@@ -372,7 +372,7 @@ impl S3Storage {
         .await
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn put_file(
         &self,
         key: &str,
@@ -412,7 +412,7 @@ impl S3Storage {
         .await
     }
 
-    #[tracing::instrument(skip(self, create_bytestream_fn))]
+    #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
     async fn put_object(
         &self,
         key: &str,
@@ -431,7 +431,7 @@ impl S3Storage {
             .await
     }
 
-    #[tracing::instrument(skip(self, create_bytestream_fn))]
+    #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
     pub(super) async fn oneshot_upload(
         &self,
         key: &str,
@@ -473,7 +473,7 @@ impl S3Storage {
         Ok(resp.e_tag.map(ETag))
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub(super) async fn prepare_multipart_upload(
         &self,
         key: &str,
@@ -509,7 +509,7 @@ impl S3Storage {
         Ok((part_count, size_of_last_part, upload_id))
     }
 
-    #[tracing::instrument(skip(self, create_bytestream_fn))]
+    #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
     pub(super) async fn upload_part(
         &self,
         key: &str,
@@ -552,7 +552,7 @@ impl S3Storage {
             .build())
     }
 
-    #[tracing::instrument(skip(self, upload_parts))]
+    #[tracing::instrument(skip(self, upload_parts), level = "trace")]
     pub(super) async fn finish_multipart_upload(
         &self,
         key: &str,
@@ -623,9 +623,9 @@ impl S3Storage {
             .await
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        tracing::debug!(key = %key, "Deleting object from S3");
+        tracing::trace!(key = %key, "Deleting object from S3");
 
         match self
             .client
@@ -636,7 +636,7 @@ impl S3Storage {
             .await
         {
             Ok(_) => {
-                tracing::debug!(key = %key, "Successfully deleted object from S3");
+                tracing::trace!(key = %key, "Successfully deleted object from S3");
                 Ok(())
             }
             Err(e) => {
@@ -648,7 +648,7 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object in S3");
         // S3 doesn't have a native rename operation, so we need to copy and delete
@@ -665,7 +665,7 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Copying object in S3");
         match self
