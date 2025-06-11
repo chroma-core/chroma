@@ -204,7 +204,7 @@ where
                 }
             });
         }
-
+        println!("[DEBUG HAMMAD] Removing node: {}", node);
         let mut node_name_to_client_guard = self.client_assigner.node_name_to_client.write();
         node_name_to_client_guard.remove(node);
         self.node_name_to_change_sender.remove(node);
