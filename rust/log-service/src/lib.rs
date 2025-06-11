@@ -3594,7 +3594,6 @@ mod tests {
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(1))]
         #[test]
         fn test_k8s_integration_rust_log_service_push_pull_logs(
             read_offset in 1usize..=100,
