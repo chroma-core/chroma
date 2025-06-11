@@ -5,6 +5,8 @@ import hypothesis.strategies as st
 
 
 def test_list_databases(client_factories: ClientFactories) -> None:
+    client = client_factories.create_client()
+    client.reset()
     admin_client = client_factories.create_admin_client_from_system()
 
     for i in range(10):

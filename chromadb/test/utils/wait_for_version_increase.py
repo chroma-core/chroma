@@ -2,7 +2,7 @@ import time
 from chromadb.api import ClientAPI
 from chromadb.test.conftest import COMPACTION_SLEEP
 
-TIMEOUT_INTERVAL = 5
+TIMEOUT_INTERVAL = 1
 
 
 def get_collection_version(client: ClientAPI, collection_name: str) -> int:
