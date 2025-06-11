@@ -102,14 +102,8 @@ async fn test_garbage_new_with_bad_manifest1_offset_9340() {
 
     match result {
         Ok(garbage) => {
-            println!(
-                "Garbage creation succeeded with {} actions",
-                garbage.actions.len()
-            );
-            // Let's examine what was created
-            for (i, action) in garbage.actions.iter().enumerate() {
-                println!("Action {}: {:?}", i, action);
-            }
+            println!("Garbage creation succeeded");
+            println!("{garbage:#?}");
         }
         Err(_) => {
             panic!("REGRESSION");

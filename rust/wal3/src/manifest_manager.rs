@@ -96,7 +96,7 @@ impl Staging {
                 Err(err) => {
                     tracing::error!("could not apply garabage: {err:?}");
                     for notifier in notifiers {
-                        let _ = notifier.send(Some(Box::new(err.clone()).into()));
+                        let _ = notifier.send(Some(err.clone().into()));
                     }
                     return None;
                 }

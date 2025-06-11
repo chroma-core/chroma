@@ -165,11 +165,8 @@ pub enum ScrubError {
     MissingSnapshotBySetsumPath { setsum: Setsum, path: String },
     #[error("MissingSnapshot: {reference:?}")]
     MissingSnapshot { reference: SnapshotPointer },
-    #[error("Garbage: expected:{expected_setsum:?} != returned:{returned_setsum:?}")]
-    CorruptGarbage {
-        expected_setsum: Setsum,
-        returned_setsum: Setsum,
-    },
+    #[error("Garbage: expected: {0}")]
+    CorruptGarbage(String),
     #[error("Corrupt snapshot replace")]
     CorruptSnapshotDrop { lhs: Setsum, rhs: Setsum },
     #[error("Corrupt snapshot replace")]

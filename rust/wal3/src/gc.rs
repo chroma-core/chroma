@@ -18,12 +18,7 @@ use crate::{
 
 #[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
 pub struct Garbage {
-    #[serde(
-        deserialize_with = "super::deserialize_setsum",
-        serialize_with = "super::serialize_setsum"
-    )]
-    pub dropped_setsum: Setsum,
-    pub actions: Vec<GarbageAction>,
+    pub actions: GarbageAction,
     pub cutoff: LogPosition,
 }
 
@@ -52,32 +47,23 @@ impl Garbage {
             .iter()
             .filter(|frag| frag.limit <= first_to_keep)
             .collect::<Vec<_>>();
-        let mut actions = vec![];
-        let mut drop_acc = Setsum::default();
+        let mut actions = GarbageAction::default();
         for snap in dropped_snapshots {
-            let (action, setsum) =
-                Self::drop_snapshot(storage, prefix, snap, throttle, snapshots).await?;
-            actions.push(action);
-            drop_acc += setsum;
+            let action = Self::drop_snapshot(storage, prefix, snap, throttle, snapshots).await?;
+            actions.merge(action)?;
         }
         for snap in replaced_snapshots {
-            let (action, setsum) =
+            let action =
                 Self::replace_snapshot(storage, prefix, snap, throttle, snapshots, first_to_keep)
                     .await?;
-            actions.push(action);
-            drop_acc += setsum;
+            actions.merge(action)?;
         }
         for frag in dropped_fragments {
-            let (action, setsum) = Self::drop_fragment(frag)?;
-            actions.push(action);
-            drop_acc += setsum;
+            let action = Self::drop_fragment(frag)?;
+            actions.merge(action)?;
         }
         let cutoff = first_to_keep;
-        let garbage = Garbage {
-            dropped_setsum: drop_acc,
-            actions,
-            cutoff,
-        };
+        let garbage = Garbage { actions, cutoff };
         garbage.scrub()?;
         Ok(garbage)
     }
@@ -167,40 +153,24 @@ impl Garbage {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.actions.is_empty()
+        self.actions.snapshots_to_drop.is_empty() && self.actions.fragments_to_drop.is_empty()
     }
 
     #[allow(clippy::result_large_err)]
     pub fn scrub(&self) -> Result<Setsum, Error> {
-        let to_drop = self
-            .actions
-            .iter()
-            .map(|x| x.scrub())
-            .collect::<Result<Vec<_>, Error>>()?;
-        let dropped_setsum = to_drop
-            .clone()
-            .into_iter()
-            .fold(Setsum::default(), Setsum::add);
-        if dropped_setsum != self.dropped_setsum {
-            return Err(Box::new(ScrubError::CorruptGarbage {
-                expected_setsum: self.dropped_setsum,
-                returned_setsum: dropped_setsum,
-            })
-            .into());
-        }
-        Ok(dropped_setsum)
+        self.actions.scrub()?;
+        Ok(self.actions.setsum_to_discard)
     }
 
     #[allow(clippy::result_large_err)]
-    fn drop_fragment(frag: &Fragment) -> Result<(GarbageAction, Setsum), Error> {
-        eprintln!("DROP_FRAGMENT({frag:?})");
-        Ok((
-            GarbageAction::DropFragment(DropFragment {
-                path_to_fragment: frag.path.clone(),
-                fragment_setsum: frag.setsum,
-            }),
-            frag.setsum,
-        ))
+    fn drop_fragment(frag: &Fragment) -> Result<GarbageAction, Error> {
+        Ok(GarbageAction {
+            snapshots_to_drop: vec![],
+            fragments_to_drop: vec![frag.clone()],
+            snapshots_to_make: vec![],
+            setsum_to_discard: frag.setsum,
+            root_snapshot_ptr: None,
+        })
     }
 
     #[allow(clippy::result_large_err)]
@@ -209,10 +179,9 @@ impl Garbage {
         prefix: &str,
         ptr: &SnapshotPointer,
         throttle: &ThrottleOptions,
-        snapshots: &dyn SnapshotCache,
-    ) -> Result<(GarbageAction, Setsum), Error> {
-        eprintln!("DROP_SNAPSHOT({ptr:?})");
-        let snapshot = match snapshots.get(ptr).await? {
+        snapshot_cache: &dyn SnapshotCache,
+    ) -> Result<GarbageAction, Error> {
+        let snapshot = match snapshot_cache.get(ptr).await? {
             Some(snapshot) => snapshot,
             None => match Snapshot::load(throttle, storage, prefix, ptr).await? {
                 Some(snapshot) => snapshot,
@@ -220,44 +189,29 @@ impl Garbage {
                     return Err(Box::new(ScrubError::MissingSnapshot {
                         reference: ptr.clone(),
                     })
-                    .into())
+                    .into());
                 }
             },
         };
-        let mut drop_acc = Setsum::default();
-        let mut children = vec![];
-        // NOTE(rescrv):  Because of our tree structure, no snapshot will have two parents.  This
-        // is critical because it means we can just drop all our children.  The setsum of the
-        // snapshot includes everything dropped, so we don't need to drop individually.  For that
-        // reason, provide a dummy drop_acc;
-        for frag in snapshot.fragments.iter() {
-            let (action, setsum) = Self::drop_fragment(frag)?;
-            children.push(action);
-            drop_acc += setsum;
-        }
+        let mut actions = GarbageAction::default();
+        actions.drop_snapshot(snapshot.clone())?;
         for snap in snapshot.snapshots.iter() {
-            let (action, setsum) = Box::pin(Self::drop_snapshot(
-                storage, prefix, snap, throttle, snapshots,
+            let action = Box::pin(Self::drop_snapshot(
+                storage,
+                prefix,
+                snap,
+                throttle,
+                snapshot_cache,
             ))
             .await?;
-            children.push(action);
-            drop_acc += setsum;
+            actions.merge(action)?;
         }
-        if drop_acc != snapshot.setsum {
-            return Err(Box::new(ScrubError::CorruptSnapshotDrop {
-                lhs: drop_acc,
-                rhs: snapshot.setsum,
-            })
-            .into());
+        for frag in snapshot.fragments.iter() {
+            let action = Self::drop_fragment(frag)?;
+            actions.merge(action)?;
         }
-        Ok((
-            GarbageAction::DropSnapshot(DropSnapshot {
-                path_to_snapshot: snapshot.path.clone(),
-                snapshot_setsum: snapshot.setsum,
-                children,
-            }),
-            drop_acc,
-        ))
+        actions.scrub()?;
+        Ok(actions)
     }
 
     #[allow(clippy::result_large_err)]
@@ -268,17 +222,17 @@ impl Garbage {
         throttle: &ThrottleOptions,
         snapshot_cache: &dyn SnapshotCache,
         first_to_keep: LogPosition,
-    ) -> Result<(GarbageAction, Setsum), Error> {
-        eprintln!("REPLACE_SNAPSHOT({ptr:?})");
+    ) -> Result<GarbageAction, Error> {
         let snapshot = match snapshot_cache.get(ptr).await? {
             Some(snapshot) => snapshot,
             None => match Snapshot::load(throttle, storage, prefix, ptr).await? {
                 Some(snapshot) => snapshot,
                 None => {
+                    eprintln!("FINDME {}:{}", file!(), line!());
                     return Err(Box::new(ScrubError::MissingSnapshot {
                         reference: ptr.clone(),
                     })
-                    .into())
+                    .into());
                 }
             },
         };
@@ -322,11 +276,24 @@ impl Garbage {
             ))
             .into());
         }
-        let mut drop_acc = Setsum::default();
-        if let Some(to_split) = snapshots_to_split.pop() {
-            let snapshots = snapshots_to_keep;
-            let fragments = fragments_to_keep;
-            let (action, setsum) = Box::pin(Self::replace_snapshot(
+        let mut actions = GarbageAction::default();
+        for snap in snapshots_to_drop {
+            let action = Box::pin(Self::drop_snapshot(
+                storage,
+                prefix,
+                snap,
+                throttle,
+                snapshot_cache,
+            ))
+            .await?;
+            actions.merge(action)?;
+        }
+        for frag in fragments_to_drop {
+            let action = Self::drop_fragment(frag)?;
+            actions.merge(action)?;
+        }
+        let ptr = if let Some(to_split) = snapshots_to_split.pop() {
+            let action = Box::pin(Self::replace_snapshot(
                 storage,
                 prefix,
                 &to_split,
@@ -335,174 +302,74 @@ impl Garbage {
                 first_to_keep,
             ))
             .await?;
-            let GarbageAction::ReplaceSnapshot(mut replace) = action else {
-                return Err(Box::new(ScrubError::Internal(
-                    "replace snapshot failed to generate a replace snapshot".to_string(),
-                ))
-                .into());
-            };
-            drop_acc += setsum;
-            replace.new_snapshot.setsum -= setsum;
-            replace.new_snapshot.path = unprefixed_snapshot_path(replace.new_snapshot.setsum);
-            replace.new_snapshot.snapshots.extend(snapshots);
-            replace.new_snapshot.fragments.extend(fragments);
-            replace.new_snapshot.snapshots.sort_by_key(|s| s.start);
-            replace.new_snapshot.fragments.sort_by_key(|f| f.start);
-            for snap in snapshots_to_drop.iter() {
-                let (action, setsum) =
-                    Self::drop_snapshot(storage, prefix, snap, throttle, snapshot_cache).await?;
-                replace.actions.push(action);
-                drop_acc += setsum;
-                replace.new_snapshot.setsum -= setsum;
-            }
-            for frag in fragments_to_drop.iter() {
-                let (action, setsum) = Self::drop_fragment(frag)?;
-                replace.actions.push(action);
-                drop_acc += setsum;
-                replace.new_snapshot.setsum -= setsum;
-            }
-            replace.new_snapshot.setsum = replace
-                .new_snapshot
-                .snapshots
-                .iter()
-                .map(|s| s.setsum)
-                .fold(Setsum::default(), Setsum::add)
-                + replace
-                    .new_snapshot
-                    .fragments
-                    .iter()
-                    .map(|f| f.setsum)
-                    .fold(Setsum::default(), Setsum::add);
-            let dropped = replace.scrub()?;
-            eprintln!("dropped {}", dropped.hexdigest());
-            eprintln!("drop_acc {}", drop_acc.hexdigest());
-            eprintln!("new_snap {}", replace.new_snapshot.setsum.hexdigest());
-            eprintln!(
-                "new_snap-input {}",
-                (replace.new_snapshot.setsum - ptr.setsum).hexdigest()
-            );
-            eprintln!(
-                "input-new_snap {}",
-                (ptr.setsum - replace.new_snapshot.setsum).hexdigest()
-            );
-            if replace.new_snapshot.setsum + drop_acc == ptr.setsum {
-                eprintln!("SUCCESS");
-                Ok((GarbageAction::ReplaceSnapshot(replace), drop_acc))
-            } else {
-                Err(Box::new(ScrubError::CorruptSnapshotReplace {
-                    old_snapshot_setsum: ptr.setsum,
-                    new_snapshot_setsum: replace.new_snapshot.setsum,
-                    dropped: drop_acc,
-                })
-                .into())
-            }
+            let ptr = action.root_snapshot_ptr.clone();
+            actions.merge(action)?;
+            ptr
         } else {
-            let snapshots = snapshots_to_keep;
-            let fragments = fragments_to_keep;
-            if fragments.is_empty() {
-                return Err(Box::new(ScrubError::Internal(
-                    "invalid state:  no fragments".to_string(),
-                ))
-                .into());
+            None
+        };
+        if ptr.is_some() && (!snapshots_to_keep.is_empty() || !fragments_to_keep.is_empty()) {
+            let mut snapshots = Vec::with_capacity(snapshots_to_keep.len() + 1);
+            if let Some(ptr) = ptr {
+                snapshots.push(ptr);
             }
+            snapshots.extend(snapshots_to_keep);
             let depth = snapshots.iter().map(|s| s.depth).max().unwrap_or(0) + 1;
             let setsum = snapshots
                 .iter()
                 .map(|s| s.setsum)
-                .fold(Setsum::default(), Setsum::add)
-                + fragments
-                    .iter()
-                    .map(|f| f.setsum)
-                    .fold(Setsum::default(), Setsum::add);
-            let new_snapshot = Snapshot {
-                path: unprefixed_snapshot_path(setsum),
+                .fold(Setsum::default(), Setsum::add);
+            let path = unprefixed_snapshot_path(setsum);
+            let fragments = fragments_to_keep;
+            actions.add_snapshot(Snapshot {
+                path,
                 setsum,
                 depth,
                 snapshots,
                 fragments,
                 writer: "garbage collection".to_string(),
-            };
-            for f in fragments_to_drop.iter() {
-                drop_acc += f.setsum;
-            }
-            for s in snapshots_to_drop.iter() {
-                drop_acc += s.setsum;
-            }
-            let drop_snapshots = snapshots_to_drop
+            })?;
+        } else if ptr.is_some() {
+            // pass
+        } else if snapshots_to_keep.len() + fragments_to_keep.len() > 1
+            || snapshots_to_keep.is_empty()
+        {
+            let setsum = snapshots_to_keep
                 .iter()
-                .map(|s| DropSnapshotShallow {
-                    path_to_snapshot: s.path_to_snapshot.clone(),
-                    snapshot_setsum: s.setsum,
-                })
-                .collect::<Vec<_>>();
-            let drop_fragments = fragments_to_drop
-                .iter()
-                .map(|f| DropFragment {
-                    path_to_fragment: f.path.clone(),
-                    fragment_setsum: f.setsum,
-                })
-                .collect::<Vec<_>>();
-            if new_snapshot.setsum + drop_acc != ptr.setsum {
-                return Err(Box::new(ScrubError::Internal(
-                    "failed to replace snapshot:  setsum doesn't balance".to_string(),
-                ))
-                .into());
-            }
-            Ok((
-                GarbageAction::ReplaceSnapshot(ReplaceSnapshot {
-                    actions: vec![],
-                    drop_snapshots,
-                    drop_fragments,
-                    new_snapshot,
-                }),
-                drop_acc,
-            ))
+                .map(|s| s.setsum)
+                .fold(Setsum::default(), Setsum::add)
+                + fragments_to_keep
+                    .iter()
+                    .map(|f| f.setsum)
+                    .fold(Setsum::default(), Setsum::add);
+            let path = unprefixed_snapshot_path(setsum);
+            let depth = snapshots_to_keep.iter().map(|s| s.depth).max().unwrap_or(0) + 1;
+            let snapshots = snapshots_to_keep;
+            let fragments = fragments_to_keep;
+            actions.add_snapshot(Snapshot {
+                path,
+                setsum,
+                depth,
+                snapshots,
+                fragments,
+                writer: "garbage collection".to_string(),
+            })?;
+        } else if !snapshots_to_keep.is_empty() {
+            // SAFETY(rescrv):  Assured by the > 1 condition above.
+            assert_eq!(1, snapshots_to_keep.len());
+            actions.set_root_snapshot(snapshots_to_keep[0].clone())?;
         }
+        actions.scrub()?;
+        Ok(actions)
     }
 
     pub fn prefixed_paths(&self, prefix: &str) -> impl Iterator<Item = String> {
-        fn prefixed_paths_for_action(
-            prefix: &str,
-            action: &GarbageAction,
-        ) -> impl Iterator<Item = String> {
-            let mut paths = vec![];
-            match action {
-                GarbageAction::DropFragment(DropFragment {
-                    path_to_fragment,
-                    fragment_setsum: _,
-                }) => paths.push(format!("{prefix}/{path_to_fragment}")),
-                GarbageAction::DropSnapshot(DropSnapshot {
-                    path_to_snapshot,
-                    snapshot_setsum: _,
-                    children,
-                }) => {
-                    paths.push(format!("{prefix}/{path_to_snapshot}"));
-                    for child in children {
-                        paths.extend(prefixed_paths_for_action(prefix, child));
-                    }
-                }
-                GarbageAction::ReplaceSnapshot(ReplaceSnapshot {
-                    actions,
-                    drop_snapshots,
-                    drop_fragments,
-                    new_snapshot: _,
-                }) => {
-                    for action in actions {
-                        paths.extend(prefixed_paths_for_action(prefix, action));
-                    }
-                    for drop_snapshot in drop_snapshots.iter() {
-                        paths.push(format!("{prefix}/{}", drop_snapshot.path_to_snapshot));
-                    }
-                    for drop_fragment in drop_fragments.iter() {
-                        paths.push(format!("{prefix}/{}", drop_fragment.path_to_fragment));
-                    }
-                }
-            };
-            paths.into_iter()
-        }
         let mut paths = vec![];
-        for action in self.actions.iter() {
-            paths.extend(prefixed_paths_for_action(prefix, action));
+        for snap in self.actions.snapshots_to_drop.iter() {
+            paths.push(format!("{prefix}/{}", snap.path));
+        }
+        for frag in self.actions.fragments_to_drop.iter() {
+            paths.push(format!("{prefix}/{}", frag.path));
         }
         paths.into_iter()
     }
@@ -513,141 +380,90 @@ impl Garbage {
         prefix: &str,
         throttle: &ThrottleOptions,
     ) -> Result<(), Error> {
-        for action in self.actions.iter() {
-            self.install_new_snapshots_from_action(storage, prefix, throttle, action)
-                .await?;
+        for snap in self.actions.snapshots_to_make.iter() {
+            snap.install(throttle, storage, prefix).await?;
         }
         Ok(())
-    }
-
-    async fn install_new_snapshots_from_action(
-        &self,
-        storage: &Storage,
-        prefix: &str,
-        throttle: &ThrottleOptions,
-        action: &GarbageAction,
-    ) -> Result<(), Error> {
-        match action {
-            GarbageAction::DropSnapshot { .. } | GarbageAction::DropFragment { .. } => {
-                // NOTE(rescrv):  Because each snapshot and fragment has exactly one path from the
-                // root, there is no need to process any of this snapshot's snapshots or fragments;
-                // they are all dropped.
-                Ok(())
-            }
-            GarbageAction::ReplaceSnapshot(replace) => {
-                replace
-                    .new_snapshot
-                    .install(throttle, storage, prefix)
-                    .await?;
-                Ok(())
-            }
-        }
     }
 }
 
 /////////////////////////////////////////// GarbageAction //////////////////////////////////////////
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct DropFragment {
-    pub path_to_fragment: String,
+#[derive(Debug, Clone, Default, serde::Deserialize, serde::Serialize)]
+pub struct GarbageAction {
+    pub snapshots_to_drop: Vec<Snapshot>,
+    pub fragments_to_drop: Vec<Fragment>,
+    pub snapshots_to_make: Vec<Snapshot>,
     #[serde(
-        deserialize_with = "deserialize_setsum",
-        serialize_with = "serialize_setsum"
+        deserialize_with = "super::deserialize_setsum",
+        serialize_with = "super::serialize_setsum"
     )]
-    pub fragment_setsum: Setsum,
-}
-
-impl DropFragment {
-    pub fn scrub(&self) -> Result<Setsum, Error> {
-        Ok(self.fragment_setsum)
-    }
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct DropSnapshot {
-    pub path_to_snapshot: String,
-    #[serde(
-        deserialize_with = "deserialize_setsum",
-        serialize_with = "serialize_setsum"
-    )]
-    pub snapshot_setsum: Setsum,
-    pub children: Vec<GarbageAction>,
-}
-
-impl DropSnapshot {
-    pub fn scrub(&self) -> Result<Setsum, Error> {
-        let to_drop = self
-            .children
-            .iter()
-            .map(|x| x.scrub())
-            .collect::<Result<Vec<_>, Error>>()?;
-        let dropped_setsum = to_drop.into_iter().fold(Setsum::default(), Setsum::add);
-        if dropped_setsum != self.snapshot_setsum {
-            return Err(Box::new(ScrubError::CorruptGarbage {
-                expected_setsum: self.snapshot_setsum,
-                returned_setsum: dropped_setsum,
-            })
-            .into());
-        }
-        Ok(dropped_setsum)
-    }
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct DropSnapshotShallow {
-    pub path_to_snapshot: String,
-    #[serde(
-        deserialize_with = "deserialize_setsum",
-        serialize_with = "serialize_setsum"
-    )]
-    pub snapshot_setsum: Setsum,
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-pub struct ReplaceSnapshot {
-    pub actions: Vec<GarbageAction>,
-    pub drop_snapshots: Vec<DropSnapshotShallow>,
-    pub drop_fragments: Vec<DropFragment>,
-    pub new_snapshot: Snapshot,
-}
-
-impl ReplaceSnapshot {
-    pub fn scrub(&self) -> Result<Setsum, Error> {
-        let actions = self
-            .actions
-            .iter()
-            .map(|a| a.scrub())
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(actions.into_iter().fold(Setsum::default(), Setsum::add)
-            + self
-                .drop_snapshots
-                .iter()
-                .map(|s| s.snapshot_setsum)
-                .fold(Setsum::default(), Setsum::add)
-            + self
-                .drop_fragments
-                .iter()
-                .map(|f| f.fragment_setsum)
-                .fold(Setsum::default(), Setsum::add))
-    }
-}
-
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum GarbageAction {
-    DropSnapshot(DropSnapshot),
-    DropFragment(DropFragment),
-    ReplaceSnapshot(ReplaceSnapshot),
+    pub setsum_to_discard: Setsum,
+    pub root_snapshot_ptr: Option<SnapshotPointer>,
 }
 
 impl GarbageAction {
-    #[allow(clippy::result_large_err)]
-    pub fn scrub(&self) -> Result<Setsum, Error> {
-        match self {
-            Self::DropFragment(f) => f.scrub(),
-            Self::DropSnapshot(s) => s.scrub(),
-            Self::ReplaceSnapshot(r) => r.scrub(),
+    pub fn set_root_snapshot(&mut self, ptr: SnapshotPointer) -> Result<(), Box<ScrubError>> {
+        if self.root_snapshot_ptr.is_some() {
+            todo!();
         }
+        self.root_snapshot_ptr = Some(ptr);
+        Ok(())
+    }
+
+    pub fn add_snapshot(&mut self, snapshot: Snapshot) -> Result<(), Box<ScrubError>> {
+        if let Some(root_snapshot_ptr) = self.root_snapshot_ptr.as_ref() {
+            if !snapshot.snapshots.iter().any(|s| s == root_snapshot_ptr) {
+                todo!();
+            }
+        }
+        self.root_snapshot_ptr = Some(snapshot.to_pointer());
+        self.snapshots_to_make.push(snapshot);
+        Ok(())
+    }
+
+    pub fn drop_snapshot(&mut self, snapshot: Snapshot) -> Result<(), Box<ScrubError>> {
+        self.scrub()?;
+        self.snapshots_to_drop.push(snapshot);
+        self.scrub()?;
+        Ok(())
+    }
+
+    pub fn scrub(&self) -> Result<(), Box<ScrubError>> {
+        // NOTE(rescrv):  There are a number of invariants we'd like to preserve, but the number
+        // one invariant is that anything reachable from snapshots_to_drop must be in
+        // snapshots_to_drop, fragments_to_drop, or referred to from a snapshot in
+        // snapshots_to_make.
+        for snapshot in self.snapshots_to_drop.iter() {
+            for unrefed_snap in snapshot.snapshots.iter() {
+                // TODO(rescrv): check it.
+            }
+            for unrefed_frag in snapshot.fragments.iter() {
+                // TODO(rescrv): check it.
+            }
+        }
+        for unrefed_frag in self.fragments_to_drop.iter() {
+            // TODO(rescrv): check it.
+        }
+        // TODO(rescrv): More invariant scrubbing.
+        Ok(())
+    }
+
+    pub fn merge(&mut self, other: GarbageAction) -> Result<(), Box<ScrubError>> {
+        other.scrub()?;
+        self.scrub()?;
+        if self.root_snapshot_ptr.is_some() && other.root_snapshot_ptr.is_some() {
+            todo!();
+        }
+        if self.root_snapshot_ptr.is_none() {
+            self.root_snapshot_ptr = other.root_snapshot_ptr;
+        }
+        self.snapshots_to_drop.extend(other.snapshots_to_drop);
+        self.snapshots_to_make.extend(other.snapshots_to_make);
+        self.fragments_to_drop.extend(other.fragments_to_drop);
+        self.setsum_to_discard += other.setsum_to_discard;
+        self.scrub()?;
+        Ok(())
     }
 }
 
@@ -744,7 +560,7 @@ mod tests {
     #[tokio::test]
     async fn replace_snapshot_triggers_to_split_case_one_level() {
         // Set up test data that will trigger the to_split case
-        let (parent_ptr, _parent_snapshot, cache) = create_snapshot_for_split_test();
+        let (nested_ptr, nested_snapshot, cache) = create_snapshot_for_split_test();
 
         // Set cutoff at position 10, which should trigger splitting the nested snapshot
         // that spans from 8 to 15
@@ -753,10 +569,10 @@ mod tests {
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
 
         // This should trigger the to_split case in replace_snapshot
-        let (action, setsum) = Garbage::replace_snapshot(
+        let action = Garbage::replace_snapshot(
             &storage,
             "replace-snapshot",
-            &parent_ptr,
+            &nested_ptr,
             &ThrottleOptions::default(),
             &cache,
             first_to_keep,
@@ -764,18 +580,28 @@ mod tests {
         .await
         .unwrap();
 
-        let GarbageAction::ReplaceSnapshot(replace) = action else {
-            panic!("did not get a replace snapshot");
-        };
-
         assert_eq!(
             Setsum::from_hexdigest(
                 "00000000aaaaaaaa000000000000000000000000000000000000000000000000"
             )
             .unwrap(),
-            setsum
+            action.setsum_to_discard,
         );
-        assert!(replace.drop_snapshots.is_empty());
+        assert!(action.snapshots_to_drop.is_empty());
+        assert_eq!(1, action.fragments_to_drop.len());
+        assert_eq!(
+            create_fragment(
+                5,
+                8,
+                FragmentSeqNo(1),
+                Setsum::from_hexdigest(
+                    "00000000aaaaaaaa000000000000000000000000000000000000000000000000",
+                )
+                .unwrap(),
+            ),
+            action.fragments_to_drop[0]
+        );
+        assert_eq!(1, action.snapshots_to_make.len());
         assert_eq!(
             Snapshot {
                 path: "snapshot/SNAPSHOT.0000000000000000bbbbbbbb0000000000000000000000000000000000000000"
@@ -797,7 +623,7 @@ mod tests {
                 ),],
                 writer: "garbage collection".to_string(),
             },
-            replace.new_snapshot
+            action.snapshots_to_make[0],
         );
     }
 
@@ -837,7 +663,7 @@ mod tests {
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
 
         // This should trigger the to_split case in replace_snapshot
-        let (action, setsum) = Garbage::replace_snapshot(
+        let action = Garbage::replace_snapshot(
             &storage,
             "replace-snapshot",
             &parent_ptr,
@@ -848,18 +674,16 @@ mod tests {
         .await
         .unwrap();
 
-        let GarbageAction::ReplaceSnapshot(replace) = action else {
-            panic!("did not get a replace snapshot");
-        };
-
         assert_eq!(
             Setsum::from_hexdigest(
                 "00000000aaaaaaaa000000000000000000000000000000000000000000000000"
             )
             .unwrap(),
-            setsum
+            action.setsum_to_discard
         );
-        assert!(replace.drop_snapshots.is_empty());
+        assert!(action.snapshots_to_drop.is_empty());
+        assert_eq!(1, action.fragments_to_drop.len());
+        assert_eq!(1, action.snapshots_to_make.len());
         assert_eq!(
             Snapshot {
                 path: "snapshot/SNAPSHOT.0000000000000000bbbbbbbb0000000000000000000000000000000000000000"
@@ -881,7 +705,7 @@ mod tests {
                 ),],
                 writer: "garbage collection".to_string(),
             },
-            replace.new_snapshot
+            action.snapshots_to_make[0]
         );
     }
 
@@ -897,7 +721,7 @@ mod tests {
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
 
         // This should trigger the to_split case in replace_snapshot
-        let (action, setsum) = Garbage::replace_snapshot(
+        let action = Garbage::replace_snapshot(
             &storage,
             "replace-snapshot",
             &parent_ptr,
@@ -908,18 +732,16 @@ mod tests {
         .await
         .unwrap();
 
-        let GarbageAction::ReplaceSnapshot(replace) = action else {
-            panic!("did not get a replace snapshot");
-        };
-
         assert_eq!(
             Setsum::from_hexdigest(
                 "00000000aaaaaaaa000000000000000000000000000000000000000000000000"
             )
             .unwrap(),
-            setsum
+            action.setsum_to_discard
         );
-        assert!(replace.drop_snapshots.is_empty());
+        assert!(action.snapshots_to_drop.is_empty());
+        assert_eq!(1, action.fragments_to_drop.len());
+        assert_eq!(1, action.snapshots_to_make.len());
         assert_eq!(
             Snapshot {
                 path: "snapshot/SNAPSHOT.0000000000000000bbbbbbbb0000000000000000000000000000000000000000"
@@ -941,7 +763,7 @@ mod tests {
                 ),],
                 writer: "garbage collection".to_string(),
             },
-            replace.new_snapshot
+            action.snapshots_to_make[0]
         );
     }
 
@@ -953,21 +775,19 @@ mod tests {
         .unwrap();
         let fragment = create_fragment(10, 20, FragmentSeqNo(1), setsum);
 
-        let (action, returned_setsum) = Garbage::drop_fragment(&fragment).unwrap();
+        let action = Garbage::drop_fragment(&fragment).unwrap();
 
         // Should return the same setsum
-        assert_eq!(returned_setsum, setsum);
+        assert_eq!(action.setsum_to_discard, setsum);
 
-        // Should create a DropFragment action
-        let GarbageAction::DropFragment(drop_frag) = action else {
-            panic!("Expected DropFragment action");
-        };
-
-        assert_eq!(drop_frag.path_to_fragment, fragment.path);
-        assert_eq!(drop_frag.fragment_setsum, fragment.setsum);
+        // Should have the fragment in fragments_to_drop
+        assert_eq!(action.fragments_to_drop.len(), 1);
+        assert_eq!(action.fragments_to_drop[0], fragment);
+        assert_eq!(action.snapshots_to_drop.len(), 0);
+        assert_eq!(action.snapshots_to_make.len(), 0);
 
         // Test scrub on the created action
-        assert_eq!(drop_frag.scrub().unwrap(), setsum);
+        action.scrub().unwrap();
     }
 
     #[tokio::test]
@@ -1017,7 +837,7 @@ mod tests {
 
         let snapshot_ptr = main_snapshot.to_pointer();
 
-        let (action, returned_setsum) = Garbage::drop_snapshot(
+        let action = Garbage::drop_snapshot(
             &storage,
             "test-prefix",
             &snapshot_ptr,
@@ -1028,19 +848,26 @@ mod tests {
         .unwrap();
 
         // Should return the total setsum
-        assert_eq!(returned_setsum, total_setsum);
+        assert_eq!(action.setsum_to_discard, total_setsum);
 
-        // Should create a DropSnapshot action
-        let GarbageAction::DropSnapshot(drop_snapshot) = action else {
-            panic!("Expected DropSnapshot action");
-        };
+        // Debug: let's see what we actually get
+        println!("snapshots_to_drop: {}", action.snapshots_to_drop.len());
+        println!("fragments_to_drop: {}", action.fragments_to_drop.len());
+        println!("snapshots_to_make: {}", action.snapshots_to_make.len());
 
-        assert_eq!(drop_snapshot.path_to_snapshot, main_snapshot.path);
-        assert_eq!(drop_snapshot.snapshot_setsum, main_snapshot.setsum);
-        assert_eq!(drop_snapshot.children.len(), 2); // 1 fragment + 1 nested snapshot
+        // Should have all snapshots and fragments in the drop lists
+        assert_eq!(action.snapshots_to_drop.len(), 2); // main + nested
+        assert_eq!(action.fragments_to_drop.len(), 2); // both fragments
+        assert_eq!(action.snapshots_to_make.len(), 0);
+
+        // Verify the main snapshot is in the drop list
+        assert!(action.snapshots_to_drop.contains(&main_snapshot));
+        assert!(action.snapshots_to_drop.contains(&nested_snapshot));
+        assert!(action.fragments_to_drop.contains(&fragment1));
+        assert!(action.fragments_to_drop.contains(&fragment2));
 
         // Test scrub on the created action
-        assert_eq!(drop_snapshot.scrub().unwrap(), total_setsum);
+        action.scrub().unwrap();
     }
 
     #[tokio::test]
@@ -1082,7 +909,7 @@ mod tests {
         let snapshot_ptr = snapshot.to_pointer();
         let first_to_keep = LogPosition::from_offset(10); // Keep fragments starting from offset 10
 
-        let (action, returned_setsum) = Garbage::replace_snapshot(
+        let action = Garbage::replace_snapshot(
             &storage,
             "test-prefix",
             &snapshot_ptr,
@@ -1094,29 +921,22 @@ mod tests {
         .unwrap();
 
         // Should return the setsum of the dropped fragment
-        assert_eq!(returned_setsum, frag1_setsum);
+        assert_eq!(action.setsum_to_discard, frag1_setsum);
 
-        // Should create a ReplaceSnapshot action
-        let GarbageAction::ReplaceSnapshot(replace_snapshot) = action else {
-            panic!("Expected ReplaceSnapshot action");
-        };
+        // Should have dropped the first fragment
+        assert_eq!(action.fragments_to_drop.len(), 1);
+        assert_eq!(action.fragments_to_drop[0], fragment1);
 
-        // New snapshot should contain only the kept fragments
-        assert_eq!(replace_snapshot.new_snapshot.fragments.len(), 2);
-        assert_eq!(
-            replace_snapshot.new_snapshot.setsum,
-            frag2_setsum + frag3_setsum
-        );
-
-        // Should have dropped fragments
-        assert_eq!(replace_snapshot.drop_fragments.len(), 1);
-        assert_eq!(
-            replace_snapshot.drop_fragments[0].fragment_setsum,
-            frag1_setsum
-        );
+        // Should have created a new snapshot with the kept fragments
+        assert_eq!(action.snapshots_to_make.len(), 1);
+        let new_snapshot = &action.snapshots_to_make[0];
+        assert_eq!(new_snapshot.fragments.len(), 2);
+        assert_eq!(new_snapshot.setsum, frag2_setsum + frag3_setsum);
+        assert!(new_snapshot.fragments.contains(&fragment2));
+        assert!(new_snapshot.fragments.contains(&fragment3));
 
         // Test scrub on the created action
-        assert_eq!(replace_snapshot.scrub().unwrap(), frag1_setsum);
+        action.scrub().unwrap();
     }
 
     #[tokio::test]
@@ -1192,7 +1012,7 @@ mod tests {
         let snapshot_ptr = parent_snapshot.to_pointer();
         let first_to_keep = LogPosition::from_offset(12); // Keep snapshots starting from offset 12
 
-        let (action, returned_setsum) = Garbage::replace_snapshot(
+        let action = Garbage::replace_snapshot(
             &storage,
             "test-prefix",
             &snapshot_ptr,
@@ -1204,34 +1024,28 @@ mod tests {
         .unwrap();
 
         // Should return the setsum of the dropped snapshot
-        assert_eq!(returned_setsum, frag1_setsum);
+        assert_eq!(action.setsum_to_discard, frag1_setsum);
 
-        // Should create a ReplaceSnapshot action
-        let GarbageAction::ReplaceSnapshot(replace_snapshot) = action else {
-            panic!("Expected ReplaceSnapshot action");
-        };
+        // Debug: let's see what we actually get
+        println!("replace_snapshot_drops_snapshots_prior_to_cutoff:");
+        println!("snapshots_to_drop: {}", action.snapshots_to_drop.len());
+        println!("fragments_to_drop: {}", action.fragments_to_drop.len());
+        println!("snapshots_to_make: {}", action.snapshots_to_make.len());
 
-        // New snapshot should contain the kept child snapshot and parent fragment
-        assert_eq!(replace_snapshot.new_snapshot.snapshots.len(), 1);
-        assert_eq!(replace_snapshot.new_snapshot.fragments.len(), 1);
-        assert_eq!(
-            replace_snapshot.new_snapshot.snapshots[0].setsum,
-            frag2_setsum
-        );
-        assert_eq!(
-            replace_snapshot.new_snapshot.setsum,
-            frag2_setsum + frag3_setsum
-        );
+        // Should have dropped the first child snapshot
+        assert_eq!(action.snapshots_to_drop.len(), 1);
+        assert_eq!(action.snapshots_to_drop[0], child_snapshot1);
 
-        // Should have dropped snapshots
-        assert_eq!(replace_snapshot.drop_snapshots.len(), 1);
-        assert_eq!(
-            replace_snapshot.drop_snapshots[0].snapshot_setsum,
-            frag1_setsum
-        );
+        // Should have created a new snapshot with the kept child snapshot and parent fragment
+        assert_eq!(action.snapshots_to_make.len(), 1);
+        let new_snapshot = &action.snapshots_to_make[0];
+        assert_eq!(new_snapshot.snapshots.len(), 1);
+        assert_eq!(new_snapshot.fragments.len(), 1);
+        assert_eq!(new_snapshot.snapshots[0].setsum, frag2_setsum);
+        assert_eq!(new_snapshot.setsum, frag2_setsum + frag3_setsum);
 
         // Test scrub on the created action
-        assert_eq!(replace_snapshot.scrub().unwrap(), frag1_setsum);
+        action.scrub().unwrap();
     }
 
     #[tokio::test]
@@ -1273,7 +1087,7 @@ mod tests {
         let snapshot_ptr = snapshot.to_pointer();
         let first_to_keep = LogPosition::from_offset(12); // Keep fragments starting from offset 12
 
-        let (action, returned_setsum) = Garbage::replace_snapshot(
+        let action = Garbage::replace_snapshot(
             &storage,
             "test-prefix",
             &snapshot_ptr,
@@ -1285,36 +1099,22 @@ mod tests {
         .unwrap();
 
         // Should return the setsum of the dropped fragments
-        assert_eq!(returned_setsum, frag1_setsum + frag2_setsum);
+        assert_eq!(action.setsum_to_discard, frag1_setsum + frag2_setsum);
 
-        // Should create a ReplaceSnapshot action
-        let GarbageAction::ReplaceSnapshot(replace_snapshot) = action else {
-            panic!("Expected ReplaceSnapshot action");
-        };
+        // Should have dropped the first two fragments
+        assert_eq!(action.fragments_to_drop.len(), 2);
+        assert!(action.fragments_to_drop.contains(&fragment1));
+        assert!(action.fragments_to_drop.contains(&fragment2));
 
-        // New snapshot should contain only the kept fragment
-        assert_eq!(replace_snapshot.new_snapshot.fragments.len(), 1);
-        assert_eq!(
-            replace_snapshot.new_snapshot.fragments[0].setsum,
-            frag3_setsum
-        );
-        assert_eq!(replace_snapshot.new_snapshot.setsum, frag3_setsum);
-
-        // Should have dropped fragments
-        assert_eq!(replace_snapshot.drop_fragments.len(), 2);
-        let dropped_fragment_setsums: Vec<_> = replace_snapshot
-            .drop_fragments
-            .iter()
-            .map(|f| f.fragment_setsum)
-            .collect();
-        assert!(dropped_fragment_setsums.contains(&frag1_setsum));
-        assert!(dropped_fragment_setsums.contains(&frag2_setsum));
+        // Should have created a new snapshot with only the kept fragment
+        assert_eq!(action.snapshots_to_make.len(), 1);
+        let new_snapshot = &action.snapshots_to_make[0];
+        assert_eq!(new_snapshot.fragments.len(), 1);
+        assert_eq!(new_snapshot.fragments[0].setsum, frag3_setsum);
+        assert_eq!(new_snapshot.setsum, frag3_setsum);
 
         // Test scrub on the created action
-        assert_eq!(
-            replace_snapshot.scrub().unwrap(),
-            frag1_setsum + frag2_setsum
-        );
+        action.scrub().unwrap();
     }
 
     #[tokio::test]
@@ -1382,7 +1182,7 @@ mod tests {
         let snapshot_ptr = interior_snapshot.to_pointer();
         let first_to_keep = LogPosition::from_offset(12); // Keep snapshots starting from offset 12
 
-        let (action, returned_setsum) = Garbage::replace_snapshot(
+        let action = Garbage::replace_snapshot(
             &storage,
             "test-prefix",
             &snapshot_ptr,
@@ -1394,33 +1194,27 @@ mod tests {
         .unwrap();
 
         // Should return the setsum of the dropped left leaf
-        assert_eq!(returned_setsum, frag1_setsum);
+        assert_eq!(action.setsum_to_discard, frag1_setsum);
 
-        // Should create a ReplaceSnapshot action
-        let GarbageAction::ReplaceSnapshot(replace_snapshot) = action else {
-            panic!("Expected ReplaceSnapshot action");
-        };
+        // Debug: let's see what we actually get
+        println!("replace_snapshot_two_levels_rightmost_leaf:");
+        println!("snapshots_to_drop: {}", action.snapshots_to_drop.len());
+        println!("fragments_to_drop: {}", action.fragments_to_drop.len());
+        println!("snapshots_to_make: {}", action.snapshots_to_make.len());
 
-        // New snapshot should contain the right-most (kept) leaf snapshot and interior fragment
-        assert_eq!(replace_snapshot.new_snapshot.snapshots.len(), 1);
-        assert_eq!(replace_snapshot.new_snapshot.fragments.len(), 1);
-        assert_eq!(
-            replace_snapshot.new_snapshot.snapshots[0].setsum,
-            frag2_setsum
-        );
-        assert_eq!(
-            replace_snapshot.new_snapshot.setsum,
-            frag2_setsum + frag3_setsum
-        );
+        // Should have dropped the left leaf snapshot
+        assert_eq!(action.snapshots_to_drop.len(), 1);
+        assert_eq!(action.snapshots_to_drop[0], left_leaf);
 
-        // Should have dropped the left snapshot
-        assert_eq!(replace_snapshot.drop_snapshots.len(), 1);
-        assert_eq!(
-            replace_snapshot.drop_snapshots[0].snapshot_setsum,
-            frag1_setsum
-        );
+        // Should have created a new snapshot with the right-most (kept) leaf snapshot and interior fragment
+        assert_eq!(action.snapshots_to_make.len(), 1);
+        let new_snapshot = &action.snapshots_to_make[0];
+        assert_eq!(new_snapshot.snapshots.len(), 1);
+        assert_eq!(new_snapshot.fragments.len(), 1);
+        assert_eq!(new_snapshot.snapshots[0].setsum, frag2_setsum);
+        assert_eq!(new_snapshot.setsum, frag2_setsum + frag3_setsum);
 
         // Test scrub on the created action
-        assert_eq!(replace_snapshot.scrub().unwrap(), frag1_setsum);
+        action.scrub().unwrap();
     }
 }

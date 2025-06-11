@@ -14,10 +14,9 @@ use chroma_storage::{
 };
 use setsum::Setsum;
 
-use crate::gc::{DropFragment, DropSnapshot, ReplaceSnapshot};
 use crate::{
-    Error, Fragment, FragmentSeqNo, Garbage, GarbageAction, LogPosition, LogWriterOptions,
-    ScrubError, ScrubSuccess, SnapshotOptions, ThrottleOptions,
+    Error, Fragment, FragmentSeqNo, Garbage, LogPosition, LogWriterOptions, ScrubError,
+    ScrubSuccess, SnapshotOptions, ThrottleOptions,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -345,12 +344,10 @@ impl Manifest {
         snapshot_options: SnapshotOptions,
         writer: &str,
     ) -> Option<Snapshot> {
+        // TODO(rescrv):  Update this to account for garbage compaction.
         let writer = writer.to_string();
         let mut snapshot_depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
         while snapshot_depth > 0 {
-            // NOTE(rescrv):  We _either_ compact a snapshot of snapshots or a snapshot of log
-            // fragments.  We don't do both as interior snapshot nodes only refer to objects of the
-            // same type.  Manifests are the only objects to refer to both fragments and snapshots.
             let mut snapshots = vec![];
             let mut setsum = Setsum::default();
             for snapshot in self.snapshots.iter().filter(|s| s.depth == snapshot_depth) {
@@ -417,6 +414,7 @@ impl Manifest {
     /// Given a snapshot, apply it to the manifest.  This modifies the manifest to refer to the
     /// snapshot and removes from the manifest all data that is now part of the snapshot.
     pub fn apply_snapshot(&mut self, snapshot: &Snapshot) -> Result<(), Error> {
+        self.scrub()?;
         if snapshot.fragments.len() > self.fragments.len() {
             return Err(Error::CorruptManifest(format!(
                 "snapshot has more fragments than manifest: {} > {}",
@@ -450,6 +448,7 @@ impl Manifest {
             limit: snapshot.maximum_log_position(),
             num_bytes: snapshot.num_bytes(),
         });
+        self.scrub()?;
         Ok(())
     }
 
@@ -537,6 +536,42 @@ impl Manifest {
                 self.setsum.hexdigest(),
                 calculated_setsum.hexdigest()
             )}.into());
+        }
+        for (lhs, rhs) in std::iter::zip(self.snapshots.iter(), self.snapshots.iter().skip(1)) {
+            if lhs.limit != rhs.start {
+                return Err(ScrubError::CorruptManifest {
+                    manifest: format!("{:?}", self),
+                    what: format!(
+                        "expected snapshots to be sequential within the manifest: gap {:?} -> {:?}",
+                        lhs.limit, rhs.start,
+                    ),
+                }
+                .into());
+            }
+        }
+        for (lhs, rhs) in std::iter::zip(self.fragments.iter(), self.fragments.iter().skip(1)) {
+            if lhs.limit != rhs.start {
+                return Err(ScrubError::CorruptManifest {
+                    manifest: format!("{:?}", self),
+                    what: format!(
+                        "expected fragments to be sequential within the manifest: gap {:?} -> {:?}",
+                        lhs.limit, rhs.start,
+                    ),
+                }
+                .into());
+            }
+        }
+        if let (Some(snap), Some(frag)) = (self.snapshots.last(), self.fragments.first()) {
+            if snap.limit != frag.start {
+                return Err(ScrubError::CorruptManifest {
+                    manifest: format!("{:?}", self),
+                    what: format!(
+                        "expected snapshots-fragments to be sequential within the manifest: gap {:?} -> {:?}",
+                        snap.limit, frag.start,
+                    ),
+                }
+                .into());
+            }
         }
         // TODO(rescrv):  Check the sequence numbers for sequentiality.
         Ok(ScrubSuccess {
@@ -758,176 +793,50 @@ impl Manifest {
 
     /// Apply the destructive operation specified by the Garbage struct.
     #[allow(clippy::result_large_err)]
-    pub fn apply_garbage(&self, garbage: Garbage) -> Result<Self, ScrubError> {
-        let Garbage {
-            dropped_setsum,
-            actions,
-            cutoff: _,
-        } = garbage;
+    pub fn apply_garbage(&self, garbage: Garbage) -> Result<Self, Box<ScrubError>> {
         let mut new = self.clone();
-        for action in actions {
-            new.apply_garbage_action(action)?;
+        for snap in garbage.actions.snapshots_to_drop {
+            let ptr = snap.to_pointer();
+            let Some(index) = new.snapshots.iter().position(|s| *s == ptr) else {
+                return Err(Box::new(ScrubError::MissingSnapshotBySetsumPath {
+                    path: ptr.path_to_snapshot,
+                    setsum: ptr.setsum,
+                }));
+            };
+            new.snapshots.remove(index);
         }
-        if self.setsum - dropped_setsum != new.setsum {
-            Err(ScrubError::CorruptGarbage {
-                expected_setsum: self.setsum - dropped_setsum,
-                returned_setsum: new.setsum,
-            })
-        } else {
-            Ok(new)
+        for frag in garbage.actions.fragments_to_drop {
+            let Some(index) = new
+                .fragments
+                .iter()
+                .position(|f| f.path == frag.path && f.setsum == frag.setsum)
+            else {
+                return Err(Box::new(ScrubError::MissingFragmentBySetsumPath {
+                    path: frag.path,
+                    setsum: frag.setsum,
+                }));
+            };
+            new.fragments.remove(index);
         }
-    }
-
-    #[allow(clippy::result_large_err)]
-    fn apply_garbage_action(&mut self, action: GarbageAction) -> Result<(), ScrubError> {
-        match action {
-            GarbageAction::DropFragment(DropFragment {
-                path_to_fragment,
-                fragment_setsum,
-            }) => {
-                let Some(index) = self.fragments.iter().position(|frag| {
-                    frag.path == path_to_fragment && frag.setsum == fragment_setsum
-                }) else {
-                    return Err(ScrubError::MissingFragmentBySetsumPath {
-                        path: path_to_fragment,
-                        setsum: fragment_setsum,
-                    });
-                };
-                self.fragments.remove(index);
-                self.setsum -= fragment_setsum;
-                self.collected += fragment_setsum;
-                Ok(())
-            }
-            GarbageAction::DropSnapshot(DropSnapshot {
-                path_to_snapshot,
-                snapshot_setsum,
-                children: _,
-            }) => {
-                let Some(index) = self.snapshots.iter().position(|snap| {
-                    snap.path_to_snapshot == path_to_snapshot && snap.setsum == snapshot_setsum
-                }) else {
-                    return Err(ScrubError::MissingSnapshotBySetsumPath {
-                        path: path_to_snapshot,
-                        setsum: snapshot_setsum,
-                    });
-                };
-                self.snapshots.remove(index);
-                self.setsum -= snapshot_setsum;
-                self.collected += snapshot_setsum;
-                // NOTE(rescrv):  There's no action to take on the children.  Removing the snapshot
-                // cuts them from the manifest.  The actual destructive routine needs the children
-                // to know what to erase, but we're unlinking the whole shebang in one go.
-                Ok(())
-            }
-            GarbageAction::ReplaceSnapshot(ReplaceSnapshot {
-                actions,
-                drop_snapshots,
-                drop_fragments,
-                new_snapshot,
-            }) => {
-                let drop_acc = Setsum::default();
-                for drop_snapshot in drop_snapshots.iter() {
-                    if !self.snapshots.iter().any(|snap| {
-                        snap.path_to_snapshot == drop_snapshot.path_to_snapshot
-                            && snap.setsum == drop_snapshot.snapshot_setsum
-                    }) {
-                        return Err(ScrubError::MissingSnapshotBySetsumPath {
-                            path: drop_snapshot.path_to_snapshot.clone(),
-                            setsum: drop_snapshot.snapshot_setsum,
-                        });
-                    };
-                }
-                for drop_fragment in drop_fragments.iter() {
-                    if !self.fragments.iter().any(|frag| {
-                        frag.path == drop_fragment.path_to_fragment
-                            && frag.setsum == drop_fragment.fragment_setsum
-                    }) {
-                        return Err(ScrubError::MissingFragmentBySetsumPath {
-                            path: drop_fragment.path_to_fragment.clone(),
-                            setsum: drop_fragment.fragment_setsum,
-                        });
-                    };
-                }
-                for action in actions.into_iter() {
-                    self.apply_garbage_action(action)?;
-                }
-                self.snapshots.insert(0, new_snapshot.to_pointer());
-                self.setsum -= drop_acc;
-                self.setsum += new_snapshot.setsum;
-                self.collected += drop_acc;
-                // NOTE(rescrv):  Ditto DropSnapshot's note.
-                Ok(())
-            }
-        }
+        todo!("apply(snapshots_to_make)");
+        new.scrub()?;
+        Ok(new)
     }
 
     /// The garbage has been completely collected from this manifest.  This is not a guarantee it
     /// will apply cleanly as a partial collection (someone's doing something funky) will fail
     /// there.  It returns false here.
     pub fn has_collected_garbage(&self, garbage: &Garbage) -> bool {
-        let Garbage {
-            dropped_setsum: _,
-            actions,
-            cutoff,
-        } = garbage;
-        // first (cheaply) look for snapshots straddling the cutoff.
-        for snap in self.snapshots.iter() {
-            if (snap.start..snap.limit).contains(cutoff) {
-                return false;
-            }
-        }
-        // fragments are allowed to overlap because we don't rewrite or check them
-        // actions are then checked against the manifest
-        for action in actions {
-            if !self.has_collected_garbage_action(action) {
-                return false;
-            }
-        }
-        // No reason to believe we haven't collected, so we have.
-        true
-    }
-
-    fn has_collected_garbage_action(&self, action: &GarbageAction) -> bool {
-        match action {
-            GarbageAction::DropFragment(DropFragment {
-                path_to_fragment,
-                fragment_setsum,
-            }) => !self
-                .fragments
+        !garbage
+            .actions
+            .snapshots_to_drop
+            .iter()
+            .any(|snap| self.snapshots.iter().any(|s| *s == snap.to_pointer()))
+            && !garbage
+                .actions
+                .fragments_to_drop
                 .iter()
-                .any(|frag| frag.path == *path_to_fragment && frag.setsum == *fragment_setsum),
-            GarbageAction::DropSnapshot(DropSnapshot {
-                path_to_snapshot,
-                snapshot_setsum,
-                children: _,
-            }) => !self.snapshots.iter().any(|snap| {
-                snap.path_to_snapshot == *path_to_snapshot && snap.setsum == *snapshot_setsum
-            }),
-            GarbageAction::ReplaceSnapshot(ReplaceSnapshot {
-                actions,
-                drop_snapshots,
-                drop_fragments,
-                new_snapshot,
-            }) => {
-                actions.iter().all(|a| self.has_collected_garbage_action(a))
-                    && !self.snapshots.iter().any(|snap1| {
-                        drop_snapshots.iter().any(|snap2| {
-                            snap1.path_to_snapshot == snap2.path_to_snapshot
-                                && snap1.setsum == snap2.snapshot_setsum
-                        })
-                    })
-                    && self.snapshots.iter().any(|snap| {
-                        snap.path_to_snapshot == new_snapshot.path
-                            && snap.setsum == new_snapshot.setsum
-                    })
-                    && self.fragments.iter().any(|frag| {
-                        drop_fragments.iter().any(|frag2| {
-                            frag.path == frag2.path_to_fragment
-                                && frag.setsum == frag2.fragment_setsum
-                        })
-                    })
-            }
-        }
+                .any(|frag| self.fragments.iter().any(|f| *f == *frag))
     }
 }
 
