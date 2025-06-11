@@ -9,8 +9,8 @@ use crate::{
     attributes::{
         collect_attribute_definition_tokens, process_attribute_definition_tokens, Attribute,
     },
-    errors::MeteringMacrosError,
     contexts::{collect_context_definition_tokens, process_context_definition_tokens, Context},
+    errors::MeteringMacrosError,
 };
 
 /// Processes the full token stream that is passed into [`crate::initialize_metering`] by
