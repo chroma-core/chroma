@@ -81,8 +81,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: 3.12
-          architecture: ${{ matrix.platform.target }}
+          python-version: 3.x
 
       - name: Set version in pyproject.toml
         shell: bash
