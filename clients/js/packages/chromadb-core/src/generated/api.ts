@@ -3049,6 +3049,12 @@ export const ApiApiFp = function (configuration?: Configuration) {
             }
             throw response;
           }
+          if (response.status === 409) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
           if (response.status === 500) {
             if (mimeType === "application/json") {
               throw response;

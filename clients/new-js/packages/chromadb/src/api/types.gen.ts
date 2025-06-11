@@ -477,6 +477,10 @@ export type UpdateTenantErrors = {
      */
     404: ErrorResponse;
     /**
+     * Tenant resource name already set
+     */
+    409: ErrorResponse;
+    /**
      * Server error
      */
     500: ErrorResponse;
