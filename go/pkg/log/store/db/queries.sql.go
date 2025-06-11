@@ -121,7 +121,7 @@ func (q *Queries) GetAllCollectionsToCompact(ctx context.Context, minCompactionS
 }
 
 const getBoundsForCollection = `-- name: GetBoundsForCollection :one
-SELECT CAST(COALESCE(MIN(record_compaction_offset_position), 0) as bigint) AS record_compaction_offset_position, CAST(COALESCE(MAX(record_enumeration_offset_position), 0) as bigint) AS record_enumeration_offset_position
+SELECT CAST(COALESCE(MIN(record_compaction_offset_position), 0) as bigint) AS record_compaction_offset_position, CAST(COALESCE(MAX(record_enumeration_offset_position), 0) as bigint) AS record_enumeration_offset_position, bool_or(is_sealed) AS is_sealed
 FROM collection
 WHERE id = $1
 `
@@ -129,12 +129,13 @@ WHERE id = $1
 type GetBoundsForCollectionRow struct {
 	RecordCompactionOffsetPosition  int64
 	RecordEnumerationOffsetPosition int64
+	IsSealed                        bool
 }
 
 func (q *Queries) GetBoundsForCollection(ctx context.Context, id string) (GetBoundsForCollectionRow, error) {
 	row := q.db.QueryRow(ctx, getBoundsForCollection, id)
 	var i GetBoundsForCollectionRow
-	err := row.Scan(&i.RecordCompactionOffsetPosition, &i.RecordEnumerationOffsetPosition)
+	err := row.Scan(&i.RecordCompactionOffsetPosition, &i.RecordEnumerationOffsetPosition, &i.IsSealed)
 	return i, err
 }
 

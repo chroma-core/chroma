@@ -61,7 +61,8 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 	}
 	var start int64
 	var limit int64
-	start, limit, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
+	var isSealed bool
+	start, limit, isSealed, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
 	if err != nil {
 		return
 	}
@@ -69,6 +70,7 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 	res = &logservicepb.ScoutLogsResponse{
 		FirstUncompactedRecordOffset: int64(start + 1),
 		FirstUninsertedRecordOffset:  int64(limit + 1),
+		IsSealed:                     isSealed,
 	}
 	trace_log.Info("Scouted Logs", zap.Int64("start", int64(start+1)), zap.Int64("limit", int64(limit+1)), zap.String("collectionId", req.CollectionId))
 	return

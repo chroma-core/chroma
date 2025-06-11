@@ -1185,6 +1185,7 @@ impl LogServer {
             Ok(Response::new(ScoutLogsResponse {
                 first_uncompacted_record_offset: start_offset,
                 first_uninserted_record_offset: limit_offset,
+                is_sealed: true,
             }))
         }
         .instrument(span)
@@ -1632,11 +1633,25 @@ impl LogServer {
                     Ok(Response::new(MigrateLogResponse {}))
                 }
                 Err(wal3::Error::UninitializedLog) => {
-                    if let Some(proxy) = self.proxy.as_ref() {
-                        tracing::info!("effectuating transfer of {collection_id}");
-                        self.effectuate_log_transfer(collection_id, proxy.clone(), 3)
-                            .await?;
-                        Ok(Response::new(MigrateLogResponse {}))
+                    if let Some(mut proxy) = self.proxy.as_ref().cloned() {
+                        if proxy
+                            .scout_logs(ScoutLogsRequest {
+                                collection_id: collection_id.to_string(),
+                            })
+                            .await?
+                            .into_inner()
+                            .is_sealed
+                        {
+                            tracing::info!("effectuating transfer of {collection_id}");
+                            self.effectuate_log_transfer(collection_id, proxy, 3)
+                                .await?;
+                            Ok(Response::new(MigrateLogResponse {}))
+                        } else {
+                            tracing::info!(
+                                "not effectuating transfer of {collection_id} (log not sealed)"
+                            );
+                            Err(Status::failed_precondition("log not sealed"))
+                        }
                     } else {
                         tracing::info!("not effectuating transfer of {collection_id} (no proxy)");
                         Err(Status::failed_precondition("proxy not initialized"))
@@ -2159,9 +2174,7 @@ mod tests {
     use crate::state_hash_table::Value;
 
     use chroma_storage::s3::s3_client_for_test_with_bucket_name;
-    use chroma_types::{
-        are_update_metadatas_close_to_equal, Operation, OperationRecord, ScalarEncoding,
-    };
+    use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
     use futures::{stream, StreamExt};
     use opentelemetry::global::meter;
     use proptest::prelude::*;

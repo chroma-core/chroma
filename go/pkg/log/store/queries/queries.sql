@@ -52,7 +52,7 @@ FROM record_log r
 WHERE r.collection_id = $1;
 
 -- name: GetBoundsForCollection :one
-SELECT CAST(COALESCE(MIN(record_compaction_offset_position), 0) as bigint) AS record_compaction_offset_position, CAST(COALESCE(MAX(record_enumeration_offset_position), 0) as bigint) AS record_enumeration_offset_position
+SELECT CAST(COALESCE(MIN(record_compaction_offset_position), 0) as bigint) AS record_compaction_offset_position, CAST(COALESCE(MAX(record_enumeration_offset_position), 0) as bigint) AS record_enumeration_offset_position, bool_or(is_sealed) AS is_sealed
 FROM collection
 WHERE id = $1;
 
