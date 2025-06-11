@@ -54,7 +54,7 @@ impl S3StorageMetrics {
         Self {
             total_num_get_requests: meter
                 .u64_counter("s3_storage_total_num_get_requests")
-                .with_description("The number of GET requests to S3. This does not include metadata HEAD requests or failed requests.")
+                .with_description("The number of GET requests to S3. This does not include metadata HEAD requests.")
                 .with_unit("requests")
                 .build(),
         }
@@ -77,6 +77,7 @@ impl S3Storage {
         upload_part_size_bytes: usize,
         download_part_size_bytes: usize,
     ) -> S3Storage {
+        tracing::info!("Creating S3 storage with bucket {}", bucket);
         S3Storage {
             bucket: bucket.to_string(),
             client,
@@ -142,11 +143,12 @@ impl S3Storage {
             .bucket(self.bucket.clone())
             .key(key)
             .send()
+            .instrument(tracing::trace_span!("cold S3 get"))
             .await;
+        self.metrics.total_num_get_requests.add(1, &[]);
         match res {
             Ok(res) => {
                 let byte_stream = res.body;
-                self.metrics.total_num_get_requests.add(1, &[]);
                 Ok((
                     Box::new(S3ByteStream::new(byte_stream)),
                     res.e_tag.map(ETag),
@@ -242,12 +244,11 @@ impl S3Storage {
             .key(&key)
             .range(range_str)
             .send()
+            .instrument(tracing::trace_span!("cold S3 get"))
             .await;
+        self.metrics.total_num_get_requests.add(1, &[]);
         match res {
-            Ok(output) => {
-                self.metrics.total_num_get_requests.add(1, &[]);
-                Ok(output)
-            }
+            Ok(output) => Ok(output),
             Err(e) => {
                 tracing::error!("Error fetching range: {:?}", e);
                 match e {
@@ -341,10 +342,7 @@ impl S3Storage {
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        let (mut stream, e_tag) = self
-            .get_stream_and_e_tag(key)
-            .instrument(tracing::trace_span!("S3 get stream"))
-            .await?;
+        let (mut stream, e_tag) = self.get_stream_and_e_tag(key).await?;
         let read_block_span = tracing::trace_span!("S3 read bytes to end");
         let buf = async {
             let mut buf: Vec<u8> = Vec::new();
