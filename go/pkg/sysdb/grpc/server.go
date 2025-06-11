@@ -99,7 +99,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		healthServer: health.NewServer(),
 	}
 
-	s3MetaStore, err := s3metastore.NewS3MetaStore(config.MetaStoreConfig)
+	s3MetaStore, err := s3metastore.NewS3MetaStore(ctx, config.MetaStoreConfig)
 	if err != nil {
 		return nil, err
 	}
