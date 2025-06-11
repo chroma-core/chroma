@@ -129,6 +129,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ['3.9']
+        parallel_run_number: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30']
         test-glob:
           - "chromadb/test/api"
           - "chromadb/test/property/test_add.py"
@@ -136,7 +137,7 @@ jobs:
         include:
           - test-glob: "chromadb/test/property/test_add.py"
             parallelized: true
-    runs-on: [blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204]
+    runs-on: blacksmith-8vcpu-ubuntu-2204
     # OIDC token auth for AWS
     permissions:
       contents: read
@@ -165,7 +166,7 @@ jobs:
       - name: Compute artifact name
         if: always()
         id: compute-artifact-name
-        run: echo "artifact_name=cluster_logs_rust_frontend_$(basename "${{ matrix.test-glob }}" .py)_${{ matrix.python }}" >> $GITHUB_OUTPUT
+        run: echo "artifact_name=cluster_logs_rust_frontend_$(basename "${{ matrix.test-glob }}" .py)_${{ matrix.python }}_${{ matrix.parallel_run_number }}" >> $GITHUB_OUTPUT
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
