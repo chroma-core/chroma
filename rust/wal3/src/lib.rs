@@ -171,11 +171,12 @@ pub enum ScrubError {
         returned_setsum: Setsum,
     },
     #[error("Corrupt snapshot replace")]
+    CorruptSnapshotDrop { lhs: Setsum, rhs: Setsum },
+    #[error("Corrupt snapshot replace")]
     CorruptSnapshotReplace {
-        lhs_before: Setsum,
-        lhs_after: Setsum,
-        rhs_before: Setsum,
-        rhs_after: Setsum,
+        old_snapshot_setsum: Setsum,
+        new_snapshot_setsum: Setsum,
+        dropped: Setsum,
     },
     #[error("Internal error within scrubbing: {0}")]
     Internal(String),
@@ -184,6 +185,8 @@ pub enum ScrubError {
         manifest: ScrubSuccess,
         observed: ScrubSuccess,
     },
+    #[error("The given snapshot rolls up to nothing with garbage")]
+    ReplaceDroppedEverything { snapshot: SnapshotPointer },
 }
 
 //////////////////////////////////////////// LogPosition ///////////////////////////////////////////

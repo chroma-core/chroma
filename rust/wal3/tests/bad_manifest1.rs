@@ -106,17 +106,13 @@ async fn test_garbage_new_with_bad_manifest1_offset_9340() {
                 "Garbage creation succeeded with {} actions",
                 garbage.actions.len()
             );
-            println!("This means the bug may have been fixed already, or conditions aren't right");
             // Let's examine what was created
             for (i, action) in garbage.actions.iter().enumerate() {
                 println!("Action {}: {:?}", i, action);
             }
-            panic!("Expected the test to fail due to a bug, but it succeeded");
         }
-        Err(e) => {
-            println!("Bug reproduced! Error: {:?}", e);
-            // This is what we expect - the bug should cause an error
-            panic!("BUG REPRODUCED");
+        Err(_) => {
+            panic!("REGRESSION");
         }
     }
 }

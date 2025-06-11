@@ -14,6 +14,7 @@ use chroma_storage::{
 };
 use setsum::Setsum;
 
+use crate::gc::{DropFragment, DropSnapshot, ReplaceSnapshot};
 use crate::{
     Error, Fragment, FragmentSeqNo, Garbage, GarbageAction, LogPosition, LogWriterOptions,
     ScrubError, ScrubSuccess, SnapshotOptions, ThrottleOptions,
@@ -780,10 +781,10 @@ impl Manifest {
     #[allow(clippy::result_large_err)]
     fn apply_garbage_action(&mut self, action: GarbageAction) -> Result<(), ScrubError> {
         match action {
-            GarbageAction::DropFragment {
+            GarbageAction::DropFragment(DropFragment {
                 path_to_fragment,
                 fragment_setsum,
-            } => {
+            }) => {
                 let Some(index) = self.fragments.iter().position(|frag| {
                     frag.path == path_to_fragment && frag.setsum == fragment_setsum
                 }) else {
@@ -797,11 +798,11 @@ impl Manifest {
                 self.collected += fragment_setsum;
                 Ok(())
             }
-            GarbageAction::DropSnapshot {
+            GarbageAction::DropSnapshot(DropSnapshot {
                 path_to_snapshot,
                 snapshot_setsum,
                 children: _,
-            } => {
+            }) => {
                 let Some(index) = self.snapshots.iter().position(|snap| {
                     snap.path_to_snapshot == path_to_snapshot && snap.setsum == snapshot_setsum
                 }) else {
@@ -818,25 +819,42 @@ impl Manifest {
                 // to know what to erase, but we're unlinking the whole shebang in one go.
                 Ok(())
             }
-            GarbageAction::ReplaceSnapshot {
-                old_path_to_snapshot,
-                old_snapshot_setsum,
+            GarbageAction::ReplaceSnapshot(ReplaceSnapshot {
+                actions,
+                drop_snapshots,
+                drop_fragments,
                 new_snapshot,
-                children: _,
-            } => {
-                let Some(index) = self.snapshots.iter().position(|snap| {
-                    snap.path_to_snapshot == old_path_to_snapshot
-                        && snap.setsum == old_snapshot_setsum
-                }) else {
-                    return Err(ScrubError::MissingSnapshotBySetsumPath {
-                        path: old_path_to_snapshot,
-                        setsum: old_snapshot_setsum,
-                    });
-                };
-                self.snapshots[index] = SnapshotPointer::from(&new_snapshot);
-                self.setsum -= old_snapshot_setsum;
+            }) => {
+                let drop_acc = Setsum::default();
+                for drop_snapshot in drop_snapshots.iter() {
+                    if !self.snapshots.iter().any(|snap| {
+                        snap.path_to_snapshot == drop_snapshot.path_to_snapshot
+                            && snap.setsum == drop_snapshot.snapshot_setsum
+                    }) {
+                        return Err(ScrubError::MissingSnapshotBySetsumPath {
+                            path: drop_snapshot.path_to_snapshot.clone(),
+                            setsum: drop_snapshot.snapshot_setsum,
+                        });
+                    };
+                }
+                for drop_fragment in drop_fragments.iter() {
+                    if !self.fragments.iter().any(|frag| {
+                        frag.path == drop_fragment.path_to_fragment
+                            && frag.setsum == drop_fragment.fragment_setsum
+                    }) {
+                        return Err(ScrubError::MissingFragmentBySetsumPath {
+                            path: drop_fragment.path_to_fragment.clone(),
+                            setsum: drop_fragment.fragment_setsum,
+                        });
+                    };
+                }
+                for action in actions.into_iter() {
+                    self.apply_garbage_action(action)?;
+                }
+                self.snapshots.insert(0, new_snapshot.to_pointer());
+                self.setsum -= drop_acc;
                 self.setsum += new_snapshot.setsum;
-                self.collected += old_snapshot_setsum;
+                self.collected += drop_acc;
                 // NOTE(rescrv):  Ditto DropSnapshot's note.
                 Ok(())
             }
@@ -871,32 +889,43 @@ impl Manifest {
 
     fn has_collected_garbage_action(&self, action: &GarbageAction) -> bool {
         match action {
-            GarbageAction::DropFragment {
+            GarbageAction::DropFragment(DropFragment {
                 path_to_fragment,
                 fragment_setsum,
-            } => !self
+            }) => !self
                 .fragments
                 .iter()
                 .any(|frag| frag.path == *path_to_fragment && frag.setsum == *fragment_setsum),
-            GarbageAction::DropSnapshot {
+            GarbageAction::DropSnapshot(DropSnapshot {
                 path_to_snapshot,
                 snapshot_setsum,
                 children: _,
-            } => !self.snapshots.iter().any(|snap| {
+            }) => !self.snapshots.iter().any(|snap| {
                 snap.path_to_snapshot == *path_to_snapshot && snap.setsum == *snapshot_setsum
             }),
-            GarbageAction::ReplaceSnapshot {
-                old_path_to_snapshot,
-                old_snapshot_setsum,
+            GarbageAction::ReplaceSnapshot(ReplaceSnapshot {
+                actions,
+                drop_snapshots,
+                drop_fragments,
                 new_snapshot,
-                children: _,
-            } => {
-                !self.snapshots.iter().any(|snap| {
-                    snap.path_to_snapshot == *old_path_to_snapshot
-                        && snap.setsum == *old_snapshot_setsum
-                }) && self.snapshots.iter().any(|snap| {
-                    snap.path_to_snapshot == new_snapshot.path && snap.setsum == new_snapshot.setsum
-                })
+            }) => {
+                actions.iter().all(|a| self.has_collected_garbage_action(a))
+                    && !self.snapshots.iter().any(|snap1| {
+                        drop_snapshots.iter().any(|snap2| {
+                            snap1.path_to_snapshot == snap2.path_to_snapshot
+                                && snap1.setsum == snap2.snapshot_setsum
+                        })
+                    })
+                    && self.snapshots.iter().any(|snap| {
+                        snap.path_to_snapshot == new_snapshot.path
+                            && snap.setsum == new_snapshot.setsum
+                    })
+                    && self.fragments.iter().any(|frag| {
+                        drop_fragments.iter().any(|frag2| {
+                            frag.path == frag2.path_to_fragment
+                                && frag.setsum == frag2.fragment_setsum
+                        })
+                    })
             }
         }
     }
