@@ -200,3 +200,48 @@ proptest::proptest! {
         }
     }
 }
+
+proptest::proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 1, .. ProptestConfig::default()
+    })]
+
+    #[test]
+    fn manifests_with_snapshots_that_collide(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 16..32), snapshot_rollover_threshold in 2..=2usize, fragment_rollover_threshold in 2..=2usize) {
+        // NOTE(rescrv):
+        // Consider a snapshot tree that gets pruned to:
+        // [MANIFEST] -> [SNAP C] -> [SNAP B] -> [SNAP A] -> [ONE FRAG]
+        // All three manifests will have the same setsum.
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let storage = rt.block_on(s3_client_for_test_with_new_bucket());
+        let mut manifest = Manifest::new_empty("test");
+        println!("deltas = {deltas:#?}");
+        let fragments = deltas_to_fragment_sequence(&deltas);
+        println!("fragments = {fragments:#?}");
+        let mut snapshots = vec![];
+        for fragment in fragments.into_iter() {
+            assert!(manifest.can_apply_fragment(&fragment));
+            manifest.apply_fragment(fragment);
+            if let Some(snapshot) = manifest.generate_snapshot(SnapshotOptions {
+                snapshot_rollover_threshold,
+                fragment_rollover_threshold,
+            }, "test") {
+                assert!(manifest.apply_snapshot(&snapshot).is_ok());
+                snapshots.push(snapshot);
+            }
+        }
+        let cache = TestingSnapshotCache {
+            snapshots: snapshots.clone(),
+        };
+        // Pick as victim the most recent snapshot and select so that we keep just one snapshot and
+        // one frag within that snapshot.
+        assert!(!manifest.snapshots.is_empty());
+        let victim = &manifest.snapshots[manifest.snapshots.len() - 1];
+        eprintln!("victim = {victim:?}");
+        eprintln!("position = {:?}", victim.limit - 1);
+        std::fs::write("manifest.json", serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
+        std::fs::write("snapshots.json", serde_json::to_string_pretty(&snapshots).unwrap()).unwrap();
+        let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_that_collide", &manifest, &ThrottleOptions::default(), &cache, victim.limit - 1)).unwrap();
+        eprintln!("garbage = {garbage:?}");
+    }
+}
