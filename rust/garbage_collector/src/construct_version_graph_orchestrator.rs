@@ -316,10 +316,10 @@ impl ConstructVersionGraphOrchestrator {
                 graph.add_edge(source_node, target_node, ());
             }
 
-            if tracing::level_enabled!(tracing::Level::DEBUG) {
+            if tracing::level_enabled!(tracing::Level::TRACE) {
                 let dot_viz = Dot::with_config(&graph, &[petgraph::dot::Config::EdgeNoLabel]);
                 let encoded = BASE64_STANDARD.encode(format!("{:?}", dot_viz));
-                tracing::debug!(base64_encoded_dot_graph = ?encoded, "Constructed graph.");
+                tracing::trace!(base64_encoded_dot_graph = ?encoded, "Constructed graph.");
             }
 
             tracing::trace!("Version files: {:#?}", self.version_files);
