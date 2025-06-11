@@ -623,6 +623,7 @@ impl S3Storage {
             .await
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
         tracing::debug!(key = %key, "Deleting object from S3");
 
@@ -647,6 +648,7 @@ impl S3Storage {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object in S3");
         // S3 doesn't have a native rename operation, so we need to copy and delete
@@ -663,6 +665,7 @@ impl S3Storage {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Copying object in S3");
         match self
