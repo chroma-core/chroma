@@ -605,6 +605,7 @@ pub struct UpdateTenantPayload {
         (status = 200, description = "Tenant updated successfully", body = UpdateTenantResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 404, description = "Tenant not found", body = ErrorResponse),
+        (status = 409, description = "Tenant resource name already set", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     )
 )]

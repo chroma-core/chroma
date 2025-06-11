@@ -319,7 +319,7 @@ pub enum UpdateTenantError {
 impl ChromaError for UpdateTenantError {
     fn code(&self) -> ErrorCodes {
         match self {
-            UpdateTenantError::FailedToSetResourceName(_) => ErrorCodes::Internal,
+            UpdateTenantError::FailedToSetResourceName(_) => ErrorCodes::AlreadyExists,
             UpdateTenantError::Internal(err) => err.code(),
             UpdateTenantError::NotFound(_) => ErrorCodes::NotFound,
         }
