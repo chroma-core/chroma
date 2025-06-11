@@ -29,6 +29,3 @@ runs:
       with:
         username: ${{ inputs.dockerhub-username }}
         password: ${{ inputs.dockerhub-password }}
-    - uses: useblacksmith/build-push-action@v1.1
-      with:
-        setup-only: true
