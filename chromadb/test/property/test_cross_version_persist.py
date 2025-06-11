@@ -140,26 +140,49 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
     ]
 
 
-test_old_versions = versions()
+# test_old_versions = versions()
 base_install_dir = tempfile.mkdtemp()
+
+
+@pytest.fixture(scope="module", params=versions())
+def old_version(request) -> Generator[str, None, None]:
+    version = request.param
+    install_version(version, {})
+    yield version
+    # Cleanup the installed version
+    path = get_path_to_version_install(version)
+    shutil.rmtree(path)
 
 
 # This fixture is not shared with the rest of the tests because it is unique in how it
 # installs the versions of chromadb
-@pytest.fixture(scope="module", params=configurations(test_old_versions))  # type: ignore
-def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
-    configuration = request.param
-    version = configuration[0]
+# @pytest.fixture()
+# def version_settings(old_version: str) -> Generator[Tuple[str, Settings], None, None]:
+#     yield (
+#         old_version,
+#         Settings(
+#             chroma_api_impl="chromadb.api.rust.RustBindingsAPI"
+#             if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+#             else "chromadb.api.segment.SegmentAPI",
+#             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+#             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+#             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+#             chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+#             allow_reset=True,
+#             is_persistent=True,
+#             persist_directory=tempfile.mkdtemp(),
+#         )
+#     )
 
-    install_version(version, {})
-    yield configuration
-    # Cleanup the installed version
-    path = get_path_to_version_install(version)
-    shutil.rmtree(path)
-    # Cleanup the persisted data
-    data_path = configuration[1].persist_directory
-    if os.path.exists(data_path):
-        shutil.rmtree(data_path, ignore_errors=True)
+
+# yield configuration
+# # Cleanup the installed version
+# path = get_path_to_version_install(version)
+# shutil.rmtree(path)
+# # Cleanup the persisted data
+# data_path = configuration[1].persist_directory
+# if os.path.exists(data_path):
+#     shutil.rmtree(data_path, ignore_errors=True)
 
 
 class not_implemented_ef(EmbeddingFunction[Documents]):
@@ -249,14 +272,29 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 )
 @settings(deadline=None)
 def test_cycle_versions(
-    version_settings: Tuple[str, Settings],
+    # version_settings: Tuple[str, Settings],
+    old_version: str,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
 ) -> None:
     # Test backwards compatibility
     # For the current version, ensure that we can load a collection from
     # the previous versions
-    version, settings = version_settings
+    # version, settings = version_settings
+
+    settings = Settings(
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI"
+        if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+        else "chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=tempfile.mkdtemp(),
+    )
+
     # The strategies can generate metadatas of malformed inputs. Other tests
     # will error check and cover these cases to make sure they error. Here we
     # just convert them to valid values since the error cases are already tested
@@ -270,7 +308,17 @@ def test_cycle_versions(
             for m in embeddings_strategy["metadatas"]
         ]
 
-    patch_for_version(version, collection_strategy, embeddings_strategy, settings)
+    patch_for_version(old_version, collection_strategy, embeddings_strategy, settings)
+
+    import sys
+
+    sys.stderr.write(
+        "Persistence directory: "
+        + settings.persist_directory
+        + " for version "
+        + old_version
+        + "\n"
+    )
 
     # Can't pickle a function, and we won't need them
     collection_strategy.embedding_function = None
@@ -283,7 +331,7 @@ def test_cycle_versions(
     conn1, conn2 = multiprocessing.Pipe()
     p = ctx.Process(
         target=persist_generated_data_with_old_version,
-        args=(version, settings, collection_strategy, embeddings_strategy, conn2),
+        args=(old_version, settings, collection_strategy, embeddings_strategy, conn2),
     )
     p.start()
     p.join()
@@ -307,7 +355,7 @@ def test_cycle_versions(
     embeddings_queue = system.instance(SqliteDB)
 
     # Automatic pruning should be disabled since embeddings_queue is non-empty
-    if packaging_version.Version(version) < packaging_version.Version(
+    if packaging_version.Version(old_version) < packaging_version.Version(
         "0.5.7"
     ):  # (automatic pruning is enabled by default in 0.5.7 and later)
         assert (
