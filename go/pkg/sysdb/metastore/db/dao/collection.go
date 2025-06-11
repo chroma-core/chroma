@@ -83,7 +83,7 @@ func (s *collectionDb) GetCollectionByResourceName(tenantResourceName string, da
 	isDeleted := false
 	isDeletedPtr := &isDeleted
 
-	collections, err := s.getCollections([]string{}, &collectionName, tenant.ID, databaseName, nil, nil, isDeletedPtr)
+	collections, err := s.getCollections(nil, &collectionName, tenant.ID, databaseName, nil, nil, isDeletedPtr)
 	if err != nil {
 		return nil, err
 	}
@@ -201,6 +201,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 
 	}
 	var results []Result
+	log.Info("Query", zap.Any("query", query.ToSQL(func(tx *gorm.DB) *gorm.DB { return tx })))
 	err = s.db.Table("(?) as ci", query).
 		Select(`
             ci.*,

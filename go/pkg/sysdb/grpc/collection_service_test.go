@@ -392,9 +392,9 @@ func (suite *CollectionServiceTestSuite) TestServer_GetCollectionByResourceName(
 	suite.NoError(err)
 
 	req := &coordinatorpb.GetCollectionByResourceNameRequest{
-		TenantResourceName: &tenantResourceName,
-		Database:           &databaseName,
-		Name:               &collectionName,
+		TenantResourceName: tenantResourceName,
+		Database:           databaseName,
+		Name:               collectionName,
 	}
 	resp, err := suite.s.GetCollectionByResourceName(context.Background(), req)
 	suite.NoError(err)
@@ -407,9 +407,9 @@ func (suite *CollectionServiceTestSuite) TestServer_GetCollectionByResourceName(
 
 	nonExistentCollectionName := "non_existent_collection"
 	req = &coordinatorpb.GetCollectionByResourceNameRequest{
-		TenantResourceName: &tenantResourceName,
-		Database:           &databaseName,
-		Name:               &nonExistentCollectionName,
+		TenantResourceName: tenantResourceName,
+		Database:           databaseName,
+		Name:               nonExistentCollectionName,
 	}
 	resp, err = suite.s.GetCollectionByResourceName(context.Background(), req)
 	suite.Error(err)
@@ -417,9 +417,9 @@ func (suite *CollectionServiceTestSuite) TestServer_GetCollectionByResourceName(
 
 	nonExistentDatabaseName := "non_existent_database"
 	req = &coordinatorpb.GetCollectionByResourceNameRequest{
-		TenantResourceName: &tenantResourceName,
-		Database:           &nonExistentDatabaseName,
-		Name:               &collectionName,
+		TenantResourceName: tenantResourceName,
+		Database:           nonExistentDatabaseName,
+		Name:               collectionName,
 	}
 	resp, err = suite.s.GetCollectionByResourceName(context.Background(), req)
 	suite.Error(err)
@@ -427,9 +427,9 @@ func (suite *CollectionServiceTestSuite) TestServer_GetCollectionByResourceName(
 
 	nonExistentTenantResourceName := "non_existent_resource_name"
 	req = &coordinatorpb.GetCollectionByResourceNameRequest{
-		TenantResourceName: &nonExistentTenantResourceName,
-		Database:           &databaseName,
-		Name:               &collectionName,
+		TenantResourceName: nonExistentTenantResourceName,
+		Database:           databaseName,
+		Name:               collectionName,
 	}
 	resp, err = suite.s.GetCollectionByResourceName(context.Background(), req)
 	suite.Error(err)
