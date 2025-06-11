@@ -14,6 +14,7 @@ use std::{
     cmp::min,
     collections::{HashMap, HashSet},
     fmt::Debug,
+    mem,
     sync::Arc,
 };
 use thiserror::Error;
@@ -67,6 +68,9 @@ where
     pub fn clients(&mut self, assignment_key: &str) -> Result<Vec<T>, ClientAssignmentError> {
         let node_name_to_client_guard = self.node_name_to_client.read();
         let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
+        if members.is_empty() {
+            panic!("[DEBUG HAMMAD] No members found in client assigner, this should not happen");
+        }
         let target_replication_factor = min(self.replication_factor, members.len());
         self.assignment_policy.set_members(members);
         let assigned = self
@@ -81,6 +85,12 @@ where
                     .cloned()
             })
             .collect::<Result<Vec<_>, _>>()?;
+        if clients.is_empty() {
+            panic!(
+                "[DEBUG HAMMAD] No clients found for assignment key: {}, this should not happen",
+                assignment_key
+            );
+        }
         Ok(clients)
     }
 
