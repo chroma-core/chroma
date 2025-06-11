@@ -201,7 +201,6 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 
 	}
 	var results []Result
-	log.Info("Query", zap.Any("query", query.ToSQL(func(tx *gorm.DB) *gorm.DB { return tx })))
 	err = s.db.Table("(?) as ci", query).
 		Select(`
             ci.*,
