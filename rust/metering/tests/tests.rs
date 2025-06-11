@@ -110,7 +110,7 @@ async fn test_init_custom_receiver() {
 #[tokio::test]
 async fn test_single_metering_context() {
     // Create a metering context of type `TestContextA`
-    let _metering_context_guard =
+    let _metering_context_handle =
         metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Set the value of `test_annotated_field` to "value"
@@ -138,7 +138,7 @@ async fn test_single_metering_context() {
 #[test]
 fn test_close_nonexistent_context_type() {
     // Create a metering context of type `TestContextA`
-    let _metering_context_guard =
+    let _metering_context_handle =
         metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Set the value of `test_annotated_field` to "value"
@@ -170,7 +170,7 @@ fn test_nested_mutation() {
     }
 
     // Create a metering context of type `TestContextA`
-    let _metering_context_guard =
+    let _metering_context_handle =
         metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Call the helper function
@@ -196,7 +196,7 @@ async fn test_nested_async_context_single_thread() {
     }
 
     // Create a metering context of type `TestContextA`
-    let _metering_context_guard =
+    let _metering_context_handle =
         metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Call the helper function
@@ -224,12 +224,12 @@ async fn test_nested_mutation_multi_thread() {
     }
 
     // Create a metering context of type `TestContextA`
-    let metering_context_guard =
+    let metering_context_handle =
         metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Call the helper function in another process, passing the context through `metered`
     let handle = tokio::spawn(async move {
-        async_helper_fn().metered(metering_context_guard).await;
+        async_helper_fn().metered(metering_context_handle).await;
     });
 
     // Wait for the handle to resolve
@@ -259,12 +259,12 @@ async fn test_nested_mutation_then_close_multi_thread() {
     }
 
     // Create a metering context of type `TestContextA`
-    let metering_context_guard =
+    let metering_context_handle =
         metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
 
     // Call the helper function in another process, passing the context through `metered`
     let handle = tokio::spawn(async move {
-        async_helper_fn().metered(metering_context_guard).await;
+        async_helper_fn().metered(metering_context_handle).await;
     });
 
     // Wait for the handle to resolve. The metering context should be cleared
