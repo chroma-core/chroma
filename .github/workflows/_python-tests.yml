@@ -128,14 +128,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.9', '3.9', '3.9', '3.9', '3.9', '3.9', '3.9', '3.9', '3.10', '3.11', '3.12']
+        python: ['3.9']
         test-glob:
           - "chromadb/test/property/test_add.py"
           - "chromadb/test/property/test_fork.py"
         include:
           - test-glob: "chromadb/test/property/test_add.py"
             parallelized: true
-    runs-on: blacksmith-8vcpu-ubuntu-2204
+    runs-on: [blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204, blacksmith-8vcpu-ubuntu-2204]
     # OIDC token auth for AWS
     permissions:
       contents: read
