@@ -81,7 +81,7 @@ async fn test_init_custom_receiver() {
         async fn handle(
             &mut self,
             message: Box<dyn metering::MeteringContext>,
-            _context_container: &ComponentContext<Self>,
+            _context: &ComponentContext<Self>,
         ) -> Self::Result {
             self.messages.push(format!("{:?}", message));
             None
@@ -187,7 +187,7 @@ fn test_nested_mutation() {
 }
 
 #[tokio::test]
-async fn test_nested_async_context_container_single_thread() {
+async fn test_nested_async_context_single_thread() {
     // Define an asynchronous helper function that sets a value for `test_attribute`
     async fn async_helper_fn() {
         metering::with_current(|metering_context| {
