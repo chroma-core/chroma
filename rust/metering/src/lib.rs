@@ -88,7 +88,7 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         pub enum MeteringError {
             #[error("The metering context receiver has already been initialized")]
             ReceiverAlreadyInitializedError,
-            #[error("The mutex guarding the active metering context was poisoned")]
+            #[error("The mutex handleing the active metering context was poisoned")]
             PoisonedMutexError,
             #[error("Requested type is not the same as the active context's type on this thread")]
             TypeMismatchError,
@@ -125,8 +125,8 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
                 ::std::cell::RefCell::new(MeteringContextContainer::default());
         }
 
-        /// Creates a metering context of type `C` and returns a guard for RAII
-        pub fn create<C: MeteringContext>(metering_context: C) -> MeteringContextGuard {
+        /// Creates a metering context of type `C` and returns a handle for RAII
+        pub fn create<C: MeteringContext>(metering_context: C) -> MeteringContextHandle {
             let metering_context_type_id = ::std::any::TypeId::of::<C>();
             let shared_boxed_metering_context = ::std::sync::Arc::new(::std::sync::Mutex::new(Box::new(
                 metering_context,
@@ -140,7 +140,7 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
                 });
             });
 
-            MeteringContextGuard {
+            MeteringContextHandle {
                 inner_shared_boxed_metering_context: shared_boxed_metering_context,
                 inner_metering_context_type_id: metering_context_type_id,
             }
@@ -166,53 +166,47 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
             ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
                 let mut active_metering_context_container = slot.borrow_mut();
 
-                if active_metering_context_container.metering_context_type_id
-                    != ::std::any::TypeId::of::<C>()
-                {
-                    return Err(MeteringError::TypeMismatchError);
-                }
-
-                let active_metering_context = std::mem::replace(
-                    &mut active_metering_context_container.shared_boxed_metering_context,
-                    ::std::sync::Arc::new(::std::sync::Mutex::new(Box::new(BlankMeteringContext))),
-                );
-                active_metering_context_container.metering_context_type_id =
-                    ::std::any::TypeId::of::<BlankMeteringContext>();
-
-                let guard = active_metering_context
+                let mut guard = active_metering_context_container
+                    .shared_boxed_metering_context
                     .lock()
                     .map_err(|_| MeteringError::PoisonedMutexError)?;
 
-                guard
+                if !guard.as_any().is::<C>() {
+                    return Err(MeteringError::TypeMismatchError);
+                }
+
+                let metering_context = guard
                     .as_any()
                     .downcast_ref::<C>()
                     .map(Clone::clone)
-                    .ok_or(MeteringError::DowncastError)
+                    .ok_or(MeteringError::DowncastError)?;
+
+                *guard = Box::new(BlankMeteringContext);
+
+                drop(guard);
+
+                active_metering_context_container.metering_context_type_id = ::std::any::TypeId::of::<BlankMeteringContext>();
+
+                active_metering_context_container.shared_boxed_metering_context =
+                    ::std::sync::Arc::new(::std::sync::Mutex::new(Box::new(BlankMeteringContext)));
+
+                Ok(metering_context)
             })
         }
 
-        /// A guard for RAII that stores a metering context and its type ID
-        pub struct MeteringContextGuard {
+        /// A handle for RAII that stores a metering context and its type ID
+        pub struct MeteringContextHandle {
             inner_shared_boxed_metering_context: SharedBoxedMeteringContext,
             inner_metering_context_type_id: ::std::any::TypeId,
-        }
-
-        /// We implement drop for the guard to get RAII
-        impl Drop for MeteringContextGuard {
-            fn drop(&mut self) {
-                ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
-                    slot.replace(MeteringContextContainer::default());
-                });
-            }
         }
 
         /// A trait that allows futures to be `metered`, similar to how `tracing` enables futures to be
         /// `instrumented`
         pub trait MeteredFutureExt: ::std::future::Future + Sized {
-            fn metered(self, metering_context_guard: MeteringContextGuard) -> MeteredFuture<Self> {
+            fn metered(self, metering_context_handle: MeteringContextHandle) -> MeteredFuture<Self> {
                 MeteredFuture {
                     inner_future: self,
-                    metering_context_guard,
+                    metering_context_handle,
                 }
             }
         }
@@ -226,7 +220,7 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         pub struct MeteredFuture<F: ::std::future::Future> {
             #[pin]
             inner_future: F,
-            metering_context_guard: MeteringContextGuard,
+            metering_context_handle: MeteringContextHandle,
         }
 
         /// Handles setting the current thread's active metering context when it is polled and
@@ -240,38 +234,23 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
             ) -> ::std::task::Poll<Self::Output> {
                 let metered_future = self.project();
 
-                ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
-                    let mut active_metering_context_container = slot.borrow_mut();
-                    ::std::mem::swap(
-                        &mut active_metering_context_container.shared_boxed_metering_context,
-                        &mut metered_future
-                            .metering_context_guard
-                            .inner_shared_boxed_metering_context,
-                    );
-                    ::std::mem::swap(
-                        &mut active_metering_context_container.metering_context_type_id,
-                        &mut metered_future
-                            .metering_context_guard
-                            .inner_metering_context_type_id,
-                    );
-                });
+                let new_container = MeteringContextContainer {
+                    shared_boxed_metering_context: metered_future
+                        .metering_context_handle
+                        .inner_shared_boxed_metering_context
+                        .clone(),
+                    metering_context_type_id: metered_future
+                        .metering_context_handle
+                        .inner_metering_context_type_id,
+                };
+
+                let previous_container =
+                    ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| slot.replace(new_container));
 
                 let output = metered_future.inner_future.poll(context);
 
                 ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
-                    let mut active_metering_context_container = slot.borrow_mut();
-                    ::std::mem::swap(
-                        &mut active_metering_context_container.shared_boxed_metering_context,
-                        &mut metered_future
-                            .metering_context_guard
-                            .inner_shared_boxed_metering_context,
-                    );
-                    ::std::mem::swap(
-                        &mut active_metering_context_container.metering_context_type_id,
-                        &mut metered_future
-                            .metering_context_guard
-                            .inner_metering_context_type_id,
-                    );
+                    slot.replace(previous_container);
                 });
 
                 output
