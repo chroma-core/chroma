@@ -130,6 +130,7 @@ jobs:
       matrix:
         python: ['3.9']
         test-glob:
+          - "chromadb/test/api"
           - "chromadb/test/property/test_add.py"
           - "chromadb/test/property/test_fork.py"
         include:
