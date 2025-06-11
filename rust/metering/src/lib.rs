@@ -125,7 +125,7 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
                 ::std::cell::RefCell::new(MeteringContextContainer::default());
         }
 
-        /// Creates a metering context of type `C` and returns a handle for RAII
+        /// Creates a metering context of type `C` and returns a handle
         pub fn create<C: MeteringContext>(metering_context: C) -> MeteringContextHandle {
             let metering_context_type_id = ::std::any::TypeId::of::<C>();
             let shared_boxed_metering_context = ::std::sync::Arc::new(::std::sync::Mutex::new(Box::new(
@@ -194,7 +194,7 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
             })
         }
 
-        /// A handle for RAII that stores a metering context and its type ID
+        /// A handle that stores a metering context and its type ID
         pub struct MeteringContextHandle {
             inner_shared_boxed_metering_context: SharedBoxedMeteringContext,
             inner_metering_context_type_id: ::std::any::TypeId,
