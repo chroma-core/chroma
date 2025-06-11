@@ -49,6 +49,7 @@ jobs:
     name: Build image for ${{ matrix.platform }}
     runs-on: blacksmith-16vcpu-ubuntu-2204
     strategy:
+      fail-fast: false
       matrix:
         platform: [amd64, arm64]
         include:
