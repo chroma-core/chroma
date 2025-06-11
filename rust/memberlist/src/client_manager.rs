@@ -270,6 +270,7 @@ where
     }
 
     async fn process_new_members(&mut self, new_members: Memberlist) {
+        println!("[DEBUG HAMMAD] Processing new members: {:?}", new_members);
         // NOTE(hammadb) In production, we assume that each query service is 1:1 with a node. I.e that no
         // two query services are running on the same node. However, in local
         // development, we may have multiple query services running on the same node.
