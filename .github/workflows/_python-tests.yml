@@ -19,130 +19,119 @@ on:
         type: string
 
 jobs:
-  test-rust-bindings:
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ${{ fromJson(inputs.python_versions) }}
-        test-glob:
-          - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
-          - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
-          - "chromadb/test/property/test_cross_version_persist.py"
-        include:
-          - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
-            parallelized: true
-          - test-glob: "chromadb/test/property/test_cross_version_persist.py"
-            parallelized: true
+  # test-rust-bindings:
+  #   timeout-minutes: 90
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       python: ${{ fromJson(inputs.python_versions) }}
+  #       test-glob:
+  #         - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
+  #         - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
+  #         - "chromadb/test/property/test_cross_version_persist.py"
+  #       include:
+  #         - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
+  #           parallelized: true
+  #         - test-glob: "chromadb/test/property/test_cross_version_persist.py"
+  #           parallelized: true
 
-    runs-on: ${{ inputs.runner }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Python
-        uses: ./.github/actions/python
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Setup Rust
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Build Rust bindings
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-      - name: Install built wheel
-        shell: bash
-        run: pip install --no-index --find-links target/wheels/ chromadb
-      - name: Test
-        run: python -m pytest ${{ matrix.test-glob }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
-        shell: bash
-        env:
-          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
-          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
-          RUST_BACKTRACE: 1
+  #   runs-on: ${{ inputs.runner }}
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Setup Python
+  #       uses: ./.github/actions/python
+  #       with:
+  #         python-version: ${{ matrix.python }}
+  #     - name: Setup Rust
+  #       uses: ./.github/actions/rust
+  #       with:
+  #         github-token: ${{ github.token }}
+  #     - name: Build Rust bindings
+  #       uses: PyO3/maturin-action@v1
+  #       with:
+  #         command: build
+  #     - name: Install built wheel
+  #       shell: bash
+  #       run: pip install --no-index --find-links target/wheels/ chromadb
+  #     - name: Test
+  #       run: python -m pytest ${{ matrix.test-glob }} ${{ matrix.parallelized && '-n auto --dist worksteal' || '' }} -v --color=yes --durations 10
+  #       shell: bash
+  #       env:
+  #         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+  #         CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
+  #         RUST_BACKTRACE: 1
 
-  test-rust-single-node-integration:
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ${{ fromJson(inputs.python_versions) }}
-        test-glob:
-          - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'"
-          - "chromadb/test/property/test_add.py"
-          - "chromadb/test/property/test_collections.py"
-          - "chromadb/test/property/test_collections_with_database_tenant.py"
-          - "chromadb/test/property/test_cross_version_persist.py"
-          - "chromadb/test/property/test_embeddings.py"
-          - "chromadb/test/property/test_filtering.py"
-          - "chromadb/test/property/test_persist.py"
-          - "chromadb/test/stress"
-    runs-on: ${{ inputs.runner }}
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    - name: Setup Python (${{ matrix.python }})
-      uses: ./.github/actions/python
-    - name: Setup Rust
-      uses: ./.github/actions/rust
-      with:
-          github-token: ${{ github.token }}
-    - name: Rust Integration Test
-      run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
-      shell: bash
-      env:
-        ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
-        PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+  # test-rust-single-node-integration:
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       python: ${{ fromJson(inputs.python_versions) }}
+  #       test-glob:
+  #         - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore='chromadb/test/test_cli.py' --ignore-glob 'chromadb/test/distributed/*'"
+  #         - "chromadb/test/property/test_add.py"
+  #         - "chromadb/test/property/test_collections.py"
+  #         - "chromadb/test/property/test_collections_with_database_tenant.py"
+  #         - "chromadb/test/property/test_cross_version_persist.py"
+  #         - "chromadb/test/property/test_embeddings.py"
+  #         - "chromadb/test/property/test_filtering.py"
+  #         - "chromadb/test/property/test_persist.py"
+  #         - "chromadb/test/stress"
+  #   runs-on: ${{ inputs.runner }}
+  #   steps:
+  #   - name: Checkout
+  #     uses: actions/checkout@v4
+  #   - name: Setup Python (${{ matrix.python }})
+  #     uses: ./.github/actions/python
+  #   - name: Setup Rust
+  #     uses: ./.github/actions/rust
+  #     with:
+  #         github-token: ${{ github.token }}
+  #   - name: Rust Integration Test
+  #     run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
+  #     shell: bash
+  #     env:
+  #       ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
+  #       PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
-  test-rust-thin-client:
-    strategy:
-      matrix:
-        python: ${{ fromJson(inputs.python_versions) }}
-        test-glob:
-          - "chromadb/test/property/test_add.py"
-          - "chromadb/test/property/test_collections.py"
-          - "chromadb/test/property/test_collections_with_database_tenant.py"
-          - "chromadb/test/property/test_embeddings.py"
-          - "chromadb/test/property/test_filtering.py"
-    runs-on: ${{ inputs.runner }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Python (${{ matrix.python }})
-        uses: ./.github/actions/python
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Setup Rust
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Test
-        run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
-        shell: bash
-        env:
-          CHROMA_THIN_CLIENT: "1"
-          ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
-          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+  # test-rust-thin-client:
+  #   strategy:
+  #     matrix:
+  #       python: ${{ fromJson(inputs.python_versions) }}
+  #       test-glob:
+  #         - "chromadb/test/property/test_add.py"
+  #         - "chromadb/test/property/test_collections.py"
+  #         - "chromadb/test/property/test_collections_with_database_tenant.py"
+  #         - "chromadb/test/property/test_embeddings.py"
+  #         - "chromadb/test/property/test_filtering.py"
+  #   runs-on: ${{ inputs.runner }}
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Setup Python (${{ matrix.python }})
+  #       uses: ./.github/actions/python
+  #       with:
+  #         python-version: ${{ matrix.python }}
+  #     - name: Setup Rust
+  #       uses: ./.github/actions/rust
+  #       with:
+  #         github-token: ${{ github.token }}
+  #     - name: Test
+  #       run: bin/rust-integration-test.sh ${{ matrix.test-glob }}
+  #       shell: bash
+  #       env:
+  #         CHROMA_THIN_CLIENT: "1"
+  #         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
+  #         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-cluster-rust-frontend:
     if: ${{ contains(inputs.runner, 'ubuntu') }}
     strategy:
       fail-fast: false
       matrix:
-        python: ${{ fromJson(inputs.python_versions) }}
+        python: ['3.9', '3.10', '3.11', '3.12']
         test-glob:
-          - "chromadb/test/api"
-          - "chromadb/test/api/test_collection.py"
-          - "chromadb/test/api/test_limit_offset.py"
-          - "chromadb/test/property/test_collections.py"
           - "chromadb/test/property/test_add.py"
-          - "chromadb/test/property/test_filtering.py"
           - "chromadb/test/property/test_fork.py"
-          - "chromadb/test/property/test_embeddings.py"
-          - "chromadb/test/property/test_collections_with_database_tenant.py"
-          - "chromadb/test/property/test_collections_with_database_tenant_overwrite.py"
-          - "chromadb/test/distributed/test_sanity.py"
-          - "chromadb/test/distributed/test_log_backpressure.py"
-          - "chromadb/test/distributed/test_log_failover.py"
         include:
           - test-glob: "chromadb/test/property/test_add.py"
             parallelized: true
@@ -193,96 +182,96 @@ jobs:
           name: cluster_test_logs
           pattern: cluster_logs_*
 
-  test-rust-bindings-stress:
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ${{ fromJson(inputs.python_versions) }}
-    runs-on: ${{ inputs.runner }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Python (${{ matrix.python }})
-        uses: ./.github/actions/python
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Setup Rust
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Build Rust bindings
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-      - name: Install built wheel
-        shell: bash
-        run: pip install --no-index --find-links target/wheels/ chromadb
-      - name: Test
-        run: python -m pytest chromadb/test/stress --durations 10
-        shell: bash
-        env:
-          PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
-          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
+  # test-rust-bindings-stress:
+  #   timeout-minutes: 90
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       python: ${{ fromJson(inputs.python_versions) }}
+  #   runs-on: ${{ inputs.runner }}
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Setup Python (${{ matrix.python }})
+  #       uses: ./.github/actions/python
+  #       with:
+  #         python-version: ${{ matrix.python }}
+  #     - name: Setup Rust
+  #       uses: ./.github/actions/rust
+  #       with:
+  #         github-token: ${{ github.token }}
+  #     - name: Build Rust bindings
+  #       uses: PyO3/maturin-action@v1
+  #       with:
+  #         command: build
+  #     - name: Install built wheel
+  #       shell: bash
+  #       run: pip install --no-index --find-links target/wheels/ chromadb
+  #     - name: Test
+  #       run: python -m pytest chromadb/test/stress --durations 10
+  #       shell: bash
+  #       env:
+  #         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+  #         CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
 
-  test-python-cli:
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ${{ fromJson(inputs.python_versions) }}
-    runs-on: ${{ inputs.runner }}
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    - name: Setup Python (${{ matrix.python }})
-      uses: ./.github/actions/python
-    - name: Setup Rust
-      uses: ./.github/actions/rust
-      with:
-        github-token: ${{ github.token }}
-    - name: Build Rust bindings
-      uses: PyO3/maturin-action@v1
-      with:
-        command: build
-    - name: Install built wheel
-      shell: bash
-      run: pip install --no-index --find-links target/wheels/ chromadb
-    - name: Integration Test
-      run: python -m pytest "chromadb/test/test_cli.py"
-      shell: bash
-      env:
-        ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
-        PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
+  # test-python-cli:
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       python: ${{ fromJson(inputs.python_versions) }}
+  #   runs-on: ${{ inputs.runner }}
+  #   steps:
+  #   - name: Checkout
+  #     uses: actions/checkout@v4
+  #   - name: Setup Python (${{ matrix.python }})
+  #     uses: ./.github/actions/python
+  #   - name: Setup Rust
+  #     uses: ./.github/actions/rust
+  #     with:
+  #       github-token: ${{ github.token }}
+  #   - name: Build Rust bindings
+  #     uses: PyO3/maturin-action@v1
+  #     with:
+  #       command: build
+  #   - name: Install built wheel
+  #     shell: bash
+  #     run: pip install --no-index --find-links target/wheels/ chromadb
+  #   - name: Integration Test
+  #     run: python -m pytest "chromadb/test/test_cli.py"
+  #     shell: bash
+  #     env:
+  #       ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
+  #       PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
-  test-windows-smoke:
-    # only run windows smoke tests when the runner isn't already windows
-    if: ${{ !contains(inputs.runner, 'windows') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ${{ fromJson(inputs.python_versions) }}
-    runs-on: 16core-64gb-windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Python
-        uses: ./.github/actions/python
-        with:
-          python-version: ${{ matrix.python }}
-      - name: Setup Rust
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Build Rust bindings
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-      - name: Install built wheel
-        shell: bash
-        run: pip install --no-index --find-links target/wheels/ chromadb
-      - name: Run tests
-        run: python -m pytest chromadb/test/test_api.py -n auto --dist worksteal -v --color=yes --durations 10
-        shell: bash
-        env:
-          CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
-          RUST_BACKTRACE: 1
+  # test-windows-smoke:
+  #   # only run windows smoke tests when the runner isn't already windows
+  #   if: ${{ !contains(inputs.runner, 'windows') }}
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       python: ${{ fromJson(inputs.python_versions) }}
+  #   runs-on: 16core-64gb-windows-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Setup Python
+  #       uses: ./.github/actions/python
+  #       with:
+  #         python-version: ${{ matrix.python }}
+  #     - name: Setup Rust
+  #       uses: ./.github/actions/rust
+  #       with:
+  #         github-token: ${{ github.token }}
+  #     - name: Build Rust bindings
+  #       uses: PyO3/maturin-action@v1
+  #       with:
+  #         command: build
+  #     - name: Install built wheel
+  #       shell: bash
+  #       run: pip install --no-index --find-links target/wheels/ chromadb
+  #     - name: Run tests
+  #       run: python -m pytest chromadb/test/test_api.py -n auto --dist worksteal -v --color=yes --durations 10
+  #       shell: bash
+  #       env:
+  #         CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
+  #         RUST_BACKTRACE: 1

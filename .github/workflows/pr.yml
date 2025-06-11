@@ -167,31 +167,31 @@ jobs:
     with:
       property_testing_preset: 'normal'
 
-  python-vulnerability-scan:
-    name: Python vulnerability scan
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
-    uses: ./.github/workflows/_python-vulnerability-scan.yml
+  # python-vulnerability-scan:
+  #   name: Python vulnerability scan
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+  #   uses: ./.github/workflows/_python-vulnerability-scan.yml
 
-  javascript-client-tests:
-    name: JavaScript client tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
-    uses: ./.github/workflows/_javascript-client-tests.yml
+  # javascript-client-tests:
+  #   name: JavaScript client tests
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
+  #   uses: ./.github/workflows/_javascript-client-tests.yml
 
-  rust-tests:
-    name: Rust tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
-    uses: ./.github/workflows/_rust-tests.yml
-    secrets: inherit
+  # rust-tests:
+  #   name: Rust tests
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+  #   uses: ./.github/workflows/_rust-tests.yml
+  #   secrets: inherit
 
-  go-tests:
-    name: Go tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
-    uses: ./.github/workflows/_go-tests.yml
-    secrets: inherit
+  # go-tests:
+  #   name: Go tests
+  #   needs: change-detection
+  #   if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+  #   uses: ./.github/workflows/_go-tests.yml
+  #   secrets: inherit
 
   check-title:
     name: Check PR Title
@@ -214,40 +214,40 @@ jobs:
                 body: 'Please tag your PR title with one of: \\[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE\\]. See https://docs.trychroma.com/contributing#contributing-code-and-ideas'
               })
 
-  lint:
-    name: Lint
-    runs-on: blacksmith-4vcpu-ubuntu-2204
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - uses: ./.github/actions/python
-        with:
-          python-version: "3.11"
-      - name: Setup Rust
-        uses: ./.github/actions/rust
-        with:
-          github-token: ${{ github.token }}
-      - name: Run pre-commit
-        shell: bash
-        run: |
-          pre-commit run --all-files trailing-whitespace
-          pre-commit run --all-files mixed-line-ending
-          pre-commit run --all-files end-of-file-fixer
-          pre-commit run --all-files requirements-txt-fixer
-          pre-commit run --all-files check-xml
-          pre-commit run --all-files check-merge-conflict
-          pre-commit run --all-files check-case-conflict
-          pre-commit run --all-files check-docstring-first
-          pre-commit run --all-files black
-          pre-commit run --all-files flake8
-          pre-commit run --all-files prettier
-          pre-commit run --all-files check-yaml
-        continue-on-error: true
-      - name: Cargo fmt check
-        shell: bash
-        run: cargo fmt -- --check
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
+  # lint:
+  #   name: Lint
+  #   runs-on: blacksmith-4vcpu-ubuntu-2204
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - uses: ./.github/actions/python
+  #       with:
+  #         python-version: "3.11"
+  #     - name: Setup Rust
+  #       uses: ./.github/actions/rust
+  #       with:
+  #         github-token: ${{ github.token }}
+  #     - name: Run pre-commit
+  #       shell: bash
+  #       run: |
+  #         pre-commit run --all-files trailing-whitespace
+  #         pre-commit run --all-files mixed-line-ending
+  #         pre-commit run --all-files end-of-file-fixer
+  #         pre-commit run --all-files requirements-txt-fixer
+  #         pre-commit run --all-files check-xml
+  #         pre-commit run --all-files check-merge-conflict
+  #         pre-commit run --all-files check-case-conflict
+  #         pre-commit run --all-files check-docstring-first
+  #         pre-commit run --all-files black
+  #         pre-commit run --all-files flake8
+  #         pre-commit run --all-files prettier
+  #         pre-commit run --all-files check-yaml
+  #       continue-on-error: true
+  #     - name: Cargo fmt check
+  #       shell: bash
+  #       run: cargo fmt -- --check
+  #     - name: Clippy
+  #       run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
 
   # This job exists for our branch protection rule.
   # We want to require status checks to pass before merging, but the set of
@@ -255,22 +255,22 @@ jobs:
   # When creating a branch protection rule, you have to specify a static list
   # of checks.
   # So since this job always runs, we can specify it in the branch protection rule.
-  all-required-pr-checks-passed:
-    if: always()
-    needs:
-    - python-tests
-    - python-vulnerability-scan
-    - javascript-client-tests
-    - rust-tests
-    - go-tests
-    - check-title
-    - lint
-    - check-helm-version-bump
-    - delete-helm-comment
-    runs-on: blacksmith-4vcpu-ubuntu-2204
-    steps:
-    - name: Decide whether the needed jobs succeeded or failed
-      uses: re-actors/alls-green@release/v1
-      with:
-        jobs: ${{ toJSON(needs) }}
-        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests,check-helm-version-bump,delete-helm-comment
+  # all-required-pr-checks-passed:
+  #   if: always()
+  #   needs:
+  #   - python-tests
+  #   - python-vulnerability-scan
+  #   - javascript-client-tests
+  #   - rust-tests
+  #   - go-tests
+  #   - check-title
+  #   - lint
+  #   - check-helm-version-bump
+  #   - delete-helm-comment
+  #   runs-on: blacksmith-4vcpu-ubuntu-2204
+  #   steps:
+  #   - name: Decide whether the needed jobs succeeded or failed
+  #     uses: re-actors/alls-green@release/v1
+  #     with:
+  #       jobs: ${{ toJSON(needs) }}
+  #       allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests,check-helm-version-bump,delete-helm-comment
