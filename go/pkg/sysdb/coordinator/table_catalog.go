@@ -634,7 +634,7 @@ func (tc *Catalog) hardDeleteCollection(ctx context.Context, deleteCollection *m
 				return err
 			}
 
-			newLineageFileFullName, err := tc.s3Store.PutLineageFile(collectionEntry.Tenant, collectionEntry.DatabaseID, rootCollection.ID, fmt.Sprintf("%s.binpb", newLineageFileId.String()), lineageFile)
+			newLineageFileFullName, err := tc.s3Store.PutLineageFile(ctx, collectionEntry.Tenant, collectionEntry.DatabaseID, rootCollection.ID, fmt.Sprintf("%s.binpb", newLineageFileId.String()), lineageFile)
 			if err != nil {
 				return err
 			}
@@ -953,7 +953,7 @@ func (tc *Catalog) getLineageFile(ctx context.Context, lineageFileName *string) 
 	}
 
 	// Safe to deref.
-	return tc.s3Store.GetLineageFile(*lineageFileName)
+	return tc.s3Store.GetLineageFile(ctx, *lineageFileName)
 }
 
 func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.ForkCollection) (*model.Collection, []*model.Segment, error) {
@@ -1139,7 +1139,7 @@ func (tc *Catalog) ForkCollection(ctx context.Context, forkCollection *model.For
 		}
 
 		newLineageFileBaseName := fmt.Sprintf("%s.binpb", newLineageFileId.String())
-		newLineageFileFullName, err = tc.s3Store.PutLineageFile(lineageFileTenantId, databaseID, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
+		newLineageFileFullName, err = tc.s3Store.PutLineageFile(txCtx, lineageFileTenantId, databaseID, rootCollectionIDStr, newLineageFileBaseName, lineageFile)
 		if err != nil {
 			return err
 		}
@@ -1290,7 +1290,7 @@ func (tc *Catalog) createFirstVersionFile(ctx context.Context, databaseID string
 	}
 	// Construct the version file name.
 	versionFileName := "0"
-	fullFilePath, err := tc.s3Store.PutVersionFile(createCollection.TenantID, databaseID, createCollection.ID.String(), versionFileName, collectionVersionFilePb)
+	fullFilePath, err := tc.s3Store.PutVersionFile(ctx, createCollection.TenantID, databaseID, createCollection.ID.String(), versionFileName, collectionVersionFilePb)
 	if err != nil {
 		return "", err
 	}
@@ -1530,7 +1530,7 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 		zap.Int64("version", int64(collectionEntry.Version)),
 		zap.String("version_file_name", collectionEntry.VersionFileName))
 
-	versionFile, err := tc.s3Store.GetVersionFile(collectionEntry.VersionFileName)
+	versionFile, err := tc.s3Store.GetVersionFile(ctx, collectionEntry.VersionFileName)
 	if err != nil {
 		log.Error("error getting version file", zap.Error(err))
 		return nil, err
@@ -1569,7 +1569,7 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 	return filteredVersions, nil
 }
 
-func (tc *Catalog) updateVersionFileInS3(existingVersionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction, previousSegmentInfo []*model.Segment, ts_secs int64) (string, error) {
+func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction, previousSegmentInfo []*model.Segment, ts_secs int64) (string, error) {
 	segmentCompactionInfos := make([]*coordinatorpb.FlushSegmentCompactionInfo, 0, len(flushCollectionCompaction.FlushSegmentCompactions))
 	// If flushCollectionCompaction.FlushSegmentCompactions is empty then use previousSegmentInfo.
 	if len(flushCollectionCompaction.FlushSegmentCompactions) == 0 {
@@ -1618,7 +1618,7 @@ func (tc *Catalog) updateVersionFileInS3(existingVersionFilePb *coordinatorpb.Co
 	// Format of version file name: <version>_<uuid>_flush
 	// The version should be left padded with 0s upto 6 digits.
 	newVersionFileName := fmt.Sprintf("%06d_%s_flush", flushCollectionCompaction.CurrentCollectionVersion+1, uuid.New().String())
-	fullFilePath, err := tc.s3Store.PutVersionFile(flushCollectionCompaction.TenantID, existingVersionFilePb.CollectionInfoImmutable.DatabaseId, flushCollectionCompaction.ID.String(), newVersionFileName, existingVersionFilePb)
+	fullFilePath, err := tc.s3Store.PutVersionFile(ctx, flushCollectionCompaction.TenantID, existingVersionFilePb.CollectionInfoImmutable.DatabaseId, flushCollectionCompaction.ID.String(), newVersionFileName, existingVersionFilePb)
 	if err != nil {
 		return "", err
 	}
@@ -1790,7 +1790,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			}
 		} else {
 			// Read the VersionFile from S3MetaStore.
-			existingVersionFilePb, err = tc.s3Store.GetVersionFile(existingVersionFileName)
+			existingVersionFilePb, err = tc.s3Store.GetVersionFile(ctx, existingVersionFileName)
 			if err != nil {
 				return nil, err
 			}
@@ -1810,7 +1810,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 		// The update function takes the content of the existing version file,
 		// and the set of segments that are part of the new version file.
 		// NEW VersionFile is created in S3 at this step.
-		newVersionFileName, err := tc.updateVersionFileInS3(existingVersionFilePb, flushCollectionCompaction, segments, time.Now().Unix())
+		newVersionFileName, err := tc.updateVersionFileInS3(ctx, existingVersionFilePb, flushCollectionCompaction, segments, time.Now().Unix())
 		if err != nil {
 			return nil, err
 		}
@@ -1993,7 +1993,7 @@ func (tc *Catalog) markVersionForDeletionInSingleCollection(
 		// TODO(rohit): log error if collection in file is different from the one in request.
 
 		existingVersionFileName := collectionEntry.VersionFileName
-		versionFilePb, err := tc.s3Store.GetVersionFile(existingVersionFileName)
+		versionFilePb, err := tc.s3Store.GetVersionFile(ctx, existingVersionFileName)
 		if err != nil {
 			return err
 		}
@@ -2011,7 +2011,7 @@ func (tc *Catalog) markVersionForDeletionInSingleCollection(
 			collectionEntry.Version,
 			uuid.New().String(),
 		)
-		newVerFileFullPath, err := tc.s3Store.PutVersionFile(tenantID, collectionEntry.DatabaseID, collectionID, newVersionFileName, versionFilePb)
+		newVerFileFullPath, err := tc.s3Store.PutVersionFile(ctx, tenantID, collectionEntry.DatabaseID, collectionID, newVersionFileName, versionFilePb)
 		if err != nil {
 			return err
 		}
@@ -2021,7 +2021,7 @@ func (tc *Catalog) markVersionForDeletionInSingleCollection(
 		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVerFileFullPath, nil, nil)
 		if err != nil {
 			// Delete the newly created version file from S3 since it is not needed.
-			tc.s3Store.DeleteVersionFile(tenantID, collectionEntry.DatabaseID, collectionID, newVersionFileName)
+			tc.s3Store.DeleteVersionFile(ctx, tenantID, collectionEntry.DatabaseID, collectionID, newVersionFileName)
 			return err
 		}
 		if rowsAffected == 0 {
@@ -2117,7 +2117,7 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 		}
 
 		existingVersionFileName := collectionEntry.VersionFileName
-		versionFilePb, err := tc.s3Store.GetVersionFile(existingVersionFileName)
+		versionFilePb, err := tc.s3Store.GetVersionFile(ctx, existingVersionFileName)
 		if err != nil {
 			return err
 		}
@@ -2153,7 +2153,7 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 			collectionEntry.Version,
 			uuid.New().String(),
 		)
-		newVerFileFullPath, err := tc.s3Store.PutVersionFile(tenantID, collectionEntry.DatabaseID, collectionID, newVersionFileName, versionFilePb)
+		newVerFileFullPath, err := tc.s3Store.PutVersionFile(ctx, tenantID, collectionEntry.DatabaseID, collectionID, newVersionFileName, versionFilePb)
 		if err != nil {
 			return err
 		}
@@ -2162,7 +2162,7 @@ func (tc *Catalog) DeleteVersionEntriesForCollection(ctx context.Context, tenant
 		rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVerFileFullPath, oldestVersionTs, &numActiveVersions)
 		if err != nil {
 			// Delete the newly created version file from S3 since it is not needed
-			tc.s3Store.DeleteVersionFile(tenantID, collectionEntry.DatabaseID, collectionID, newVersionFileName)
+			tc.s3Store.DeleteVersionFile(ctx, tenantID, collectionEntry.DatabaseID, collectionID, newVersionFileName)
 			return err
 		}
 		if rowsAffected == 0 {

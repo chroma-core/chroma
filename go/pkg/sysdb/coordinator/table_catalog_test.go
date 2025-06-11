@@ -175,7 +175,7 @@ func newMockS3MetaStore() *mockS3MetaStore {
 	}
 }
 
-func (m *mockS3MetaStore) GetLineageFile(fileName string) (*coordinatorpb.CollectionLineageFile, error) {
+func (m *mockS3MetaStore) GetLineageFile(ctx context.Context, fileName string) (*coordinatorpb.CollectionLineageFile, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -187,7 +187,7 @@ func (m *mockS3MetaStore) GetLineageFile(fileName string) (*coordinatorpb.Collec
 	}, nil
 }
 
-func (m *mockS3MetaStore) PutLineageFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionLineageFile) (string, error) {
+func (m *mockS3MetaStore) PutLineageFile(ctx context.Context, tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionLineageFile) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -195,7 +195,7 @@ func (m *mockS3MetaStore) PutLineageFile(tenantID, databaseID, collectionID, fil
 	return fileName, nil
 }
 
-func (m *mockS3MetaStore) GetVersionFile(fileName string) (*coordinatorpb.CollectionVersionFile, error) {
+func (m *mockS3MetaStore) GetVersionFile(ctx context.Context, fileName string) (*coordinatorpb.CollectionVersionFile, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -222,7 +222,7 @@ func (m *mockS3MetaStore) ListVersionFiles() ([]*coordinatorpb.CollectionVersion
 	return files, names, nil
 }
 
-func (m *mockS3MetaStore) PutVersionFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error) {
+func (m *mockS3MetaStore) PutVersionFile(ctx context.Context, tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -234,7 +234,7 @@ func (m *mockS3MetaStore) HasObjectWithPrefix(ctx context.Context, prefix string
 	return false, nil
 }
 
-func (m *mockS3MetaStore) DeleteVersionFile(tenantID, databaseID, collectionID, fileName string) error {
+func (m *mockS3MetaStore) DeleteVersionFile(ctx context.Context, tenantID, databaseID, collectionID, fileName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -287,7 +287,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 			},
 		},
 	}
-	fileName, err := mockS3Store.PutVersionFile(tenantID, "test_database", collectionID.String(), "version_1.pb", initialVersionFile)
+	fileName, err := mockS3Store.PutVersionFile(context.Background(), tenantID, "test_database", collectionID.String(), "version_1.pb", initialVersionFile)
 	assert.NoError(t, err)
 	assert.Equal(t, "version_1.pb", fileName)
 
@@ -492,7 +492,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 			},
 		},
 	}
-	fileName, err := mockS3Store.PutVersionFile(tenantID, "test_database", collectionID.String(), "version_1.pb", initialVersionFile)
+	fileName, err := mockS3Store.PutVersionFile(context.Background(), tenantID, "test_database", collectionID.String(), "version_1.pb", initialVersionFile)
 	assert.NoError(t, err)
 	assert.Equal(t, "version_1.pb", fileName)
 
@@ -672,7 +672,7 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 			},
 		},
 	}
-	mockS3Store.PutVersionFile(tenantID, databaseID, collectionID, existingVersionFileName, initialVersionFile)
+	mockS3Store.PutVersionFile(context.Background(), tenantID, databaseID, collectionID, existingVersionFileName, initialVersionFile)
 
 	// Setup mock collection entry
 	mockCollectionEntry := &dbmodel.Collection{
@@ -717,6 +717,7 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 	assert.NoError(t, err)
 	// Verify the version file was updated correctly
 	updatedFile, err := mockS3Store.GetVersionFile(
+		context.Background(),
 		existingVersionFileName,
 	)
 	assert.NoError(t, err)
@@ -805,7 +806,7 @@ func TestCatalog_MarkVersionForDeletion(t *testing.T) {
 			},
 		},
 	}
-	mockS3Store.PutVersionFile(tenantID, databaseID, collectionID, existingVersionFileName, initialVersionFile)
+	mockS3Store.PutVersionFile(context.Background(), tenantID, databaseID, collectionID, existingVersionFileName, initialVersionFile)
 
 	// Setup mock collection entry
 	mockCollectionEntry := &dbmodel.Collection{
@@ -848,6 +849,7 @@ func TestCatalog_MarkVersionForDeletion(t *testing.T) {
 	existingVersionFileName, err = catalog.GetVersionFileNamesForCollection(context.Background(), tenantID, collectionID)
 	assert.NoError(t, err)
 	updatedFile, err := mockS3Store.GetVersionFile(
+		context.Background(),
 		existingVersionFileName,
 	)
 	assert.NoError(t, err)
@@ -940,7 +942,7 @@ func TestCatalog_MarkVersionForDeletion_VersionNotFound(t *testing.T) {
 			},
 		},
 	}
-	mockS3Store.PutVersionFile(tenantID, "test_database", collectionID, existingVersionFileName, initialVersionFile)
+	mockS3Store.PutVersionFile(context.Background(), tenantID, "test_database", collectionID, existingVersionFileName, initialVersionFile)
 
 	// Setup mock collection entry
 	mockCollectionEntry := &dbmodel.Collection{
