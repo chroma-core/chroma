@@ -3,16 +3,7 @@
 pub trait MeteringContext:
     ::std::fmt::Debug + ::std::any::Any + ::std::marker::Send + ::std::marker::Sync + 'static
 {
-    fn clone_box(&self) -> Box<dyn MeteringContext>;
-
     fn as_any(&self) -> &dyn ::std::any::Any;
-}
-
-/// An implementation of `Clone` for boxed trait objects of `MeteringContext`
-impl Clone for Box<dyn MeteringContext> {
-    fn clone(&self) -> Box<dyn MeteringContext> {
-        self.clone_box()
-    }
 }
 
 /// A blank metering context to use when there is no active metering context
@@ -22,10 +13,6 @@ pub struct BlankMeteringContext;
 /// We implement the `MeteringContext` trait for the blank metering context so it can be represented
 /// in the same way that a user-defined metering context would be internally
 impl MeteringContext for BlankMeteringContext {
-    fn clone_box(&self) -> Box<dyn MeteringContext> {
-        Box::new(self.clone())
-    }
-
     fn as_any(&self) -> &dyn ::std::any::Any {
         self
     }
@@ -36,143 +23,98 @@ impl MeteringContext for BlankMeteringContext {
 pub enum MeteringError {
     #[error("The metering context receiver has already been initialized")]
     ReceiverAlreadyInitializedError,
-    #[error("The mutex handleing the active metering context was poisoned")]
-    PoisonedMutexError,
-    #[error("Requested type is not the same as the active context's type on this thread")]
-    TypeMismatchError,
-    #[error(
-        "Failed to downcast context from std::any::Any to provided type, despite type IDs matching"
-    )]
+    #[error("Failed to downcast context to provided type")]
     DowncastError,
 }
 
-/// A safe reference to a metering context to share between threads
-#[derive(Clone, std::fmt::Debug)]
-struct MeteringContextContainer(::std::sync::Arc<Box<dyn MeteringContext>>);
+/// A type alias for a shared, boxed, metering context
+pub type MeteringContextContainer = ::std::sync::Arc<dyn MeteringContext>;
 
-/// The default value for `MeteringContextContainer` is a `BlankMeteringContext`
-impl ::std::default::Default for MeteringContextContainer {
-    fn default() -> Self {
-        MeteringContextContainer(::std::sync::Arc::new(Box::new(BlankMeteringContext)))
-    }
+/// Allows `MeteringContextContainer` to be entered for synchronous programs
+pub trait Enter {
+    fn enter(&self);
 }
 
-/// `enter` and `exit` methods to enable metering in synchronous cases
-impl MeteringContextContainer {
+/// Allows `MeteringContextContainer` to be exited for synchronous programs
+pub trait Exit {
+    fn exit(&self);
+}
+
+/// Enter sets the current thread's context to this context
+impl Enter for MeteringContextContainer {
     fn enter(&self) {
         ACTIVE_METERING_CONTEXT_CONTAINER.with(|cell| {
             cell.replace(self.clone());
         });
     }
+}
 
+/// Exit clears the current thread's context
+impl Exit for MeteringContextContainer {
     fn exit(&self) {
         ACTIVE_METERING_CONTEXT_CONTAINER.with(|cell| {
-            cell.replace(MeteringContextContainer::default());
+            cell.replace(::std::sync::Arc::new(BlankMeteringContext));
         });
     }
 }
+
 // Thread-local storage for the active metering context
 ::std::thread_local! {
     static ACTIVE_METERING_CONTEXT_CONTAINER: ::std::cell::RefCell<MeteringContextContainer> =
-        ::std::cell::RefCell::new(MeteringContextContainer::default());
+        ::std::cell::RefCell::new(::std::sync::Arc::new(BlankMeteringContext));
 }
 
-/// Creates a metering context of type `C` and returns a handle
-pub fn create<C: MeteringContext>(metering_context: C) -> MeteringContextHandle {
-    let metering_context_type_id = ::std::any::TypeId::of::<C>();
-    let shared_boxed_metering_context = ::std::sync::Arc::new(::std::sync::Mutex::new(Box::new(
-        metering_context,
-    )
-        as Box<dyn MeteringContext>));
-
-    // ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
-    //     slot.replace(OldMeteringContextContainer {
-    //         shared_boxed_metering_context: shared_boxed_metering_context.clone(),
-    //         metering_context_type_id,
-    //     });
-    // });
-
-    MeteringContextHandle {
-        inner_shared_boxed_metering_context: shared_boxed_metering_context,
-        inner_metering_context_type_id: metering_context_type_id,
-    }
+/// Creates a metering context of type `C` and returns a `MeteringContextContainer`
+pub fn create<C: MeteringContext>(metering_context: C) -> MeteringContextContainer {
+    let metering_context_container = ::std::sync::Arc::new(metering_context);
+    metering_context_container
 }
 
 /// Allows users to specify a closure to invoke on the current thread's active metering context.
 /// If no context is active, this will be a no-op because the mutation will be applied to
 /// `BlankMeteringContext`
-pub fn with_current(mutator: impl FnOnce(&mut dyn MeteringContext)) {
-    ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
-        let active_metering_context_container = slot.borrow();
-        if let Ok(mut shared_boxed_metering_context) = active_metering_context_container
-            .shared_boxed_metering_context
-            .lock()
-        {
-            mutator(&mut **shared_boxed_metering_context);
-        };
-    });
+pub fn with_current(mutator: impl FnOnce(&dyn MeteringContext)) {
+    ACTIVE_METERING_CONTEXT_CONTAINER.with(|cell| {
+        let active_metering_context_container = cell.borrow();
+        mutator(&**active_metering_context_container as &dyn MeteringContext);
+    })
+}
+
+/// Gets the current metering context and returns it as `MeteringContextContainer`,
+/// incrementing its reference count
+pub fn get_current() -> MeteringContextContainer {
+    ACTIVE_METERING_CONTEXT_CONTAINER.with(|cell| {
+        let active_metering_context_container = cell.borrow();
+        return active_metering_context_container.clone();
+    })
 }
 
 /// Closes the current thread's metering context if it is of type `C`, otherwise returns an error
 pub fn close<C: MeteringContext + Clone>() -> Result<C, MeteringError> {
-    ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
-        let mut active_metering_context_container = slot.borrow_mut();
+    ACTIVE_METERING_CONTEXT_CONTAINER.with(|cell| {
+        let mut active_metering_context_container = cell.borrow_mut();
 
-        let mut guard = active_metering_context_container
-            .shared_boxed_metering_context
-            .lock()
-            .map_err(|_| MeteringError::PoisonedMutexError)?;
-
-        if !guard.as_any().is::<C>() {
-            return Err(MeteringError::TypeMismatchError);
-        }
-
-        let metering_context = guard
+        let metering_context = (**active_metering_context_container)
             .as_any()
             .downcast_ref::<C>()
             .map(Clone::clone)
             .ok_or(MeteringError::DowncastError)?;
 
-        *guard = Box::new(BlankMeteringContext);
-
-        drop(guard);
-
-        active_metering_context_container.metering_context_type_id =
-            ::std::any::TypeId::of::<BlankMeteringContext>();
-
-        active_metering_context_container.shared_boxed_metering_context =
-            ::std::sync::Arc::new(::std::sync::Mutex::new(Box::new(BlankMeteringContext)));
+        *active_metering_context_container = ::std::sync::Arc::new(BlankMeteringContext);
 
         Ok(metering_context)
     })
 }
 
-/// A handle that stores a metering context and its type ID
-#[derive(std::fmt::Debug)]
-pub struct MeteringContextHandle {
-    pub inner_shared_boxed_metering_context: MeteringContextContainer,
-    inner_metering_context_type_id: ::std::any::TypeId,
-}
-
 /// A trait that allows futures to be `metered`, similar to how `tracing` enables futures to be
 /// `instrumented`
 pub trait MeteredFutureExt: ::std::future::Future + Sized {
-    fn metered(self, metering_context_handle: MeteringContextContainer) -> MeteredFuture<Self> {
+    fn metered(self, metering_context_container: MeteringContextContainer) -> MeteredFuture<Self> {
         MeteredFuture {
             inner_future: self,
-            metering_context_handle,
+            metering_context_container,
         }
     }
-}
-
-pub fn get_current() -> MeteringContextHandle {
-    ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
-        let active = slot.borrow();
-        return MeteringContextHandle {
-            inner_shared_boxed_metering_context: active.shared_boxed_metering_context.clone(),
-            inner_metering_context_type_id: active.metering_context_type_id,
-        };
-    })
 }
 
 /// A blanket implementation of `metered` for all futures
@@ -184,7 +126,7 @@ impl<F: ::std::future::Future> MeteredFutureExt for F {}
 pub struct MeteredFuture<F: ::std::future::Future> {
     #[pin]
     inner_future: F,
-    metering_context_handle: ::std::sync::Arc<MeteringContextHandle>,
+    metering_context_container: MeteringContextContainer,
 }
 
 /// Handles setting the current thread's active metering context when it is polled and
@@ -196,26 +138,13 @@ impl<F: ::std::future::Future> ::std::future::Future for MeteredFuture<F> {
         self: ::std::pin::Pin<&mut Self>,
         context: &mut ::std::task::Context<'_>,
     ) -> ::std::task::Poll<Self::Output> {
-        let metered_future = self.project();
+        let this = self.project();
 
-        let new_container = OldMeteringContextContainer {
-            shared_boxed_metering_context: metered_future
-                .metering_context_handle
-                .inner_shared_boxed_metering_context
-                .clone(),
-            metering_context_type_id: metered_future
-                .metering_context_handle
-                .inner_metering_context_type_id,
-        };
+        this.metering_context_container.enter();
 
-        let previous_container =
-            ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| slot.replace(new_container));
+        let output = this.inner_future.poll(context);
 
-        let output = metered_future.inner_future.poll(context);
-
-        ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
-            slot.replace(previous_container);
-        });
+        this.metering_context_container.exit();
 
         output
     }

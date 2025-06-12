@@ -19,3 +19,4 @@ parking_lot = { workspace = true }
 chroma-system = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 pin-project = "1.1.10"
+syn = "2.0.102"
