@@ -138,7 +138,7 @@ fn new_or_forked_sparse_index_strategy(
             let sparse_index_id = Uuid::new_v4();
             // TODO(Sanket-temp): Update this.
             let sparse_index = FileReference::SparseIndex {
-                path: format!("sparse_index/{}", sparse_index_id),
+                path: format!("root/{}", sparse_index_id),
                 block_paths: block_paths.into_iter().collect(),
             };
             SegmentFileReference {

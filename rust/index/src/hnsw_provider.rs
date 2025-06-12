@@ -783,9 +783,7 @@ mod tests {
 
             if metadata.is_dir() {
                 assert!(
-                    path.ends_with("hnsw")
-                        || path.ends_with("block")
-                        || path.ends_with("sparse_index")
+                    path.ends_with("hnsw") || path.ends_with("block") || path.ends_with("root")
                 );
             } else {
                 panic!("Expected hnsw purge to be successful")
