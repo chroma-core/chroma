@@ -579,74 +579,50 @@ impl OnceLogWriter {
 
     #[tracing::instrument(skip(self))]
     async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
-        /*
-            let cutoff = self.garbage_collection_cutoff().await?;
-            self.manifest_manager.heartbeat().await?;
-            let garbage = self
-                .manifest_manager
-                // TODO(rescrv):  Evaluate putting a cache in here.
-                .compute_garbage(options, cutoff, &())
-                .await?;
-            if garbage.is_empty() {
-                tracing::info!("no garbage to collect");
-                return Ok(());
-            }
-            let garbage = match garbage
-                .install(&self.options.throttle_manifest, &self.storage, &self.prefix)
-                .await
-            {
-                Ok(()) => garbage,
-                Err(Error::LogContention) => {
-                    match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
-                        .await
-                    {
-                        Ok(Some(garbage)) => garbage,
-                        Ok(None) => return Err(Error::LogContention),
-                        Err(err) => {
-                            return Err(err);
-                        }
-                    }
-                }
-                Err(err) => {
-                    return Err(err);
-                }
-            };
-            let paths = garbage
-                .prefixed_paths_to_delete(&self.prefix)
-                .collect::<Vec<_>>();
-            self.manifest_manager.apply_garbage(garbage).await?;
-            let exp_backoff: ExponentialBackoff = options.throttle.into();
-            let start = Instant::now();
-            for path in paths {
-                loop {
-                    match self.storage.delete(&path).await {
-                        Ok(()) => break,
-                        Err(StorageError::NotFound { .. }) => break,
-                        Err(err) => {
-                            tracing::error!("could not cleanup garbage: {err:?}");
-                            if start.elapsed() > Duration::from_secs(600) {
-                                tracing::error!(
-                                    "could not cleanup garbage within 10 minutes, returning"
-                                );
-                                return Err(Error::StorageError(Arc::new(err)));
-                            }
-                            let mut backoff = exp_backoff.next();
-                            if backoff > Duration::from_secs(600) {
-                                backoff = Duration::from_secs(600);
-                            }
-                            tokio::time::sleep(backoff).await;
-                        }
+        let cutoff = self.garbage_collection_cutoff().await?;
+        self.manifest_manager.heartbeat().await?;
+        let garbage = self
+            .manifest_manager
+            // TODO(rescrv):  Evaluate putting a cache in here.
+            .compute_garbage(options, cutoff, &())
+            .await?;
+        let garbage = match garbage
+            .install(&self.options.throttle_manifest, &self.storage, &self.prefix)
+            .await
+        {
+            Ok(()) => garbage,
+            Err(Error::LogContention) => {
+                match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
+                    .await
+                {
+                    Ok(Some(garbage)) => garbage,
+                    Ok(None) => return Err(Error::LogContention),
+                    Err(err) => {
+                        return Err(err);
                     }
                 }
             }
+            Err(err) => {
+                return Err(err);
+            }
+        };
+        let paths = garbage
+            .prefixed_paths_to_delete(&self.prefix)
+            .collect::<Vec<_>>();
+        self.manifest_manager.apply_garbage(garbage).await?;
+        let exp_backoff: ExponentialBackoff = options.throttle.into();
+        let start = Instant::now();
+        for path in paths {
             loop {
-                match self.storage.delete(&Garbage::path(&self.prefix)).await {
+                match self.storage.delete(&path).await {
                     Ok(()) => break,
                     Err(StorageError::NotFound { .. }) => break,
                     Err(err) => {
                         tracing::error!("could not cleanup garbage: {err:?}");
                         if start.elapsed() > Duration::from_secs(600) {
-                            tracing::error!("could not cleanup garbage within 10 minutes, returning");
+                            tracing::error!(
+                                "could not cleanup garbage within 10 minutes, returning"
+                            );
                             return Err(Error::StorageError(Arc::new(err)));
                         }
                         let mut backoff = exp_backoff.next();
@@ -657,7 +633,25 @@ impl OnceLogWriter {
                     }
                 }
             }
-        */
+        }
+        loop {
+            match self.storage.delete(&Garbage::path(&self.prefix)).await {
+                Ok(()) => break,
+                Err(StorageError::NotFound { .. }) => break,
+                Err(err) => {
+                    tracing::error!("could not cleanup garbage: {err:?}");
+                    if start.elapsed() > Duration::from_secs(600) {
+                        tracing::error!("could not cleanup garbage within 10 minutes, returning");
+                        return Err(Error::StorageError(Arc::new(err)));
+                    }
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(600) {
+                        backoff = Duration::from_secs(600);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
         Ok(())
     }
 

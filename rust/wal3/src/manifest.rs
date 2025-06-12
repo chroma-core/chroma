@@ -15,8 +15,8 @@ use chroma_storage::{
 use setsum::Setsum;
 
 use crate::{
-    Error, Fragment, FragmentSeqNo, Garbage, LogPosition, LogWriterOptions, ScrubError,
-    ScrubSuccess, SnapshotOptions, ThrottleOptions,
+    Error, Fragment, FragmentSeqNo, Garbage, GarbageAction, LogPosition, LogWriterOptions,
+    ScrubError, ScrubSuccess, SnapshotOptions, ThrottleOptions,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -810,38 +810,64 @@ impl Manifest {
     /// Apply the destructive operation specified by the Garbage struct.
     #[allow(clippy::result_large_err)]
     pub fn apply_garbage(&self, garbage: Garbage) -> Result<Self, Error> {
-        /*
-        if garbage.is_empty() {
-            return Ok(self.clone());
-        }
         garbage.scrub()?;
         let mut new = self.clone();
-        for snap in garbage.actions.snapshots_to_drop.iter() {
-            let ptr = snap.to_pointer();
-            let Some(index) = new.snapshots.iter().position(|s| *s == ptr) else {
-                continue;
-            };
-            new.snapshots.remove(index);
-        }
-        for frag in garbage.actions.fragments_to_drop.iter() {
-            let Some(index) = new
-                .fragments
-                .iter()
-                .position(|f| f.path == frag.path && f.setsum == frag.setsum)
-            else {
-                continue;
-            };
-            new.fragments.remove(index);
-        }
-        if let Some(root_snapshot) = garbage.actions.root_snapshot() {
-            new.snapshots.push(root_snapshot);
-            new.snapshots.sort_by_key(|s| s.start);
-        }
-        todo!(); // new.collected += garbage.actions.setsum_to_discard;
-        new.scrub()?;
+        new.apply_garbage_action(garbage.actions)?;
         Ok(new)
-        */
-        todo!();
+    }
+
+    fn apply_garbage_action(&mut self, action: GarbageAction) -> Result<(), Error> {
+        match action {
+            GarbageAction::DropFragment(frag) => {
+                if let Some(index) = self.fragments.iter().position(|f| *f == frag) {
+                    self.collected += frag.setsum;
+                    self.fragments.remove(index);
+                    Ok(())
+                } else {
+                    todo!();
+                }
+            }
+            GarbageAction::DropSnapshot {
+                snapshot,
+                transitive_garbage,
+            } => {
+                if let Some(index) = self.snapshots.iter().position(|s| *s == snapshot) {
+                    self.collected += snapshot.setsum;
+                    self.snapshots.remove(index);
+                    Ok(())
+                } else {
+                    todo!();
+                }
+            }
+            GarbageAction::ReplaceSnapshot {
+                old,
+                new,
+                delta,
+                transitive_garbage: _,
+            } => {
+                if let Some(index) = self.snapshots.iter().position(|s| *s == old) {
+                    self.collected += delta;
+                    self.setsum += delta;
+                    self.snapshots[index] = new.to_pointer();
+                    Ok(())
+                } else {
+                    todo!();
+                }
+            }
+            GarbageAction::KeepSnapshot(snap) => {
+                if self.snapshots.iter().position(|s| *s == snap).is_some() {
+                    Ok(())
+                } else {
+                    todo!();
+                }
+            }
+            GarbageAction::TopLevel { do_all } => {
+                for action in do_all {
+                    self.apply_garbage_action(action)?;
+                }
+                Ok(())
+            }
+        }
     }
 }
 

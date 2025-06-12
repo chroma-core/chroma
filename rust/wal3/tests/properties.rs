@@ -6,8 +6,8 @@ use proptest::prelude::{ProptestConfig, Strategy};
 use rand::RngCore;
 
 use wal3::{
-    Error, Fragment, FragmentSeqNo, Garbage, LogPosition, Manifest, Snapshot, SnapshotOptions,
-    SnapshotPointer, ThrottleOptions,
+    Error, Fragment, FragmentSeqNo, Garbage, GarbageAction, LogPosition, Manifest, Snapshot,
+    SnapshotOptions, SnapshotPointer, ThrottleOptions,
 };
 
 #[derive(Default)]
@@ -142,7 +142,12 @@ proptest::proptest! {
             eprintln!("manifest.setsum = {}", manifest.setsum.hexdigest());
             eprintln!("new_manifest.setsum = {}", new_manifest.setsum.hexdigest());
             eprintln!("dropped = {}", dropped.hexdigest());
-            assert_eq!(manifest.setsum - dropped, new_manifest.setsum, "manifest.setsum mismatch");
+            // NOTE(rescrv):  This looks wrong.  It is not.
+            //
+            // Reasoning:  Garbage collection only advances a prefix of collected.  It doesn't
+            // affect the totality of data that has been written, which is what gets captured by
+            // manifest.setsum.  The relationship is collected + active = manifest.setsum.
+            assert_eq!(manifest.setsum, new_manifest.setsum, "manifest.setsum mismatch");
             assert_eq!(manifest.collected + dropped, new_manifest.collected, "manifest.collected mismatch");
             assert!(new_manifest.scrub().is_ok(), "scrub error");
         }
@@ -156,7 +161,6 @@ proptest::proptest! {
 
     #[test]
     fn manifests_with_snapshots_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..1000), snapshot_rollover_threshold in 2..20usize, fragment_rollover_threshold in 2..20usize) {
-        /*
         let rt = tokio::runtime::Runtime::new().unwrap();
         let storage = rt.block_on(s3_client_for_test_with_new_bucket());
         let throttle = ThrottleOptions::default();
@@ -189,7 +193,17 @@ proptest::proptest! {
             let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_gargage", &manifest, &throttle, &cache, position)).unwrap();
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.scrub().unwrap();
-            cache.snapshots.extend(garbage.actions.snapshots_to_make.clone());
+            fn apply_snapshots(action: &GarbageAction, snapshots: &mut Vec<Snapshot>) {
+                if let GarbageAction::ReplaceSnapshot { new, .. } = action {
+                    snapshots.push(new.clone());
+                }
+                if let GarbageAction::TopLevel { do_all } = action {
+                    for action in do_all {
+                        apply_snapshots(action, snapshots);
+                    }
+                }
+            }
+            apply_snapshots(&garbage.actions, &mut cache.snapshots);
             let new_manifest = manifest.apply_garbage(garbage.clone()).unwrap();
             eprintln!("manifest.setsum = {}", manifest.setsum.hexdigest());
             eprintln!("new_manifest.setsum = {}", new_manifest.setsum.hexdigest());
@@ -198,7 +212,6 @@ proptest::proptest! {
             assert_eq!(manifest.collected + dropped, new_manifest.collected, "manifest.collected mismatch");
             assert!(new_manifest.scrub().is_ok(), "scrub error");
         }
-        */
     }
 }
 

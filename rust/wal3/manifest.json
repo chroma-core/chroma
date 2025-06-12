@@ -1,70 +1,70 @@
 {
-  "setsum": "f662b3e86fac8a72f6c6fb6ed7ebf3fe14e24c157544728e085a756d5ffdb777",
+  "setsum": "550149babd5a9c372cd8843846798af61f7ea40f9dcd8ba605d2b2eab332b902",
   "collected": "0000000000000000000000000000000000000000000000000000000000000000",
-  "acc_bytes": 73563797,
+  "acc_bytes": 119620281,
   "writer": "test",
   "snapshots": [
     {
-      "setsum": "40a4f0b56012f2bf8022ff60e4ebb9e9b080a8d103e67a1038455235fa3bd6cb",
-      "path_to_snapshot": "snapshot/SNAPSHOT.40a4f0b56012f2bf8022ff60e4ebb9e9b080a8d103e67a1038455235fa3bd6cb",
+      "setsum": "ceccfa61e7131e255b5066835bd01ffbbeaafb4e809b42aa1d04eb172408d4d7",
+      "path_to_snapshot": "snapshot/SNAPSHOT.ceccfa61e7131e255b5066835bd01ffbbeaafb4e809b42aa1d04eb172408d4d7",
       "depth": 4,
       "start": {
         "offset": 1
       },
       "limit": {
-        "offset": 8960
+        "offset": 8547
       },
-      "num_bytes": 57535039
+      "num_bytes": 69925799
     },
     {
-      "setsum": "52c956f7553202782ef3679ffbe14fb4de4e1030472a8eeba26b2e71a0fdde42",
-      "path_to_snapshot": "snapshot/SNAPSHOT.52c956f7553202782ef3679ffbe14fb4de4e1030472a8eeba26b2e71a0fdde42",
+      "setsum": "2e4794ad5d76fda4003075ab16ea9360b1f3a89c4492c419956b319827877d46",
+      "path_to_snapshot": "snapshot/SNAPSHOT.2e4794ad5d76fda4003075ab16ea9360b1f3a89c4492c419956b319827877d46",
+      "depth": 3,
+      "start": {
+        "offset": 8547
+      },
+      "limit": {
+        "offset": 13336
+      },
+      "num_bytes": 25096401
+    },
+    {
+      "setsum": "9f3a4d0ec68cb58caba8ebe535b1567851f6e245abd982b4aaf1868d118e25e3",
+      "path_to_snapshot": "snapshot/SNAPSHOT.9f3a4d0ec68cb58caba8ebe535b1567851f6e245abd982b4aaf1868d118e25e3",
       "depth": 2,
       "start": {
-        "offset": 8960
+        "offset": 13336
       },
       "limit": {
-        "offset": 11546
+        "offset": 15711
       },
-      "num_bytes": 2613606
+      "num_bytes": 11403930
     },
     {
-      "setsum": "bbfdccff7eb9719b12edcd304281b5ad1a61886ea0c740bf5011ce18d6b3a613",
-      "path_to_snapshot": "snapshot/SNAPSHOT.bbfdccff7eb9719b12edcd304281b5ad1a61886ea0c740bf5011ce18d6b3a613",
+      "setsum": "8bd9598c5ef0e1dea113831a0254e94d6a434a9101553bd1b8a97da3e49e3cff",
+      "path_to_snapshot": "snapshot/SNAPSHOT.8bd9598c5ef0e1dea113831a0254e94d6a434a9101553bd1b8a97da3e49e3cff",
       "depth": 1,
       "start": {
-        "offset": 11546
+        "offset": 15711
       },
       "limit": {
-        "offset": 12417
+        "offset": 16497
       },
-      "num_bytes": 9596262
+      "num_bytes": 12263730
     }
   ],
   "fragments": [
     {
-      "path": "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000017.parquet",
-      "seq_no": 23,
+      "path": "log/Bucket=0000000000000000/FragmentSeqNo=000000000000001f.parquet",
+      "seq_no": 31,
       "start": {
-        "offset": 12417
+        "offset": 16497
       },
       "limit": {
-        "offset": 13020
+        "offset": 17043
       },
-      "num_bytes": 27468,
-      "setsum": "ad637fa9961a9658ea055552eb90558a86da88d41e63010758a5c6be321e81ae"
-    },
-    {
-      "path": "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000018.parquet",
-      "seq_no": 24,
-      "start": {
-        "offset": 13020
-      },
-      "limit": {
-        "offset": 13857
-      },
-      "num_bytes": 3791422,
-      "setsum": "ed931f9284938e46cabd71eb050bdf28a5d582d05f0827cc54f15fef4bf0daa6"
+      "num_bytes": 930421,
+      "setsum": "2ad912103353e901039b3a09d8b896d41fa5d24c1f70c65c58c6910948740502"
     }
   ]
 }
