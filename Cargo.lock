@@ -3341,6 +3341,7 @@ dependencies = [
  "tracing-subscriber",
  "tracing-test",
  "uuid",
+ "wal3",
 ]
 
 [[package]]
