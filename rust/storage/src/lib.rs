@@ -293,12 +293,26 @@ impl Storage {
         }
     }
 
-    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
+    pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.delete(key).await,
-            Storage::S3(s3) => s3.delete(key).await,
-            Storage::Local(local) => local.delete(key).await,
-            Storage::AdmissionControlledS3(_) => Err(StorageError::NotImplemented),
+            Storage::ObjectStore(object_store) => {
+                if options.if_match.is_some() {
+                    return Err(StorageError::Message {
+                        message: "if match not supported for object store backend".to_string(),
+                    });
+                }
+                object_store.delete(key).await
+            }
+            Storage::S3(s3) => s3.delete(key, options).await,
+            Storage::Local(local) => {
+                if options.if_match.is_some() {
+                    return Err(StorageError::Message {
+                        message: "if match not supported for object store backend".to_string(),
+                    });
+                }
+                local.delete(key).await
+            }
+            Storage::AdmissionControlledS3(ac) => ac.delete(key, options).await,
         }
     }
 
@@ -433,6 +447,29 @@ impl GetOptions {
     pub fn with_strong_consistency(mut self) -> Self {
         self.requires_strong_consistency = true;
         self
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct DeleteOptions {
+    if_match: Option<ETag>,
+    priority: StorageRequestPriority,
+}
+
+impl DeleteOptions {
+    pub fn if_matches(e_tag: &ETag, priority: StorageRequestPriority) -> Self {
+        Self::new(Some(e_tag.clone()), priority)
+    }
+
+    pub fn with_priority(priority: StorageRequestPriority) -> Self {
+        Self {
+            priority,
+            ..Default::default()
+        }
+    }
+
+    fn new(if_match: Option<ETag>, priority: StorageRequestPriority) -> DeleteOptions {
+        DeleteOptions { if_match, priority }
     }
 }
 
