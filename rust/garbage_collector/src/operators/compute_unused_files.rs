@@ -363,6 +363,7 @@ mod tests {
             Uuid::new_v4(),
             block_ids,
             None, // Use default "test" prefix
+            "".to_string(),
         )
         .await?;
 
