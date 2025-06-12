@@ -37,12 +37,7 @@ func (s *logServer) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequ
 	}
 	var recordCount int64
 	var isSealed bool
-	for retryCount := 0; retryCount < 3; retryCount++ {
-		recordCount, isSealed, err = s.lr.InsertRecords(ctx, collectionID.String(), recordsContent)
-		if err == nil {
-			break
-		}
-	}
+	recordCount, isSealed, err = s.lr.InsertRecords(ctx, collectionID.String(), recordsContent)
 	if err != nil {
 		return
 	}

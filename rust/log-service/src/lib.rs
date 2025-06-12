@@ -3623,7 +3623,9 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        stream::iter(logs.chunks(100).map(|log_chunk| async {
+        push_log_to_server(&log_server, collection_id, &logs[0..100]).await;
+
+        stream::iter(logs.chunks(100).skip(1).map(|log_chunk| async {
             push_log_to_server(&log_server, collection_id, log_chunk).await;
 
             if (log_chunk
