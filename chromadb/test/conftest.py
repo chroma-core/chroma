@@ -1039,6 +1039,12 @@ def pytest_configure(config):
             level=config.getini("log_file_level"),
         )
         logging.getLogger("pytest").info("starting")
+    else:
+        logging.basicConfig(
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            level=config.getini("log_level"),
+        )
+        logging.getLogger("pytest").info("starting")
 
 
 def is_client_in_process(client: ClientAPI) -> bool:

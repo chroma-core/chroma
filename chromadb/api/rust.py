@@ -86,6 +86,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def start(self) -> None:
+        print("python: starting RustBindingsAPI", flush=True)
         # Construct the SqliteConfig
         # TOOD: We should add a "config converter"
         if self._system.settings.require("is_persistent"):
@@ -118,6 +119,7 @@ class RustBindingsAPI(ServerAPI):
             persist_path=persist_path,
             hnsw_cache_size=self.hnsw_cache_size,
         )
+        print("python: RustBindingsAPI started", flush=True)
 
     @override
     def stop(self) -> None:

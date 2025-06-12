@@ -111,9 +111,11 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
             if let Some(parent) = path.parent() {
                 create_dir_all(parent).await?;
             }
+            log::info!("Connecting to SQLite database at URL: {:?}", path);
             SqlitePoolOptions::new()
                 .connect_with(conn_options.filename(path).create_if_missing(true))
-                .await?
+                .await
+                .expect("Failed to connect to SQLite database")
         } else {
             SqlitePoolOptions::new()
                 .max_lifetime(None)
@@ -122,6 +124,8 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
                 .connect_with(conn_options.in_memory(true).shared_cache(true))
                 .await?
         };
+        let options = conn.connect_options();
+        log::info!("Connecting to SQLite database with options: {:?}", options);
 
         let db = SqliteDb::new(conn, config.hash_type);
 

@@ -1444,11 +1444,16 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         (config, system): &(FrontendConfig, System),
         registry: &registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        println!("sleeping for 1 second...");
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        println!("woke up!");
+
         // Create sqlitedb if configured
         if let Some(sqlite_conf) = &config.sqlitedb {
             SqliteDb::try_from_config(sqlite_conf, registry)
                 .await
-                .map_err(|e| e.boxed())?;
+                .expect("Failed to create SqliteDb");
+            // .map_err(|e| e.boxed())?;
         };
 
         // Create segment manager if configured
