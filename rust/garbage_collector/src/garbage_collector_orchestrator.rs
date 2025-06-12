@@ -780,12 +780,11 @@ mod tests {
             .into_iter()
             .filter(|path| path.contains(&format!("{}/", s3_path)))
             .map(|path| {
-                Uuid::from_str(
-                    path.split("/")
-                        .nth(1) // Get the prefix part after "hnsw/"
-                        .unwrap(),
-                )
-                .unwrap()
+                let id = match path.rfind('/') {
+                    Some(pos) => &path[pos + 1..],
+                    None => panic!("Invalid path format: {}", path),
+                };
+                Uuid::from_str(id).unwrap()
             })
             .collect::<std::collections::HashSet<_>>() // de-dupe
             .into_iter()
