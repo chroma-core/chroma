@@ -39,6 +39,9 @@ from chromadb.api.types import (
 # TODO(hammadb): Unify imports across types vs root __init__.py
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb_rust_bindings
+import logging
+
+logging.getLogger().setLevel(logging.INFO)
 
 
 from typing import Optional, Sequence

@@ -30,6 +30,9 @@ from chromadb.test.utils.cross_version import (
     install_version,
     get_path_to_version_install,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Minimum persisted version we support, and other substantial change versions
 # 0.4.1 is the first version with persistence
@@ -199,8 +202,10 @@ def persist_generated_data_with_old_version(
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
     conn: Connection,
+    logger: logging.Logger,
 ) -> None:
     try:
+        logger.info(f"Running test with old version {version} in process {os.getpid()}")
         old_module = switch_to_version(version, VERSIONED_MODULES)
         # In 0.7.0 we switch to Rust client. The old versions are using the the python SegmentAPI client
         if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ and packaging_version.Version(
@@ -209,8 +214,10 @@ def persist_generated_data_with_old_version(
             settings.chroma_api_impl = "chromadb.api.segment.SegmentAPI"
         system = old_module.config.System(settings)
         api = system.instance(api_import_for_version(old_module, version))
+        logger.info("starting system with version " + version)
         system.start()
 
+        logger.info("calling reset")
         api.reset()
         # In 0.5.4 we changed the API of the server api level to
         # deal with collection models instead of collections
@@ -224,7 +231,9 @@ def persist_generated_data_with_old_version(
             # In order to test old versions, we can't rely on the not_implemented function
             embedding_function=not_implemented_ef(),
         )
+        logger.info("created collection " + coll.name)
         coll.add(**embeddings_strategy)
+        logger.info("finished adding embeddings")
 
         # Just use some basic checks for sanity and manual testing where you break the new
         # version
@@ -310,14 +319,11 @@ def test_cycle_versions(
 
     patch_for_version(old_version, collection_strategy, embeddings_strategy, settings)
 
-    import sys
-
-    sys.stderr.write(
+    logger.info(
         "Persistence directory: "
         + settings.persist_directory
         + " for version "
         + old_version
-        + "\n"
     )
 
     # Can't pickle a function, and we won't need them
@@ -331,7 +337,14 @@ def test_cycle_versions(
     conn1, conn2 = multiprocessing.Pipe()
     p = ctx.Process(
         target=persist_generated_data_with_old_version,
-        args=(old_version, settings, collection_strategy, embeddings_strategy, conn2),
+        args=(
+            old_version,
+            settings,
+            collection_strategy,
+            embeddings_strategy,
+            conn2,
+            logger,
+        ),
     )
     p.start()
     p.join()
@@ -341,6 +354,7 @@ def test_cycle_versions(
         raise e
 
     p.close()
+    logger.info("Finished persisting data with old version " + old_version)
 
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
@@ -369,6 +383,8 @@ def test_cycle_versions(
         )
     )
 
+    logger.info("Checking invariants after loading collection from old version")
+
     # Should be able to clean log immediately after updating
 
     # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
@@ -396,3 +412,7 @@ def test_cycle_versions(
 
     # Shutdown system
     system.stop()
+    logger.info(
+        "Finished checking invariants after loading collection from old version "
+        + old_version
+    )

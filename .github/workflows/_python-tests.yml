@@ -48,7 +48,14 @@ jobs:
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
-          RUST_BACKTRACE: 1
+          RUST_BACKTRACE: full
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cross-version-persist-logs-${{ matrix.iteration }}
+          path: "*.log"
+
   test-rust-bindings:
     timeout-minutes: 90
     strategy:

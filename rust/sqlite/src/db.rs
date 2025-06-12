@@ -94,6 +94,14 @@ impl SqliteDb {
     /// Arguments:
     /// - migrations: Vec<Migration> - The migrations to apply
     async fn apply_migrations(&self, migrations: Vec<Migration>) -> Result<(), sqlx::Error> {
+        let options = self.conn.connect_options();
+        let sqlite_filename = options.get_filename();
+
+        log::info!(
+            "Applying {} migrations to {:?}",
+            migrations.len(),
+            sqlite_filename
+        );
         let mut tx = self.conn.begin().await?;
         for migration in migrations {
             // Apply the migration
@@ -117,6 +125,10 @@ impl SqliteDb {
             tx.execute(query).await?;
         }
         tx.commit().await?;
+        log::info!(
+            "All migrations applied successfully to {:?}",
+            sqlite_filename
+        );
         Ok(())
     }
 
@@ -215,6 +227,7 @@ impl SqliteDb {
             .await
             .expect("Expect it to be fetched");
         let name: String = row.get("name");
+        log::info!("Migrations table initialized: {}", name);
         name == "migrations" // Sanity check
     }
 

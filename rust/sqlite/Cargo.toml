@@ -22,3 +22,4 @@ rust-embed = { workspace = true }
 chroma-error = { workspace = true, features = ["sqlx"] }
 chroma-types = { workspace = true }
 chroma-config = { workspace = true }
+log = "0.4.27"

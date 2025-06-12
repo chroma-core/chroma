@@ -1026,8 +1026,19 @@ def produce_fns(
     yield request.param
 
 
-def pytest_configure(config):  # type: ignore
+def pytest_configure(config):
     embeddings_queue._called_from_test = True
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER")
+    if worker_id is not None:
+        import sys
+
+        sys.stderr.write("Setting up logging for worker: {}\n".format(worker_id))
+        logging.basicConfig(
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            filename=f"tests_{worker_id}.log",
+            level=config.getini("log_file_level"),
+        )
+        logging.getLogger("pytest").info("starting")
 
 
 def is_client_in_process(client: ClientAPI) -> bool:

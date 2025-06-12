@@ -11,6 +11,7 @@ use chroma_sqlite::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 
 #[pymodule]
 fn chromadb_rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    pyo3_log::init();
     m.add_class::<Bindings>()?;
 
     // TODO: move this into a module hierarchy
