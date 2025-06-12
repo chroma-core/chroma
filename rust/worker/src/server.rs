@@ -88,9 +88,6 @@ impl WorkerServer {
         println!("Worker listening on {}", addr);
 
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
-        health_reporter
-            .set_not_serving::<QueryExecutorServer<WorkerServer>>()
-            .await;
 
         let server = Server::builder()
             .add_service(health_service)
