@@ -112,15 +112,14 @@ impl Snapshot {
             bytes_read += snapshot.num_bytes;
         }
         let depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
-        if depth + 1 != self.depth {
-            return Err(ScrubError::CorruptManifest{
+        if depth >= self.depth {
+            return Err(Box::new(ScrubError::CorruptManifest {
                 manifest: self.path.to_string(),
                 what: format!(
-                "expected snapshot depth does not match observed contents in {}: expected:{} != observed:{}",
-                self.path,
-                self.depth,
-                depth + 1,
-            )}.into());
+                    "expected snapshot depth is not monotonoic for {}",
+                    self.path
+                ),
+            }));
         }
         for frag in self.fragments.iter() {
             calculated_setsum += frag.setsum;
@@ -358,14 +357,17 @@ impl Manifest {
             }
             if snapshots.len() >= snapshot_options.snapshot_rollover_threshold {
                 // TODO(rescrv):  This is necessary, but breaks atm.
-                /*
                 if let Some(snap) = snapshots.iter().min_by_key(|s| s.start) {
-                    if !self.snapshots.is_empty() && self.snapshots[0].limit == snap.start {
-                        setsum += snap.setsum;
-                        snapshots.insert(0, snap.clone());
+                    if !self.snapshots.is_empty()
+                        && self.snapshots[0].limit == snap.start
+                        && self.snapshots[0].depth < snapshot_depth
+                    {
+                        let to_insert = &self.snapshots[0];
+                        eprintln!("INSERT {to_insert:#?}");
+                        setsum += to_insert.setsum;
+                        snapshots.insert(0, to_insert.clone());
                     }
                 }
-                */
                 let path = unprefixed_snapshot_path(setsum);
                 tracing::info!("generating snapshot {path}");
                 return Some(Snapshot {
