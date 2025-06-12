@@ -229,7 +229,6 @@ impl Garbage {
             None => match Snapshot::load(throttle, storage, prefix, ptr).await? {
                 Some(snapshot) => snapshot,
                 None => {
-                    eprintln!("FINDME {}:{}", file!(), line!());
                     return Err(Box::new(ScrubError::MissingSnapshot {
                         reference: ptr.clone(),
                     })
@@ -294,20 +293,7 @@ impl Garbage {
             let Some(to_split) = snapshots_to_split.pop() else {
                 unreachable!("snapshots_to_split must be non-empty and have len() <= 1");
             };
-            let snapshot_to_split = match snapshot_cache.get(&to_split).await? {
-                Some(snapshot) => snapshot,
-                None => match Snapshot::load(throttle, storage, prefix, &to_split).await? {
-                    Some(snapshot) => snapshot,
-                    None => {
-                        eprintln!("FINDME {}:{}", file!(), line!());
-                        return Err(Box::new(ScrubError::MissingSnapshot {
-                            reference: ptr.clone(),
-                        })
-                        .into());
-                    }
-                },
-            };
-            let mut interior_action = Box::pin(Self::replace_snapshot(
+            let interior_action = Box::pin(Self::replace_snapshot(
                 storage,
                 prefix,
                 &to_split,
@@ -316,45 +302,77 @@ impl Garbage {
                 first_to_keep,
             ))
             .await?;
-            interior_action.scrub()?;
-            match &mut interior_action {
-                GarbageAction::KeepSnapshot(ptr) => {
-                    let action = GarbageAction::ReplaceSnapshot {
-                        old: ptr.clone(),
-                        new: snapshot_to_split,
-                        delta: Setsum::default(),
-                        transitive_garbage,
-                    };
-                    action.scrub()?;
-                    Ok(action)
-                }
+            let replace_drop = interior_action.scrub()?;
+            let (replaced, replaced_delta) = match &interior_action {
+                GarbageAction::KeepSnapshot(ptr) => (ptr.clone(), Setsum::default()),
                 GarbageAction::ReplaceSnapshot {
-                    old,
+                    old: _,
                     new,
                     delta,
-                    transitive_garbage: interior_garbage,
-                } => {
-                    *old = ptr.clone();
-                    eprintln!("old: {old:#?}");
-                    eprintln!("new: {new:#?}");
-                    eprintln!("transitive_garbage: {transitive_garbage:#?}");
-                    eprintln!(
-                        "transitive_garbage_acc: {}",
-                        transitive_garbage_acc.hexdigest()
-                    );
-                    eprintln!("delta: {delta:?}");
-                    *delta += transitive_garbage_acc;
-                    eprintln!("delta: {delta:?}");
-                    eprintln!("interior_garbage: {interior_garbage:#?}");
-                    interior_garbage.extend(transitive_garbage);
-                    eprintln!("interior_garbage: {interior_garbage:#?}");
-                    interior_action.scrub()?;
-                    Ok(interior_action)
-                }
+                    transitive_garbage: _,
+                } => (new.to_pointer(), *delta),
                 _ => {
                     todo!();
                 }
+            };
+            if replace_drop != replaced_delta {
+                todo!();
             }
+            if to_split.setsum != replaced.setsum + replace_drop {
+                todo!();
+            }
+            let mut snapshots = vec![replaced];
+            snapshots.extend(snapshots_to_keep);
+            let fragments = fragments_to_keep;
+            let dropped = snapshots_to_drop
+                .iter()
+                .map(|s| s.setsum)
+                .fold(Setsum::default(), Setsum::add)
+                + fragments_to_drop
+                    .iter()
+                    .map(|f| f.setsum)
+                    .fold(Setsum::default(), Setsum::add)
+                + replace_drop;
+            let setsum = snapshots
+                .iter()
+                .map(|s| s.setsum)
+                .fold(Setsum::default(), Setsum::add)
+                + fragments
+                    .iter()
+                    .map(|f| f.setsum)
+                    .fold(Setsum::default(), Setsum::add);
+            let path = unprefixed_snapshot_path(setsum);
+            let depth = snapshots.iter().map(|s| s.depth).max().unwrap_or(0) + 1;
+            let snapshot = Snapshot {
+                path,
+                setsum,
+                depth,
+                snapshots,
+                fragments,
+                writer: "garbage collection no-split".to_string(),
+            };
+            if dropped + setsum != ptr.setsum {
+                todo!();
+            }
+            transitive_garbage.push(interior_action);
+            if transitive_garbage
+                .iter()
+                .map(|g| g.scrub())
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .fold(Setsum::default(), Setsum::add)
+                != dropped
+            {
+                todo!();
+            }
+            let action = GarbageAction::ReplaceSnapshot {
+                old: ptr.clone(),
+                new: snapshot,
+                delta: dropped,
+                transitive_garbage,
+            };
+            action.scrub()?;
+            Ok(action)
         } else if snapshots_to_drop.is_empty() && fragments_to_drop.is_empty() {
             let action = GarbageAction::KeepSnapshot(ptr.clone());
             action.scrub()?;
@@ -602,18 +620,6 @@ impl GarbageAction {
                 if discard == *delta && old.setsum == new.setsum + discard {
                     Ok(discard)
                 } else {
-                    eprintln!("OLD {old:#?}");
-                    eprintln!("NEW {new:#?}");
-                    eprintln!("DISCARD {transitive_garbage:#?}");
-                    eprintln!(
-                        "{}\n{}\n{}\n{}\n{}\n{}",
-                        old.setsum.hexdigest(),
-                        new.setsum.hexdigest(),
-                        delta.hexdigest(),
-                        discard.hexdigest(),
-                        (new.setsum - old.setsum).hexdigest(),
-                        (old.setsum - new.setsum).hexdigest()
-                    );
                     todo!();
                 }
             }
@@ -1122,7 +1128,7 @@ mod tests {
             GarbageAction::ReplaceSnapshot {
                 old,
                 new,
-                delta,
+                delta: _,
                 transitive_garbage,
             } => {
                 assert_eq!(old, &snapshot_ptr);
@@ -1238,7 +1244,7 @@ mod tests {
             GarbageAction::ReplaceSnapshot {
                 old,
                 new,
-                delta,
+                delta: _,
                 transitive_garbage,
             } => {
                 assert_eq!(old, &snapshot_ptr);
@@ -1333,7 +1339,7 @@ mod tests {
             GarbageAction::ReplaceSnapshot {
                 old,
                 new,
-                delta,
+                delta: _,
                 transitive_garbage,
             } => {
                 assert_eq!(old, &snapshot_ptr);
@@ -1445,18 +1451,17 @@ mod tests {
             GarbageAction::ReplaceSnapshot {
                 old,
                 new,
-                delta,
+                delta: _,
                 transitive_garbage,
             } => {
                 assert_eq!(old, &snapshot_ptr);
 
                 // Should have one transitive garbage action for the dropped left leaf snapshot
                 assert_eq!(transitive_garbage.len(), 1);
-                eprintln!("GARBAGE {:?}", transitive_garbage[0]);
                 match &transitive_garbage[0] {
                     GarbageAction::DropSnapshot {
                         snapshot,
-                        transitive_garbage,
+                        transitive_garbage: _,
                     } => {
                         assert_eq!(*snapshot, left_leaf.to_pointer());
                     }

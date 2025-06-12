@@ -829,7 +829,7 @@ impl Manifest {
             }
             GarbageAction::DropSnapshot {
                 snapshot,
-                transitive_garbage,
+                transitive_garbage: _,
             } => {
                 if let Some(index) = self.snapshots.iter().position(|s| *s == snapshot) {
                     self.collected += snapshot.setsum;
@@ -847,7 +847,6 @@ impl Manifest {
             } => {
                 if let Some(index) = self.snapshots.iter().position(|s| *s == old) {
                     self.collected += delta;
-                    self.setsum += delta;
                     self.snapshots[index] = new.to_pointer();
                     Ok(())
                 } else {
@@ -855,7 +854,7 @@ impl Manifest {
                 }
             }
             GarbageAction::KeepSnapshot(snap) => {
-                if self.snapshots.iter().position(|s| *s == snap).is_some() {
+                if self.snapshots.iter().any(|s| *s == snap) {
                     Ok(())
                 } else {
                     todo!();

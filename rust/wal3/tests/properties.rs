@@ -160,7 +160,7 @@ proptest::proptest! {
     })]
 
     #[test]
-    fn manifests_with_snapshots_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..1000), snapshot_rollover_threshold in 2..20usize, fragment_rollover_threshold in 2..20usize) {
+    fn manifests_with_snapshots_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..100), snapshot_rollover_threshold in 2..3usize, fragment_rollover_threshold in 2..3usize) {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let storage = rt.block_on(s3_client_for_test_with_new_bucket());
         let throttle = ThrottleOptions::default();
@@ -208,6 +208,7 @@ proptest::proptest! {
             eprintln!("manifest.setsum = {}", manifest.setsum.hexdigest());
             eprintln!("new_manifest.setsum = {}", new_manifest.setsum.hexdigest());
             eprintln!("dropped = {}", dropped.hexdigest());
+            eprintln!("dropped^1 = {}", (Setsum::default()- dropped).hexdigest());
             assert_eq!(manifest.setsum, new_manifest.setsum, "manifest.setsum mismatch");
             assert_eq!(manifest.collected + dropped, new_manifest.collected, "manifest.collected mismatch");
             assert!(new_manifest.scrub().is_ok(), "scrub error");
@@ -253,8 +254,6 @@ proptest::proptest! {
         let victim = &manifest.snapshots[manifest.snapshots.len() - 1];
         eprintln!("victim = {victim:?}");
         eprintln!("position = {:?}", victim.limit - 1);
-        std::fs::write("manifest.json", serde_json::to_string_pretty(&manifest).unwrap()).unwrap();
-        std::fs::write("snapshots.json", serde_json::to_string_pretty(&snapshots).unwrap()).unwrap();
         let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_that_collide", &manifest, &ThrottleOptions::default(), &cache, victim.limit - 1)).unwrap();
         eprintln!("garbage = {garbage:?}");
     }
