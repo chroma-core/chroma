@@ -16,11 +16,6 @@ name = "query_service"
 path = "src/bin/query_service.rs"
 
 [dependencies]
-tracing-opentelemetry = { workspace = true }
-tracing-subscriber = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 chroma-tracing = { workspace = true }
 regex = { workspace = true }
 

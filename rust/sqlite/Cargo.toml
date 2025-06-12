@@ -14,7 +14,6 @@ tempfile = { workspace = true }
 pyo3 = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-futures = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 rust-embed = { workspace = true }
