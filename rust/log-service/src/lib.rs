@@ -1185,6 +1185,7 @@ impl LogServer {
             Ok(Response::new(ScoutLogsResponse {
                 first_uncompacted_record_offset: start_offset,
                 first_uninserted_record_offset: limit_offset,
+                is_sealed: true,
             }))
         }
         .instrument(span)
@@ -1632,11 +1633,25 @@ impl LogServer {
                     Ok(Response::new(MigrateLogResponse {}))
                 }
                 Err(wal3::Error::UninitializedLog) => {
-                    if let Some(proxy) = self.proxy.as_ref() {
-                        tracing::info!("effectuating transfer of {collection_id}");
-                        self.effectuate_log_transfer(collection_id, proxy.clone(), 3)
-                            .await?;
-                        Ok(Response::new(MigrateLogResponse {}))
+                    if let Some(mut proxy) = self.proxy.as_ref().cloned() {
+                        if proxy
+                            .scout_logs(ScoutLogsRequest {
+                                collection_id: collection_id.to_string(),
+                            })
+                            .await?
+                            .into_inner()
+                            .is_sealed
+                        {
+                            tracing::info!("effectuating transfer of {collection_id}");
+                            self.effectuate_log_transfer(collection_id, proxy, 3)
+                                .await?;
+                            Ok(Response::new(MigrateLogResponse {}))
+                        } else {
+                            tracing::info!(
+                                "not effectuating transfer of {collection_id} (log not sealed)"
+                            );
+                            Err(Status::failed_precondition("log not sealed"))
+                        }
                     } else {
                         tracing::info!("not effectuating transfer of {collection_id} (no proxy)");
                         Err(Status::failed_precondition("proxy not initialized"))
@@ -2159,7 +2174,8 @@ mod tests {
     use crate::state_hash_table::Value;
 
     use chroma_storage::s3::s3_client_for_test_with_bucket_name;
-    use chroma_types::{are_update_metadatas_close_to_equal, OperationRecord};
+    use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
+    use futures::{stream, StreamExt};
     use opentelemetry::global::meter;
     use proptest::prelude::*;
     use tokio::runtime::Runtime;
@@ -3591,6 +3607,84 @@ mod tests {
             mock_compact_on_server(&log_server, collection_id, new_enum_offset).await;
             validate_dirty_log_on_server(&log_server, &[]).await;
         });
+    }
+
+    async fn test_stress_seal_and_migrate() {
+        let log_server = setup_log_server().await;
+        let collection_id = CollectionUuid::new();
+        let mut logs = (0..100000)
+            .map(|index| OperationRecord {
+                id: index.to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::Delete,
+            })
+            .collect::<Vec<_>>();
+
+        push_log_to_server(&log_server, collection_id, &logs[0..100]).await;
+
+        stream::iter(logs.chunks(100).skip(1).map(|log_chunk| async {
+            push_log_to_server(&log_server, collection_id, log_chunk).await;
+
+            if (log_chunk
+                .first()
+                .and_then(|op| op.id.parse::<usize>().ok())
+                .unwrap_or_default()
+                ..=log_chunk
+                    .last()
+                    .and_then(|op| op.id.parse::<usize>().ok())
+                    .unwrap_or_default())
+                .contains(&50000)
+            {
+                seal_collection_on_server(&log_server, collection_id).await;
+                log_server
+                    .migrate_log(Request::new(MigrateLogRequest {
+                        collection_id: collection_id.to_string(),
+                    }))
+                    .await
+                    .expect("Migrate Logs should not fail");
+            }
+        }))
+        .buffer_unordered(32)
+        .collect::<Vec<_>>()
+        .await;
+
+        let mut inserted_logs = log_server
+            .pull_logs(Request::new(PullLogsRequest {
+                collection_id: collection_id.to_string(),
+                start_from_offset: 1,
+                batch_size: 100000,
+                end_timestamp: i64::MAX,
+            }))
+            .await
+            .expect("Pull Logs should not fail")
+            .into_inner()
+            .records
+            .into_iter()
+            .map(chroma_types::LogRecord::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("Logs should be valid");
+        assert_eq!(inserted_logs.len(), logs.len());
+        logs.sort_by_key(|rec| rec.id.clone());
+        inserted_logs.sort_by_key(|log| log.record.id.clone());
+        for (got_op, ref_op) in inserted_logs.into_iter().map(|l| l.record).zip(logs) {
+            assert_eq!(got_op.id, ref_op.id);
+            assert_eq!(got_op.operation, ref_op.operation);
+        }
+    }
+
+    #[test]
+    fn test_k8s_integration_rust_log_service_stress_seal_and_migrate() {
+        let runtime = Runtime::new().unwrap();
+        // NOTE: Somehow it overflow the stack under default stack limit
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || runtime.block_on(test_stress_seal_and_migrate()))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
     }
 
     proptest! {

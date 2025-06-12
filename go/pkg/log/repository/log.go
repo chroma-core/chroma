@@ -280,7 +280,7 @@ func (r *LogRepository) GetLastCompactedOffsetForCollection(ctx context.Context,
 // record inserted.  Thus, the range of uncompacted records is the interval (start, limit], which is
 // kind of backwards from how it is elsewhere, so pay attention to comments indicating the bias of
 // the offset.
-func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId string) (start, limit int64, err error) {
+func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId string) (start, limit int64, isSealed bool, err error) {
 	bounds, err := r.queries.GetBoundsForCollection(ctx, collectionId)
 	if err != nil {
 		trace_log.Error("Error in getting minimum and maximum offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
@@ -288,6 +288,7 @@ func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId
 	}
 	start = bounds.RecordCompactionOffsetPosition
 	limit = bounds.RecordEnumerationOffsetPosition
+	isSealed = bounds.IsSealed
 	err = nil
 	return
 }
