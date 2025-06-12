@@ -186,15 +186,6 @@ jobs:
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
 
-  images-build:
-    name: Build images
-    needs: change-detection
-    uses: ./.github/workflows/_build_release_container.yml
-    secrets: inherit
-    with:
-      push: false
-      tag: ${{ github.sha }}
-
   go-tests:
     name: Go tests
     needs: change-detection
