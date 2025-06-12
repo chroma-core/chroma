@@ -495,6 +495,14 @@ impl Manifest {
 
     /// The oldest LogPosition in the manifest.
     pub fn oldest_timestamp(&self) -> Option<LogPosition> {
+        if let Some(snap) = self
+            .snapshots
+            .iter()
+            .map(|f| f.start)
+            .min_by_key(|p| p.offset())
+        {
+            return Some(snap);
+        }
         self.fragments
             .iter()
             .map(|f| f.start)
@@ -503,9 +511,17 @@ impl Manifest {
 
     /// The LogPosition of the next record to be written.
     pub fn newest_timestamp(&self) -> Option<LogPosition> {
-        self.fragments
+        if let Some(frag) = self
+            .fragments
             .iter()
             .map(|f| f.limit)
+            .max_by_key(|p| p.offset())
+        {
+            return Some(frag);
+        }
+        self.snapshots
+            .iter()
+            .map(|f| f.start)
             .max_by_key(|p| p.offset())
     }
 
@@ -528,7 +544,7 @@ impl Manifest {
             calculated_setsum += frag.setsum;
             bytes_read += frag.num_bytes;
         }
-        if self.setsum != calculated_setsum {
+        if self.setsum != calculated_setsum + self.collected {
             return Err(ScrubError::CorruptManifest{
                 manifest: format!("{:?}", self),
                 what: format!(
@@ -793,50 +809,39 @@ impl Manifest {
 
     /// Apply the destructive operation specified by the Garbage struct.
     #[allow(clippy::result_large_err)]
-    pub fn apply_garbage(&self, garbage: Garbage) -> Result<Self, Box<ScrubError>> {
+    pub fn apply_garbage(&self, garbage: Garbage) -> Result<Self, Error> {
+        /*
+        if garbage.is_empty() {
+            return Ok(self.clone());
+        }
+        garbage.scrub()?;
         let mut new = self.clone();
-        for snap in garbage.actions.snapshots_to_drop {
+        for snap in garbage.actions.snapshots_to_drop.iter() {
             let ptr = snap.to_pointer();
             let Some(index) = new.snapshots.iter().position(|s| *s == ptr) else {
-                return Err(Box::new(ScrubError::MissingSnapshotBySetsumPath {
-                    path: ptr.path_to_snapshot,
-                    setsum: ptr.setsum,
-                }));
+                continue;
             };
             new.snapshots.remove(index);
         }
-        for frag in garbage.actions.fragments_to_drop {
+        for frag in garbage.actions.fragments_to_drop.iter() {
             let Some(index) = new
                 .fragments
                 .iter()
                 .position(|f| f.path == frag.path && f.setsum == frag.setsum)
             else {
-                return Err(Box::new(ScrubError::MissingFragmentBySetsumPath {
-                    path: frag.path,
-                    setsum: frag.setsum,
-                }));
+                continue;
             };
             new.fragments.remove(index);
         }
-        todo!("apply(snapshots_to_make)");
+        if let Some(root_snapshot) = garbage.actions.root_snapshot() {
+            new.snapshots.push(root_snapshot);
+            new.snapshots.sort_by_key(|s| s.start);
+        }
+        todo!(); // new.collected += garbage.actions.setsum_to_discard;
         new.scrub()?;
         Ok(new)
-    }
-
-    /// The garbage has been completely collected from this manifest.  This is not a guarantee it
-    /// will apply cleanly as a partial collection (someone's doing something funky) will fail
-    /// there.  It returns false here.
-    pub fn has_collected_garbage(&self, garbage: &Garbage) -> bool {
-        !garbage
-            .actions
-            .snapshots_to_drop
-            .iter()
-            .any(|snap| self.snapshots.iter().any(|s| *s == snap.to_pointer()))
-            && !garbage
-                .actions
-                .fragments_to_drop
-                .iter()
-                .any(|frag| self.fragments.iter().any(|f| *f == *frag))
+        */
+        todo!();
     }
 }
 
