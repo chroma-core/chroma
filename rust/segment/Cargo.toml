@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 async-trait = { workspace = true }
 futures = { workspace = true }
-parking_lot = { workspace = true }
 regex = { workspace = true }
 roaring = { workspace = true }
 sea-query = { workspace = true }
@@ -20,7 +19,6 @@ tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
-serde_json = { workspace = true }
 rayon = { workspace = true }
 
 chroma-blockstore = { workspace = true }
