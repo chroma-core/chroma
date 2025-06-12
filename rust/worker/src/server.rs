@@ -88,9 +88,6 @@ impl WorkerServer {
         println!("Worker listening on {}", addr);
 
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
-        health_reporter
-            .set_serving::<QueryExecutorServer<Self>>()
-            .await;
 
         let server = Server::builder()
             .add_service(health_service)
@@ -113,9 +110,30 @@ impl WorkerServer {
             tracing::info!("Received SIGTERM, shutting down");
         });
 
+        tokio::spawn(async move {
+            // Poll is-ready every 50ms until the server is ready
+            // We don't timeout here because we assume some upstream daemon like
+            // system will kill/restart us if we don't become ready in a reasonable time
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(50));
+            loop {
+                interval.tick().await;
+                if worker.is_ready() {
+                    break;
+                }
+            }
+            // Wait for the server to start
+            health_reporter
+                .set_serving::<QueryExecutorServer<WorkerServer>>()
+                .await;
+        });
+
         server.await?;
 
         Ok(())
+    }
+
+    fn is_ready(&self) -> bool {
+        self.log.is_ready()
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
