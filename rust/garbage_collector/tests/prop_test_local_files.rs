@@ -604,6 +604,7 @@ impl GcTest {
             Uuid::new_v4(),
             record_segment_info.block_ids.clone(),
             Some("test_si_rec_".to_string()),
+            "".to_string(),
         )
         .await
         .unwrap();
@@ -632,6 +633,7 @@ impl GcTest {
             Uuid::new_v4(),
             metadata_segment_info.block_ids.clone(),
             Some("test_si_meta_".to_string()),
+            "".to_string(),
         )
         .await
         .unwrap();
