@@ -4,7 +4,7 @@ use super::{
 };
 use std::sync::Arc;
 use tokio::{select, time::timeout};
-use tracing::{trace_span, Instrument, Span};
+use tracing::{Instrument, Span};
 
 struct Inner<C>
 where
@@ -79,15 +79,7 @@ where
                 message = channel.recv() => {
                     match message {
                         Some(mut message) => {
-                            let parent_span: tracing::Span = match message.get_tracing_context() {
-                                Some(spn) => {
-                                    spn
-                                },
-                                None => {
-                                    Span::current().clone()
-                                }
-                            };
-                            let child_span = trace_span!(parent: parent_span, "Component received message", "name" =  C::get_name());
+                            let span: tracing::Span = message.get_tracing_context().unwrap_or(Span::current().clone());
                             let component_context = ComponentContext {
                                     system: self.inner.system.clone(),
                                     sender: self.inner.sender.clone(),
@@ -95,7 +87,7 @@ where
                                     scheduler: self.inner.scheduler.clone(),
                             };
                             let task_future = message.handle(&mut self.handler, &component_context);
-                            task_future.instrument(child_span).await;
+                            task_future.instrument(span).await;
                         }
                         None => {
                             tracing::error!("Channel closed");

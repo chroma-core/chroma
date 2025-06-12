@@ -783,6 +783,11 @@ impl GarbageCollectorOrchestrator {
             })?;
 
             for collection_id in topo.iter().rev() {
+                // This check is not strictly needed as are_all_children_soft_deleted will be false if the current node is not soft deleted, but it avoids unnecessary computation and prevents misleading logs.
+                if !self.soft_deleted_collections_to_gc.contains(collection_id) {
+                    continue;
+                }
+
                 let are_all_children_soft_deleted = petgraph::algo::dijkstra(
                     &collection_dependency_graph,
                     *collection_id,

@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
@@ -76,17 +77,17 @@ func NewS3MetaStoreWithContainer(ctx context.Context, bucketName, basePathSysDB 
 		return nil, nil, fmt.Errorf("failed to create minio container: %w", err)
 	}
 
-	s3Store, err := NewS3MetaStoreForTesting(bucketName, "us-east-1", basePathSysDB, minioContainer.URI, defaultAccessKey, defaultSecretKey)
+	s3Store, err := NewS3MetaStoreForTesting(ctx, bucketName, "us-east-1", basePathSysDB, minioContainer.URI, defaultAccessKey, defaultSecretKey)
 	if err != nil {
 		minioContainer.Terminate(ctx)
 		return nil, nil, fmt.Errorf("failed to create s3 store: %w", err)
 	}
 
 	// Create bucket if it doesn't exist
-	_, err = s3Store.S3.CreateBucket(&s3.CreateBucketInput{
+	_, err = s3Store.S3.CreateBucket(ctx, &s3.CreateBucketInput{
 		Bucket: aws.String(bucketName),
-		CreateBucketConfiguration: &s3.CreateBucketConfiguration{
-			LocationConstraint: aws.String("us-east-1"),
+		CreateBucketConfiguration: &types.CreateBucketConfiguration{
+			LocationConstraint: types.BucketLocationConstraint("us-east-1"),
 		},
 	})
 	if err != nil {

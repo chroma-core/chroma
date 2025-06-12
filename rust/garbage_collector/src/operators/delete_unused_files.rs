@@ -85,8 +85,6 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
         tracing::debug!(
             files_count = input.unused_s3_files.len(),
             hnsw_prefixes_count = input.hnsw_prefixes_for_deletion.len(),
-            files = ?input.unused_s3_files,
-            hnsw_prefixes = ?input.hnsw_prefixes_for_deletion,
             cleanup_mode = ?self.cleanup_mode,
             "Starting deletion of unused files"
         );

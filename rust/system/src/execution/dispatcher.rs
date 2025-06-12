@@ -104,7 +104,7 @@ impl Dispatcher {
     async fn enqueue_task(&mut self, mut task: TaskMessage) {
         match task.get_type() {
             OperatorType::IO => {
-                let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name());
+                let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name(), task_type = "io");
                 // This spin loop:
                 // - reads a witness from active_io_tasks.
                 // - aborts the task if witness is zero.
@@ -141,9 +141,10 @@ impl Dispatcher {
             OperatorType::Other => {
                 // If a worker is waiting for a task, send it to the worker in FIFO order
                 // Otherwise, add it to the task queue
+                let span = trace_span!(parent: Span::current(), "Other task execution", name = task.get_name(), task_type = "other");
+
                 match self.waiters.pop() {
-                    Some(channel) => match channel.reply_to.send(task, Some(Span::current())).await
-                    {
+                    Some(channel) => match channel.reply_to.send(task, Some(span)).await {
                         Ok(_) => {}
                         Err(e) => {
                             tracing::error!("Error sending task to worker: {:?}", e);
@@ -153,7 +154,7 @@ impl Dispatcher {
                         if self.task_queue.len() >= self.config.task_queue_limit {
                             task.abort().await;
                         } else {
-                            self.task_queue.push_back((task, Span::current()));
+                            self.task_queue.push_back((task, span));
                         }
                     }
                 }

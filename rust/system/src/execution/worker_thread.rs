@@ -2,7 +2,6 @@ use super::{dispatcher::TaskRequestMessage, operator::TaskMessage};
 use crate::{Component, ComponentContext, ComponentRuntime, Handler, ReceiverForMessage};
 use async_trait::async_trait;
 use std::fmt::{Debug, Formatter, Result};
-use tracing::{trace_span, Instrument, Span};
 
 /// A worker thread is responsible for executing tasks
 /// It sends requests to the dispatcher for new tasks.
@@ -57,9 +56,7 @@ impl Handler<TaskMessage> for WorkerThread {
     type Result = ();
 
     async fn handle(&mut self, mut task: TaskMessage, ctx: &ComponentContext<WorkerThread>) {
-        let child_span =
-            trace_span!(parent: Span::current(), "Task execution", name = task.get_name());
-        task.run().instrument(child_span).await;
+        task.run().await;
         let req: TaskRequestMessage = TaskRequestMessage::new(ctx.receiver());
         let _res = self.dispatcher.send(req, None).await;
         // TODO: task run should be able to error and we should send it as part of the result
