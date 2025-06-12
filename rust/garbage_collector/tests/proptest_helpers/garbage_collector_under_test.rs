@@ -1,6 +1,6 @@
 use super::garbage_collector_reference::{CollectionStatus, ReferenceGarbageCollector};
 use crate::define_thread_local_stats;
-use crate::proptest_helpers::proptest_types::{SegmentIds, Transition};
+use crate::proptest_helpers::proptest_types::Transition;
 use chroma_blockstore::RootManager;
 use chroma_cache::nop::NopCache;
 use chroma_config::registry::Registry;
@@ -11,14 +11,14 @@ use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig, SysDb};
 use chroma_system::Orchestrator;
 use chroma_system::{Dispatcher, DispatcherConfig, System};
 use chroma_types::chroma_proto::CollectionVersionFile;
-use chroma_types::{CollectionUuid, Segment, SegmentScope, SegmentType, SegmentUuid};
+use chroma_types::{Segment, SegmentScope, SegmentType};
 use chrono::DateTime;
 use futures::StreamExt;
 use garbage_collector_library::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator;
 use garbage_collector_library::types::CleanupMode;
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
 use prost::Message;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::sync::OnceCell;
@@ -29,12 +29,9 @@ define_thread_local_stats!(STATS);
 
 pub struct GarbageCollectorUnderTest {
     runtime: Arc<tokio::runtime::Runtime>,
-    tenant: String,
-    database: String,
     sysdb: SysDb,
     storage: Storage,
     root_manager: RootManager,
-    collection_id_to_segment_ids: HashMap<CollectionUuid, SegmentIds>,
 }
 
 impl Drop for GarbageCollectorUnderTest {
@@ -83,11 +80,6 @@ impl StateMachineTest for GarbageCollectorUnderTest {
     ) -> Self::SystemUnderTest {
         tracing::debug!("Starting test");
 
-        let tenant_id = Uuid::new_v4();
-        let tenant_name = format!("test_tenant_{}", tenant_id);
-        let database_id = Uuid::new_v4();
-        let database_name = format!("test_database_{}", database_id);
-
         ref_state.runtime.block_on(async {
             let registry = Registry::new();
 
@@ -110,20 +102,21 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                     .unwrap(),
             );
 
-            sysdb.create_tenant(tenant_name.clone()).await.unwrap();
+            sysdb.create_tenant(ref_state.tenant.clone()).await.unwrap();
             sysdb
-                .create_database(database_id, database_name.clone(), tenant_name.clone())
+                .create_database(
+                    ref_state.db_id.0,
+                    ref_state.db_name.clone(),
+                    ref_state.tenant.clone(),
+                )
                 .await
                 .unwrap();
 
             Self {
                 runtime: ref_state.runtime.clone(),
-                tenant: tenant_name,
-                database: database_name,
                 sysdb,
                 storage: storage.clone(),
                 root_manager,
-                collection_id_to_segment_ids: HashMap::new(),
             }
         })
     }
@@ -149,7 +142,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
 
                     let segments = vec![
                         Segment {
-                            id: SegmentUuid::new(),
+                            id: segments.vector.segment_id,
                             r#type: SegmentType::HnswDistributed,
                             scope: SegmentScope::VECTOR,
                             collection: collection_id,
@@ -157,7 +150,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             file_path: segments.vector.into(),
                         },
                         Segment {
-                            id: SegmentUuid::new(),
+                            id: segments.metadata.segment_id,
                             r#type: SegmentType::BlockfileMetadata,
                             scope: SegmentScope::METADATA,
                             collection: collection_id,
@@ -165,7 +158,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             file_path: segments.metadata.into(),
                         },
                         Segment {
-                            id: SegmentUuid::new(),
+                            id: segments.record.segment_id,
                             r#type: SegmentType::BlockfileRecord,
                             scope: SegmentScope::RECORD,
                             collection: collection_id,
@@ -173,20 +166,12 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             file_path: segments.record.into(),
                         },
                     ];
-                    let segment_ids = SegmentIds {
-                        vector: segments[0].id,
-                        metadata: segments[1].id,
-                        record: segments[2].id,
-                    };
-                    state
-                        .collection_id_to_segment_ids
-                        .insert(collection_id, segment_ids);
 
                     state
                         .sysdb
                         .create_collection(
-                            state.tenant.clone(),
-                            state.database.clone(),
+                            ref_state.tenant.clone(),
+                            ref_state.db_name.clone(),
                             collection_id,
                             format!("Collection {}", collection_id),
                             segments,
@@ -204,8 +189,8 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 ref_state
                     .runtime
                     .block_on(state.sysdb.delete_collection(
-                        state.tenant.clone(),
-                        state.database.clone(),
+                        ref_state.tenant.clone(),
+                        ref_state.db_name.clone(),
                         collection_id,
                         vec![],
                     ))
@@ -216,22 +201,17 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 collection_id,
                 next_segments,
             } => {
-                let segment_ids = state
-                    .collection_id_to_segment_ids
-                    .get(&collection_id)
-                    .unwrap();
-
                 ref_state.runtime.block_on(async {
                     next_segments.write_files(&state.storage).await;
 
                     state
                         .sysdb
                         .flush_compaction(
-                            state.tenant.clone(),
+                            ref_state.tenant.clone(),
                             collection_id,
                             0,
                             ref_state.max_version_for_collection(collection_id).unwrap() as i32 - 1,
-                            next_segments.into_segment_flushes(segment_ids),
+                            next_segments.into_segment_flushes(),
                             0,
                             0,
                         )
@@ -245,7 +225,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 new_collection_id,
             } => {
                 let nonce = Uuid::new_v4().to_string();
-                let collection_and_segments = ref_state
+                let _ = ref_state
                     .runtime
                     .block_on(state.sysdb.fork_collection(
                         source_collection_id,
@@ -263,10 +243,6 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                       ),
                     ))
                     .unwrap();
-
-                state
-                    .collection_id_to_segment_ids
-                    .insert(new_collection_id, SegmentIds::from(collection_and_segments));
             }
 
             Transition::GarbageCollect {
@@ -280,7 +256,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                         async {
                             let collections = state
                                 .sysdb
-                                .get_collections_to_gc(None, None, Some(state.tenant.clone()))
+                                .get_collections_to_gc(None, None, Some(ref_state.tenant.clone()))
                                 .await
                                 .unwrap();
                             tracing::debug!(
