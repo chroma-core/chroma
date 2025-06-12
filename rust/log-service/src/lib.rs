@@ -489,12 +489,6 @@ impl wal3::MarkDirty for MarkDirty {
     }
 }
 
-////////////////////////////////////// storage_prefix_for_log //////////////////////////////////////
-
-pub fn storage_prefix_for_log(collection: CollectionUuid) -> String {
-    format!("logs/{}", collection)
-}
-
 ///////////////////////////////////////////// LogServer ////////////////////////////////////////////
 
 pub struct LogServer {
@@ -647,7 +641,7 @@ impl LogServer {
                 }
             })
             .collect::<Result<Vec<_>, Status>>()?;
-        let prefix = storage_prefix_for_log(collection_id);
+        let prefix = collection_id.storage_prefix_for_log();
         let mark_dirty = MarkDirty {
             collection_id,
             dirty_log: Arc::clone(&self.dirty_log),
@@ -676,7 +670,7 @@ impl LogServer {
         .await?;
         // Set it up so that once we release the mutex, the next person won't do I/O and will
         // immediately be able to push logs.
-        let storage_prefix = storage_prefix_for_log(collection_id);
+        let storage_prefix = collection_id.storage_prefix_for_log();
         let mark_dirty = MarkDirty {
             collection_id,
             dirty_log: Arc::clone(&self.dirty_log),
@@ -781,7 +775,7 @@ impl LogServer {
             "update_collection_log_offset for {collection_id} to {}",
             adjusted_log_offset
         );
-        let storage_prefix = storage_prefix_for_log(collection_id);
+        let storage_prefix = collection_id.storage_prefix_for_log();
 
         let log_reader = LogReader::new(
             self.config.reader.clone(),
@@ -1020,12 +1014,12 @@ impl LogServer {
         &self,
         rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
     ) -> Result<(), Error> {
-        let load_cursor = |storage, collection_id| async move {
+        let load_cursor = |storage, collection_id: CollectionUuid| async move {
             let cursor = &COMPACTION;
             let cursor_store = CursorStore::new(
                 CursorStoreOptions::default(),
                 Arc::clone(storage),
-                storage_prefix_for_log(collection_id),
+                collection_id.storage_prefix_for_log(),
                 "rollup".to_string(),
             );
             let span = tracing::info_span!("cursor load", collection_id = ?collection_id);
@@ -1074,7 +1068,7 @@ impl LogServer {
 
         async move {
             tracing::info!("Pushing logs for collection {}", collection_id);
-            let prefix = storage_prefix_for_log(collection_id);
+            let prefix = collection_id.storage_prefix_for_log();
             let key = LogKey { collection_id };
             let handle = self.open_logs.get_or_create_state(key);
             let mark_dirty = MarkDirty {
@@ -1151,7 +1145,7 @@ impl LogServer {
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         async move {
-            let prefix = storage_prefix_for_log(collection_id);
+            let prefix = collection_id.storage_prefix_for_log();
             let log_reader = LogReader::new(
                 self.config.reader.clone(),
                 Arc::clone(&self.storage),
@@ -1237,7 +1231,7 @@ impl LogServer {
         collection_id: CollectionUuid,
         pull_logs: &PullLogsRequest,
     ) -> Result<Vec<Fragment>, wal3::Error> {
-        let prefix = storage_prefix_for_log(collection_id);
+        let prefix = collection_id.storage_prefix_for_log();
         let log_reader = LogReader::new(
             self.config.reader.clone(),
             Arc::clone(&self.storage),
@@ -1284,7 +1278,7 @@ impl LogServer {
             let futures = fragments
                 .iter()
                 .map(|fragment| async {
-                    let prefix = storage_prefix_for_log(collection_id);
+                    let prefix = collection_id.storage_prefix_for_log();
                     if let Some(cache) = self.cache.as_ref() {
                         let cache_key = format!("{collection_id}::{}", fragment.path);
                         let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
@@ -1361,8 +1355,8 @@ impl LogServer {
         let target_collection_id = Uuid::parse_str(&request.target_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        let source_prefix = storage_prefix_for_log(source_collection_id);
-        let target_prefix = storage_prefix_for_log(target_collection_id);
+        let source_prefix = source_collection_id.storage_prefix_for_log();
+        let target_prefix = target_collection_id.storage_prefix_for_log();
         let storage = Arc::clone(&self.storage);
         let options = self.config.writer.clone();
 
@@ -1612,7 +1606,7 @@ impl LogServer {
                 "Migrating log for collection {} to new log service",
                 collection_id
             );
-            let prefix = storage_prefix_for_log(collection_id);
+            let prefix = collection_id.storage_prefix_for_log();
             let key = LogKey { collection_id };
             let handle = self.open_logs.get_or_create_state(key);
             let mark_dirty = MarkDirty {
@@ -1673,7 +1667,7 @@ impl LogServer {
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         tracing::info!("inspect_log_state for {collection_id}");
-        let storage_prefix = storage_prefix_for_log(collection_id);
+        let storage_prefix = collection_id.storage_prefix_for_log();
         let log_reader = LogReader::new(
             self.config.reader.clone(),
             Arc::clone(&self.storage),
@@ -2572,7 +2566,7 @@ mod tests {
     #[test]
     fn storage_prefix_for_log_format() {
         let collection_id = CollectionUuid::new();
-        let prefix = storage_prefix_for_log(collection_id);
+        let prefix = collection_id.storage_prefix_for_log();
         assert_eq!(format!("logs/{}", collection_id), prefix);
     }
 
