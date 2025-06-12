@@ -8,7 +8,6 @@ name = "frontend_service"
 path = "src/bin/frontend_service.rs"
 
 [dependencies]
-bytes = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
@@ -24,7 +23,6 @@ thiserror = { workspace = true }
 tower-http = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
-regex = { workspace = true }
 futures = { workspace = true }
 backon = { workspace = true }
 tracing-opentelemetry = { workspace = true }

@@ -3265,6 +3265,18 @@ mod tests {
         }
     }
 
+    async fn seal_collection_on_server(server: &LogServer, collection_id: CollectionUuid) {
+        server
+            .proxy
+            .clone()
+            .expect("Legacy log service should be present")
+            .seal_log(Request::new(SealLogRequest {
+                collection_id: collection_id.to_string(),
+            }))
+            .await
+            .expect("Seal log should not fail");
+    }
+
     async fn push_log_to_server(
         server: &LogServer,
         collection_id: CollectionUuid,
@@ -3398,15 +3410,7 @@ mod tests {
             validate_dirty_log_on_server(&log_server, &[]).await;
 
             let collection_id = CollectionUuid::new();
-            log_server
-                .proxy
-                .clone()
-                .expect("Legacy log service should be present")
-                .seal_log(Request::new(SealLogRequest {
-                    collection_id: collection_id.to_string(),
-                }))
-                .await
-                .expect("Seal log should not fail");
+            seal_collection_on_server(&log_server, collection_id).await;
 
             for chunk in operations.chunks(100) {
                 push_log_to_server(&log_server, collection_id, chunk).await;
@@ -3438,15 +3442,7 @@ mod tests {
             for (index, operation) in operations {
                 let collection_id = CollectionUuid::new();
                 collection_id_with_ord.push((index, collection_id));
-                log_server
-                    .proxy
-                    .clone()
-                    .expect("Legacy log service should be present")
-                    .seal_log(Request::new(SealLogRequest {
-                        collection_id: collection_id.to_string(),
-                    }))
-                    .await
-                    .expect("Seal log should not fail");
+                seal_collection_on_server(&log_server, collection_id).await;
                 push_log_to_server(&log_server, collection_id, &[operation]).await;
                 let enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
                 assert_eq!(enum_offset, 1);
@@ -3479,15 +3475,7 @@ mod tests {
             let source_collection_id = CollectionUuid::new();
             let fork_collection_id = CollectionUuid::new();
 
-            log_server
-                .proxy
-                .clone()
-                .expect("Legacy log service should be present")
-                .seal_log(Request::new(SealLogRequest {
-                    collection_id: source_collection_id.to_string(),
-                }))
-                .await
-                .expect("Seal log should not fail");
+            seal_collection_on_server(&log_server, source_collection_id).await;
 
             if !initial_operations.is_empty() {
                 push_log_to_server(&log_server, source_collection_id, &initial_operations).await;
@@ -3524,15 +3512,9 @@ mod tests {
             }
 
             validate_dirty_log_on_server(&log_server, &dirty_collection_ids).await;
-            validate_log_on_server(
-                &log_server,
-                source_collection_id,
-                &expected_source,
-                1,
-                10000,
-            )
-            .await;
-            validate_log_on_server(&log_server, fork_collection_id, &expected_fork, 1, 10000).await;
+            validate_log_on_server(&log_server, source_collection_id, &expected_source, 1, 1000)
+                .await;
+            validate_log_on_server(&log_server, fork_collection_id, &expected_fork, 1, 1000).await;
 
             if !expected_source.is_empty() {
                 let source_enum_offset =
@@ -3546,6 +3528,67 @@ mod tests {
                 assert_eq!(fork_enum_offset, expected_fork.len() as i64);
                 mock_compact_on_server(&log_server, fork_collection_id, fork_enum_offset).await;
             }
+            validate_dirty_log_on_server(&log_server, &[]).await;
+        });
+    }
+
+    fn test_seal_and_migrate_logs(
+        operations_before_seal: Vec<OperationRecord>,
+        operations_after_migrate: Vec<OperationRecord>,
+    ) {
+        let runtime = Runtime::new().unwrap();
+        runtime.block_on(async move {
+            let log_server = setup_log_server().await;
+            validate_dirty_log_on_server(&log_server, &[]).await;
+
+            let collection_id = CollectionUuid::new();
+            if !operations_before_seal.is_empty() {
+                push_log_to_server(&log_server, collection_id, &operations_before_seal).await;
+            }
+            let old_enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
+            assert_eq!(old_enum_offset, operations_before_seal.len() as i64);
+            let compact_offset = old_enum_offset / 2;
+            if compact_offset > 1 {
+                mock_compact_on_server(&log_server, collection_id, compact_offset).await;
+            }
+            validate_dirty_log_on_server(&log_server, &[]).await;
+
+            seal_collection_on_server(&log_server, collection_id).await;
+            log_server
+                .migrate_log(Request::new(MigrateLogRequest {
+                    collection_id: collection_id.to_string(),
+                }))
+                .await
+                .expect("Migrate Logs should not fail");
+            let first_uncompacted_offset = compact_offset.saturating_add(1) as usize;
+            if operations_before_seal.is_empty() {
+                validate_dirty_log_on_server(&log_server, &[]).await;
+            } else {
+                validate_dirty_log_on_server(&log_server, &[collection_id]).await;
+            }
+            validate_log_on_server(
+                &log_server,
+                collection_id,
+                &operations_before_seal,
+                first_uncompacted_offset,
+                1000,
+            )
+            .await;
+            push_log_to_server(&log_server, collection_id, &operations_after_migrate).await;
+            let mut combined_logs = operations_before_seal.clone();
+            combined_logs.extend(operations_after_migrate);
+            validate_dirty_log_on_server(&log_server, &[collection_id]).await;
+            validate_log_on_server(
+                &log_server,
+                collection_id,
+                &combined_logs,
+                first_uncompacted_offset,
+                1000,
+            )
+            .await;
+            let new_enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
+            assert_eq!(new_enum_offset, combined_logs.len() as i64);
+            mock_compact_on_server(&log_server, collection_id, new_enum_offset).await;
             validate_dirty_log_on_server(&log_server, &[]).await;
         });
     }
@@ -3583,6 +3626,18 @@ mod tests {
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
             std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_fork_logs(initial_operations, source_operations, fork_operations))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+
+        #[test]
+        fn test_k8s_integration_rust_log_service_seal_and_migrate_logs(
+            operations_before_seal in proptest::collection::vec(any::<OperationRecord>(), 0..=100),
+            operations_after_migrate in proptest::collection::vec(any::<OperationRecord>(), 1..=20),
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_seal_and_migrate_logs(operations_before_seal, operations_after_migrate))
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");

@@ -18,7 +18,6 @@ path = "src/bin/garbage_collector_tool.rs"
 [dependencies]
 async-trait = { workspace = true }
 chrono = { workspace = true }
-clap = { workspace = true }
 figment = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
@@ -45,7 +44,6 @@ chroma-storage = { workspace = true }
 chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-index = { workspace = true }
-chroma-segment = { workspace = true }
 chroma-memberlist = { workspace = true }
 chroma-tracing = { workspace = true }
 

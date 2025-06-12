@@ -12,7 +12,6 @@ opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-tokio = { workspace = true }
 tonic = { workspace = true }
 tower = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true }

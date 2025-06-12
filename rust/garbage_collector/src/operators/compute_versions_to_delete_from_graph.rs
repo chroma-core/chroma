@@ -126,11 +126,25 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                         .map(|(version, _, mode)| (version, mode))
                         .collect();
                     let num_versions = versions.len();
-                    tracing::debug!(
-                        collection_id = %collection_id,
-                        versions_to_delete = ?versions,
-                        "Processed {num_versions} versions from collection {collection_id}"
-                    );
+
+                    if tracing::enabled!(tracing::Level::DEBUG) {
+                        let num_versions_to_keep = versions
+                            .iter()
+                            .filter(|(_, action)| **action == CollectionVersionAction::Keep)
+                            .count();
+                        let num_versions_to_delete = versions
+                            .iter()
+                            .filter(|(_, action)| **action == CollectionVersionAction::Delete)
+                            .count();
+
+                        tracing::debug!(
+                            collection_id = %collection_id,
+                            num_versions = num_versions,
+                            num_versions_to_keep,
+                            num_versions_to_delete,
+                            "Computed versions to delete for collection {collection_id}",
+                        );
+                    }
 
                     (collection_id, versions)
                 })
