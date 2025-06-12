@@ -14,7 +14,7 @@ use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
 pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
     EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "error,opentelemetry_sdk=info,".to_string()
+        "error,opentelemetry_sdk=info,garbage_collector=debug,".to_string()
             + &vec![
                 "chroma",
                 "chroma-blockstore",
@@ -37,7 +37,6 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "query_service",
                 "wal3",
                 "worker",
-                "garbage_collector",
                 "continuous_verification",
             ]
             .into_iter()
