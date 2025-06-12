@@ -121,7 +121,6 @@ impl WorkerServer {
                     break;
                 }
             }
-            // Wait for the server to start
             health_reporter
                 .set_serving::<QueryExecutorServer<WorkerServer>>()
                 .await;
