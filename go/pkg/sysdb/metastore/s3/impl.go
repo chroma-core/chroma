@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/pingcap/log"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/aws/aws-sdk-go-v2/otelaws"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
@@ -73,6 +74,7 @@ func NewS3MetaStoreForTesting(ctx context.Context, bucketName, region, basePathS
 	}
 
 	// Configure S3 client with path-style addressing and custom endpoint for MinIO
+	otelaws.AppendMiddlewares(&cfg.APIOptions)
 	s3Client := s3.NewFromConfig(cfg, func(o *s3.Options) {
 		o.UsePathStyle = true
 		o.BaseEndpoint = aws.String(endpoint)
@@ -129,6 +131,7 @@ func NewS3MetaStore(ctx context.Context, cfg S3MetaStoreConfig) (*S3MetaStore, e
 	}
 
 	// Create S3 client with optional path-style addressing and custom endpoint
+	otelaws.AppendMiddlewares(&awsConfig.APIOptions)
 	s3Client := s3.NewFromConfig(awsConfig, func(o *s3.Options) {
 		o.UsePathStyle = cfg.ForcePathStyle
 		if cfg.Endpoint != "" {
