@@ -622,7 +622,7 @@ mod tests {
     async fn create_test_collection(
         clients: &mut ChromaGrpcClients,
         enable_spann: bool,
-    ) -> (CollectionUuid, String) {
+    ) -> (CollectionUuid, String, Uuid, Uuid) {
         // Create unique identifiers for tenant and database
         let test_uuid = uuid::Uuid::new_v4();
         let tenant_id = format!("test_tenant_{}", test_uuid);
@@ -745,18 +745,40 @@ mod tests {
 
         validate_test_collection(clients, collection_id).await;
 
-        (collection_id, tenant_id)
+        let collection_with_segments = clients
+            .get_collection_with_segments(collection_id.to_string())
+            .await
+            .unwrap();
+        let db_id = Uuid::from_str(
+            &collection_with_segments
+                .collection
+                .expect("Expected collection to be found")
+                .database_id,
+        )
+        .expect("Failed to parse database ID");
+
+        let mut segment_id_str = String::from("");
+        for segment in collection_with_segments.segments {
+            if segment.r#type == "urn:chroma:segment/vector/spann"
+                || segment.r#type == "urn:chroma:segment/vector/hnsw-distributed"
+            {
+                segment_id_str = segment.id.clone();
+            }
+        }
+        let segment_id =
+            Uuid::from_str(&segment_id_str).expect("Failed to parse segment ID from collection");
+
+        (collection_id, tenant_id, db_id, segment_id)
     }
 
-    // NOTE(Sanket): This orchestrator should be deleted.
     // Prefix path has not been changed here due to this reason.
-    async fn get_hnsw_index_ids(storage: &Storage) -> Vec<Uuid> {
+    async fn get_hnsw_index_ids(storage: &Storage, s3_path: &str) -> Vec<Uuid> {
         storage
-            .list_prefix("hnsw", GetOptions::default())
+            .list_prefix(s3_path, GetOptions::default())
             .await
             .unwrap()
             .into_iter()
-            .filter(|path| path.contains("hnsw/"))
+            .filter(|path| path.contains(&format!("{}/", s3_path)))
             .map(|path| {
                 Uuid::from_str(
                     path.split("/")
@@ -780,9 +802,14 @@ mod tests {
             .unwrap();
 
         let mut clients = ChromaGrpcClients::new().await.unwrap();
-        let (collection_id, tenant_id) = create_test_collection(&mut clients, use_spann).await;
+        let (collection_id, tenant_id, db_id, segment_id) =
+            create_test_collection(&mut clients, use_spann).await;
 
-        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
+        let s3_path = format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}/hnsw",
+            tenant_id, db_id, collection_id, segment_id
+        );
+        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage, &s3_path).await;
 
         // Get version count before GC
         let versions_before_gc = clients
@@ -878,7 +905,7 @@ mod tests {
         );
 
         // Check HNSW indices
-        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage).await;
+        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage, &s3_path).await;
         tracing::info!(
             before = ?hnsw_index_ids_before_gc,
             after = ?hnsw_index_ids_after_gc,
@@ -928,9 +955,14 @@ mod tests {
             .collect();
 
         let mut clients = ChromaGrpcClients::new().await.unwrap();
-        let (collection_id, tenant_id) = create_test_collection(&mut clients, true).await;
+        let (collection_id, tenant_id, db_id, segment_id) =
+            create_test_collection(&mut clients, true).await;
 
-        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
+        let s3_path = format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}/hnsw",
+            tenant_id, db_id, collection_id, segment_id
+        );
+        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage, &s3_path).await;
 
         // Get version count before GC
         let versions_before_gc = clients
@@ -1026,7 +1058,7 @@ mod tests {
         );
 
         // Check HNSW indices
-        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage).await;
+        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage, &s3_path).await;
         tracing::info!(
             before = ?hnsw_index_ids_before_gc,
             after = ?hnsw_index_ids_after_gc,
@@ -1078,9 +1110,14 @@ mod tests {
             .unwrap();
 
         let mut clients = ChromaGrpcClients::new().await.unwrap();
-        let (collection_id, tenant_id) = create_test_collection(&mut clients, true).await;
+        let (collection_id, tenant_id, db_id, segment_id) =
+            create_test_collection(&mut clients, true).await;
 
-        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
+        let s3_path = format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}/hnsw",
+            tenant_id, db_id, collection_id, segment_id
+        );
+        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage, &s3_path).await;
 
         // Get version count before GC
         let versions_before_gc = clients
@@ -1181,7 +1218,7 @@ mod tests {
         );
 
         // Check HNSW indices
-        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage).await;
+        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage, &s3_path).await;
         tracing::info!(
             before = ?hnsw_index_ids_before_gc,
             after = ?hnsw_index_ids_after_gc,
