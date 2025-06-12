@@ -29,5 +29,7 @@ runs:
         repo-token: ${{ inputs.github-token }}
     - name: Set up cache
       uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: common-rust-cache
     - name: Setup Nextest
       uses: taiki-e/install-action@nextest
