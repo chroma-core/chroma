@@ -1065,11 +1065,19 @@ mod tests {
     // The same record segment writer should be able to run concurrently on different threads without conflict
     #[test]
     fn test_max_offset_id_shuttle() {
-        let test_segment = tokio::runtime::Builder::new_multi_thread()
+        let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("Runtime creation should not fail")
-            .block_on(async { TestDistributedSegment::default() });
+            .expect("Runtime creation should not fail");
+        let test_segment = runtime.block_on(async { TestDistributedSegment::default() });
+        let record_segment_writer = runtime
+            .block_on(RecordSegmentWriter::from_segment(
+                &test_segment.collection.tenant,
+                &test_segment.collection.database_id,
+                &test_segment.record_segment,
+                &test_segment.blockfile_provider,
+            ))
+            .expect("Should be able to initialize record segment writer");
         shuttle::check_random(
             move || {
                 let log_partition_size = 100;
@@ -1084,14 +1092,6 @@ mod tests {
                     .collect::<Vec<_>>();
 
                 let offset_id = Arc::new(AtomicU32::new(1));
-
-                let record_segment_writer = future::block_on(RecordSegmentWriter::from_segment(
-                    &test_segment.collection.tenant,
-                    &test_segment.collection.database_id,
-                    &test_segment.record_segment,
-                    &test_segment.blockfile_provider,
-                ))
-                .expect("Should be able to initialize record segment writer");
 
                 let mut handles = Vec::new();
 
@@ -1135,6 +1135,7 @@ mod tests {
                     );
                     };
 
+                let record_segment_writer = record_segment_writer.clone();
                 thread::Builder::new()
                     .stack_size(stack_size)
                     .spawn(move || {
