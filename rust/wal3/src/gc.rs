@@ -48,7 +48,6 @@ impl Garbage {
             .filter(|frag| frag.limit <= first_to_keep)
             .collect::<Vec<_>>();
         /*
-        let mut actions = GarbageAction::default();
         for snap in dropped_snapshots {
             let action = Self::drop_snapshot(storage, prefix, snap, throttle, snapshots).await?;
             actions.merge(action)?;
@@ -274,7 +273,7 @@ impl Garbage {
         let mut transitive_garbage = vec![];
         for snap in snapshots_to_drop.iter() {
             transitive_garbage
-                .push(Self::drop_snapshot(storage, prefix, ptr, throttle, snapshot_cache).await?);
+                .push(Self::drop_snapshot(storage, prefix, snap, throttle, snapshot_cache).await?);
         }
         for frag in fragments_to_drop.iter() {
             transitive_garbage.push(Self::drop_fragment(frag)?);
@@ -298,7 +297,7 @@ impl Garbage {
             };
             todo!();
         } else if snapshots_to_drop.is_empty() && fragments_to_drop.is_empty() {
-            todo!();
+            Ok(GarbageAction::KeepSnapshot(ptr.clone()))
         } else {
             let dropped = snapshots_to_drop
                 .iter()
@@ -328,6 +327,30 @@ impl Garbage {
                 fragments,
                 writer: "garbage collection no-split".to_string(),
             };
+            if dropped + setsum != ptr.setsum {
+                todo!();
+            }
+            if transitive_garbage
+                .iter()
+                .map(|g| g.scrub())
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .fold(Setsum::default(), Setsum::add)
+                != dropped
+            {
+                eprintln!(
+                    "garbage {}",
+                    transitive_garbage
+                        .iter()
+                        .map(|g| g.scrub())
+                        .collect::<Result<Vec<_>, _>>()?
+                        .into_iter()
+                        .fold(Setsum::default(), Setsum::add)
+                        .hexdigest()
+                );
+                eprintln!("dropped {}", dropped.hexdigest());
+                todo!();
+            }
             Ok(GarbageAction::ReplaceSnapshot {
                 old: ptr.clone(),
                 new: snapshot,
@@ -776,7 +799,7 @@ mod tests {
         action.prefixed_paths_to_delete("replace-snapshot", &mut paths_to_delete);
         paths_to_delete.sort();
         assert_eq!(
-            vec!["LEEEEEERRRRROOOOOOYYYY JJJJJENNNNNNKKKKKIIIINNNNNS".to_string()],
+            vec!["replace-snapshot/fragment_5_8", "replace-snapshot/snapshot/SNAPSHOT.00000000aaaaaaaabbbbbbbb0000000000000000000000000000000000000000"],
             paths_to_delete
         );
         let mut snapshots_to_new = vec![];
@@ -804,7 +827,7 @@ mod tests {
                     )
                     .unwrap(),
                 ),],
-                writer: "garbage collection".to_string(),
+                writer: "garbage collection no-split".to_string(),
             },
             snapshots_to_new[0].clone(),
         );
@@ -868,7 +891,7 @@ mod tests {
         action.prefixed_paths_to_delete("replace-snapshot", &mut paths_to_delete);
         paths_to_delete.sort();
         assert_eq!(
-            vec!["LEEEEEERRRRROOOOOOYYYY JJJJJENNNNNNKKKKKIIIINNNNNS".to_string()],
+            vec!["replace-snapshot/fragment_5_8", "replace-snapshot/snapshot/SNAPSHOT.00000000aaaaaaaabbbbbbbb0000000000000000000000000000000000000000"],
             paths_to_delete
         );
         let mut snapshots_to_new = vec![];
@@ -896,7 +919,7 @@ mod tests {
                     )
                     .unwrap(),
                 ),],
-                writer: "garbage collection".to_string(),
+                writer: "garbage collection no-split".to_string(),
             },
             snapshots_to_new[0].clone(),
         );
@@ -936,7 +959,7 @@ mod tests {
         action.prefixed_paths_to_delete("replace-snapshot", &mut paths_to_delete);
         paths_to_delete.sort();
         assert_eq!(
-            vec!["LEEEEEERRRRROOOOOOYYYY JJJJJENNNNNNKKKKKIIIINNNNNS".to_string()],
+            vec!["replace-snapshot/fragment_5_8", "replace-snapshot/snapshot/SNAPSHOT.00000000aaaaaaaabbbbbbbb0000000000000000000000000000000000000000"],
             paths_to_delete
         );
         let mut snapshots_to_new = vec![];
@@ -964,7 +987,7 @@ mod tests {
                     )
                     .unwrap(),
                 ),],
-                writer: "garbage collection".to_string(),
+                writer: "garbage collection no-split".to_string(),
             },
             snapshots_to_new[0].clone(),
         );
@@ -1270,10 +1293,23 @@ mod tests {
                 // Should have one transitive garbage action for the dropped child snapshot
                 assert_eq!(transitive_garbage.len(), 1);
                 match &transitive_garbage[0] {
-                    GarbageAction::DropFragment(frag) => {
-                        assert_eq!(*frag, fragment1);
+                    GarbageAction::DropSnapshot {
+                        snapshot,
+                        transitive_garbage,
+                    } => {
+                        assert_eq!(child_snapshot1.to_pointer(), *snapshot);
+                        assert_eq!(1, transitive_garbage.len());
+                        match &transitive_garbage[0] {
+                            GarbageAction::DropFragment(frag) => {
+                                assert_eq!(fragment1, *frag);
+                            }
+                            _ => panic!("expected a dropped fragment"),
+                        }
                     }
-                    _ => panic!("Expected DropFragment in transitive garbage"),
+                    _ => panic!(
+                        "Expected DropFragment in transitive garbage {:?}",
+                        transitive_garbage[0]
+                    ),
                 }
 
                 // Check the new snapshot contains the kept child snapshot and parent fragment
@@ -1463,9 +1499,13 @@ mod tests {
 
                 // Should have one transitive garbage action for the dropped left leaf snapshot
                 assert_eq!(transitive_garbage.len(), 1);
+                eprintln!("GARBAGE {:?}", transitive_garbage[0]);
                 match &transitive_garbage[0] {
-                    GarbageAction::DropFragment(frag) => {
-                        assert_eq!(*frag, fragment1);
+                    GarbageAction::DropSnapshot {
+                        snapshot,
+                        transitive_garbage,
+                    } => {
+                        assert_eq!(*snapshot, left_leaf.to_pointer());
                     }
                     _ => panic!("Expected DropFragment in transitive garbage"),
                 }
