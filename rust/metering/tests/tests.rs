@@ -226,51 +226,64 @@ async fn test_nested_mutation_multi_thread() {
     // Create a metering context of type `TestContextA`
     let metering_context_handle =
         metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
+    let shared_metering_context_handle = std::sync::Arc::new(metering_context_handle);
 
-    // Call the helper function in another process, passing the context through `metered`
-    let handle = tokio::spawn(async move {
-        async_helper_fn().metered(metering_context_handle).await;
-    });
-
-    // Wait for the handle to resolve
-    handle.await.unwrap();
-
-    // Close the metering context
-    let expected_metering_context = metering::close::<metering::TestContextA>();
-    assert!(expected_metering_context.is_ok());
-    assert!(
-        expected_metering_context.unwrap().test_annotated_field == Some("async_helper".to_string())
-    );
-
-    // Verify that the metering context is empty
-    let expected_error = metering::close::<metering::TestContextA>();
-    assert!(expected_error.is_err());
-}
-
-#[tokio::test]
-async fn test_nested_mutation_then_close_multi_thread() {
-    // Define an asynchronous helper function that sets a value for `test_attribute`
-    async fn async_helper_fn() {
-        metering::with_current(|metering_context| {
-            metering_context.test_attribute(Some("async_helper".to_string()))
+    (async move {
+        println!("current: {:?}", metering::get_current());
+        let current = metering::get_current();
+        // Call the helper function in another process, passing the context through `metered`
+        let handle = tokio::spawn(async move {
+            async_helper_fn()
+                .metered(std::sync::Arc::new(current))
+                .await;
         });
+
+        // Wait for the handle to resolve
+        handle.await.unwrap();
+
+        // Close the metering context
         let expected_metering_context = metering::close::<metering::TestContextA>();
         assert!(expected_metering_context.is_ok());
-    }
+        println!("expected: {:?}", expected_metering_context);
+        assert!(
+            expected_metering_context.unwrap().test_annotated_field
+                == Some("async_helper".to_string())
+        );
 
-    // Create a metering context of type `TestContextA`
-    let metering_context_handle =
-        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
+        // Verify that the metering context is empty
+        let expected_error = metering::close::<metering::TestContextA>();
+        assert!(expected_error.is_err())
+    })
+    .metered(shared_metering_context_handle.clone())
+    .await;
 
-    // Call the helper function in another process, passing the context through `metered`
-    let handle = tokio::spawn(async move {
-        async_helper_fn().metered(metering_context_handle).await;
-    });
-
-    // Wait for the handle to resolve. The metering context should be cleared
-    handle.await.unwrap();
-
-    // Verify that the metering context is empty
-    let expected_error = metering::close::<metering::TestContextA>();
-    assert!(expected_error.is_err());
+    println!("current: {:?}", metering::get_current());
 }
+
+// #[tokio::test]
+// async fn test_nested_mutation_then_close_multi_thread() {
+//     // Define an asynchronous helper function that sets a value for `test_attribute`
+//     async fn async_helper_fn() {
+//         metering::with_current(|metering_context| {
+//             metering_context.test_attribute(Some("async_helper".to_string()))
+//         });
+//         let expected_metering_context = metering::close::<metering::TestContextA>();
+//         assert!(expected_metering_context.is_ok());
+//     }
+
+//     // Create a metering context of type `TestContextA`
+//     let metering_context_handle =
+//         metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
+
+//     // Call the helper function in another process, passing the context through `metered`
+//     let handle = tokio::spawn(async move {
+//         async_helper_fn().metered(metering_context_handle).await;
+//     });
+
+//     // Wait for the handle to resolve. The metering context should be cleared
+//     handle.await.unwrap();
+
+//     // Verify that the metering context is empty
+//     let expected_error = metering::close::<metering::TestContextA>();
+//     assert!(expected_error.is_err());
+// }

@@ -13,6 +13,7 @@ use crate::{
 mod annotations;
 mod attributes;
 mod contexts;
+mod dev;
 mod errors;
 mod fields;
 mod mutators;
@@ -69,7 +70,7 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
 
         /// A blank metering context to use when there is no active metering context
         #[derive(::std::fmt::Debug, Clone)]
-        struct BlankMeteringContext;
+        pub struct BlankMeteringContext;
 
         /// We implement the `MeteringContext` trait for the blank metering context so it can be represented
         /// in the same way that a user-defined metering context would be internally
@@ -133,12 +134,12 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
             )
                 as Box<dyn MeteringContext>));
 
-            ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
-                slot.replace(MeteringContextContainer {
-                    shared_boxed_metering_context: shared_boxed_metering_context.clone(),
-                    metering_context_type_id,
-                });
-            });
+            // ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
+            //     slot.replace(MeteringContextContainer {
+            //         shared_boxed_metering_context: shared_boxed_metering_context.clone(),
+            //         metering_context_type_id,
+            //     });
+            // });
 
             MeteringContextHandle {
                 inner_shared_boxed_metering_context: shared_boxed_metering_context,
@@ -195,20 +196,31 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         }
 
         /// A handle that stores a metering context and its type ID
+        #[derive(std::fmt::Debug)]
         pub struct MeteringContextHandle {
-            inner_shared_boxed_metering_context: SharedBoxedMeteringContext,
+            pub inner_shared_boxed_metering_context: SharedBoxedMeteringContext,
             inner_metering_context_type_id: ::std::any::TypeId,
         }
 
         /// A trait that allows futures to be `metered`, similar to how `tracing` enables futures to be
         /// `instrumented`
         pub trait MeteredFutureExt: ::std::future::Future + Sized {
-            fn metered(self, metering_context_handle: MeteringContextHandle) -> MeteredFuture<Self> {
+            fn metered(self, metering_context_handle: ::std::sync::Arc<MeteringContextHandle>) -> MeteredFuture<Self> {
                 MeteredFuture {
                     inner_future: self,
                     metering_context_handle,
                 }
             }
+        }
+
+        pub fn get_current() -> MeteringContextHandle {
+            ACTIVE_METERING_CONTEXT_CONTAINER.with(|slot| {
+                let active = slot.borrow();
+                return MeteringContextHandle {
+                    inner_shared_boxed_metering_context: active.shared_boxed_metering_context.clone(),
+                    inner_metering_context_type_id: active.metering_context_type_id
+                };
+            })
         }
 
         /// A blanket implementation of `metered` for all futures
@@ -220,7 +232,7 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         pub struct MeteredFuture<F: ::std::future::Future> {
             #[pin]
             inner_future: F,
-            metering_context_handle: MeteringContextHandle,
+            metering_context_handle: ::std::sync::Arc<MeteringContextHandle>,
         }
 
         /// Handles setting the current thread's active metering context when it is polled and
