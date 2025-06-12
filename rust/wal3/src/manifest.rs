@@ -356,7 +356,6 @@ impl Manifest {
                 }
             }
             if snapshots.len() >= snapshot_options.snapshot_rollover_threshold {
-                // TODO(rescrv):  This is necessary, but breaks atm.
                 if let Some(snap) = snapshots.iter().min_by_key(|s| s.start) {
                     if !self.snapshots.is_empty()
                         && self.snapshots[0].limit == snap.start

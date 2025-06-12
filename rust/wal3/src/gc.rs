@@ -61,7 +61,9 @@ impl Garbage {
             .filter(|frag| frag.limit <= first_to_keep)
             .collect::<Vec<_>>();
         if replaced_snapshots.len() > 1 {
-            todo!();
+            return Err(Error::CorruptGarbage(
+                "More than one snapshot needs replacing".to_string(),
+            ));
         }
         let mut ret = Garbage {
             snapshots_to_drop: vec![],
@@ -96,7 +98,9 @@ impl Garbage {
                 .await?;
         }
         if drop_acc != ret.setsum_to_discard {
-            todo!();
+            return Err(Error::ScrubError(Box::new(ScrubError::CorruptGarbage(
+                "setsums don't balance".to_string(),
+            ))));
         }
         Ok(ret)
     }
@@ -211,7 +215,9 @@ impl Garbage {
 
     fn drop_fragment(&mut self, frag: &Fragment, first: &mut bool) -> Result<Setsum, Error> {
         if self.fragments_to_drop_limit != frag.seq_no && !*first {
-            todo!();
+            return Err(Error::ScrubError(Box::new(ScrubError::Internal(
+                "fragment sequence numbers collected out of order".to_string(),
+            ))));
         }
         if *first {
             self.fragments_to_drop_start = frag.seq_no;
@@ -262,7 +268,12 @@ impl Garbage {
             self.snapshots_to_drop.push(ptr.clone());
             Ok(snapshot.setsum)
         } else {
-            todo!();
+            Err(Error::ScrubError(Box::new(
+                ScrubError::CorruptSnapshotDrop {
+                    lhs: snapshot.setsum,
+                    rhs: drop_acc,
+                },
+            )))
         }
     }
 
