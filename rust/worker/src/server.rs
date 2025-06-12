@@ -111,10 +111,10 @@ impl WorkerServer {
         });
 
         tokio::spawn(async move {
-            // Poll is-ready every 50ms until the server is ready
+            // Poll is-ready every ms until the server is ready
             // We don't timeout here because we assume some upstream daemon like
             // system will kill/restart us if we don't become ready in a reasonable time
-            let mut interval = tokio::time::interval(std::time::Duration::from_millis(50));
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(1));
             loop {
                 interval.tick().await;
                 if worker.is_ready() {
