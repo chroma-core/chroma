@@ -13,7 +13,7 @@ use super::proptest_types::Transition;
 use super::segment_file_strategies::SegmentGroup;
 use chroma_types::{CollectionUuid, DatabaseUuid};
 use petgraph::graph::{DiGraph, NodeIndex};
-use proptest::prelude::{any, BoxedStrategy};
+use proptest::prelude::{any, any_with, BoxedStrategy};
 use proptest::strategy::Strategy;
 use proptest::{prelude::Just, prop_oneof};
 use proptest_state_machine::ReferenceStateMachine;
@@ -239,10 +239,11 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
 
         let create_collection_id = CollectionUuid::new();
         let create_collection_transition =
-            any::<SegmentGroup>().prop_map(move |segment_group| Transition::CreateCollection {
-                collection_id: create_collection_id,
-                segments: segment_group,
-            });
+            any_with::<SegmentGroup>((state.tenant.clone(), state.db_id, create_collection_id))
+                .prop_map(move |segment_group| Transition::CreateCollection {
+                    collection_id: create_collection_id,
+                    segments: segment_group,
+                });
 
         let _delete_collection_transition = alive_collection_id_strategy
             .clone()
