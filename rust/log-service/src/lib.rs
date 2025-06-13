@@ -1105,7 +1105,7 @@ impl LogServer {
             }
             let record_count = messages.len() as i32;
             match log.append_many(messages).await {
-                Ok(_) => {}
+                Ok(_) | Err(wal3::Error::LogContentionDurable) => {}
                 Err(err @ wal3::Error::Backoff) => {
                     return Err(Status::new(
                         chroma_error::ErrorCodes::Unavailable.into(),

@@ -298,11 +298,24 @@ impl LogWriter {
                 Ok(out) => {
                     return Ok(out);
                 }
-                err @ Err(Error::LogContentionDurable) | err @ Err(Error::LogContentionFailure) => {
+                Err(Error::LogContentionDurable) => {
+                    {
+                        // SAFETY(rescrv):  Mutex poisoning.
+                        let mut inner = self.inner.lock().unwrap();
+                        inner.writer.take();
+                    }
+                    // Silence this error in favor of the one we got from f.
+                    if self.ensure_open().await.is_ok() {
+                        return Err(Error::LogContentionDurable);
+                    } else {
+                        return Err(Error::LogContentionFailure);
+                    }
+                }
+                Err(Error::LogContentionFailure) => {
                     // SAFETY(rescrv):  Mutex poisoning.
                     let mut inner = self.inner.lock().unwrap();
                     inner.writer.take();
-                    return err;
+                    return Err(Error::LogContentionFailure);
                 }
                 Err(Error::LogContentionRetry) => {
                     // SAFETY(rescrv):  Mutex poisoning.
