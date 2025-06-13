@@ -24,7 +24,7 @@ async fn destroy_snapshot(
             destroy_fragment(storage, prefix, frag).await?;
         }
     }
-    Ok(())
+    delete_file(storage, prefix, &snap.path_to_snapshot).await
 }
 
 async fn destroy_fragment(
