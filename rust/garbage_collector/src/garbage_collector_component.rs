@@ -725,6 +725,7 @@ mod tests {
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
             port: 50055,
             root_cache_config: Default::default(),
+            jemalloc_pprof_server_port: None,
         };
         let registry = Registry::new();
 
@@ -852,6 +853,7 @@ mod tests {
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
             port: 50055,
             root_cache_config: Default::default(),
+            jemalloc_pprof_server_port: None,
         };
         let registry = Registry::new();
 
@@ -1053,6 +1055,7 @@ mod tests {
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
             port: 50055,
             root_cache_config: Default::default(),
+            jemalloc_pprof_server_port: None,
         };
         let registry = Registry::new();
 
