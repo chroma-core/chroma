@@ -71,9 +71,6 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         /// Implementations of capabilities for the base trait object `dyn MeteringContext`.
         #( #capability_implementations_for_base_context )*
 
-
-
-
         #[derive(::std::fmt::Debug, Clone)]
         pub struct BlankMeteringContext;
 
