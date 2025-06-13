@@ -52,7 +52,7 @@ export interface ChromaClientArgs {
 export class ChromaClient {
   private _tenant: string | undefined;
   private _database: string | undefined;
-  private _use_base64_encoding_for_embeddings: boolean = false;
+  private _use_base64_encoding_for_embeddings: boolean = true;
   private readonly apiClient: ReturnType<typeof createClient>;
 
   /**
