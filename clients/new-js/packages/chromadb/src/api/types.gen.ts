@@ -13,6 +13,7 @@ export type AddCollectionRecordsResponse = {
 };
 
 export type ChecklistResponse = {
+    base64_encoding: boolean;
     max_batch_size: number;
 };
 
