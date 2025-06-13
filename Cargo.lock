@@ -1360,15 +1360,9 @@ dependencies = [
  "async-tempfile",
  "bincode",
  "bloom",
- "chroma-blockstore",
- "chroma-cache",
- "chroma-storage",
- "chroma-types",
- "clap",
  "criterion",
  "dirs 5.0.1",
  "futures",
- "indicatif",
  "rand 0.8.5",
  "reqwest 0.12.9",
  "serde",
@@ -1378,8 +1372,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "uuid",
- "worker",
 ]
 
 [[package]]
@@ -1403,11 +1395,9 @@ dependencies = [
  "proptest",
  "proptest-state-machine",
  "prost 0.13.5",
- "prost-types 0.13.5",
  "rand 0.8.5",
  "roaring",
  "serde",
- "serde_json",
  "shuttle",
  "tempfile",
  "thiserror 1.0.69",
@@ -1423,10 +1413,8 @@ dependencies = [
  "ahash",
  "anyhow",
  "async-trait",
- "chroma-config",
  "chroma-error",
  "chroma-tracing",
- "chroma-types",
  "clap",
  "foyer",
  "mixtrics",
@@ -1437,8 +1425,6 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -1525,7 +1511,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.1",
  "backon",
- "bytes",
+ "base64 0.22.1",
  "chroma-cache",
  "chroma-config",
  "chroma-distance",
@@ -1538,6 +1524,7 @@ dependencies = [
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
+ "criterion",
  "figment",
  "futures",
  "http-body-util",
@@ -1549,7 +1536,6 @@ dependencies = [
  "proptest",
  "proptest-state-machine",
  "rand 0.8.5",
- "regex",
  "reqwest 0.12.9",
  "rust-embed",
  "serde",
@@ -1619,10 +1605,8 @@ dependencies = [
  "figment",
  "guacamole",
  "opentelemetry",
- "opentelemetry-http",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "rand 0.8.5",
  "reqwest 0.12.9",
  "serde",
  "serde_json",
@@ -1640,25 +1624,19 @@ dependencies = [
 name = "chroma-log"
 version = "0.1.0"
 dependencies = [
- "arrow",
  "async-trait",
  "bytemuck",
- "bytes",
  "chroma-config",
  "chroma-error",
  "chroma-memberlist",
  "chroma-segment",
  "chroma-sqlite",
- "chroma-storage",
  "chroma-sysdb",
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
- "figment",
  "futures",
- "opentelemetry",
  "proptest",
- "prost 0.13.5",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -1667,12 +1645,9 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tonic",
- "tonic-health",
  "tower 0.4.13",
  "tracing",
- "tracing-opentelemetry",
  "uuid",
- "wal3",
 ]
 
 [[package]]
@@ -1681,17 +1656,12 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "async-trait",
- "bytemuck",
  "bytes",
  "chroma-cache",
  "chroma-config",
  "chroma-error",
  "chroma-log",
- "chroma-segment",
- "chroma-sqlite",
  "chroma-storage",
- "chroma-sysdb",
- "chroma-system",
  "chroma-tracing",
  "chroma-types",
  "figment",
@@ -1701,19 +1671,14 @@ dependencies = [
  "parquet",
  "proptest",
  "prost 0.13.5",
- "rand 0.8.5",
  "serde",
  "serde_json",
- "setsum",
- "sqlx",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tonic",
  "tonic-health",
- "tower 0.4.13",
  "tracing",
- "tracing-opentelemetry",
  "uuid",
  "wal3",
 ]
@@ -1777,7 +1742,6 @@ dependencies = [
  "chroma-storage",
  "chroma-types",
  "futures",
- "parking_lot",
  "proptest",
  "rayon",
  "regex",
@@ -1786,7 +1750,6 @@ dependencies = [
  "sea-query-binder",
  "serde",
  "serde-pickle",
- "serde_json",
  "shuttle",
  "sqlx",
  "tantivy",
@@ -1805,7 +1768,6 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "chroma-types",
- "futures",
  "md5",
  "pyo3",
  "regex",
@@ -1835,14 +1797,12 @@ dependencies = [
  "futures",
  "object_store",
  "opentelemetry",
- "parking_lot",
  "rand 0.8.5",
  "rand_xorshift",
  "serde",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util",
  "tracing",
 ]
 
@@ -1860,9 +1820,6 @@ dependencies = [
  "chrono",
  "derivative",
  "futures",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
  "parking_lot",
  "prost 0.13.5",
  "sea-query",
@@ -1872,12 +1829,9 @@ dependencies = [
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
- "tokio-util",
  "tonic",
  "tower 0.4.13",
  "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -1913,7 +1867,6 @@ dependencies = [
  "opentelemetry_sdk",
  "serde",
  "serde_json",
- "tokio",
  "tonic",
  "tower 0.4.13",
  "tracing",
@@ -1927,7 +1880,6 @@ name = "chroma-types"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "chroma-config",
  "chroma-error",
  "proptest",
  "proptest-derive 0.5.1",
@@ -1977,7 +1929,6 @@ dependencies = [
 name = "chromadb_rust_bindings"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "chroma-cache",
  "chroma-cli",
  "chroma-config",
@@ -1989,10 +1940,7 @@ dependencies = [
  "chroma-sysdb",
  "chroma-system",
  "chroma-types",
- "mdac",
- "numpy",
  "pyo3",
- "serde",
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
@@ -3339,14 +3287,12 @@ dependencies = [
  "chroma-error",
  "chroma-index",
  "chroma-memberlist",
- "chroma-segment",
  "chroma-storage",
  "chroma-sysdb",
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
  "chrono",
- "clap",
  "figment",
  "futures",
  "humantime",
@@ -5183,22 +5129,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
-name = "numpy"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7cfbf3f0feededcaa4d289fe3079b03659e85c5b5a177f4ba6fb01ab4fb3e39"
-dependencies = [
- "libc",
- "ndarray",
- "num-complex",
- "num-integer",
- "num-traits",
- "pyo3",
- "pyo3-build-config",
- "rustc-hash 2.0.0",
-]
-
-[[package]]
 name = "objc-sys"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5425,7 +5355,6 @@ dependencies = [
  "bytes",
  "http 1.1.0",
  "opentelemetry",
- "reqwest 0.12.9",
 ]
 
 [[package]]
@@ -6522,7 +6451,6 @@ checksum = "a77c62af46e79de0a562e1a9849205ffcb7fc1238876e9bd743357570e04046f"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "futures-channel",
  "futures-core",
  "futures-util",
  "h2 0.4.7",
@@ -8875,9 +8803,9 @@ dependencies = [
  "chroma-error",
  "chroma-storage",
  "futures",
- "futures-core",
  "guacamole",
  "parquet",
+ "proptest",
  "rand 0.8.5",
  "serde",
  "serde_json",
@@ -8885,7 +8813,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -9459,9 +9386,6 @@ dependencies = [
  "futures",
  "indicatif",
  "num_cpus",
- "opentelemetry",
- "opentelemetry-otlp",
- "opentelemetry_sdk",
  "parking_lot",
  "proptest",
  "proptest-state-machine",
@@ -9485,8 +9409,6 @@ dependencies = [
  "tonic",
  "tonic-health",
  "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
  "uuid",
 ]
 

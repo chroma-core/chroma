@@ -3,7 +3,7 @@ use crate::{
     s3::S3Storage,
     GetOptions,
 };
-use crate::{ETag, PutOptions, StorageConfigError};
+use crate::{DeleteOptions, ETag, PutOptions, StorageConfigError};
 use async_trait::async_trait;
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use bytes::Bytes;
@@ -481,6 +481,20 @@ impl AdmissionControlledS3Storage {
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         // Akin to a HEAD request; no AC.
         self.storage.copy(src_key, dst_key).await
+    }
+
+    pub async fn list_prefix(
+        &self,
+        prefix: &str,
+        options: GetOptions,
+    ) -> Result<Vec<String>, StorageError> {
+        let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+        let _permit = self.rate_limiter.enter(atomic_priority, None).await;
+        self.storage.list_prefix(prefix).await
+    }
+
+    pub async fn delete(&self, prefix: &str, options: DeleteOptions) -> Result<(), StorageError> {
+        self.storage.delete(prefix, options).await
     }
 }
 

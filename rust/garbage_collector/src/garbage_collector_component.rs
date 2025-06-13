@@ -14,7 +14,7 @@ use chroma_system::{
 };
 use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
 use std::{
     collections::{HashMap, HashSet},
@@ -162,7 +162,13 @@ impl GarbageCollector {
                 );
 
             let started_at = SystemTime::now();
-            let result = orchestrator.run(system.clone()).await?;
+            let result = match orchestrator.run(system.clone()).await {
+                Ok(res) => res,
+                Err(e) => {
+                    tracing::error!("Failed to run garbage collection orchestrator v2: {:?}", e);
+                    return Err(GarbageCollectCollectionError::OrchestratorV2Error(e));
+                }
+            };
             let duration_ms = started_at
                 .elapsed()
                 .map(|d| d.as_millis() as u64)
@@ -349,26 +355,9 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             .expect("Failed to get collections to gc");
         tracing::info!("Got {} total collections", collections_to_gc.len());
         let collections_to_gc = self.filter_collections(collections_to_gc);
-        tracing::info!(
-            "Filtered to {} collections to garbage collect",
-            collections_to_gc.len()
-        );
-
-        let mut sysdb = self.sysdb_client.clone();
-
-        let mut jobs = FuturesUnordered::new();
 
         let mut num_skipped_jobs = 0;
-        for collection in collections_to_gc {
-            if self.disabled_collections.contains(&collection.id) {
-                tracing::warn!(
-                    "Skipping garbage collection for disabled collection: {}",
-                    collection.id
-                );
-                num_skipped_jobs += 1;
-                continue;
-            }
-
+        let collections_to_gc = collections_to_gc.into_iter().map(|collection| {
             let cleanup_mode = if let Some(tenant_mode_overrides) = &self.tenant_mode_overrides {
                 tenant_mode_overrides
                     .get(&collection.tenant)
@@ -378,15 +367,29 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 self.default_cleanup_mode
             };
 
+            (cleanup_mode.to_owned(), collection)
+        }).filter(|(cleanup_mode, collection)| {
             if collection.lineage_file_path.is_some() && !cleanup_mode.is_v2() {
                 tracing::debug!(
                     "Skipping garbage collection for root of fork tree because GC v1 cannot handle fork trees: {}",
                     collection.id
                 );
                 num_skipped_jobs += 1;
-                continue;
+                return false;
             }
 
+            true
+        }).collect::<Vec<_>>();
+
+        tracing::info!(
+            "Filtered to {} collections to garbage collect",
+            collections_to_gc.len()
+        );
+
+        let mut sysdb = self.sysdb_client.clone();
+
+        let mut jobs_stream = futures::stream::iter(collections_to_gc)
+        .map(|(cleanup_mode, collection)| {
             tracing::info!(
                 "Processing collection: {} (tenant: {}, version_file_path: {})",
                 collection.id,
@@ -397,27 +400,26 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job", collection_id = ?collection.id, tenant_id = %collection.tenant, cleanup_mode = ?cleanup_mode);
             instrumented_span.follows_from(Span::current());
 
-            jobs.push(
-                self.garbage_collect_collection(
-                    version_absolute_cutoff_time,
-                    collection_soft_delete_absolute_cutoff_time,
-                    collection,
-                    cleanup_mode,
-                )
-                .instrument(instrumented_span),
-            );
-        }
-        tracing::info!("GC {} jobs", jobs.len());
+            self.garbage_collect_collection(
+                version_absolute_cutoff_time,
+                collection_soft_delete_absolute_cutoff_time,
+                collection,
+                cleanup_mode,
+            )
+            .instrument(instrumented_span)
+        })
+        .buffer_unordered(100);
+
         let mut num_completed_jobs = 0;
         let mut num_failed_jobs = 0;
-        while let Some(job) = jobs.next().await {
-            match job {
+        while let Some(job_result) = jobs_stream.next().await {
+            match job_result {
                 Ok(result) => {
                     tracing::info!("Garbage collection completed. Deleted {} files over {} versions for collection {}.", result.num_files_deleted, result.num_versions_deleted, result.collection_id);
                     num_completed_jobs += 1;
                 }
                 Err(e) => {
-                    tracing::info!("Garbage collection failed: {:?}", e);
+                    tracing::error!("Garbage collection failed: {:?}", e);
                     num_failed_jobs += 1;
                 }
             }

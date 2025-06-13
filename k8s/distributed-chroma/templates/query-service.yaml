@@ -67,6 +67,7 @@ spec:
           readinessProbe:
             grpc:
               port: 50051
+              service: chroma.QueryExecutor
           volumeMounts:
             {{if .Values.queryService.configuration}}
             - name: query-service-config

@@ -76,10 +76,10 @@ async fn writer_thread(
 }
 
 #[tokio::test]
-async fn test_k8s_integration_ping_pong_contention() {
+async fn test_k8s_integration_99_ping_pong_contention() {
     // Create a shared storage for both threads to use
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-    let prefix = "test_k8s_integration_ping_pong_contention";
+    let prefix = "test_k8s_integration_99_ping_pong_contention";
     let writer_name = "init";
 
     // Initialize the log

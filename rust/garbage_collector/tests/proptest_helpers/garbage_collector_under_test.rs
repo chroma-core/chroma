@@ -8,7 +8,7 @@ use chroma_config::Configurable;
 use chroma_storage::config::{
     ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
 };
-use chroma_storage::{GetOptions, Storage};
+use chroma_storage::{DeleteOptions, GetOptions, Storage};
 use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig, SysDb};
 use chroma_system::Orchestrator;
 use chroma_system::{Dispatcher, DispatcherConfig, System};
@@ -48,7 +48,11 @@ impl Drop for GarbageCollectorUnderTest {
         self.runtime.block_on(async {
             self.sysdb.reset().await.unwrap();
 
-            let files = self.storage.list_prefix("").await.unwrap();
+            let files = self
+                .storage
+                .list_prefix("", GetOptions::default())
+                .await
+                .unwrap();
             if files.is_empty() {
                 return;
             }
@@ -56,7 +60,10 @@ impl Drop for GarbageCollectorUnderTest {
                 .map(|file| {
                     let storage = self.storage.clone();
                     async move {
-                        storage.delete(&file).await.unwrap();
+                        storage
+                            .delete(&file, DeleteOptions::default())
+                            .await
+                            .unwrap();
                     }
                 })
                 .buffer_unordered(32)
@@ -472,7 +479,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
         let file_ref_counts = ref_state.get_file_ref_counts();
         let files_on_disk = ref_state
             .runtime
-            .block_on(state.storage.list_prefix(""))
+            .block_on(state.storage.list_prefix("", GetOptions::default()))
             .unwrap()
             .into_iter()
             .collect::<HashSet<_>>();

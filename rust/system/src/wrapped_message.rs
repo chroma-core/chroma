@@ -83,9 +83,12 @@ where
             match result {
                 Ok(result) => {
                     if let Some(reply_channel) = message.reply_channel {
-                        reply_channel
-                            .send(result)
-                            .expect("message reply channel was unexpectedly dropped by caller");
+                        if let Err(e) = reply_channel.send(result) {
+                            tracing::error!(
+                                "message reply channel was unexpectedly dropped by caller: {:?}",
+                                e
+                            );
+                        }
                     }
                 }
                 Err(panic_value) => {
@@ -94,5 +97,58 @@ where
                 }
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ComponentSender;
+
+    #[tokio::test]
+    async fn test_dropped_reply_channel_does_not_panic() {
+        #[derive(Debug)]
+        struct TestMessage;
+
+        #[derive(Debug)]
+        struct TestComponent;
+        impl Component for TestComponent {
+            fn get_name() -> &'static str {
+                "TestComponent"
+            }
+            fn queue_size(&self) -> usize {
+                10
+            }
+            fn on_handler_panic(&mut self, panic_value: Box<dyn std::any::Any + Send>) {
+                tracing::error!("Handler panicked: {:?}", panic_value);
+                std::panic::resume_unwind(panic_value);
+            }
+        }
+
+        #[async_trait]
+        impl Handler<TestMessage> for TestComponent {
+            type Result = ();
+            async fn handle(&mut self, _: TestMessage, _: &ComponentContext<Self>) -> () {}
+        }
+
+        let system = crate::System::new();
+
+        let mut comp = TestComponent;
+        let (tx, _) = tokio::sync::mpsc::channel(comp.queue_size());
+        let sender = ComponentSender::new(tx);
+
+        let ctx = ComponentContext {
+            system,
+            sender,
+            cancellation_token: tokio_util::sync::CancellationToken::new(),
+            scheduler: crate::scheduler::Scheduler::new(),
+        };
+        let (tx, rx) = oneshot::channel();
+        let mut msg = Some(HandleableMessageImpl::new(TestMessage, Some(tx)));
+
+        drop(rx); // simulates a receiver disconnecting, nothing left to handle the message
+        msg.handle_and_reply(&mut comp, &ctx).await;
+
+        // done if doesn't panic
     }
 }

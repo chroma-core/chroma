@@ -8,7 +8,6 @@ name = "frontend_service"
 path = "src/bin/frontend_service.rs"
 
 [dependencies]
-bytes = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
@@ -24,7 +23,6 @@ thiserror = { workspace = true }
 tower-http = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
-regex = { workspace = true }
 futures = { workspace = true }
 backon = { workspace = true }
 tracing-opentelemetry = { workspace = true }
@@ -33,7 +31,6 @@ mdac = { workspace = true }
 opentelemetry.workspace = true
 validator = { workspace = true }
 rust-embed = { workspace = true }
-
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
@@ -49,6 +46,7 @@ chroma-sqlite = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { version = "0.2.0", features = ["debug"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
+base64 = { workspace = true }
 
 [dev-dependencies]
 reqwest = { workspace = true }
@@ -58,3 +56,9 @@ chroma-types = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 worker = { workspace = true }
 ndarray = { workspace = true }
+criterion = { workspace = true }
+
+
+[[bench]]
+name="base64"
+harness = false

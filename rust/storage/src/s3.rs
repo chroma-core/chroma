@@ -11,8 +11,8 @@
 use super::config::StorageConfig;
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
-use super::PutOptions;
 use super::StorageConfigError;
+use super::{DeleteOptions, PutOptions};
 use crate::{ETag, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
@@ -103,7 +103,7 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     #[allow(clippy::type_complexity)]
     async fn get_stream_and_e_tag(
         &self,
@@ -163,7 +163,7 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     #[allow(clippy::type_complexity)]
     pub(super) async fn get_key_ranges(
         &self,
@@ -207,7 +207,7 @@ impl S3Storage {
         Ok((content_length, ranges, e_tag.map(ETag)))
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub(super) async fn fetch_range(
         &self,
         key: String,
@@ -255,7 +255,7 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub(super) async fn get_parallel(
         &self,
         key: &str,
@@ -305,13 +305,13 @@ impl S3Storage {
         Ok((Arc::new(output_buffer), e_tag))
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         self.get_with_e_tag(key).await.map(|(buf, _)| buf)
     }
 
     /// Perform a strongly consistent get and return the e_tag.
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn get_with_e_tag(
         &self,
         key: &str,
@@ -351,7 +351,7 @@ impl S3Storage {
         total_size_bytes < self.upload_part_size_bytes
     }
 
-    #[tracing::instrument(skip(self, bytes))]
+    #[tracing::instrument(skip(self, bytes), level = "trace")]
     pub async fn put_bytes(
         &self,
         key: &str,
@@ -372,7 +372,7 @@ impl S3Storage {
         .await
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn put_file(
         &self,
         key: &str,
@@ -412,7 +412,7 @@ impl S3Storage {
         .await
     }
 
-    #[tracing::instrument(skip(self, create_bytestream_fn))]
+    #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
     async fn put_object(
         &self,
         key: &str,
@@ -431,7 +431,7 @@ impl S3Storage {
             .await
     }
 
-    #[tracing::instrument(skip(self, create_bytestream_fn))]
+    #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
     pub(super) async fn oneshot_upload(
         &self,
         key: &str,
@@ -473,7 +473,7 @@ impl S3Storage {
         Ok(resp.e_tag.map(ETag))
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub(super) async fn prepare_multipart_upload(
         &self,
         key: &str,
@@ -509,7 +509,7 @@ impl S3Storage {
         Ok((part_count, size_of_last_part, upload_id))
     }
 
-    #[tracing::instrument(skip(self, create_bytestream_fn))]
+    #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
     pub(super) async fn upload_part(
         &self,
         key: &str,
@@ -552,7 +552,7 @@ impl S3Storage {
             .build())
     }
 
-    #[tracing::instrument(skip(self, upload_parts))]
+    #[tracing::instrument(skip(self, upload_parts), level = "trace")]
     pub(super) async fn finish_multipart_upload(
         &self,
         key: &str,
@@ -623,20 +623,20 @@ impl S3Storage {
             .await
     }
 
-    #[tracing::instrument(skip(self))]
-    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        tracing::debug!(key = %key, "Deleting object from S3");
+    #[tracing::instrument(skip(self), level = "trace")]
+    pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
+        tracing::trace!(key = %key, "Deleting object from S3");
 
-        match self
-            .client
-            .delete_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-        {
+        let req = self.client.delete_object().bucket(&self.bucket).key(key);
+
+        let req = match options.if_match {
+            Some(e_tag) => req.if_match(e_tag.0),
+            None => req,
+        };
+
+        match req.send().await {
             Ok(_) => {
-                tracing::debug!(key = %key, "Successfully deleted object from S3");
+                tracing::trace!(key = %key, "Successfully deleted object from S3");
                 Ok(())
             }
             Err(e) => {
@@ -648,12 +648,12 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object in S3");
         // S3 doesn't have a native rename operation, so we need to copy and delete
         self.copy(src_key, dst_key).await?;
-        match self.delete(src_key).await {
+        match self.delete(src_key, DeleteOptions::default()).await {
             Ok(_) => {
                 tracing::info!(src = %src_key, dst = %dst_key, "Successfully renamed object");
                 Ok(())
@@ -665,7 +665,7 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), level = "trace")]
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         tracing::info!(src = %src_key, dst = %dst_key, "Copying object in S3");
         match self
@@ -685,6 +685,33 @@ impl S3Storage {
                 })
             }
         }
+    }
+
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
+        let mut outs = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .set_max_keys(Some(1000))
+            .prefix(prefix)
+            .into_paginator()
+            .send();
+        let mut paths = vec![];
+        while let Some(result) = outs.next().await {
+            let output = result.map_err(|err| StorageError::Generic {
+                source: Arc::new(err),
+            })?;
+            for object in output.contents() {
+                if let Some(key) = object.key() {
+                    paths.push(key.to_string());
+                } else {
+                    return Err(StorageError::Message {
+                        message: format!("list on prefix {:?} led to empty key", prefix),
+                    });
+                }
+            }
+        }
+        Ok(paths)
     }
 }
 
@@ -1130,5 +1157,33 @@ mod tests {
         storage.copy("test/00", "test2/00").await.unwrap();
         let bytes = storage.get("test2/00").await.unwrap();
         assert_eq!("ABC123XYZ".as_bytes(), bytes.as_slice());
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_list_prefix() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+        for i in 0..16 {
+            storage
+                .oneshot_upload(
+                    &format!("test/{:02x}", i),
+                    0,
+                    |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
+                    PutOptions {
+                        if_not_exists: true,
+                        if_match: None,
+                        priority: StorageRequestPriority::P0,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        let mut results = storage.list_prefix("test/").await.unwrap();
+        results.sort();
+        eprintln!("Results of listing (should be 0x00..0xff inclusive): {results:#?}");
+        assert_eq!(16, results.len());
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(format!("test/{:02x}", i), *result, "index = {}", i);
+        }
     }
 }

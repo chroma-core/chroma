@@ -354,7 +354,7 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 
 	// Validate version file
 	suite.NotNil(collection.VersionFileName)
-	versionFile, err := suite.s3MetaStore.GetVersionFile(collection.VersionFileName)
+	versionFile, err := suite.s3MetaStore.GetVersionFile(context.Background(), collection.VersionFileName)
 	suite.NoError(err)
 	suite.NotNil(versionFile)
 	v0 := versionFile.VersionHistory.Versions[0]
@@ -1566,7 +1566,7 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	// Check version file of forked collection
 	suite.Equal(collection.RootCollectionID, &sourceCreateCollection.ID)
 	suite.NotNil(collection.VersionFileName)
-	versionFile, err := suite.s3MetaStore.GetVersionFile(collection.VersionFileName)
+	versionFile, err := suite.s3MetaStore.GetVersionFile(context.Background(), collection.VersionFileName)
 	suite.NoError(err)
 	suite.NotNil(versionFile)
 	v0 := versionFile.VersionHistory.Versions[0]

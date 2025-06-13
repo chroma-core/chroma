@@ -15,7 +15,7 @@
 export namespace Api {
   export interface AddCollectionRecordsPayload {
     documents?: (string | null)[] | null;
-    embeddings?: number[][] | null;
+    embeddings?: Api.EmbeddingsPayload | null;
     ids: string[];
     metadatas?:
       | ({ [name: string]: boolean | number | number | string } | null)[]
@@ -144,6 +144,8 @@ export namespace Api {
     config: unknown;
     name: string;
   }
+
+  export type EmbeddingsPayload = number[][] | string[];
 
   export interface ErrorResponse {
     error: string;
@@ -345,7 +347,7 @@ export namespace Api {
 
   export interface UpdateCollectionRecordsPayload {
     documents?: (string | null)[] | null;
-    embeddings?: (number[] | null)[] | null;
+    embeddings?: Api.UpdateEmbeddingsPayload | null;
     ids: string[];
     metadatas?:
       | ({ [name: string]: boolean | number | number | string } | null)[]
@@ -356,6 +358,8 @@ export namespace Api {
   export interface UpdateCollectionRecordsResponse {}
 
   export interface UpdateCollectionResponse {}
+
+  export type UpdateEmbeddingsPayload = (number[] | null)[] | (string | null)[];
 
   export interface UpdateHnswConfiguration {
     /**
@@ -397,7 +401,7 @@ export namespace Api {
 
   export interface UpsertCollectionRecordsPayload {
     documents?: (string | null)[] | null;
-    embeddings?: number[][] | null;
+    embeddings?: Api.EmbeddingsPayload | null;
     ids: string[];
     metadatas?:
       | ({ [name: string]: boolean | number | number | string } | null)[]

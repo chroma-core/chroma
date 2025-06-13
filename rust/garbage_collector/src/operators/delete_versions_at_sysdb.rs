@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::Storage;
+use chroma_storage::{DeleteOptions, Storage};
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
@@ -89,7 +89,7 @@ impl DeleteVersionsAtSysDbOperator {
             let path = file_path.clone();
             futures.push(async move {
                 storage
-                    .delete(&path)
+                    .delete(&path, DeleteOptions::default())
                     .await
                     .map_err(|e| (path, e.to_string()))
             });
