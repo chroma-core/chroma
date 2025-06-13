@@ -186,6 +186,7 @@ export namespace Api {
 
   export interface GetTenantResponse {
     name: string;
+    resource_name?: string | null;
   }
 
   export interface GetUserIdentityResponse {
@@ -398,6 +399,12 @@ export namespace Api {
      */
     sync_threshold?: number | null;
   }
+
+  export interface UpdateTenantPayload {
+    resource_name: string;
+  }
+
+  export interface UpdateTenantResponse {}
 
   export interface UpsertCollectionRecordsPayload {
     documents?: (string | null)[] | null;

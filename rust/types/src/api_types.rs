@@ -243,6 +243,7 @@ impl GetTenantRequest {
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
+    pub resource_name: Option<String>,
 }
 
 #[cfg(feature = "pyo3")]
@@ -251,6 +252,11 @@ impl GetTenantResponse {
     #[getter]
     pub fn name(&self) -> &String {
         &self.name
+    }
+
+    #[getter]
+    pub fn resource_name(&self) -> Option<String> {
+        self.resource_name.clone()
     }
 }
 
@@ -267,6 +273,55 @@ impl ChromaError for GetTenantError {
         match self {
             GetTenantError::Internal(err) => err.code(),
             GetTenantError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
+#[non_exhaustive]
+#[derive(Validate, Serialize, ToSchema)]
+pub struct UpdateTenantRequest {
+    pub tenant_id: String,
+    pub resource_name: String,
+}
+
+impl UpdateTenantRequest {
+    pub fn try_new(
+        tenant_id: String,
+        resource_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            resource_name,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct UpdateTenantResponse {}
+
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl UpdateTenantResponse {}
+
+#[derive(Error, Debug)]
+pub enum UpdateTenantError {
+    #[error("Failed to set resource name")]
+    FailedToSetResourceName(#[from] tonic::Status),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Tenant [{0}] not found")]
+    NotFound(String),
+}
+
+impl ChromaError for UpdateTenantError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            UpdateTenantError::FailedToSetResourceName(_) => ErrorCodes::AlreadyExists,
+            UpdateTenantError::Internal(err) => err.code(),
+            UpdateTenantError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }
