@@ -1579,6 +1579,7 @@ dependencies = [
  "itertools 0.13.0",
  "opentelemetry",
  "parking_lot",
+ "parquet",
  "proptest",
  "rand 0.8.5",
  "rayon",
@@ -4072,6 +4073,7 @@ dependencies = [
  "console",
  "number_prefix",
  "portable-atomic",
+ "rayon",
  "unicode-width 0.2.0",
  "web-time",
 ]
