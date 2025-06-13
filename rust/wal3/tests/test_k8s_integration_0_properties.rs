@@ -95,7 +95,7 @@ proptest::proptest! {
 
 proptest::proptest! {
     #[test]
-    fn manifests_with_snapshots(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1000), snapshot_rollover_threshold in 2..100usize, fragment_rollover_threshold in 2..100usize) {
+    fn test_k8s_integration_manifests_with_snapshots(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1000), snapshot_rollover_threshold in 2..100usize, fragment_rollover_threshold in 2..100usize) {
         let mut manifest = Manifest::new_empty("test");
         let fragments = deltas_to_fragment_sequence(&deltas);
         for fragment in fragments.into_iter() {
@@ -117,7 +117,7 @@ proptest::proptest! {
     })]
 
     #[test]
-    fn manifests_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..75)) {
+    fn test_k8s_integration_manifests_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..75)) {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let storage = rt.block_on(s3_client_for_test_with_new_bucket());
         let throttle = ThrottleOptions::default();
@@ -161,7 +161,7 @@ proptest::proptest! {
     })]
 
     #[test]
-    fn manifests_with_snapshots_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..100), snapshot_rollover_threshold in 2..3usize, fragment_rollover_threshold in 2..3usize) {
+    fn test_k8s_integration_manifests_with_snapshots_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..100), snapshot_rollover_threshold in 2..3usize, fragment_rollover_threshold in 2..3usize) {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let storage = rt.block_on(s3_client_for_test_with_new_bucket());
         let throttle = ThrottleOptions::default();
@@ -213,7 +213,7 @@ proptest::proptest! {
     })]
 
     #[test]
-    fn manifests_with_snapshots_that_collide(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 16..32), snapshot_rollover_threshold in 2..=2usize, fragment_rollover_threshold in 2..=2usize) {
+    fn test_k8s_integration_manifests_with_snapshots_that_collide(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 16..32), snapshot_rollover_threshold in 2..=2usize, fragment_rollover_threshold in 2..=2usize) {
         // NOTE(rescrv):
         // Consider a snapshot tree that gets pruned to:
         // [MANIFEST] -> [SNAP C] -> [SNAP B] -> [SNAP A] -> [ONE FRAG]

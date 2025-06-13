@@ -344,7 +344,7 @@ async fn replace_snapshot_triggers_to_split_case_three_level() {
 }
 
 #[test]
-fn drop_frag() {
+fn test_k8s_integration_drop_frag() {
     let setsum =
         Setsum::from_hexdigest("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
             .unwrap();
