@@ -22,11 +22,19 @@ use crate::{
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
 
 pub fn manifest_path(prefix: &str) -> String {
-    format!("{prefix}/manifest/MANIFEST")
+    format!("{prefix}/{}", unprefixed_manifest_path())
+}
+
+pub fn unprefixed_manifest_path() -> String {
+    "manifest/MANIFEST".to_string()
+}
+
+pub fn snapshot_prefix() -> String {
+    "snapshot/".to_string()
 }
 
 pub fn unprefixed_snapshot_path(setsum: Setsum) -> String {
-    format!("snapshot/SNAPSHOT.{}", setsum.hexdigest())
+    format!("{}SNAPSHOT.{}", snapshot_prefix(), setsum.hexdigest())
 }
 
 pub fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
@@ -868,6 +876,7 @@ mod tests {
             "snapshot/SNAPSHOT.0000000000000000000000000000000000000000000000000000000000000000",
             unprefixed_snapshot_path(Setsum::default())
         );
+        assert_eq!("snapshot/", snapshot_prefix(),);
     }
 
     #[test]

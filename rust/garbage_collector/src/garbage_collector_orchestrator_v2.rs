@@ -841,7 +841,20 @@ impl GarbageCollectorOrchestrator {
             );
 
             for collection_id in ordered_soft_deleted_to_hard_delete_collections {
-                // TODO(rescrv): add wal3 hard delete here.
+                if let Err(err) = wal3::destroy(
+                    Arc::new(self.storage.clone()),
+                    collection_id.storage_prefix_for_log(),
+                )
+                .await
+                {
+                    tracing::error!("could not destroy/hard delete wal3 instance: {err:?}");
+                    // NOTE(rescrv):  The alternative is to have a dead letter queue for this
+                    // collection.  Once hard deleted from sysdb it'll be "impossible" to find the
+                    // garbage later, so leave the soft-deleted state to drive this state machine
+                    // to resolution, probably with operator involvement as this should never
+                    // happen and is tested.
+                    continue;
+                }
                 self.sysdb_client
                     .finish_collection_deletion(
                         self.tenant
