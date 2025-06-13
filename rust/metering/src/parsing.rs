@@ -1,121 +1,18 @@
 use proc_macro2::{Ident, TokenStream};
 use quote::ToTokens;
-use std::fmt;
 use syn::{
     parse::{Parse, ParseStream},
     spanned::Spanned,
 };
 
-use crate::{capabilities::Capability, contexts::Context};
+use crate::{capabilities::Capability, contexts::Context, errors::MeteringMacrosError};
 
-#[derive(Debug)]
-pub enum MeteringMacrosError {
-    SynError(syn::Error),
-
-    InvalidCapabilityAttribute(proc_macro2::Span),
-    MissingCapabilityId(proc_macro2::Span),
-    CapabilityMethodCount(usize, proc_macro2::Span),
-    CapabilityItemNotAMethod(proc_macro2::Span),
-    CapabilityMethodMissingSelf(proc_macro2::Span),
-    CapabilityMethodInvalidArg(proc_macro2::Span),
-
-    InvalidContextAttribute(proc_macro2::Span),
-    ContextMissingCapabilities(proc_macro2::Span),
-    ContextMissingHandlers(proc_macro2::Span),
-    ContextMismatchedHandlers(proc_macro2::Span),
-}
-
-impl fmt::Display for MeteringMacrosError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            MeteringMacrosError::SynError(e) => write!(f, "{}", e),
-
-            MeteringMacrosError::InvalidCapabilityAttribute(_) => {
-                write!(
-                    f,
-                    "The `capability` attribute must be a list, like `#[capability(id = \"...\")]`"
-                )
-            }
-            MeteringMacrosError::MissingCapabilityId(_) => {
-                write!(
-                    f,
-                    "The `capability` attribute is missing the `id = \"...\"` argument"
-                )
-            }
-            MeteringMacrosError::CapabilityMethodCount(count, _) => {
-                write!(
-                    f,
-                    "A capability trait must have exactly one method, but this one has {}",
-                    count
-                )
-            }
-            MeteringMacrosError::CapabilityItemNotAMethod(_) => {
-                write!(f, "The item inside a capability trait must be a method")
-            }
-            MeteringMacrosError::CapabilityMethodMissingSelf(_) => {
-                write!(
-                    f,
-                    "The first parameter of a capability method must be `&self`"
-                )
-            }
-            MeteringMacrosError::CapabilityMethodInvalidArg(_) => {
-                write!(
-                    f,
-                    "A capability method argument could not be parsed correctly"
-                )
-            }
-
-            MeteringMacrosError::InvalidContextAttribute(_) => {
-                write!(
-                    f,
-                    "The `context` attribute must be a list, like `#[context(...)]`"
-                )
-            }
-            MeteringMacrosError::ContextMissingCapabilities(_) => {
-                write!(
-                    f,
-                    "The `context` attribute is missing the `capabilities` argument"
-                )
-            }
-            MeteringMacrosError::ContextMissingHandlers(_) => {
-                write!(
-                    f,
-                    "The `context` attribute is missing the `handlers` argument"
-                )
-            }
-            MeteringMacrosError::ContextMismatchedHandlers(_) => {
-                write!(f, "The `capabilities` and `handlers` arrays must have the same number of elements")
-            }
-        }
-    }
-}
-
-impl MeteringMacrosError {
-    pub fn to_compile_error(&self) -> TokenStream {
-        let message = self.to_string();
-        let span = match self {
-            MeteringMacrosError::SynError(e) => return e.to_compile_error(),
-            MeteringMacrosError::InvalidCapabilityAttribute(s)
-            | MeteringMacrosError::MissingCapabilityId(s)
-            | MeteringMacrosError::CapabilityMethodCount(_, s)
-            | MeteringMacrosError::CapabilityItemNotAMethod(s)
-            | MeteringMacrosError::CapabilityMethodMissingSelf(s)
-            | MeteringMacrosError::CapabilityMethodInvalidArg(s)
-            | MeteringMacrosError::InvalidContextAttribute(s)
-            | MeteringMacrosError::ContextMissingCapabilities(s)
-            | MeteringMacrosError::ContextMissingHandlers(s)
-            | MeteringMacrosError::ContextMismatchedHandlers(s) => *s,
-        };
-        quote::quote_spanned! {span=>
-            compile_error!(#message);
-        }
-    }
-}
-
+/// Represents an item at the root level of the syntax tree.
 struct RootItems {
     items: Vec<syn::Item>,
 }
 
+/// Implementation of [`syn::parse::Parse`] for [`RootItems`].
 impl Parse for RootItems {
     fn parse(input: ParseStream) -> syn::Result<Self> {
         let mut items = Vec::new();
@@ -126,6 +23,9 @@ impl Parse for RootItems {
     }
 }
 
+/// The main entrypoint of the parser that accepts the full input token stream and parses out
+/// vectors of [`crate::capabilities::Capability`], [`crate::contexts::Context`], and
+/// passthrough items.
 pub fn process_token_stream(
     token_stream: &TokenStream,
 ) -> Result<(Vec<Capability>, Vec<Context>, Vec<syn::Item>), MeteringMacrosError> {
@@ -133,7 +33,7 @@ pub fn process_token_stream(
         syn::parse2(token_stream.clone()).map_err(MeteringMacrosError::SynError)?;
     let mut capabilities = Vec::new();
     let mut contexts = Vec::new();
-    let mut passthrough_items = Vec::new();
+    let mut passthroughs = Vec::new();
 
     for item in root_items.items {
         let mut is_processed = false;
@@ -143,35 +43,41 @@ pub fn process_token_stream(
                 let mut clean_trait = item_trait.clone();
                 clean_trait
                     .attrs
-                    .retain(|a| !a.path().is_ident("capability"));
-                passthrough_items.push(syn::Item::Trait(clean_trait));
+                    .retain(|attribute| !attribute.path().is_ident("capability"));
+                passthroughs.push(syn::Item::Trait(clean_trait));
                 is_processed = true;
             }
         } else if let syn::Item::Struct(item_struct) = &item {
             if has_attribute(&item_struct.attrs, "context") {
                 contexts.push(parse_context(item_struct.clone())?);
                 let mut clean_struct = item_struct.clone();
-                clean_struct.attrs.retain(|a| !a.path().is_ident("context"));
-                passthrough_items.push(syn::Item::Struct(clean_struct));
+                clean_struct
+                    .attrs
+                    .retain(|attribute| !attribute.path().is_ident("context"));
+                passthroughs.push(syn::Item::Struct(clean_struct));
                 is_processed = true;
             }
         }
         if !is_processed {
-            passthrough_items.push(item);
+            passthroughs.push(item);
         }
     }
-    Ok((capabilities, contexts, passthrough_items))
+    Ok((capabilities, contexts, passthroughs))
 }
 
-fn has_attribute(attrs: &[syn::Attribute], name: &str) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident(name))
+/// Determines whether a given item's attribute macros contains a specific `target_attribute_name`.
+fn has_attribute(attributes: &[syn::Attribute], target_attribute_name: &str) -> bool {
+    attributes
+        .iter()
+        .any(|attribute| attribute.path().is_ident(target_attribute_name))
 }
 
+/// Helper function to parse an individual capability.
 fn parse_capability(item_trait: syn::ItemTrait) -> Result<Capability, MeteringMacrosError> {
     let attr = item_trait
         .attrs
         .iter()
-        .find(|a| a.path().is_ident("capability"))
+        .find(|attribute| attribute.path().is_ident("capability"))
         .unwrap();
 
     let mut id_string = None;
@@ -187,7 +93,7 @@ fn parse_capability(item_trait: syn::ItemTrait) -> Result<Capability, MeteringMa
                         id_string = Some(s.value());
                         Ok(())
                     } else {
-                        Err(meta.error("capability `id` must be a string literal"))
+                        Err(meta.error("capability `id` must be attribute string literal"))
                     }
                 } else {
                     Err(meta
@@ -251,16 +157,17 @@ fn parse_capability(item_trait: syn::ItemTrait) -> Result<Capability, MeteringMa
             attr.span(),
         ),
         capability_method_name_ident: method.sig.ident.clone(),
-        capability_method_parameters_token_streams: param_tokens,
+        capability_method_parameter_token_streams: param_tokens,
         capability_method_parameter_name_idents: param_names,
     })
 }
 
+/// Helper function to parse an individual context.
 fn parse_context(item_struct: syn::ItemStruct) -> Result<Context, MeteringMacrosError> {
     let attr = item_struct
         .attrs
         .iter()
-        .find(|a| a.path().is_ident("context"))
+        .find(|attribute| attribute.path().is_ident("context"))
         .unwrap();
 
     let mut sub_ids = None;
