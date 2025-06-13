@@ -550,7 +550,7 @@ pub fn fragment_prefix() -> String {
 
 pub fn prefixed_fragment_path(prefix: &str, fragment_seq_no: FragmentSeqNo) -> String {
     format!(
-        "{}{}/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
+        "{}/{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
         prefix,
         fragment_prefix(),
         fragment_seq_no.bucket(),
@@ -572,4 +572,19 @@ pub fn parse_fragment_path(path: &str) -> Option<FragmentSeqNo> {
     let fsn_equals_number = basename.strip_suffix(".parquet")?;
     let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
     u64::from_str_radix(number, 16).ok().map(FragmentSeqNo)
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths() {
+        assert_eq!(
+            "THIS_IS_THE_COLLECTION/log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet",
+            prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentSeqNo(1))
+        );
+    }
 }
