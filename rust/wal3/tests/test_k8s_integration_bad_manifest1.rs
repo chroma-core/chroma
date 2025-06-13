@@ -46,7 +46,7 @@ impl SnapshotCache for MockSnapshotCache {
 }
 
 #[tokio::test]
-async fn test_garbage_new_with_bad_manifest1_offset_9340() {
+async fn test_k8s_integration_garbage_new_with_bad_manifest1_offset_9340() {
     // Load the bad manifest from the JSON file
     let manifest_json = include_str!("bad_manifest1.json");
     let manifest: Manifest = serde_json::from_str(manifest_json).expect("Failed to parse manifest");
