@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
@@ -47,6 +48,7 @@ pub struct LogWriter {
     writer: String,
     mark_dirty: Arc<dyn MarkDirty>,
     inner: Mutex<Option<EpochWriter>>,
+    reopen_protection: tokio::sync::Mutex<()>,
 }
 
 impl LogWriter {
@@ -81,10 +83,12 @@ impl LogWriter {
             writer: once_log_writer,
         };
         let writer = writer.to_string();
+        let reopen_protection = tokio::sync::Mutex::new(());
         Ok(Self {
             writer,
             mark_dirty,
             inner: Mutex::new(Some(inner)),
+            reopen_protection,
         })
     }
 
@@ -125,10 +129,12 @@ impl LogWriter {
             writer: once_log_writer,
         };
         let writer = writer.to_string();
+        let reopen_protection = tokio::sync::Mutex::new(());
         Ok(Self {
             writer,
             mark_dirty,
             inner: Mutex::new(Some(inner)),
+            reopen_protection,
         })
     }
 
@@ -159,7 +165,7 @@ impl LogWriter {
         // race between writers.
         let manifest = Manifest::load(&ThrottleOptions::default(), storage, prefix).await?;
         if manifest.is_some() {
-            return Err(Error::LogContention);
+            return Err(Error::LogContentionFailure);
         }
         // SAFETY(rescrv):  This will only succeed if the file doesn't exist.  Technically the log
         // could be initialized and garbage collected to leave a prefix hole, but our timing
@@ -250,46 +256,12 @@ impl LogWriter {
 
     #[tracing::instrument(skip(self, messages))]
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = { self.inner.lock().unwrap().clone() };
-        if let Some(epoch_writer) = inner {
-            let res = epoch_writer.writer.append(messages.clone()).await;
-            if matches!(res, Err(Error::LogContention)) {
-                loop {
-                    let writer = OnceLogWriter::open(
-                        epoch_writer.writer.options.clone(),
-                        epoch_writer.writer.storage.clone(),
-                        epoch_writer.writer.prefix.clone(),
-                        self.writer.clone(),
-                        Arc::clone(&self.mark_dirty),
-                    )
-                    .await;
-                    let writer = match writer {
-                        Ok(writer) => writer,
-                        Err(Error::LogContention) => continue,
-                        Err(err) => return Err(err),
-                    };
-                    // SAFETY(rescrv):  Mutex poisoning.
-                    let mut inner = self.inner.lock().unwrap();
-                    if let Some(second) = inner.as_mut() {
-                        if second.epoch == epoch_writer.epoch {
-                            second.epoch += 1;
-                            second.writer.shutdown();
-                            second.writer = writer;
-                        }
-                        return Err(Error::LogContention);
-                    } else {
-                        // This should never happen, so just be polite with an error.
-                        return Err(Error::LogClosed);
-                    }
-                }
-            } else {
-                res
-            }
-        } else {
-            // This should never happen, so just be polite with an error.
-            Err(Error::LogClosed)
-        }
+        let once_log_append_many = move |log: &Arc<OnceLogWriter>| {
+            let messages = messages.clone();
+            let log = Arc::clone(log);
+            async move { log.append(messages).await }
+        };
+        self.handle_log_contention(once_log_append_many).await
     }
 
     pub fn reader(&self, options: LogReaderOptions) -> Option<LogReader> {
@@ -326,41 +298,87 @@ impl LogWriter {
     }
 
     pub async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
-        loop {
+        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
+            let options = options.clone();
+            let log = Arc::clone(log);
+            async move { log.garbage_collect(&options).await }
+        };
+        self.handle_log_contention(once_log_garbage_collect).await
+    }
+
+    async fn handle_log_contention<O, F: Future<Output = Result<O, Error>>>(
+        &self,
+        f: impl Fn(&Arc<OnceLogWriter>) -> F,
+    ) -> Result<O, Error> {
+        for _ in 0..3 {
             // SAFETY(rescrv):  Mutex poisoning.
             let inner = { self.inner.lock().unwrap().clone() };
             let Some(epoch_writer) = inner else {
                 // This should never happen, so just be polite with an error.
                 return Err(Error::LogClosed);
             };
-            match epoch_writer.writer.garbage_collect(options).await {
-                Ok(()) => return Ok(()),
-                Err(Error::LogContention) => {
-                    let writer = OnceLogWriter::open(
-                        epoch_writer.writer.options.clone(),
-                        epoch_writer.writer.storage.clone(),
-                        epoch_writer.writer.prefix.clone(),
+            match f(&epoch_writer.writer).await {
+                Ok(out) => {
+                    return Ok(out);
+                }
+                err @ Err(Error::LogContentionDurable) | err @ Err(Error::LogContentionFailure) => {
+                    self.reopen(
+                        &epoch_writer,
                         self.writer.clone(),
                         Arc::clone(&self.mark_dirty),
                     )
                     .await?;
-                    // SAFETY(rescrv):  Mutex poisoning.
-                    let mut inner = self.inner.lock().unwrap();
-                    if let Some(second) = inner.as_mut() {
-                        if second.epoch == epoch_writer.epoch {
-                            second.epoch += 1;
-                            second.writer.shutdown();
-                            second.writer = writer;
-                        }
-                        // fall through the loop to retry.
-                    } else {
-                        // This should never happen, so just be polite with an error.
-                        return Err(Error::LogClosed);
-                    }
+                    return err;
+                }
+                Err(Error::LogContentionRetry) => {
+                    self.reopen(
+                        &epoch_writer,
+                        self.writer.clone(),
+                        Arc::clone(&self.mark_dirty),
+                    )
+                    .await?;
                 }
                 Err(err) => {
                     return Err(err);
                 }
+            }
+        }
+        Err(Error::LogContentionFailure)
+    }
+
+    async fn reopen(
+        &self,
+        epoch_writer: &EpochWriter,
+        writer: String,
+        mark_dirty: Arc<dyn MarkDirty>,
+    ) -> Result<(), Error> {
+        loop {
+            let _guard = self.reopen_protection.lock().await;
+            let writer = match OnceLogWriter::open(
+                epoch_writer.writer.options.clone(),
+                epoch_writer.writer.storage.clone(),
+                epoch_writer.writer.prefix.clone(),
+                writer.clone(),
+                Arc::clone(&mark_dirty),
+            )
+            .await
+            {
+                Ok(writer) => writer,
+                Err(Error::LogContentionRetry) => continue,
+                Err(err) => return Err(err),
+            };
+            // SAFETY(rescrv):  Mutex poisoning.
+            let mut inner = self.inner.lock().unwrap();
+            if let Some(second) = inner.as_mut() {
+                if second.epoch == epoch_writer.epoch {
+                    second.epoch += 1;
+                    second.writer.shutdown();
+                    second.writer = writer;
+                }
+                return Ok(());
+            } else {
+                // This should never happen, so just be polite with an error.
+                return Err(Error::LogClosed);
             }
         }
     }
@@ -412,7 +430,7 @@ impl OnceLogWriter {
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         let batch_manager = BatchManager::new(options.throttle_fragment).ok_or(Error::Internal)?;
-        let manifest_manager = ManifestManager::new(
+        let mut manifest_manager = ManifestManager::new(
             options.throttle_manifest,
             options.snapshot_manifest,
             Arc::clone(&storage),
@@ -591,12 +609,12 @@ impl OnceLogWriter {
             .await
         {
             Ok(e_tag) => (garbage, e_tag),
-            Err(Error::LogContention) => {
+            Err(Error::LogContentionRetry) => {
                 match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
                     .await
                 {
                     Ok(Some((garbage, e_tag))) => (garbage, e_tag),
-                    Ok(None) => return Err(Error::LogContention),
+                    Ok(None) => return Err(Error::LogContentionFailure),
                     Err(err) => {
                         return Err(err);
                     }
@@ -678,7 +696,7 @@ impl OnceLogWriter {
         for cursor_name in cursors.list().await? {
             let witness = cursors.load(&cursor_name).await?;
             let Some(cursor) = witness.map(|w| w.1) else {
-                return Err(Error::LogContention);
+                return Err(Error::LogContentionFailure);
             };
             if cursor.position <= collect_up_to.unwrap_or(cursor.position) {
                 collect_up_to = Some(cursor.position);
@@ -777,7 +795,7 @@ pub async fn upload_parquet(
                 return Ok((unprefixed_path, setsum, buffer.len()));
             }
             Err(StorageError::Precondition { path: _, source: _ }) => {
-                return Err(Error::LogContention);
+                return Err(Error::LogContentionRetry);
             }
             Err(err) => {
                 if start.elapsed() > Duration::from_secs(60) {
