@@ -212,6 +212,23 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	return res, nil
 }
 
+func (s *Server) GetCollectionByResourceName(ctx context.Context, req *coordinatorpb.GetCollectionByResourceNameRequest) (*coordinatorpb.GetCollectionResponse, error) {
+	tenantResourceName := req.TenantResourceName
+	databaseName := req.Database
+	collectionName := req.Name
+
+	res := &coordinatorpb.GetCollectionResponse{}
+
+	collection, err := s.coordinator.GetCollectionByResourceName(ctx, tenantResourceName, databaseName, collectionName)
+	if err != nil {
+		log.Error("GetCollectionByResourceName failed. ", zap.Error(err), zap.String("tenant_resource_name", tenantResourceName), zap.String("database_name", databaseName), zap.String("collection_name", collectionName))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	res.Collection = convertCollectionToProto(collection)
+	return res, nil
+}
+
 func (s *Server) CountCollections(ctx context.Context, req *coordinatorpb.CountCollectionsRequest) (*coordinatorpb.CountCollectionsResponse, error) {
 	res := &coordinatorpb.CountCollectionsResponse{}
 	collection_count, err := s.coordinator.CountCollections(ctx, req.Tenant, req.Database)

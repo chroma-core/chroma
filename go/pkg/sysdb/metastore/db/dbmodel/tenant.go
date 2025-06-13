@@ -28,4 +28,5 @@ type ITenantDb interface {
 	DeleteAll() error
 	UpdateTenantLastCompactionTime(tenantID string, lastCompactionTime int64) error
 	GetTenantsLastCompactionTime(tenantIDs []string) ([]*Tenant, error)
+	SetTenantResourceName(tenantID string, resourceName string) error
 }

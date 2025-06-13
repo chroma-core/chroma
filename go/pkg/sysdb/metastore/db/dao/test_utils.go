@@ -210,3 +210,8 @@ func CleanUpTestCollection(db *gorm.DB, collectionId string) error {
 
 	return nil
 }
+
+func SetTestTenantResourceName(db *gorm.DB, tenantID, resourceName string) error {
+	tenantDb := &tenantDb{db: db}
+	return tenantDb.SetTenantResourceName(tenantID, resourceName)
+}

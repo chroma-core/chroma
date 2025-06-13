@@ -478,6 +478,23 @@ func (tc *Catalog) GetCollections(ctx context.Context, collectionIDs []types.Uni
 	return collections, nil
 }
 
+func (tc *Catalog) GetCollectionByResourceName(ctx context.Context, tenantResourceName string, databaseName string, collectionName string) (*model.Collection, error) {
+	tracer := otel.Tracer
+	if tracer != nil {
+		_, span := tracer.Start(ctx, "Catalog.GetCollectionByResourceName")
+		defer span.End()
+	}
+
+	collectionAndMetadata, err := tc.metaDomain.CollectionDb(ctx).GetCollectionByResourceName(tenantResourceName, databaseName, collectionName)
+	if err != nil {
+		return nil, err
+	}
+	if collectionAndMetadata == nil {
+		return nil, common.ErrCollectionNotFound
+	}
+	return convertCollectionToModel([]*dbmodel.CollectionAndMetadata{collectionAndMetadata})[0], nil
+}
+
 func (tc *Catalog) CountCollections(ctx context.Context, tenantID string, databaseName *string) (uint64, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
@@ -1501,6 +1518,10 @@ func (tc *Catalog) SetTenantLastCompactionTime(ctx context.Context, tenantID str
 func (tc *Catalog) GetTenantsLastCompactionTime(ctx context.Context, tenantIDs []string) ([]*dbmodel.Tenant, error) {
 	tenants, err := tc.metaDomain.TenantDb(ctx).GetTenantsLastCompactionTime(tenantIDs)
 	return tenants, err
+}
+
+func (tc *Catalog) SetTenantResourceName(ctx context.Context, tenantID string, resourceName string) error {
+	return tc.metaDomain.TenantDb(ctx).SetTenantResourceName(tenantID, resourceName)
 }
 
 // ListCollectionVersions lists all versions of a collection that have not been marked for deletion.
