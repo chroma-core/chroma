@@ -11,10 +11,10 @@ use chroma_sqlite::config::{MigrationHash, MigrationMode, SqliteDBConfig};
 
 #[pymodule]
 fn chromadb_rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    pyo3_log::Logger::new(m.py(), pyo3_log::Caching::LoggersAndLevels)?
-        .filter(log::LevelFilter::Info)
-        .install()
-        .expect("Someone installed a logger before us :-(");
+    // pyo3_log::Logger::new(m.py(), pyo3_log::Caching::LoggersAndLevels)?
+    //     .filter(log::LevelFilter::Info)
+    //     .install()
+    //     .expect("Someone installed a logger before us :-(");
 
     m.add_class::<Bindings>()?;
 
