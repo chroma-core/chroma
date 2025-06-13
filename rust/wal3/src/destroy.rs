@@ -154,5 +154,17 @@ pub async fn destroy(storage: Arc<Storage>, prefix: &str) -> Result<(), Error> {
     destroy_dangling_snapshots(&storage, prefix).await?;
     destroy_dangling_fragments(&storage, prefix).await?;
     destroy_manifest(&storage, prefix).await?;
-    Ok(())
+    let possible_files = storage
+        .list_prefix(prefix, GetOptions::default())
+        .await
+        .map_err(Arc::new)?;
+    if possible_files.is_empty() {
+        Ok(())
+    } else {
+        tracing::error!("leftover files in {prefix}");
+        Err(Error::GarbageCollection(format!(
+            "got a file I don't trust: {}",
+            possible_files[0],
+        )))
+    }
 }

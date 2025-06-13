@@ -843,7 +843,7 @@ impl GarbageCollectorOrchestrator {
             for collection_id in ordered_soft_deleted_to_hard_delete_collections {
                 if let Err(err) = wal3::destroy(
                     Arc::new(self.storage.clone()),
-                    collection_id.storage_prefix_for_log(),
+                    &collection_id.storage_prefix_for_log(),
                 )
                 .await
                 {
