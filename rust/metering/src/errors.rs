@@ -7,15 +7,14 @@ use proc_macro2::TokenStream;
 #[derive(Debug)]
 pub enum MeteringMacrosError {
     SynError(syn::Error),
-
+    // Capability-related errors
     InvalidCapabilityAttribute(proc_macro2::Span),
-    MissingCapabilityId(proc_macro2::Span),
     CapabilityNotPublic(proc_macro2::Span),
     CapabilityMethodCount(usize, proc_macro2::Span),
     CapabilityItemNotAMethod(proc_macro2::Span),
     CapabilityMethodMissingSelf(proc_macro2::Span),
     CapabilityMethodInvalidArg(proc_macro2::Span),
-
+    // Context-related errors
     InvalidContextAttribute(proc_macro2::Span),
     ContextMissingCapabilities(proc_macro2::Span),
     ContextMissingHandlers(proc_macro2::Span),
@@ -29,16 +28,7 @@ impl fmt::Display for MeteringMacrosError {
             MeteringMacrosError::SynError(error) => write!(formatter, "{}", error),
 
             MeteringMacrosError::InvalidCapabilityAttribute(_) => {
-                write!(
-                    formatter,
-                    "The `capability` attribute must be a list, like `#[capability(id = \"...\")]`"
-                )
-            }
-            MeteringMacrosError::MissingCapabilityId(_) => {
-                write!(
-                    formatter,
-                    "The `capability` attribute is missing the `id = \"...\"` argument"
-                )
+                write!(formatter, "The `capability` attribute should have no arguments, like `#[capability]`, not `#[capability(...)]`")
             }
             MeteringMacrosError::CapabilityNotPublic(_) => {
                 write!(formatter, "A capability trait must be declared as `pub`")
@@ -101,7 +91,6 @@ impl MeteringMacrosError {
         let span = match self {
             MeteringMacrosError::SynError(error) => return error.to_compile_error(),
             MeteringMacrosError::InvalidCapabilityAttribute(span)
-            | MeteringMacrosError::MissingCapabilityId(span)
             | MeteringMacrosError::CapabilityNotPublic(span)
             | MeteringMacrosError::CapabilityMethodCount(_, span)
             | MeteringMacrosError::CapabilityItemNotAMethod(span)

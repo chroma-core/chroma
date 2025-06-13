@@ -20,12 +20,12 @@ mod metering {
     use super::initialize_metering;
 
     initialize_metering! {
-        #[capability(id = "test_capability")]
+        #[capability]
         pub trait TestCapability {
             fn test_capability(&self, increment_num: u64);
         }
 
-        #[context(capabilities = ["test_capability"], handlers = [test_handler_a])]
+        #[context(capabilities = [TestCapability], handlers = [test_handler_a])]
         #[derive(Debug, Clone)]
         pub struct TestContextA {
             pub test_annotated_field: Arc<AtomicU64>
@@ -39,7 +39,7 @@ mod metering {
             }
         }
 
-        #[context(capabilities = ["test_capability"], handlers = [test_handler_b])]
+        #[context(capabilities = [TestCapability], handlers = [test_handler_b])]
         #[derive(Debug, Clone)]
         pub struct TestContextB {
             pub test_annotated_field: Arc<AtomicU64>

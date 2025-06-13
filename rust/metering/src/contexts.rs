@@ -9,7 +9,7 @@ use crate::capabilities::Capability;
 #[derive(Debug)]
 pub struct Context {
     pub context_name_ident: Ident,
-    pub context_capability_id_strings_to_handler_idents: HashMap<String, Ident>,
+    pub context_capability_name_idents_to_handler_idents: HashMap<Ident, Ident>,
 }
 
 /// Generates the implementations of a context's capabilities and the corresponding marker
@@ -34,23 +34,22 @@ pub struct Context {
 /// ```
 pub fn generate_capability_implementations_for_context(
     context: &Context,
-    capability_id_to_capability: &HashMap<String, Capability>,
+    capability_name_to_capability: &HashMap<Ident, Capability>,
 ) -> TokenStream {
     let context_name_ident = &context.context_name_ident;
 
     let capability_implementations_for_context = context
-        .context_capability_id_strings_to_handler_idents
+        .context_capability_name_idents_to_handler_idents
         .iter()
-        .map(|(capability_id_string, handler_ident)| {
+        .map(|(capability_name_ident, handler_ident)| {
             let Capability {
-                capability_name_ident,
                 capability_method_name_ident,
                 capability_method_parameter_token_streams,
                 capability_method_parameter_name_idents,
                 ..
-            } = capability_id_to_capability
-            .get(capability_id_string)
-            .expect(&format!("No capability found with ID {}", capability_id_string));
+            } = capability_name_to_capability
+            .get(capability_name_ident)
+            .expect(&format!("No capability found with ID {}", capability_name_ident));
 
             quote! {
                 impl #capability_name_ident for #context_name_ident {
@@ -62,14 +61,14 @@ pub fn generate_capability_implementations_for_context(
         });
 
     let capability_marker_method_overrides_for_context = context
-        .context_capability_id_strings_to_handler_idents
+        .context_capability_name_idents_to_handler_idents
         .keys()
         .map(|capability_id_string| {
             let Capability {
                 capability_name_ident,
                 capability_marker_method_name_ident,
                 ..
-            } = capability_id_to_capability
+            } = capability_name_to_capability
             .get(capability_id_string)
             .expect(&format!("No capability found with ID {}", capability_id_string));
 

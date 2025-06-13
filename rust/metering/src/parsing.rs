@@ -79,7 +79,11 @@ fn parse_capability(item_trait: syn::ItemTrait) -> Result<Capability, MeteringMa
         .attrs
         .iter()
         .find(|attribute| attribute.path().is_ident("capability"))
-        .unwrap();
+        .ok_or_else(|| MeteringMacrosError::InvalidCapabilityAttribute(item_trait.span()))?;
+
+    if !matches!(attr.meta, syn::Meta::Path(_)) {
+        return Err(MeteringMacrosError::InvalidCapabilityAttribute(attr.span()));
+    }
 
     match &item_trait.vis {
         syn::Visibility::Public(_) => {}
@@ -89,34 +93,6 @@ fn parse_capability(item_trait: syn::ItemTrait) -> Result<Capability, MeteringMa
             ));
         }
     }
-
-    let mut id_string = None;
-    if let syn::Meta::List(meta_list) = &attr.meta {
-        meta_list
-            .parse_nested_meta(|meta| {
-                if meta.path.is_ident("id") {
-                    if let syn::Expr::Lit(syn::ExprLit {
-                        lit: syn::Lit::Str(s),
-                        ..
-                    }) = meta.value()?.parse()?
-                    {
-                        id_string = Some(s.value());
-                        Ok(())
-                    } else {
-                        Err(meta.error("capability `id` must be attribute string literal"))
-                    }
-                } else {
-                    Err(meta
-                        .error("unrecognized key for capability attribute, only `id` is supported"))
-                }
-            })
-            .map_err(MeteringMacrosError::SynError)?;
-    } else {
-        return Err(MeteringMacrosError::InvalidCapabilityAttribute(attr.span()));
-    }
-
-    let id_string =
-        id_string.ok_or_else(|| MeteringMacrosError::MissingCapabilityId(attr.span()))?;
 
     if item_trait.items.len() != 1 {
         return Err(MeteringMacrosError::CapabilityMethodCount(
@@ -160,10 +136,9 @@ fn parse_capability(item_trait: syn::ItemTrait) -> Result<Capability, MeteringMa
     }
 
     Ok(Capability {
-        capability_id_string: id_string.clone(),
-        capability_name_ident: item_trait.ident,
+        capability_name_ident: item_trait.ident.clone(),
         capability_marker_method_name_ident: Ident::new(
-            &format!("__marker_{}", id_string),
+            &format!("__marker_{}", item_trait.ident.to_string()),
             attr.span(),
         ),
         capability_method_name_ident: method.sig.ident.clone(),
@@ -179,76 +154,69 @@ fn parse_context(item_struct: syn::ItemStruct) -> Result<Context, MeteringMacros
         .attrs
         .iter()
         .find(|attribute| attribute.path().is_ident("context"))
-        .unwrap();
+        .ok_or_else(|| MeteringMacrosError::InvalidContextAttribute(item_struct.span()))?;
 
-    let mut sub_ids = None;
+    let mut cap_idents = None;
     let mut handlers = None;
     if let syn::Meta::List(meta_list) = &attr.meta {
-        meta_list
-            .parse_nested_meta(|meta| {
+        meta_list.parse_nested_meta(|meta| {
                 if meta.path.is_ident("capabilities") {
-                    let value = meta.value()?;
-                    if let syn::Expr::Array(arr) = value.parse()? {
-                        let mut ids = Vec::new();
-                        for elem in arr.elems {
-                            if let syn::Expr::Lit(syn::ExprLit {
-                                lit: syn::Lit::Str(s),
-                                ..
-                            }) = elem
-                            {
-                                ids.push(s.value());
-                            } else {
-                                return Err(meta
-                                    .error("`capabilities` must be an array of string literals"));
-                            }
-                        }
-                        sub_ids = Some(ids);
-                    } else {
+                     let value = meta.value()?;
+                     if let syn::Expr::Array(arr) = value.parse()? {
+                         let mut idents = Vec::new();
+                         for elem in arr.elems {
+                             if let syn::Expr::Path(p) = elem {
+                                 if let Some(ident) = p.path.get_ident() {
+                                     idents.push(ident.clone()); // Store the trait ident directly
+                                 } else {
+                                    return Err(meta.error("`capabilities` must be an array of simple trait identifiers"));
+                                 }
+                             } else {
+                                 return Err(meta.error("`capabilities` must be an array of trait identifiers"));
+                             }
+                         }
+                         cap_idents = Some(idents);
+                     } else {
                         return Err(meta.error("`capabilities` must be an array literal `[...]`"));
-                    }
+                     }
                 } else if meta.path.is_ident("handlers") {
-                    let value = meta.value()?;
-                    if let syn::Expr::Array(arr) = value.parse()? {
-                        let mut h = Vec::new();
-                        for elem in arr.elems {
-                            if let syn::Expr::Path(p) = elem {
-                                if let Some(ident) = p.path.get_ident() {
-                                    h.push(ident.clone());
-                                } else {
-                                    return Err(meta.error(
-                                        "`handlers` must be an array of simple identifiers",
-                                    ));
-                                }
-                            } else {
-                                return Err(
-                                    meta.error("`handlers` must be an array of identifiers")
-                                );
-                            }
-                        }
-                        handlers = Some(h);
-                    } else {
+                     let value = meta.value()?;
+                     if let syn::Expr::Array(arr) = value.parse()? {
+                         let mut h = Vec::new();
+                         for elem in arr.elems {
+                             if let syn::Expr::Path(p) = elem {
+                                 if let Some(ident) = p.path.get_ident() {
+                                     h.push(ident.clone());
+                                 } else {
+                                    return Err(meta.error("`handlers` must be an array of simple identifiers"));
+                                 }
+                             } else {
+                                return Err(meta.error("`handlers` must be an array of identifiers"));
+                             }
+                         }
+                         handlers = Some(h);
+                     } else {
                         return Err(meta.error("`handlers` must be an array literal `[...]`"));
-                    }
+                     }
                 }
                 Ok(())
-            })
-            .map_err(MeteringMacrosError::SynError)?;
+            }).map_err(MeteringMacrosError::SynError)?;
     } else {
         return Err(MeteringMacrosError::InvalidContextAttribute(attr.span()));
     }
 
-    let sub_ids =
-        sub_ids.ok_or_else(|| MeteringMacrosError::ContextMissingCapabilities(attr.span()))?;
+    let cap_idents =
+        cap_idents.ok_or_else(|| MeteringMacrosError::ContextMissingCapabilities(attr.span()))?;
     let handlers =
         handlers.ok_or_else(|| MeteringMacrosError::ContextMissingHandlers(attr.span()))?;
 
-    if sub_ids.len() != handlers.len() {
+    if cap_idents.len() != handlers.len() {
         return Err(MeteringMacrosError::ContextMismatchedHandlers(attr.span()));
     }
 
     Ok(Context {
         context_name_ident: item_struct.ident,
-        context_capability_id_strings_to_handler_idents: sub_ids
+        context_capability_name_idents_to_handler_idents: cap_idents
             .into_iter()
             .zip(handlers.into_iter())
             .collect(),

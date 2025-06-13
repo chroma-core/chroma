@@ -2,7 +2,7 @@ extern crate proc_macro;
 
 use std::collections::HashMap;
 
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 
 use crate::{
@@ -31,9 +31,9 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
         Err(error) => return proc_macro::TokenStream::from(error.to_compile_error()),
     };
 
-    let capability_id_to_capability: HashMap<String, Capability> = capabilities
+    let capability_names_to_capabilities: HashMap<Ident, Capability> = capabilities
         .iter()
-        .map(|s| (s.capability_id_string.clone(), s.clone()))
+        .map(|capability| (capability.capability_name_ident.clone(), capability.clone()))
         .collect();
 
     let capability_marker_method_definitions: Vec<TokenStream> = capabilities
@@ -44,7 +44,10 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
     let capability_implementations_for_contexts: Vec<TokenStream> = contexts
         .iter()
         .map(|context| {
-            generate_capability_implementations_for_context(context, &capability_id_to_capability)
+            generate_capability_implementations_for_context(
+                context,
+                &capability_names_to_capabilities,
+            )
         })
         .collect();
 
