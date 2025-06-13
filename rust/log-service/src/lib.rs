@@ -1331,7 +1331,9 @@ impl LogServer {
                     });
                 }
             }
-            if !records.is_empty() && records[0].log_offset != pull_logs.start_from_offset {
+            if records.len() != pull_logs.batch_size as usize
+                || records[0].log_offset != pull_logs.start_from_offset
+            {
                 return Err(Status::not_found("Some entries have been purged"));
             }
             tracing::info!("pulled {} records", records.len());
