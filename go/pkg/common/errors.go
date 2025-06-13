@@ -8,6 +8,7 @@ var (
 	// Tenant errors
 	ErrTenantNotFound                  = errors.New("tenant not found")
 	ErrTenantUniqueConstraintViolation = errors.New("tenant unique constraint violation")
+	ErrTenantResourceNameAlreadySet    = errors.New("tenant resource name is already set")
 
 	// Database errors
 	ErrDatabaseNotFound                  = errors.New("database not found")

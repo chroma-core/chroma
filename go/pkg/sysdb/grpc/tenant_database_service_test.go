@@ -185,6 +185,74 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_DeleteDatabase() {
 	suite.Equal(0, len(databases))
 }
 
+func (suite *TenantDatabaseServiceTestSuite) TestServer_SetTenantResourceName() {
+	log.Info("TestServer_SetTenantResourceName")
+	tenantId := "TestSetTenantResourceName"
+	resourceName := "test-resource-name"
+
+	_, err := suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
+		Name: tenantId,
+		Ts:   time.Now().Unix(),
+	}, time.Now().Unix())
+	suite.NoError(err)
+
+	request := &coordinatorpb.SetTenantResourceNameRequest{
+		Id:           tenantId,
+		ResourceName: resourceName,
+	}
+	_, err = suite.s.SetTenantResourceName(context.Background(), request)
+	suite.NoError(err)
+
+	var tenant dbmodel.Tenant
+	err = suite.db.Where("id = ?", tenantId).First(&tenant).Error
+	suite.NoError(err)
+	suite.Equal(resourceName, *tenant.ResourceName)
+
+	err = dao.CleanUpTestTenant(suite.db, tenantId)
+	suite.NoError(err)
+}
+
+func (suite *TenantDatabaseServiceTestSuite) TestServer_GetTenant() {
+	log.Info("TestServer_GetTenant")
+	tenantId := "TestGetTenant"
+	resourceName := "test-resource-name"
+
+	_, err := suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
+		Name: tenantId,
+		Ts:   time.Now().Unix(),
+	}, time.Now().Unix())
+	suite.NoError(err)
+
+	response, err := suite.s.GetTenant(context.Background(), &coordinatorpb.GetTenantRequest{
+		Name: tenantId,
+	})
+	suite.NoError(err)
+	suite.Equal(tenantId, response.Tenant.Name)
+	suite.Nil(response.Tenant.ResourceName)
+
+	_, err = suite.s.SetTenantResourceName(context.Background(), &coordinatorpb.SetTenantResourceNameRequest{
+		Id:           tenantId,
+		ResourceName: resourceName,
+	})
+	suite.NoError(err)
+
+	response, err = suite.s.GetTenant(context.Background(), &coordinatorpb.GetTenantRequest{
+		Name: tenantId,
+	})
+	suite.NoError(err)
+	suite.Equal(tenantId, response.Tenant.Name)
+	suite.Equal(resourceName, *response.Tenant.ResourceName)
+
+	_, err = suite.s.GetTenant(context.Background(), &coordinatorpb.GetTenantRequest{
+		Name: "NonExistentTenant",
+	})
+	suite.Error(err)
+	suite.Equal(codes.NotFound, status.Code(err))
+
+	err = dao.CleanUpTestTenant(suite.db, tenantId)
+	suite.NoError(err)
+}
+
 func TestTenantDatabaseServiceTestSuite(t *testing.T) {
 	testSuite := new(TenantDatabaseServiceTestSuite)
 	suite.Run(t, testSuite)
