@@ -171,10 +171,10 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
             })
         }
 
-        /// A trait that allows futures to be `metered`, similar to how `tracing` enables futures to be
-        /// `instrumented`
+        /// A trait that allows futures to be metered, similar to how `tracing` enables futures to be
+        /// instrumented
         pub trait MeteredFutureExt: ::std::future::Future + Sized {
-            fn metered(self, metering_context_container: MeteringContextContainer) -> MeteredFuture<Self> {
+            fn meter(self, metering_context_container: MeteringContextContainer) -> MeteredFuture<Self> {
                 MeteredFuture {
                     inner_future: self,
                     metering_context_container,

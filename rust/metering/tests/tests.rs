@@ -135,7 +135,7 @@ async fn test_single_metering_context() {
     let metering_context_container =
         metering::create::<metering::TestContextA>(metering::TestContextA::default());
 
-    // Enter the metering context (required if not using `.metered` on a future)
+    // Enter the metering context (required if not using `.meter` on a future)
     metering_context_container.enter();
 
     // Set the value of `test_annotated_field` to "value"
@@ -167,7 +167,7 @@ fn test_close_nonexistent_context_type() {
     let metering_context_container =
         metering::create::<metering::TestContextA>(metering::TestContextA::default());
 
-    // Enter the metering context (required if not using `.metered` on a future)
+    // Enter the metering context (required if not using `.meter` on a future)
     metering_context_container.enter();
 
     // Set the value of `test_annotated_field` to "value"
@@ -207,7 +207,7 @@ fn test_nested_mutation() {
     let metering_context_container =
         metering::create::<metering::TestContextA>(metering::TestContextA::default());
 
-    // Enter the metering context (required if not using `.metered` on a future)
+    // Enter the metering context (required if not using `.meter` on a future)
     metering_context_container.enter();
 
     // Call the helper function
@@ -243,7 +243,7 @@ async fn test_nested_async_context_single_thread() {
     let metering_context_container =
         metering::create::<metering::TestContextA>(metering::TestContextA::default());
 
-    // Enter the metering context (required if not using `.metered` on a future)
+    // Enter the metering context (required if not using `.meter` on a future)
     metering_context_container.enter();
 
     // Call the helper function
@@ -285,7 +285,7 @@ async fn test_nested_mutation_multi_thread() {
 
         // Call the helper function in another process, passing the context through `metered`
         let handle = tokio::spawn(async move {
-            async_helper_fn().metered(current).await;
+            async_helper_fn().meter(current).await;
         });
 
         // Wait for the handle to resolve
@@ -307,7 +307,7 @@ async fn test_nested_mutation_multi_thread() {
         let expected_error = metering::close::<metering::TestContextA>();
         assert!(expected_error.is_err())
     })
-    .metered(metering_context_container.clone())
+    .meter(metering_context_container.clone())
     .await;
 
     println!("current: {:?}", metering::get_current());
@@ -328,7 +328,7 @@ async fn test_nested_mutation_then_close_multi_thread() {
 
     // Call the helper function in another process, passing the context through `metered`
     let handle = tokio::spawn(async move {
-        async_helper_fn().metered(metering_context_container).await;
+        async_helper_fn().meter(metering_context_container).await;
     });
 
     // Wait for the handle to resolve. The metering context should be cleared
