@@ -1104,16 +1104,16 @@ impl LogServer {
                 messages.push(buf);
             }
             let record_count = messages.len() as i32;
-            log.append_many(messages).await.map_err(|err| {
-                if let wal3::Error::Backoff = err {
-                    Status::new(
+            match log.append_many(messages).await {
+                Ok(_) | Err(wal3::Error::LogContentionDurable) => {}
+                Err(err @ wal3::Error::Backoff) => {
+                    return Err(Status::new(
                         chroma_error::ErrorCodes::Unavailable.into(),
                         err.to_string(),
-                    )
-                } else {
-                    Status::new(err.code().into(), err.to_string())
+                    ));
                 }
-            })?;
+                Err(err) => return Err(Status::new(err.code().into(), err.to_string())),
+            };
             if let Some(cache) = self.cache.as_ref() {
                 let cache_key = cache_key_for_manifest(collection_id);
                 if let Some(manifest) = log.manifest() {
