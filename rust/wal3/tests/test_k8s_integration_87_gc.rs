@@ -86,7 +86,7 @@ fn create_snapshot_for_split_test() -> (SnapshotPointer, Snapshot, MockSnapshotC
 }
 
 #[tokio::test]
-async fn replace_snapshot_triggers_to_split_case_one_level() {
+async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_one_level() {
     // Set up test data that will trigger the to_split case
     let (nested_ptr, _, cache) = create_snapshot_for_split_test();
 
@@ -188,7 +188,7 @@ fn create_nested_snapshot_for_split_test(
 }
 
 #[tokio::test]
-async fn replace_snapshot_triggers_to_split_case_two_level() {
+async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level() {
     // Set up test data that will trigger the to_split case
     let (parent_ptr, _parent_snapshot, cache) = create_nested_snapshot_for_split_test(1);
 
@@ -266,7 +266,7 @@ async fn replace_snapshot_triggers_to_split_case_two_level() {
 }
 
 #[tokio::test]
-async fn replace_snapshot_triggers_to_split_case_three_level() {
+async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_level() {
     // Set up test data that will trigger the to_split case
     let (parent_ptr, _parent_snapshot, cache) = create_nested_snapshot_for_split_test(2);
 
@@ -344,7 +344,7 @@ async fn replace_snapshot_triggers_to_split_case_three_level() {
 }
 
 #[test]
-fn test_k8s_integration_drop_frag() {
+fn test_k8s_integration_test_k8s_integration_drop_frag() {
     let setsum =
         Setsum::from_hexdigest("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
             .unwrap();
@@ -371,7 +371,7 @@ fn test_k8s_integration_drop_frag() {
 }
 
 #[tokio::test]
-async fn drop_snapshot() {
+async fn test_k8s_integration_drop_snapshot() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let cache = MockSnapshotCache::default();
 
@@ -448,7 +448,7 @@ async fn drop_snapshot() {
 }
 
 #[tokio::test]
-async fn replace_snapshot_flat() {
+async fn test_k8s_integration_replace_snapshot_flat() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let cache = MockSnapshotCache::default();
 
@@ -522,7 +522,7 @@ async fn replace_snapshot_flat() {
 }
 
 #[tokio::test]
-async fn replace_snapshot_drops_snapshots_prior_to_cutoff() {
+async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let cache = MockSnapshotCache::default();
 
@@ -630,7 +630,7 @@ async fn replace_snapshot_drops_snapshots_prior_to_cutoff() {
 }
 
 #[tokio::test]
-async fn replace_snapshot_drops_fragments_prior_to_cutoff() {
+async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let cache = MockSnapshotCache::default();
 
@@ -703,7 +703,7 @@ async fn replace_snapshot_drops_fragments_prior_to_cutoff() {
 }
 
 #[tokio::test]
-async fn replace_snapshot_two_levels_rightmost_leaf() {
+async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let cache = MockSnapshotCache::default();
 
