@@ -10,6 +10,7 @@ pub enum MeteringMacrosError {
 
     InvalidCapabilityAttribute(proc_macro2::Span),
     MissingCapabilityId(proc_macro2::Span),
+    CapabilityNotPublic(proc_macro2::Span),
     CapabilityMethodCount(usize, proc_macro2::Span),
     CapabilityItemNotAMethod(proc_macro2::Span),
     CapabilityMethodMissingSelf(proc_macro2::Span),
@@ -38,6 +39,9 @@ impl fmt::Display for MeteringMacrosError {
                     formatter,
                     "The `capability` attribute is missing the `id = \"...\"` argument"
                 )
+            }
+            MeteringMacrosError::CapabilityNotPublic(_) => {
+                write!(formatter, "A capability trait must be declared as `pub`")
             }
             MeteringMacrosError::CapabilityMethodCount(count, _) => {
                 write!(
@@ -98,6 +102,7 @@ impl MeteringMacrosError {
             MeteringMacrosError::SynError(error) => return error.to_compile_error(),
             MeteringMacrosError::InvalidCapabilityAttribute(span)
             | MeteringMacrosError::MissingCapabilityId(span)
+            | MeteringMacrosError::CapabilityNotPublic(span)
             | MeteringMacrosError::CapabilityMethodCount(_, span)
             | MeteringMacrosError::CapabilityItemNotAMethod(span)
             | MeteringMacrosError::CapabilityMethodMissingSelf(span)

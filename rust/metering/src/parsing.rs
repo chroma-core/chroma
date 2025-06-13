@@ -74,11 +74,21 @@ fn has_attribute(attributes: &[syn::Attribute], target_attribute_name: &str) -> 
 
 /// Helper function to parse an individual capability.
 fn parse_capability(item_trait: syn::ItemTrait) -> Result<Capability, MeteringMacrosError> {
+    // NOTE(c-gamble): Unwrap is safe due to `has_attribute` check in caller.
     let attr = item_trait
         .attrs
         .iter()
         .find(|attribute| attribute.path().is_ident("capability"))
         .unwrap();
+
+    match &item_trait.vis {
+        syn::Visibility::Public(_) => {}
+        _ => {
+            return Err(MeteringMacrosError::CapabilityNotPublic(
+                item_trait.ident.span(),
+            ));
+        }
+    }
 
     let mut id_string = None;
     if let syn::Meta::List(meta_list) = &attr.meta {
@@ -164,6 +174,7 @@ fn parse_capability(item_trait: syn::ItemTrait) -> Result<Capability, MeteringMa
 
 /// Helper function to parse an individual context.
 fn parse_context(item_struct: syn::ItemStruct) -> Result<Context, MeteringMacrosError> {
+    // NOTE(c-gamble): Unwrap is safe due to `has_attribute` check in caller.
     let attr = item_struct
         .attrs
         .iter()
