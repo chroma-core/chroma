@@ -26,5 +26,5 @@ chroma-system = { workspace = true }
 chroma-types = { workspace = true, features = ["pyo3"] }
 chroma-error = { workspace = true, features = ["validator"] }
 chroma-cli = { workspace = true }
-pyo3-log = "0.12.4"
 log = "0.4.27"
+simplelog = "0.12.2"
