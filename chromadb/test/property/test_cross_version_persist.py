@@ -310,72 +310,72 @@ def test_cycle_versions(
     print("System started with current version", flush=True)
     client = ClientCreator.from_system(system)
     print("Creating collection with current version", flush=True)
-    # coll = client.get_collection(
-    #     name=collection_strategy.name,
-    #     embedding_function=not_implemented_ef(),  # type: ignore
-    # )
+    coll = client.get_collection(
+        name=collection_strategy.name,
+        embedding_function=not_implemented_ef(),  # type: ignore
+    )
 
-    # # embeddings_queue = system.instance(SqliteDB)
+    embeddings_queue = system.instance(SqliteDB)
 
-    # # # Automatic pruning should be disabled since embeddings_queue is non-empty
-    # # if packaging_version.Version(old_version) < packaging_version.Version(
-    # #     "0.5.7"
-    # # ):  # (automatic pruning is enabled by default in 0.5.7 and later)
-    # #     assert (
-    # #         embeddings_queue.config.get_parameter("automatically_purge").value is False
-    # #     )
+    # Automatic pruning should be disabled since embeddings_queue is non-empty
+    if packaging_version.Version(old_version) < packaging_version.Version(
+        "0.5.7"
+    ):  # (automatic pruning is enabled by default in 0.5.7 and later)
+        assert (
+            embeddings_queue.config.get_parameter("automatically_purge").value is False
+        )
 
-    # # # Update to True so log_size_below_max() invariant will pass
-    # # embeddings_queue.set_config(
-    # #     EmbeddingsQueueConfigurationInternal(
-    # #         [ConfigurationParameter("automatically_purge", True)]
-    # #     )
-    # # )
+    # Update to True so log_size_below_max() invariant will pass
+    embeddings_queue.set_config(
+        EmbeddingsQueueConfigurationInternal(
+            [ConfigurationParameter("automatically_purge", True)]
+        )
+    )
 
-    # print(
-    #     "Checking invariants after loading collection from old version " + old_version
-    # )
-    # logger.info("Checking invariants after loading collection from old version")
+    print(
+        "Checking invariants after loading collection from old version " + old_version
+    )
+    logger.info("Checking invariants after loading collection from old version")
 
-    # # Should be able to clean log immediately after updating
+    # Should be able to clean log immediately after updating
 
-    # # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
-    # # Cleaning the log is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
-    # # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
-    # # if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
-    # #     # Trigger log purge in Rust impl
-    # #     logger.info("Before count")
-    # #     invariants.count(coll, embeddings_strategy)
-    # #     logger.info("After count")
-    # # else:
-    # #     trigger_vector_segments_max_seq_id_migration(
-    # #         embeddings_queue, system.instance(SegmentManager)
-    # #     )
-    # #     embeddings_queue.purge_log(coll.id)
-    # logger.info("log size below max?")
-    # invariants.log_size_below_max(system, [coll], True)
+    # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
+    # Cleaning the log is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
+    # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        # Trigger log purge in Rust impl
+        logger.info("Before count")
+        invariants.count(coll, embeddings_strategy)
+        logger.info("After count")
+    else:
+        trigger_vector_segments_max_seq_id_migration(
+            embeddings_queue, system.instance(SegmentManager)
+        )
+        embeddings_queue.purge_log(coll.id)
+    logger.info("log size below max?")
+    invariants.log_size_below_max(system, [coll], True)
 
-    # # Should be able to add embeddings
-    # logger.info("adding records")
-    # coll.add(**embeddings_strategy)  # type: ignore
+    # Should be able to add embeddings
+    logger.info("adding records")
+    coll.add(**embeddings_strategy)  # type: ignore
 
-    # logger.info("count?")
-    # invariants.count(coll, embeddings_strategy)
-    # logger.info("metadata?")
-    # invariants.metadatas_match(coll, embeddings_strategy)
-    # logger.info("documents?")
-    # invariants.documents_match(coll, embeddings_strategy)
-    # logger.info("ids?")
-    # invariants.ids_match(coll, embeddings_strategy)
-    # logger.info("ann?")
-    # invariants.ann_accuracy(coll, embeddings_strategy)
-    # logger.info("log size?")
-    # invariants.log_size_below_max(system, [coll], True)
+    logger.info("count?")
+    invariants.count(coll, embeddings_strategy)
+    logger.info("metadata?")
+    invariants.metadatas_match(coll, embeddings_strategy)
+    logger.info("documents?")
+    invariants.documents_match(coll, embeddings_strategy)
+    logger.info("ids?")
+    invariants.ids_match(coll, embeddings_strategy)
+    logger.info("ann?")
+    invariants.ann_accuracy(coll, embeddings_strategy)
+    logger.info("log size?")
+    invariants.log_size_below_max(system, [coll], True)
 
-    # # Shutdown system
-    # logger.info("Shutting down system")
-    # system.stop()
-    # logger.info(
-    #     "Finished checking invariants after loading collection from old version "
-    #     + old_version
-    # )
+    # Shutdown system
+    logger.info("Shutting down system")
+    system.stop()
+    logger.info(
+        "Finished checking invariants after loading collection from old version "
+        + old_version
+    )
