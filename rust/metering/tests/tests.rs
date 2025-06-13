@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering;
 
 // NOTE(c-gamble): Procedural macros cannot be used in the same crates in which they are defined.
 // Instead, it is recommended to create a `tests/` directory in which to write unit and integration
@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use chroma_metering::initialize_metering;
 use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
 
-use crate::metering::{Enter, Exit, MeteredFutureExt, SubmitExt};
+use crate::metering::{Enter, Exit, MeteredFutureExt, SubmitExt, TestCapability};
 
 /// Represents a user defining their own metering module.
 mod metering {
@@ -20,13 +20,13 @@ mod metering {
     use super::initialize_metering;
 
     initialize_metering! {
-        #[subscription(id = "test_subscription")]
-        trait TestSubscription {
-            fn test_subscription(&self, increment_num: u64);
+        #[capability(id = "test_capability")]
+        pub trait TestCapability {
+            fn test_capability(&self, increment_num: u64);
         }
 
-        #[context(subscriptions = ["test_subscription"], handlers = [test_handler_a])]
-        #[derive(Debug)]
+        #[context(capabilities = ["test_capability"], handlers = [test_handler_a])]
+        #[derive(Debug, Clone)]
         pub struct TestContextA {
             pub test_annotated_field: Arc<AtomicU64>
         }
@@ -39,8 +39,8 @@ mod metering {
             }
         }
 
-        #[context(subscriptions = ["test_subscription"], handlers = [test_handler_b])]
-        #[derive(Default, Debug, Clone)]
+        #[context(capabilities = ["test_capability"], handlers = [test_handler_b])]
+        #[derive(Debug, Clone)]
         pub struct TestContextB {
             pub test_annotated_field: Arc<AtomicU64>
         }
@@ -133,23 +133,21 @@ async fn test_init_custom_receiver() {
 async fn test_single_metering_context() {
     // Create a metering context of type `TestContextA`
     let metering_context_container =
-        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
+        metering::create::<metering::TestContextA>(metering::TestContextA::default());
 
     // Enter the metering context (required if not using `.metered` on a future)
     metering_context_container.enter();
 
     // Set the value of `test_annotated_field` to "value"
-    metering::with_current(|metering_context| {
-        metering_context.test_subscription(Some("value".to_string()))
-    });
+    metering::with_current(|metering_context| metering_context.test_capability(100));
 
     // Close the metering context
     let expected_metering_context = metering::close::<metering::TestContextA>();
     assert!(expected_metering_context.is_ok());
-    let metering_context = expected_metering_context.unwrap(); // only unwrap once
+    let metering_context = expected_metering_context.unwrap();
     assert_eq!(
-        metering_context.test_annotated_field,
-        Some("value".to_string())
+        metering_context.test_annotated_field.load(Ordering::SeqCst),
+        100u64
     );
 
     // Submit the context to the receiver
@@ -167,15 +165,13 @@ async fn test_single_metering_context() {
 fn test_close_nonexistent_context_type() {
     // Create a metering context of type `TestContextA`
     let metering_context_container =
-        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
+        metering::create::<metering::TestContextA>(metering::TestContextA::default());
 
     // Enter the metering context (required if not using `.metered` on a future)
     metering_context_container.enter();
 
     // Set the value of `test_annotated_field` to "value"
-    metering::with_current(|metering_context| {
-        metering_context.test_subscription(Some("value".to_string()))
-    });
+    metering::with_current(|metering_context| metering_context.test_capability(100));
 
     // Try to pop context B off of the stack
     let expected_none_pop_b = metering::close::<metering::TestContextB>();
@@ -184,7 +180,13 @@ fn test_close_nonexistent_context_type() {
     // Pop context A off of of the stack
     let expected_metering_context = metering::close::<metering::TestContextA>();
     assert!(expected_metering_context.is_ok());
-    assert!(expected_metering_context.unwrap().test_annotated_field == Some("value".to_string()));
+    assert_eq!(
+        expected_metering_context
+            .unwrap()
+            .test_annotated_field
+            .load(Ordering::SeqCst),
+        100u64
+    );
 
     // Verify that the metering context is empty
     let expected_none_pop_a = metering::close::<metering::TestContextA>();
@@ -196,16 +198,14 @@ fn test_close_nonexistent_context_type() {
 
 #[test]
 fn test_nested_mutation() {
-    // Define a helper function that sets a value for `test_subscription`
+    // Define a helper function that sets a value for `test_capability`
     fn helper_fn() {
-        metering::with_current(|metering_context| {
-            metering_context.test_subscription(Some("helper".to_string()))
-        });
+        metering::with_current(|metering_context| metering_context.test_capability(50));
     }
 
     // Create a metering context of type `TestContextA`
     let metering_context_container =
-        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
+        metering::create::<metering::TestContextA>(metering::TestContextA::default());
 
     // Enter the metering context (required if not using `.metered` on a future)
     metering_context_container.enter();
@@ -216,7 +216,13 @@ fn test_nested_mutation() {
     // Close the metering context
     let expected_metering_context = metering::close::<metering::TestContextA>();
     assert!(expected_metering_context.is_ok());
-    assert!(expected_metering_context.unwrap().test_annotated_field == Some("helper".to_string()));
+    assert_eq!(
+        expected_metering_context
+            .unwrap()
+            .test_annotated_field
+            .load(Ordering::SeqCst),
+        50u64
+    );
 
     // Verify that the metering context is empty
     let expected_error = metering::close::<metering::TestContextA>();
@@ -228,16 +234,14 @@ fn test_nested_mutation() {
 
 #[tokio::test]
 async fn test_nested_async_context_single_thread() {
-    // Define an asynchronous helper function that sets a value for `test_subscription`
+    // Define an asynchronous helper function that sets a value for `test_capability`
     async fn async_helper_fn() {
-        metering::with_current(|metering_context| {
-            metering_context.test_subscription(Some("async_helper".to_string()))
-        });
+        metering::with_current(|metering_context| metering_context.test_capability(25));
     }
 
     // Create a metering context of type `TestContextA`
     let metering_context_container =
-        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
+        metering::create::<metering::TestContextA>(metering::TestContextA::default());
 
     // Enter the metering context (required if not using `.metered` on a future)
     metering_context_container.enter();
@@ -248,8 +252,12 @@ async fn test_nested_async_context_single_thread() {
     // Close the metering context
     let expected_metering_context = metering::close::<metering::TestContextA>();
     assert!(expected_metering_context.is_ok());
-    assert!(
-        expected_metering_context.unwrap().test_annotated_field == Some("async_helper".to_string())
+    assert_eq!(
+        expected_metering_context
+            .unwrap()
+            .test_annotated_field
+            .load(Ordering::SeqCst),
+        25u64
     );
 
     // Verify that the metering context is empty
@@ -262,16 +270,14 @@ async fn test_nested_async_context_single_thread() {
 
 #[tokio::test]
 async fn test_nested_mutation_multi_thread() {
-    // Define an asynchronous helper function that sets a value for `test_subscription`
+    // Define an asynchronous helper function that sets a value for `test_capability`
     async fn async_helper_fn() {
-        let _ = metering::with_current(|metering_context| {
-            metering_context.test_subscription(Some("async_helper".to_string()))
-        });
+        let _ = metering::with_current(|metering_context| metering_context.test_capability(25));
     }
 
     // Create a metering context of type `TestContextA`
     let metering_context_container =
-        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
+        metering::create::<metering::TestContextA>(metering::TestContextA::default());
 
     (async move {
         // Get the current metering context
@@ -289,9 +295,12 @@ async fn test_nested_mutation_multi_thread() {
         let expected_metering_context = metering::close::<metering::TestContextA>();
         assert!(expected_metering_context.is_ok());
         println!("expected: {:?}", expected_metering_context);
-        assert!(
-            expected_metering_context.unwrap().test_annotated_field
-                == Some("async_helper".to_string())
+        assert_eq!(
+            expected_metering_context
+                .unwrap()
+                .test_annotated_field
+                .load(Ordering::SeqCst),
+            25u64
         );
 
         // Verify that the metering context is empty
@@ -306,18 +315,16 @@ async fn test_nested_mutation_multi_thread() {
 
 #[tokio::test]
 async fn test_nested_mutation_then_close_multi_thread() {
-    // Define an asynchronous helper function that sets a value for `test_subscription`
+    // Define an asynchronous helper function that sets a value for `test_capability`
     async fn async_helper_fn() {
-        metering::with_current(|metering_context| {
-            metering_context.test_subscription(Some("async_helper".to_string()))
-        });
+        metering::with_current(|metering_context| metering_context.test_capability(25));
         let expected_metering_context = metering::close::<metering::TestContextA>();
         assert!(expected_metering_context.is_ok());
     }
 
     // Create a metering context of type `TestContextA`
     let metering_context_container =
-        metering::create::<metering::TestContextA>(metering::TestContextA::new(100u64));
+        metering::create::<metering::TestContextA>(metering::TestContextA::default());
 
     // Call the helper function in another process, passing the context through `metered`
     let handle = tokio::spawn(async move {

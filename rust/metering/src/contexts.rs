@@ -2,101 +2,83 @@ use proc_macro2::{Ident, TokenStream};
 use quote::quote;
 use std::collections::HashMap;
 
-use crate::subscriptions::Subscription;
+use crate::capabilities::Capability;
 
-/// Represents a user-defined metering context.
+#[derive(Debug)]
 pub struct Context {
-    pub context_foreign_macro_token_streams: Vec<TokenStream>,
-    pub context_subscription_id_strings_to_handler_idents: HashMap<String, Ident>,
-    pub maybe_context_visibility_modifier_token_stream: Option<TokenStream>,
     pub context_name_ident: Ident,
-    pub context_field_token_streams: Vec<TokenStream>,
+    pub context_capability_id_strings_to_handler_idents: HashMap<String, Ident>,
 }
 
-/// Generates the output tokens for an implementation of a given subscription on a context.
-fn generate_context_subscription_implementation_token_stream(
-    context_name_ident: &Ident,
-    handler_ident: &Ident,
-    subscription: &Subscription,
-) -> TokenStream {
-    let Subscription {
-        subscription_id_string: _subscription_id_string,
-        subscription_foreign_macro_token_streams: _subscription_foreign_macro_token_streams,
-        maybe_subscription_visibility_modifier_token_stream:
-            _maybe_subscription_visibility_modifier_token_stream,
-        subscription_name_ident,
-        subscription_method_foreign_macro_token_streams:
-            _subscription_method_foreign_macro_token_streams,
-        subscription_method_name_ident,
-        subscription_method_parameter_name_idents,
-        subscription_method_parameters_token_streams,
-    } = subscription;
-
-    quote! {
-        impl #subscription_name_ident for #context_name_ident {
-            fn #subscription_method_name_ident(&self, #( #subscription_method_parameters_token_streams )*) {
-                #handler_ident(self, #( #subscription_method_parameter_name_idents )*);
-            }
-        }
-    }
-}
-
-/// Generates the output tokens required for a user-defined metering context.
-pub fn generate_context_definition_token_stream(
+pub fn generate_context_impls(
     context: &Context,
-    subscription_ids_to_subscriptions: &HashMap<String, Subscription>,
+    capability_id_to_capability: &HashMap<String, Capability>,
 ) -> TokenStream {
-    let Context {
-        context_foreign_macro_token_streams,
-        context_subscription_id_strings_to_handler_idents,
-        maybe_context_visibility_modifier_token_stream,
-        context_name_ident,
-        context_field_token_streams,
-    } = context;
+    let context_name_ident = &context.context_name_ident;
 
-    let context_definition_token_stream =
-        if maybe_context_visibility_modifier_token_stream.is_some() {
+    let capability_impls = context
+        .context_capability_id_strings_to_handler_idents
+        .iter()
+        .map(|(sub_id, handler_ident)| {
+            let sub = capability_id_to_capability.get(sub_id).unwrap();
+            let sub_trait_name = &sub.capability_name_ident;
+            let sub_method_name = &sub.capability_method_name_ident;
+            let sub_method_params = &sub.capability_method_parameters_token_streams;
+            let sub_method_param_names = &sub.capability_method_parameter_name_idents;
             quote! {
-                #( #context_foreign_macro_token_streams )*
-                #maybe_context_visibility_modifier_token_stream struct #context_name_ident {
-                    #( #context_field_token_streams )*
+                impl #sub_trait_name for #context_name_ident {
+                    fn #sub_method_name(&self, #( #sub_method_params ),*) {
+                        #handler_ident(self, #( #sub_method_param_names ),*);
+                    }
                 }
             }
-        } else {
+        });
+
+    let marker_method_overrides = context
+        .context_capability_id_strings_to_handler_idents
+        .keys()
+        .map(|sub_id| {
+            let sub = capability_id_to_capability.get(sub_id).unwrap();
+            let marker_method_name = &sub.capability_marker_method_name_ident;
+            let sub_trait_name = &sub.capability_name_ident;
             quote! {
-                #( #context_foreign_macro_token_streams )*
-                struct #context_name_ident {
-                    #( #context_field_token_streams )*
+                fn #marker_method_name(&self) -> Result<&dyn #sub_trait_name, String> {
+                    Ok(self)
                 }
             }
-        };
-
-    let context_subscription_implementation_token_streams: Vec<TokenStream> =
-        context_subscription_id_strings_to_handler_idents
-            .iter()
-            .map(|(subscription_id, handler_ident)| {
-                generate_context_subscription_implementation_token_stream(
-                    context_name_ident,
-                    handler_ident,
-                    subscription_ids_to_subscriptions
-                        .get(subscription_id)
-                        .expect(&format!(
-                            "No subscription found with ID {:?}",
-                            subscription_id
-                        )),
-                )
-            })
-            .collect();
+        });
 
     quote! {
-        #context_definition_token_stream
+
+        #( #capability_impls )*
+
 
         impl MeteringContext for #context_name_ident {
             fn as_any(&self) -> &dyn ::std::any::Any {
                 self
             }
+            #( #marker_method_overrides )*
         }
+    }
+}
 
-        #( #context_subscription_implementation_token_streams )*
+pub fn generate_dispatch_impl(capability: &Capability) -> TokenStream {
+    let Capability {
+        capability_name_ident,
+        capability_method_name_ident,
+        capability_marker_method_name_ident,
+        capability_method_parameters_token_streams,
+        capability_method_parameter_name_idents,
+        ..
+    } = capability;
+
+    quote! {
+        impl #capability_name_ident for dyn MeteringContext {
+            fn #capability_method_name_ident(&self, #( #capability_method_parameters_token_streams ),*) {
+                if let Ok(sub_impl) = self.#capability_marker_method_name_ident() {
+                    sub_impl.#capability_method_name_ident(#( #capability_method_parameter_name_idents ),*);
+                }
+            }
+        }
     }
 }
