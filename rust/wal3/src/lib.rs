@@ -21,7 +21,7 @@ pub use batch_manager::BatchManager;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
 pub use gc::Garbage;
-pub use manifest::{Manifest, Snapshot, SnapshotPointer};
+pub use manifest::{unprefixed_snapshot_path, Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
 pub use snapshot_cache::SnapshotCache;
