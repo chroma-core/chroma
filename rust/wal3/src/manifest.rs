@@ -15,8 +15,8 @@ use chroma_storage::{
 use setsum::Setsum;
 
 use crate::{
-    Error, Fragment, FragmentSeqNo, LogPosition, LogWriterOptions, ScrubError, ScrubSuccess,
-    SnapshotOptions, ThrottleOptions,
+    Error, Fragment, FragmentSeqNo, Garbage, LogPosition, LogWriterOptions, ScrubError,
+    ScrubSuccess, SnapshotOptions, ThrottleOptions,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -59,6 +59,12 @@ pub struct SnapshotPointer {
 impl SnapshotPointer {
     /// An estimate on the number of bytes required to serialize this object as JSON.
     pub const JSON_SIZE_ESTIMATE: usize = 142;
+}
+
+impl From<&Snapshot> for SnapshotPointer {
+    fn from(snap: &Snapshot) -> Self {
+        snap.to_pointer()
+    }
 }
 
 ///////////////////////////////////////////// Snapshot /////////////////////////////////////////////
@@ -106,15 +112,14 @@ impl Snapshot {
             bytes_read += snapshot.num_bytes;
         }
         let depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
-        if depth + 1 != self.depth {
-            return Err(ScrubError::CorruptManifest{
+        if depth >= self.depth {
+            return Err(Box::new(ScrubError::CorruptManifest {
                 manifest: self.path.to_string(),
                 what: format!(
-                "expected snapshot depth does not match observed contents in {}: expected:{} != observed:{}",
-                self.path,
-                self.depth,
-                depth + 1,
-            )}.into());
+                    "expected snapshot depth is not monotonoic for {}",
+                    self.path
+                ),
+            }));
         }
         for frag in self.fragments.iter() {
             calculated_setsum += frag.setsum;
@@ -302,6 +307,12 @@ pub struct Manifest {
         serialize_with = "super::serialize_setsum"
     )]
     pub setsum: Setsum,
+    #[serde(
+        default,
+        deserialize_with = "super::deserialize_setsum",
+        serialize_with = "super::serialize_setsum"
+    )]
+    pub collected: Setsum,
     pub acc_bytes: u64,
     pub writer: String,
     pub snapshots: Vec<SnapshotPointer>,
@@ -315,6 +326,7 @@ impl Manifest {
     pub fn new_empty(writer: &str) -> Self {
         Self {
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             writer: writer.to_string(),
             snapshots: vec![],
@@ -335,9 +347,6 @@ impl Manifest {
         let writer = writer.to_string();
         let mut snapshot_depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
         while snapshot_depth > 0 {
-            // NOTE(rescrv):  We _either_ compact a snapshot of snapshots or a snapshot of log
-            // fragments.  We don't do both as interior snapshot nodes only refer to objects of the
-            // same type.  Manifests are the only objects to refer to both fragments and snapshots.
             let mut snapshots = vec![];
             let mut setsum = Setsum::default();
             for snapshot in self.snapshots.iter().filter(|s| s.depth == snapshot_depth) {
@@ -347,6 +356,17 @@ impl Manifest {
                 }
             }
             if snapshots.len() >= snapshot_options.snapshot_rollover_threshold {
+                if let Some(snap) = snapshots.iter().min_by_key(|s| s.start) {
+                    if !self.snapshots.is_empty()
+                        && self.snapshots[0].limit == snap.start
+                        && self.snapshots[0].depth < snapshot_depth
+                    {
+                        let to_insert = &self.snapshots[0];
+                        eprintln!("INSERT {to_insert:#?}");
+                        setsum += to_insert.setsum;
+                        snapshots.insert(0, to_insert.clone());
+                    }
+                }
                 let path = unprefixed_snapshot_path(setsum);
                 tracing::info!("generating snapshot {path}");
                 return Some(Snapshot {
@@ -404,6 +424,7 @@ impl Manifest {
     /// Given a snapshot, apply it to the manifest.  This modifies the manifest to refer to the
     /// snapshot and removes from the manifest all data that is now part of the snapshot.
     pub fn apply_snapshot(&mut self, snapshot: &Snapshot) -> Result<(), Error> {
+        self.scrub()?;
         if snapshot.fragments.len() > self.fragments.len() {
             return Err(Error::CorruptManifest(format!(
                 "snapshot has more fragments than manifest: {} > {}",
@@ -437,6 +458,7 @@ impl Manifest {
             limit: snapshot.maximum_log_position(),
             num_bytes: snapshot.num_bytes(),
         });
+        self.scrub()?;
         Ok(())
     }
 
@@ -483,6 +505,14 @@ impl Manifest {
 
     /// The oldest LogPosition in the manifest.
     pub fn oldest_timestamp(&self) -> Option<LogPosition> {
+        if let Some(snap) = self
+            .snapshots
+            .iter()
+            .map(|f| f.start)
+            .min_by_key(|p| p.offset())
+        {
+            return Some(snap);
+        }
         self.fragments
             .iter()
             .map(|f| f.start)
@@ -491,9 +521,17 @@ impl Manifest {
 
     /// The LogPosition of the next record to be written.
     pub fn newest_timestamp(&self) -> Option<LogPosition> {
-        self.fragments
+        if let Some(frag) = self
+            .fragments
             .iter()
             .map(|f| f.limit)
+            .max_by_key(|p| p.offset())
+        {
+            return Some(frag);
+        }
+        self.snapshots
+            .iter()
+            .map(|f| f.start)
             .max_by_key(|p| p.offset())
     }
 
@@ -516,7 +554,7 @@ impl Manifest {
             calculated_setsum += frag.setsum;
             bytes_read += frag.num_bytes;
         }
-        if self.setsum != calculated_setsum {
+        if self.setsum != calculated_setsum + self.collected {
             return Err(ScrubError::CorruptManifest{
                 manifest: format!("{:?}", self),
                 what: format!(
@@ -524,6 +562,42 @@ impl Manifest {
                 self.setsum.hexdigest(),
                 calculated_setsum.hexdigest()
             )}.into());
+        }
+        for (lhs, rhs) in std::iter::zip(self.snapshots.iter(), self.snapshots.iter().skip(1)) {
+            if lhs.limit != rhs.start {
+                return Err(ScrubError::CorruptManifest {
+                    manifest: format!("{:?}", self),
+                    what: format!(
+                        "expected snapshots to be sequential within the manifest: gap {:?} -> {:?}",
+                        lhs.limit, rhs.start,
+                    ),
+                }
+                .into());
+            }
+        }
+        for (lhs, rhs) in std::iter::zip(self.fragments.iter(), self.fragments.iter().skip(1)) {
+            if lhs.limit != rhs.start {
+                return Err(ScrubError::CorruptManifest {
+                    manifest: format!("{:?}", self),
+                    what: format!(
+                        "expected fragments to be sequential within the manifest: gap {:?} -> {:?}",
+                        lhs.limit, rhs.start,
+                    ),
+                }
+                .into());
+            }
+        }
+        if let (Some(snap), Some(frag)) = (self.snapshots.last(), self.fragments.first()) {
+            if snap.limit != frag.start {
+                return Err(ScrubError::CorruptManifest {
+                    manifest: format!("{:?}", self),
+                    what: format!(
+                        "expected snapshots-fragments to be sequential within the manifest: gap {:?} -> {:?}",
+                        snap.limit, frag.start,
+                    ),
+                }
+                .into());
+            }
         }
         // TODO(rescrv):  Check the sequence numbers for sequentiality.
         Ok(ScrubSuccess {
@@ -559,6 +633,7 @@ impl Manifest {
         let initial = Manifest {
             writer,
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -741,6 +816,44 @@ impl Manifest {
             (None, None) => self.initial_offset.unwrap_or(LogPosition::from_offset(1)),
         }
     }
+
+    /// Return the lowest addressable offset in the log.
+    pub fn minimum_fragment_seq_no(&self) -> FragmentSeqNo {
+        self.fragments
+            .iter()
+            .map(|f| f.seq_no)
+            .min()
+            .unwrap_or(FragmentSeqNo::BEGIN)
+    }
+
+    /// Apply the destructive operation specified by the Garbage struct.
+    #[allow(clippy::result_large_err)]
+    pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Self, Error> {
+        let mut new = self.clone();
+        for to_drop in garbage.snapshots_to_drop.iter() {
+            if let Some(index) = new.snapshots.iter().position(|s| s == to_drop) {
+                new.snapshots.remove(index);
+            }
+        }
+        // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
+        for seq_no in garbage.fragments_to_drop_start.0..garbage.fragments_to_drop_limit.0 {
+            if let Some(index) = new
+                .fragments
+                .iter()
+                .position(|f| f.seq_no == FragmentSeqNo(seq_no))
+            {
+                new.fragments.remove(index);
+            }
+        }
+        if let Some(snap) = garbage.snapshot_for_root.take() {
+            if !new.snapshots.contains(&snap) {
+                new.snapshots.insert(0, snap);
+            }
+        }
+        new.collected += garbage.setsum_to_discard;
+        new.scrub()?;
+        Ok(new)
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -796,6 +909,7 @@ mod tests {
         let manifest = Manifest {
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
@@ -839,6 +953,7 @@ mod tests {
                 "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
             )
             .unwrap(),
+            collected: Setsum::default(),
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
@@ -851,6 +966,7 @@ mod tests {
                 "6c5b5ee2c5e741a8d190d215d6cb2802a57ce0d3bb5a1a0223964e97acfa8083",
             )
             .unwrap(),
+            collected: Setsum::default(),
             acc_bytes: 8200,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
@@ -886,6 +1002,7 @@ mod tests {
         let mut manifest = Manifest {
             writer: "manifest writer 1".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -903,6 +1020,7 @@ mod tests {
                     "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
                 )
                 .unwrap(),
+                collected: Setsum::default(),
                 acc_bytes: 83,
                 snapshots: vec![],
                 fragments: vec![
@@ -973,6 +1091,7 @@ mod tests {
         let mut manifest = Manifest {
             writer: "manifest writer 1".to_string(),
             setsum: fragment1.setsum + fragment2.setsum,
+            collected: Setsum::default(),
             acc_bytes: 83,
             snapshots: vec![SnapshotPointer {
                 path_to_snapshot: "snap.1".to_string(),
@@ -994,6 +1113,7 @@ mod tests {
                     "70ff5599703548d61cc7fa9d53d66d61be4e52ff4bf84b07ad45d6d96b174af4"
                 )
                 .unwrap(),
+                collected: Setsum::default(),
                 acc_bytes: 183,
                 snapshots: vec![SnapshotPointer {
                     path_to_snapshot: "snap.1".to_string(),
@@ -1015,6 +1135,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -1036,6 +1157,7 @@ mod tests {
         let manifest_with_fragment = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment],
@@ -1052,6 +1174,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -1073,6 +1196,7 @@ mod tests {
         let manifest_with_fragment = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment],
@@ -1106,6 +1230,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 125,
             snapshots: vec![snapshot],
             fragments: vec![fragment],
@@ -1127,6 +1252,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -1144,6 +1270,7 @@ mod tests {
         let manifest_none = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -1161,6 +1288,7 @@ mod tests {
         let mut manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
@@ -1185,6 +1313,7 @@ mod tests {
         let expected_manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: fragment.setsum,
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment],
@@ -1217,6 +1346,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
@@ -1255,6 +1385,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment],
@@ -1288,6 +1419,7 @@ mod tests {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 100,
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
@@ -1306,6 +1438,7 @@ mod tests {
         let empty_manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
