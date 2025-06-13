@@ -272,7 +272,7 @@ async fn test_nested_async_context_single_thread() {
 async fn test_nested_mutation_multi_thread() {
     // Define an asynchronous helper function that sets a value for `test_capability`
     async fn async_helper_fn() {
-        let _ = metering::with_current(|metering_context| metering_context.test_capability(25));
+        metering::with_current(|metering_context| metering_context.test_capability(25));
     }
 
     // Create a metering context of type `TestContextA`

@@ -23,12 +23,15 @@ impl Parse for RootItems {
     }
 }
 
+/// A type alias for the result of [`crate::parsing::process_token_stream`].
+pub type ParseResult = (Vec<Capability>, Vec<Context>, Vec<syn::Item>);
+
 /// The main entrypoint of the parser that accepts the full input token stream and parses out
 /// vectors of [`crate::capabilities::Capability`], [`crate::contexts::Context`], and
 /// passthrough items.
 pub fn process_token_stream(
     token_stream: &TokenStream,
-) -> Result<(Vec<Capability>, Vec<Context>, Vec<syn::Item>), MeteringMacrosError> {
+) -> Result<ParseResult, MeteringMacrosError> {
     let root_items: RootItems =
         syn::parse2(token_stream.clone()).map_err(MeteringMacrosError::SynError)?;
     let mut capabilities = Vec::new();
@@ -103,7 +106,7 @@ fn parse_capability(capability_trait: syn::ItemTrait) -> Result<Capability, Mete
         ));
     }
 
-    let capability_method = if let Some(syn::TraitItem::Fn(m)) = capability_trait.items.get(0) {
+    let capability_method = if let Some(syn::TraitItem::Fn(m)) = capability_trait.items.first() {
         m
     } else {
         return Err(MeteringMacrosError::CapabilityItemNotAMethod(
@@ -112,9 +115,7 @@ fn parse_capability(capability_trait: syn::ItemTrait) -> Result<Capability, Mete
     };
 
     match capability_method.sig.inputs.iter().next() {
-        Some(syn::FnArg::Receiver(rec)) if rec.reference.is_some() && rec.mutability.is_none() => {
-            ()
-        }
+        Some(syn::FnArg::Receiver(rec)) if rec.reference.is_some() && rec.mutability.is_none() => {}
         _ => {
             return Err(MeteringMacrosError::CapabilityMethodMissingSelf(
                 capability_method.sig.fn_token.span,
@@ -145,7 +146,7 @@ fn parse_capability(capability_trait: syn::ItemTrait) -> Result<Capability, Mete
     Ok(Capability {
         capability_name_ident: capability_trait.ident.clone(),
         capability_marker_method_name_ident: Ident::new(
-            &format!("__marker_{}", capability_trait.ident.to_string()),
+            &format!("__marker_{}", capability_trait.ident),
             capability_attribute.span(),
         ),
         capability_method_name_ident: capability_method.sig.ident.clone(),
@@ -229,7 +230,7 @@ fn parse_context(context_struct: syn::ItemStruct) -> Result<Context, MeteringMac
         context_name_ident: context_struct.ident,
         context_capability_name_idents_to_handler_idents: capability_idents
             .into_iter()
-            .zip(handler_idents.into_iter())
+            .zip(handler_idents)
             .collect(),
     })
 }

@@ -49,7 +49,7 @@ pub fn generate_capability_implementations_for_context(
                 ..
             } = capability_name_to_capability
             .get(capability_name_ident)
-            .expect(&format!("No capability found with ID {}", capability_name_ident));
+            .unwrap_or_else(|| panic!("No capability found with ID {}", capability_name_ident));
 
             quote! {
                 impl #capability_name_ident for #context_name_ident {
@@ -63,14 +63,14 @@ pub fn generate_capability_implementations_for_context(
     let capability_marker_method_overrides_for_context = context
         .context_capability_name_idents_to_handler_idents
         .keys()
-        .map(|capability_id_string| {
+        .map(|capability_name_ident| {
             let Capability {
                 capability_name_ident,
                 capability_marker_method_name_ident,
                 ..
             } = capability_name_to_capability
-            .get(capability_id_string)
-            .expect(&format!("No capability found with ID {}", capability_id_string));
+            .get(capability_name_ident)
+            .unwrap_or_else(|| panic!("No capability found with ID {}", capability_name_ident));
 
             quote! {
                 fn #capability_marker_method_name_ident(&self) -> Result<&dyn #capability_name_ident, String> {
