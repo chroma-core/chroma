@@ -22,10 +22,10 @@ use crate::{
 /// unused->used->discarded.  The epoch of a writer is used to determine if and when log contention
 /// indicates that a new writer should be created.  The epoch is incremented when a new writer is
 /// created and checked before creating a new writer.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct EpochWriter {
     epoch: u64,
-    writer: Arc<OnceLogWriter>,
+    writer: Option<Arc<OnceLogWriter>>,
 }
 
 ///////////////////////////////////////////// MarkDirty ////////////////////////////////////////////
@@ -45,9 +45,12 @@ impl MarkDirty for () {
 ///////////////////////////////////////////// LogWriter ////////////////////////////////////////////
 
 pub struct LogWriter {
+    options: LogWriterOptions,
+    storage: Arc<Storage>,
+    prefix: String,
     writer: String,
     mark_dirty: Arc<dyn MarkDirty>,
-    inner: Mutex<Option<EpochWriter>>,
+    inner: Mutex<EpochWriter>,
     reopen_protection: tokio::sync::Mutex<()>,
 }
 
@@ -70,26 +73,21 @@ impl LogWriter {
         mark_dirty: D,
     ) -> Result<Self, Error> {
         let mark_dirty = Arc::new(mark_dirty) as _;
-        let once_log_writer = OnceLogWriter::open(
-            options,
-            storage,
-            prefix.to_string(),
-            writer.to_string(),
-            Arc::clone(&mark_dirty),
-        )
-        .await?;
-        let inner = EpochWriter {
-            epoch: 1,
-            writer: once_log_writer,
-        };
+        let inner = EpochWriter::default();
+        let prefix = prefix.to_string();
         let writer = writer.to_string();
         let reopen_protection = tokio::sync::Mutex::new(());
-        Ok(Self {
+        let this = Self {
+            options,
+            storage,
+            prefix,
             writer,
             mark_dirty,
-            inner: Mutex::new(Some(inner)),
+            inner: Mutex::new(inner),
             reopen_protection,
-        })
+        };
+        this.ensure_open().await?;
+        Ok(this)
     }
 
     /// Open or try once to initialize the log.
@@ -101,41 +99,30 @@ impl LogWriter {
         mark_dirty: D,
     ) -> Result<Self, Error> {
         let mark_dirty = Arc::new(mark_dirty) as _;
-        let once_log_writer = match OnceLogWriter::open(
-            options.clone(),
-            Arc::clone(&storage),
-            prefix.to_string(),
-            writer.to_string(),
-            Arc::clone(&mark_dirty),
-        )
-        .await
-        {
-            Ok(writer) => writer,
-            Err(Error::UninitializedLog) => {
-                Self::initialize(&options, &storage, prefix, writer).await?;
-                OnceLogWriter::open(
-                    options,
-                    storage,
-                    prefix.to_string(),
-                    writer.to_string(),
-                    Arc::clone(&mark_dirty),
-                )
-                .await?
-            }
-            Err(e) => return Err(e),
-        };
-        let inner = EpochWriter {
-            epoch: 1,
-            writer: once_log_writer,
-        };
+        let inner = EpochWriter::default();
+        let prefix = prefix.to_string();
         let writer = writer.to_string();
         let reopen_protection = tokio::sync::Mutex::new(());
-        Ok(Self {
+        let this = Self {
+            options,
+            storage,
+            prefix,
             writer,
             mark_dirty,
-            inner: Mutex::new(Some(inner)),
+            inner: Mutex::new(inner),
             reopen_protection,
-        })
+        };
+        match this.ensure_open().await {
+            Ok(_) => {}
+            Err(Error::UninitializedLog) => {
+                Self::initialize(&this.options, &this.storage, &this.prefix, &this.writer).await?;
+                this.ensure_open().await?;
+            }
+            Err(err) => {
+                return Err(err);
+            }
+        }
+        Ok(this)
     }
 
     /// Given a contiguous subset of data from some other location (preferably another log),
@@ -241,9 +228,9 @@ impl LogWriter {
     /// This will close the log.
     pub async fn close(self) -> Result<(), Error> {
         // SAFETY(rescrv):  Mutex poisoning.
-        let inner = { self.inner.lock().unwrap().take() };
-        if let Some(inner) = inner {
-            inner.writer.close().await
+        let writer = { self.inner.lock().unwrap().writer.take() };
+        if let Some(writer) = writer {
+            writer.close().await
         } else {
             Ok(())
         }
@@ -264,37 +251,32 @@ impl LogWriter {
         self.handle_log_contention(once_log_append_many).await
     }
 
+    // TODO(rescrv):  No option
     pub fn reader(&self, options: LogReaderOptions) -> Option<LogReader> {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = self.inner.lock().unwrap();
-        inner.as_ref().map(|inner| {
-            LogReader::new(
-                options,
-                Arc::clone(&inner.writer.storage),
-                inner.writer.prefix.clone(),
-            )
-        })
+        Some(LogReader::new(
+            options,
+            Arc::clone(&self.storage),
+            self.prefix.clone(),
+        ))
     }
 
+    // TODO(rescrv):  No option
     pub fn cursors(&self, options: CursorStoreOptions) -> Option<CursorStore> {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = self.inner.lock().unwrap();
-        inner.as_ref().map(|inner| {
-            CursorStore::new(
-                options,
-                Arc::clone(&inner.writer.storage),
-                inner.writer.prefix.clone(),
-                self.writer.clone(),
-            )
-        })
+        Some(CursorStore::new(
+            options,
+            Arc::clone(&self.storage),
+            self.prefix.clone(),
+            self.writer.clone(),
+        ))
     }
 
     pub fn manifest(&self) -> Option<Manifest> {
         // SAFETY(rescrv):  Mutex poisoning.
         let inner = self.inner.lock().unwrap();
         inner
+            .writer
             .as_ref()
-            .map(|inner| inner.writer.manifest_manager.latest())
+            .map(|writer| writer.manifest_manager.latest())
     }
 
     pub async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
@@ -311,32 +293,21 @@ impl LogWriter {
         f: impl Fn(&Arc<OnceLogWriter>) -> F,
     ) -> Result<O, Error> {
         for _ in 0..3 {
-            // SAFETY(rescrv):  Mutex poisoning.
-            let inner = { self.inner.lock().unwrap().clone() };
-            let Some(epoch_writer) = inner else {
-                // This should never happen, so just be polite with an error.
-                return Err(Error::LogClosed);
-            };
-            match f(&epoch_writer.writer).await {
+            let writer = self.ensure_open().await?;
+            match f(&writer).await {
                 Ok(out) => {
                     return Ok(out);
                 }
                 err @ Err(Error::LogContentionDurable) | err @ Err(Error::LogContentionFailure) => {
-                    self.reopen(
-                        &epoch_writer,
-                        self.writer.clone(),
-                        Arc::clone(&self.mark_dirty),
-                    )
-                    .await?;
+                    // SAFETY(rescrv):  Mutex poisoning.
+                    let mut inner = self.inner.lock().unwrap();
+                    inner.writer.take();
                     return err;
                 }
                 Err(Error::LogContentionRetry) => {
-                    self.reopen(
-                        &epoch_writer,
-                        self.writer.clone(),
-                        Arc::clone(&self.mark_dirty),
-                    )
-                    .await?;
+                    // SAFETY(rescrv):  Mutex poisoning.
+                    let mut inner = self.inner.lock().unwrap();
+                    inner.writer.take();
                 }
                 Err(err) => {
                     return Err(err);
@@ -346,20 +317,23 @@ impl LogWriter {
         Err(Error::LogContentionFailure)
     }
 
-    async fn reopen(
-        &self,
-        epoch_writer: &EpochWriter,
-        writer: String,
-        mark_dirty: Arc<dyn MarkDirty>,
-    ) -> Result<(), Error> {
-        loop {
-            let _guard = self.reopen_protection.lock().await;
+    async fn ensure_open(&self) -> Result<Arc<OnceLogWriter>, Error> {
+        let _guard = self.reopen_protection.lock().await;
+        for _ in 0..3 {
+            let epoch = {
+                // SAFETY(rescrv):  Mutex poisoning.
+                let inner = self.inner.lock().unwrap();
+                if let Some(writer) = inner.writer.as_ref() {
+                    return Ok(Arc::clone(writer));
+                }
+                inner.epoch
+            };
             let writer = match OnceLogWriter::open(
-                epoch_writer.writer.options.clone(),
-                epoch_writer.writer.storage.clone(),
-                epoch_writer.writer.prefix.clone(),
-                writer.clone(),
-                Arc::clone(&mark_dirty),
+                self.options.clone(),
+                self.storage.clone(),
+                self.prefix.clone(),
+                self.writer.clone(),
+                Arc::clone(&self.mark_dirty),
             )
             .await
             {
@@ -369,18 +343,16 @@ impl LogWriter {
             };
             // SAFETY(rescrv):  Mutex poisoning.
             let mut inner = self.inner.lock().unwrap();
-            if let Some(second) = inner.as_mut() {
-                if second.epoch == epoch_writer.epoch {
-                    second.epoch += 1;
-                    second.writer.shutdown();
-                    second.writer = writer;
+            if inner.epoch == epoch {
+                inner.epoch += 1;
+                if let Some(writer) = inner.writer.take() {
+                    writer.shutdown();
                 }
-                return Ok(());
-            } else {
-                // This should never happen, so just be polite with an error.
-                return Err(Error::LogClosed);
+                inner.writer = Some(Arc::clone(&writer));
+                return Ok(writer);
             }
         }
+        Err(Error::LogContentionRetry)
     }
 }
 
