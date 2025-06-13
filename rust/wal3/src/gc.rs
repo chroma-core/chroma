@@ -5,7 +5,8 @@ use std::time::Duration;
 use setsum::Setsum;
 
 use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutOptions, Storage,
+    StorageError,
 };
 
 use crate::manifest::unprefixed_snapshot_path;
@@ -110,7 +111,7 @@ impl Garbage {
         options: &ThrottleOptions,
         storage: &Storage,
         prefix: &str,
-    ) -> Result<Option<Garbage>, Error> {
+    ) -> Result<Option<(Garbage, Option<ETag>)>, Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
             options.headroom as f64,
@@ -123,11 +124,11 @@ impl Garbage {
                 .await
                 .map_err(Arc::new)
             {
-                Ok((ref garbage, _)) => {
+                Ok((ref garbage, e_tag)) => {
                     let garbage: Garbage = serde_json::from_slice(garbage).map_err(|e| {
                         Error::CorruptGarbage(format!("could not decode JSON garbage: {e:?}"))
                     })?;
-                    return Ok(Some(garbage));
+                    return Ok(Some((garbage, e_tag)));
                 }
                 Err(err) => match &*err {
                     StorageError::NotFound { path: _, source: _ } => return Ok(None),
@@ -150,7 +151,7 @@ impl Garbage {
         options: &ThrottleOptions,
         storage: &Storage,
         prefix: &str,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<ETag>, Error> {
         self.install_new_snapshots(storage, prefix, options).await?;
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
@@ -165,7 +166,7 @@ impl Garbage {
                 .into_bytes();
             let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
             match storage.put_bytes(&path, payload, options).await {
-                Ok(_) => return Ok(()),
+                Ok(e_tag) => return Ok(e_tag),
                 Err(StorageError::Precondition { path: _, source: _ }) => {
                     // NOTE(rescrv):  We know that someone put the file before us, and therefore we
                     // know this write failed.  Because the garbage file is created and deleted

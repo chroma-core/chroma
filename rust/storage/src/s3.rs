@@ -11,8 +11,8 @@
 use super::config::StorageConfig;
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
-use super::PutOptions;
 use super::StorageConfigError;
+use super::{DeleteOptions, PutOptions};
 use crate::{ETag, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
@@ -624,17 +624,17 @@ impl S3Storage {
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
-    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
+    pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
         tracing::trace!(key = %key, "Deleting object from S3");
 
-        match self
-            .client
-            .delete_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-        {
+        let req = self.client.delete_object().bucket(&self.bucket).key(key);
+
+        let req = match options.if_match {
+            Some(e_tag) => req.if_match(e_tag.0),
+            None => req,
+        };
+
+        match req.send().await {
             Ok(_) => {
                 tracing::trace!(key = %key, "Successfully deleted object from S3");
                 Ok(())
@@ -653,7 +653,7 @@ impl S3Storage {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object in S3");
         // S3 doesn't have a native rename operation, so we need to copy and delete
         self.copy(src_key, dst_key).await?;
-        match self.delete(src_key).await {
+        match self.delete(src_key, DeleteOptions::default()).await {
             Ok(_) => {
                 tracing::info!(src = %src_key, dst = %dst_key, "Successfully renamed object");
                 Ok(())

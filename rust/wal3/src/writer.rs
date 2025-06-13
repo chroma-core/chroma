@@ -4,7 +4,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{GetOptions, PutOptions, Storage, StorageError};
+use chroma_storage::{DeleteOptions, GetOptions, PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -586,16 +586,16 @@ impl OnceLogWriter {
             // TODO(rescrv):  Evaluate putting a cache in here.
             .compute_garbage(options, cutoff, &())
             .await?;
-        let garbage = match garbage
+        let (garbage, e_tag) = match garbage
             .install(&self.options.throttle_manifest, &self.storage, &self.prefix)
             .await
         {
-            Ok(()) => garbage,
+            Ok(e_tag) => (garbage, e_tag),
             Err(Error::LogContention) => {
                 match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
                     .await
                 {
-                    Ok(Some(garbage)) => garbage,
+                    Ok(Some((garbage, e_tag))) => (garbage, e_tag),
                     Ok(None) => return Err(Error::LogContention),
                     Err(err) => {
                         return Err(err);
@@ -614,7 +614,7 @@ impl OnceLogWriter {
         let start = Instant::now();
         for path in paths {
             loop {
-                match self.storage.delete(&path).await {
+                match self.storage.delete(&path, DeleteOptions::default()).await {
                     Ok(()) => break,
                     Err(StorageError::NotFound { .. }) => break,
                     Err(err) => {
@@ -635,7 +635,16 @@ impl OnceLogWriter {
             }
         }
         loop {
-            match self.storage.delete(&Garbage::path(&self.prefix)).await {
+            let options = if let Some(e_tag) = e_tag.as_ref() {
+                DeleteOptions::if_matches(e_tag, StorageRequestPriority::P0)
+            } else {
+                DeleteOptions::default()
+            };
+            match self
+                .storage
+                .delete(&Garbage::path(&self.prefix), options)
+                .await
+            {
                 Ok(()) => break,
                 Err(StorageError::NotFound { .. }) => break,
                 Err(err) => {

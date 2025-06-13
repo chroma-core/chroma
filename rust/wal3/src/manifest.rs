@@ -362,7 +362,6 @@ impl Manifest {
                         && self.snapshots[0].depth < snapshot_depth
                     {
                         let to_insert = &self.snapshots[0];
-                        eprintln!("INSERT {to_insert:#?}");
                         setsum += to_insert.setsum;
                         snapshots.insert(0, to_insert.clone());
                     }
