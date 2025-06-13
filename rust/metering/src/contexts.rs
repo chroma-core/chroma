@@ -15,7 +15,7 @@ pub struct Context {
 /// Generates the implementations of a context's capabilities and the corresponding marker
 /// method overrides for the `MeteringContext` implementation on that context.
 /// e.g.,
-/// ```
+/// ```ignore
 /// impl SomeCapability for SomeContext {
 ///     fn some_capability(&self, some_arg: SomeType) {
 ///         some_handler(self, some_arg);
@@ -95,7 +95,7 @@ pub fn generate_capability_implementations_for_context(
 
 /// Generates the implementation of a capability for the trait object of the base context.
 /// e.g.,
-/// ```
+/// ```ignore
 /// impl SomeCapability for dyn MeteringContext {
 ///     fn some_capability(&self, some_arg: SomeType) {
 ///         if let Ok(capability_marker_for_context) = self.__marker_some_capability() {

@@ -15,7 +15,7 @@ pub struct Capability {
 
 /// Generates a marker method for a capability.
 /// e.g.,   
-/// ```
+/// ```ignore
 /// fn __marker_some_capability(&self) -> Result<&dyn SomeCapability, String> {
 ///     Err(format!("This context does not support the capability with ID '{}'", "some_capability"))
 /// }
