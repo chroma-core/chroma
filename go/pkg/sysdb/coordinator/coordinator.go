@@ -233,6 +233,8 @@ func (s *Coordinator) GetTenantsLastCompactionTime(ctx context.Context, tenantID
 	return s.catalog.GetTenantsLastCompactionTime(ctx, tenantIDs)
 }
 
+// Note: as of now, this is the only field settable on a tenant, so we have a narrowly scoped operation.
+// If we enable more fields to be settable on a tenant, we should consider adding a more general UpdateTenant API.
 func (s *Coordinator) SetTenantResourceName(ctx context.Context, tenantID string, resourceName string) error {
 	return s.catalog.SetTenantResourceName(ctx, tenantID, resourceName)
 }
