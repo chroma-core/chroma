@@ -156,6 +156,7 @@ impl ChromaError for ResetError {
 #[derive(Serialize, ToSchema)]
 pub struct ChecklistResponse {
     pub max_batch_size: u32,
+    pub supports_base64_encoding: bool,
 }
 
 #[derive(Serialize, ToSchema)]
