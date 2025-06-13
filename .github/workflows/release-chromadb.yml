@@ -86,6 +86,7 @@ jobs:
     with:
       tag: ${{ needs.get-version.outputs.version }}
       tag_as_latest: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
+      push: true
 
   release-pypi:
     name: Publish to PyPI
