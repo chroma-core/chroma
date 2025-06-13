@@ -3,7 +3,7 @@ mod bindings;
 mod errors;
 use std::fs::File;
 
-use simplelog::{CombinedLogger, Config, LevelFilter, WriteLogger};
+use simplelog::{CombinedLogger, Config, ConfigBuilder, LevelFilter, WriteLogger};
 
 use crate::bindings::cli;
 use bindings::{Bindings, PythonBindingsConfig};
@@ -18,11 +18,17 @@ fn chromadb_rust_bindings(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let worker_id = std::env::var("PYTEST_XDIST_WORKER").unwrap_or_else(|_| "unknown".to_string());
     let log_file_name = format!("chroma_rust_bindings_{}.log", worker_id);
 
+    let log_config = ConfigBuilder::new()
+        .set_time_format_custom(simplelog::format_description!(
+            "[hour]:[minute]:[second].[subsecond]"
+        ))
+        .build();
+
     CombinedLogger::init(vec![
         // Only write to a file called app.log
         WriteLogger::new(
             LevelFilter::Info, // global filter
-            Config::default(), // timestamp, level, target, etc.
+            log_config,
             File::create(log_file_name).expect("Failed to create log file"),
         ),
     ])
