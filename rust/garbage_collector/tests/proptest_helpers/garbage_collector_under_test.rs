@@ -5,7 +5,7 @@ use chroma_blockstore::RootManager;
 use chroma_cache::nop::NopCache;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
-use chroma_storage::s3_client_for_test_with_new_bucket;
+use chroma_storage::s3::s3_client_for_test_with_bucket_name;
 use chroma_storage::{DeleteOptions, GetOptions, Storage};
 use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig, SysDb};
 use chroma_system::Orchestrator;
@@ -92,7 +92,9 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             let registry = Registry::new();
 
             let storage = STORAGE_ONCE
-                .get_or_init(|| async { s3_client_for_test_with_new_bucket().await })
+                .get_or_init(|| async {
+                    s3_client_for_test_with_bucket_name("chroma-storage").await
+                })
                 .await;
 
             let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
