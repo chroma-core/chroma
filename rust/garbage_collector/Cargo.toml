@@ -46,6 +46,7 @@ chroma-cache = { workspace = true }
 chroma-index = { workspace = true }
 chroma-memberlist = { workspace = true }
 chroma-tracing = { workspace = true }
+wal3 = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

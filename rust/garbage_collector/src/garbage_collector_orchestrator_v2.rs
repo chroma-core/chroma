@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::construct_version_graph_orchestrator::{
     ConstructVersionGraphError, ConstructVersionGraphOrchestrator,
 };
@@ -44,6 +46,7 @@ use std::time::SystemTime;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
+use wal3::{GarbageCollectionOptions, LogWriter, LogWriterOptions};
 
 #[derive(Debug)]
 pub struct GarbageCollectorOrchestrator {
@@ -279,6 +282,31 @@ impl GarbageCollectorOrchestrator {
         let output = orchestrator.run(self.system.clone()).await?;
 
         let collection_ids = output.version_files.keys().cloned().collect::<Vec<_>>();
+
+        for collection_id in collection_ids.iter() {
+            let log = match LogWriter::open(
+                LogWriterOptions::default(),
+                Arc::new(self.storage.clone()),
+                &collection_id.storage_prefix_for_log(),
+                "garbage collection service",
+                (),
+            )
+            .await
+            {
+                Ok(log) => log,
+                Err(err) => {
+                    tracing::error!("could not garbage collect log: {err:?}");
+                    continue;
+                }
+            };
+            if let Err(err) = log
+                .garbage_collect(&GarbageCollectionOptions::default())
+                .await
+            {
+                tracing::error!("could not garbage collect log: {err:?}");
+                continue;
+            }
+        }
 
         self.soft_deleted_collections_to_gc = self
             .get_eligible_soft_deleted_collections_to_gc(collection_ids)
@@ -813,6 +841,7 @@ impl GarbageCollectorOrchestrator {
             );
 
             for collection_id in ordered_soft_deleted_to_hard_delete_collections {
+                // TODO(rescrv): add wal3 hard delete here.
                 self.sysdb_client
                     .finish_collection_deletion(
                         self.tenant
