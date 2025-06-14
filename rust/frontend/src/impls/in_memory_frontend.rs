@@ -33,10 +33,12 @@ pub struct InMemoryFrontend {
 
 impl InMemoryFrontend {
     pub fn new() -> Self {
+        tracing::info!("InMemoryFrontend::new called");
         Default::default()
     }
 
     pub fn reset(&mut self) -> Result<chroma_types::ResetResponse, chroma_types::ResetError> {
+        tracing::info!("InMemoryFrontend::reset called");
         self.inner = Inner::default();
         Ok(chroma_types::ResetResponse {})
     }
@@ -44,12 +46,14 @@ impl InMemoryFrontend {
     pub fn heartbeat(
         &self,
     ) -> Result<chroma_types::HeartbeatResponse, chroma_types::HeartbeatError> {
+        tracing::info!("InMemoryFrontend::heartbeat called");
         Ok(chroma_types::HeartbeatResponse {
             nanosecond_heartbeat: 0,
         })
     }
 
     pub fn get_max_batch_size(&mut self) -> u32 {
+        tracing::info!("InMemoryFrontend::get_max_batch_size called");
         1024
     }
 
@@ -57,6 +61,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::CreateTenantRequest,
     ) -> Result<chroma_types::CreateTenantResponse, chroma_types::CreateTenantError> {
+        tracing::info!("InMemoryFrontend::create_tenant called: name={}", request.name);
         let was_new = self.inner.tenants.insert(request.name.clone());
         if !was_new {
             return Err(chroma_types::CreateTenantError::AlreadyExists(request.name));
@@ -69,6 +74,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::GetTenantRequest,
     ) -> Result<chroma_types::GetTenantResponse, chroma_types::GetTenantError> {
+        tracing::info!("InMemoryFrontend::get_tenant called: name={}", request.name);
         if self.inner.tenants.contains(&request.name) {
             Ok(chroma_types::GetTenantResponse { name: request.name })
         } else {
@@ -80,6 +86,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::CreateDatabaseRequest,
     ) -> Result<chroma_types::CreateDatabaseResponse, chroma_types::CreateDatabaseError> {
+        tracing::info!("InMemoryFrontend::create_database called: tenant_id={}, database_name={}", request.tenant_id, request.database_name);
         if self.inner.databases.iter().any(|db| {
             db.id == request.database_id
                 || (db.name == request.database_name && db.tenant == request.tenant_id)
@@ -102,6 +109,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::ListDatabasesRequest,
     ) -> Result<chroma_types::ListDatabasesResponse, chroma_types::ListDatabasesError> {
+        tracing::info!("InMemoryFrontend::list_databases called: tenant_id={}", request.tenant_id);
         let databases: Vec<_> = self
             .inner
             .databases
@@ -119,6 +127,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::GetDatabaseRequest,
     ) -> Result<chroma_types::GetDatabaseResponse, chroma_types::GetDatabaseError> {
+        tracing::info!("InMemoryFrontend::get_database called: tenant_id={}, database_name={}", request.tenant_id, request.database_name);
         if let Some(db) = self
             .inner
             .databases
@@ -137,6 +146,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::DeleteDatabaseRequest,
     ) -> Result<chroma_types::DeleteDatabaseResponse, chroma_types::DeleteDatabaseError> {
+        tracing::info!("InMemoryFrontend::delete_database called: tenant_id={}, database_name={}", request.tenant_id, request.database_name);
         if let Some(pos) = self
             .inner
             .databases
@@ -156,6 +166,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::ListCollectionsRequest,
     ) -> Result<chroma_types::ListCollectionsResponse, chroma_types::GetCollectionsError> {
+
         let collections: Vec<_> = self
             .inner
             .collections
@@ -176,6 +187,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::CountCollectionsRequest,
     ) -> Result<chroma_types::CountCollectionsResponse, chroma_types::CountCollectionsError> {
+
         let count = self
             .inner
             .collections
@@ -193,6 +205,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::GetCollectionRequest,
     ) -> Result<chroma_types::GetCollectionResponse, chroma_types::GetCollectionError> {
+        tracing::info!("InMemoryFrontend::get_collection called: tenant_id={}, database_name={}, collection_name={}", request.tenant_id, request.database_name, request.collection_name);
         if let Some(collection) = self.inner.collections.iter().find(|c| {
             c.collection.name == request.collection_name && c.collection.tenant == request.tenant_id
         }) {
@@ -208,6 +221,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::CreateCollectionRequest,
     ) -> Result<chroma_types::CreateCollectionResponse, chroma_types::CreateCollectionError> {
+        tracing::info!("InMemoryFrontend::create_collection called: tenant_id={}, database_name={}, name={}", request.tenant_id, request.database_name, request.name);
         if self.inner.collections.iter().any(|c| {
             c.collection.name == request.name
                 && c.collection.tenant == request.tenant_id
@@ -265,6 +279,7 @@ impl InMemoryFrontend {
         &mut self,
         _request: chroma_types::UpdateCollectionRequest,
     ) -> Result<chroma_types::UpdateCollectionResponse, chroma_types::UpdateCollectionError> {
+        tracing::info!("InMemoryFrontend::update_collection called");
         unimplemented!()
     }
 
@@ -273,6 +288,7 @@ impl InMemoryFrontend {
         request: chroma_types::DeleteCollectionRequest,
     ) -> Result<chroma_types::DeleteCollectionRecordsResponse, chroma_types::DeleteCollectionError>
     {
+        tracing::info!("InMemoryFrontend::delete_collection called: tenant_id={}, database_name={}, collection_name={}", request.tenant_id, request.database_name, request.collection_name);
         let inner = &mut self.inner;
         if let Some(pos) = inner.collections.iter().position(|c| {
             c.collection.name == request.collection_name
@@ -293,6 +309,7 @@ impl InMemoryFrontend {
         request: chroma_types::AddCollectionRecordsRequest,
     ) -> Result<chroma_types::AddCollectionRecordsResponse, chroma_types::AddCollectionRecordsError>
     {
+        tracing::info!("InMemoryFrontend::add called: tenant_id={}, database_name={}, collection_id={}", request.tenant_id, request.database_name, request.collection_id);
         let collection = self
             .inner
             .collections
@@ -341,6 +358,7 @@ impl InMemoryFrontend {
         chroma_types::UpdateCollectionRecordsResponse,
         chroma_types::UpdateCollectionRecordsError,
     > {
+        tracing::info!("InMemoryFrontend::update called: tenant_id={}, database_name={}, collection_id={}", request.tenant_id, request.database_name, request.collection_id);
         let collection = self
             .inner
             .collections
@@ -388,6 +406,7 @@ impl InMemoryFrontend {
         chroma_types::UpsertCollectionRecordsResponse,
         chroma_types::UpsertCollectionRecordsError,
     > {
+        tracing::info!("InMemoryFrontend::upsert called: tenant_id={}, database_name={}, collection_id={}", request.tenant_id, request.database_name, request.collection_id);
         let collection = self
             .inner
             .collections
@@ -437,10 +456,10 @@ impl InMemoryFrontend {
         chroma_types::DeleteCollectionRecordsResponse,
         chroma_types::DeleteCollectionRecordsError,
     > {
+        tracing::info!("InMemoryFrontend::delete called: tenant_id={}, database_name={}, collection_id={}", request.tenant_id, request.database_name, request.collection_id);
         if request.ids.is_none() && request.r#where.is_none() {
             return Ok(chroma_types::DeleteCollectionRecordsResponse {});
         }
-
         let ids_to_delete = self
             .get(
                 chroma_types::GetRequest::try_new(
@@ -494,6 +513,7 @@ impl InMemoryFrontend {
         &self,
         request: chroma_types::CountRequest,
     ) -> Result<chroma_types::CountResponse, chroma_types::QueryError> {
+        tracing::info!("InMemoryFrontend::count called: tenant_id={}, database_name={}, collection_id={}", request.tenant_id, request.database_name, request.collection_id);
         let collection = self
             .inner
             .collections
@@ -529,6 +549,7 @@ impl InMemoryFrontend {
         &self,
         request: chroma_types::GetRequest,
     ) -> Result<chroma_types::GetResponse, chroma_types::QueryError> {
+        tracing::info!("InMemoryFrontend::get called: tenant_id={}, database_name={}, collection_id={}", request.tenant_id, request.database_name, request.collection_id);
         let collection = self
             .inner
             .collections
@@ -590,6 +611,7 @@ impl InMemoryFrontend {
         &mut self,
         request: chroma_types::QueryRequest,
     ) -> Result<chroma_types::QueryResponse, chroma_types::QueryError> {
+        tracing::info!("InMemoryFrontend::query called: tenant_id={}, database_name={}, collection_id={}", request.tenant_id, request.database_name, request.collection_id);
         let collection = self
             .inner
             .collections
@@ -662,6 +684,7 @@ impl InMemoryFrontend {
     }
 
     pub fn healthcheck(&self) -> chroma_types::HealthCheckResponse {
+        tracing::info!("InMemoryFrontend::healthcheck called");
         chroma_types::HealthCheckResponse {
             is_executor_ready: true,
             is_log_client_ready: true,

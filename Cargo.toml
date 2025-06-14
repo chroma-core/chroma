@@ -144,3 +144,6 @@ opt-level = 3
 
 [profile.test.package.rand_chacha]
 opt-level = 3
+
+[patch.crates-io]
+arrow-arith = { version = "52.2.0", path = "patched/arrow-arith" }

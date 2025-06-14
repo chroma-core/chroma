@@ -701,6 +701,7 @@ impl ServiceBasedFrontend {
             ..
         }: AddCollectionRecordsRequest,
     ) -> Result<AddCollectionRecordsResponse, AddCollectionRecordsError> {
+        tracing::info!("Using local Chroma instance for add operation");
         self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
             Some(embedding.len())
         })
@@ -775,6 +776,7 @@ impl ServiceBasedFrontend {
             ..
         }: UpdateCollectionRecordsRequest,
     ) -> Result<UpdateCollectionRecordsResponse, UpdateCollectionRecordsError> {
+        tracing::info!("Using local Chroma instance for update operation");
         self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
             embedding.as_ref().map(|emb| emb.len())
         })
@@ -853,6 +855,7 @@ impl ServiceBasedFrontend {
             ..
         }: UpsertCollectionRecordsRequest,
     ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
+        tracing::info!("Using local Chroma instance for upsert operation");
         self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
             Some(embedding.len())
         })
@@ -1254,6 +1257,7 @@ impl ServiceBasedFrontend {
     }
 
     pub async fn get(&mut self, request: GetRequest) -> Result<GetResponse, QueryError> {
+        tracing::info!("Using local Chroma instance for get operation");
         let retries = Arc::new(AtomicUsize::new(0));
         let get_to_retry = || {
             let mut self_clone = self.clone();
@@ -1376,6 +1380,7 @@ impl ServiceBasedFrontend {
     }
 
     pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        tracing::info!("Using local Chroma instance for query operation");
         self.validate_embedding(
             request.collection_id,
             Some(&request.embeddings),
@@ -1444,6 +1449,8 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         (config, system): &(FrontendConfig, System),
         registry: &registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+
+
         // Create sqlitedb if configured
         if let Some(sqlite_conf) = &config.sqlitedb {
             SqliteDb::try_from_config(sqlite_conf, registry)

@@ -19,7 +19,7 @@ path = "src/bin/query_service.rs"
 chroma-tracing = { workspace = true }
 regex = { workspace = true }
 
-[target.'cfg(not(target_env = "msvc"))'.dependencies]
+[target.'cfg(all(not(target_env = "msvc"), not(target_os = "ios"), not(target_os = "tvos")))'.dependencies]
 tikv-jemallocator = "0.6"
 
 serde = { workspace = true }

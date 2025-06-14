@@ -45,3 +45,25 @@ target/
 
 # Rapid test data
 testdata
+
+# Swift bindings and frameworks
+*.build
+swift_package/Sources/ChromaSwift/*.swift
+swift_package/chroma_swift_framework.xcframework
+*.dylib
+*.metallib
+*.framework
+
+# Xcode
+*.xcuserdatad/
+*.xcuserstate
+**/xcuserdata/
+project.xcworkspace/xcuserdata/
+
+# Ignore generated Swift bindings
+/rust/swift_bindings/out/
+/rust/swift_bindings/Chroma/
+
+# Ignore Swift Package Manager and Xcode build artifacts
+.build/
+/DerivedData/

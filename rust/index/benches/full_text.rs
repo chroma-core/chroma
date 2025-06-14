@@ -16,10 +16,10 @@ use dataset_utilities::{get_record_dataset, get_record_query_dataset_pair};
 use rayon::prelude::*;
 use tantivy::tokenizer::NgramTokenizer;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), not(target_os = "ios"), not(target_os = "tvos")))]
 use tikv_jemallocator::Jemalloc;
 
-#[cfg(not(target_env = "msvc"))]
+#[cfg(all(not(target_env = "msvc"), not(target_os = "ios"), not(target_os = "tvos")))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 

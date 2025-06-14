@@ -16,7 +16,7 @@ roaring = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }
-shuttle = { workspace = true }
+
 prost = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true }
@@ -36,6 +36,8 @@ rand = { workspace = true }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 bincode = { workspace = true }
+
+shuttle = { workspace = true }
 
 [[bench]]
 name = "blockfile_writer"
