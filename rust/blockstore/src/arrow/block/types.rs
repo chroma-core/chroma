@@ -855,3 +855,30 @@ where
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+
+    use std::sync::Arc;
+
+    use arrow::{
+        array::Int32Array,
+        datatypes::{DataType, Field, Schema},
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_block_serde() {
+        let batch = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new("id", DataType::Int32, false)])),
+            vec![Arc::new(Int32Array::from(vec![1, 2, 3, 4, 5]))],
+        )
+        .unwrap();
+        let b1 = Block::from_record_batch(Uuid::new_v4(), batch.clone());
+        let bytes = bincode::serialize(&b1).unwrap();
+        let b2 = bincode::deserialize::<Block>(&bytes).unwrap();
+        assert_eq!(b1.id, b2.id);
+        assert_eq!(b1.data.0, b2.data.0);
+    }
+}
