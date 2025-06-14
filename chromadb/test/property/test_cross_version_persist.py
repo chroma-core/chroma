@@ -30,6 +30,9 @@ from chromadb.test.utils.cross_version import (
     install_version,
     get_path_to_version_install,
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Minimum persisted version we support, and other substantial change versions
 # 0.4.1 is the first version with persistence
@@ -119,47 +122,14 @@ def api_import_for_version(module: Any, version: str) -> Type:  # type: ignore
     return module.api.ServerAPI  # type: ignore
 
 
-def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
-    return [
-        (
-            version,
-            Settings(
-                chroma_api_impl="chromadb.api.rust.RustBindingsAPI"
-                if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
-                else "chromadb.api.segment.SegmentAPI",
-                chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
-                chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
-                chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
-                chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
-                allow_reset=True,
-                is_persistent=True,
-                persist_directory=tempfile.mkdtemp(),
-            ),
-        )
-        for version in versions
-    ]
-
-
-test_old_versions = versions()
-base_install_dir = tempfile.mkdtemp()
-
-
-# This fixture is not shared with the rest of the tests because it is unique in how it
-# installs the versions of chromadb
-@pytest.fixture(scope="module", params=configurations(test_old_versions))  # type: ignore
-def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
-    configuration = request.param
-    version = configuration[0]
-
+@pytest.fixture(scope="module", params=versions())
+def old_version(request) -> Generator[str, None, None]:
+    version = request.param
     install_version(version, {})
-    yield configuration
+    yield version
     # Cleanup the installed version
     path = get_path_to_version_install(version)
     shutil.rmtree(path)
-    # Cleanup the persisted data
-    data_path = configuration[1].persist_directory
-    if os.path.exists(data_path):
-        shutil.rmtree(data_path, ignore_errors=True)
 
 
 class not_implemented_ef(EmbeddingFunction[Documents]):
@@ -224,7 +194,10 @@ def persist_generated_data_with_old_version(
 
         # Shutdown system
         system.stop()
+        print("Finished persisting data with old version " + version)
+        print("PID", os.getpid())
     except Exception as e:
+        print(f"Error persisting data with old version {version}: {e}")
         conn.send(e)
         raise e
 
@@ -242,6 +215,8 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
     key="coll",
 )
 
+import tempfile
+
 
 @given(
     collection_strategy=collection_st,
@@ -249,14 +224,29 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 )
 @settings(deadline=None)
 def test_cycle_versions(
-    version_settings: Tuple[str, Settings],
+    # version_settings: Tuple[str, Settings],
+    old_version: str,
     collection_strategy: strategies.Collection,
     embeddings_strategy: strategies.RecordSet,
 ) -> None:
     # Test backwards compatibility
     # For the current version, ensure that we can load a collection from
     # the previous versions
-    version, settings = version_settings
+    # version, settings = version_settings
+
+    settings = Settings(
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI"
+        if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+        else "chromadb.api.segment.SegmentAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        allow_reset=True,
+        is_persistent=True,
+        persist_directory=tempfile.mkdtemp(),
+    )
+
     # The strategies can generate metadatas of malformed inputs. Other tests
     # will error check and cover these cases to make sure they error. Here we
     # just convert them to valid values since the error cases are already tested
@@ -270,7 +260,14 @@ def test_cycle_versions(
             for m in embeddings_strategy["metadatas"]
         ]
 
-    patch_for_version(version, collection_strategy, embeddings_strategy, settings)
+    patch_for_version(old_version, collection_strategy, embeddings_strategy, settings)
+
+    logger.info(
+        "Persistence directory: "
+        + settings.persist_directory
+        + " for version "
+        + old_version
+    )
 
     # Can't pickle a function, and we won't need them
     collection_strategy.embedding_function = None
@@ -283,7 +280,13 @@ def test_cycle_versions(
     conn1, conn2 = multiprocessing.Pipe()
     p = ctx.Process(
         target=persist_generated_data_with_old_version,
-        args=(version, settings, collection_strategy, embeddings_strategy, conn2),
+        args=(
+            old_version,
+            settings,
+            collection_strategy,
+            embeddings_strategy,
+            conn2,
+        ),
     )
     p.start()
     p.join()
@@ -293,12 +296,20 @@ def test_cycle_versions(
         raise e
 
     p.close()
+    print(
+        f"Finished persisting data with old version {old_version} to {settings.persist_directory}",
+        flush=True,
+    )
+    logger.info("Finished persisting data with old version " + old_version)
 
     # Switch to the current version (local working directory) and check the invariants
     # are preserved for the collection
     system = config.System(settings)
+    print("Starting system with current version", flush=True)
     system.start()
+    print("System started with current version", flush=True)
     client = ClientCreator.from_system(system)
+    print("Creating collection with current version", flush=True)
     coll = client.get_collection(
         name=collection_strategy.name,
         embedding_function=not_implemented_ef(),  # type: ignore
@@ -307,7 +318,7 @@ def test_cycle_versions(
     embeddings_queue = system.instance(SqliteDB)
 
     # Automatic pruning should be disabled since embeddings_queue is non-empty
-    if packaging_version.Version(version) < packaging_version.Version(
+    if packaging_version.Version(old_version) < packaging_version.Version(
         "0.5.7"
     ):  # (automatic pruning is enabled by default in 0.5.7 and later)
         assert (
@@ -321,6 +332,11 @@ def test_cycle_versions(
         )
     )
 
+    print(
+        "Checking invariants after loading collection from old version " + old_version
+    )
+    logger.info("Checking invariants after loading collection from old version")
+
     # Should be able to clean log immediately after updating
 
     # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
@@ -328,23 +344,38 @@ def test_cycle_versions(
     # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
     if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
         # Trigger log purge in Rust impl
+        logger.info("Before count")
         invariants.count(coll, embeddings_strategy)
+        logger.info("After count")
     else:
         trigger_vector_segments_max_seq_id_migration(
             embeddings_queue, system.instance(SegmentManager)
         )
         embeddings_queue.purge_log(coll.id)
+    logger.info("log size below max?")
     invariants.log_size_below_max(system, [coll], True)
 
     # Should be able to add embeddings
+    logger.info("adding records")
     coll.add(**embeddings_strategy)  # type: ignore
 
+    logger.info("count?")
     invariants.count(coll, embeddings_strategy)
+    logger.info("metadata?")
     invariants.metadatas_match(coll, embeddings_strategy)
+    logger.info("documents?")
     invariants.documents_match(coll, embeddings_strategy)
+    logger.info("ids?")
     invariants.ids_match(coll, embeddings_strategy)
+    logger.info("ann?")
     invariants.ann_accuracy(coll, embeddings_strategy)
+    logger.info("log size?")
     invariants.log_size_below_max(system, [coll], True)
 
     # Shutdown system
+    logger.info("Shutting down system")
     system.stop()
+    logger.info(
+        "Finished checking invariants after loading collection from old version "
+        + old_version
+    )
