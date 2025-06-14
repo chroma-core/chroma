@@ -524,7 +524,7 @@ mod tests {
     use crate::helper::ChromaGrpcClients;
     use chroma_config::registry::Registry;
     use chroma_config::Configurable;
-    use chroma_storage::s3_config_for_test_with_bucket_name;
+    use chroma_storage::s3_config_for_localhost_with_bucket_name;
     use chroma_storage::GetOptions;
     use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
     use chroma_system::System;
@@ -770,7 +770,7 @@ mod tests {
 
     async fn test_k8s_integration_check_end_to_end(use_spann: bool) {
         // Create storage config and storage client
-        let storage_config = s3_config_for_test_with_bucket_name("chroma-storage").await;
+        let storage_config = s3_config_for_localhost_with_bucket_name("chroma-storage").await;
 
         let registry = Registry::new();
         let storage = Storage::try_from_config(&storage_config, &registry)
@@ -910,7 +910,7 @@ mod tests {
     #[traced_test]
     async fn test_k8s_integration_soft_delete() {
         // Create storage config and storage client
-        let storage_config = s3_config_for_test_with_bucket_name("chroma-storage").await;
+        let storage_config = s3_config_for_localhost_with_bucket_name("chroma-storage").await;
 
         let registry = Registry::new();
         let storage = Storage::try_from_config(&storage_config, &registry)
@@ -1068,7 +1068,7 @@ mod tests {
     #[traced_test]
     async fn test_k8s_integration_dry_run() {
         // Create storage config and storage client
-        let storage_config = s3_config_for_test_with_bucket_name("chroma-storage").await;
+        let storage_config = s3_config_for_localhost_with_bucket_name("chroma-storage").await;
 
         let registry = Registry::new();
         let storage = Storage::try_from_config(&storage_config, &registry)

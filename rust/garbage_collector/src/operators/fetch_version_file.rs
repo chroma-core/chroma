@@ -139,7 +139,7 @@ mod tests {
     use super::*;
     use chroma_config::registry;
     use chroma_config::Configurable;
-    use chroma_storage::s3_config_for_test_with_bucket_name;
+    use chroma_storage::s3_config_for_localhost_with_bucket_name;
     use chroma_storage::PutOptions;
     use chroma_types::chroma_proto::CollectionInfoImmutable;
     use chroma_types::chroma_proto::CollectionVersionHistory;
@@ -148,7 +148,7 @@ mod tests {
 
     async fn setup_test_storage() -> Storage {
         // Create storage config for Minio
-        let storage_config = s3_config_for_test_with_bucket_name("chroma-storage").await;
+        let storage_config = s3_config_for_localhost_with_bucket_name("chroma-storage").await;
 
         // Add more detailed logging
         tracing::info!("Setting up test storage with config: {:?}", storage_config);
