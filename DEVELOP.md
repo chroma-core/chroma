@@ -86,7 +86,7 @@ If you are developing with VSCode or its derivatives (Windsurf/Cursor etc), make
 
 For debugging it is recommended to install the `CodeLLDB` extension.
 
-You should be able to run and debug the rust tests by clicking on the 'Run Test' or 'Debug' button above the test method definitions.
+You should be able to run and debug the rust tests by clicking on the 'Run Test' or 'Debug' button found above the test method definitions.
 
 <img width="262" alt="image" src="https://github.com/user-attachments/assets/a7779e4d-9d64-4511-9271-b790bed7b68b" />
 
