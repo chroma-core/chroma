@@ -127,6 +127,14 @@ class Settings(BaseSettings):  # type: ignore
     # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
     chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
 
+    @validator(
+        "chroma_server_cors_allow_origins", pre=True, always=True, allow_reuse=True
+    )
+    def validate_safe_cors_origin(cls, v: List[str]) -> List[str]:
+        if len(v) > 0 and any([origin == "*" for origin in v]):
+            logger.warning("CORS origin '*' is not recommended for production use")
+        return v
+
     @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
     def empty_str_to_none(cls, v: str) -> Optional[str]:
         if type(v) is str and v.strip() == "":
