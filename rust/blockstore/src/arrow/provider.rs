@@ -20,7 +20,9 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
 };
+use chroma_tracing::util::{get_current_trace_id, Stopwatch};
 use futures::{stream::FuturesUnordered, StreamExt};
+use opentelemetry::{global, KeyValue};
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -263,6 +265,36 @@ impl ChromaError for ForkError {
     }
 }
 
+#[derive(Clone)]
+pub struct BlockMetrics {
+    pub commit_latency: opentelemetry::metrics::Histogram<u64>,
+    pub num_blocks_flushed: opentelemetry::metrics::Histogram<u64>,
+    pub flush_latency: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl Default for BlockMetrics {
+    fn default() -> Self {
+        let meter = global::meter("chroma");
+        Self {
+            commit_latency: meter
+                .u64_histogram("block_commit_latency")
+                .with_description("Commit latency")
+                .with_unit("microseconds")
+                .build(),
+            num_blocks_flushed: meter
+                .u64_histogram("block_num_blocks_flushed")
+                .with_description("Number of blocks flushed")
+                .with_unit("blocks")
+                .build(),
+            flush_latency: meter
+                .u64_histogram("block_flush_latency")
+                .with_description("Flush latency")
+                .with_unit("microseconds")
+                .build(),
+        }
+    }
+}
+
 /// A simple local cache of Arrow-backed blocks, the blockfile provider passes this
 /// to the ArrowBlockfile when it creates a new blockfile. So that the blockfile can manage and access blocks
 /// # Note
@@ -274,6 +306,7 @@ pub(super) struct BlockManager {
     block_cache: Arc<dyn PersistentCache<Uuid, Block>>,
     storage: Storage,
     max_block_size_bytes: usize,
+    block_metrics: BlockMetrics,
 }
 
 impl BlockManager {
@@ -287,6 +320,7 @@ impl BlockManager {
             block_cache,
             storage,
             max_block_size_bytes,
+            block_metrics: BlockMetrics::default(),
         }
     }
 
@@ -317,6 +351,9 @@ impl BlockManager {
         &self,
         delta: impl Delta,
     ) -> Block {
+        let trace_id = get_current_trace_id().to_string();
+        let attribute = [KeyValue::new("trace_id", trace_id)];
+        let _stopwatch = Stopwatch::new(&self.block_metrics.commit_latency, &attribute);
         let delta_id = delta.id();
         let record_batch = delta.finish::<K, V>(None);
         let block = Block::from_record_batch(delta_id, record_batch);
@@ -387,6 +424,10 @@ impl BlockManager {
             }
         };
         let key = format!("block/{}", block.id);
+
+        let trace_id = get_current_trace_id().to_string();
+        let attribute = [KeyValue::new("trace_id", trace_id)];
+        let _stopwatch = Stopwatch::new(&self.block_metrics.flush_latency, &attribute);
         let block_bytes_len = bytes.len();
         let res = self
             .storage
@@ -403,6 +444,7 @@ impl BlockManager {
                     block.id,
                     block_bytes_len
                 );
+                self.block_metrics.num_blocks_flushed.record(1, &attribute);
             }
             Err(e) => {
                 tracing::info!("Error writing block to storage {}", e);
