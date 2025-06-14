@@ -46,6 +46,10 @@ chroma-cache = { workspace = true }
 chroma-index = { workspace = true }
 chroma-memberlist = { workspace = true }
 chroma-tracing = { workspace = true }
+chroma-jemalloc-pprof-server = { workspace = true }
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }

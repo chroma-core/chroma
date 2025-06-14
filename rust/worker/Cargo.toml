@@ -20,7 +20,7 @@ chroma-tracing = { workspace = true }
 regex = { workspace = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
+tikv-jemallocator = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

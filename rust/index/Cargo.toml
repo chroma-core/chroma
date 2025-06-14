@@ -41,7 +41,7 @@ proptest = { workspace = true }
 indicatif = "0.17.9"
 anyhow = "1.0.93"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
+tikv-jemallocator = { workspace = true }
 
 [[bench]]
 name = "full_text"

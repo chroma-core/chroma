@@ -49,6 +49,7 @@ pub(super) struct GarbageCollectorConfig {
     pub port: u16,
     #[serde(default)]
     pub root_cache_config: CacheConfig,
+    pub jemalloc_pprof_server_port: Option<u16>,
 }
 
 impl GarbageCollectorConfig {
