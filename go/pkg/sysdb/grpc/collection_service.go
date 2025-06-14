@@ -270,7 +270,7 @@ func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckC
 			log.Error("CheckCollection failed. collection id format error", zap.Error(err), zap.String("collection_id", collectionID))
 			return nil, grpcutils.BuildInternalGrpcError(err.Error())
 		}
-		deleted, err := s.coordinator.CheckCollection(ctx, parsedId)
+		deleted, logPosition, err := s.coordinator.CheckCollection(ctx, parsedId)
 
 		if err != nil {
 			log.Error("CheckCollection failed", zap.Error(err), zap.String("collection_id", collectionID))
@@ -278,6 +278,7 @@ func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckC
 		}
 
 		res.Deleted[i] = deleted
+		res.LogPosition[i] = logPosition
 	}
 	return res, nil
 }

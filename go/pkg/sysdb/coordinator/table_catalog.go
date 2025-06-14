@@ -403,7 +403,7 @@ func (tc *Catalog) CreateCollection(ctx context.Context, createCollection *model
 
 // Returns true if collection is deleted (either soft-deleted or hard-deleted)
 // and false otherwise.
-func (tc *Catalog) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, error) {
+func (tc *Catalog) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, int64, error) {
 	tracer := otel.Tracer
 	if tracer != nil {
 		_, span := tracer.Start(ctx, "Catalog.CheckCollection")
@@ -412,18 +412,14 @@ func (tc *Catalog) CheckCollection(ctx context.Context, collectionID types.Uniqu
 
 	collectionInfo, err := tc.metaDomain.CollectionDb(ctx).GetCollectionWithoutMetadata(types.FromUniqueID(collectionID), nil, nil)
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
 	// Collection is hard deleted.
 	if collectionInfo == nil {
-		return true, nil
+		return true, 0, nil
 	}
-	// Collection is soft deleted.
-	if collectionInfo.IsDeleted {
-		return true, nil
-	}
-	// Collection is not deleted.
-	return false, nil
+
+	return collectionInfo.IsDeleted, collectionInfo.LogPosition, nil
 }
 
 func (tc *Catalog) GetCollection(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string) (*model.Collection, error) {

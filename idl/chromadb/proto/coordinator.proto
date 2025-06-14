@@ -227,6 +227,7 @@ message CheckCollectionsRequest {
 
 message CheckCollectionsResponse {
   repeated bool deleted = 1;
+  repeated int64 log_position = 2;
 }
 
 message UpdateCollectionRequest {
