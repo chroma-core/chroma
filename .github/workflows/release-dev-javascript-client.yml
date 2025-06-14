@@ -103,3 +103,23 @@ jobs:
         working-directory: ./clients/js/
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  notify-slack-on-failure:
+    name: Notify Slack on Release Failure
+    if: failure()
+    needs: [release-dev]
+    runs-on: blacksmith-2vcpu-ubuntu-2204
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *JavaScript client (dev) release failure!*
+              *Workflow:* ${{ github.workflow }}
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Author:* ${{ github.actor }}
+              *Ref:* ${{ github.ref_name }}
