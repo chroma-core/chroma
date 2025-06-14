@@ -763,10 +763,12 @@ impl Manifest {
                     // without an e_tag we cannot do anything.  The log contention backoff protocol
                     // cares for this case, rather than having to error-handle it separately
                     // because it "crashes" the log and reinitializes.
-                    return Err(Error::LogContention);
+                    return Err(Error::LogContentionFailure);
                 }
                 Err(StorageError::Precondition { path: _, source: _ }) => {
-                    return Err(Error::LogContention);
+                    // NOTE(rescrv):  This is "durable" because it's a manifest failure.  See the
+                    // comment in the Error enum for why this makes sense.
+                    return Err(Error::LogContentionDurable);
                 }
                 Err(e) => {
                     tracing::error!("error uploading manifest: {e:?}");

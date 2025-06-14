@@ -75,8 +75,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
     )
     .await
     .unwrap();
-    let log_contention = log.append(vec![81, 82, 83, 84]).await.unwrap_err();
-    assert!(matches!(log_contention, wal3::Error::LogContention));
+    // The log contention will be transparently sorted out.
     let position = log.append(vec![81, 82, 83, 84]).await.unwrap();
     let fragment2 = FragmentCondition {
         path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet".to_string(),

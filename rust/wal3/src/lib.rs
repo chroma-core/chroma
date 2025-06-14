@@ -43,8 +43,27 @@ pub enum Error {
     AlreadyInitialized,
     #[error("scanned region is garbage collected")]
     GarbageCollected,
-    #[error("log contention fails a write")]
-    LogContention,
+    // NOTE(rescrv):  Durable means the contention occurs only on the manifest.  A manifest-scoped
+    // op may return this case and assume higher ups translate it to failure.  This is hypothetical
+    // and a note to the future because in the code as of this comment the data is always durable
+    // before any manifest contention can happen.
+    //
+    // There are three cases:
+    // - The operation does not need to be retried because it is durable, but we need to internally
+    //   propagate state to correct for the log contention.
+    // - The operation needs to be retried because there was explicit contention writing the
+    //   fragement.  We need to retry, but can return this error to the user.
+    // - The operation is in an ambiguous state and we cannot advise the user either way.  Fail the
+    //   write and let a higher level protocol handle it.
+    //
+    // By observation, manifest contention on the write path is always LogContentionDurable.  If
+    // you change the write path you need to audit where it gets returned.
+    #[error("log contention, but your data is durable")]
+    LogContentionDurable,
+    #[error("log contention, and your operation may be retried")]
+    LogContentionRetry,
+    #[error("log contention, and your data may or may not be durable")]
+    LogContentionFailure,
     #[error("the log is full")]
     LogFull,
     #[error("the log is closed")]
@@ -84,7 +103,9 @@ impl chroma_error::ChromaError for Error {
             Self::UninitializedLog => chroma_error::ErrorCodes::FailedPrecondition,
             Self::AlreadyInitialized => chroma_error::ErrorCodes::AlreadyExists,
             Self::GarbageCollected => chroma_error::ErrorCodes::NotFound,
-            Self::LogContention => chroma_error::ErrorCodes::Aborted,
+            Self::LogContentionDurable => chroma_error::ErrorCodes::Aborted,
+            Self::LogContentionRetry => chroma_error::ErrorCodes::Aborted,
+            Self::LogContentionFailure => chroma_error::ErrorCodes::Aborted,
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
             Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
