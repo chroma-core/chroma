@@ -3,9 +3,9 @@ use chroma_blockstore::{arrow::provider::RootManagerError, RootManager};
 use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid, HNSW_PATH};
+use futures::stream::StreamExt;
 use std::{collections::HashSet, str::FromStr};
 use thiserror::Error;
-use tokio::task::{JoinError, JoinSet};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -44,8 +44,6 @@ pub enum ListFilesAtVersionError {
     VersionNotFound(i64),
     #[error("Invalid UUID: {0}")]
     InvalidUuid(uuid::Error),
-    #[error("Sparse index fetch task failed: {0}")]
-    SparseIndexTaskFailed(JoinError),
     #[error("Error fetching block IDs for sparse index: {0}")]
     FetchBlockIdsError(#[from] RootManagerError),
     #[error("Version file missing collection ID")]
@@ -134,32 +132,30 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
             }
         }
 
-        let mut block_id_tasks = JoinSet::new();
-        for sparse_index_id in sparse_index_ids {
-            let root_manager = input.root_manager.clone();
-            block_id_tasks.spawn(async move {
-                match root_manager.get_all_block_ids(&sparse_index_id).await {
-                    Ok(block_ids) => Ok(block_ids),
-                    Err(RootManagerError::StorageGetError(StorageError::NotFound { .. })) => {
-                        tracing::debug!(
-                            "Sparse index {} not found in storage. Assuming it was previously deleted.",
-                            sparse_index_id
-                        );
-                        Ok(vec![])
+        if !sparse_index_ids.is_empty() {
+            let num = sparse_index_ids.len();
+            let mut get_block_ids_stream = futures::stream::iter(sparse_index_ids)
+                .map(|sparse_index_id| async move {
+                    match input.root_manager.get_all_block_ids(&sparse_index_id).await {
+                        Ok(block_ids) => Ok(block_ids),
+                        Err(RootManagerError::StorageGetError(StorageError::NotFound { .. })) => {
+                            tracing::debug!(
+                                "Sparse index {} not found in storage. Assuming it was previously deleted.",
+                                sparse_index_id
+                            );
+                            Ok(vec![])
+                        }
+                        Err(e) => Err(e),
                     }
-                    Err(e) => Err(e),
+                }).buffer_unordered(num);
+
+            while let Some(res) = get_block_ids_stream.next().await {
+                let block_ids = res.map_err(ListFilesAtVersionError::FetchBlockIdsError)?;
+
+                for block_id in block_ids {
+                    // Path construction here will need to be updated after the upcoming collection file prefix changes.
+                    file_paths.insert(format!("block/{}", block_id));
                 }
-            });
-        }
-
-        while let Some(res) = block_id_tasks.join_next().await {
-            let block_ids = res
-                .map_err(ListFilesAtVersionError::SparseIndexTaskFailed)?
-                .map_err(ListFilesAtVersionError::FetchBlockIdsError)?;
-
-            for block_id in block_ids {
-                // Path construction here will need to be updated after the upcoming collection file prefix changes.
-                file_paths.insert(format!("block/{}", block_id));
             }
         }
 
