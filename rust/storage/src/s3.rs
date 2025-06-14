@@ -8,7 +8,7 @@
 // Once we move to our own implementation of hnswlib we can support
 // streaming from s3.
 
-use super::config::StorageConfig;
+use super::config::{S3CredentialsConfig, StorageConfig};
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
 use super::StorageConfigError;
@@ -724,7 +724,8 @@ impl Configurable<StorageConfig> for S3Storage {
         match &config {
             StorageConfig::S3(s3_config) => {
                 let client = match &s3_config.credentials {
-                    super::config::S3CredentialsConfig::Minio => {
+                    super::config::S3CredentialsConfig::Minio
+                    | super::config::S3CredentialsConfig::Localhost => {
                         // Set up credentials assuming minio is running locally
                         let cred = aws_sdk_s3::config::Credentials::new(
                             "minio",
@@ -739,9 +740,17 @@ impl Configurable<StorageConfig> for S3Storage {
                             .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
                         let retry_config = RetryConfig::standard();
 
+                        let mut endpoint_url = "http://minio.chroma:9000".to_string();
+                        if matches!(
+                            s3_config.credentials,
+                            super::config::S3CredentialsConfig::Localhost
+                        ) {
+                            endpoint_url = "http://localhost:9000".to_string();
+                        }
+
                         // Set up s3 client
                         let config = aws_sdk_s3::config::Builder::new()
-                            .endpoint_url("http://minio.chroma:9000".to_string())
+                            .endpoint_url(endpoint_url)
                             .credentials_provider(cred)
                             .behavior_version_latest()
                             .region(aws_sdk_s3::config::Region::new("us-east-1"))
@@ -787,6 +796,16 @@ impl Configurable<StorageConfig> for S3Storage {
             _ => Err(Box::new(StorageConfigError::InvalidStorageConfig)),
         }
     }
+}
+
+pub async fn s3_config_for_localhost_with_bucket_name(
+    name: impl Into<String>,
+) -> crate::StorageConfig {
+    StorageConfig::S3(crate::config::S3StorageConfig {
+        bucket: name.into(),
+        credentials: S3CredentialsConfig::Localhost,
+        ..Default::default()
+    })
 }
 
 pub async fn s3_client_for_test_with_bucket_name(name: &str) -> crate::Storage {
