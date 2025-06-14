@@ -26,6 +26,7 @@ export namespace Api {
   export interface AddCollectionRecordsResponse {}
 
   export interface ChecklistResponse {
+    base64_encoding: boolean;
     /**
      * @type {number}
      * @memberof ChecklistResponse
