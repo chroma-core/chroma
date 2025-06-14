@@ -8,7 +8,7 @@
 // Once we move to our own implementation of hnswlib we can support
 // streaming from s3.
 
-use super::config::StorageConfig;
+use super::config::{S3CredentialsConfig, StorageConfig};
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
 use super::StorageConfigError;
@@ -787,6 +787,14 @@ impl Configurable<StorageConfig> for S3Storage {
             _ => Err(Box::new(StorageConfigError::InvalidStorageConfig)),
         }
     }
+}
+
+pub async fn s3_config_for_test_with_bucket_name(name: impl Into<String>) -> crate::StorageConfig {
+    StorageConfig::S3(crate::config::S3StorageConfig {
+        bucket: name.into(),
+        credentials: S3CredentialsConfig::Minio,
+        ..Default::default()
+    })
 }
 
 pub async fn s3_client_for_test_with_bucket_name(name: &str) -> crate::Storage {
