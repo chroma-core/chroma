@@ -9,6 +9,7 @@ mod backoff;
 mod batch_manager;
 mod copy;
 mod cursors;
+mod destroy;
 mod gc;
 mod manifest;
 mod manifest_manager;
@@ -20,6 +21,7 @@ pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
+pub use destroy::destroy;
 pub use gc::Garbage;
 pub use manifest::{unprefixed_snapshot_path, Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
@@ -542,10 +544,15 @@ where
 
 ////////////////////////////////////////// Fragment Paths //////////////////////////////////////////
 
+pub fn fragment_prefix() -> String {
+    "log/".to_string()
+}
+
 pub fn prefixed_fragment_path(prefix: &str, fragment_seq_no: FragmentSeqNo) -> String {
     format!(
-        "{}/log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
+        "{}/{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
         prefix,
+        fragment_prefix(),
         fragment_seq_no.bucket(),
         fragment_seq_no.0,
     )
@@ -565,4 +572,19 @@ pub fn parse_fragment_path(path: &str) -> Option<FragmentSeqNo> {
     let fsn_equals_number = basename.strip_suffix(".parquet")?;
     let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
     u64::from_str_radix(number, 16).ok().map(FragmentSeqNo)
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths() {
+        assert_eq!(
+            "THIS_IS_THE_COLLECTION/log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet",
+            prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentSeqNo(1))
+        );
+    }
 }

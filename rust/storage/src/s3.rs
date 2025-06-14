@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
+use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_sdk_s3::operation::get_object::GetObjectOutput;
@@ -639,12 +640,26 @@ impl S3Storage {
                 tracing::trace!(key = %key, "Successfully deleted object from S3");
                 Ok(())
             }
-            Err(e) => {
-                tracing::error!(error = %e, key = %key, "Failed to delete object from S3");
-                Err(StorageError::Generic {
-                    source: Arc::new(e.into_service_error()),
-                })
-            }
+            Err(e) => match e {
+                SdkError::ServiceError(err) => {
+                    let inner = err.into_err();
+                    match inner.code() {
+                        Some("NotFound") => Err(StorageError::NotFound {
+                            path: key.to_string(),
+                            source: Arc::new(inner),
+                        }),
+                        _ => {
+                            tracing::error!(error = %inner, key = %key, "Failed to delete object from S3");
+                            Err(StorageError::Generic {
+                                source: Arc::new(inner),
+                            })
+                        }
+                    }
+                }
+                _ => Err(StorageError::Generic {
+                    source: Arc::new(e),
+                }),
+            },
         }
     }
 
