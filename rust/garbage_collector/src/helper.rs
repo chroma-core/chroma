@@ -3,9 +3,9 @@ use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::{
     CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, FilterOperator,
-    GetCollectionWithSegmentsRequest, GetPlan, LimitOperator, ListCollectionVersionsRequest,
-    ListCollectionVersionsResponse, OperationRecord, ProjectionOperator, PushLogsRequest,
-    ScanOperator, Segment, SegmentScope, Vector,
+    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetPlan, LimitOperator,
+    ListCollectionVersionsRequest, ListCollectionVersionsResponse, OperationRecord,
+    ProjectionOperator, PushLogsRequest, ScanOperator, Segment, SegmentScope, Vector,
 };
 use chroma_types::InternalCollectionConfiguration;
 use std::collections::HashMap;
@@ -315,6 +315,16 @@ impl ChromaGrpcClients {
         };
 
         let response = self.sysdb.list_collection_versions(request).await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn get_collection_with_segments(
+        &mut self,
+        collection_id: String,
+    ) -> Result<GetCollectionWithSegmentsResponse, Box<dyn std::error::Error>> {
+        let request = GetCollectionWithSegmentsRequest { id: collection_id };
+
+        let response = self.sysdb.get_collection_with_segments(request).await?;
         Ok(response.into_inner())
     }
 }

@@ -1,3 +1,5 @@
+use crate::types::ChromaSegmentFlusher;
+
 use super::blockfile_record::{ApplyMaterializedLogError, RecordSegmentReader};
 use super::types::MaterializeLogsResult;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -277,10 +279,14 @@ impl DistributedHNSWSegmentWriter {
             Ok(_) => {}
             Err(e) => return Err(e),
         }
-        // TODO(Sanket-temp): Use path prefix here as well so that can register
-        // with sysdb correctly.
         let mut flushed_files = HashMap::new();
-        flushed_files.insert(HNSW_INDEX.to_string(), vec![hnsw_index_id.to_string()]);
+        flushed_files.insert(
+            HNSW_INDEX.to_string(),
+            vec![ChromaSegmentFlusher::flush_key(
+                &prefix_path,
+                &hnsw_index_id.0,
+            )],
+        );
         Ok(flushed_files)
     }
 

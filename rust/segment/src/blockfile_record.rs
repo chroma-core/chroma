@@ -1,3 +1,5 @@
+use crate::types::ChromaSegmentFlusher;
+
 use super::distributed_spann::SpannSegmentWriterError;
 use super::types::{HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult};
 use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
@@ -599,6 +601,7 @@ impl Debug for RecordSegmentFlusher {
 
 impl RecordSegmentFlusher {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
+        let prefix_path = self.user_id_to_id_flusher.prefix_path();
         let user_id_to_id_bf_id = self.user_id_to_id_flusher.id();
         let id_to_user_id_bf_id = self.id_to_user_id_flusher.id();
         let id_to_data_bf_id = self.id_to_data_flusher.id();
@@ -614,7 +617,10 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     USER_ID_TO_OFFSET_ID.to_string(),
-                    vec![user_id_to_id_bf_id.to_string()],
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &prefix_path,
+                        &user_id_to_id_bf_id,
+                    )],
                 );
             }
             Err(e) => {
@@ -626,7 +632,10 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_USER_ID.to_string(),
-                    vec![id_to_user_id_bf_id.to_string()],
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &prefix_path,
+                        &id_to_user_id_bf_id,
+                    )],
                 );
             }
             Err(e) => {
@@ -638,7 +647,10 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     OFFSET_ID_TO_DATA.to_string(),
-                    vec![id_to_data_bf_id.to_string()],
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &prefix_path,
+                        &id_to_data_bf_id,
+                    )],
                 );
             }
             Err(e) => {
@@ -650,7 +662,10 @@ impl RecordSegmentFlusher {
             Ok(_) => {
                 flushed_files.insert(
                     MAX_OFFSET_ID.to_string(),
-                    vec![max_offset_id_bf_id.to_string()],
+                    vec![ChromaSegmentFlusher::flush_key(
+                        &prefix_path,
+                        &max_offset_id_bf_id,
+                    )],
                 );
             }
             Err(e) => {
@@ -1050,11 +1065,19 @@ mod tests {
     // The same record segment writer should be able to run concurrently on different threads without conflict
     #[test]
     fn test_max_offset_id_shuttle() {
-        let test_segment = tokio::runtime::Builder::new_multi_thread()
+        let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .expect("Runtime creation should not fail")
-            .block_on(async { TestDistributedSegment::default() });
+            .expect("Runtime creation should not fail");
+        let test_segment = runtime.block_on(async { TestDistributedSegment::default() });
+        let record_segment_writer = runtime
+            .block_on(RecordSegmentWriter::from_segment(
+                &test_segment.collection.tenant,
+                &test_segment.collection.database_id,
+                &test_segment.record_segment,
+                &test_segment.blockfile_provider,
+            ))
+            .expect("Should be able to initialize record segment writer");
         shuttle::check_random(
             move || {
                 let log_partition_size = 100;
@@ -1069,14 +1092,6 @@ mod tests {
                     .collect::<Vec<_>>();
 
                 let offset_id = Arc::new(AtomicU32::new(1));
-
-                let record_segment_writer = future::block_on(RecordSegmentWriter::from_segment(
-                    &test_segment.collection.tenant,
-                    &test_segment.collection.database_id,
-                    &test_segment.record_segment,
-                    &test_segment.blockfile_provider,
-                ))
-                .expect("Should be able to initialize record segment writer");
 
                 let mut handles = Vec::new();
 
@@ -1120,6 +1135,7 @@ mod tests {
                     );
                     };
 
+                let record_segment_writer = record_segment_writer.clone();
                 thread::Builder::new()
                     .stack_size(stack_size)
                     .spawn(move || {
