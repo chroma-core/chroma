@@ -47,3 +47,4 @@ We welcome pull requests to add new Integrations to the community.
 | [Haystack](./frameworks/haystack)       | ✓      | -            |
 | [OpenLIT](./frameworks/openlit)         | ✓      | Coming Soon! |
 | [Anthropic MCP](./frameworks/anthropic-mcp) | ✓ | Coming Soon! |
+| [Arize Phoenix](./frameworks/arize-phoenix.md) | ✓ | Coming Soon! |
