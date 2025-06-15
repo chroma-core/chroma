@@ -74,7 +74,9 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
         init_tracing(tracing_layers);
         init_panic_tracing_hook();
     } else {
-        eprintln!("OpenTelemetry is not enabled because it is missing from the config.");
+        let tracing_layers = vec![init_global_filter_layer(), init_stdout_layer()];
+        init_tracing(tracing_layers);
+        init_panic_tracing_hook();
     }
 
     let mut fe_cfg = config.frontend.clone();
