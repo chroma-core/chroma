@@ -771,7 +771,6 @@ mod tests {
         (collection_id, tenant_id, db_id, segment_id)
     }
 
-    // Prefix path has not been changed here due to this reason.
     async fn get_hnsw_index_ids(storage: &Storage, s3_path: &str) -> Vec<Uuid> {
         storage
             .list_prefix(s3_path, GetOptions::default())
@@ -779,13 +778,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .filter(|path| path.contains(&format!("{}/", s3_path)))
-            .map(|path| {
-                let id = match path.rfind('/') {
-                    Some(pos) => &path[pos + 1..],
-                    None => panic!("Invalid path format: {}", path),
-                };
-                Uuid::from_str(id).unwrap()
-            })
+            .map(|path| Uuid::from_str(path.split("/").nth(9).unwrap()).unwrap())
             .collect::<std::collections::HashSet<_>>() // de-dupe
             .into_iter()
             .collect()
