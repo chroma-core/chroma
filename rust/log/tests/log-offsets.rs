@@ -51,7 +51,7 @@ async fn test_k8s_integration_log_offsets_empty_log_50052() {
     let resp = log_service
         .pull_logs(PullLogsRequest {
             collection_id: collection_id.clone(),
-            batch_size: 2,
+            batch_size: 1,
             end_timestamp: i64::MAX,
             start_from_offset: 1,
         })
@@ -160,7 +160,7 @@ async fn test_k8s_integration_log_offsets_empty_log_50054() {
     let resp = rust_log_service
         .pull_logs(PullLogsRequest {
             collection_id: collection_id.clone(),
-            batch_size: 2,
+            batch_size: 1,
             end_timestamp: i64::MAX,
             start_from_offset: 1,
         })
