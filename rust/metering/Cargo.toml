@@ -1,5 +1,5 @@
 [package]
-name = "chroma-metering-macros"
+name = "chroma-metering"
 version = "0.1.0"
 edition = "2021"
 

@@ -17,6 +17,7 @@ members = [
     "rust/log-service",
     "rust/memberlist",
     "rust/metering-macros",
+    "rust/metering",
     "rust/storage",
     "rust/system",
     "rust/sysdb",
@@ -110,6 +111,7 @@ chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
 chroma-memberlist = { path = "rust/memberlist" }
 chroma-metering-macros = { path = "rust/metering-macros" }
+chroma-metering = { path = "rust/metering" }
 chroma-segment = { path = "rust/segment" }
 chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
