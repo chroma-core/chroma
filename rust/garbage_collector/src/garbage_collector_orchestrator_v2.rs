@@ -303,8 +303,12 @@ impl GarbageCollectorOrchestrator {
                 .garbage_collect(&GarbageCollectionOptions::default())
                 .await
             {
-                tracing::error!("could not garbage collect log: {err:?}");
-                continue;
+                if matches!(err, wal3::Error::UninitializedLog) {
+                    // pass:  An uninitilized log is garbage collected.
+                } else {
+                    tracing::error!("could not garbage collect log: {err:?}");
+                    continue;
+                }
             }
         }
 
