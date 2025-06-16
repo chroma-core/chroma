@@ -860,6 +860,7 @@ impl Manifest {
             }
         }
         new.collected += garbage.setsum_to_discard;
+        new.initial_offset = Some(garbage.first_to_keep);
         new.scrub()?;
         Ok(new)
     }
