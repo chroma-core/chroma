@@ -1,4 +1,5 @@
 use chroma_config::Configurable;
+use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_memberlist::memberlist_provider::CustomResourceMemberlistProvider;
 use chroma_memberlist::memberlist_provider::MemberlistProvider;
 use chroma_system::{Dispatcher, System};
@@ -53,6 +54,15 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
             GarbageCollectorConfig::load()
         }
     };
+
+    // Start pprof server
+    let mut pprof_shutdown_tx = None;
+    if let Some(port) = config.jemalloc_pprof_server_port {
+        info!("Starting jemalloc pprof server on port {}", port);
+        let shutdown_channel = tokio::sync::oneshot::channel();
+        pprof_shutdown_tx = Some(shutdown_channel.0);
+        spawn_pprof_server(6060, shutdown_channel.1).await;
+    }
 
     let tracing_layers = vec![
         init_global_filter_layer(),
@@ -153,6 +163,10 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     system.stop().await;
     system.join().await;
     let _ = server_join_handle.await;
+
+    if let Some(shutdown_tx) = pprof_shutdown_tx {
+        let _ = shutdown_tx.send(());
+    }
 
     info!("Shutting down garbage collector service");
     Ok(())

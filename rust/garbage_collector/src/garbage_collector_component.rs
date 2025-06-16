@@ -525,9 +525,7 @@ mod tests {
     use super::*;
     use crate::helper::ChromaGrpcClients;
     use chroma_memberlist::memberlist_provider::Member;
-    use chroma_storage::config::{
-        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
-    };
+    use chroma_storage::s3_config_for_localhost_with_bucket_name;
     use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig};
     use chroma_system::{DispatcherConfig, System};
     use tracing_test::traced_test;
@@ -709,15 +707,7 @@ mod tests {
                 num_channels: 1,
             },
             dispatcher_config: DispatcherConfig::default(),
-            storage_config: StorageConfig::ObjectStore(ObjectStoreConfig {
-                bucket: ObjectStoreBucketConfig {
-                    name: "chroma-storage".to_string(),
-                    r#type: ObjectStoreType::Minio,
-                },
-                upload_part_size_bytes: 1024 * 1024,   // 1MB
-                download_part_size_bytes: 1024 * 1024, // 1MB
-                max_concurrent_requests: 10,
-            }),
+            storage_config: s3_config_for_localhost_with_bucket_name("chroma-storage").await,
             default_mode: CleanupMode::DryRun,
             tenant_mode_overrides: Some(tenant_mode_overrides),
             assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
@@ -725,6 +715,7 @@ mod tests {
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
             port: 50055,
             root_cache_config: Default::default(),
+            jemalloc_pprof_server_port: None,
         };
         let registry = Registry::new();
 
@@ -836,15 +827,7 @@ mod tests {
                 num_channels: 1,
             },
             dispatcher_config: DispatcherConfig::default(),
-            storage_config: StorageConfig::ObjectStore(ObjectStoreConfig {
-                bucket: ObjectStoreBucketConfig {
-                    name: "chroma-storage".to_string(),
-                    r#type: ObjectStoreType::Minio,
-                },
-                upload_part_size_bytes: 1024 * 1024,   // 1MB
-                download_part_size_bytes: 1024 * 1024, // 1MB
-                max_concurrent_requests: 10,
-            }),
+            storage_config: s3_config_for_localhost_with_bucket_name("chroma-storage").await,
             default_mode: CleanupMode::DryRun,
             tenant_mode_overrides: Some(tenant_mode_overrides),
             assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
@@ -852,6 +835,7 @@ mod tests {
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
             port: 50055,
             root_cache_config: Default::default(),
+            jemalloc_pprof_server_port: None,
         };
         let registry = Registry::new();
 
@@ -1037,15 +1021,7 @@ mod tests {
                 num_channels: 1,
             },
             dispatcher_config: DispatcherConfig::default(),
-            storage_config: StorageConfig::ObjectStore(ObjectStoreConfig {
-                bucket: ObjectStoreBucketConfig {
-                    name: "chroma-storage".to_string(),
-                    r#type: ObjectStoreType::Minio,
-                },
-                upload_part_size_bytes: 1024 * 1024,   // 1MB
-                download_part_size_bytes: 1024 * 1024, // 1MB
-                max_concurrent_requests: 10,
-            }),
+            storage_config: s3_config_for_localhost_with_bucket_name("chroma-storage").await,
             default_mode: CleanupMode::DeleteV2,
             tenant_mode_overrides: None,
             assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig::default(),
@@ -1053,6 +1029,7 @@ mod tests {
             memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig::default(),
             port: 50055,
             root_cache_config: Default::default(),
+            jemalloc_pprof_server_port: None,
         };
         let registry = Registry::new();
 
