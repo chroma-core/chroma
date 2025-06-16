@@ -135,4 +135,3 @@ garbageCollector:
         kube_namespace: "chroma"
         memberlist_name: "garbage-collection-service-memberlist"
         queue_size: 100
-    jemalloc_pprof_server_port: 6060

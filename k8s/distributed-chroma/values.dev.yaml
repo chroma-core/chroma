@@ -36,4 +36,4 @@ rustLogService:
   replicaCount: 1
 
 garbageCollector:
-  jemalloc_config: "prof:true,prof_active:true,lg_prof_sample:19"
+  jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"

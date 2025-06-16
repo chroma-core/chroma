@@ -58,9 +58,9 @@ spec:
             mountPath: /config/
           {{ end }}
         env:
-          {{ if .Values.garbageCollector.jemalloc_config }}
+          {{ if .Values.garbageCollector.jemallocConfig }}
           - name: _RJEM_MALLOC_CONF
-            value: {{ .Values.garbageCollector.jemalloc_config }}
+            value: {{ .Values.garbageCollector.jemallocConfig }}
           {{ end }}
           {{if .Values.garbageCollector.configuration}}
           - name: CONFIG_PATH
