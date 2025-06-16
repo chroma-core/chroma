@@ -312,6 +312,7 @@ pub struct BlockMetrics {
     pub commit_latency: opentelemetry::metrics::Histogram<u64>,
     pub num_blocks_flushed: opentelemetry::metrics::Histogram<u64>,
     pub flush_latency: opentelemetry::metrics::Histogram<u64>,
+    pub num_get_requests: opentelemetry::metrics::Histogram<u64>,
 }
 
 impl Default for BlockMetrics {
@@ -332,6 +333,11 @@ impl Default for BlockMetrics {
                 .u64_histogram("block_flush_latency")
                 .with_description("Flush latency")
                 .with_unit("microseconds")
+                .build(),
+            num_get_requests: meter
+                .u64_histogram("block_num_cold_get_requests")
+                .with_description("Number of cold block get requests")
+                .with_unit("requests")
                 .build(),
         }
     }
@@ -442,6 +448,9 @@ impl BlockManager {
                     .await;
                 match bytes_res {
                     Ok(bytes) => {
+                        let trace_id = get_current_trace_id().to_string();
+                        let attribute = [KeyValue::new("trace_id", trace_id)];
+                        self.block_metrics.num_get_requests.record(1, &attribute);
                         let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
                         let block =
                             deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
