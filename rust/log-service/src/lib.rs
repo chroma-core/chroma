@@ -329,8 +329,9 @@ impl RollupPerCollection {
         if log_position < self.start_log_position {
             self.start_log_position = log_position;
         }
-        if log_position + num_records > self.limit_log_position {
-            self.limit_log_position = log_position + num_records;
+        if log_position.offset().saturating_add(num_records) > self.limit_log_position.offset() {
+            self.limit_log_position =
+                LogPosition::from_offset(log_position.offset().saturating_add(num_records));
         }
         // Take the biggest reinsert count.
         self.reinsert_count = std::cmp::max(self.reinsert_count, reinsert_count);
