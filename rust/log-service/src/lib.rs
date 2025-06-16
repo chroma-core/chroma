@@ -362,14 +362,20 @@ impl RollupPerCollection {
         DirtyMarker::MarkDirty {
             collection_id,
             log_position: self.start_log_position,
-            num_records: self.limit_log_position - self.start_log_position,
+            num_records: self
+                .limit_log_position
+                .offset()
+                .saturating_sub(self.start_log_position.offset()),
             reinsert_count: self.reinsert_count,
             initial_insertion_epoch_us: self.initial_insertion_epoch_us,
         }
     }
 
     fn requires_backpressure(&self, threshold: u64) -> bool {
-        self.limit_log_position - self.start_log_position >= threshold
+        self.limit_log_position
+            .offset()
+            .saturating_sub(self.start_log_position.offset())
+            >= threshold
     }
 }
 
