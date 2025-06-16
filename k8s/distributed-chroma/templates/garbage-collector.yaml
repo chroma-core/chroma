@@ -43,6 +43,10 @@ spec:
         readinessProbe:
           grpc:
             port: 50055
+        ports:
+          - containerPort: 6060
+            protocol: TCP
+            name: pprof
         {{ if .Values.garbageCollector.resources }}
         resources:
           limits:
