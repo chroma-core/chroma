@@ -123,6 +123,7 @@ impl Bindings {
             executor: executor_config,
             default_knn_index: knn_index,
             tenants_to_migrate_immediately: vec![],
+            tenants_to_migrate_immediately_threshold: None,
         };
 
         let frontend = runtime.block_on(async {

@@ -1517,7 +1517,10 @@ mod tests {
     use chroma_types::Collection;
     use uuid::Uuid;
 
-    use crate::server::CreateCollectionPayload;
+    use crate::{
+        executor::config::{DistributedExecutorConfig, ExecutorConfig},
+        server::CreateCollectionPayload,
+    };
 
     use super::*;
 
@@ -1559,6 +1562,42 @@ mod tests {
         assert!(segments.iter().any(
             |s| s.r#type == SegmentType::HnswLocalPersisted && s.scope == SegmentScope::VECTOR
         ));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_migrate_immediately_criteria() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig {
+            tenants_to_migrate_immediately: vec!["cccccccc-cccc-cccc-cccc-cccccccccccc".to_string()],
+            tenants_to_migrate_immediately_threshold: Some(
+                "66666666-6666-6666-6666-666666666666".to_string(),
+            ),
+            allow_reset: false,
+            sqlitedb: None,
+            segment_manager: None,
+            sysdb: Default::default(),
+            collections_with_segments_provider: Default::default(),
+            log: Default::default(),
+            executor: ExecutorConfig::Distributed(DistributedExecutorConfig {
+                connections_per_node: 128,
+                replication_factor: 2,
+                connect_timeout_ms: 1000,
+                request_timeout_ms: 1000,
+                retry: Default::default(),
+                assignment: Default::default(),
+                memberlist_provider: Default::default(),
+                max_query_service_response_size_bytes: 65536,
+            }),
+            default_knn_index: KnnIndex::Spann,
+        };
+        let frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+        assert!(frontend.tenant_is_on_new_log_by_default("22222222-2222-2222-2222-222222222222"));
+        assert!(frontend.tenant_is_on_new_log_by_default("66666666-6666-6666-6666-666666666666"));
+        assert!(!frontend.tenant_is_on_new_log_by_default("77777777-7777-7777-7777-777777777777"));
+        assert!(frontend.tenant_is_on_new_log_by_default("cccccccc-cccc-cccc-cccc-cccccccccccc"));
     }
 
     #[tokio::test]
