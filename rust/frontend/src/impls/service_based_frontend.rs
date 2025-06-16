@@ -67,6 +67,7 @@ pub struct ServiceBasedFrontend {
     default_knn_index: KnnIndex,
     retries_builder: ExponentialBuilder,
     tenants_to_migrate_immediately: HashSet<String>,
+    tenants_to_migrate_immediately_threshold: Option<String>,
 }
 
 impl ServiceBasedFrontend {
@@ -80,6 +81,7 @@ impl ServiceBasedFrontend {
         max_batch_size: u32,
         default_knn_index: KnnIndex,
         tenants_to_migrate_immediately: HashSet<String>,
+        tenants_to_migrate_immediately_threshold: Option<String>,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -123,6 +125,7 @@ impl ServiceBasedFrontend {
             default_knn_index,
             retries_builder,
             tenants_to_migrate_immediately,
+            tenants_to_migrate_immediately_threshold,
         }
     }
 
@@ -517,6 +520,10 @@ impl ServiceBasedFrontend {
 
     fn tenant_is_on_new_log_by_default(&self, tenant_id: &str) -> bool {
         self.tenants_to_migrate_immediately.contains(tenant_id)
+            || self
+                .tenants_to_migrate_immediately_threshold
+                .as_ref()
+                .is_some_and(|threshold| tenant_id <= threshold.as_str())
     }
 
     pub async fn update_collection(
@@ -1487,6 +1494,8 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             .iter()
             .cloned()
             .collect::<HashSet<String>>();
+        let tenants_to_migrate_immediately_threshold =
+            config.tenants_to_migrate_immediately_threshold.clone();
         Ok(ServiceBasedFrontend::new(
             config.allow_reset,
             sysdb,
@@ -1496,6 +1505,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             max_batch_size,
             config.default_knn_index,
             tenants_to_migrate_immediately,
+            tenants_to_migrate_immediately_threshold,
         ))
     }
 }
