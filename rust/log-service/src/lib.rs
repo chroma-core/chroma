@@ -1332,7 +1332,7 @@ impl LogServer {
                 }
             }
             if records.len() != pull_logs.batch_size as usize
-                || records[0].log_offset != pull_logs.start_from_offset
+                || (!records.is_empty() && records[0].log_offset != pull_logs.start_from_offset)
             {
                 return Err(Status::not_found("Some entries have been purged"));
             }
@@ -3314,8 +3314,15 @@ mod tests {
         collection_id: CollectionUuid,
         reference_logs: &[OperationRecord],
         read_offset: usize,
-        batch_size: usize,
+        mut batch_size: usize,
     ) {
+        // NOTE: Log offset always starts with 1.
+        let ref_start_offset = read_offset.saturating_sub(1).min(reference_logs.len());
+        let ref_end_offset = ref_start_offset
+            .saturating_add(batch_size)
+            .min(reference_logs.len());
+        batch_size = batch_size.min(ref_end_offset - ref_start_offset);
+
         let read_logs = server
             .pull_logs(Request::new(PullLogsRequest {
                 collection_id: collection_id.to_string(),
@@ -3331,12 +3338,6 @@ mod tests {
             .map(chroma_types::LogRecord::try_from)
             .collect::<Result<Vec<_>, _>>()
             .expect("Logs should be valid");
-
-        // NOTE: Log offset always starts with 1.
-        let ref_start_offset = read_offset.saturating_sub(1).min(reference_logs.len());
-        let ref_end_offset = ref_start_offset
-            .saturating_add(batch_size)
-            .min(reference_logs.len());
 
         assert_eq!(read_logs.len(), ref_end_offset - ref_start_offset);
 
