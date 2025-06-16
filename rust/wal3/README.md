@@ -166,7 +166,7 @@ wal3/log/Bucket=10000/FragmentSeqNo=10000.parquet
 ...
 wal3/log/Bucket=15000/FragmentSeqNo=15000.parquet
 ...
-wal3/manifest/MANIFEST.json
+wal3/manifest/MANIFEST
 wal3/snapshot/SNAPSHOT.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 wal3/garbage/GARBAGE
 ```

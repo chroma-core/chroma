@@ -172,7 +172,7 @@ impl Garbage {
                     // know this write failed.  Because the garbage file is created and deleted
                     // we cannot just overwrite, so fail with log contention and let higher level
                     // protocol decide.
-                    return Err(Error::LogContention);
+                    return Err(Error::LogContentionRetry);
                 }
                 Err(e) => {
                     tracing::error!("error uploading manifest: {e:?}");

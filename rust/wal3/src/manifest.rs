@@ -22,11 +22,19 @@ use crate::{
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
 
 pub fn manifest_path(prefix: &str) -> String {
-    format!("{prefix}/manifest/MANIFEST")
+    format!("{prefix}/{}", unprefixed_manifest_path())
+}
+
+pub fn unprefixed_manifest_path() -> String {
+    "manifest/MANIFEST".to_string()
+}
+
+pub fn snapshot_prefix() -> String {
+    "snapshot/".to_string()
 }
 
 pub fn unprefixed_snapshot_path(setsum: Setsum) -> String {
-    format!("snapshot/SNAPSHOT.{}", setsum.hexdigest())
+    format!("{}SNAPSHOT.{}", snapshot_prefix(), setsum.hexdigest())
 }
 
 pub fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
@@ -755,10 +763,12 @@ impl Manifest {
                     // without an e_tag we cannot do anything.  The log contention backoff protocol
                     // cares for this case, rather than having to error-handle it separately
                     // because it "crashes" the log and reinitializes.
-                    return Err(Error::LogContention);
+                    return Err(Error::LogContentionFailure);
                 }
                 Err(StorageError::Precondition { path: _, source: _ }) => {
-                    return Err(Error::LogContention);
+                    // NOTE(rescrv):  This is "durable" because it's a manifest failure.  See the
+                    // comment in the Error enum for why this makes sense.
+                    return Err(Error::LogContentionDurable);
                 }
                 Err(e) => {
                     tracing::error!("error uploading manifest: {e:?}");
@@ -850,6 +860,7 @@ impl Manifest {
             }
         }
         new.collected += garbage.setsum_to_discard;
+        new.initial_offset = Some(garbage.first_to_keep);
         new.scrub()?;
         Ok(new)
     }
@@ -868,6 +879,7 @@ mod tests {
             "snapshot/SNAPSHOT.0000000000000000000000000000000000000000000000000000000000000000",
             unprefixed_snapshot_path(Setsum::default())
         );
+        assert_eq!("snapshot/", snapshot_prefix(),);
     }
 
     #[test]
