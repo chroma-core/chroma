@@ -67,6 +67,7 @@ pub struct ServiceBasedFrontend {
     default_knn_index: KnnIndex,
     retries_builder: ExponentialBuilder,
     tenants_to_migrate_immediately: HashSet<String>,
+    tenants_to_migrate_immediately_threshold: Option<String>,
 }
 
 impl ServiceBasedFrontend {
@@ -80,6 +81,7 @@ impl ServiceBasedFrontend {
         max_batch_size: u32,
         default_knn_index: KnnIndex,
         tenants_to_migrate_immediately: HashSet<String>,
+        tenants_to_migrate_immediately_threshold: Option<String>,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -123,6 +125,7 @@ impl ServiceBasedFrontend {
             default_knn_index,
             retries_builder,
             tenants_to_migrate_immediately,
+            tenants_to_migrate_immediately_threshold,
         }
     }
 
@@ -517,6 +520,10 @@ impl ServiceBasedFrontend {
 
     fn tenant_is_on_new_log_by_default(&self, tenant_id: &str) -> bool {
         self.tenants_to_migrate_immediately.contains(tenant_id)
+            || self
+                .tenants_to_migrate_immediately_threshold
+                .as_ref()
+                .is_some_and(|threshold| tenant_id <= threshold.as_str())
     }
 
     pub async fn update_collection(
@@ -1487,6 +1494,8 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             .iter()
             .cloned()
             .collect::<HashSet<String>>();
+        let tenants_to_migrate_immediately_threshold =
+            config.tenants_to_migrate_immediately_threshold.clone();
         Ok(ServiceBasedFrontend::new(
             config.allow_reset,
             sysdb,
@@ -1496,6 +1505,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             max_batch_size,
             config.default_knn_index,
             tenants_to_migrate_immediately,
+            tenants_to_migrate_immediately_threshold,
         ))
     }
 }
@@ -1507,7 +1517,10 @@ mod tests {
     use chroma_types::Collection;
     use uuid::Uuid;
 
-    use crate::server::CreateCollectionPayload;
+    use crate::{
+        executor::config::{DistributedExecutorConfig, ExecutorConfig},
+        server::CreateCollectionPayload,
+    };
 
     use super::*;
 
@@ -1549,6 +1562,42 @@ mod tests {
         assert!(segments.iter().any(
             |s| s.r#type == SegmentType::HnswLocalPersisted && s.scope == SegmentScope::VECTOR
         ));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_migrate_immediately_criteria() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig {
+            tenants_to_migrate_immediately: vec!["cccccccc-cccc-cccc-cccc-cccccccccccc".to_string()],
+            tenants_to_migrate_immediately_threshold: Some(
+                "66666666-6666-6666-6666-666666666666".to_string(),
+            ),
+            allow_reset: false,
+            sqlitedb: None,
+            segment_manager: None,
+            sysdb: Default::default(),
+            collections_with_segments_provider: Default::default(),
+            log: Default::default(),
+            executor: ExecutorConfig::Distributed(DistributedExecutorConfig {
+                connections_per_node: 128,
+                replication_factor: 2,
+                connect_timeout_ms: 1000,
+                request_timeout_ms: 1000,
+                retry: Default::default(),
+                assignment: Default::default(),
+                memberlist_provider: Default::default(),
+                max_query_service_response_size_bytes: 65536,
+            }),
+            default_knn_index: KnnIndex::Spann,
+        };
+        let frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+        assert!(frontend.tenant_is_on_new_log_by_default("22222222-2222-2222-2222-222222222222"));
+        assert!(frontend.tenant_is_on_new_log_by_default("66666666-6666-6666-6666-666666666666"));
+        assert!(!frontend.tenant_is_on_new_log_by_default("77777777-7777-7777-7777-777777777777"));
+        assert!(frontend.tenant_is_on_new_log_by_default("cccccccc-cccc-cccc-cccc-cccccccccccc"));
     }
 
     #[tokio::test]

@@ -66,6 +66,8 @@ pub struct FrontendConfig {
     pub default_knn_index: KnnIndex,
     #[serde(default = "Default::default")]
     pub tenants_to_migrate_immediately: Vec<String>,
+    #[serde(default = "Default::default")]
+    pub tenants_to_migrate_immediately_threshold: Option<String>,
 }
 
 impl FrontendConfig {
@@ -83,6 +85,7 @@ impl FrontendConfig {
             executor: default_executor_config(),
             default_knn_index: default_default_knn_index(),
             tenants_to_migrate_immediately: vec![],
+            tenants_to_migrate_immediately_threshold: None,
         }
     }
 }
