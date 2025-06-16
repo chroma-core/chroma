@@ -199,7 +199,7 @@ mod tests {
     async fn test_dry_run_mode() {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let (test_files, _) = setup_test_files(&storage).await;
+        let (test_files, hnsw_files) = setup_test_files(&storage).await;
 
         let operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
@@ -208,13 +208,18 @@ mod tests {
         );
         let input = DeleteUnusedFilesInput {
             unused_s3_files: test_files.clone(),
-            hnsw_prefixes_for_deletion: vec!["prefix1".to_string()],
+            hnsw_prefixes_for_deletion: hnsw_files.clone(),
         };
 
         let result = operator.run(&input).await.unwrap();
 
         // Verify original files still exist
         for file in &test_files {
+            assert!(result.deleted_files.contains(file));
+            assert!(Path::new(&tmp_dir.path().join(file)).exists());
+        }
+
+        for file in &hnsw_files {
             assert!(result.deleted_files.contains(file));
             assert!(Path::new(&tmp_dir.path().join(file)).exists());
         }
@@ -233,7 +238,7 @@ mod tests {
         );
         let input = DeleteUnusedFilesInput {
             unused_s3_files: test_files.clone(),
-            hnsw_prefixes_for_deletion: vec!["prefix1".to_string()],
+            hnsw_prefixes_for_deletion: hnsw_files.clone(),
         };
 
         let result = operator.run(&input).await.unwrap();
@@ -274,7 +279,7 @@ mod tests {
         );
         let input = DeleteUnusedFilesInput {
             unused_s3_files: test_files.clone(),
-            hnsw_prefixes_for_deletion: vec!["prefix1".to_string()],
+            hnsw_prefixes_for_deletion: hnsw_files.clone(),
         };
 
         let result = operator.run(&input).await.unwrap();
