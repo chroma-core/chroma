@@ -211,25 +211,29 @@ impl std::ops::Deref for LogRef<'_> {
 async fn get_log_from_handle<'a>(
     handle: &'a crate::state_hash_table::Handle<LogKey, LogStub>,
     options: &LogWriterOptions,
+    keep_alive: Duration,
     storage: &Arc<Storage>,
     prefix: &str,
     mark_dirty: MarkDirty,
 ) -> Result<LogRef<'a>, wal3::Error> {
     let active = handle.active.lock().await;
-    get_log_from_handle_with_mutex_held(handle, active, options, storage, prefix, mark_dirty).await
+    get_log_from_handle_with_mutex_held(
+        handle, active, options, keep_alive, storage, prefix, mark_dirty,
+    )
+    .await
 }
 
 async fn get_log_from_handle_with_mutex_held<'a>(
     handle: &'a crate::state_hash_table::Handle<LogKey, LogStub>,
     mut active: tokio::sync::MutexGuard<'_, ActiveLog>,
     options: &LogWriterOptions,
+    keep_alive: Duration,
     storage: &Arc<Storage>,
     prefix: &str,
     mark_dirty: MarkDirty,
 ) -> Result<LogRef<'a>, wal3::Error> {
     if active.log.is_some() {
-        // TODO(rescrv): Magic constant.
-        active.keep_alive(Duration::from_secs(60));
+        active.keep_alive(keep_alive);
     }
     if let Some(log) = active.log.as_ref() {
         return Ok(LogRef {
@@ -246,8 +250,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
         mark_dirty.clone(),
     )
     .await?;
-    // TODO(rescrv): Magic constant.
-    active.keep_alive(Duration::from_secs(60));
+    active.keep_alive(keep_alive);
     tracing::info!("Opened log at {}", prefix);
     let opened = Arc::new(opened);
     active.log = Some(Arc::clone(&opened));
@@ -582,14 +585,13 @@ impl LogServer {
             ));
         }
         tracing::info!("scouted {collection_id} start={start} limit={limit}");
-        // TODO(rescrv):  Magic constant.
-        const STEP: u64 = 100;
-        let num_steps = (limit.saturating_sub(start) + STEP - 1) / STEP;
+        let step = self.config.effectuate_log_transfer_batch_size as u64;
+        let num_steps = (limit.saturating_sub(start) + step - 1) / step;
         let actual_steps = (0..num_steps)
             .map(|x| {
                 (
-                    start + x * STEP,
-                    std::cmp::min(start + x * STEP + STEP, limit),
+                    start + x * step,
+                    std::cmp::min(start + x * step + step, limit),
                 )
             })
             .collect::<Vec<_>>();
@@ -599,7 +601,7 @@ impl LogServer {
             .map(|(start, limit)| PullLogsRequest {
                 collection_id: collection_id.to_string(),
                 start_from_offset: start as i64,
-                // SAFETY(rescrv):  STEP fits a i32.
+                // SAFETY(rescrv):  step fits a i32 as it comes from a u16.
                 batch_size: (limit - start) as i32,
                 end_timestamp: i64::MAX,
             });
@@ -700,6 +702,7 @@ impl LogServer {
             &handle,
             active,
             &self.config.writer,
+            self.config.log_keep_alive,
             &self.storage,
             &storage_prefix,
             mark_dirty,
@@ -722,9 +725,12 @@ impl LogServer {
                 .await?
                 .into_inner();
             if resp.log_is_sealed {
-                // TODO(rescrv):  Magic constant.
-                self.effectuate_log_transfer(collection_id, proxy.clone(), 3)
-                    .await?;
+                self.effectuate_log_transfer(
+                    collection_id,
+                    proxy.clone(),
+                    self.config.effectuate_log_transfer_retries.into(),
+                )
+                .await?;
                 Box::pin(self.push_logs(Request::new(request))).await
             } else {
                 Ok(Response::new(resp))
@@ -1101,6 +1107,7 @@ impl LogServer {
             let log = match get_log_from_handle(
                 &handle,
                 &self.config.writer,
+                self.config.log_keep_alive,
                 &self.storage,
                 &prefix,
                 mark_dirty,
@@ -1563,7 +1570,7 @@ impl LogServer {
                 cursor.position,
                 // TODO(rescrv):  Magic constant.
                 Limits {
-                    max_files: Some(1_000_000),
+                    max_files: Some(10_000),
                     max_bytes: Some(1_000_000_000),
                     max_records: Some(1_000_000),
                 },
@@ -1642,6 +1649,7 @@ impl LogServer {
             match get_log_from_handle(
                 &handle,
                 &self.config.writer,
+                self.config.log_keep_alive,
                 &self.storage,
                 &prefix,
                 mark_dirty,
@@ -1663,8 +1671,12 @@ impl LogServer {
                             .is_sealed
                         {
                             tracing::info!("effectuating transfer of {collection_id}");
-                            self.effectuate_log_transfer(collection_id, proxy, 3)
-                                .await?;
+                            self.effectuate_log_transfer(
+                                collection_id,
+                                proxy,
+                                self.config.effectuate_log_transfer_retries.into(),
+                            )
+                            .await?;
                             Ok(Response::new(MigrateLogResponse {}))
                         } else {
                             tracing::info!(
@@ -2036,6 +2048,12 @@ pub struct LogServerConfig {
     pub reinsert_threshold: u64,
     #[serde(default = "LogServerConfig::default_rollup_interval")]
     pub rollup_interval: Duration,
+    #[serde(default = "LogServerConfig::default_log_keepalive")]
+    pub log_keep_alive: Duration,
+    #[serde(default = "LogServerConfig::default_effectuate_log_transfer_batch_size")]
+    pub effectuate_log_transfer_batch_size: u16,
+    #[serde(default = "LogServerConfig::default_effectuate_log_transfer_retries")]
+    pub effectuate_log_transfer_retries: u16,
     #[serde(default = "LogServerConfig::default_timeout_us")]
     pub timeout_us: u64,
     #[serde(default)]
@@ -2067,6 +2085,21 @@ impl LogServerConfig {
         Duration::from_secs(10)
     }
 
+    /// keep logs in-memory for 60 seconds
+    fn default_log_keepalive() -> Duration {
+        Duration::from_secs(60)
+    }
+
+    // transfer 100 records at a time when doing a log transfer
+    fn default_effectuate_log_transfer_batch_size() -> u16 {
+        100
+    }
+
+    // retry 3 times when doing a log transfer
+    fn default_effectuate_log_transfer_retries() -> u16 {
+        3
+    }
+
     /// force compaction if a candidate has been on the log for one day.
     fn default_timeout_us() -> u64 {
         86_400_000_000
@@ -2087,6 +2120,9 @@ impl Default for LogServerConfig {
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
             rollup_interval: Self::default_rollup_interval(),
+            log_keep_alive: Self::default_log_keepalive(),
+            effectuate_log_transfer_batch_size: Self::default_effectuate_log_transfer_batch_size(),
+            effectuate_log_transfer_retries: Self::default_effectuate_log_transfer_retries(),
             timeout_us: Self::default_timeout_us(),
             proxy_to: None,
         }
