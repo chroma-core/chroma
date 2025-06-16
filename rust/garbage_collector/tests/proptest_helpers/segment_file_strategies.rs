@@ -1,4 +1,5 @@
 use chroma_blockstore::test_utils::sparse_index_test_utils::create_test_sparse_index;
+use chroma_index::hnsw_provider::FILES;
 use chroma_storage::Storage;
 use chroma_types::{CollectionUuid, DatabaseUuid, SegmentFlushInfo, SegmentUuid};
 use futures::StreamExt;
@@ -78,12 +79,10 @@ struct SegmentFileReference {
 fn new_hnsw_index_strategy(prefix_path: String) -> BoxedStrategy<SegmentFileReference> {
     let hnsw_index_id = Uuid::new_v4();
     let hnsw_index = FileReference::Hnsw {
-        file_paths: vec![
-            format!("{}/hnsw/{}/header.bin", prefix_path, hnsw_index_id),
-            format!("{}/hnsw/{}/data_level0.bin", prefix_path, hnsw_index_id),
-            format!("{}/hnsw/{}/length.bin", prefix_path, hnsw_index_id),
-            format!("{}/hnsw/{}/link_lists.bin", prefix_path, hnsw_index_id),
-        ],
+        file_paths: FILES
+            .iter()
+            .map(|file_name| format!("{}/hnsw/{}/{}", prefix_path, hnsw_index_id, file_name))
+            .collect::<Vec<String>>(),
     };
     Just(SegmentFileReference {
         reference_id: hnsw_index_id,
@@ -251,18 +250,15 @@ impl SegmentFilePaths {
                             // Don't inherit, create new
                             let hnsw_index_id = Uuid::new_v4();
                             let hnsw_index = FileReference::Hnsw {
-                                file_paths: vec![
-                                    format!("{}/hnsw/{}/header.bin", prefix_path, hnsw_index_id),
-                                    format!(
-                                        "{}/hnsw/{}/data_level0.bin",
-                                        prefix_path, hnsw_index_id
-                                    ),
-                                    format!("{}/hnsw/{}/length.bin", prefix_path, hnsw_index_id),
-                                    format!(
-                                        "{}/hnsw/{}/link_lists.bin",
-                                        prefix_path, hnsw_index_id
-                                    ),
-                                ],
+                                file_paths: FILES
+                                    .iter()
+                                    .map(|file_name| {
+                                        format!(
+                                            "{}/hnsw/{}/{}",
+                                            prefix_path, hnsw_index_id, file_name
+                                        )
+                                    })
+                                    .collect::<Vec<String>>(),
                             };
 
                             refs.insert(
