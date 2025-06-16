@@ -43,18 +43,34 @@ jobs:
         shell: bash
         run: pip install --no-index --find-links target/wheels/ chromadb
       - name: Test
-        run: python -m pytest chromadb/test/property/test_cross_version_persist.py -n auto --dist worksteal -v --color=yes --durations 10 -s
+        run: |
+          python -m pytest chromadb/test/property/test_cross_version_persist.py -n auto --dist worksteal -v --color=yes --durations 10 -s
         shell: bash
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
           RUST_BACKTRACE: full
+      - name: Gather test dbs
+        if: always()
+        run: |
+          sudo find /tmp -type f -name chroma.sqlite3 | while read -r src; do
+            rel_path="${src#/tmp/}"
+            mkdir -p "./test-dbs/$(dirname "$rel_path")"
+            cp "$src" "./test-dbs/$rel_path"
+          done
+        shell: bash
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: cross-version-persist-logs-${{ matrix.iteration }}
           path: "*.log"
+      - name: Upload all chroma.sqlite3 files from /tmp
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chroma-sqlite-dumps-${{ matrix.iteration }}
+          path: test-dbs
 
   test-rust-bindings:
     timeout-minutes: 90
