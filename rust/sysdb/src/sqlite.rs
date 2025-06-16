@@ -949,6 +949,7 @@ impl SqliteSysDb {
                 } else if let Some(float_value) = row.get::<Option<f64>, _>("float_value") {
                     Some((key.to_string(), MetadataValue::Float(float_value)))
                 } else {
+                    log::info!("defaulting to bool_value: {:#?}", row.columns(),);
                     row.get::<Option<bool>, _>("bool_value")
                         .map(|bool_value| (key.to_string(), MetadataValue::Bool(bool_value)))
                 }

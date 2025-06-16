@@ -1800,6 +1800,7 @@ dependencies = [
  "chrono",
  "derivative",
  "futures",
+ "log",
  "parking_lot",
  "prost 0.13.5",
  "sea-query",
