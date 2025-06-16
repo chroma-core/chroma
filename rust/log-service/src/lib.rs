@@ -349,8 +349,8 @@ impl RollupPerCollection {
         self.start_log_position = witness
             .map(|x| x.1.position)
             .unwrap_or(LogPosition::from_offset(1));
-        self.limit_log_position = self.limit_log_position.max(self.start_log_position);
         assert!(self.start_log_position < self.limit_log_position);
+        self.limit_log_position = self.limit_log_position.max(self.start_log_position);
     }
 
     fn is_empty(&self) -> bool {
