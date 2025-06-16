@@ -56,13 +56,19 @@ export function SearchResult({ codeChunk }: { codeChunk: CodeChunk }) {
 }
 
 export function SearchResultSkeleton() {
-  return (<div role="status" className="max-w-sm animate-pulse">
-    <div className="h-2.5 bg-gray-200 rounded-full dark:bg-gray-700 w-48 mb-4"></div>
-    <div className="h-2 bg-gray-200 rounded-full dark:bg-gray-700 max-w-[360px] mb-2.5"></div>
-    <div className="h-2 bg-gray-200 rounded-full dark:bg-gray-700 mb-2.5"></div>
-    <div className="h-2 bg-gray-200 rounded-full dark:bg-gray-700 max-w-[330px] mb-2.5"></div>
-    <div className="h-2 bg-gray-200 rounded-full dark:bg-gray-700 max-w-[300px] mb-2.5"></div>
-    <div className="h-2 bg-gray-200 rounded-full dark:bg-gray-700 max-w-[360px]"></div>
-    <span className="sr-only">Loading...</span>
+  return (<div role="status" className="w-full animate-pulse">
+    <div className="mac-style mac-style-hover row-span-3 flex grow flex-col justify-between border border-black bg-black text-white">
+      <div className="px-5 pt-3 pb-2 font-mono text-md uppercase"><div className="h-2.5 bg-gray-200 rounded-full dark:bg-gray-700 w-48 mb-4"></div></div>
+      <hr className="mt-1 mb-3"></hr>
+      <div className="mb-4 flex flex-col gap-4 px-5 text-sm max-w-full">
+        <div className='w-full'>
+          <div className="h-2 bg-gray-200 rounded-full dark:bg-gray-700 max-w-[360px] mb-2.5"></div>
+          <div className="h-2 bg-gray-200 rounded-full dark:bg-gray-700 mb-2.5"></div>
+          <div className="h-2 bg-gray-200 rounded-full dark:bg-gray-700 max-w-[330px] mb-2.5"></div>
+          <div className="h-2 bg-gray-200 rounded-full dark:bg-gray-700 max-w-[300px] mb-2.5"></div>
+          <div className="h-2 bg-gray-200 rounded-full dark:bg-gray-700 max-w-[360px]"></div>
+        </div>
+      </div>
+    </div>
   </div>);
 }

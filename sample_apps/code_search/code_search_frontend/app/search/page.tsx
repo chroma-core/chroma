@@ -29,7 +29,7 @@ function Error({ error }: { error: string }) {
   return (
     <div className="items-center justify-center h-full">
       <div className="max-w-2xl mx-auto mt-8">
-        <Box title={'Error returned from backend server'}>
+        <Box title={'Error returned from backend server'} className="bg-white">
           <div>The backend server encountered the following error:</div>
           <div>{error}</div>
         </Box>

@@ -53,7 +53,7 @@ function Onboard(props: { setState: any, setUrl: any }) {
 
 function Connecting(props: { setState: any }) {
   return (
-    <Box title={'Currently trying to connect'}>
+    <Box title={'Currently trying to connect'} className="bg-white">
       <div>
         Please run an instance by using the provided script in the tutorial.
       </div>

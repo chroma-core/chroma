@@ -1,4 +1,4 @@
-package views
+package renderer
 
 import (
 	"math"

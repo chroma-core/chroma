@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"chroma-core/code-search-tui/renderer"
+	"chroma-core/code-search-tui/util"
 	"chroma-core/code-search-tui/views"
 
 	"github.com/charmbracelet/bubbles/help"
@@ -12,16 +14,29 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const (
+	SearchBarScreen = iota
+	SearchResultsScreen
+)
+
 type keymap = struct {
-	quit key.Binding
+	quit  key.Binding
+	about key.Binding
+}
+
+type ScreenModel interface {
+	tea.Model
 }
 
 type rootModel struct {
-	width  int
-	height int
-	keymap keymap
-	help   help.Model
-	logo   views.LogoModel
+	width    int
+	height   int
+	keymap   keymap
+	help     help.Model
+	tooSmall views.TooSmallModel
+	screens  []tea.Model
+	active   int
+	debugMsg string
 }
 
 func newModel() rootModel {
@@ -32,8 +47,17 @@ func newModel() rootModel {
 				key.WithKeys("esc", "ctrl+c"),
 				key.WithHelp("esc", "quit"),
 			),
+			about: key.NewBinding(
+				key.WithKeys("ctrl+a"),
+				key.WithHelp("ctrl+a", "about"),
+			),
 		},
-		logo: views.NewLogoModel(),
+		tooSmall: views.NewTooSmallModel(),
+		screens: []tea.Model{
+			renderer.NewRendererModel(views.NewWMModel()),
+			views.NewSearchResultsModel(),
+		},
+		active: SearchBarScreen,
 	}
 	return m
 }
@@ -44,37 +68,71 @@ func (m rootModel) Init() tea.Cmd {
 
 func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+	case util.DoSearchMsg:
+		m.active = SearchResultsScreen
+	case util.DebugMsg:
+		m.debugMsg = msg.Msg
+		return m, nil
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, m.keymap.quit):
-			return m, tea.Quit
+			if m.active == SearchBarScreen {
+				return m, tea.Quit
+			} else {
+				m.active = SearchBarScreen
+			}
+		case key.Matches(msg, m.keymap.about):
+			cmds = append(cmds, func() tea.Msg {
+				return util.OpenWindowMsg{WindowId: views.AboutWindow}
+			})
 		}
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
 		m.width = msg.Width
-		m.logo.Width = msg.Width
-		m.logo.Height = msg.Height
+		newCmd := tea.WindowSizeMsg{
+			Width:  msg.Width,
+			Height: msg.Height - 3,
+		}
+		for i := range m.screens {
+			m.screens[i], cmd = m.screens[i].Update(newCmd)
+			cmds = append(cmds, cmd)
+		}
+		m.tooSmall.SetSize(msg.Width, msg.Height-2)
+		return m, nil
+	case util.OpenWindowMsg:
+		newModel, cmd := m.screens[0].Update(msg)
+		m.screens[0] = newModel.(ScreenModel)
+		cmds = append(cmds, cmd)
+		return m, tea.Batch(cmds...)
 	}
 
-	var cmd tea.Cmd
-	m.logo, cmd = m.logo.Update(msg)
-	if cmd != nil {
-		cmds = append(cmds, cmd)
-	}
+	focusedScreen := m.screens[m.active]
+	newModel, cmd := focusedScreen.Update(msg)
+	m.screens[m.active] = newModel.(ScreenModel)
+	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m rootModel) isTooSmall() bool {
+	return m.width < 80 || m.height < 20
 }
 
 func (m rootModel) View() string {
 	help := m.help.ShortHelpView([]key.Binding{
 		m.keymap.quit,
+		m.keymap.about,
 	})
 
-	logo := m.logo.View()
+	if m.isTooSmall() {
+		return m.tooSmall.View() + "\n\n " + help
+	}
 
-	return logo + "\n\n" + help
+	focusedScreen := m.screens[m.active]
+	return focusedScreen.View() + "\n\n " + help + " " + m.debugMsg
 }
 
 func main() {
