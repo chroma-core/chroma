@@ -90,28 +90,9 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
             "Starting deletion of unused files"
         );
 
-        // Generate list of HNSW files
-        // NOTE(Sanket): input.hnsw_prefixes_for_deletion is no longer used
-        // hence not overriding prefix changes here. We should remove this param.
-        let hnsw_files: Vec<String> = input
-            .hnsw_prefixes_for_deletion
-            .iter()
-            .flat_map(|prefix| {
-                [
-                    "header.bin",
-                    "data_level0.bin",
-                    "length.bin",
-                    "link_lists.bin",
-                ]
-                .iter()
-                .map(|file| format!("hnsw/{}/{}", prefix, file))
-                .collect::<Vec<String>>()
-            })
-            .collect();
-
         // Create a list that contains all files that will be deleted.
         let mut all_files = input.unused_s3_files.clone();
-        all_files.extend(hnsw_files);
+        all_files.extend(input.hnsw_prefixes_for_deletion.clone());
 
         // NOTE(rohit):
         // We don't want to fail the entire operation if one file fails to rename or delete.
