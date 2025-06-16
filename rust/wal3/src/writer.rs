@@ -4,7 +4,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{GetOptions, PutOptions, Storage, StorageError};
+use chroma_storage::{DeleteOptions, GetOptions, PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -13,8 +13,8 @@ use tracing::Instrument;
 
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
-    ExponentialBackoff, Fragment, FragmentSeqNo, LogPosition, LogReader, LogReaderOptions,
-    LogWriterOptions, Manifest, ManifestManager, ThrottleOptions,
+    ExponentialBackoff, Fragment, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition,
+    LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestManager, ThrottleOptions,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -324,6 +324,46 @@ impl LogWriter {
             .as_ref()
             .map(|inner| inner.writer.manifest_manager.latest())
     }
+
+    pub async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
+        loop {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let inner = { self.inner.lock().unwrap().clone() };
+            let Some(epoch_writer) = inner else {
+                // This should never happen, so just be polite with an error.
+                return Err(Error::LogClosed);
+            };
+            match epoch_writer.writer.garbage_collect(options).await {
+                Ok(()) => return Ok(()),
+                Err(Error::LogContention) => {
+                    let writer = OnceLogWriter::open(
+                        epoch_writer.writer.options.clone(),
+                        epoch_writer.writer.storage.clone(),
+                        epoch_writer.writer.prefix.clone(),
+                        self.writer.clone(),
+                        Arc::clone(&self.mark_dirty),
+                    )
+                    .await?;
+                    // SAFETY(rescrv):  Mutex poisoning.
+                    let mut inner = self.inner.lock().unwrap();
+                    if let Some(second) = inner.as_mut() {
+                        if second.epoch == epoch_writer.epoch {
+                            second.epoch += 1;
+                            second.writer.shutdown();
+                            second.writer = writer;
+                        }
+                        // fall through the loop to retry.
+                    } else {
+                        // This should never happen, so just be polite with an error.
+                        return Err(Error::LogClosed);
+                    }
+                }
+                Err(err) => {
+                    return Err(err);
+                }
+            }
+        }
+    }
 }
 
 impl std::fmt::Debug for LogWriter {
@@ -535,6 +575,122 @@ impl OnceLogWriter {
         // Record the records/batches written.
         self.batch_manager.finish_write();
         Ok(log_position)
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
+        let cutoff = self.garbage_collection_cutoff().await?;
+        self.manifest_manager.heartbeat().await?;
+        let garbage = self
+            .manifest_manager
+            // TODO(rescrv):  Evaluate putting a cache in here.
+            .compute_garbage(options, cutoff, &())
+            .await?;
+        let (garbage, e_tag) = match garbage
+            .install(&self.options.throttle_manifest, &self.storage, &self.prefix)
+            .await
+        {
+            Ok(e_tag) => (garbage, e_tag),
+            Err(Error::LogContention) => {
+                match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
+                    .await
+                {
+                    Ok(Some((garbage, e_tag))) => (garbage, e_tag),
+                    Ok(None) => return Err(Error::LogContention),
+                    Err(err) => {
+                        return Err(err);
+                    }
+                }
+            }
+            Err(err) => {
+                return Err(err);
+            }
+        };
+        let paths = garbage
+            .prefixed_paths_to_delete(&self.prefix)
+            .collect::<Vec<_>>();
+        self.manifest_manager.apply_garbage(garbage).await?;
+        let exp_backoff: ExponentialBackoff = options.throttle.into();
+        let start = Instant::now();
+        for path in paths {
+            loop {
+                match self.storage.delete(&path, DeleteOptions::default()).await {
+                    Ok(()) => break,
+                    Err(StorageError::NotFound { .. }) => break,
+                    Err(err) => {
+                        tracing::error!("could not cleanup garbage: {err:?}");
+                        if start.elapsed() > Duration::from_secs(600) {
+                            tracing::error!(
+                                "could not cleanup garbage within 10 minutes, returning"
+                            );
+                            return Err(Error::StorageError(Arc::new(err)));
+                        }
+                        let mut backoff = exp_backoff.next();
+                        if backoff > Duration::from_secs(600) {
+                            backoff = Duration::from_secs(600);
+                        }
+                        tokio::time::sleep(backoff).await;
+                    }
+                }
+            }
+        }
+        loop {
+            let options = if let Some(e_tag) = e_tag.as_ref() {
+                DeleteOptions::if_matches(e_tag, StorageRequestPriority::P0)
+            } else {
+                DeleteOptions::default()
+            };
+            match self
+                .storage
+                .delete(&Garbage::path(&self.prefix), options)
+                .await
+            {
+                Ok(()) => break,
+                Err(StorageError::NotFound { .. }) => break,
+                Err(err) => {
+                    tracing::error!("could not cleanup garbage: {err:?}");
+                    if start.elapsed() > Duration::from_secs(600) {
+                        tracing::error!("could not cleanup garbage within 10 minutes, returning");
+                        return Err(Error::StorageError(Arc::new(err)));
+                    }
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(600) {
+                        backoff = Duration::from_secs(600);
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // NOTE(rescrv): Garbage collection cutoff is responsible for determining the crucial amount of
+    // how much to garbage collect.  If there are no cursors, it must bail with an error.
+    async fn garbage_collection_cutoff(&self) -> Result<LogPosition, Error> {
+        let cursors = CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::clone(&self.storage),
+            self.prefix.clone(),
+            "garbage collection writer".to_string(),
+        );
+        // This will be None if there are no cursors, upholding the function invariant.
+        let mut collect_up_to = None;
+        for cursor_name in cursors.list().await? {
+            let witness = cursors.load(&cursor_name).await?;
+            let Some(cursor) = witness.map(|w| w.1) else {
+                return Err(Error::LogContention);
+            };
+            if cursor.position <= collect_up_to.unwrap_or(cursor.position) {
+                collect_up_to = Some(cursor.position);
+            }
+        }
+        let Some(collect_up_to) = collect_up_to else {
+            return Err(Error::NoSuchCursor(format!(
+                "there is no cursor for prefix {}",
+                self.prefix
+            )));
+        };
+        Ok(collect_up_to)
     }
 }
 

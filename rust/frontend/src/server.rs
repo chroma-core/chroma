@@ -42,6 +42,10 @@ use uuid::Uuid;
 use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
+    base64_decode::{
+        maybe_decode_embeddings, maybe_decode_update_embeddings, EmbeddingsPayload,
+        UpdateEmbeddingsPayload,
+    },
     config::FrontendServerConfig,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
@@ -1217,7 +1221,7 @@ async fn fork_collection(
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
 pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
+    embeddings: Option<EmbeddingsPayload>,
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<Metadata>>>,
@@ -1233,7 +1237,7 @@ impl AddCollectionRecordsPayload {
     ) -> Self {
         Self {
             ids,
-            embeddings,
+            embeddings: embeddings.map(EmbeddingsPayload::JsonArrays),
             documents,
             uris,
             metadatas,
@@ -1284,7 +1288,9 @@ async fn collection_add(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    if let Some(embeddings) = &payload.embeddings {
+
+    let payload_embeddings: Option<Vec<Vec<f32>>> = maybe_decode_embeddings(payload.embeddings)?;
+    if let Some(embeddings) = payload_embeddings.as_ref() {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
     }
     if let Some(metadatas) = &payload.metadatas {
@@ -1310,7 +1316,7 @@ async fn collection_add(
         database,
         collection_id,
         payload.ids,
-        payload.embeddings,
+        payload_embeddings,
         payload.documents,
         payload.uris,
         payload.metadatas,
@@ -1324,7 +1330,7 @@ async fn collection_add(
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct UpdateCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<Vec<Option<Vec<f32>>>>,
+    embeddings: Option<UpdateEmbeddingsPayload>,
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
@@ -1373,7 +1379,9 @@ async fn collection_update(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::Update, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    if let Some(embeddings) = &payload.embeddings {
+    let payload_embeddings: Option<Vec<Option<Vec<f32>>>> =
+        maybe_decode_update_embeddings(payload.embeddings)?;
+    if let Some(embeddings) = &payload_embeddings {
         quota_payload = quota_payload.with_update_embeddings(embeddings);
     }
     if let Some(metadatas) = &payload.metadatas {
@@ -1398,7 +1406,7 @@ async fn collection_update(
         database,
         collection_id,
         payload.ids,
-        payload.embeddings,
+        payload_embeddings,
         payload.documents,
         payload.uris,
         payload.metadatas,
@@ -1410,7 +1418,7 @@ async fn collection_update(
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct UpsertCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
+    embeddings: Option<EmbeddingsPayload>,
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
@@ -1466,7 +1474,8 @@ async fn collection_upsert(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    if let Some(embeddings) = &payload.embeddings {
+    let payload_embeddings: Option<Vec<Vec<f32>>> = maybe_decode_embeddings(payload.embeddings)?;
+    if let Some(embeddings) = payload_embeddings.as_ref() {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
     }
     if let Some(metadatas) = &payload.metadatas {
@@ -1492,7 +1501,7 @@ async fn collection_upsert(
         database,
         collection_id,
         payload.ids,
-        payload.embeddings,
+        payload_embeddings,
         payload.documents,
         payload.uris,
         payload.metadatas,

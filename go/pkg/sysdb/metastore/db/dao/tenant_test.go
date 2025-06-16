@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	"github.com/pingcap/log"
@@ -94,6 +95,35 @@ func (suite *TenantDbTestSuite) TestTenantDb_GetTenantsLastCompactionTime() {
 	for _, tenantId := range tenantIds {
 		suite.db.Delete(&dbmodel.Tenant{}, "id = ?", tenantId)
 	}
+}
+
+func (suite *TenantDbTestSuite) TestTenantDb_SetTenantResourceName() {
+	tenantId := "testSetTenantResourceName"
+	err := suite.Db.Insert(&dbmodel.Tenant{
+		ID: tenantId,
+	})
+	suite.Require().NoError(err)
+	tenant, err := suite.Db.GetTenants(tenantId)
+	suite.Require().NoError(err)
+	suite.Require().Len(tenant, 1)
+	suite.Assert().Nil(tenant[0].ResourceName)
+
+	err = suite.Db.SetTenantResourceName(tenantId, "resourceName")
+	suite.Require().NoError(err)
+
+	tenant, err = suite.Db.GetTenants(tenantId)
+	suite.Require().NoError(err)
+	suite.Require().Len(tenant, 1)
+	suite.Require().Equal("resourceName", *tenant[0].ResourceName)
+
+	err = suite.Db.SetTenantResourceName(tenantId, "resourceName")
+	suite.Require().Equal(common.ErrTenantResourceNameAlreadySet, err)
+
+	err = suite.Db.SetTenantResourceName("fake-tenant", "resourceName")
+	suite.Require().Error(err)
+	suite.Require().Equal(common.ErrTenantNotFound, err)
+
+	suite.db.Delete(&dbmodel.Tenant{}, "id = ?", tenantId)
 }
 
 func TestTenantDbTestSuite(t *testing.T) {

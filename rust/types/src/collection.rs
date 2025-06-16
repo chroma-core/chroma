@@ -34,6 +34,10 @@ impl CollectionUuid {
     pub fn new() -> Self {
         CollectionUuid(Uuid::new_v4())
     }
+
+    pub fn storage_prefix_for_log(&self) -> String {
+        format!("logs/{}", self)
+    }
 }
 
 impl std::str::FromStr for CollectionUuid {
@@ -374,5 +378,14 @@ mod test {
             converted_collection.updated_at,
             SystemTime::UNIX_EPOCH + Duration::new(1, 1)
         );
+    }
+
+    #[test]
+    fn storage_prefix_for_log_format() {
+        let collection_id = Uuid::parse_str("34e72052-5e60-47cb-be88-19a9715b7026")
+            .map(CollectionUuid)
+            .unwrap();
+        let prefix = collection_id.storage_prefix_for_log();
+        assert_eq!("logs/34e72052-5e60-47cb-be88-19a9715b7026", prefix);
     }
 }

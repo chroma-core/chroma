@@ -114,7 +114,7 @@ garbageCollector:
     max_collections_to_gc: 1000
     gc_interval_mins: 1
     disallow_collections: []
-    default_mode: "delete"
+    default_mode: "deletev2"
     sysdb_config:
       host: "sysdb.chroma"
       port: 50051

@@ -149,6 +149,103 @@ func TestCatalog_GetCollections(t *testing.T) {
 	mockMetaDomain.AssertExpectations(t)
 }
 
+func TestCatalog_GetCollectionByResourceName(t *testing.T) {
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockCollectionDb := &mocks.ICollectionDb{}
+
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
+
+	tenantID := "test_tenant"
+	databaseID := types.NewUniqueID().String()
+	tenantResourceName := "test_tenant_resource_name"
+	collectionID := "00000000-0000-0000-0000-000000000001"
+	collectionName := "test_collection"
+	configurationJson := "{test_config}"
+	dim := int32(128)
+
+	mockCollectionEntry := &dbmodel.CollectionAndMetadata{
+		Collection: &dbmodel.Collection{
+			ID:                   collectionID,
+			Name:                 &collectionName,
+			ConfigurationJsonStr: &configurationJson,
+			Dimension:            &dim,
+			DatabaseID:           databaseID,
+			Ts:                   types.Timestamp(0),
+			IsDeleted:            false,
+			CreatedAt:            time.Now(),
+			UpdatedAt:            time.Now(),
+			Tenant:               tenantID,
+		},
+		CollectionMetadata: []*dbmodel.CollectionMetadata{},
+		TenantID:           tenantID,
+		DatabaseName:       "test_database",
+	}
+
+	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
+	mockCollectionDb.On("GetCollectionByResourceName", tenantResourceName, tenantID, databaseID).Return(mockCollectionEntry, nil)
+
+	result, err := catalog.GetCollectionByResourceName(context.Background(), tenantResourceName, tenantID, databaseID)
+
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, collectionID, result.ID.String())
+	assert.Equal(t, collectionName, result.Name)
+	assert.Equal(t, configurationJson, result.ConfigurationJsonStr)
+	assert.Equal(t, dim, *result.Dimension)
+	assert.Equal(t, databaseID, result.DatabaseId.String())
+
+	mockMetaDomain.AssertExpectations(t)
+	mockCollectionDb.AssertExpectations(t)
+}
+
+func TestCatalog_GetCollectionByResourceName_NotFound(t *testing.T) {
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockCollectionDb := &mocks.ICollectionDb{}
+
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
+
+	tenantID := "test_tenant"
+	databaseID := types.NewUniqueID().String()
+	tenantResourceName := "non_existent_tenant_resource_name"
+
+	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
+	mockCollectionDb.On("GetCollectionByResourceName", tenantResourceName, tenantID, databaseID).Return((*dbmodel.CollectionAndMetadata)(nil), nil)
+
+	result, err := catalog.GetCollectionByResourceName(context.Background(), tenantResourceName, tenantID, databaseID)
+
+	assert.Error(t, err)
+	assert.Nil(t, result)
+
+	mockMetaDomain.AssertExpectations(t)
+	mockCollectionDb.AssertExpectations(t)
+}
+
+func TestCatalog_GetCollectionByResourceName_DbError(t *testing.T) {
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockCollectionDb := &mocks.ICollectionDb{}
+
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
+
+	tenantID := "test_tenant"
+	databaseID := types.NewUniqueID().String()
+	tenantResourceName := "test_tenant_resource_name"
+
+	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
+	mockCollectionDb.On("GetCollectionByResourceName", tenantResourceName, tenantID, databaseID).Return((*dbmodel.CollectionAndMetadata)(nil), assert.AnError)
+
+	result, err := catalog.GetCollectionByResourceName(context.Background(), tenantResourceName, tenantID, databaseID)
+
+	assert.Error(t, err)
+	assert.Equal(t, assert.AnError, err)
+	assert.Nil(t, result)
+
+	mockMetaDomain.AssertExpectations(t)
+	mockCollectionDb.AssertExpectations(t)
+}
+
 func TestCatalog_GetCollectionSize(t *testing.T) {
 	mockMetaDomain := &mocks.IMetaDomain{}
 	catalog := NewTableCatalog(nil, mockMetaDomain, nil, false)
@@ -175,7 +272,7 @@ func newMockS3MetaStore() *mockS3MetaStore {
 	}
 }
 
-func (m *mockS3MetaStore) GetLineageFile(fileName string) (*coordinatorpb.CollectionLineageFile, error) {
+func (m *mockS3MetaStore) GetLineageFile(ctx context.Context, fileName string) (*coordinatorpb.CollectionLineageFile, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -187,7 +284,7 @@ func (m *mockS3MetaStore) GetLineageFile(fileName string) (*coordinatorpb.Collec
 	}, nil
 }
 
-func (m *mockS3MetaStore) PutLineageFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionLineageFile) (string, error) {
+func (m *mockS3MetaStore) PutLineageFile(ctx context.Context, tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionLineageFile) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -195,7 +292,7 @@ func (m *mockS3MetaStore) PutLineageFile(tenantID, databaseID, collectionID, fil
 	return fileName, nil
 }
 
-func (m *mockS3MetaStore) GetVersionFile(fileName string) (*coordinatorpb.CollectionVersionFile, error) {
+func (m *mockS3MetaStore) GetVersionFile(ctx context.Context, fileName string) (*coordinatorpb.CollectionVersionFile, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -222,7 +319,7 @@ func (m *mockS3MetaStore) ListVersionFiles() ([]*coordinatorpb.CollectionVersion
 	return files, names, nil
 }
 
-func (m *mockS3MetaStore) PutVersionFile(tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error) {
+func (m *mockS3MetaStore) PutVersionFile(ctx context.Context, tenantID, databaseID, collectionID, fileName string, file *coordinatorpb.CollectionVersionFile) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -234,7 +331,7 @@ func (m *mockS3MetaStore) HasObjectWithPrefix(ctx context.Context, prefix string
 	return false, nil
 }
 
-func (m *mockS3MetaStore) DeleteVersionFile(tenantID, databaseID, collectionID, fileName string) error {
+func (m *mockS3MetaStore) DeleteVersionFile(ctx context.Context, tenantID, databaseID, collectionID, fileName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -287,7 +384,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollection(t *testing.T) {
 			},
 		},
 	}
-	fileName, err := mockS3Store.PutVersionFile(tenantID, "test_database", collectionID.String(), "version_1.pb", initialVersionFile)
+	fileName, err := mockS3Store.PutVersionFile(context.Background(), tenantID, "test_database", collectionID.String(), "version_1.pb", initialVersionFile)
 	assert.NoError(t, err)
 	assert.Equal(t, "version_1.pb", fileName)
 
@@ -492,7 +589,7 @@ func TestCatalog_FlushCollectionCompactionForVersionedCollectionWithEmptyFilePat
 			},
 		},
 	}
-	fileName, err := mockS3Store.PutVersionFile(tenantID, "test_database", collectionID.String(), "version_1.pb", initialVersionFile)
+	fileName, err := mockS3Store.PutVersionFile(context.Background(), tenantID, "test_database", collectionID.String(), "version_1.pb", initialVersionFile)
 	assert.NoError(t, err)
 	assert.Equal(t, "version_1.pb", fileName)
 
@@ -672,7 +769,7 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 			},
 		},
 	}
-	mockS3Store.PutVersionFile(tenantID, databaseID, collectionID, existingVersionFileName, initialVersionFile)
+	mockS3Store.PutVersionFile(context.Background(), tenantID, databaseID, collectionID, existingVersionFileName, initialVersionFile)
 
 	// Setup mock collection entry
 	mockCollectionEntry := &dbmodel.Collection{
@@ -717,6 +814,7 @@ func TestCatalog_DeleteCollectionVersion(t *testing.T) {
 	assert.NoError(t, err)
 	// Verify the version file was updated correctly
 	updatedFile, err := mockS3Store.GetVersionFile(
+		context.Background(),
 		existingVersionFileName,
 	)
 	assert.NoError(t, err)
@@ -805,7 +903,7 @@ func TestCatalog_MarkVersionForDeletion(t *testing.T) {
 			},
 		},
 	}
-	mockS3Store.PutVersionFile(tenantID, databaseID, collectionID, existingVersionFileName, initialVersionFile)
+	mockS3Store.PutVersionFile(context.Background(), tenantID, databaseID, collectionID, existingVersionFileName, initialVersionFile)
 
 	// Setup mock collection entry
 	mockCollectionEntry := &dbmodel.Collection{
@@ -848,6 +946,7 @@ func TestCatalog_MarkVersionForDeletion(t *testing.T) {
 	existingVersionFileName, err = catalog.GetVersionFileNamesForCollection(context.Background(), tenantID, collectionID)
 	assert.NoError(t, err)
 	updatedFile, err := mockS3Store.GetVersionFile(
+		context.Background(),
 		existingVersionFileName,
 	)
 	assert.NoError(t, err)
@@ -940,7 +1039,7 @@ func TestCatalog_MarkVersionForDeletion_VersionNotFound(t *testing.T) {
 			},
 		},
 	}
-	mockS3Store.PutVersionFile(tenantID, "test_database", collectionID, existingVersionFileName, initialVersionFile)
+	mockS3Store.PutVersionFile(context.Background(), tenantID, "test_database", collectionID, existingVersionFileName, initialVersionFile)
 
 	// Setup mock collection entry
 	mockCollectionEntry := &dbmodel.Collection{
@@ -1349,4 +1448,47 @@ func int64Ptr(i int64) *int64 {
 
 func float64Ptr(f float64) *float64 {
 	return &f
+}
+
+func TestCatalog_SetTenantResourceName(t *testing.T) {
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockTenantDb := &mocks.ITenantDb{}
+
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
+
+	tenantID := "test_tenant"
+	resourceName := "static_tenant_name"
+
+	mockMetaDomain.On("TenantDb", mock.Anything).Return(mockTenantDb)
+	mockTenantDb.On("SetTenantResourceName", tenantID, resourceName).Return(nil)
+
+	err := catalog.SetTenantResourceName(context.Background(), tenantID, resourceName)
+
+	assert.NoError(t, err)
+
+	mockMetaDomain.AssertExpectations(t)
+	mockTenantDb.AssertExpectations(t)
+}
+
+func TestCatalog_SetTenantResourceName_TenantNotFound(t *testing.T) {
+	mockTxImpl := &mocks.ITransaction{}
+	mockMetaDomain := &mocks.IMetaDomain{}
+	mockTenantDb := &mocks.ITenantDb{}
+
+	catalog := NewTableCatalog(mockTxImpl, mockMetaDomain, nil, false)
+
+	tenantID := "non_existent_tenant"
+	resourceName := "static_tenant_name"
+
+	mockMetaDomain.On("TenantDb", mock.Anything).Return(mockTenantDb)
+	mockTenantDb.On("SetTenantResourceName", tenantID, resourceName).Return(common.ErrTenantNotFound)
+
+	err := catalog.SetTenantResourceName(context.Background(), tenantID, resourceName)
+
+	assert.Error(t, err)
+	assert.Equal(t, common.ErrTenantNotFound, err)
+
+	mockMetaDomain.AssertExpectations(t)
+	mockTenantDb.AssertExpectations(t)
 }

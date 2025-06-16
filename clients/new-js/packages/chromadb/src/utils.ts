@@ -324,8 +324,7 @@ export const validateWhere = (where: Where) => {
 
   if (Object.keys(where).length != 1) {
     throw new ChromaValueError(
-      `Expected 'where' to have exactly one operator, but got ${
-        Object.keys(where).length
+      `Expected 'where' to have exactly one operator, but got ${Object.keys(where).length
       }`,
     );
   }
@@ -546,4 +545,26 @@ export const parseConnectionPath = (path: string) => {
   } catch {
     throw new ChromaValueError(`Invalid URL: ${path}`);
   }
+};
+const packEmbedding = (embedding: number[]): ArrayBuffer => {
+  const buffer = new ArrayBuffer(embedding.length * 4);
+  const view = new Float32Array(buffer);
+  for (let i = 0; i < embedding.length; i++) {
+    view[i] = embedding[i];
+  }
+  return buffer;
+};
+
+export const optionalEmbeddingsToBase64Bytes = (embeddings: number[][] | undefined) => {
+  if (!embeddings) {
+    return undefined;
+  }
+
+  return embeddings.map(embedding => {
+    const buffer = packEmbedding(embedding);
+
+    const uint8Array = new Uint8Array(buffer);
+    const binaryString = Array.from(uint8Array, byte => String.fromCharCode(byte)).join('');
+    return btoa(binaryString);
+  });
 };

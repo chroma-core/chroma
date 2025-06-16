@@ -12,22 +12,28 @@ const NAME = "voyageai";
 export interface VoyageAIConfig {
   api_key_env_var: string;
   model_name: string;
+  input_type?: string;
+  truncation: boolean;
 }
 
 export interface VoyageAIArgs {
   modelName: string;
   apiKeyEnvVar?: string;
   apiKey?: string;
+  inputType?: string;
+  truncation?: boolean;
 }
 
 export class VoyageAIEmbeddingFunction implements EmbeddingFunction {
   public readonly name = NAME;
   private readonly apiKeyEnvVar: string;
   private readonly modelName: string;
+  private readonly inputType?: string;
+  private readonly truncation: boolean;
   private client: VoyageAIClient;
 
   constructor(args: VoyageAIArgs) {
-    const { apiKeyEnvVar = "VOYAGE_API_KEY", modelName } = args;
+    const { apiKeyEnvVar = "VOYAGE_API_KEY", modelName, inputType, truncation } = args;
 
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
 
@@ -39,6 +45,8 @@ export class VoyageAIEmbeddingFunction implements EmbeddingFunction {
 
     this.modelName = modelName;
     this.apiKeyEnvVar = apiKeyEnvVar;
+    this.inputType = inputType;
+    this.truncation = truncation !== undefined ? truncation : true;;
     this.client = new VoyageAIClient({ apiKey });
   }
 
@@ -61,6 +69,8 @@ export class VoyageAIEmbeddingFunction implements EmbeddingFunction {
     return new VoyageAIEmbeddingFunction({
       modelName: config.model_name,
       apiKeyEnvVar: config.api_key_env_var,
+      inputType: config.input_type,
+      truncation: config.truncation,
     });
   }
 
@@ -76,6 +86,8 @@ export class VoyageAIEmbeddingFunction implements EmbeddingFunction {
     return {
       api_key_env_var: this.apiKeyEnvVar,
       model_name: this.modelName,
+      input_type: this.inputType,
+      truncation: this.truncation,
     };
   }
 

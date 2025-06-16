@@ -14,7 +14,7 @@ use chroma_storage::{
 
 use crate::{
     parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ScrubError,
-    ScrubSuccess, Snapshot,
+    ScrubSuccess, Snapshot, SnapshotCache,
 };
 
 fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
@@ -22,25 +22,36 @@ fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPositio
 }
 
 /// Limits allows encoding things like offset, timestamp, and byte size limits for the read.
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
+#[derive(Copy, Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
 pub struct Limits {
     pub max_files: Option<u64>,
     pub max_bytes: Option<u64>,
     pub max_records: Option<u64>,
 }
 
+impl Limits {
+    pub const UNLIMITED: Limits = Limits {
+        max_files: None,
+        max_bytes: None,
+        max_records: None,
+    };
+}
+
 /// LogReader is a reader for the log.
 pub struct LogReader {
     options: LogReaderOptions,
     storage: Arc<Storage>,
+    cache: Option<Arc<dyn SnapshotCache>>,
     pub(crate) prefix: String,
 }
 
 impl LogReader {
     pub fn new(options: LogReaderOptions, storage: Arc<Storage>, prefix: String) -> Self {
+        let cache = None;
         Self {
             options,
             storage,
+            cache,
             prefix,
         }
     }
@@ -50,11 +61,17 @@ impl LogReader {
         storage: Arc<Storage>,
         prefix: String,
     ) -> Result<Self, Error> {
+        let cache = None;
         Ok(Self {
             options,
             storage,
+            cache,
             prefix,
         })
+    }
+
+    pub fn with_cache(&mut self, cache: Arc<dyn SnapshotCache>) {
+        self.cache = Some(cache);
     }
 
     pub async fn manifest(&self) -> Result<Option<Manifest>, Error> {
@@ -119,7 +136,22 @@ impl LogReader {
                 .map(|s| {
                     let options = self.options.clone();
                     let storage = Arc::clone(&self.storage);
-                    async move { Snapshot::load(&options.throttle, &storage, &self.prefix, s).await }
+                    let cache = self.cache.as_ref().map(Arc::clone);
+                    async move {
+                        if let Some(cache) = cache {
+                            if let Some(snapshot) = cache.get(s).await? {
+                                return Ok(Some(snapshot));
+                            }
+                            let snap = Snapshot::load(&options.throttle, &storage, &self.prefix, s)
+                                .await?;
+                            if let Some(snap) = snap.as_ref() {
+                                cache.put(s, snap).await?;
+                            }
+                            Ok(snap)
+                        } else {
+                            Snapshot::load(&options.throttle, &storage, &self.prefix, s).await
+                        }
+                    }
                 })
                 .collect::<Vec<_>>();
             let resolved = futures::future::try_join_all(futures).await?;
@@ -743,6 +775,7 @@ mod tests {
 
         let manifest = Manifest {
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 2000,
             writer: "test-writer".to_string(),
             snapshots: vec![],
@@ -757,7 +790,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(100), // Would need data up to exactly offset 200
         };
-        let result = LogReader::scan_from_manifest(&manifest, from, limits.clone());
+        let result = LogReader::scan_from_manifest(&manifest, from, limits);
         assert!(
             result.is_some(),
             "Should succeed when request stays within manifest coverage"
@@ -830,17 +863,15 @@ mod tests {
         // Boundary case 7: Empty manifest
         let empty_manifest = Manifest {
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 0,
             writer: "test-writer".to_string(),
             snapshots: vec![],
             fragments: vec![],
             initial_offset: None,
         };
-        let result_empty = LogReader::scan_from_manifest(
-            &empty_manifest,
-            LogPosition::from_offset(0),
-            limits.clone(),
-        );
+        let result_empty =
+            LogReader::scan_from_manifest(&empty_manifest, LogPosition::from_offset(0), limits);
         assert!(
             result_empty.is_none(),
             "Should return None for empty manifest"
@@ -865,6 +896,7 @@ mod tests {
     fn obo_in_manifest_code() {
         let manifest = Manifest {
             setsum: Setsum::default(),
+            collected: Setsum::default(),
             acc_bytes: 35837467,
             writer: "log writer".to_string(),
             snapshots: vec![],

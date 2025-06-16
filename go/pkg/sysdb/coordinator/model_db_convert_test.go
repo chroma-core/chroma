@@ -165,3 +165,14 @@ func TestConvertCollectionToModel(t *testing.T) {
 	assert.Nil(t, modelCollections[0].Metadata)
 	assert.Equal(t, dbId, modelCollections[0].DatabaseId)
 }
+
+func TestConvertTenantToModel(t *testing.T) {
+	resourceName := "resourceName"
+	tenant := &dbmodel.Tenant{
+		ID:           "tenantID",
+		ResourceName: &resourceName,
+	}
+	modelTenant := convertTenantToModel(tenant)
+	assert.Equal(t, "tenantID", modelTenant.Name)
+	assert.Equal(t, "resourceName", *modelTenant.ResourceName)
+}

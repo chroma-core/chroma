@@ -9,18 +9,22 @@ mod backoff;
 mod batch_manager;
 mod copy;
 mod cursors;
+mod gc;
 mod manifest;
 mod manifest_manager;
 mod reader;
+mod snapshot_cache;
 mod writer;
 
 pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
-pub use manifest::{Manifest, Snapshot, SnapshotPointer};
+pub use gc::Garbage;
+pub use manifest::{unprefixed_snapshot_path, Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
+pub use snapshot_cache::SnapshotCache;
 pub use writer::{upload_parquet, LogWriter, MarkDirty};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
@@ -57,8 +61,12 @@ pub enum Error {
     CorruptFragment(String),
     #[error("corrupt cursor: {0}")]
     CorruptCursor(String),
+    #[error("corrupt garbage: {0}")]
+    CorruptGarbage(String),
     #[error("missing cursor: {0}")]
     NoSuchCursor(String),
+    #[error("garbage collection: {0}")]
+    GarbageCollection(String),
     #[error("scrub error: {0}")]
     ScrubError(#[from] Box<ScrubError>),
     #[error("parquet error: {0}")]
@@ -84,7 +92,9 @@ impl chroma_error::ChromaError for Error {
             Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptFragment(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptCursor(_) => chroma_error::ErrorCodes::DataLoss,
+            Self::CorruptGarbage(_) => chroma_error::ErrorCodes::DataLoss,
             Self::NoSuchCursor(_) => chroma_error::ErrorCodes::Unknown,
+            Self::GarbageCollection(_) => chroma_error::ErrorCodes::Unknown,
             Self::ScrubError(_) => chroma_error::ErrorCodes::DataLoss,
             Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
             Self::StorageError(storage) => storage.code(),
@@ -149,13 +159,31 @@ pub enum ScrubError {
     },
     #[error("MissingFragment: {reference:?}")]
     MissingFragment { reference: Fragment },
+    #[error("MissingFragmentBySetsumPath: {setsum:?} {path:?}")]
+    MissingFragmentBySetsumPath { setsum: Setsum, path: String },
+    #[error("MissingSnapshotBySetsumPath: {setsum:?} {path:?}")]
+    MissingSnapshotBySetsumPath { setsum: Setsum, path: String },
     #[error("MissingSnapshot: {reference:?}")]
     MissingSnapshot { reference: SnapshotPointer },
+    #[error("Garbage: expected: {0}")]
+    CorruptGarbage(String),
+    #[error("Corrupt snapshot replace")]
+    CorruptSnapshotDrop { lhs: Setsum, rhs: Setsum },
+    #[error("Corrupt snapshot replace")]
+    CorruptSnapshotReplace {
+        old_snapshot_setsum: Setsum,
+        new_snapshot_setsum: Setsum,
+        dropped: Setsum,
+    },
+    #[error("Internal error within scrubbing: {0}")]
+    Internal(String),
     #[error("OverallMismatch: {manifest:?} {observed:?}")]
     OverallMismatch {
         manifest: ScrubSuccess,
         observed: ScrubSuccess,
     },
+    #[error("The given snapshot rolls up to nothing with garbage")]
+    ReplaceDroppedEverything { snapshot: SnapshotPointer },
 }
 
 //////////////////////////////////////////// LogPosition ///////////////////////////////////////////
@@ -394,6 +422,16 @@ impl Default for CursorStoreOptions {
     }
 }
 
+///////////////////////////////////// GarbageCollectionOptions /////////////////////////////////////
+
+/// GarbageCollectionOptions control the behavior of garbage collection.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct GarbageCollectionOptions {
+    /// Default throttling options for deletes.
+    #[serde(default)]
+    pub throttle: ThrottleOptions,
+}
+
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
 
 /// A FragmentSeqNo is an identifier that corresponds to the the number of fragments that have been
@@ -404,6 +442,8 @@ impl Default for CursorStoreOptions {
 pub struct FragmentSeqNo(pub u64);
 
 impl FragmentSeqNo {
+    const BEGIN: FragmentSeqNo = FragmentSeqNo(1);
+
     /// Returns the successor of this FragmentSeqNo, or None if this FragmentSeqNo is the maximum
     pub fn successor(&self) -> Option<Self> {
         if self.0 == u64::MAX {
@@ -501,6 +541,15 @@ where
 }
 
 ////////////////////////////////////////// Fragment Paths //////////////////////////////////////////
+
+pub fn prefixed_fragment_path(prefix: &str, fragment_seq_no: FragmentSeqNo) -> String {
+    format!(
+        "{}/log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
+        prefix,
+        fragment_seq_no.bucket(),
+        fragment_seq_no.0,
+    )
+}
 
 pub fn unprefixed_fragment_path(fragment_seq_no: FragmentSeqNo) -> String {
     format!(

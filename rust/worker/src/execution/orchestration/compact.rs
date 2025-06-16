@@ -1051,18 +1051,14 @@ mod tests {
     use chroma_sysdb::{SysDb, TestSysDb};
     use chroma_system::{Dispatcher, Orchestrator, System};
     use chroma_types::{
+        operator::{Filter, Limit, Projection},
         DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where,
     };
+    use regex::Regex;
 
     use crate::{
         config::RootConfig,
-        execution::{
-            operators::{
-                fetch_log::FetchLogOperator, filter::FilterOperator, limit::LimitOperator,
-                projection::ProjectionOperator,
-            },
-            orchestration::get::GetOrchestrator,
-        },
+        execution::{operators::fetch_log::FetchLogOperator, orchestration::get::GetOrchestrator},
     };
 
     use super::CompactOrchestrator;
@@ -1144,7 +1140,7 @@ mod tests {
             collection_uuid: collection_id,
             tenant: old_cas.collection.tenant.clone(),
         };
-        let filter = FilterOperator {
+        let filter = Filter {
             query_ids: None,
             where_clause: Some(Where::disjunction(vec![
                 Where::Metadata(MetadataExpression {
@@ -1160,11 +1156,11 @@ mod tests {
                 }),
             ])),
         };
-        let limit = LimitOperator {
+        let limit = Limit {
             skip: 0,
             fetch: None,
         };
-        let project = ProjectionOperator {
+        let project = Projection {
             document: true,
             embedding: true,
             metadata: true,
@@ -1183,10 +1179,9 @@ mod tests {
         let old_vals = get_orchestrator
             .run(system.clone())
             .await
-            .expect("Get orchestrator should not fail")
-            .0;
+            .expect("Get orchestrator should not fail");
 
-        assert!(!old_vals.records.is_empty());
+        assert!(!old_vals.result.records.is_empty());
 
         let rebuild_orchestrator = CompactOrchestrator::new(
             collection_id,
@@ -1211,13 +1206,13 @@ mod tests {
 
         let mut expected_new_collection = old_cas.collection.clone();
         expected_new_collection.version += 1;
+
+        let version_suffix_re = Regex::new(r"/\d+$").unwrap();
+
         expected_new_collection.version_file_path = Some(
-            old_cas
-                .collection
-                .version_file_path
-                .clone()
-                .unwrap()
-                .replace("/1", "/2"),
+            version_suffix_re
+                .replace(&old_cas.collection.version_file_path.clone().unwrap(), "/2")
+                .to_string(),
         );
         assert_eq!(new_cas.collection, expected_new_collection);
         assert_eq!(new_cas.metadata_segment.id, old_cas.metadata_segment.id);
@@ -1250,8 +1245,7 @@ mod tests {
         let new_vals = get_orchestrator
             .run(system)
             .await
-            .expect("Get orchestrator should not fail")
-            .0;
+            .expect("Get orchestrator should not fail");
 
         assert_eq!(new_vals, old_vals);
     }

@@ -56,7 +56,7 @@ By default, the `ChromaClient` is wired to connect to a Chroma server at `http:/
 ```typescript
 const client = new ChromaClient({
     ssl: false,
-    host: localhost,
+    host: 'localhost',
     port: 9000,
     database: 'my-db',
     headers: {}

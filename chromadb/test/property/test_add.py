@@ -7,28 +7,16 @@ import pytest
 import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import ClientAPI
-from chromadb.api.client import AdminClient
 from chromadb.api.types import Embeddings, Metadatas
 from chromadb.test.conftest import (
     NOT_CLUSTER_ONLY,
     override_hypothesis_profile,
+    create_isolated_database,
 )
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 from chromadb.utils.batch_utils import create_batches
-
-
-def create_isolated_database(client: ClientAPI) -> None:
-    """Create an isolated database for the test."""
-    admin_settings = client.get_settings()
-    if admin_settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
-        admin_settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
-
-    admin = AdminClient(admin_settings)
-    database = "test_add_" + str(uuid.uuid4())
-    admin.create_database(database)
-    client.set_database(database)
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
