@@ -876,10 +876,7 @@ impl LogServer {
         &self,
         request: GetAllCollectionInfoToCompactRequest,
     ) -> Result<Response<GetAllCollectionInfoToCompactResponse>, Status> {
-        // TODO(rescrv):  Realistically we could make this configurable.
-        // TODO(rescrv):  Magic constant.
-        const MAX_COLLECTION_INFO_NUMBER: usize = 10000;
-        let mut selected_rollups = Vec::with_capacity(MAX_COLLECTION_INFO_NUMBER);
+        let mut selected_rollups = Vec::with_capacity(self.config.rollup_max_size);
         // Do a non-allocating pass here.
         {
             let need_to_compact = self.need_to_compact.lock();
@@ -889,6 +886,9 @@ impl LogServer {
                         >= request.min_compaction_size
                 {
                     selected_rollups.push((*collection_id, *rollup));
+                    if selected_rollups.len() >= self.config.rollup_max_size {
+                        break;
+                    }
                 }
             }
         }
@@ -997,17 +997,16 @@ impl LogServer {
             .scan(
                 cursor.position,
                 Limits {
-                    max_files: Some(10_000),
+                    max_files: Some(self.config.rollup_max_size as u64),
                     max_bytes: Some(1_000_000_000),
-                    max_records: Some(10_000),
+                    max_records: Some(self.config.rollup_max_size as u64),
                 },
             )
             .await?;
         if dirty_fragments.is_empty() {
             return Ok((witness, cursor, vec![]));
         }
-        // TODO(rescrv):  Magic constant.
-        if dirty_fragments.len() >= 1_000 {
+        if dirty_fragments.len() >= self.config.rollup_max_size / 10 {
             tracing::error!("Too many dirty fragments: {}", dirty_fragments.len());
         }
         let dirty_futures = dirty_fragments
@@ -2048,6 +2047,8 @@ pub struct LogServerConfig {
     pub reinsert_threshold: u64,
     #[serde(default = "LogServerConfig::default_rollup_interval")]
     pub rollup_interval: Duration,
+    #[serde(default = "LogServerConfig::default_rollup_max_size")]
+    pub rollup_max_size: usize,
     #[serde(default = "LogServerConfig::default_log_keepalive")]
     pub log_keep_alive: Duration,
     #[serde(default = "LogServerConfig::default_effectuate_log_transfer_batch_size")]
@@ -2085,6 +2086,11 @@ impl LogServerConfig {
         Duration::from_secs(10)
     }
 
+    /// return at most 10k collection infos from get all collections to compact
+    fn default_rollup_max_size() -> usize {
+        10_000
+    }
+
     /// keep logs in-memory for 60 seconds
     fn default_log_keepalive() -> Duration {
         Duration::from_secs(60)
@@ -2120,6 +2126,7 @@ impl Default for LogServerConfig {
             num_records_before_backpressure: Self::default_num_records_before_backpressure(),
             reinsert_threshold: Self::default_reinsert_threshold(),
             rollup_interval: Self::default_rollup_interval(),
+            rollup_max_size: Self::default_rollup_max_size(),
             log_keep_alive: Self::default_log_keepalive(),
             effectuate_log_transfer_batch_size: Self::default_effectuate_log_transfer_batch_size(),
             effectuate_log_transfer_retries: Self::default_effectuate_log_transfer_retries(),
