@@ -30,14 +30,11 @@ use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use chroma_tracing::util::get_current_trace_id;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
-use opentelemetry::metrics::Meter;
-use opentelemetry::KeyValue;
 use rand::Rng;
 use std::clone::Clone;
 use std::ops::Range;
@@ -46,42 +43,12 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
 
-#[derive(Clone, Debug)]
-pub struct S3StorageMetrics {
-    num_get_requests: opentelemetry::metrics::Histogram<u64>,
-    num_put_requests: opentelemetry::metrics::Histogram<u64>,
-    num_delete_requests: opentelemetry::metrics::Histogram<u64>,
-}
-
-impl S3StorageMetrics {
-    pub fn new(meter: Meter) -> Self {
-        Self {
-            num_get_requests: meter
-                .u64_histogram("s3_num_get_requests")
-                .with_description("The number of GET requests to S3.")
-                .with_unit("requests")
-                .build(),
-            num_put_requests: meter
-                .u64_histogram("s3_num_put_requests")
-                .with_description("The number of PUT requests to S3.")
-                .with_unit("requests")
-                .build(),
-            num_delete_requests: meter
-                .u64_histogram("s3_num_delete_requests")
-                .with_description("The number of DELETE requests to S3.")
-                .with_unit("requests")
-                .build(),
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct S3Storage {
     pub(super) bucket: String,
     pub(super) client: aws_sdk_s3::Client,
     pub(super) upload_part_size_bytes: usize,
     pub(super) download_part_size_bytes: usize,
-    pub(super) metrics: S3StorageMetrics,
 }
 
 impl S3Storage {
@@ -97,7 +64,6 @@ impl S3Storage {
             client,
             upload_part_size_bytes,
             download_part_size_bytes,
-            metrics: S3StorageMetrics::new(opentelemetry::global::meter("chroma")),
         }
     }
 
@@ -160,9 +126,6 @@ impl S3Storage {
             .instrument(tracing::trace_span!("cold S3 get"))
             .await;
 
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        self.metrics.num_get_requests.record(1, &attribute);
         match res {
             Ok(res) => {
                 let byte_stream = res.body;
@@ -218,9 +181,6 @@ impl S3Storage {
             .key(key)
             .send()
             .await;
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        self.metrics.num_get_requests.record(1, &attribute);
         let (content_length, e_tag) = match head_res {
             Ok(res) => match res.content_length {
                 Some(len) => (len, res.e_tag),
@@ -266,9 +226,6 @@ impl S3Storage {
             .send()
             .instrument(tracing::trace_span!("cold S3 get"))
             .await;
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        self.metrics.num_get_requests.record(1, &attribute);
         match res {
             Ok(output) => Ok(output),
             Err(e) => {
@@ -474,9 +431,6 @@ impl S3Storage {
                     .await
             }
         };
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        self.metrics.num_put_requests.record(1, &attribute);
         res
     }
 
@@ -520,9 +474,6 @@ impl S3Storage {
             }
         })?;
 
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        self.metrics.num_put_requests.record(1, &attribute);
         Ok(resp.e_tag.map(ETag))
     }
 
@@ -599,9 +550,6 @@ impl S3Storage {
                 source: Arc::new(err.into_service_error()),
             })?;
 
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        self.metrics.num_put_requests.record(1, &attribute);
         Ok(CompletedPart::builder()
             .e_tag(upload_part_res.e_tag.unwrap_or_default())
             .part_number(part_number)
@@ -716,9 +664,6 @@ impl S3Storage {
                 }),
             },
         };
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        self.metrics.num_delete_requests.record(1, &attribute);
         res
     }
 
