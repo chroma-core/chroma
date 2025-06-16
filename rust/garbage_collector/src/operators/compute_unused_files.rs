@@ -5,6 +5,7 @@ use chroma_blockstore::{
 };
 use chroma_cache::nop::NopCache;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::{hnsw_provider::HnswIndexProvider, IndexUuid};
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
@@ -81,7 +82,30 @@ impl ComputeUnusedFilesOperator {
             for (file_type, file_paths) in &segment_compaction_info.file_paths {
                 // For hnsw_index files, just add it without comparing with newer version.
                 if file_type == "hnsw_index" || file_type == HNSW_PATH {
-                    unused_hnsw_prefixes.extend(file_paths.paths.clone());
+                    for file_path in file_paths.paths.iter() {
+                        let (prefix, hnsw_id) = Segment::extract_prefix_and_id(file_path);
+                        let hnsw_uuid = IndexUuid(Uuid::parse_str(hnsw_id).map_err(|e| {
+                            tracing::error!(error = %e, "Failed to parse UUID");
+                            ComputeUnusedFilesError::InvalidUuid(e, hnsw_id.to_string())
+                        })?);
+                        for file in [
+                            "header.bin",
+                            "data_level0.bin",
+                            "length.bin",
+                            "link_lists.bin",
+                        ]
+                        .iter()
+                        {
+                            let hnsw_prefix =
+                                HnswIndexProvider::format_key(prefix, &hnsw_uuid, file);
+                            tracing::debug!(
+                                line = line!(),
+                                "ComputeUnusedFilesOperator: unused_hnsw_prefix: {:?}",
+                                hnsw_prefix
+                            );
+                            unused_hnsw_prefixes.push(hnsw_prefix);
+                        }
+                    }
                     continue;
                 }
                 for file_path in &file_paths.paths {
