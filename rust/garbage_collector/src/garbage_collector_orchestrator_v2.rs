@@ -284,7 +284,7 @@ impl GarbageCollectorOrchestrator {
         let collection_ids = output.version_files.keys().cloned().collect::<Vec<_>>();
 
         for collection_id in collection_ids.iter() {
-            let log = match LogWriter::open(
+            match LogWriter::open(
                 LogWriterOptions::default(),
                 Arc::new(self.storage.clone()),
                 &collection_id.storage_prefix_for_log(),
@@ -293,18 +293,20 @@ impl GarbageCollectorOrchestrator {
             )
             .await
             {
-                Ok(log) => log,
+                Ok(log) => {
+                    if let Err(err) = log
+                        .garbage_collect(&GarbageCollectionOptions::default())
+                        .await
+                    {
+                        tracing::error!("could not garbage collect log: {err:?}");
+                        continue;
+                    }
+                }
+                Err(wal3::Error::UninitializedLog) => {}
                 Err(err) => {
                     tracing::error!("could not garbage collect log: {err:?}");
                     continue;
                 }
-            };
-            if let Err(err) = log
-                .garbage_collect(&GarbageCollectionOptions::default())
-                .await
-            {
-                tracing::error!("could not garbage collect log: {err:?}");
-                continue;
             }
         }
 

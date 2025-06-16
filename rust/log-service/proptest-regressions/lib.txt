@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc ba6cef35853bca82d7527a7f42b2dbb8a6d60f3084f249993b56cf945fd83b0e # shrinks to read_offset = 1, batch_size = 1, operations = [OperationRecord { id: "", document: None, embedding: Some("[...]"), metadata: None, operation: Add }]
+cc 6c09d8d5a095fde4c6263f24e208c2db1ac203d8f8f7d899573659268255c239 # shrinks to initial_operations = [], source_operations = [], fork_operations = []
