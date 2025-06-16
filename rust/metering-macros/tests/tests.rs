@@ -2,7 +2,7 @@
 // Instead, it is recommended to create a `tests/` directory in which to write unit and integration
 // tests. See https://github.com/rust-lang/rust/issues/110247 for additional information.
 #[cfg(test)]
-use chroma_metering::initialize_metering;
+use chroma_metering_macros::initialize_metering;
 use std::sync::atomic::Ordering;
 
 use crate::metering::{Enterable, MeteredFutureExt, TestCapability};
