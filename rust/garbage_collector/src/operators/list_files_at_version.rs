@@ -3,7 +3,10 @@ use chroma_blockstore::{
     arrow::provider::{BlockManager, RootManagerError},
     RootManager,
 };
-use chroma_index::{hnsw_provider::HnswIndexProvider, IndexUuid};
+use chroma_index::{
+    hnsw_provider::{HnswIndexProvider, FILES},
+    IndexUuid,
+};
 use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid, Segment, HNSW_PATH};
@@ -113,12 +116,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                         for path in &segment_paths.paths {
                             let (prefix, hnsw_index_id) = Segment::extract_prefix_and_id(path);
                             file_prefix = prefix.to_string();
-                            for hnsw_file in [
-                                "header.bin",
-                                "data_level0.bin",
-                                "length.bin",
-                                "link_lists.bin",
-                            ] {
+                            for hnsw_file in FILES {
                                 let hnsw_index_uuid = IndexUuid(
                                     Uuid::parse_str(hnsw_index_id)
                                         .map_err(ListFilesAtVersionError::InvalidUuid)?,

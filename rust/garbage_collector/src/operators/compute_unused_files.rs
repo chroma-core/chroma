@@ -5,7 +5,10 @@ use chroma_blockstore::{
 };
 use chroma_cache::nop::NopCache;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::{hnsw_provider::HnswIndexProvider, IndexUuid};
+use chroma_index::{
+    hnsw_provider::{HnswIndexProvider, FILES},
+    IndexUuid,
+};
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
@@ -88,14 +91,7 @@ impl ComputeUnusedFilesOperator {
                             tracing::error!(error = %e, "Failed to parse UUID");
                             ComputeUnusedFilesError::InvalidUuid(e, hnsw_id.to_string())
                         })?);
-                        for file in [
-                            "header.bin",
-                            "data_level0.bin",
-                            "length.bin",
-                            "link_lists.bin",
-                        ]
-                        .iter()
-                        {
+                        for file in FILES.iter() {
                             let hnsw_prefix =
                                 HnswIndexProvider::format_key(prefix, &hnsw_uuid, file);
                             tracing::debug!(

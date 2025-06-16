@@ -159,6 +159,7 @@ impl DeleteUnusedFilesOperator {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chroma_index::hnsw_provider::FILES;
     use chroma_storage::local::LocalStorage;
     use chroma_storage::PutOptions;
     use std::path::Path;
@@ -179,12 +180,10 @@ mod tests {
         }
 
         // Create HNSW test files
-        let hnsw_files = vec![
-            format!("hnsw/{}/header.bin", "prefix1"),
-            format!("hnsw/{}/data_level0.bin", "prefix1"),
-            format!("hnsw/{}/length.bin", "prefix1"),
-            format!("hnsw/{}/link_lists.bin", "prefix1"),
-        ];
+        let hnsw_files = FILES
+            .iter()
+            .map(|file_name| format!("hnsw/prefix1/{}", file_name))
+            .collect::<Vec<String>>();
         for file in &hnsw_files {
             create_test_file(storage, file, b"test content").await;
         }
