@@ -120,7 +120,7 @@ jobs:
   merge:
     name: Merge platform manifests
     runs-on: blacksmith-4vcpu-ubuntu-2204
-    if: ${{ inputs.push == 'true' }}
+    if: ${{ inputs.push == true }}
     needs:
       - build
     steps:
