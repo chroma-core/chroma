@@ -11,7 +11,11 @@ use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid, Segment, HNSW_PATH};
 use futures::stream::StreamExt;
-use std::{collections::HashSet, str::FromStr, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::Arc,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -89,7 +93,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
             .ok_or_else(|| ListFilesAtVersionError::VersionHistoryMissing)?;
 
         let mut file_paths = HashSet::new();
-        let mut sparse_index_ids = HashSet::new();
+        let mut sparse_index_ids = HashMap::new();
 
         let version = version_history
             .versions
@@ -108,14 +112,12 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
             collection_id
         );
 
-        let mut file_prefix = String::from("");
         if let Some(segment_info) = &version.segment_info {
             for segment in &segment_info.segment_compaction_info {
                 for (file_type, segment_paths) in &segment.file_paths {
                     if file_type == "hnsw_index" || file_type == HNSW_PATH {
                         for path in &segment_paths.paths {
                             let (prefix, hnsw_index_id) = Segment::extract_prefix_and_id(path);
-                            file_prefix = prefix.to_string();
                             for hnsw_file in FILES {
                                 let hnsw_index_uuid = IndexUuid(
                                     Uuid::parse_str(hnsw_index_id)
@@ -135,12 +137,11 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                             let (prefix, sparse_index_id) = Segment::extract_prefix_and_id(path);
                             let sparse_index_uuid = Uuid::parse_str(sparse_index_id)
                                 .map_err(ListFilesAtVersionError::InvalidUuid)?;
-                            file_prefix = prefix.to_string();
                             let file_path =
                                 RootManager::get_storage_key(prefix, &sparse_index_uuid);
 
                             file_paths.insert(file_path);
-                            sparse_index_ids.insert(sparse_index_uuid);
+                            sparse_index_ids.insert(sparse_index_uuid, prefix.to_string());
                         }
                     }
                 }
@@ -150,27 +151,26 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
         if !sparse_index_ids.is_empty() {
             let num = sparse_index_ids.len();
             let mut get_block_ids_stream = futures::stream::iter(sparse_index_ids)
-                .map(|sparse_index_id| {
-                    let file_prefix_clone = file_prefix.clone();
+                .map(|(sparse_index_id, file_prefix)|
                     async move {
-                        match input.root_manager.get_all_block_ids(&sparse_index_id, &file_prefix_clone).await {
-                            Ok(block_ids) => Ok(block_ids),
+                        match input.root_manager.get_all_block_ids(&sparse_index_id, &file_prefix).await {
+                            Ok(block_ids) => Ok((block_ids, file_prefix)),
                             Err(RootManagerError::StorageGetError(StorageError::NotFound { .. })) => {
                                 tracing::debug!(
                                     "Sparse index {} not found in storage. Assuming it was previously deleted.",
                                     sparse_index_id
                                 );
-                                Ok(vec![])
+                                Ok((vec![], file_prefix))
                             }
                             Err(e) => Err(e),
                         }
-                }}).buffer_unordered(num);
+                }).buffer_unordered(num);
 
             while let Some(res) = get_block_ids_stream.next().await {
                 let block_ids = res.map_err(ListFilesAtVersionError::FetchBlockIdsError)?;
 
-                for block_id in block_ids {
-                    let s3_key = BlockManager::format_key(&file_prefix, &block_id);
+                for block_id in block_ids.0 {
+                    let s3_key = BlockManager::format_key(&block_ids.1, &block_id);
                     file_paths.insert(s3_key);
                 }
             }
