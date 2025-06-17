@@ -1006,7 +1006,7 @@ impl ServiceBasedFrontend {
 
             if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
                 // Store the request start time for the subsequent write event
-                maybe_request_received_at = Some(collection_read_context.get_request_received_at());
+                maybe_request_received_at = Some(collection_read_context.request_received_at);
 
                 // Return the read event
                 Some(MeterEvent::CollectionRead(collection_read_context))

@@ -82,7 +82,7 @@ initialize_metering! {
         pub tenant: String,
         pub database: String,
         pub collection_id: String,
-        pub latest_collection_logical_size_bytes: MeteringAtomicU64,
+        latest_collection_logical_size_bytes: MeteringAtomicU64,
     }
 
     impl CollectionForkContext {
@@ -130,20 +130,20 @@ initialize_metering! {
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
     #[serde(rename_all = "snake_case")]
     pub struct CollectionReadContext {
-        tenant: String,
-        database: String,
-        collection_id: String,
+        pub tenant: String,
+        pub database: String,
+        pub collection_id: String,
         #[serde(flatten)]
-        action: ReadAction,
+        pub action: ReadAction,
+        // NOTE(c-gamble): We use chrono's `DateTime` object here because `std::time::Instant`
+        // is not compatible with serde.
+        pub request_received_at: DateTime<Utc>,
         fts_query_length: MeteringAtomicU64,
         metadata_predicate_count: MeteringAtomicU64,
         query_embedding_count: MeteringAtomicU64,
         pulled_log_size_bytes: MeteringAtomicU64,
         latest_collection_logical_size_bytes: MeteringAtomicU64,
         return_bytes: MeteringAtomicU64,
-        // NOTE(c-gamble): We use chrono's `DateTime` object here because `std::time::Instant`
-        // is not compatible with serde.
-        request_received_at: DateTime<Utc>,
         request_handling_duration_ms: MeteringAtomicU64,
     }
 
@@ -163,12 +163,6 @@ initialize_metering! {
                 request_received_at,
                 request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
             }
-        }
-
-        // NOTE(c-gamble): This is a special method to support the current multi-event nature of delete requests. It
-        // should be deleted in the future once we have a single delete event.
-        pub fn get_request_received_at(&self) -> DateTime<Utc> {
-            self.request_received_at
         }
     }
 
@@ -261,13 +255,13 @@ initialize_metering! {
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
     #[serde(rename_all = "snake_case")]
     pub struct CollectionWriteContext {
-        tenant: String,
-        database: String,
-        collection_id: String,
+        pub tenant: String,
+        pub database: String,
+        pub collection_id: String,
         #[serde(flatten)]
-        action: WriteAction,
+        pub action: WriteAction,
+        pub request_received_at: DateTime<Utc>,
         log_size_bytes: MeteringAtomicU64,
-        request_received_at: DateTime<Utc>,
         request_handling_duration_ms: MeteringAtomicU64,
     }
 
