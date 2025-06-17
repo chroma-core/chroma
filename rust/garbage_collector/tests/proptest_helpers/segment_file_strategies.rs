@@ -1,5 +1,6 @@
 use chroma_blockstore::test_utils::sparse_index_test_utils::create_test_sparse_index;
 use chroma_index::hnsw_provider::FILES;
+use chroma_segment::types::ChromaSegmentFlusher;
 use chroma_storage::Storage;
 use chroma_types::{CollectionUuid, DatabaseUuid, SegmentFlushInfo, SegmentUuid};
 use futures::StreamExt;
@@ -201,7 +202,15 @@ impl From<SegmentFilePaths> for HashMap<String, Vec<String>> {
         for (key, value) in segment_file_paths.paths {
             file_paths.insert(
                 key.name().to_string(),
-                value.iter().map(|f| f.reference_id.to_string()).collect(),
+                value
+                    .iter()
+                    .map(|f| {
+                        ChromaSegmentFlusher::flush_key(
+                            &segment_file_paths.prefix_path,
+                            &f.reference_id,
+                        )
+                    })
+                    .collect(),
             );
         }
         file_paths
