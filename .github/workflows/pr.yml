@@ -34,8 +34,6 @@ jobs:
             # Outside docs
             outside-docs:
               - '!docs/**'
-            # Root markdown files
-            root-md-files:
               - '!**/*.md'
             # Helm chart changes
             helm-changes:
