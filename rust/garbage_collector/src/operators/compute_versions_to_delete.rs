@@ -4,7 +4,7 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
 use chrono::{DateTime, Utc};
 use humantime::format_duration;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -12,14 +12,14 @@ pub struct ComputeVersionsToDeleteOperator {}
 
 #[derive(Debug)]
 pub struct ComputeVersionsToDeleteInput {
-    pub version_file: CollectionVersionFile,
+    pub version_file: Arc<CollectionVersionFile>,
     pub cutoff_time: DateTime<Utc>,
     pub min_versions_to_keep: u32,
 }
 
 #[derive(Debug)]
 pub struct ComputeVersionsToDeleteOutput {
-    pub version_file: CollectionVersionFile,
+    pub version_file: Arc<CollectionVersionFile>,
     pub versions_to_delete: VersionListForCollection,
     pub oldest_version_to_keep: i64,
 }
@@ -54,7 +54,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
         &self,
         input: &ComputeVersionsToDeleteInput,
     ) -> Result<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteError> {
-        let mut version_file = input.version_file.clone();
+        let version_file = input.version_file.clone();
         let collection_info = version_file
             .collection_info_immutable
             .as_ref()
@@ -73,6 +73,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
         let mut marked_versions = Vec::new();
         let mut oldest_version_to_keep = 0;
 
+        let mut version_file = version_file.as_ref().clone();
         if let Some(ref mut version_history) = version_file.version_history {
             let mut unique_versions_seen = 0;
             let mut last_version = None;
@@ -149,7 +150,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
         );
 
         Ok(ComputeVersionsToDeleteOutput {
-            version_file,
+            version_file: Arc::new(version_file),
             versions_to_delete,
             oldest_version_to_keep,
         })
@@ -198,7 +199,7 @@ mod tests {
             ],
         };
 
-        let version_file = CollectionVersionFile {
+        let version_file = Arc::new(CollectionVersionFile {
             version_history: Some(version_history),
             collection_info_immutable: Some(CollectionInfoImmutable {
                 tenant_id: "test_tenant".to_string(),
@@ -207,7 +208,7 @@ mod tests {
                 dimension: 0,
                 ..Default::default()
             }),
-        };
+        });
 
         let input = ComputeVersionsToDeleteInput {
             version_file,
@@ -221,7 +222,12 @@ mod tests {
             .unwrap();
 
         // Verify the results.
-        let versions = &result.version_file.version_history.unwrap().versions;
+        let versions = &result
+            .version_file
+            .version_history
+            .as_ref()
+            .unwrap()
+            .versions;
         assert!(versions[0].marked_for_deletion);
         assert!(versions[1].marked_for_deletion);
         assert!(!versions[2].marked_for_deletion); // Version 2 should be kept.
