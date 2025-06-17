@@ -1,10 +1,7 @@
 use chroma_metering_macros::initialize_metering;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
+use std::sync::atomic::Ordering;
 use uuid::Uuid;
 
 mod utils;
