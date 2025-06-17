@@ -1733,6 +1733,8 @@ dependencies = [
 name = "chroma-metering-macros"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chroma-system",
  "pin-project",
  "proc-macro2 1.0.95",
  "quote 1.0.40",
