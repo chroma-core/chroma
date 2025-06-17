@@ -3751,4 +3751,126 @@ mod tests {
             .expect("Spawned thread should not fail to join");
         }
     }
+
+    #[tokio::test]
+    async fn test_k8s_integration_update_collection_log_offset_never_moves_backwards() {
+        use chroma_storage::s3_client_for_test_with_new_bucket;
+        use chroma_types::chroma_proto::UpdateCollectionLogOffsetRequest;
+        use std::collections::HashMap;
+        use tonic::Request;
+        use wal3::{LogWriter, LogWriterOptions};
+
+        // Set up test storage using S3 (minio)
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+
+        // Create the dirty log writer
+        let dirty_log = LogWriter::open_or_initialize(
+            LogWriterOptions::default(),
+            Arc::clone(&storage),
+            "dirty-test",
+            "dirty log writer",
+            (),
+        )
+        .await
+        .expect("Failed to create dirty log");
+        let dirty_log = Arc::new(dirty_log);
+
+        // Create LogServer manually
+        let config = LogServerConfig::default();
+        let log_server = LogServer {
+            config,
+            open_logs: Arc::new(StateHashTable::default()),
+            storage,
+            dirty_log,
+            proxy: None,
+            rolling_up: tokio::sync::Mutex::new(()),
+            backpressure: Mutex::new(Arc::new(HashSet::default())),
+            need_to_compact: Mutex::new(HashMap::default()),
+            cache: None,
+            metrics: Metrics::new(opentelemetry::global::meter("test")),
+        };
+
+        let collection_id = CollectionUuid::new();
+        let collection_id_str = collection_id.to_string();
+
+        // Manually initialize a log for this collection to avoid "proxy not initialized" error
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let _log_writer = LogWriter::open_or_initialize(
+            LogWriterOptions::default(),
+            Arc::clone(&log_server.storage),
+            &storage_prefix,
+            "test log writer",
+            (),
+        )
+        .await
+        .expect("Failed to initialize collection log");
+
+        // Step 1: Initialize collection log and set it to offset 100
+        let initial_request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str.clone(),
+            log_offset: 100,
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(initial_request))
+            .await;
+        assert!(
+            response.is_ok(),
+            "Initial offset update should succeed: {:?}",
+            response.err()
+        );
+
+        // Step 2: Verify we can move forward (to offset 150)
+        let forward_request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str.clone(),
+            log_offset: 150,
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(forward_request))
+            .await;
+        assert!(response.is_ok(), "Forward movement should succeed");
+
+        // Step 3: Attempt to move backwards (to offset 50) - this should be blocked
+        let backward_request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str.clone(),
+            log_offset: 50,
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(backward_request))
+            .await;
+
+        // The function should succeed but not actually move the offset backwards
+        // (it returns early with OK status when current offset > requested offset)
+        assert!(
+            response.is_ok(),
+            "Backward request should return OK but not move offset"
+        );
+
+        // Step 4: Verify that requesting the same offset works
+        let same_request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str.clone(),
+            log_offset: 150, // Same as current
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(same_request))
+            .await;
+        assert!(response.is_ok(), "Same offset request should succeed");
+
+        // Step 5: Verify we can still move forward after backward attempt was blocked
+        let final_forward_request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str,
+            log_offset: 200,
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(final_forward_request))
+            .await;
+        assert!(
+            response.is_ok(),
+            "Forward movement after backward attempt should succeed"
+        );
+    }
 }

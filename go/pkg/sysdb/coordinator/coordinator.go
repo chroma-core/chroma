@@ -127,7 +127,7 @@ func (s *Coordinator) GetCollectionWithSegments(ctx context.Context, collectionI
 	return s.catalog.GetCollectionWithSegments(ctx, collectionID, false)
 }
 
-func (s *Coordinator) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, error) {
+func (s *Coordinator) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, int64, error) {
 	return s.catalog.CheckCollection(ctx, collectionID)
 }
 
