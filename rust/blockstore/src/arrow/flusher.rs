@@ -4,10 +4,9 @@ use super::{
     root::RootWriter,
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
+use chroma_error::ChromaError;
 use futures::{StreamExt, TryStreamExt};
 use uuid::Uuid;
-
-use chroma_error::ChromaError;
 
 pub struct ArrowBlockfileFlusher {
     block_manager: BlockManager,

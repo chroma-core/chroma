@@ -638,7 +638,7 @@ impl S3Storage {
             None => req,
         };
 
-        let res = match req.send().await {
+        match req.send().await {
             Ok(_) => {
                 tracing::trace!(key = %key, "Successfully deleted object from S3");
                 Ok(())
@@ -663,8 +663,7 @@ impl S3Storage {
                     source: Arc::new(e),
                 }),
             },
-        };
-        res
+        }
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
@@ -898,7 +897,6 @@ mod tests {
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
-            metrics: S3StorageMetrics::new(opentelemetry::global::meter("chroma")),
         };
         storage.create_bucket().await.unwrap();
 
@@ -924,7 +922,6 @@ mod tests {
             client,
             upload_part_size_bytes,
             download_part_size_bytes,
-            metrics: S3StorageMetrics::new(opentelemetry::global::meter("chroma")),
         };
         storage.create_bucket().await.unwrap();
         storage
@@ -972,7 +969,6 @@ mod tests {
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
-            metrics: S3StorageMetrics::new(opentelemetry::global::meter("chroma")),
         };
         storage.create_bucket().await.unwrap();
 
