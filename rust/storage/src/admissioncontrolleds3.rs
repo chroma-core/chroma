@@ -144,7 +144,7 @@ impl AdmissionControlledS3Storage {
         }
 
         let part_size = storage.download_part_size_bytes;
-        tracing::info!(
+        tracing::debug!(
             "[AdmissionControlledS3][Parallel fetch] Content length: {}, key ranges: {:?}",
             content_length,
             ranges
