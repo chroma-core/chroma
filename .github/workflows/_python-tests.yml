@@ -173,7 +173,7 @@ jobs:
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_FRONTEND_TEST_ONLY: "1"
-          CHROMA_SERVER_HOST: "localhost:3000"
+          CHROMA_SERVER_HOST: "localhost:8000"
       - name: Compute artifact name
         if: always()
         id: compute-artifact-name
