@@ -1,7 +1,37 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server"]
+members = [
+    "rust/benchmark",
+    "rust/blockstore",
+    "rust/cache",
+    "rust/chroma",
+    "rust/config",
+    "rust/distance",
+    "rust/error",
+    "rust/frontend",
+    "rust/garbage_collector",
+    "rust/index",
+    "rust/load",
+    "rust/log",
+    "rust/log-service",
+    "rust/memberlist",
+    "rust/metering-macros",
+    "rust/storage",
+    "rust/system",
+    "rust/sysdb",
+    "rust/types",
+    "rust/worker",
+    "rust/segment",
+    "rust/python_bindings",
+    "rust/mdac",
+    "rust/tracing",
+    "rust/sqlite",
+    "rust/cli",
+    "rust/wal3",
+    "rust/js_bindings",
+    "rust/jemalloc-pprof-server"
+]
 
 [workspace.dependencies]
 arrow = "52.2.0"
@@ -19,6 +49,7 @@ http-body-util = "0.1.3"
 lazy_static = { version = "1.4" }
 lexical-core = "1.0"
 num_cpus = "1.16.0"
+once_cell = "1.21.3"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
 opentelemetry-http = { version = "0.27", features = ["reqwest"] }
@@ -78,6 +109,7 @@ chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
 chroma-memberlist = { path = "rust/memberlist" }
+chroma-metering-macros = { path = "rust/metering-macros" }
 chroma-segment = { path = "rust/segment" }
 chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
