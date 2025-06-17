@@ -127,7 +127,8 @@ func (s *Server) GetTenant(ctx context.Context, req *coordinatorpb.GetTenantRequ
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 	res.Tenant = &coordinatorpb.Tenant{
-		Name: tenant.Name,
+		Name:         tenant.Name,
+		ResourceName: tenant.ResourceName,
 	}
 	return res, nil
 }
@@ -140,6 +141,15 @@ func (s *Server) SetLastCompactionTimeForTenant(ctx context.Context, req *coordi
 	}
 	log.Info("SetLastCompactionTimeForTenant success", zap.String("request", req.String()))
 	return &emptypb.Empty{}, nil
+}
+
+func (s *Server) SetTenantResourceName(ctx context.Context, req *coordinatorpb.SetTenantResourceNameRequest) (*coordinatorpb.SetTenantResourceNameResponse, error) {
+	err := s.coordinator.SetTenantResourceName(ctx, req.Id, req.ResourceName)
+	if err != nil {
+		log.Error("error SetTenantResourceName", zap.String("request", req.String()), zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+	return &coordinatorpb.SetTenantResourceNameResponse{}, nil
 }
 
 func (s *Server) GetLastCompactionTimeForTenant(ctx context.Context, req *coordinatorpb.GetLastCompactionTimeForTenantRequest) (*coordinatorpb.GetLastCompactionTimeForTenantResponse, error) {

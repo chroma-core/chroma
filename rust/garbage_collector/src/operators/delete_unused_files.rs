@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::HNSW_INDEX_S3_PREFIX;
 use chroma_storage::Storage;
-use chroma_storage::StorageError;
+use chroma_storage::{DeleteOptions, StorageError};
 use chroma_system::{Operator, OperatorType};
 use futures::stream::StreamExt;
 use std::collections::HashSet;
@@ -31,7 +31,9 @@ impl DeleteUnusedFilesOperator {
     }
 
     async fn delete_with_path(&self, file_path: String) -> Result<(), StorageError> {
-        self.storage.delete(&file_path).await
+        self.storage
+            .delete(&file_path, DeleteOptions::default())
+            .await
     }
 
     async fn rename_with_path(

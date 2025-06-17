@@ -1808,6 +1808,43 @@ func (suite *APIsTestSuite) TestGetCollections() {
 	suite.Equal(createCollection.ID, result[0].ID)
 }
 
+func (suite *APIsTestSuite) TestGetCollectionByResourceName() {
+	ctx := context.Background()
+
+	testCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_collection_by_resource_name",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	_, _, err := suite.coordinator.CreateCollection(ctx, testCollection)
+	suite.NoError(err)
+
+	tenantResourceName := "test_tenant_resource_name"
+	err = suite.coordinator.SetTenantResourceName(ctx, suite.tenantName, tenantResourceName)
+	suite.NoError(err)
+
+	collection, err := suite.coordinator.GetCollectionByResourceName(ctx, tenantResourceName, suite.databaseName, testCollection.Name)
+	suite.NoError(err)
+	suite.Equal(testCollection.ID, collection.ID)
+	suite.Equal(testCollection.Name, collection.Name)
+	suite.Equal(testCollection.TenantID, collection.TenantID)
+	suite.Equal(testCollection.DatabaseName, collection.DatabaseName)
+
+	_, err = suite.coordinator.GetCollectionByResourceName(ctx, tenantResourceName, suite.databaseName, "non_existent_collection")
+	suite.Error(err)
+	suite.True(errors.Is(err, common.ErrCollectionNotFound))
+
+	_, err = suite.coordinator.GetCollectionByResourceName(ctx, tenantResourceName, "non_existent_database", testCollection.Name)
+	suite.Error(err)
+	suite.True(errors.Is(err, common.ErrCollectionNotFound))
+
+	_, err = suite.coordinator.GetCollectionByResourceName(ctx, "non_existent_tenant_resource_name", suite.databaseName, testCollection.Name)
+	suite.Error(err)
+	suite.True(errors.Is(err, common.ErrCollectionNotFound))
+}
+
 func TestAPIsTestSuite(t *testing.T) {
 	testSuite := new(APIsTestSuite)
 	suite.Run(t, testSuite)

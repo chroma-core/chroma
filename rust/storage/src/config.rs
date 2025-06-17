@@ -52,6 +52,7 @@ pub struct ObjectStoreConfig {
 pub enum S3CredentialsConfig {
     #[default]
     Minio,
+    Localhost,
     AWS,
 }
 

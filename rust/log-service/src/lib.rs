@@ -489,12 +489,6 @@ impl wal3::MarkDirty for MarkDirty {
     }
 }
 
-////////////////////////////////////// storage_prefix_for_log //////////////////////////////////////
-
-pub fn storage_prefix_for_log(collection: CollectionUuid) -> String {
-    format!("logs/{}", collection)
-}
-
 ///////////////////////////////////////////// LogServer ////////////////////////////////////////////
 
 pub struct LogServer {
@@ -647,7 +641,7 @@ impl LogServer {
                 }
             })
             .collect::<Result<Vec<_>, Status>>()?;
-        let prefix = storage_prefix_for_log(collection_id);
+        let prefix = collection_id.storage_prefix_for_log();
         let mark_dirty = MarkDirty {
             collection_id,
             dirty_log: Arc::clone(&self.dirty_log),
@@ -676,7 +670,7 @@ impl LogServer {
         .await?;
         // Set it up so that once we release the mutex, the next person won't do I/O and will
         // immediately be able to push logs.
-        let storage_prefix = storage_prefix_for_log(collection_id);
+        let storage_prefix = collection_id.storage_prefix_for_log();
         let mark_dirty = MarkDirty {
             collection_id,
             dirty_log: Arc::clone(&self.dirty_log),
@@ -781,7 +775,7 @@ impl LogServer {
             "update_collection_log_offset for {collection_id} to {}",
             adjusted_log_offset
         );
-        let storage_prefix = storage_prefix_for_log(collection_id);
+        let storage_prefix = collection_id.storage_prefix_for_log();
 
         let log_reader = LogReader::new(
             self.config.reader.clone(),
@@ -1020,12 +1014,12 @@ impl LogServer {
         &self,
         rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
     ) -> Result<(), Error> {
-        let load_cursor = |storage, collection_id| async move {
+        let load_cursor = |storage, collection_id: CollectionUuid| async move {
             let cursor = &COMPACTION;
             let cursor_store = CursorStore::new(
                 CursorStoreOptions::default(),
                 Arc::clone(storage),
-                storage_prefix_for_log(collection_id),
+                collection_id.storage_prefix_for_log(),
                 "rollup".to_string(),
             );
             let span = tracing::info_span!("cursor load", collection_id = ?collection_id);
@@ -1074,7 +1068,7 @@ impl LogServer {
 
         async move {
             tracing::info!("Pushing logs for collection {}", collection_id);
-            let prefix = storage_prefix_for_log(collection_id);
+            let prefix = collection_id.storage_prefix_for_log();
             let key = LogKey { collection_id };
             let handle = self.open_logs.get_or_create_state(key);
             let mark_dirty = MarkDirty {
@@ -1151,7 +1145,7 @@ impl LogServer {
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         async move {
-            let prefix = storage_prefix_for_log(collection_id);
+            let prefix = collection_id.storage_prefix_for_log();
             let log_reader = LogReader::new(
                 self.config.reader.clone(),
                 Arc::clone(&self.storage),
@@ -1185,6 +1179,7 @@ impl LogServer {
             Ok(Response::new(ScoutLogsResponse {
                 first_uncompacted_record_offset: start_offset,
                 first_uninserted_record_offset: limit_offset,
+                is_sealed: true,
             }))
         }
         .instrument(span)
@@ -1236,7 +1231,7 @@ impl LogServer {
         collection_id: CollectionUuid,
         pull_logs: &PullLogsRequest,
     ) -> Result<Vec<Fragment>, wal3::Error> {
-        let prefix = storage_prefix_for_log(collection_id);
+        let prefix = collection_id.storage_prefix_for_log();
         let log_reader = LogReader::new(
             self.config.reader.clone(),
             Arc::clone(&self.storage),
@@ -1283,7 +1278,7 @@ impl LogServer {
             let futures = fragments
                 .iter()
                 .map(|fragment| async {
-                    let prefix = storage_prefix_for_log(collection_id);
+                    let prefix = collection_id.storage_prefix_for_log();
                     if let Some(cache) = self.cache.as_ref() {
                         let cache_key = format!("{collection_id}::{}", fragment.path);
                         let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
@@ -1360,8 +1355,8 @@ impl LogServer {
         let target_collection_id = Uuid::parse_str(&request.target_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        let source_prefix = storage_prefix_for_log(source_collection_id);
-        let target_prefix = storage_prefix_for_log(target_collection_id);
+        let source_prefix = source_collection_id.storage_prefix_for_log();
+        let target_prefix = target_collection_id.storage_prefix_for_log();
         let storage = Arc::clone(&self.storage);
         let options = self.config.writer.clone();
 
@@ -1611,7 +1606,7 @@ impl LogServer {
                 "Migrating log for collection {} to new log service",
                 collection_id
             );
-            let prefix = storage_prefix_for_log(collection_id);
+            let prefix = collection_id.storage_prefix_for_log();
             let key = LogKey { collection_id };
             let handle = self.open_logs.get_or_create_state(key);
             let mark_dirty = MarkDirty {
@@ -1632,11 +1627,25 @@ impl LogServer {
                     Ok(Response::new(MigrateLogResponse {}))
                 }
                 Err(wal3::Error::UninitializedLog) => {
-                    if let Some(proxy) = self.proxy.as_ref() {
-                        tracing::info!("effectuating transfer of {collection_id}");
-                        self.effectuate_log_transfer(collection_id, proxy.clone(), 3)
-                            .await?;
-                        Ok(Response::new(MigrateLogResponse {}))
+                    if let Some(mut proxy) = self.proxy.as_ref().cloned() {
+                        if proxy
+                            .scout_logs(ScoutLogsRequest {
+                                collection_id: collection_id.to_string(),
+                            })
+                            .await?
+                            .into_inner()
+                            .is_sealed
+                        {
+                            tracing::info!("effectuating transfer of {collection_id}");
+                            self.effectuate_log_transfer(collection_id, proxy, 3)
+                                .await?;
+                            Ok(Response::new(MigrateLogResponse {}))
+                        } else {
+                            tracing::info!(
+                                "not effectuating transfer of {collection_id} (log not sealed)"
+                            );
+                            Err(Status::failed_precondition("log not sealed"))
+                        }
                     } else {
                         tracing::info!("not effectuating transfer of {collection_id} (no proxy)");
                         Err(Status::failed_precondition("proxy not initialized"))
@@ -1658,7 +1667,7 @@ impl LogServer {
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         tracing::info!("inspect_log_state for {collection_id}");
-        let storage_prefix = storage_prefix_for_log(collection_id);
+        let storage_prefix = collection_id.storage_prefix_for_log();
         let log_reader = LogReader::new(
             self.config.reader.clone(),
             Arc::clone(&self.storage),
@@ -2159,7 +2168,8 @@ mod tests {
     use crate::state_hash_table::Value;
 
     use chroma_storage::s3::s3_client_for_test_with_bucket_name;
-    use chroma_types::{are_update_metadatas_close_to_equal, OperationRecord};
+    use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
+    use futures::{stream, StreamExt};
     use opentelemetry::global::meter;
     use proptest::prelude::*;
     use tokio::runtime::Runtime;
@@ -2556,7 +2566,7 @@ mod tests {
     #[test]
     fn storage_prefix_for_log_format() {
         let collection_id = CollectionUuid::new();
-        let prefix = storage_prefix_for_log(collection_id);
+        let prefix = collection_id.storage_prefix_for_log();
         assert_eq!(format!("logs/{}", collection_id), prefix);
     }
 
@@ -3591,6 +3601,84 @@ mod tests {
             mock_compact_on_server(&log_server, collection_id, new_enum_offset).await;
             validate_dirty_log_on_server(&log_server, &[]).await;
         });
+    }
+
+    async fn test_stress_seal_and_migrate() {
+        let log_server = setup_log_server().await;
+        let collection_id = CollectionUuid::new();
+        let mut logs = (0..100000)
+            .map(|index| OperationRecord {
+                id: index.to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::Delete,
+            })
+            .collect::<Vec<_>>();
+
+        push_log_to_server(&log_server, collection_id, &logs[0..100]).await;
+
+        stream::iter(logs.chunks(100).skip(1).map(|log_chunk| async {
+            push_log_to_server(&log_server, collection_id, log_chunk).await;
+
+            if (log_chunk
+                .first()
+                .and_then(|op| op.id.parse::<usize>().ok())
+                .unwrap_or_default()
+                ..=log_chunk
+                    .last()
+                    .and_then(|op| op.id.parse::<usize>().ok())
+                    .unwrap_or_default())
+                .contains(&50000)
+            {
+                seal_collection_on_server(&log_server, collection_id).await;
+                log_server
+                    .migrate_log(Request::new(MigrateLogRequest {
+                        collection_id: collection_id.to_string(),
+                    }))
+                    .await
+                    .expect("Migrate Logs should not fail");
+            }
+        }))
+        .buffer_unordered(32)
+        .collect::<Vec<_>>()
+        .await;
+
+        let mut inserted_logs = log_server
+            .pull_logs(Request::new(PullLogsRequest {
+                collection_id: collection_id.to_string(),
+                start_from_offset: 1,
+                batch_size: 100000,
+                end_timestamp: i64::MAX,
+            }))
+            .await
+            .expect("Pull Logs should not fail")
+            .into_inner()
+            .records
+            .into_iter()
+            .map(chroma_types::LogRecord::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("Logs should be valid");
+        assert_eq!(inserted_logs.len(), logs.len());
+        logs.sort_by_key(|rec| rec.id.clone());
+        inserted_logs.sort_by_key(|log| log.record.id.clone());
+        for (got_op, ref_op) in inserted_logs.into_iter().map(|l| l.record).zip(logs) {
+            assert_eq!(got_op.id, ref_op.id);
+            assert_eq!(got_op.operation, ref_op.operation);
+        }
+    }
+
+    #[test]
+    fn test_k8s_integration_rust_log_service_stress_seal_and_migrate() {
+        let runtime = Runtime::new().unwrap();
+        // NOTE: Somehow it overflow the stack under default stack limit
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || runtime.block_on(test_stress_seal_and_migrate()))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
     }
 
     proptest! {

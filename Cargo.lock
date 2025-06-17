@@ -1511,6 +1511,7 @@ dependencies = [
  "async-trait",
  "axum 0.8.1",
  "backon",
+ "base64 0.22.1",
  "chroma-cache",
  "chroma-config",
  "chroma-distance",
@@ -1523,6 +1524,7 @@ dependencies = [
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
+ "criterion",
  "figment",
  "futures",
  "http-body-util",
@@ -1577,6 +1579,7 @@ dependencies = [
  "itertools 0.13.0",
  "opentelemetry",
  "parking_lot",
+ "parquet",
  "proptest",
  "rand 0.8.5",
  "rayon",
@@ -1589,6 +1592,15 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "chroma-jemalloc-pprof-server"
+version = "0.1.0"
+dependencies = [
+ "axum 0.8.1",
+ "jemalloc_pprof",
+ "tokio",
 ]
 
 [[package]]
@@ -2509,6 +2521,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "6.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "deflate64"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2758,6 +2784,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "env_filter"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "186e05a59d4c50738528153b83b0b0194d3a29507dfec16eccd4b342903397d0"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.11.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3716d7a920fb4fac5d84e9d4bce8ceb321e9414b4409da61b07b75c1e3d0697"
+dependencies = [
+ "env_filter",
+ "log",
 ]
 
 [[package]]
@@ -3270,6 +3315,7 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "chroma-index",
+ "chroma-jemalloc-pprof-server",
  "chroma-memberlist",
  "chroma-storage",
  "chroma-sysdb",
@@ -3292,6 +3338,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "tikv-jemallocator",
  "tokio",
  "tokio-test",
  "tonic",
@@ -4031,6 +4078,7 @@ dependencies = [
  "console",
  "number_prefix",
  "portable-atomic",
+ "rayon",
  "unicode-width 0.2.0",
  "web-time",
 ]
@@ -4040,6 +4088,28 @@ name = "indoc"
 version = "2.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b248f5224d1d606005e02c97f5aa4e88eeb230488bcc03bc9ca4d7991399f2b5"
+
+[[package]]
+name = "inferno"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2094aecddc672e902cd773bad7071542f63641e01e9187c3bba4b43005e837e9"
+dependencies = [
+ "ahash",
+ "clap",
+ "crossbeam-channel",
+ "crossbeam-utils",
+ "dashmap",
+ "env_logger",
+ "indexmap 2.6.0",
+ "itoa",
+ "log",
+ "num-format",
+ "once_cell",
+ "quick-xml 0.37.5",
+ "rgb",
+ "str_stack",
+]
 
 [[package]]
 name = "inherent"
@@ -4183,6 +4253,23 @@ name = "itoa"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
+
+[[package]]
+name = "jemalloc_pprof"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5622af6d21ff86ed7797ef98e11b8f302da25ec69a7db9f6cde8e2e1c8df9992"
+dependencies = [
+ "anyhow",
+ "libc",
+ "mappings",
+ "once_cell",
+ "pprof_util",
+ "tempfile",
+ "tikv-jemalloc-ctl",
+ "tokio",
+ "tracing",
+]
 
 [[package]]
 name = "jni"
@@ -4669,6 +4756,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mappings"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e434981a332777c2b3062652d16a55f8e74fa78e6b1882633f0d77399c84fc2a"
+dependencies = [
+ "anyhow",
+ "libc",
+ "once_cell",
+ "pprof_util",
+ "tracing",
+]
+
+[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5056,6 +5156,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51d515d32fb182ee37cda2ccdcb92950d6a3c2893aa280e540671c2cd0f3b1d9"
 
 [[package]]
+name = "num-format"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a652d9771a63711fd3c3deb670acfbe5c30a4072e664d7a3bf5a9e1056ac72c3"
+dependencies = [
+ "arrayvec",
+ "itoa",
+]
+
+[[package]]
 name = "num-integer"
 version = "0.1.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5246,7 +5356,7 @@ dependencies = [
  "md-5",
  "parking_lot",
  "percent-encoding",
- "quick-xml",
+ "quick-xml 0.36.2",
  "rand 0.8.5",
  "reqwest 0.12.9",
  "ring",
@@ -5797,6 +5907,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 
 [[package]]
+name = "pprof_util"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9fa015c78eed2130951e22c58d2095849391e73817ab2e74f71b0b9f63dd8416"
+dependencies = [
+ "anyhow",
+ "backtrace",
+ "flate2",
+ "inferno",
+ "num",
+ "paste",
+ "prost 0.13.5",
+]
+
+[[package]]
 name = "ppv-lite86"
 version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6082,6 +6207,15 @@ checksum = "f7649a7b4df05aed9ea7ec6f628c67c9953a43869b8bc50929569b2999d443fe"
 dependencies = [
  "memchr",
  "serde",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.37.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "331e97a1af0bf59823e6eadffe373d7b27f485be8748f71471c662c1f269b7fb"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -6490,6 +6624,15 @@ dependencies = [
  "crypto-bigint 0.4.9",
  "hmac",
  "zeroize",
+]
+
+[[package]]
+name = "rgb"
+version = "0.8.50"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "57397d16646700483b67d2dd6511d79318f9d057fdbd21a4066aeac8b41d310a"
+dependencies = [
+ "bytemuck",
 ]
 
 [[package]]
@@ -7543,6 +7686,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "str_stack"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9091b6114800a5f2141aee1d1b9d6ca3592ac062dc5decb3764ec5895a47b4eb"
+
+[[package]]
 name = "stringprep"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7957,6 +8106,17 @@ dependencies = [
  "flate2",
  "jpeg-decoder",
  "weezl",
+]
+
+[[package]]
+name = "tikv-jemalloc-ctl"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f21f216790c8df74ce3ab25b534e0718da5a1916719771d3fec23315c99e468b"
+dependencies = [
+ "libc",
+ "paste",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]
@@ -8820,6 +8980,8 @@ dependencies = [
  "futures",
  "guacamole",
  "parquet",
+ "proptest",
+ "rand 0.8.5",
  "serde",
  "serde_json",
  "setsum",

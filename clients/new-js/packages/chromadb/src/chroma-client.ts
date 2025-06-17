@@ -52,6 +52,7 @@ export interface ChromaClientArgs {
 export class ChromaClient {
   private _tenant: string | undefined;
   private _database: string | undefined;
+  private _use_base64_encoding_for_embeddings: boolean = false;
   private readonly apiClient: ReturnType<typeof createClient>;
 
   /**
@@ -129,6 +130,14 @@ export class ChromaClient {
    */
   public get database(): string | undefined {
     return this._database;
+  }
+
+  /**
+   * Gets base64_encoding flag
+   * @returns The base64_encoding flag or False if not set
+   */
+  public get useBase64EncodingForEmbeddings(): boolean {
+    return this._use_base64_encoding_for_embeddings;
   }
 
   protected set database(database: string | undefined) {
@@ -313,9 +322,9 @@ export class ChromaClient {
       embeddingFunction: embeddingFunction
         ? embeddingFunction
         : await getEmbeddingFunction(
-            data.name,
-            data.configuration_json.embedding_function ?? undefined,
-          ),
+          data.name,
+          data.configuration_json.embedding_function ?? undefined,
+        ),
       id: data.id,
     });
   }

@@ -8,11 +8,11 @@
 // Once we move to our own implementation of hnswlib we can support
 // streaming from s3.
 
-use super::config::StorageConfig;
+use super::config::{S3CredentialsConfig, StorageConfig};
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
-use super::PutOptions;
 use super::StorageConfigError;
+use super::{DeleteOptions, PutOptions};
 use crate::{ETag, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
@@ -624,17 +624,17 @@ impl S3Storage {
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
-    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
+    pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
         tracing::trace!(key = %key, "Deleting object from S3");
 
-        match self
-            .client
-            .delete_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-        {
+        let req = self.client.delete_object().bucket(&self.bucket).key(key);
+
+        let req = match options.if_match {
+            Some(e_tag) => req.if_match(e_tag.0),
+            None => req,
+        };
+
+        match req.send().await {
             Ok(_) => {
                 tracing::trace!(key = %key, "Successfully deleted object from S3");
                 Ok(())
@@ -653,7 +653,7 @@ impl S3Storage {
         tracing::info!(src = %src_key, dst = %dst_key, "Renaming object in S3");
         // S3 doesn't have a native rename operation, so we need to copy and delete
         self.copy(src_key, dst_key).await?;
-        match self.delete(src_key).await {
+        match self.delete(src_key, DeleteOptions::default()).await {
             Ok(_) => {
                 tracing::info!(src = %src_key, dst = %dst_key, "Successfully renamed object");
                 Ok(())
@@ -686,6 +686,33 @@ impl S3Storage {
             }
         }
     }
+
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
+        let mut outs = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket)
+            .set_max_keys(Some(1000))
+            .prefix(prefix)
+            .into_paginator()
+            .send();
+        let mut paths = vec![];
+        while let Some(result) = outs.next().await {
+            let output = result.map_err(|err| StorageError::Generic {
+                source: Arc::new(err),
+            })?;
+            for object in output.contents() {
+                if let Some(key) = object.key() {
+                    paths.push(key.to_string());
+                } else {
+                    return Err(StorageError::Message {
+                        message: format!("list on prefix {:?} led to empty key", prefix),
+                    });
+                }
+            }
+        }
+        Ok(paths)
+    }
 }
 
 #[async_trait]
@@ -697,7 +724,8 @@ impl Configurable<StorageConfig> for S3Storage {
         match &config {
             StorageConfig::S3(s3_config) => {
                 let client = match &s3_config.credentials {
-                    super::config::S3CredentialsConfig::Minio => {
+                    super::config::S3CredentialsConfig::Minio
+                    | super::config::S3CredentialsConfig::Localhost => {
                         // Set up credentials assuming minio is running locally
                         let cred = aws_sdk_s3::config::Credentials::new(
                             "minio",
@@ -712,9 +740,17 @@ impl Configurable<StorageConfig> for S3Storage {
                             .read_timeout(Duration::from_millis(s3_config.request_timeout_ms));
                         let retry_config = RetryConfig::standard();
 
+                        let mut endpoint_url = "http://minio.chroma:9000".to_string();
+                        if matches!(
+                            s3_config.credentials,
+                            super::config::S3CredentialsConfig::Localhost
+                        ) {
+                            endpoint_url = "http://localhost:9000".to_string();
+                        }
+
                         // Set up s3 client
                         let config = aws_sdk_s3::config::Builder::new()
-                            .endpoint_url("http://minio.chroma:9000".to_string())
+                            .endpoint_url(endpoint_url)
                             .credentials_provider(cred)
                             .behavior_version_latest()
                             .region(aws_sdk_s3::config::Region::new("us-east-1"))
@@ -760,6 +796,16 @@ impl Configurable<StorageConfig> for S3Storage {
             _ => Err(Box::new(StorageConfigError::InvalidStorageConfig)),
         }
     }
+}
+
+pub async fn s3_config_for_localhost_with_bucket_name(
+    name: impl Into<String>,
+) -> crate::StorageConfig {
+    StorageConfig::S3(crate::config::S3StorageConfig {
+        bucket: name.into(),
+        credentials: S3CredentialsConfig::Localhost,
+        ..Default::default()
+    })
 }
 
 pub async fn s3_client_for_test_with_bucket_name(name: &str) -> crate::Storage {
@@ -1130,5 +1176,33 @@ mod tests {
         storage.copy("test/00", "test2/00").await.unwrap();
         let bytes = storage.get("test2/00").await.unwrap();
         assert_eq!("ABC123XYZ".as_bytes(), bytes.as_slice());
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_list_prefix() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+        for i in 0..16 {
+            storage
+                .oneshot_upload(
+                    &format!("test/{:02x}", i),
+                    0,
+                    |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
+                    PutOptions {
+                        if_not_exists: true,
+                        if_match: None,
+                        priority: StorageRequestPriority::P0,
+                    },
+                )
+                .await
+                .unwrap();
+        }
+
+        let mut results = storage.list_prefix("test/").await.unwrap();
+        results.sort();
+        eprintln!("Results of listing (should be 0x00..0xff inclusive): {results:#?}");
+        assert_eq!(16, results.len());
+        for (i, result) in results.iter().enumerate() {
+            assert_eq!(format!("test/{:02x}", i), *result, "index = {}", i);
+        }
     }
 }

@@ -26,6 +26,8 @@ message ScoutLogsResponse {
   int64 first_uninserted_record_offset = 2;
   // The oldest record on the log will have this offset.
   int64 first_uncompacted_record_offset = 3;
+  // Whether the log is sealed.
+  bool is_sealed = 4;
 }
 
 message PullLogsRequest {

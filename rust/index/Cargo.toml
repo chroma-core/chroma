@@ -12,6 +12,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 parking_lot = { workspace = true }
 arrow = { workspace = true }
+parquet = { workspace = true }
 serde = { workspace = true }
 tantivy = { workspace = true }
 tokio = { workspace = true }
@@ -38,11 +39,15 @@ rayon = { workspace = true }
 criterion = { workspace = true }
 chroma-benchmark = { workspace = true }
 proptest = { workspace = true }
-indicatif = "0.17.9"
+indicatif = { workspace = true }
 anyhow = "1.0.93"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
+tikv-jemallocator = { workspace = true }
 
 [[bench]]
 name = "full_text"
+harness = false
+
+[[bench]]
+name = "literal"
 harness = false
