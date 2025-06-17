@@ -26,7 +26,6 @@ impl MeterEvent {
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex, OnceLock};
-    use uuid::Uuid;
 
     use crate::{core::MeterEvent, CollectionForkContext, MeteredFutureExt};
     use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
@@ -78,7 +77,7 @@ mod tests {
                 };
                 let handle = system.start_component(component);
                 let rx: Box<dyn ReceiverForMessage<MeterEvent>> = handle.receiver();
-                let _ = MeterEvent::init_receiver(rx);
+                MeterEvent::init_receiver(rx);
                 (system, messages.clone())
             })
             .1
@@ -100,7 +99,7 @@ mod tests {
             crate::create::<CollectionForkContext>(CollectionForkContext::new(
                 "tenant".to_string(),
                 "database".to_string(),
-                Uuid::new_v4(),
+                "collection".to_string(),
             ));
         helper().meter(metering_context_container).await;
 

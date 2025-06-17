@@ -1525,6 +1525,7 @@ dependencies = [
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
+ "chrono",
  "criterion",
  "figment",
  "futures",
@@ -1732,7 +1733,6 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]

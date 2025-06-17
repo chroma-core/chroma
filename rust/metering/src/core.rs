@@ -5,9 +5,8 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
-use uuid::Uuid;
 
-use crate::types::{MeteringAtomicU64, MeteringMutex};
+use crate::types::MeteringAtomicU64;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "read_action")]
@@ -34,13 +33,38 @@ initialize_metering! {
     }
 
     #[capability]
-    pub trait RequestReceivedAt {
-        fn request_received_at(&self, received_at: DateTime<Utc>);
+    pub trait LogSizeBytes {
+        fn log_size_bytes(&self, log_size_bytes: u64);
     }
 
     #[capability]
     pub trait RequestHandlingDuration {
         fn request_handling_duration(&self, completed_at: DateTime<Utc>);
+    }
+
+    #[capability]
+    pub trait FtsQueryLength {
+        fn fts_query_length(&self, fts_query_length: u64);
+    }
+
+    #[capability]
+    pub trait MetadataPredicateCount {
+        fn metadata_predicate_count(&self, metadata_predicate_count: u64);
+    }
+
+    #[capability]
+    pub trait QueryEmbeddingCount {
+        fn query_embedding_count(&self, query_embedding_count: u64);
+    }
+
+    #[capability]
+    pub trait PulledLogSizeBytes {
+        fn pulled_log_size_bytes(&self, pulled_log_size_bytes: u64);
+    }
+
+    #[capability]
+    pub trait ReturnBytes {
+        fn return_bytes(&self, return_bytes: u64);
     }
 
     ////////////////////////////////// collection_fork //////////////////////////////////
@@ -57,16 +81,16 @@ initialize_metering! {
     pub struct CollectionForkContext {
         pub tenant: String,
         pub database: String,
-        pub collection_id: Uuid,
+        pub collection_id: String,
         pub latest_collection_logical_size_bytes: MeteringAtomicU64,
     }
 
     impl CollectionForkContext {
-        pub fn new( tenant: String, database: String, collection_id: Uuid) -> Self {
+        pub fn new(tenant: String, database: String, collection_id: String) -> Self {
             CollectionForkContext {
-                tenant: tenant,
-                database: database,
-                collection_id: collection_id,
+                tenant,
+                database,
+                collection_id,
                 latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
             }
         }
@@ -85,42 +109,127 @@ initialize_metering! {
     ////////////////////////////////// collection_read //////////////////////////////////
     #[context(
         capabilities = [
-            RequestReceivedAt,
-            RequestHandlingDuration
+            RequestHandlingDuration,
+            FtsQueryLength,
+            MetadataPredicateCount,
+            QueryEmbeddingCount,
+            PulledLogSizeBytes,
+            LatestCollectionLogicalSizeBytes,
+            ReturnBytes,
             ],
         handlers = [
-            __handler_collection_read_request_received_at,
-            __handler_collection_read_request_handling_duration
+            __handler_collection_read_request_handling_duration,
+            __handler_collection_read_fts_query_length,
+            __handler_collection_read_metadata_predicate_count,
+            __handler_collection_read_query_embedding_count,
+            __handler_collection_read_pulled_log_size_bytes,
+            __handler_collection_read_latest_collection_logical_size_bytes,
+            __handler_collection_read_return_bytes,
         ]
     )]
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
     #[serde(rename_all = "snake_case")]
     pub struct CollectionReadContext {
-        pub tenant: String,
-        pub database: String,
-        pub collection_id: Uuid,
+        tenant: String,
+        database: String,
+        collection_id: String,
         #[serde(flatten)]
-        pub action: ReadAction,
-        pub fts_query_length: u64,
-        pub metadata_predicate_count: u64,
-        pub query_embedding_count: u64,
-        pub pulled_log_size_bytes: u64,
-        pub latest_collection_logical_size_bytes: u64,
-        pub return_bytes: u64,
+        action: ReadAction,
+        fts_query_length: MeteringAtomicU64,
+        metadata_predicate_count: MeteringAtomicU64,
+        query_embedding_count: MeteringAtomicU64,
+        pulled_log_size_bytes: MeteringAtomicU64,
+        latest_collection_logical_size_bytes: MeteringAtomicU64,
+        return_bytes: MeteringAtomicU64,
         // NOTE(c-gamble): We use chrono's `DateTime` object here because `std::time::Instant`
         // is not compatible with serde.
-        pub request_received_at: MeteringMutex<DateTime<Utc>>,
-        pub request_handling_duration_ms: MeteringAtomicU64,
+        request_received_at: DateTime<Utc>,
+        request_handling_duration_ms: MeteringAtomicU64,
     }
 
-    /// Handler for [`crate::core::RequestReceivedAt`] capability for collection read contexts
-    fn __handler_collection_read_request_received_at(
-        context: &CollectionReadContext,
-        received_at: DateTime<Utc>,
-    ) {
-        if let Ok(mut guard) = context.request_received_at.lock() {
-            *guard = received_at;
+    impl CollectionReadContext {
+        pub fn new(tenant: String, database: String, collection_id: String, action: ReadAction, request_received_at: DateTime<Utc>,) -> Self {
+            CollectionReadContext {
+                tenant,
+                database,
+                collection_id,
+                action,
+                fts_query_length: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+                metadata_predicate_count: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+                query_embedding_count: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+                pulled_log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+                latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+                return_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+                request_received_at,
+                request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+            }
         }
+
+        // NOTE(c-gamble): This is a special method to support the current multi-event nature of delete requests. It
+        // should be deleted in the future once we have a single delete event.
+        pub fn get_request_received_at(&self) -> DateTime<Utc> {
+            self.request_received_at
+        }
+    }
+
+    /// Handler for [`crate::core::FtsQueryLength`] capability for collection read contexts
+    fn __handler_collection_read_fts_query_length(
+        context: &CollectionReadContext,
+        fts_query_length: u64,
+    ) {
+        context
+            .fts_query_length
+            .store(fts_query_length, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::MetadataPredicateCount`] capability for collection read contexts
+    fn __handler_collection_read_metadata_predicate_count(
+        context: &CollectionReadContext,
+        metadata_predicate_count: u64,
+    ) {
+        context
+            .metadata_predicate_count
+            .store(metadata_predicate_count, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::QueryEmbeddingCount`] capability for collection read contexts
+    fn __handler_collection_read_query_embedding_count(
+        context: &CollectionReadContext,
+        query_embedding_count: u64,
+    ) {
+        context
+            .query_embedding_count
+            .store(query_embedding_count, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::PulledLogSizeBytes`] capability for collection read contexts
+    fn __handler_collection_read_pulled_log_size_bytes(
+        context: &CollectionReadContext,
+        pulled_log_size_bytes: u64,
+    ) {
+        context
+            .pulled_log_size_bytes
+            .store(pulled_log_size_bytes, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::LatestCollectionLogicalSizeBytes`] capability for collection read contexts
+    fn __handler_collection_read_latest_collection_logical_size_bytes(
+        context: &CollectionReadContext,
+        latest_collection_logical_size_bytes: u64,
+    ) {
+        context
+            .latest_collection_logical_size_bytes
+            .store(latest_collection_logical_size_bytes, Ordering::SeqCst);
+    }
+
+    /// Handler for [`crate::core::ReturnBytes`] capability for collection read contexts
+    fn __handler_collection_read_return_bytes(
+        context: &CollectionReadContext,
+        return_bytes: u64,
+    ) {
+        context
+            .return_bytes
+            .store(return_bytes, Ordering::SeqCst);
     }
 
     /// Handler for [`crate::core::RequestHandlingDuration`] capability for collection read contexts
@@ -128,9 +237,8 @@ initialize_metering! {
         context: &CollectionReadContext,
         completed_at: DateTime<Utc>,
     ) {
-        let received_at = context.request_received_at.lock().unwrap();
         let duration_ms = completed_at
-            .signed_duration_since(*received_at) // NOTE(c-gamble): We use signed to suppress "time went backward" errors.
+            .signed_duration_since(context.request_received_at) // NOTE(c-gamble): We use signed to suppress "time went backward" errors.
             .num_milliseconds()
             .max(0) as u64;
 
@@ -142,35 +250,49 @@ initialize_metering! {
     ////////////////////////////////// collection_write //////////////////////////////////
     #[context(
         capabilities = [
-            RequestReceivedAt,
-            RequestHandlingDuration
+            RequestHandlingDuration,
+            LogSizeBytes
             ],
         handlers = [
-            __handler_collection_write_request_received_at,
-            __handler_collection_write_request_handling_duration
+            __handler_collection_write_request_handling_duration,
+            __handler_collection_write_log_size_bytes
         ]
     )]
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
     #[serde(rename_all = "snake_case")]
     pub struct CollectionWriteContext {
-        pub tenant: String,
-        pub database: String,
-        pub collection_id: Uuid,
+        tenant: String,
+        database: String,
+        collection_id: String,
         #[serde(flatten)]
-        pub action: WriteAction,
-        pub log_size_bytes: u64,
-        pub request_received_at: MeteringMutex<DateTime<Utc>>,
-        pub request_handling_duration_ms: MeteringAtomicU64,
+        action: WriteAction,
+        log_size_bytes: MeteringAtomicU64,
+        request_received_at: DateTime<Utc>,
+        request_handling_duration_ms: MeteringAtomicU64,
     }
 
-    /// Handler for [`crate::core::RequestReceivedAt`] capability for collection write contexts
-    fn __handler_collection_write_request_received_at(
-        context: &CollectionWriteContext,
-        received_at: DateTime<Utc>,
-    ) {
-        if let Ok(mut guard) = context.request_received_at.lock() {
-            *guard = received_at;
+    impl CollectionWriteContext {
+        pub fn new(tenant: String, database: String, collection_id: String, action: WriteAction, request_received_at: DateTime<Utc>) -> Self {
+            CollectionWriteContext {
+                tenant,
+                database,
+                collection_id,
+                action,
+                log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+                request_received_at,
+                request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+            }
         }
+    }
+
+    /// Handler for [`crate::core::LogSizeBytes`] capability for collection write contexts
+    fn __handler_collection_write_log_size_bytes(
+        context: &CollectionWriteContext,
+        log_size_bytes: u64,
+    ) {
+        context
+            .log_size_bytes
+            .store(log_size_bytes, Ordering::SeqCst);
     }
 
     /// Handler for [`crate::core::RequestHandlingDuration`] capability for collection write contexts
@@ -178,9 +300,8 @@ initialize_metering! {
         context: &CollectionWriteContext,
         completed_at: DateTime<Utc>,
     ) {
-        let received_at = context.request_received_at.lock().unwrap();
         let duration_ms = completed_at
-            .signed_duration_since(*received_at) // NOTE(c-gamble): We use signed to suppress "time went backward" errors.
+            .signed_duration_since(context.request_received_at) // NOTE(c-gamble): We use signed to suppress "time went backward" errors.
             .num_milliseconds()
             .max(0) as u64;
 
@@ -201,21 +322,20 @@ pub enum MeterEvent {
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use std::sync::{atomic::AtomicU64, Arc, Mutex};
-    use uuid::Uuid;
+    use std::sync::{atomic::AtomicU64, Arc};
 
     use super::{CollectionWriteContext, MeterEvent, WriteAction};
-    use crate::types::{MeteringAtomicU64, MeteringMutex};
+    use crate::types::MeteringAtomicU64;
 
     #[test]
     fn test_event_serialization() {
         let event = MeterEvent::CollectionWrite(CollectionWriteContext {
             tenant: "test_tenant".to_string(),
             database: "test_database".to_string(),
-            collection_id: Uuid::new_v4(),
+            collection_id: "test_collection".to_string(),
             action: WriteAction::Add,
-            log_size_bytes: 1000,
-            request_received_at: MeteringMutex(Mutex::new(Utc::now())),
+            log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(1000))),
+            request_received_at: Utc::now(),
             request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
         });
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");

@@ -7,8 +7,9 @@ use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_metering::{
-    CollectionForkContext, CollectionReadContext, CollectionWriteContext,
-    LatestCollectionLogicalSizeBytes, MeterEvent,
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
+    FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
+    MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes, WriteAction,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
@@ -37,6 +38,7 @@ use chroma_types::{
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
     Where,
 };
+use chrono::Utc;
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -606,7 +608,6 @@ impl ServiceBasedFrontend {
         &mut self,
         ForkCollectionRequest {
             tenant_id,
-            database_name,
             source_collection_id,
             target_collection_name,
             ..
@@ -703,7 +704,6 @@ impl ServiceBasedFrontend {
         &mut self,
         AddCollectionRecordsRequest {
             tenant_id,
-            database_name,
             collection_id,
             ids,
             embeddings,
@@ -750,16 +750,15 @@ impl ServiceBasedFrontend {
             .add_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
+        // Attach the log size in bytes to the metering context
+        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionWrite {
-            tenant: tenant_id,
-            database: database_name,
-            collection_id: collection_id.0,
-            action: WriteAction::Add,
-            log_size_bytes,
+        if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
+            MeterEvent::CollectionWrite(collection_write_context)
+                .submit()
+                .await;
         }
-        .submit()
-        .await;
 
         match res {
             Ok(()) => Ok(AddCollectionRecordsResponse {}),
@@ -777,7 +776,6 @@ impl ServiceBasedFrontend {
         &mut self,
         UpdateCollectionRecordsRequest {
             tenant_id,
-            database_name,
             collection_id,
             ids,
             embeddings,
@@ -828,16 +826,15 @@ impl ServiceBasedFrontend {
             .update_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
+        // Attach the log size in bytes to the metering context
+        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionWrite {
-            tenant: tenant_id,
-            database: database_name,
-            collection_id: collection_id.0,
-            action: WriteAction::Update,
-            log_size_bytes,
+        if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
+            MeterEvent::CollectionWrite(collection_write_context)
+                .submit()
+                .await;
         }
-        .submit()
-        .await;
 
         match res {
             Ok(()) => Ok(UpdateCollectionRecordsResponse {}),
@@ -855,7 +852,6 @@ impl ServiceBasedFrontend {
         &mut self,
         UpsertCollectionRecordsRequest {
             tenant_id,
-            database_name,
             collection_id,
             ids,
             embeddings,
@@ -908,16 +904,15 @@ impl ServiceBasedFrontend {
             .upsert_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
+        // Attach the log size in bytes to the metering context
+        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionWrite {
-            tenant: tenant_id,
-            database: database_name,
-            collection_id: collection_id.0,
-            action: WriteAction::Upsert,
-            log_size_bytes,
+        if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
+            MeterEvent::CollectionWrite(collection_write_context)
+                .submit()
+                .await;
         }
-        .submit()
-        .await;
 
         match res {
             Ok(()) => Ok(UpsertCollectionRecordsResponse {}),
@@ -943,6 +938,12 @@ impl ServiceBasedFrontend {
         }: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let mut records = Vec::new();
+
+        // NOTE(c-gamble): We are using a non-standard metering pattern in which we create a metering context within a
+        // nested call because we have to emit both a read and write event for delete requests. We need to extract the
+        // request start time from the current context here because our metering library only allows one active metering
+        // context per thread at a time. Eventually, this should be replaced by a single `CollectionDeleteRecordsContext`.
+        let mut maybe_request_received_at = None;
 
         let read_event = if let Some(where_clause) = r#where {
             let collection_and_segments = self
@@ -992,19 +993,26 @@ impl ServiceBasedFrontend {
                     metadata: None,
                 });
             }
-            // TODO: Submit event after the response is sent
-            Some(MeterEvent::CollectionRead {
-                tenant: tenant_id.clone(),
-                database: database_name.clone(),
-                collection_id: collection_id.0,
-                action: ReadAction::GetForDelete,
-                fts_query_length,
-                metadata_predicate_count,
-                query_embedding_count: 0,
-                pulled_log_size_bytes: get_result.pulled_log_bytes,
-                latest_collection_logical_size_bytes,
-                return_bytes,
-            })
+
+            // Attach metadata to the read context
+            chroma_metering::with_current(|context| {
+                context.fts_query_length(fts_query_length);
+                context.metadata_predicate_count(metadata_predicate_count);
+                context.query_embedding_count(0);
+                context.pulled_log_size_bytes(get_result.pulled_log_bytes);
+                context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+                context.return_bytes(return_bytes);
+            });
+
+            if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
+                // Store the request start time for the subsequent write event
+                maybe_request_received_at = Some(collection_read_context.get_request_received_at());
+
+                // Return the read event
+                Some(MeterEvent::CollectionRead(collection_read_context))
+            } else {
+                None
+            }
         } else if let Some(user_ids) = ids {
             records.extend(user_ids.into_iter().map(|id| OperationRecord {
                 id,
@@ -1040,16 +1048,37 @@ impl ServiceBasedFrontend {
         if let Some(event) = read_event {
             event.submit().await;
         }
+
+        // NOTE(c-gamble): See note above for additional context, but this is a non-standard pattern
+        // and we are only implementing metering for delete in this manner because delete currently
+        // produces two metering events.
+        let collection_write_context_container =
+            chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
+                tenant_id.clone(),
+                database_name.clone(),
+                collection_id.0.to_string(),
+                WriteAction::Delete,
+                if let Some(request_received_at) = maybe_request_received_at {
+                    request_received_at
+                } else {
+                    Utc::now()
+                },
+            ));
+        collection_write_context_container.enter();
+
+        // Attach the log size bytes to the write context
+        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionWrite {
-            tenant: tenant_id,
-            database: database_name,
-            collection_id: collection_id.0,
-            action: WriteAction::Delete,
-            log_size_bytes,
+        if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
+            MeterEvent::CollectionWrite(collection_write_context)
+                .submit()
+                .await;
         }
-        .submit()
-        .await;
+
+        // NOTE(c-gamble): This is not strictly necessary but good for hygiene. We can remove it once we consolidate
+        // delete into a single event.
+        collection_write_context_container.exit();
 
         Ok(DeleteCollectionRecordsResponse {})
     }
@@ -1105,12 +1134,7 @@ impl ServiceBasedFrontend {
 
     pub async fn retryable_count(
         &mut self,
-        CountRequest {
-            tenant_id,
-            database_name,
-            collection_id,
-            ..
-        }: CountRequest,
+        CountRequest { collection_id, .. }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
@@ -1129,21 +1153,24 @@ impl ServiceBasedFrontend {
             })
             .await?;
         let return_bytes = count_result.size_bytes();
+
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.fts_query_length(0);
+            context.metadata_predicate_count(0);
+            context.query_embedding_count(0);
+            context.pulled_log_size_bytes(count_result.pulled_log_bytes);
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.return_bytes(return_bytes);
+        });
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionRead {
-            tenant: tenant_id.clone(),
-            database: database_name.clone(),
-            collection_id: collection_id.0,
-            action: ReadAction::Count,
-            fts_query_length: 0,
-            metadata_predicate_count: 0,
-            query_embedding_count: 0,
-            pulled_log_size_bytes: count_result.pulled_log_bytes,
-            latest_collection_logical_size_bytes,
-            return_bytes,
+        if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
+            MeterEvent::CollectionRead(collection_read_context)
+                .submit()
+                .await;
         }
-        .submit()
-        .await;
+
         Ok(count_result.count)
     }
 
@@ -1196,8 +1223,6 @@ impl ServiceBasedFrontend {
     async fn retryable_get(
         &mut self,
         GetRequest {
-            tenant_id,
-            database_name,
             collection_id,
             ids,
             r#where,
@@ -1247,21 +1272,24 @@ impl ServiceBasedFrontend {
             })
             .await?;
         let return_bytes = get_result.size_bytes();
+
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.fts_query_length(fts_query_length);
+            context.metadata_predicate_count(metadata_predicate_count);
+            context.query_embedding_count(0);
+            context.pulled_log_size_bytes(get_result.pulled_log_bytes);
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.return_bytes(return_bytes);
+        });
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionRead {
-            tenant: tenant_id.clone(),
-            database: database_name.clone(),
-            collection_id: collection_id.0,
-            action: ReadAction::Get,
-            metadata_predicate_count,
-            fts_query_length,
-            query_embedding_count: 0,
-            pulled_log_size_bytes: get_result.pulled_log_bytes,
-            latest_collection_logical_size_bytes,
-            return_bytes,
+        if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
+            MeterEvent::CollectionRead(collection_read_context)
+                .submit()
+                .await;
         }
-        .submit()
-        .await;
+
         Ok((get_result, include).into())
     }
 
@@ -1314,8 +1342,6 @@ impl ServiceBasedFrontend {
     async fn retryable_query(
         &mut self,
         QueryRequest {
-            tenant_id,
-            database_name,
             collection_id,
             ids,
             r#where,
@@ -1369,21 +1395,24 @@ impl ServiceBasedFrontend {
             })
             .await?;
         let return_bytes = query_result.size_bytes();
+
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.fts_query_length(fts_query_length);
+            context.metadata_predicate_count(metadata_predicate_count);
+            context.query_embedding_count(query_embedding_count);
+            context.pulled_log_size_bytes(query_result.pulled_log_bytes);
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.return_bytes(return_bytes);
+        });
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionRead {
-            tenant: tenant_id.clone(),
-            database: database_name.clone(),
-            collection_id: collection_id.0,
-            action: ReadAction::Query,
-            metadata_predicate_count,
-            fts_query_length,
-            query_embedding_count,
-            pulled_log_size_bytes: query_result.pulled_log_bytes,
-            latest_collection_logical_size_bytes,
-            return_bytes,
+        if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
+            MeterEvent::CollectionRead(collection_read_context)
+                .submit()
+                .await;
         }
-        .submit()
-        .await;
+
         Ok((query_result, include).into())
     }
 

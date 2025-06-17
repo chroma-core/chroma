@@ -8,6 +8,7 @@ name = "frontend_service"
 path = "src/bin/frontend_service.rs"
 
 [dependencies]
+chrono = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
