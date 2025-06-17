@@ -224,29 +224,33 @@ impl ManifestManager {
     /// Recover from a fault in writing.  It is possible that fragments have been written that are
     /// not referenced by the manifest.  Scout ahead until an empty slot is observed.  Then write
     /// the manifest that includes the new fragments.
-    pub async fn recover(&self, mark_dirty: &dyn MarkDirty) -> Result<(), Error> {
-        loop {
-            let next_seq_no_to_apply = {
-                // SAFETY(rescrv):  Mutex poisoning.
-                let staging = self.staging.lock().unwrap();
-                staging.next_seq_no_to_apply
-            };
-            let next_fragment = read_fragment(
-                &self.storage,
-                &self.prefix,
-                &unprefixed_fragment_path(next_seq_no_to_apply),
-            )
-            .await?;
-            if let Some(fragment) = next_fragment {
-                mark_dirty
-                    .mark_dirty(fragment.start, (fragment.limit - fragment.start) as usize)
-                    .await?;
-                self.publish_fragment(fragment).await?;
-            } else {
-                break;
+    pub async fn recover(&mut self, mark_dirty: &dyn MarkDirty) -> Result<(), Error> {
+        let next_seq_no_to_apply = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let staging = self.staging.lock().unwrap();
+            staging.next_seq_no_to_apply
+        };
+        let next_fragment = read_fragment(
+            &self.storage,
+            &self.prefix,
+            &unprefixed_fragment_path(next_seq_no_to_apply),
+        )
+        .await?;
+        if let Some(fragment) = next_fragment {
+            mark_dirty
+                .mark_dirty(fragment.start, (fragment.limit - fragment.start) as usize)
+                .await?;
+            // NOTE(rescrv):  This is a hack.  We are recovering, we want to reset staging to
+            // be totally consistent.  It's easier to throw it away and restart than to get the
+            // adjustment right.
+            match self.publish_fragment(fragment).await {
+                Ok(()) => Err(Error::LogContentionRetry),
+                Err(Error::LogContentionDurable) => Err(Error::LogContentionRetry),
+                err => err,
             }
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     /// Check for log contention at the cost of a read to S3.
@@ -260,7 +264,7 @@ impl ManifestManager {
         if e_tag == staging.stable.e_tag {
             Ok(())
         } else {
-            Err(Error::LogContention)
+            Err(Error::LogContentionFailure)
         }
     }
 

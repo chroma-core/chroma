@@ -47,6 +47,7 @@ chroma-index = { workspace = true }
 chroma-memberlist = { workspace = true }
 chroma-tracing = { workspace = true }
 chroma-jemalloc-pprof-server = { workspace = true }
+wal3 = { workspace = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true }

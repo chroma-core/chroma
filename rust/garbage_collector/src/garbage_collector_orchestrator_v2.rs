@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::construct_version_graph_orchestrator::{
     ConstructVersionGraphError, ConstructVersionGraphOrchestrator,
 };
@@ -44,6 +46,7 @@ use std::time::SystemTime;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
+use wal3::{GarbageCollectionOptions, LogWriter, LogWriterOptions};
 
 #[derive(Debug)]
 pub struct GarbageCollectorOrchestrator {
@@ -132,6 +135,8 @@ pub enum GarbageCollectorError {
     Result(#[from] RecvError),
     #[error("{0}")]
     Generic(#[from] Box<dyn ChromaError>),
+    #[error("{0}")]
+    Wal3(#[from] wal3::Error),
     #[error("The task was aborted because resources were exhausted")]
     Aborted,
 
@@ -279,6 +284,33 @@ impl GarbageCollectorOrchestrator {
         let output = orchestrator.run(self.system.clone()).await?;
 
         let collection_ids = output.version_files.keys().cloned().collect::<Vec<_>>();
+
+        for collection_id in collection_ids.iter() {
+            match LogWriter::open(
+                LogWriterOptions::default(),
+                Arc::new(self.storage.clone()),
+                &collection_id.storage_prefix_for_log(),
+                "garbage collection service",
+                (),
+            )
+            .await
+            {
+                Ok(log) => {
+                    if let Err(err) = log
+                        .garbage_collect(&GarbageCollectionOptions::default())
+                        .await
+                    {
+                        tracing::error!("could not garbage collect log: {err:?}");
+                        continue;
+                    }
+                }
+                Err(wal3::Error::UninitializedLog) => {}
+                Err(err) => {
+                    tracing::error!("could not garbage collect log: {err:?}");
+                    continue;
+                }
+            }
+        }
 
         self.soft_deleted_collections_to_gc = self
             .get_eligible_soft_deleted_collections_to_gc(collection_ids)
@@ -813,6 +845,15 @@ impl GarbageCollectorOrchestrator {
             );
 
             for collection_id in ordered_soft_deleted_to_hard_delete_collections {
+                if let Err(err) = wal3::destroy(
+                    Arc::new(self.storage.clone()),
+                    &collection_id.storage_prefix_for_log(),
+                )
+                .await
+                {
+                    tracing::error!("could not destroy/hard delete wal3 instance: {err:?}");
+                    return Err(GarbageCollectorError::Wal3(err));
+                }
                 self.sysdb_client
                     .finish_collection_deletion(
                         self.tenant

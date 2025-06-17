@@ -50,7 +50,9 @@ async fn writer_thread(
                         .unwrap();
                     break;
                 }
-                Err(Error::LogContention) => {
+                Err(Error::LogContentionDurable)
+                | Err(Error::LogContentionRetry)
+                | Err(Error::LogContentionFailure) => {
                     println!("writer sees contention preventing {i}");
                     contention_errors += 1;
                     continue;
@@ -82,7 +84,9 @@ async fn garbage_collector_thread(
                 .await
             {
                 Ok(()) => break,
-                Err(Error::LogContention) => {
+                Err(Error::LogContentionDurable)
+                | Err(Error::LogContentionRetry)
+                | Err(Error::LogContentionFailure) => {
                     println!("gc sees contention preventing {i}");
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     continue;
