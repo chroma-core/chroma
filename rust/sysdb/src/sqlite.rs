@@ -16,6 +16,7 @@ use chroma_types::{
     SegmentType, SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError,
 };
 use futures::TryStreamExt;
+use sea_query::{Alias, Expr};
 use sea_query_binder::SqlxBinder;
 use sqlx::error::ErrorKind;
 use sqlx::sqlite::SqliteRow;
@@ -797,8 +798,12 @@ impl SqliteSysDb {
                 table::SegmentMetadata::StrValue,
                 table::SegmentMetadata::IntValue,
                 table::SegmentMetadata::FloatValue,
-                table::SegmentMetadata::BoolValue,
+                // table::SegmentMetadata::BoolValue,
             ])
+            .expr_as(
+                Expr::col(table::SegmentMetadata::BoolValue),
+                Alias::new("bool_value"),
+            )
             .build_sqlx(sea_query::SqliteQueryBuilder);
 
         log::info!("SQL: {:#?}, values: {:#?}", sql, values);
