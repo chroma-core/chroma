@@ -3753,7 +3753,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn update_collection_log_offset_never_moves_backwards() {
+    async fn test_k8s_integration_update_collection_log_offset_never_moves_backwards() {
         use chroma_storage::s3_client_for_test_with_new_bucket;
         use chroma_types::chroma_proto::UpdateCollectionLogOffsetRequest;
         use std::collections::HashMap;
