@@ -82,7 +82,7 @@ initialize_metering! {
         pub tenant: String,
         pub database: String,
         pub collection_id: String,
-        latest_collection_logical_size_bytes: MeteringAtomicU64,
+        pub latest_collection_logical_size_bytes: MeteringAtomicU64,
     }
 
     impl CollectionForkContext {
@@ -138,13 +138,13 @@ initialize_metering! {
         // NOTE(c-gamble): We use chrono's `DateTime` object here because `std::time::Instant`
         // is not compatible with serde.
         pub request_received_at: DateTime<Utc>,
-        fts_query_length: MeteringAtomicU64,
-        metadata_predicate_count: MeteringAtomicU64,
-        query_embedding_count: MeteringAtomicU64,
-        pulled_log_size_bytes: MeteringAtomicU64,
-        latest_collection_logical_size_bytes: MeteringAtomicU64,
-        return_bytes: MeteringAtomicU64,
-        request_handling_duration_ms: MeteringAtomicU64,
+        pub fts_query_length: MeteringAtomicU64,
+        pub metadata_predicate_count: MeteringAtomicU64,
+        pub query_embedding_count: MeteringAtomicU64,
+        pub pulled_log_size_bytes: MeteringAtomicU64,
+        pub latest_collection_logical_size_bytes: MeteringAtomicU64,
+        pub return_bytes: MeteringAtomicU64,
+        pub request_handling_duration_ms: MeteringAtomicU64,
     }
 
     impl CollectionReadContext {
@@ -261,8 +261,8 @@ initialize_metering! {
         #[serde(flatten)]
         pub action: WriteAction,
         pub request_received_at: DateTime<Utc>,
-        log_size_bytes: MeteringAtomicU64,
-        request_handling_duration_ms: MeteringAtomicU64,
+        pub log_size_bytes: MeteringAtomicU64,
+        pub request_handling_duration_ms: MeteringAtomicU64,
     }
 
     impl CollectionWriteContext {
