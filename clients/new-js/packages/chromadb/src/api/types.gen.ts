@@ -14,6 +14,7 @@ export type AddCollectionRecordsResponse = {
 
 export type ChecklistResponse = {
     max_batch_size: number;
+    supports_base64_encoding: boolean;
 };
 
 export type Collection = {

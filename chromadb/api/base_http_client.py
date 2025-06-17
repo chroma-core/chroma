@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 class BaseHTTPClient:
     _settings: Settings
-    _max_batch_size: int = -1
+    pre_flight_checks: Any = None
     keepalive_secs: int = 40
 
     @staticmethod

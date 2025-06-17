@@ -5,7 +5,7 @@ import {
   normalizeMethod,
   parseConnectionPath,
 } from "./utils";
-import { DefaultService as Api } from "./api";
+import { DefaultService as Api, ChecklistResponse } from "./api";
 import { CollectionMetadata, UserIdentity } from "./types";
 import { Collection, CollectionImpl } from "./collection";
 import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
@@ -52,7 +52,7 @@ export interface ChromaClientArgs {
 export class ChromaClient {
   private _tenant: string | undefined;
   private _database: string | undefined;
-  private _use_base64_encoding_for_embeddings: boolean = false;
+  private _preflightChecks: ChecklistResponse | undefined;
   private readonly apiClient: ReturnType<typeof createClient>;
 
   /**
@@ -132,16 +132,20 @@ export class ChromaClient {
     return this._database;
   }
 
-  /**
-   * Gets base64_encoding flag
-   * @returns The base64_encoding flag or False if not set
-   */
-  public get useBase64EncodingForEmbeddings(): boolean {
-    return this._use_base64_encoding_for_embeddings;
-  }
-
   protected set database(database: string | undefined) {
     this._database = database;
+  }
+
+  /**
+   * Gets the preflight checks
+   * @returns The preflight checks or undefined if not set
+   */
+  public get preflightChecks(): ChecklistResponse | undefined {
+    return this._preflightChecks;
+  }
+
+  protected set preflightChecks(preflightChecks: ChecklistResponse | undefined) {
+    this._preflightChecks = preflightChecks;
   }
 
   /** @ignore */
@@ -442,5 +446,38 @@ export class ChromaClient {
       client: this.apiClient,
     });
     return data;
+  }
+
+  /**
+   * Gets the preflight checks
+   * @returns Promise resolving to the preflight checks
+   */
+  public async getPreflightChecks(): Promise<ChecklistResponse> {
+    if (!this.preflightChecks) {
+      const { data } = await Api.preFlightChecks({
+        client: this.apiClient,
+      });
+      this.preflightChecks = data;
+      return this.preflightChecks;
+    }
+    return this.preflightChecks;
+  }
+
+  /**
+   * Gets the max batch size
+   * @returns Promise resolving to the max batch size
+   */
+  public async getMaxBatchSize(): Promise<number> {
+    const preflightChecks = await this.getPreflightChecks();
+    return preflightChecks.max_batch_size ?? -1;
+  }
+
+  /**
+   * Gets whether base64_encoding is supported by the connected server
+   * @returns Promise resolving to whether base64_encoding is supported
+   */
+  public async supportsBase64Encoding(): Promise<boolean> {
+    const preflightChecks = await this.getPreflightChecks();
+    return preflightChecks.supports_base64_encoding ?? false;
   }
 }
