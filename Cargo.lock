@@ -1518,12 +1518,14 @@ dependencies = [
  "chroma-error",
  "chroma-log",
  "chroma-memberlist",
+ "chroma-metering",
  "chroma-segment",
  "chroma-sqlite",
  "chroma-sysdb",
  "chroma-system",
  "chroma-tracing",
  "chroma-types",
+ "chrono",
  "criterion",
  "figment",
  "futures",
@@ -1714,6 +1716,22 @@ dependencies = [
  "tokio",
  "tonic",
  "tower 0.4.13",
+ "tracing",
+]
+
+[[package]]
+name = "chroma-metering"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-metering-macros",
+ "chroma-system",
+ "chrono",
+ "pin-project",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
  "tracing",
 ]
 
