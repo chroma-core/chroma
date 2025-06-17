@@ -6,11 +6,14 @@ use backon::{ExponentialBuilder, Retryable};
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
+use chroma_metering::{
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext,
+    LatestCollectionLogicalSizeBytes, MeterEvent,
+};
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
-use chroma_tracing::meter_event::{MeterEvent, ReadAction, WriteAction};
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
@@ -634,15 +637,17 @@ impl ServiceBasedFrontend {
             .set_collection_with_segments(collection_and_segments)
             .await;
 
+        // Attach the collection's latest logical size to the metering context
+        chroma_metering::with_current(|context| {
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes)
+        });
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionFork {
-            tenant: tenant_id,
-            database: database_name,
-            collection_id: source_collection_id.0,
-            latest_collection_logical_size_bytes,
+        if let Ok(collection_fork_context) = chroma_metering::close::<CollectionForkContext>() {
+            MeterEvent::CollectionFork(collection_fork_context)
+                .submit()
+                .await;
         }
-        .submit()
-        .await;
 
         Ok(collection)
     }

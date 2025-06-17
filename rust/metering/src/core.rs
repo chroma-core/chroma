@@ -1,7 +1,10 @@
 use chroma_metering_macros::initialize_metering;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::Ordering;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use uuid::Uuid;
 
 use crate::types::{MeteringAtomicU64, MeteringMutex};
@@ -26,6 +29,11 @@ pub enum WriteAction {
 
 initialize_metering! {
     #[capability]
+    pub trait LatestCollectionLogicalSizeBytes {
+        fn latest_collection_logical_size_bytes(&self, latest_collection_logical_size_bytes: u64);
+    }
+
+    #[capability]
     pub trait RequestReceivedAt {
         fn request_received_at(&self, received_at: DateTime<Utc>);
     }
@@ -36,14 +44,42 @@ initialize_metering! {
     }
 
     ////////////////////////////////// collection_fork //////////////////////////////////
-    #[context(capabilities = [], handlers = [])]
+    #[context(
+        capabilities = [
+            LatestCollectionLogicalSizeBytes
+        ],
+        handlers = [
+            __handler_collection_fork_latest_collection_logical_size_bytes
+        ]
+    )]
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
     #[serde(rename_all = "snake_case")]
     pub struct CollectionForkContext {
         pub tenant: String,
         pub database: String,
         pub collection_id: Uuid,
-        pub latest_collection_logical_size_bytes: u64,
+        pub latest_collection_logical_size_bytes: MeteringAtomicU64,
+    }
+
+    impl CollectionForkContext {
+        pub fn new( tenant: String, database: String, collection_id: Uuid) -> Self {
+            CollectionForkContext {
+                tenant: tenant,
+                database: database,
+                collection_id: collection_id,
+                latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
+            }
+        }
+    }
+
+    /// Handler for [`crate::core::LatestCollectionLogicalSizeBytes`] capability for collection fork contexts
+    fn __handler_collection_fork_latest_collection_logical_size_bytes(
+        context: &CollectionForkContext,
+        latest_collection_logical_size_bytes: u64,
+    ) {
+        context
+            .latest_collection_logical_size_bytes
+            .store(latest_collection_logical_size_bytes, Ordering::SeqCst);
     }
 
     ////////////////////////////////// collection_read //////////////////////////////////
@@ -77,7 +113,7 @@ initialize_metering! {
         pub request_handling_duration_ms: MeteringAtomicU64,
     }
 
-    /// Handler for [`crate::RequestReceivedAt`] capability for collection read requests
+    /// Handler for [`crate::core::RequestReceivedAt`] capability for collection read contexts
     fn __handler_collection_read_request_received_at(
         context: &CollectionReadContext,
         received_at: DateTime<Utc>,
@@ -87,7 +123,7 @@ initialize_metering! {
         }
     }
 
-    /// Handler for [`crate::RequestHandlingDuration`] capability for collection read requests
+    /// Handler for [`crate::core::RequestHandlingDuration`] capability for collection read contexts
     fn __handler_collection_read_request_handling_duration(
         context: &CollectionReadContext,
         completed_at: DateTime<Utc>,
@@ -127,7 +163,7 @@ initialize_metering! {
         pub request_handling_duration_ms: MeteringAtomicU64,
     }
 
-    /// Handler for [`crate::RequestReceivedAt`] capability for collection write requests
+    /// Handler for [`crate::core::RequestReceivedAt`] capability for collection write contexts
     fn __handler_collection_write_request_received_at(
         context: &CollectionWriteContext,
         received_at: DateTime<Utc>,
@@ -137,7 +173,7 @@ initialize_metering! {
         }
     }
 
-    /// Handler for [`crate::RequestHandlingDuration`] capability for collection write requests
+    /// Handler for [`crate::core::RequestHandlingDuration`] capability for collection write contexts
     fn __handler_collection_write_request_handling_duration(
         context: &CollectionWriteContext,
         completed_at: DateTime<Utc>,

@@ -5,6 +5,7 @@ use axum::{
     routing::{get, post},
     Json, Router, ServiceExt,
 };
+use chroma_metering::{CollectionForkContext, MeteredFutureExt};
 use chroma_system::System;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
@@ -1205,6 +1206,11 @@ async fn fork_collection(
     quota_payload = quota_payload.with_collection_name(&payload.new_name);
     server.quota_enforcer.enforce(&quota_payload).await?;
 
+    // Create a metering context
+    let metering_context_container = chroma_metering::create::<CollectionForkContext>(
+        CollectionForkContext::new(tenant.clone(), database.clone(), collection_id.0.clone()),
+    );
+
     let _guard =
         server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
 
@@ -1215,7 +1221,13 @@ async fn fork_collection(
         payload.new_name,
     )?;
 
-    Ok(Json(server.frontend.fork_collection(request).await?))
+    Ok(Json(
+        server
+            .frontend
+            .fork_collection(request)
+            .meter(metering_context_container)
+            .await?,
+    ))
 }
 
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
@@ -2052,4 +2064,7 @@ mod tests {
             serde_json::Value::String("InvalidArgumentError".to_string())
         );
     }
+
+    #[tokio::test]
+    async fn test_fork_collection_metering() {}
 }

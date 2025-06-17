@@ -26,61 +26,21 @@ impl MeterEvent {
 #[cfg(test)]
 mod tests {
     use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
+    use std::sync::{Arc, Mutex};
     use uuid::Uuid;
 
-    use crate::core::{Enterable, MeterEvent};
+    use crate::{
+        core::{Enterable, MeterEvent},
+        test_utils::MeteringTestComponent,
+    };
 
     #[tokio::test]
     async fn test_init_custom_receiver() {
-        use std::sync::{Arc, Mutex};
-
-        #[derive(Clone)]
-        struct TestComponent {
-            pub messages: Arc<Mutex<Vec<String>>>,
-        }
-
-        impl std::fmt::Debug for TestComponent {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.debug_struct("TestComponent").finish()
-            }
-        }
-
-        #[async_trait::async_trait]
-        impl Component for TestComponent {
-            fn get_name() -> &'static str {
-                "TestComponent"
-            }
-
-            fn queue_size(&self) -> usize {
-                100
-            }
-
-            async fn on_start(&mut self, _: &ComponentContext<Self>) {}
-
-            fn on_stop_timeout(&self) -> std::time::Duration {
-                std::time::Duration::from_secs(1)
-            }
-        }
-
-        #[async_trait::async_trait]
-        impl Handler<MeterEvent> for TestComponent {
-            type Result = Option<()>;
-
-            async fn handle(
-                &mut self,
-                message: MeterEvent,
-                _context: &ComponentContext<Self>,
-            ) -> Self::Result {
-                self.messages.lock().unwrap().push(format!("{:?}", message));
-                None
-            }
-        }
-
         let system = System::new();
 
         let shared_messages = Arc::new(Mutex::new(vec![]));
 
-        let test_component = TestComponent {
+        let test_component = MeteringTestComponent {
             messages: shared_messages.clone(),
         };
 
