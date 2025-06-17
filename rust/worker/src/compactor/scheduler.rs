@@ -138,7 +138,16 @@ impl Scheduler {
                     let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
 
                     let last_compaction_time = match tenant {
-                        Ok(tenant) => tenant[0].last_compaction_time,
+                        Ok(tenant) => {
+                            if tenant.is_empty() {
+                                tracing::info!(
+                                    "Ignoring collection: {:?}",
+                                    collection_info.collection_id
+                                );
+                                continue;
+                            }
+                            tenant[0].last_compaction_time
+                        }
                         Err(e) => {
                             tracing::error!("Error: {:?}", e);
                             // Ignore this collection id for this compaction iteration
