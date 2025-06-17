@@ -308,14 +308,18 @@ struct RollupPerCollection {
 }
 
 impl RollupPerCollection {
-    fn new(first_observation: LogPosition, num_records: u64) -> Self {
+    fn new(
+        first_observation: LogPosition,
+        num_records: u64,
+        initial_insertion_epoch_us: u64,
+    ) -> Self {
         Self {
             start_log_position: first_observation,
             limit_log_position: LogPosition::from_offset(
                 first_observation.offset().saturating_add(num_records),
             ),
             reinsert_count: 0,
-            initial_insertion_epoch_us: u64::MAX,
+            initial_insertion_epoch_us,
         }
     }
 
@@ -439,9 +443,13 @@ impl DirtyMarker {
                     reinsert_count,
                     initial_insertion_epoch_us,
                 } => {
-                    let position = rollups
-                        .entry(*collection_id)
-                        .or_insert_with(|| RollupPerCollection::new(*log_position, *num_records));
+                    let position = rollups.entry(*collection_id).or_insert_with(|| {
+                        RollupPerCollection::new(
+                            *log_position,
+                            *num_records,
+                            *initial_insertion_epoch_us,
+                        )
+                    });
                     position.observe_dirty_marker(
                         *log_position,
                         *num_records,
@@ -2472,7 +2480,7 @@ mod tests {
     fn rollup_per_collection_new() {
         let start_position = LogPosition::from_offset(10);
         let num_records = 5;
-        let rollup = RollupPerCollection::new(start_position, num_records);
+        let rollup = RollupPerCollection::new(start_position, num_records, 0);
 
         assert_eq!(start_position, rollup.start_log_position);
         assert_eq!(LogPosition::from_offset(15), rollup.limit_log_position);
@@ -2482,11 +2490,11 @@ mod tests {
     #[test]
     fn rollup_per_collection_observe_dirty_marker() {
         let start_position = LogPosition::from_offset(10);
-        let mut rollup = RollupPerCollection::new(start_position, 5);
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_micros() as u64;
+        let mut rollup = RollupPerCollection::new(start_position, 5, now);
 
         // Observe a marker that extends the range
         rollup.observe_dirty_marker(LogPosition::from_offset(20), 10, 3, now);
@@ -2505,16 +2513,16 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_is_empty() {
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0, 42);
         assert!(rollup.is_empty());
 
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, 42);
         assert!(!rollup.is_empty());
     }
 
     #[test]
     fn rollup_per_collection_requires_backpressure() {
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 100);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 100, 42);
         assert!(rollup.requires_backpressure(50));
         assert!(!rollup.requires_backpressure(150));
         assert!(rollup.requires_backpressure(100)); // Equal case
@@ -2528,7 +2536,7 @@ mod tests {
             .unwrap()
             .as_micros() as u64;
 
-        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5);
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, now);
         rollup.observe_dirty_marker(LogPosition::from_offset(10), 5, 2, now);
 
         let marker = rollup.dirty_marker(collection_id);
@@ -2837,7 +2845,7 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_witness_functionality() {
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, 42);
 
         // Test that the rollup can handle boundary conditions
         assert_eq!(LogPosition::from_offset(10), rollup.start_log_position);
@@ -2847,11 +2855,11 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_backpressure_boundary_conditions() {
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), u64::MAX);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), u64::MAX, 42);
         assert!(rollup.requires_backpressure(u64::MAX - 1));
         assert!(rollup.requires_backpressure(u64::MAX));
 
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(u64::MAX - 100), 50);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(u64::MAX - 100), 50, 42);
         assert!(!rollup.requires_backpressure(100));
         assert!(rollup.requires_backpressure(25));
     }
@@ -3007,11 +3015,11 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_gap_handling() {
-        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5);
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_micros() as u64;
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, now + 1);
 
         rollup.observe_dirty_marker(LogPosition::from_offset(20), 5, 1, now);
 
@@ -3128,7 +3136,7 @@ mod tests {
     #[test]
     fn rollup_per_collection_extreme_positions() {
         let start_position = LogPosition::from_offset(u64::MAX - 10);
-        let rollup = RollupPerCollection::new(start_position, 5);
+        let rollup = RollupPerCollection::new(start_position, 5, 42);
 
         assert_eq!(start_position, rollup.start_log_position);
         assert!(!rollup.is_empty());
@@ -3137,7 +3145,7 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_zero_epoch() {
-        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5);
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 5, u64::MAX);
 
         rollup.observe_dirty_marker(LogPosition::from_offset(15), 5, 1, 0);
 
@@ -3203,23 +3211,24 @@ mod tests {
 
     #[test]
     fn rollup_per_collection_edge_case_positions() {
-        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(100), 0);
+        let mut rollup = RollupPerCollection::new(LogPosition::from_offset(100), 0, 1042);
 
         rollup.observe_dirty_marker(LogPosition::from_offset(50), 25, 1, 1000);
 
         assert_eq!(LogPosition::from_offset(50), rollup.start_log_position);
         assert_eq!(LogPosition::from_offset(100), rollup.limit_log_position);
+        assert_eq!(1000, rollup.initial_insertion_epoch_us);
     }
 
     #[test]
     fn backpressure_threshold_verification() {
-        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), 100);
+        let rollup = RollupPerCollection::new(LogPosition::from_offset(0), 100, 42);
 
         assert!(rollup.requires_backpressure(99));
         assert!(rollup.requires_backpressure(100));
         assert!(!rollup.requires_backpressure(101));
 
-        let zero_rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0);
+        let zero_rollup = RollupPerCollection::new(LogPosition::from_offset(10), 0, 42);
         assert!(!zero_rollup.requires_backpressure(1));
         assert!(zero_rollup.requires_backpressure(0));
     }
