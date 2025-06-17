@@ -125,7 +125,6 @@ impl S3Storage {
             .send()
             .instrument(tracing::trace_span!("cold S3 get"))
             .await;
-
         match res {
             Ok(res) => {
                 let byte_stream = res.body;
@@ -422,16 +421,13 @@ impl S3Storage {
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        let res = {
-            if self.is_oneshot_upload(total_size_bytes) {
-                self.oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
-                    .await
-            } else {
-                self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
-                    .await
-            }
-        };
-        res
+        if self.is_oneshot_upload(total_size_bytes) {
+            self.oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
+                .await
+        } else {
+            self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
+                .await
+        }
     }
 
     #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
@@ -473,7 +469,6 @@ impl S3Storage {
                 }
             }
         })?;
-
         Ok(resp.e_tag.map(ETag))
     }
 
