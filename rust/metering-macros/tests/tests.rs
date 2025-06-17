@@ -3,9 +3,10 @@
 // tests. See https://github.com/rust-lang/rust/issues/110247 for additional information.
 #[cfg(test)]
 use chroma_metering_macros::initialize_metering;
+use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
 use std::sync::atomic::Ordering;
 
-use crate::metering::{Enterable, MeteredFutureExt, TestCapability};
+use crate::metering::{Enterable, MeteredFutureExt, SubmitExt, TestCapability};
 
 /// Represents a user defining their own metering module.
 mod metering {
@@ -62,6 +63,84 @@ mod metering {
             .test_annotated_field
             .fetch_add(increment_value, Ordering::Relaxed);
     }
+}
+
+// NOTE(c-gamble): This needs to be async because `chroma_system::System::start_component` expects
+// to be inside of a Tokio runtime.
+#[tokio::test]
+async fn test_init_custom_receiver() {
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct TestComponent {
+        pub messages: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl std::fmt::Debug for TestComponent {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("TestComponent").finish()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Component for TestComponent {
+        fn get_name() -> &'static str {
+            "TestComponent"
+        }
+
+        fn queue_size(&self) -> usize {
+            100
+        }
+
+        async fn on_start(&mut self, _: &ComponentContext<Self>) {}
+
+        fn on_stop_timeout(&self) -> std::time::Duration {
+            std::time::Duration::from_secs(1)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Handler<Box<dyn metering::MeteringContext>> for TestComponent {
+        type Result = Option<()>;
+
+        async fn handle(
+            &mut self,
+            message: Box<dyn metering::MeteringContext>,
+            _context: &ComponentContext<Self>,
+        ) -> Self::Result {
+            self.messages.lock().unwrap().push(format!("{:?}", message));
+            None
+        }
+    }
+
+    let system = System::new();
+
+    let shared_messages = Arc::new(Mutex::new(vec![]));
+
+    let test_component = TestComponent {
+        messages: shared_messages.clone(),
+    };
+
+    let component_handle = system.start_component(test_component);
+
+    let custom_receiver: Box<dyn ReceiverForMessage<Box<dyn metering::MeteringContext>>> =
+        component_handle.receiver();
+
+    let _ = metering::init_receiver(custom_receiver);
+
+    let metering_context_container =
+        metering::create::<metering::TestContextA>(metering::TestContextA::default());
+    metering_context_container.enter();
+
+    let expected_metering_context = metering::close::<metering::TestContextA>();
+    assert!(expected_metering_context.is_ok());
+
+    expected_metering_context.unwrap().submit().await;
+
+    // Wait a bit to allow the message to propagate
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    assert_eq!(shared_messages.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]
