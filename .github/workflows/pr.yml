@@ -34,6 +34,7 @@ jobs:
             # Outside docs
             outside-docs:
               - '!docs/**'
+              - '*.md'
             # Helm chart changes
             helm-changes:
               - 'k8s/distributed-chroma/**'

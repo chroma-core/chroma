@@ -52,8 +52,8 @@ pub struct S3Storage {
 
 impl S3Storage {
     fn new(
-        bucket: &str,
         client: aws_sdk_s3::Client,
+        bucket: &str,
         upload_part_size_bytes: usize,
         download_part_size_bytes: usize,
     ) -> S3Storage {
