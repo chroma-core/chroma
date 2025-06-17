@@ -376,20 +376,6 @@ impl GrpcLog {
         Ok(self.client.clone())
     }
 
-    fn client_for_purge(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Option<LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>> {
-        match &mut self.alt_client_assigner {
-            Some(assigner) => assigner
-                .clients(&collection_id.to_string())
-                .unwrap_or_default()
-                .first()
-                .cloned(),
-            None => None,
-        }
-    }
-
     // ScoutLogs returns the offset of the next record to be inserted into the log.
     #[tracing::instrument(skip(self))]
     pub(super) async fn scout_logs(
@@ -685,17 +671,22 @@ impl GrpcLog {
         &mut self,
         collection_id: CollectionUuid,
     ) -> Result<(), GrpcPurgeDirtyForCollectionError> {
-        if let Some(mut client) = self.client_for_purge(collection_id) {
+        let Some(assigner) = self.alt_client_assigner.as_mut() else {
+            return Ok(());
+        };
+        let mut err = None;
+        for mut client in assigner.all().into_iter() {
             let request =
                 client.purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
                     // NOTE(rescrv):  Use the untyped string representation of the collection ID.
                     collection_id: collection_id.0.to_string(),
                 });
-            let response = request.await;
-            match response {
-                Ok(_) => Ok(()),
-                Err(e) => Err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty(e)),
+            if let Err(e) = request.await {
+                err = Some(e);
             }
+        }
+        if let Some(err) = err {
+            Err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty(err))
         } else {
             Ok(())
         }
