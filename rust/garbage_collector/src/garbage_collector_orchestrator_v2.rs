@@ -135,6 +135,8 @@ pub enum GarbageCollectorError {
     Result(#[from] RecvError),
     #[error("{0}")]
     Generic(#[from] Box<dyn ChromaError>),
+    #[error("{0}")]
+    Wal3(#[from] wal3::Error),
     #[error("The task was aborted because resources were exhausted")]
     Aborted,
 
@@ -850,7 +852,7 @@ impl GarbageCollectorOrchestrator {
                 .await
                 {
                     tracing::error!("could not destroy/hard delete wal3 instance: {err:?}");
-                    return Err(GarbageCollectorError::Aborted);
+                    return Err(GarbageCollectorError::Wal3(err));
                 }
                 self.sysdb_client
                     .finish_collection_deletion(
