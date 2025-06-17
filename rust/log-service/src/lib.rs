@@ -3794,7 +3794,7 @@ mod tests {
         let collection_id_str = collection_id.to_string();
 
         // Manually initialize a log for this collection to avoid "proxy not initialized" error
-        let storage_prefix = storage_prefix_for_log(collection_id);
+        let storage_prefix = collection_id.storage_prefix_for_log();
         let _log_writer = LogWriter::open_or_initialize(
             LogWriterOptions::default(),
             Arc::clone(&log_server.storage),
