@@ -680,6 +680,8 @@ impl SqliteSysDb {
             ])
             .build_sqlx(sea_query::SqliteQueryBuilder);
 
+        log::info!("SQL: {:#?}, values: {:#?}", sql, values);
+
         let mut rows = sqlx::query_with(&sql, values).fetch(conn);
         let mut rows_by_collection_id: HashMap<CollectionUuid, Vec<SqliteRow>> = HashMap::new();
 
@@ -798,6 +800,8 @@ impl SqliteSysDb {
                 table::SegmentMetadata::BoolValue,
             ])
             .build_sqlx(sea_query::SqliteQueryBuilder);
+
+        log::info!("SQL: {:#?}, values: {:#?}", sql, values);
 
         let mut rows = sqlx::query_with(&sql, values).fetch(conn);
         let mut rows_by_segment_id: HashMap<SegmentUuid, Vec<SqliteRow>> = HashMap::new();
