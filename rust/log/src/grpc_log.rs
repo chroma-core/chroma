@@ -674,22 +674,24 @@ impl GrpcLog {
         let Some(assigner) = self.alt_client_assigner.as_mut() else {
             return Ok(());
         };
-        let mut err = None;
-        for mut client in assigner.all().into_iter() {
-            let request =
-                client.purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
-                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
-                    collection_id: collection_id.0.to_string(),
-                });
-            if let Err(e) = request.await {
-                err = Some(e);
-            }
+        let mut futures = vec![];
+        for client in assigner.all().into_iter() {
+            let mut client = client.clone();
+            let request = async move {
+                client
+                    .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
+                        // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                        collection_id: collection_id.0.to_string(),
+                    })
+                    .await
+                    .map_err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty)
+            };
+            futures.push(request);
         }
-        if let Some(err) = err {
-            Err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty(err))
-        } else {
-            Ok(())
+        if !futures.is_empty() {
+            futures::future::try_join_all(futures.into_iter()).await?;
         }
+        Ok(())
     }
 
     pub async fn seal_log(
