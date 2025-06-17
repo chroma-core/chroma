@@ -41,7 +41,7 @@ async fn main() {
         std::process::exit(13);
     }
     if collection_info.deleted[0] {
-        eprintln!("cowardly refusing to do anything with a deleted database");
+        eprintln!("cowardly refusing to do anything with a deleted collection");
         std::process::exit(13);
     }
     let _resp = log_client
