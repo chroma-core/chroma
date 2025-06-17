@@ -29,7 +29,7 @@ pip install chromadb # python client
 # for client-server mode, chroma run --path /chroma_db_path
 ```
 
-The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@swyx/BasicChromaStarter?v=1)):
+The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@chroma/Chroma-Pluggable-knowledge-for-AI?v=1)):
 
 ```python
 import chromadb

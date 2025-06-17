@@ -1611,7 +1611,7 @@ mod tests {
         // TODO: this should use our official Rust HTTP client, once we have one
         let client = reqwest::Client::new();
         let create_response = client
-            .post("http://localhost:3000/api/v2/tenants/default_tenant/databases/default_database/collections")
+            .post("http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections")
             .json(
                 &CreateCollectionPayload { name: Uuid::new_v4().to_string(), configuration: None, metadata: None, get_or_create: false },
             )

@@ -1969,7 +1969,7 @@ mod tests {
     #[tokio::test]
     async fn test_cors() {
         let mut config = FrontendServerConfig::single_node_default();
-        config.cors_allow_origins = Some(vec!["http://localhost:3000".to_string()]);
+        config.cors_allow_origins = Some(vec!["http://localhost:8000".to_string()]);
 
         let port = test_server(config).await;
 
@@ -1979,14 +1979,14 @@ mod tests {
                 reqwest::Method::OPTIONS,
                 format!("http://localhost:{}/api/v2/heartbeat", port),
             )
-            .header("Origin", "http://localhost:3000")
+            .header("Origin", "http://localhost:8000")
             .send()
             .await
             .unwrap();
         assert_eq!(res.status(), 200);
 
         let allow_origin = res.headers().get("Access-Control-Allow-Origin");
-        assert_eq!(allow_origin.unwrap(), "http://localhost:3000");
+        assert_eq!(allow_origin.unwrap(), "http://localhost:8000");
 
         let allow_methods = res.headers().get("Access-Control-Allow-Methods");
         assert_eq!(allow_methods.unwrap(), "*");
@@ -2008,7 +2008,7 @@ mod tests {
                 reqwest::Method::OPTIONS,
                 format!("http://localhost:{}/api/v2/heartbeat", port),
             )
-            .header("Origin", "http://localhost:3000")
+            .header("Origin", "http://localhost:8000")
             .send()
             .await
             .unwrap();
