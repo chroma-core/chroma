@@ -480,7 +480,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         data = {
             "ids": batch[0],
             "embeddings": optional_embeddings_to_base64_strings(batch[1])
-            if self.get_settings().use_base64_encoding_for_embeddings
+            if self.supports_base64_encoding()
             else batch[1],
             "metadatas": batch[2],
             "documents": batch[3],
@@ -647,10 +647,26 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """Returns the settings of the client"""
         return self._settings
 
+    @trace_method("FastAPI.get_pre_flight_checks", OpenTelemetryGranularity.OPERATION)
+    def get_pre_flight_checks(self) -> Any:
+        if self.pre_flight_checks is None:
+            resp_json = self._make_request("get", "/pre-flight-checks")
+            self.pre_flight_checks = resp_json
+        return self.pre_flight_checks
+
+    @trace_method(
+        "FastAPI.supports_base64_encoding", OpenTelemetryGranularity.OPERATION
+    )
+    def supports_base64_encoding(self) -> bool:
+        pre_flight_checks = self.get_pre_flight_checks()
+        b64_encoding_enabled = cast(
+            bool, pre_flight_checks.get("supports_base64_encoding", False)
+        )
+        return b64_encoding_enabled
+
     @trace_method("FastAPI.get_max_batch_size", OpenTelemetryGranularity.OPERATION)
     @override
     def get_max_batch_size(self) -> int:
-        if self._max_batch_size == -1:
-            resp_json = self._make_request("get", "/pre-flight-checks")
-            self._max_batch_size = cast(int, resp_json["max_batch_size"])
-        return self._max_batch_size
+        pre_flight_checks = self.get_pre_flight_checks()
+        max_batch_size = cast(int, pre_flight_checks.get("max_batch_size", -1))
+        return max_batch_size

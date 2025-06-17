@@ -39,7 +39,7 @@ class ClientCreateCollectionEvent(ProductTelemetryEvent):
 
 
 class CollectionAddEvent(ProductTelemetryEvent):
-    max_batch_size: ClassVar[int] = 1000
+    max_batch_size: ClassVar[int] = 3000
     batch_size: int
     collection_uuid: str
     add_amount: int
@@ -84,7 +84,7 @@ class CollectionAddEvent(ProductTelemetryEvent):
 
 
 class CollectionUpdateEvent(ProductTelemetryEvent):
-    max_batch_size: ClassVar[int] = 100
+    max_batch_size: ClassVar[int] = 300
     batch_size: int
     collection_uuid: str
     update_amount: int
@@ -133,7 +133,7 @@ class CollectionUpdateEvent(ProductTelemetryEvent):
 
 
 class CollectionQueryEvent(ProductTelemetryEvent):
-    max_batch_size: ClassVar[int] = 1000
+    max_batch_size: ClassVar[int] = 3000
     batch_size: int
     collection_uuid: str
     query_amount: int
@@ -198,7 +198,7 @@ class CollectionQueryEvent(ProductTelemetryEvent):
 
 
 class CollectionGetEvent(ProductTelemetryEvent):
-    max_batch_size: ClassVar[int] = 100
+    max_batch_size: ClassVar[int] = 300
     batch_size: int
     collection_uuid: str
     ids_count: int

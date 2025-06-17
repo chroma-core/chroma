@@ -32,6 +32,7 @@ export namespace Api {
      * minimum: 0
      */
     max_batch_size: number;
+    supports_base64_encoding: boolean;
   }
 
   export interface Collection {

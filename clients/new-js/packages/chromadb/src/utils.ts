@@ -312,6 +312,12 @@ export const validateBaseRecordSet = ({
   }
 };
 
+export const validateMaxBatchSize = (recordSetLength: number, maxBatchSize: number) => {
+  if (recordSetLength > maxBatchSize) {
+    throw new ChromaValueError(`Record set length ${recordSetLength} exceeds max batch size ${maxBatchSize}`);
+  }
+};
+
 /**
  * Validates a where clause for metadata filtering.
  * @param where - Where clause object to validate

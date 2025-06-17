@@ -451,6 +451,7 @@ async fn pre_flight_checks(
     server.metrics.pre_flight_checks.add(1, &[]);
     Ok(Json(ChecklistResponse {
         max_batch_size: server.frontend.clone().get_max_batch_size(),
+        supports_base64_encoding: true,
     }))
 }
 
