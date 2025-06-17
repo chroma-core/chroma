@@ -25,51 +25,86 @@ impl MeterEvent {
 
 #[cfg(test)]
 mod tests {
-    use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
     use uuid::Uuid;
 
-    use crate::{
-        core::{Enterable, MeterEvent},
-        test_utils::MeteringTestComponent,
-    };
+    use crate::{core::MeterEvent, CollectionForkContext, MeteredFutureExt};
+    use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
+    #[derive(Clone)]
+    struct MeteringTestComponent {
+        messages: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl std::fmt::Debug for MeteringTestComponent {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("MeteringTestComponent").finish()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Component for MeteringTestComponent {
+        fn get_name() -> &'static str {
+            "MeteringTestComponent"
+        }
+        fn queue_size(&self) -> usize {
+            100
+        }
+        async fn on_start(&mut self, _: &ComponentContext<Self>) {}
+        fn on_stop_timeout(&self) -> std::time::Duration {
+            std::time::Duration::from_secs(1)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Handler<MeterEvent> for MeteringTestComponent {
+        type Result = Option<()>;
+        async fn handle(
+            &mut self,
+            message: MeterEvent,
+            _ctx: &ComponentContext<Self>,
+        ) -> Self::Result {
+            self.messages.lock().unwrap().push(format!("{:?}", message));
+            None
+        }
+    }
+    static TEST_ENV: OnceLock<(System, Arc<Mutex<Vec<String>>>)> = OnceLock::new();
+    fn test_env() -> Arc<Mutex<Vec<String>>> {
+        TEST_ENV
+            .get_or_init(|| {
+                let system = System::new();
+                let messages = Arc::new(Mutex::new(Vec::new()));
+                let component = MeteringTestComponent {
+                    messages: messages.clone(),
+                };
+                let handle = system.start_component(component);
+                let rx: Box<dyn ReceiverForMessage<MeterEvent>> = handle.receiver();
+                let _ = MeterEvent::init_receiver(rx);
+                (system, messages.clone())
+            })
+            .1
+            .clone()
+    }
 
     #[tokio::test]
     async fn test_init_custom_receiver() {
-        let system = System::new();
+        let messages = test_env();
+        messages.lock().unwrap().clear();
 
-        let shared_messages = Arc::new(Mutex::new(vec![]));
+        async fn helper() {
+            if let Ok(metering_context) = crate::core::close::<CollectionForkContext>() {
+                MeterEvent::CollectionFork(metering_context).submit().await;
+            }
+        }
 
-        let test_component = MeteringTestComponent {
-            messages: shared_messages.clone(),
-        };
+        let metering_context_container =
+            crate::create::<CollectionForkContext>(CollectionForkContext::new(
+                "tenant".to_string(),
+                "database".to_string(),
+                Uuid::new_v4(),
+            ));
+        helper().meter(metering_context_container).await;
 
-        let component_handle = system.start_component(test_component);
-
-        let custom_receiver: Box<dyn ReceiverForMessage<MeterEvent>> = component_handle.receiver();
-
-        let _ = MeterEvent::init_receiver(custom_receiver);
-
-        let metering_context_container = crate::create::<crate::core::CollectionForkContext>(
-            crate::core::CollectionForkContext {
-                tenant: "tenant".to_string(),
-                database: "database".to_string(),
-                collection_id: Uuid::new_v4(),
-                latest_collection_logical_size_bytes: 0,
-            },
-        );
-        metering_context_container.enter();
-
-        let expected_metering_context = crate::close::<crate::core::CollectionForkContext>();
-        assert!(expected_metering_context.is_ok());
-
-        MeterEvent::CollectionFork(expected_metering_context.unwrap())
-            .submit()
-            .await;
-
-        // Wait a bit to allow the message to propagate
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        assert_eq!(shared_messages.lock().unwrap().len(), 1);
+        assert_eq!(messages.lock().unwrap().len(), 1);
     }
 }

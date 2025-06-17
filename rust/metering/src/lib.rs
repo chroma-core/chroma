@@ -1,6 +1,5 @@
 mod core;
 mod receiver;
-mod test_utils;
 mod types;
 
 pub use core::{
