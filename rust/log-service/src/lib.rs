@@ -315,7 +315,7 @@ impl RollupPerCollection {
                 first_observation.offset().saturating_add(num_records),
             ),
             reinsert_count: 0,
-            initial_insertion_epoch_us: 0,
+            initial_insertion_epoch_us: u64::MAX,
         }
     }
 
@@ -334,7 +334,7 @@ impl RollupPerCollection {
                 LogPosition::from_offset(log_position.offset().saturating_add(num_records));
         }
         // Take the biggest reinsert count.
-        self.reinsert_count = std::cmp::max(self.reinsert_count, reinsert_count) + 1;
+        self.reinsert_count = std::cmp::max(self.reinsert_count, reinsert_count);
         // Consider the most recent initial insertion time so if we've compacted earlier we drop.
         self.initial_insertion_epoch_us =
             std::cmp::min(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
@@ -366,7 +366,7 @@ impl RollupPerCollection {
                 .limit_log_position
                 .offset()
                 .saturating_sub(self.start_log_position.offset()),
-            reinsert_count: self.reinsert_count,
+            reinsert_count: self.reinsert_count.saturating_add(1),
             initial_insertion_epoch_us: self.initial_insertion_epoch_us,
         }
     }
@@ -2477,7 +2477,6 @@ mod tests {
         assert_eq!(start_position, rollup.start_log_position);
         assert_eq!(LogPosition::from_offset(15), rollup.limit_log_position);
         assert_eq!(0, rollup.reinsert_count);
-        assert_eq!(0, rollup.initial_insertion_epoch_us);
     }
 
     #[test]
@@ -2500,8 +2499,8 @@ mod tests {
         rollup.observe_dirty_marker(LogPosition::from_offset(5), 2, 1, now - 1000);
         assert_eq!(LogPosition::from_offset(5), rollup.start_log_position);
         assert_eq!(LogPosition::from_offset(30), rollup.limit_log_position);
-        assert_eq!(3, rollup.reinsert_count); // Should keep max
-        assert_eq!(now, rollup.initial_insertion_epoch_us); // Should keep max
+        assert_eq!(3, rollup.reinsert_count); // Same
+        assert_eq!(now - 1000, rollup.initial_insertion_epoch_us); // Should move to min
     }
 
     #[test]
@@ -2544,7 +2543,7 @@ mod tests {
                 assert_eq!(collection_id, cid);
                 assert_eq!(LogPosition::from_offset(10), log_position);
                 assert_eq!(5, num_records);
-                assert_eq!(2, reinsert_count);
+                assert_eq!(3, reinsert_count);
                 assert_eq!(now, initial_insertion_epoch_us);
             }
             _ => panic!("Expected MarkDirty variant"),
@@ -2685,7 +2684,7 @@ mod tests {
         assert_eq!(LogPosition::from_offset(10), rollup1.start_log_position);
         assert_eq!(LogPosition::from_offset(33), rollup1.limit_log_position);
         assert_eq!(1, rollup1.reinsert_count); // max of 1 and 0
-        assert_eq!(now, rollup1.initial_insertion_epoch_us); // max of now and now-1000
+        assert_eq!(now - 1000, rollup1.initial_insertion_epoch_us); // max of now and now-1000
 
         // Check collection_id2 rollup
         let rollup2 = rollup.get(&collection_id2).unwrap();
@@ -3070,7 +3069,7 @@ mod tests {
             collection_rollup.limit_log_position
         );
         assert_eq!(99, collection_rollup.reinsert_count);
-        assert_eq!(now + 999, collection_rollup.initial_insertion_epoch_us);
+        assert_eq!(now, collection_rollup.initial_insertion_epoch_us);
     }
 
     #[test]
