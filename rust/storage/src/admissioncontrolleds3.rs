@@ -685,7 +685,7 @@ mod tests {
 
     use rand::{distributions::Alphanumeric, Rng};
 
-    use crate::{admissioncontrolleds3::AdmissionControlledS3Storage, s3::S3Storage};
+    use crate::{admissioncontrolleds3::AdmissionControlledS3Storage, s3::S3Storage, GetOptions};
 
     fn get_s3_client() -> aws_sdk_s3::Client {
         // Set up credentials assuming minio is running locally
