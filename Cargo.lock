@@ -1730,6 +1730,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-metering-macros"
+version = "0.1.0"
+dependencies = [
+ "pin-project",
+ "proc-macro2 1.0.95",
+ "quote 1.0.40",
+ "syn 2.0.102",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "chroma-segment"
 version = "0.1.0"
 dependencies = [
