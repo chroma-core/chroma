@@ -1,0 +1,12 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 224805d1b23398d59a037d3ae192e5d32fc114957b64ea0b8209d67ef642035b # shrinks to operations_before_seal = [], operations_after_migrate = [OperationRecord { id: "", document: None, embedding: Some("[...]"), metadata: None, operation: Add }]
+cc 6c09d8d5a095fde4c6263f24e208c2db1ac203d8f8f7d899573659268255c239 # shrinks to initial_operations = [], source_operations = [], fork_operations = []
+cc 85a395fbfca69e7c9197fce89252b273c98389e3f5a773c443f405639f137e49 # shrinks to operations = [(0, OperationRecord { id: "", document: None, embedding: Some("[...]"), metadata: None, operation: Add })]
+cc 9fbbfa4c87cfe3d41253eadb2bc048aa36bc939208cbe23e3ee5eb8094df91d4 # shrinks to read_offset = 1, batch_size = 1, operations = [OperationRecord { id: "", document: None, embedding: Some("[...]"), metadata: None, operation: Add }]
+cc ba6cef35853bca82d7527a7f42b2dbb8a6d60f3084f249993b56cf945fd83b0e # shrinks to read_offset = 1, batch_size = 1, operations = [OperationRecord { id: "", document: None, embedding: Some("[...]"), metadata: None, operation: Add }]
+cc bec924432fdfb2bd91273126b0cd30300a6988be3bbb3cf4ceb928eb8a37bacd # shrinks to initial_operations = [], source_operations = [], fork_operations = []
