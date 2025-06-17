@@ -436,6 +436,15 @@ impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'
         6
     }
 
+    async fn prefetch_ngrams<'me, Ngrams>(&'me self, ngrams: Ngrams)
+    where
+        Ngrams: IntoIterator<Item = &'me str> + Send + Sync,
+    {
+        self.posting_lists_blockfile_reader
+            .load_blocks_for_prefixes(ngrams)
+            .await
+    }
+
     async fn lookup_ngram_range<'me, NgramRange>(
         &'me self,
         ngram_range: NgramRange,
