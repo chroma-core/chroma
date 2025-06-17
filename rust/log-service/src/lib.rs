@@ -334,10 +334,10 @@ impl RollupPerCollection {
                 LogPosition::from_offset(log_position.offset().saturating_add(num_records));
         }
         // Take the biggest reinsert count.
-        self.reinsert_count = std::cmp::max(self.reinsert_count, reinsert_count);
+        self.reinsert_count = std::cmp::max(self.reinsert_count, reinsert_count) + 1;
         // Consider the most recent initial insertion time so if we've compacted earlier we drop.
         self.initial_insertion_epoch_us =
-            std::cmp::max(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
+            std::cmp::min(self.initial_insertion_epoch_us, initial_insertion_epoch_us);
     }
 
     fn witness_cursor(&mut self, witness: Option<&Witness>) {
