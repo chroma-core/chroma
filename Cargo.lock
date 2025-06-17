@@ -1718,6 +1718,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-metering"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "chroma-metering-macros",
+ "chroma-system",
+ "chrono",
+ "pin-project",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "chroma-metering-macros"
 version = "0.1.0"
 dependencies = [

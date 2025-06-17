@@ -3,16 +3,16 @@ name = "chroma-metering"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-proc-macro = true
-
 [dependencies]
-proc-macro2 = "1.0.95"
-quote = "1.0.40"
+async-trait = { workspace = true }
+chroma-metering-macros = { workspace = true }
+chroma-system = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+pin-project = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-pin-project = "1.1.10"
-syn = "2.0.102"
+uuid = { workspace = true } 
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["time"] }
+serde_json = { workspace = true }
