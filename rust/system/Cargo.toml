@@ -12,7 +12,7 @@ async-trait = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["time", "io-util"] }
 tokio-util = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }

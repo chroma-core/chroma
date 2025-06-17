@@ -1,7 +1,9 @@
 use chroma_metering_macros::initialize_metering;
+use chroma_system::ReceiverForMessage;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::Ordering;
+use std::sync::{atomic::Ordering, OnceLock};
+use tracing::Span;
 use uuid::Uuid;
 
 mod utils;
@@ -160,6 +162,25 @@ pub enum MeterEvent {
     CollectionFork(CollectionForkContext),
     CollectionRead(CollectionReadContext),
     CollectionWrite(CollectionWriteContext),
+}
+
+pub static METER_EVENT_RECEIVER: OnceLock<Box<dyn ReceiverForMessage<MeterEvent>>> =
+    OnceLock::new();
+
+impl MeterEvent {
+    pub fn init_receiver(receiver: Box<dyn ReceiverForMessage<MeterEvent>>) {
+        if METER_EVENT_RECEIVER.set(receiver).is_err() {
+            tracing::error!("Meter event handler is already initialized")
+        }
+    }
+
+    pub async fn submit(self) {
+        if let Some(handler) = METER_EVENT_RECEIVER.get() {
+            if let Err(err) = handler.send(self, Some(Span::current())).await {
+                tracing::error!("Unable to send meter event: {err}")
+            }
+        }
+    }
 }
 
 #[cfg(test)]

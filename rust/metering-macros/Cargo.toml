@@ -7,8 +7,6 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
-async-trait = { workspace = true }
-chroma-system = { workspace = true }
 proc-macro2 = "1.0.95"
 pin-project = { workspace = true }
 quote = "1.0.40"
