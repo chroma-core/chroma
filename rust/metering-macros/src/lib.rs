@@ -102,14 +102,15 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
             fn exit(&self);
         }
 
-        /// Enter sets the current thread's context to this context
         impl Enterable for MeteringContextContainer {
+            /// Enter sets the current thread's context to this context
             fn enter(&self) {
                 ACTIVE_METERING_CONTEXT_CONTAINER.with(|cell| {
                     cell.replace(self.clone());
                 });
             }
 
+            /// Exit clears the current thread's active metering context
             fn exit(&self) {
                 ACTIVE_METERING_CONTEXT_CONTAINER.with(|cell| {
                     cell.replace(::std::sync::Arc::new(BlankMeteringContext));
@@ -208,5 +209,44 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
                 output
             }
         }
+
+        /// A global variable that stores the receiver to which metering contexts are sent
+        /// when they are submitted.
+        static RECEIVER: ::std::sync::OnceLock<
+            Box<dyn ::chroma_system::ReceiverForMessage<Box<dyn MeteringContext>>>,
+        > = ::std::sync::OnceLock::new();
+
+        /// Initialize a custom receiver that implements `chroma_system::ReceiverForMessage`.
+        /// Returns a void result if successful, else a `ReceiverAlreadyInitializedError` if
+        /// the receiver has already been initialized.
+        pub fn init_receiver(
+            receiver: Box<dyn ::chroma_system::ReceiverForMessage<Box<dyn MeteringContext>>>,
+        ) -> Result<(), MeteringError> {
+            if RECEIVER.set(receiver).is_err() {
+                return Err(MeteringError::ReceiverAlreadyInitializedError);
+            }
+            Ok(())
+        }
+
+        /// A trait that defines a `submit` function that sends metering contexts to their receiver.
+        /// Emits an error trace if sending is unsuccessful.
+        #[::async_trait::async_trait]
+        pub trait SubmitExt: MeteringContext + Sized {
+            async fn submit(self) {
+                if let Some(receiver) = RECEIVER.get() {
+                    if let Err(error) = receiver
+                        .send(Box::new(self), Some(::tracing::Span::current()))
+                        .await
+                    {
+                        ::tracing::error!("Unable to send metering context to receiver: {:?}", error);
+                    }
+                }
+            }
+        }
+
+        /// A blanket implementation of `SubmitExt` for all types implementing `MeteringContext` that are
+        /// `Send` and `'static`.
+        #[::async_trait::async_trait]
+        impl<T> SubmitExt for T where T: MeteringContext + ::std::marker::Send + 'static {}
     })
 }
