@@ -850,12 +850,7 @@ impl GarbageCollectorOrchestrator {
                 .await
                 {
                     tracing::error!("could not destroy/hard delete wal3 instance: {err:?}");
-                    // NOTE(rescrv):  The alternative is to have a dead letter queue for this
-                    // collection.  Once hard deleted from sysdb it'll be "impossible" to find the
-                    // garbage later, so leave the soft-deleted state to drive this state machine
-                    // to resolution, probably with operator involvement as this should never
-                    // happen and is tested.
-                    continue;
+                    return Err(GarbageCollectorError::Aborted);
                 }
                 self.sysdb_client
                     .finish_collection_deletion(
