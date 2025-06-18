@@ -130,8 +130,8 @@ proptest::proptest! {
             manifest.apply_fragment(fragment);
         }
         eprintln!("starting manifest = {manifest:#?}");
-        let start = manifest.oldest_timestamp().unwrap();
-        let limit = manifest.newest_timestamp().unwrap();
+        let start = manifest.oldest_timestamp();
+        let limit = manifest.next_write_timestamp();
         let cache = TestingSnapshotCache::default();
         for offset in start.offset()..limit.offset() {
             let position = LogPosition::from_offset(offset);
@@ -182,8 +182,8 @@ proptest::proptest! {
             }
         }
         eprintln!("starting manifest = {manifest:#?}");
-        let start = manifest.oldest_timestamp().unwrap();
-        let limit = manifest.newest_timestamp().unwrap();
+        let start = manifest.oldest_timestamp();
+        let limit = manifest.next_write_timestamp();
         let mut cache = TestingSnapshotCache {
             snapshots: snapshots.clone(),
         };

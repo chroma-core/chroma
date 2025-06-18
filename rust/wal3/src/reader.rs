@@ -82,22 +82,22 @@ impl LogReader {
         )
     }
 
-    pub async fn maximum_log_position(&self) -> Result<LogPosition, Error> {
+    pub async fn oldest_timestamp(&self) -> Result<LogPosition, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
         else {
             return Err(Error::UninitializedLog);
         };
-        Ok(manifest.maximum_log_position())
+        Ok(manifest.oldest_timestamp())
     }
 
-    pub async fn minimum_log_position(&self) -> Result<LogPosition, Error> {
+    pub async fn next_write_timestamp(&self) -> Result<LogPosition, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
         else {
             return Err(Error::UninitializedLog);
         };
-        Ok(manifest.minimum_log_position())
+        Ok(manifest.next_write_timestamp())
     }
 
     /// Scan up to:
@@ -781,6 +781,7 @@ mod tests {
             snapshots: vec![],
             fragments: fragments.clone(),
             initial_offset: Some(LogPosition::from_offset(1)),
+            initial_seq_no: Some(FragmentSeqNo(1)),
         };
 
         // Boundary case 1: Request exactly at the manifest limit
@@ -869,6 +870,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: None,
+            initial_seq_no: None,
         };
         let result_empty =
             LogReader::scan_from_manifest(&empty_manifest, LogPosition::from_offset(0), limits);
@@ -3360,6 +3362,7 @@ mod tests {
                 },
             ],
             initial_offset: Some(LogPosition { offset: 1 }),
+            initial_seq_no: Some(FragmentSeqNo(1)),
         };
         let Some(fragments) = LogReader::scan_from_manifest(
             &manifest,
