@@ -7,7 +7,6 @@ edition = "2021"
 async-trait = { workspace = true }
 chroma-metering-macros = { workspace = true }
 chroma-system = { workspace = true }
-chrono = { workspace = true, features = ["serde"] }
 pin-project = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

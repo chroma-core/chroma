@@ -38,7 +38,6 @@ use chroma_types::{
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
     Where,
 };
-use chrono::Utc;
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -939,12 +938,6 @@ impl ServiceBasedFrontend {
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let mut records = Vec::new();
 
-        // NOTE(c-gamble): We are using a non-standard metering pattern in which we create a metering context within a
-        // nested call because we have to emit both a read and write event for delete requests. We need to extract the
-        // request start time from the current context here because our metering library only allows one active metering
-        // context per thread at a time. Eventually, this should be replaced by a single `CollectionDeleteRecordsContext`.
-        let mut maybe_request_received_at = None;
-
         let read_event = if let Some(where_clause) = r#where {
             let collection_and_segments = self
                 .collections_with_segments_provider
@@ -1005,9 +998,6 @@ impl ServiceBasedFrontend {
             });
 
             if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
-                // Store the request start time for the subsequent write event
-                maybe_request_received_at = Some(collection_read_context.request_received_at);
-
                 // Return the read event
                 Some(MeterEvent::CollectionRead(collection_read_context))
             } else {
@@ -1058,11 +1048,6 @@ impl ServiceBasedFrontend {
                 database_name.clone(),
                 collection_id.0.to_string(),
                 WriteAction::Delete,
-                if let Some(request_received_at) = maybe_request_received_at {
-                    request_received_at
-                } else {
-                    Utc::now()
-                },
             ));
         collection_write_context_container.enter();
 

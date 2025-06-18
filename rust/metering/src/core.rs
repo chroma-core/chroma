@@ -1,5 +1,4 @@
 use chroma_metering_macros::initialize_metering;
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -128,9 +127,6 @@ initialize_metering! {
         pub collection_id: String,
         #[serde(flatten)]
         pub action: ReadAction,
-        // NOTE(c-gamble): We use chrono's `DateTime` object here because `std::time::Instant`
-        // is not compatible with serde.
-        pub request_received_at: DateTime<Utc>,
         pub fts_query_length: MeteringAtomicU64,
         pub metadata_predicate_count: MeteringAtomicU64,
         pub query_embedding_count: MeteringAtomicU64,
@@ -140,7 +136,7 @@ initialize_metering! {
     }
 
     impl CollectionReadContext {
-        pub fn new(tenant: String, database: String, collection_id: String, action: ReadAction, request_received_at: DateTime<Utc>,) -> Self {
+        pub fn new(tenant: String, database: String, collection_id: String, action: ReadAction) -> Self {
             CollectionReadContext {
                 tenant,
                 database,
@@ -152,7 +148,6 @@ initialize_metering! {
                 pulled_log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
                 latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
                 return_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                request_received_at,
             }
         }
     }
@@ -235,19 +230,17 @@ initialize_metering! {
         pub collection_id: String,
         #[serde(flatten)]
         pub action: WriteAction,
-        pub request_received_at: DateTime<Utc>,
         pub log_size_bytes: MeteringAtomicU64,
     }
 
     impl CollectionWriteContext {
-        pub fn new(tenant: String, database: String, collection_id: String, action: WriteAction, request_received_at: DateTime<Utc>) -> Self {
+        pub fn new(tenant: String, database: String, collection_id: String, action: WriteAction) -> Self {
             CollectionWriteContext {
                 tenant,
                 database,
                 collection_id,
                 action,
                 log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                request_received_at,
             }
         }
     }
@@ -273,7 +266,6 @@ pub enum MeterEvent {
 
 #[cfg(test)]
 mod tests {
-    use chrono::Utc;
     use std::sync::{atomic::AtomicU64, Arc};
 
     use super::{CollectionWriteContext, MeterEvent, WriteAction};
@@ -287,7 +279,6 @@ mod tests {
             collection_id: "test_collection".to_string(),
             action: WriteAction::Add,
             log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(1000))),
-            request_received_at: Utc::now(),
         });
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");
         let json_event =
