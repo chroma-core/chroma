@@ -188,9 +188,11 @@ impl ManifestManager {
             return Err(Error::UninitializedLog);
         };
         let latest_fragment = manifest.fragments.iter().max_by_key(|f| f.limit.offset());
-        let next_log_position = latest_fragment
-            .map(|f| f.limit)
-            .unwrap_or(LogPosition::from_offset(1));
+        let next_log_position = latest_fragment.map(|f| f.limit).unwrap_or(
+            manifest
+                .initial_offset
+                .unwrap_or(LogPosition::from_offset(1)),
+        );
         let next_seq_no_to_assign = latest_fragment
             .map(|f| f.seq_no + 1)
             .unwrap_or(FragmentSeqNo(1));
