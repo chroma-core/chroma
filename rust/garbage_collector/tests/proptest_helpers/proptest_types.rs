@@ -1,5 +1,5 @@
 use super::segment_file_strategies::SegmentGroup;
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionAndSegments, CollectionUuid, SegmentUuid};
 
 #[derive(Clone, Debug)]
 pub enum Transition {
@@ -21,4 +21,20 @@ pub enum Transition {
         min_versions_to_keep: usize,
     },
     NoOp,
+}
+
+pub struct SegmentIds {
+    pub vector: SegmentUuid,
+    pub metadata: SegmentUuid,
+    pub record: SegmentUuid,
+}
+
+impl From<CollectionAndSegments> for SegmentIds {
+    fn from(segments: CollectionAndSegments) -> Self {
+        SegmentIds {
+            vector: segments.vector_segment.id,
+            metadata: segments.metadata_segment.id,
+            record: segments.record_segment.id,
+        }
+    }
 }

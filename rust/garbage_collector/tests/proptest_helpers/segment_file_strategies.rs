@@ -11,6 +11,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use super::proptest_types::SegmentIds;
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Default)]
 enum SegmentFileReferenceType {
     #[default]
@@ -152,7 +154,7 @@ fn new_or_forked_sparse_index_strategy(
 #[derive(Clone, Debug)]
 pub struct SegmentFilePaths {
     paths: HashMap<SegmentFileReferenceType, Vec<SegmentFileReference>>,
-    pub segment_id: SegmentUuid,
+    pub root_segment_id: SegmentUuid,
     pub prefix_path: String,
 }
 
@@ -189,7 +191,7 @@ impl Arbitrary for SegmentFilePaths {
                 .into_iter()
                 .map(|(k, v)| (k, vec![v]))
                 .collect::<HashMap<_, _>>(),
-            segment_id,
+            root_segment_id: segment_id,
             prefix_path: prefix_path_clone.clone(),
         })
         .boxed()
@@ -228,9 +230,9 @@ impl SegmentFilePaths {
         paths
     }
 
-    fn into_segment_flush_info(self) -> SegmentFlushInfo {
+    fn into_segment_flush_info(self, segment_id: SegmentUuid) -> SegmentFlushInfo {
         SegmentFlushInfo {
-            segment_id: self.segment_id,
+            segment_id,
             file_paths: self.into(),
         }
     }
@@ -365,7 +367,7 @@ impl SegmentFilePaths {
                 },
             );
 
-        let segment_id = self.segment_id;
+        let segment_id = self.root_segment_id;
         let prefix_path = self.prefix_path.clone();
         (hnsw_references_strategy, sparse_indices_strategy)
             .prop_map(move |(hnsw_references, sparse_indices)| {
@@ -374,7 +376,7 @@ impl SegmentFilePaths {
 
                 Self {
                     paths: references,
-                    segment_id,
+                    root_segment_id: segment_id,
                     prefix_path: prefix_path.clone(),
                 }
             })
@@ -401,10 +403,10 @@ impl SegmentGroup {
         all_file_paths
     }
 
-    pub fn into_segment_flushes(self) -> Arc<[SegmentFlushInfo]> {
-        let vector_flush_info = self.vector.into_segment_flush_info();
-        let metadata_flush_info = self.metadata.into_segment_flush_info();
-        let record_flush_info = self.record.into_segment_flush_info();
+    pub fn into_segment_flushes(self, ids: &SegmentIds) -> Arc<[SegmentFlushInfo]> {
+        let vector_flush_info = self.vector.into_segment_flush_info(ids.vector);
+        let metadata_flush_info = self.metadata.into_segment_flush_info(ids.metadata);
+        let record_flush_info = self.record.into_segment_flush_info(ids.record);
 
         Arc::from([vector_flush_info, metadata_flush_info, record_flush_info])
     }
