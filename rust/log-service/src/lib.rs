@@ -354,6 +354,13 @@ impl RollupPerCollection {
         self.start_log_position = witness
             .map(|x| x.1.position)
             .unwrap_or(LogPosition::from_offset(1));
+        if self.start_log_position > self.limit_log_position {
+            tracing::error!(
+                "invariant violation; will patch: {:?} > {:?}",
+                self.start_log_position,
+                self.limit_log_position
+            );
+        }
         self.limit_log_position = self.limit_log_position.max(self.start_log_position);
     }
 
