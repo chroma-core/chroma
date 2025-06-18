@@ -6,5 +6,5 @@ pub use core::{
     close, create, get_current, with_current, CollectionForkContext, CollectionReadContext,
     CollectionWriteContext, Enterable, FtsQueryLength, LatestCollectionLogicalSizeBytes,
     LogSizeBytes, MetadataPredicateCount, MeterEvent, MeteredFutureExt, PulledLogSizeBytes,
-    QueryEmbeddingCount, ReadAction, RequestHandlingDuration, ReturnBytes, WriteAction,
+    QueryEmbeddingCount, ReadAction, RequestCompletedAt, ReturnBytes, WriteAction,
 };
