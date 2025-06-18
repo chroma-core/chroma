@@ -29,6 +29,7 @@ mod tests {
 
     use crate::{core::MeterEvent, CollectionForkContext, MeteredFutureExt};
     use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, System};
+    use chrono::Utc;
     #[derive(Clone)]
     struct MeteringTestComponent {
         messages: Arc<Mutex<Vec<String>>>,
@@ -100,6 +101,7 @@ mod tests {
                 "tenant".to_string(),
                 "database".to_string(),
                 "collection".to_string(),
+                Utc::now(),
             ));
         helper().meter(metering_context_container).await;
 
