@@ -3,6 +3,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Clone, Debug)]
@@ -10,7 +11,7 @@ pub struct MarkVersionsAtSysDbOperator {}
 
 #[derive(Debug)]
 pub struct MarkVersionsAtSysDbInput {
-    pub version_file: CollectionVersionFile,
+    pub version_file: Arc<CollectionVersionFile>,
     pub versions_to_delete: VersionListForCollection,
     pub sysdb_client: SysDb,
     pub epoch_id: i64,
@@ -19,7 +20,7 @@ pub struct MarkVersionsAtSysDbInput {
 
 #[derive(Debug)]
 pub struct MarkVersionsAtSysDbOutput {
-    pub version_file: CollectionVersionFile,
+    pub version_file: Arc<CollectionVersionFile>,
     pub epoch_id: i64,
     pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
@@ -78,7 +79,7 @@ mod tests {
     #[tokio::test]
     async fn test_mark_versions_success() {
         let sysdb = SysDb::Test(TestSysDb::new());
-        let version_file = CollectionVersionFile::default();
+        let version_file = Arc::new(CollectionVersionFile::default());
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
             database_id: "default".to_string(),
@@ -105,7 +106,7 @@ mod tests {
     #[tokio::test]
     async fn test_mark_versions_empty_list() {
         let sysdb = SysDb::Test(TestSysDb::new());
-        let version_file = CollectionVersionFile::default();
+        let version_file = Arc::new(CollectionVersionFile::default());
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
             database_id: "default".to_string(),
@@ -132,7 +133,7 @@ mod tests {
     #[tokio::test]
     async fn test_mark_versions_error() {
         let sysdb = SysDb::Test(TestSysDb::new());
-        let version_file = CollectionVersionFile::default();
+        let version_file = Arc::new(CollectionVersionFile::default());
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
             database_id: "default".to_string(),

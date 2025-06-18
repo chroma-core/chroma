@@ -17,6 +17,7 @@ use chroma_types::CollectionUuid;
 use prost::Message;
 use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Clone, Debug, Default)]
@@ -53,7 +54,7 @@ impl Debug for FetchVersionFileInput {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct FetchVersionFileOutput {
-    pub file: CollectionVersionFile,
+    pub file: Arc<CollectionVersionFile>,
     pub collection_id: CollectionUuid,
 }
 
@@ -128,7 +129,7 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
         .map_err(FetchVersionFileError::InvalidUuid)?;
 
         Ok(FetchVersionFileOutput {
-            file: version_file,
+            file: Arc::new(version_file),
             collection_id,
         })
     }
@@ -212,7 +213,7 @@ mod tests {
         let result = operator.run(&input).await.expect("Failed to run operator");
 
         // Verify the content
-        assert_eq!(result.file, test_file);
+        assert_eq!(result.file, test_file.into());
 
         // Cleanup - Note: object_store doesn't have a delete method,
         // but the test bucket should be cleaned up between test runs
