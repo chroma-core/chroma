@@ -62,7 +62,7 @@ pub struct GarbageCollectorOrchestrator {
     root_manager: RootManager,
     result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
     cleanup_mode: CleanupMode,
-    version_files: HashMap<CollectionUuid, CollectionVersionFile>,
+    version_files: HashMap<CollectionUuid, Arc<CollectionVersionFile>>,
     versions_to_delete_output: Option<ComputeVersionsToDeleteOutput>,
     pending_mark_versions_at_sysdb_tasks: HashSet<CollectionUuid>,
     pending_list_files_at_version_tasks: HashSet<(CollectionUuid, i64)>,
