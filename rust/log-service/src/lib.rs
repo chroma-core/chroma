@@ -806,7 +806,7 @@ impl LogServer {
             storage_prefix.clone(),
         );
 
-        let res = log_reader.maximum_log_position().await;
+        let res = log_reader.next_write_timestamp().await;
         if let Err(wal3::Error::UninitializedLog) = res {
             return self
                 .forward_update_collection_log_offset(Request::new(request))
@@ -1176,8 +1176,8 @@ impl LogServer {
             );
             let (start_position, limit_position) = match log_reader.manifest().await {
                 Ok(Some(manifest)) => (
-                    manifest.minimum_log_position(),
-                    manifest.maximum_log_position(),
+                    manifest.oldest_timestamp(),
+                    manifest.next_write_timestamp(),
                 ),
                 Ok(None) | Err(wal3::Error::UninitializedLog) => {
                     tracing::info!("Log is uninitialized on rust log service. Forwarding ScoutLog request to legacy log service");
@@ -1395,7 +1395,7 @@ impl LogServer {
                 Arc::clone(&storage),
                 source_prefix.clone(),
             );
-            if let Err(err) = log_reader.maximum_log_position().await {
+            if let Err(err) = log_reader.next_write_timestamp().await {
                 match err {
                     wal3::Error::UninitializedLog => {
                         return self.forward_fork_logs(Request::new(request)).await;
@@ -1440,7 +1440,7 @@ impl LogServer {
                 target_prefix,
             );
             // This is the next record to insert, so we'll have to adjust downwards.
-            let max_offset = log_reader.maximum_log_position().await.map_err(|err| {
+            let max_offset = log_reader.next_write_timestamp().await.map_err(|err| {
                 Status::new(err.code().into(), format!("Failed to read copied log: {}", err))
             })?;
             if max_offset < offset {

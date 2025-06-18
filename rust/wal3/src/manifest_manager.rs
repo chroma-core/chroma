@@ -487,6 +487,7 @@ mod tests {
                 snapshots: vec![],
                 fragments: vec![],
                 initial_offset: None,
+                initial_seq_no: None,
             },
             work.0
         );
@@ -516,6 +517,7 @@ mod tests {
                     }
                 ],
                 initial_offset: None,
+                initial_seq_no: None,
             },
             work.2
         );

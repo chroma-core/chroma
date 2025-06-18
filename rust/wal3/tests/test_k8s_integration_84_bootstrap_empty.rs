@@ -46,4 +46,21 @@ async fn test_k8s_integration_84_bootstrap_empty() {
         .await
         .unwrap();
     assert_eq!(0, scan.len());
+    reader.scrub().await.unwrap();
+
+    let writer = LogWriter::open(options, Arc::clone(&storage), PREFIX, WRITER, mark_dirty)
+        .await
+        .unwrap();
+    writer.manifest().unwrap().scrub().unwrap();
+    writer
+        .append_many(vec![Vec::from("fresh-write".to_string())])
+        .await
+        .unwrap();
+
+    let scan = reader
+        .scan(LogPosition::from_offset(42), Limits::default())
+        .await
+        .unwrap();
+    assert_eq!(1, scan.len());
+    reader.scrub().await.unwrap();
 }
