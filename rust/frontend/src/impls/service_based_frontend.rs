@@ -9,7 +9,8 @@ use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
-    MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes, WriteAction,
+    MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, RequestCompletedAt, ReturnBytes,
+    WriteAction,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
@@ -638,9 +639,10 @@ impl ServiceBasedFrontend {
             .set_collection_with_segments(collection_and_segments)
             .await;
 
-        // Attach the collection's latest logical size to the metering context
+        // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
-            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes)
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -750,8 +752,11 @@ impl ServiceBasedFrontend {
             .add_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
-        // Attach the log size in bytes to the metering context
-        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+            context.request_completed_at(Utc::now());
+        });
 
         // TODO: Submit event after the response is sent
         if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
@@ -826,8 +831,11 @@ impl ServiceBasedFrontend {
             .update_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
-        // Attach the log size in bytes to the metering context
-        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+            context.request_completed_at(Utc::now());
+        });
 
         // TODO: Submit event after the response is sent
         if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
@@ -904,8 +912,11 @@ impl ServiceBasedFrontend {
             .upsert_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
-        // Attach the log size in bytes to the metering context
-        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+            context.request_completed_at(Utc::now());
+        });
 
         // TODO: Submit event after the response is sent
         if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
@@ -1002,6 +1013,8 @@ impl ServiceBasedFrontend {
                 context.pulled_log_size_bytes(get_result.pulled_log_bytes);
                 context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
                 context.return_bytes(return_bytes);
+                // NOTE(c-gamble): We skip attaching `request_completed_at` to the read context because the delete
+                // request is technically not complete until the write context is emitted.
             });
 
             if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
@@ -1066,8 +1079,13 @@ impl ServiceBasedFrontend {
             ));
         collection_write_context_container.enter();
 
-        // Attach the log size bytes to the write context
-        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+        // Attach metadata to the write context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+            // NOTE(c-gamble): We attach the request completion time here because this is when the delete request
+            // has finished executing.
+            context.request_completed_at(Utc::now());
+        });
 
         // TODO: Submit event after the response is sent
         if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
@@ -1162,6 +1180,7 @@ impl ServiceBasedFrontend {
             context.pulled_log_size_bytes(count_result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
+            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -1281,6 +1300,7 @@ impl ServiceBasedFrontend {
             context.pulled_log_size_bytes(get_result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
+            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -1404,6 +1424,7 @@ impl ServiceBasedFrontend {
             context.pulled_log_size_bytes(query_result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
+            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent

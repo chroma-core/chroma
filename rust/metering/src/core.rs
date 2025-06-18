@@ -63,19 +63,19 @@ initialize_metering! {
     }
 
     #[capability]
-    pub trait RequestHandlingDuration {
-        fn request_handling_duration(&self, completed_at: DateTime<Utc>);
+    pub trait RequestCompletedAt {
+        fn request_completed_at(&self, completed_at: DateTime<Utc>);
     }
 
     ////////////////////////////////// collection_fork //////////////////////////////////
     #[context(
         capabilities = [
             LatestCollectionLogicalSizeBytes,
-            RequestHandlingDuration,
+            RequestCompletedAt,
         ],
         handlers = [
             __handler_collection_fork_latest_collection_logical_size_bytes,
-            __handler_collection_fork_request_handling_duration,
+            __handler_collection_fork_request_completed_at,
         ]
     )]
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -86,7 +86,7 @@ initialize_metering! {
         pub collection_id: String,
         pub request_received_at: DateTime<Utc>,
         pub latest_collection_logical_size_bytes: MeteringAtomicU64,
-        pub request_handling_duration_ms: MeteringAtomicU64,
+        pub request_execution_time_ms: MeteringAtomicU64,
     }
 
     impl CollectionForkContext {
@@ -102,7 +102,7 @@ initialize_metering! {
                 collection_id,
                 request_received_at,
                 latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
+                request_execution_time_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
             }
         }
     }
@@ -117,8 +117,8 @@ initialize_metering! {
             .store(latest_collection_logical_size_bytes, Ordering::SeqCst);
     }
 
-    /// Handler for [`crate::core::RequestHandlingDuration`] capability for collection fork contexts
-    fn __handler_collection_fork_request_handling_duration(
+    /// Handler for [`crate::core::RequestCompletedAt`] capability for collection fork contexts
+    fn __handler_collection_fork_request_completed_at(
         context: &CollectionForkContext,
         completed_at: DateTime<Utc>,
     ) {
@@ -128,7 +128,7 @@ initialize_metering! {
             .max(0) as u64;
 
         context
-            .request_handling_duration_ms
+            .request_execution_time_ms
             .store(duration_ms, Ordering::SeqCst);
     }
 
@@ -141,7 +141,7 @@ initialize_metering! {
             PulledLogSizeBytes,
             LatestCollectionLogicalSizeBytes,
             ReturnBytes,
-            RequestHandlingDuration,
+            RequestCompletedAt,
             ],
         handlers = [
             __handler_collection_read_fts_query_length,
@@ -150,7 +150,7 @@ initialize_metering! {
             __handler_collection_read_pulled_log_size_bytes,
             __handler_collection_read_latest_collection_logical_size_bytes,
             __handler_collection_read_return_bytes,
-            __handler_collection_read_request_handling_duration,
+            __handler_collection_read_request_completed_at,
         ]
     )]
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -168,7 +168,7 @@ initialize_metering! {
         pub pulled_log_size_bytes: MeteringAtomicU64,
         pub latest_collection_logical_size_bytes: MeteringAtomicU64,
         pub return_bytes: MeteringAtomicU64,
-        pub request_handling_duration_ms: MeteringAtomicU64,
+        pub request_execution_time_ms: MeteringAtomicU64,
     }
 
     impl CollectionReadContext {
@@ -191,7 +191,7 @@ initialize_metering! {
                 pulled_log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
                 latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
                 return_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
+                request_execution_time_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
             }
         }
     }
@@ -256,8 +256,8 @@ initialize_metering! {
             .store(return_bytes, Ordering::SeqCst);
     }
 
-    /// Handler for [`crate::core::RequestHandlingDuration`] capability for collection read contexts
-    fn __handler_collection_read_request_handling_duration(
+    /// Handler for [`crate::core::RequestCompletedAt`] capability for collection read contexts
+    fn __handler_collection_read_request_completed_at(
         context: &CollectionReadContext,
         completed_at: DateTime<Utc>,
     ) {
@@ -267,7 +267,7 @@ initialize_metering! {
             .max(0) as u64;
 
         context
-            .request_handling_duration_ms
+            .request_execution_time_ms
             .store(duration_ms, Ordering::SeqCst);
     }
 
@@ -275,11 +275,11 @@ initialize_metering! {
     #[context(
         capabilities = [
             LogSizeBytes,
-            RequestHandlingDuration,
+            RequestCompletedAt,
             ],
         handlers = [
             __handler_collection_write_log_size_bytes,
-            __handler_collection_write_request_handling_duration,
+            __handler_collection_write_request_completed_at,
         ]
     )]
     #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -292,7 +292,7 @@ initialize_metering! {
         pub action: WriteAction,
         pub request_received_at: DateTime<Utc>,
         pub log_size_bytes: MeteringAtomicU64,
-        pub request_handling_duration_ms: MeteringAtomicU64,
+        pub request_execution_time_ms: MeteringAtomicU64,
     }
 
     impl CollectionWriteContext {
@@ -310,7 +310,7 @@ initialize_metering! {
                 action,
                 request_received_at,
                 log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
+                request_execution_time_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
             }
         }
     }
@@ -325,8 +325,8 @@ initialize_metering! {
             .store(log_size_bytes, Ordering::SeqCst);
     }
 
-    /// Handler for [`crate::core::RequestHandlingDuration`] capability for collection write contexts
-    fn __handler_collection_write_request_handling_duration(
+    /// Handler for [`crate::core::RequestCompletedAt`] capability for collection write contexts
+    fn __handler_collection_write_request_completed_at(
         context: &CollectionWriteContext,
         completed_at: DateTime<Utc>,
     ) {
@@ -336,7 +336,7 @@ initialize_metering! {
             .max(0) as u64;
 
         context
-            .request_handling_duration_ms
+            .request_execution_time_ms
             .store(duration_ms, Ordering::SeqCst);
     }
 }
@@ -367,7 +367,7 @@ mod tests {
             action: WriteAction::Add,
             request_received_at: Utc::now(),
             log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(1000))),
-            request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+            request_execution_time_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
         });
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");
         let json_event =
