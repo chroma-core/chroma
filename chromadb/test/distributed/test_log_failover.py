@@ -315,24 +315,15 @@ def test_log_failover_with_compaction_and_gc_delay(
             ids=[str(i)],
             embeddings=[embeddings[-1]],
         )
-        if i == RECORDS / 2:
-            # NOTE(rescrv):  This compaction tests a very particular race when migrating logs.
-            # Imagine this sequence:
-            # 1. Write 51 records to the go log.
-            # 2. Compact all 51 records.
-            # 3. Write 49 more records to the go log.
-            # 4. Seal the go log.
-            # 5. Log migration moves the remaining 49 records to the rust service.
-            # 6. Cached frontend tries to read from a timestamp that includes all 100 records, using
-            #    the initial compaction, but from a log that only has 49 records.
-            # The fix is to make sure the log returns not found when a prefix of the log is
-            # compacted.  This forces a fallback to repopulate the cache of the sysdb.
-            wait_for_version_increase(client, collection.name, 0)
-            # We sleep for 90 seconds to let GC bulldoze this collection with high probability.
-            time.sleep(90)
 
     request = SealLogRequest(collection_id=str(collection.id))
     response = log_service_stub.SealLog(request, timeout=60)
+    request = MigrateLogRequest(collection_id=str(collection.id))
+    response = log_service_stub.MigrateLog(request, timeout=60)
+
+    wait_for_version_increase(client, collection.name, 0)
+    # We sleep for 90 seconds to let GC bulldoze this collection with high probability.
+    time.sleep(90)
 
     # Add another RECORDS records, where each embedding has 3 dimensions randomly generated between 0
     # and 1
