@@ -23,7 +23,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 use thiserror::Error;
-use tracing::{instrument, span, Instrument, Span};
+use tracing::{span, Instrument, Span};
 use uuid::Uuid;
 
 #[allow(dead_code)]
@@ -127,7 +127,6 @@ impl GarbageCollector {
         self.system = Some(system);
     }
 
-    #[instrument]
     async fn garbage_collect_collection(
         &self,
         version_absolute_cutoff_time: DateTime<Utc>,
