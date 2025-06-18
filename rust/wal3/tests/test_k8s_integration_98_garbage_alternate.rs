@@ -6,8 +6,8 @@ use tokio::sync::Mutex;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Cursor, CursorName, CursorStoreOptions, Error, GarbageCollectionOptions, LogWriter,
-    LogWriterOptions, Manifest,
+    Cursor, CursorName, CursorStoreOptions, Error, GarbageCollectionOptions, LogReaderOptions,
+    LogWriter, LogWriterOptions, Manifest,
 };
 
 pub mod common;
@@ -46,6 +46,12 @@ async fn writer_thread(
                             },
                             &witness,
                         )
+                        .await
+                        .unwrap();
+                    writer
+                        .reader(LogReaderOptions::default())
+                        .unwrap()
+                        .scrub()
                         .await
                         .unwrap();
                     break;
