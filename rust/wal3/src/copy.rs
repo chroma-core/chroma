@@ -59,7 +59,24 @@ pub async fn copy(
         };
         Manifest::initialize_from_manifest(options, storage, &target, manifest).await?;
     } else {
-        Manifest::initialize(options, storage, &target, "empty copy task").await?;
+        let reference = reader.manifest().await?.ok_or(Error::Internal)?;
+        let setsum = Setsum::default();
+        let collected = Setsum::default();
+        let acc_bytes = 0;
+        let manifest = Manifest {
+            setsum,
+            collected,
+            acc_bytes,
+            writer: "zero-copy task".to_string(),
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: Some(reference.next_write_timestamp()),
+            initial_seq_no: reference.next_fragment_seq_no(),
+        };
+        if manifest.initial_offset.is_some() && manifest.initial_seq_no.is_none() {
+            return Err(Error::Internal);
+        }
+        Manifest::initialize_from_manifest(options, storage, &target, manifest).await?;
     }
     Ok(())
 }

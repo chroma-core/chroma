@@ -34,6 +34,7 @@ async fn writer_thread(
         loop {
             match writer.append(message.clone()).await {
                 Ok(position) => {
+                    let position = position + 1u64;
                     println!("writer succeeds in iteration {i}");
                     successful_writes += 1;
                     witness = cursors
