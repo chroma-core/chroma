@@ -37,8 +37,6 @@
 //!    - Input: Version file, versions to delete, unused S3 files
 //!    - Output: Deletion confirmation
 
-use std::fmt::{Debug, Formatter};
-
 use crate::types::{CleanupMode, GarbageCollectorResponse};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -51,6 +49,8 @@ use chroma_system::{
 use chroma_types::chroma_proto::CollectionVersionFile;
 use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
+use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
@@ -87,7 +87,7 @@ pub struct GarbageCollectorOrchestrator {
     dispatcher: ComponentHandle<Dispatcher>,
     storage: Storage,
     result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
-    pending_version_file: Option<CollectionVersionFile>,
+    pending_version_file: Option<Arc<CollectionVersionFile>>,
     pending_versions_to_delete: Option<chroma_types::chroma_proto::VersionListForCollection>,
     pending_epoch_id: Option<i64>,
     num_versions_deleted: u32,

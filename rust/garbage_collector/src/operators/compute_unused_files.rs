@@ -8,7 +8,10 @@ use chroma_types::{
     chroma_proto::{CollectionSegmentInfo, CollectionVersionFile, VersionListForCollection},
     HNSW_PATH,
 };
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -171,7 +174,7 @@ impl ComputeUnusedFilesOperator {
 
 #[derive(Clone)]
 pub struct ComputeUnusedFilesInput {
-    pub version_file: CollectionVersionFile,
+    pub version_file: Arc<CollectionVersionFile>,
     pub versions_to_delete: VersionListForCollection,
     pub oldest_version_to_keep: i64,
 }
@@ -239,7 +242,9 @@ impl Operator<ComputeUnusedFilesInput, ComputeUnusedFilesOutput> for ComputeUnus
         // Build a map to version to segment_info
         let mut version_to_segment_info = HashMap::new();
         let version_history = version_file
+            .as_ref()
             .version_history
+            .as_ref()
             .ok_or(ComputeUnusedFilesError::MissingVersionHistory)?;
 
         // Check if version history is empty
@@ -465,7 +470,7 @@ mod tests {
 
         let input = ComputeUnusedFilesInput {
             oldest_version_to_keep: 3,
-            version_file: chroma_proto::CollectionVersionFile {
+            version_file: Arc::new(chroma_proto::CollectionVersionFile {
                 collection_info_immutable: None,
                 version_history: Some(CollectionVersionHistory {
                     versions: vec![
@@ -520,7 +525,7 @@ mod tests {
                         },
                     ],
                 }),
-            },
+            }),
             versions_to_delete: chroma_proto::VersionListForCollection {
                 versions: vec![1, 2],
                 collection_id: "test_collection".to_string(),
@@ -570,12 +575,12 @@ mod tests {
 
         // Create input with missing version info
         let input = ComputeUnusedFilesInput {
-            version_file: chroma_proto::CollectionVersionFile {
+            version_file: Arc::new(chroma_proto::CollectionVersionFile {
                 collection_info_immutable: None,
                 version_history: Some(CollectionVersionHistory {
                     versions: vec![], // Empty version history wrapped in Some
                 }),
-            },
+            }),
             versions_to_delete: chroma_proto::VersionListForCollection {
                 versions: vec![1, 2], // Versions that don't exist in history
                 collection_id: "test_collection".to_string(),
@@ -606,7 +611,7 @@ mod tests {
         );
 
         let input = ComputeUnusedFilesInput {
-            version_file: chroma_proto::CollectionVersionFile {
+            version_file: Arc::new(chroma_proto::CollectionVersionFile {
                 collection_info_immutable: None,
                 version_history: Some(CollectionVersionHistory {
                     versions: vec![
@@ -639,7 +644,7 @@ mod tests {
                         },
                     ],
                 }),
-            },
+            }),
             versions_to_delete: chroma_proto::VersionListForCollection {
                 versions: vec![1, 2], // Try to delete 2 versions
                 collection_id: "test_collection".to_string(),

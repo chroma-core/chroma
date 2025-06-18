@@ -3,7 +3,7 @@ use chroma_blockstore::{arrow::provider::RootManagerError, RootManager};
 use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid, HNSW_PATH};
-use std::{collections::HashSet, str::FromStr};
+use std::{collections::HashSet, str::FromStr, sync::Arc};
 use thiserror::Error;
 use tokio::task::{JoinError, JoinSet};
 use uuid::Uuid;
@@ -11,14 +11,14 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct ListFilesAtVersionInput {
     root_manager: RootManager,
-    version_file: CollectionVersionFile,
+    version_file: Arc<CollectionVersionFile>,
     version: i64,
 }
 
 impl ListFilesAtVersionInput {
     pub fn new(
         root_manager: RootManager,
-        version_file: CollectionVersionFile,
+        version_file: Arc<CollectionVersionFile>,
         version: i64,
     ) -> Self {
         Self {

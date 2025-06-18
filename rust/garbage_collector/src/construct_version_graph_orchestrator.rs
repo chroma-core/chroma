@@ -30,6 +30,7 @@ use petgraph::{dot::Dot, graph::DiGraph};
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
+    sync::Arc,
 };
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
@@ -55,7 +56,7 @@ pub struct ConstructVersionGraphOrchestrator {
     lineage_file_path: Option<String>,
 
     version_dependencies: Vec<VersionDependency>,
-    version_files: HashMap<CollectionUuid, CollectionVersionFile>,
+    version_files: HashMap<CollectionUuid, Arc<CollectionVersionFile>>,
     num_pending_tasks: usize,
 }
 
@@ -88,7 +89,7 @@ impl ConstructVersionGraphOrchestrator {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct ConstructVersionGraphResponse {
-    pub version_files: HashMap<CollectionUuid, CollectionVersionFile>,
+    pub version_files: HashMap<CollectionUuid, Arc<CollectionVersionFile>>,
     pub graph: VersionGraph,
 }
 
