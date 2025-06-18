@@ -59,7 +59,7 @@ Billing is account-based. All data across your collections and tenants within a 
 
 **Can I deploy Chroma in my own VPC?**
 
-Yes. We offer a BYOC (bring your own cloud) option for single-tenant deployments. Contact us for more details.
+Yes. We offer a BYOC (bring your own cloud) option for single-tenant deployments. [Contact us](mailto:support@trychroma.com) for more details.
 
 **Do I get charged for background indexing?**
 

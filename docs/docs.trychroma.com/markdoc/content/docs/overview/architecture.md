@@ -12,7 +12,7 @@ Chroma runs wherever you need it to, supporting you in everything from local exp
 - **Single Node**: as a single-node server - great for small to medium scale workloads of < 10M records in a handful of collections.
 - **Distributed**: as a scalable distributed system - great for large scale production workloads, supporting millions of collections.
 
-You can use Chroma Cloud (link), which is a managed offering of distributed Chroma.
+You can use [Chroma Cloud](https://www.trychroma.com/signup), which is a managed offering of distributed Chroma.
 
 ## Core Components
 
@@ -46,7 +46,7 @@ Responsible for **all read operations.**
 
 **The Compactor**
 
-A background job that builds from
+A service that periodically builds and maintains indexes.
 
 - Reads from the Log and builds updated vector / full-text / metadata indexes
 - Writes materialized index data to shared storage
@@ -70,9 +70,9 @@ These components operate differently depending on the deployment mode, particula
     - The system catalog is backed by a SQL database.
     - All services use local SSDs as caches to reduce object storage latency and cost.
 
-## Request sequences
+## Request Sequences
 
-**Read path**
+**Read Path**
 
 <INSERT DIAGRAM>
 
