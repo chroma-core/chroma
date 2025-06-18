@@ -8,3 +8,5 @@ pub use core::{
     LogSizeBytes, MetadataPredicateCount, MeterEvent, MeteredFutureExt, PulledLogSizeBytes,
     QueryEmbeddingCount, ReadAction, RequestCompletedAt, ReturnBytes, WriteAction,
 };
+
+pub use types::MeteringAtomicU64;
