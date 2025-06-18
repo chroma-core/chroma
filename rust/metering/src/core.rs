@@ -38,11 +38,6 @@ initialize_metering! {
     }
 
     #[capability]
-    pub trait RequestHandlingDuration {
-        fn request_handling_duration(&self, completed_at: DateTime<Utc>);
-    }
-
-    #[capability]
     pub trait FtsQueryLength {
         fn fts_query_length(&self, fts_query_length: u64);
     }
@@ -109,7 +104,6 @@ initialize_metering! {
     ////////////////////////////////// collection_read //////////////////////////////////
     #[context(
         capabilities = [
-            RequestHandlingDuration,
             FtsQueryLength,
             MetadataPredicateCount,
             QueryEmbeddingCount,
@@ -118,7 +112,6 @@ initialize_metering! {
             ReturnBytes,
             ],
         handlers = [
-            __handler_collection_read_request_handling_duration,
             __handler_collection_read_fts_query_length,
             __handler_collection_read_metadata_predicate_count,
             __handler_collection_read_query_embedding_count,
@@ -144,7 +137,6 @@ initialize_metering! {
         pub pulled_log_size_bytes: MeteringAtomicU64,
         pub latest_collection_logical_size_bytes: MeteringAtomicU64,
         pub return_bytes: MeteringAtomicU64,
-        pub request_handling_duration_ms: MeteringAtomicU64,
     }
 
     impl CollectionReadContext {
@@ -161,7 +153,6 @@ initialize_metering! {
                 latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
                 return_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
                 request_received_at,
-                request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
             }
         }
     }
@@ -226,29 +217,13 @@ initialize_metering! {
             .store(return_bytes, Ordering::SeqCst);
     }
 
-    /// Handler for [`crate::core::RequestHandlingDuration`] capability for collection read contexts
-    fn __handler_collection_read_request_handling_duration(
-        context: &CollectionReadContext,
-        completed_at: DateTime<Utc>,
-    ) {
-        let duration_ms = completed_at
-            .signed_duration_since(context.request_received_at) // NOTE(c-gamble): We use signed to suppress "time went backward" errors.
-            .num_milliseconds()
-            .max(0) as u64;
-
-        context
-            .request_handling_duration_ms
-            .store(duration_ms, Ordering::SeqCst);
-    }
 
     ////////////////////////////////// collection_write //////////////////////////////////
     #[context(
         capabilities = [
-            RequestHandlingDuration,
             LogSizeBytes
             ],
         handlers = [
-            __handler_collection_write_request_handling_duration,
             __handler_collection_write_log_size_bytes
         ]
     )]
@@ -262,7 +237,6 @@ initialize_metering! {
         pub action: WriteAction,
         pub request_received_at: DateTime<Utc>,
         pub log_size_bytes: MeteringAtomicU64,
-        pub request_handling_duration_ms: MeteringAtomicU64,
     }
 
     impl CollectionWriteContext {
@@ -274,7 +248,6 @@ initialize_metering! {
                 action,
                 log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
                 request_received_at,
-                request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
             }
         }
     }
@@ -287,21 +260,6 @@ initialize_metering! {
         context
             .log_size_bytes
             .store(log_size_bytes, Ordering::SeqCst);
-    }
-
-    /// Handler for [`crate::core::RequestHandlingDuration`] capability for collection write contexts
-    fn __handler_collection_write_request_handling_duration(
-        context: &CollectionWriteContext,
-        completed_at: DateTime<Utc>,
-    ) {
-        let duration_ms = completed_at
-            .signed_duration_since(context.request_received_at) // NOTE(c-gamble): We use signed to suppress "time went backward" errors.
-            .num_milliseconds()
-            .max(0) as u64;
-
-        context
-            .request_handling_duration_ms
-            .store(duration_ms, Ordering::SeqCst);
     }
 }
 
@@ -330,7 +288,6 @@ mod tests {
             action: WriteAction::Add,
             log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(1000))),
             request_received_at: Utc::now(),
-            request_handling_duration_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
         });
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");
         let json_event =
