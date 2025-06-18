@@ -24,6 +24,7 @@ use chroma_types::{
     UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
+use chrono::Utc;
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -1216,6 +1217,7 @@ async fn fork_collection(
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
+            Utc::now(),
         ));
 
     let _guard =
@@ -1336,6 +1338,7 @@ async fn collection_add(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Add,
+            Utc::now(),
         ));
 
     tracing::info!(name: "collection_add", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
@@ -1439,6 +1442,7 @@ async fn collection_update(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Update,
+            Utc::now(),
         ));
 
     tracing::info!(name: "collection_update", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
@@ -1549,6 +1553,7 @@ async fn collection_upsert(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Upsert,
+            Utc::now(),
         ));
 
     tracing::info!(name: "collection_upsert", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
@@ -1650,6 +1655,7 @@ async fn collection_delete(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::GetForDelete,
+            Utc::now(),
         ));
 
     tracing::info!(name: "collection_delete", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.as_ref().map_or(0, |ids| ids.len()), has_where = r#where.is_some());
@@ -1729,6 +1735,7 @@ async fn collection_count(
             database.clone(),
             collection_id.clone(),
             ReadAction::Count,
+            Utc::now(),
         ));
 
     let request = CountRequest::try_new(
@@ -1830,6 +1837,7 @@ async fn collection_get(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Get,
+            Utc::now(),
         ));
 
     tracing::info!(
@@ -1946,6 +1954,7 @@ async fn collection_query(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Query,
+            Utc::now(),
         ));
 
     tracing::info!(
