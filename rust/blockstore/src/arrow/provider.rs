@@ -332,7 +332,7 @@ impl Default for BlockMetrics {
             flush_latency: meter
                 .u64_histogram("block_flush_latency")
                 .with_description("Flush latency")
-                .with_unit("microseconds")
+                .with_unit("milliseconds")
                 .build(),
             num_get_requests: meter
                 .u64_histogram("block_num_cold_get_requests")

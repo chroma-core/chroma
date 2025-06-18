@@ -58,7 +58,6 @@ impl S3Storage {
         upload_part_size_bytes: usize,
         download_part_size_bytes: usize,
     ) -> S3Storage {
-        tracing::info!("Creating S3 storage with bucket {}", bucket);
         S3Storage {
             bucket: bucket.to_string(),
             client,
@@ -105,7 +104,6 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self), level = "trace")]
     #[allow(clippy::type_complexity)]
     async fn get_stream_and_e_tag(
         &self,
@@ -422,12 +420,12 @@ impl S3Storage {
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         if self.is_oneshot_upload(total_size_bytes) {
-            self.oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
-                .await
-        } else {
-            self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
-                .await
+            return self
+                .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
+                .await;
         }
+        self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
+            .await
     }
 
     #[tracing::instrument(skip(self, create_bytestream_fn), level = "trace")]
