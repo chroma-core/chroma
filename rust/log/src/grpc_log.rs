@@ -117,7 +117,7 @@ impl ChromaError for GrpcGetCollectionsWithNewDataError {
 
 #[derive(Error, Debug)]
 pub enum GrpcUpdateCollectionLogOffsetError {
-    #[error("Failed to update collection log offset")]
+    #[error("Failed to update collection log offset: {0}")]
     FailedToUpdateCollectionLogOffset(#[from] tonic::Status),
     #[error(transparent)]
     ClientAssignerError(#[from] ClientAssignmentError),
