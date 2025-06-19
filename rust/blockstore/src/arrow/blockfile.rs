@@ -11,6 +11,7 @@ use crate::arrow::root::CURRENT_VERSION;
 use crate::arrow::sparse_index::SparseIndexWriter;
 use crate::key::CompositeKey;
 use crate::key::KeyWrapper;
+use chroma_cache::AysncPartitionedMutex;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
@@ -31,7 +32,7 @@ pub struct ArrowUnorderedBlockfileWriter {
     block_deltas: Arc<Mutex<HashMap<Uuid, UnorderedBlockDelta>>>,
     root: RootWriter,
     id: Uuid,
-    write_mutex: Arc<tokio::sync::Mutex<()>>,
+    deltas_mutex: Arc<AysncPartitionedMutex<Uuid>>,
 }
 // TODO: method visibility should not be pub(crate)
 
@@ -79,7 +80,7 @@ impl ArrowUnorderedBlockfileWriter {
             block_deltas,
             root: root_writer,
             id,
-            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            deltas_mutex: Arc::new(AysncPartitionedMutex::new(())),
         }
     }
 
@@ -98,7 +99,7 @@ impl ArrowUnorderedBlockfileWriter {
             block_deltas,
             root: new_root,
             id,
-            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            deltas_mutex: Arc::new(AysncPartitionedMutex::new(())),
         }
     }
 
@@ -158,118 +159,155 @@ impl ArrowUnorderedBlockfileWriter {
         Ok(flusher)
     }
 
+    // TODO: value must be smaller than the block size except for position lists, which are a special case
+    // where we split the value across multiple blocks
     pub(crate) async fn set<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
         key: K,
         value: V,
     ) -> Result<(), Box<dyn ChromaError>> {
-        // TODO: for now the BF writer locks the entire write operation
-        let _guard = self.write_mutex.lock().await;
-
-        // TODO: value must be smaller than the block size except for position lists, which are a special case
-        //  where we split the value across multiple blocks
-
-        // Get the target block id for the key
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+        let (_, target_block_id) = loop {
+            // Get the target block id for the key
+            let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
 
-        // See if a delta for the target block already exists, if not create a new one and add it to the transaction state
-        // Creating a delta loads the block entirely into memory
+            // Lock the delta for the target block id
+            let delta_guard = self.deltas_mutex.lock(&target_block_id).await;
+
+            // Recheck if the target block id is still the same. Otherwise, someone concurrently
+            // modified the root and we need to restart.
+            let new_target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+            // Someone concurrently converted the block to delta and/or split it so restart all over.
+            if new_target_block_id != target_block_id {
+                continue;
+            }
+            break (delta_guard, target_block_id);
+        };
 
         let delta = {
             let deltas = self.block_deltas.lock();
             deltas.get(&target_block_id).cloned()
         };
 
-        let delta = match delta {
-            None => {
-                let block = match self
-                    .block_manager
-                    .get(
-                        &self.root.prefix_path,
-                        &target_block_id,
-                        StorageRequestPriority::P0,
-                    )
-                    .await
-                {
-                    Ok(Some(block)) => block,
-                    Ok(None) => {
-                        return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+        if let Some(delta) = delta {
+            // Add the key, value pair to delta.
+            // Then check if its over size and split as needed
+            delta.add(prefix, key, value);
+
+            if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
+                let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
+                // First add to deltas before making it visible through the sparse index.
+                // This prevents dangling references.
+                let blocks_to_add = {
+                    let mut blocks_to_add = Vec::with_capacity(new_blocks.len());
+                    let mut deltas = self.block_deltas.lock();
+                    for (split_key, new_delta) in new_blocks {
+                        blocks_to_add.push((split_key, new_delta.id));
+                        deltas.insert(new_delta.id, new_delta);
                     }
-                    Err(e) => {
-                        return Err(Box::new(e));
-                    }
+                    blocks_to_add
                 };
-                let new_delta = match self
-                    .block_manager
-                    .fork::<K, V, UnorderedBlockDelta>(&block.id, &self.root.prefix_path)
-                    .await
-                {
-                    Ok(delta) => delta,
-                    Err(e) => {
-                        return Err(Box::new(e));
+                // Update the sparse index atomically in one batch.
+                self.root
+                    .sparse_index
+                    .apply_updates(vec![], blocks_to_add)
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+            }
+        } else {
+            // Fetch the block and convert to delta.
+            let block = match self
+                .block_manager
+                .get(
+                    &self.root.prefix_path,
+                    &target_block_id,
+                    StorageRequestPriority::P0,
+                )
+                .await
+            {
+                Ok(Some(block)) => block,
+                Ok(None) => {
+                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                }
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+            let new_delta = match self
+                .block_manager
+                .fork::<K, V, UnorderedBlockDelta>(&block.id, &self.root.prefix_path)
+                .await
+            {
+                Ok(delta) => delta,
+                Err(e) => {
+                    return Err(Box::new(e));
+                }
+            };
+
+            // Add the key, value pair to delta.
+            // Then check if its over size and split as needed
+            new_delta.add(prefix, key, value);
+
+            if new_delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
+                // First add to deltas before making it visible through the sparse index.
+                // This prevents dangling references.
+                let new_blocks = new_delta.split::<K, V>(self.block_manager.max_block_size_bytes());
+                let (blocks_to_add, blocks_to_replace) = {
+                    let mut blocks_to_add = Vec::with_capacity(new_blocks.len());
+                    let mut deltas = self.block_deltas.lock();
+                    for (split_key, new_delta) in new_blocks {
+                        blocks_to_add.push((split_key, new_delta.id));
+                        deltas.insert(new_delta.id, new_delta);
                     }
+                    deltas.insert(new_delta.id, new_delta.clone());
+                    (blocks_to_add, vec![(target_block_id, new_delta.id)])
                 };
-                let new_id = new_delta.id;
-                // Blocks can be empty.
+                // Update the sparse index atomically in one batch.
+                self.root
+                    .sparse_index
+                    .apply_updates(blocks_to_replace, blocks_to_add)
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+            } else {
+                let mut deltas = self.block_deltas.lock();
+                deltas.insert(new_delta.id, new_delta.clone());
                 self.root
                     .sparse_index
                     .replace_block(target_block_id, new_delta.id);
-                {
-                    let mut deltas = self.block_deltas.lock();
-                    deltas.insert(new_id, new_delta.clone());
-                }
-                new_delta
-            }
-            Some(delta) => delta,
-        };
-
-        // Add the key, value pair to delta.
-        // Then check if its over size and split as needed
-        delta.add(prefix, key, value);
-
-        if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
-            let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
-            for (split_key, new_delta) in new_blocks {
-                self.root
-                    .sparse_index
-                    .add_block(split_key, new_delta.id)
-                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-
-                let mut deltas = self.block_deltas.lock();
-                deltas.insert(new_delta.id, new_delta);
             }
         }
 
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub async fn get_owned<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         &self,
         prefix: &str,
         key: K,
     ) -> Result<Option<V::PreparedValue>, Box<dyn ChromaError>> {
-        // TODO: for now the BF writer locks the entire write operation
-        let _guard = self.write_mutex.lock().await;
-
-        // TODO: value must be smaller than the block size except for position lists, which are a special case
-        //  where we split the value across multiple blocks
-
-        // Get the target block id for the key
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+        let (_, target_block_id) = loop {
+            // Get the target block id for the key
+            let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
 
-        // See if a delta for the target block already exists, if not create a new one and add it to the transaction state
-        // Creating a delta loads the block entirely into memory
+            // Lock the delta for the target block id
+            let delta_guard = self.deltas_mutex.lock(&target_block_id).await;
+
+            // Recheck if the target block id is still the same. Otherwise, someone concurrently
+            // modified the root and we need to restart.
+            let new_target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+            // Someone concurrently converted the block to delta and/or split it so restart all over.
+            if new_target_block_id != target_block_id {
+                continue;
+            }
+            break (delta_guard, target_block_id);
+        };
 
         let delta = {
             let deltas = self.block_deltas.lock();
             deltas.get(&target_block_id).cloned()
         };
 
-        let delta = match delta {
+        Ok(match delta {
             None => {
                 let block = match self
                     .block_manager
@@ -298,21 +336,19 @@ impl ArrowUnorderedBlockfileWriter {
                         return Err(Box::new(e));
                     }
                 };
-                let new_id = new_delta.id;
-                // Blocks can be empty.
+                // Read the value before making the delta visible through the sparse index.
+                let value = V::get_owned_value_from_delta(prefix, key.into(), &new_delta);
+                // Insert to delta first and then make it visible through the sparse index to
+                // prevent dangling references.
+                let mut deltas = self.block_deltas.lock();
+                deltas.insert(new_delta.id, new_delta.clone());
                 self.root
                     .sparse_index
                     .replace_block(target_block_id, new_delta.id);
-                {
-                    let mut deltas = self.block_deltas.lock();
-                    deltas.insert(new_id, new_delta.clone());
-                }
-                new_delta
+                value
             }
-            Some(delta) => delta,
-        };
-
-        Ok(V::get_owned_value_from_delta(prefix, key.into(), &delta))
+            Some(delta) => V::get_owned_value_from_delta(prefix, key.into(), &delta),
+        })
     }
 
     pub(crate) async fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(
@@ -320,18 +356,30 @@ impl ArrowUnorderedBlockfileWriter {
         prefix: &str,
         key: K,
     ) -> Result<(), Box<dyn ChromaError>> {
-        let _guard = self.write_mutex.lock().await;
-        // Get the target block id for the key
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+        let (_, target_block_id) = loop {
+            // Get the target block id for the key
+            let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
 
-        // TODO: clean this up as its redudant with the set method
+            // Lock the delta for the target block id
+            let delta_guard = self.deltas_mutex.lock(&target_block_id).await;
+
+            // Recheck if the target block id is still the same. Otherwise, someone concurrently
+            // modified the root and we need to restart.
+            let new_target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+            // Someone concurrently converted the block to delta and/or split it so restart all over.
+            if new_target_block_id != target_block_id {
+                continue;
+            }
+            break (delta_guard, target_block_id);
+        };
+
         let delta = {
             let deltas = self.block_deltas.lock();
             deltas.get(&target_block_id).cloned()
         };
 
-        let delta = match delta {
+        match delta {
             None => {
                 let block = match self
                     .block_manager
@@ -360,19 +408,20 @@ impl ArrowUnorderedBlockfileWriter {
                         return Err(Box::new(e));
                     }
                 };
-                let new_id = new_delta.id;
+                // Delete the key before making the delta visible through the sparse index.
+                new_delta.delete::<K, V>(prefix, key);
+                // Insert to delta first and then make it visible through the sparse index to
+                // prevent dangling references.
+                let mut deltas = self.block_deltas.lock();
+                deltas.insert(new_delta.id, new_delta.clone());
                 self.root
                     .sparse_index
                     .replace_block(target_block_id, new_delta.id);
-                {
-                    let mut deltas = self.block_deltas.lock();
-                    deltas.insert(new_id, new_delta.clone());
-                }
-                new_delta
             }
-            Some(delta) => delta,
+            Some(delta) => {
+                delta.delete::<K, V>(prefix, key);
+            }
         };
-        delta.delete::<K, V>(prefix, key);
         Ok(())
     }
 
@@ -759,7 +808,7 @@ mod tests {
         arrow::config::TEST_MAX_BLOCK_SIZE_BYTES, arrow::provider::ArrowBlockfileProvider,
     };
     use crate::{BlockfileReader, BlockfileWriter, BlockfileWriterOptions};
-    use chroma_cache::new_cache_for_test;
+    use chroma_cache::{new_cache_for_test, AysncPartitionedMutex};
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{CollectionUuid, DataRecord, DatabaseUuid, MetadataValue, SegmentUuid};
     use futures::{StreamExt, TryStreamExt};
@@ -2025,7 +2074,7 @@ mod tests {
             block_deltas,
             root: root_writer,
             id: Uuid::new_v4(),
-            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            deltas_mutex: Arc::new(AysncPartitionedMutex::new(())),
         };
 
         let n = 2000;
