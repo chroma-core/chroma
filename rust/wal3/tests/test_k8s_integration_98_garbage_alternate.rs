@@ -52,7 +52,7 @@ async fn writer_thread(
                     writer
                         .reader(LogReaderOptions::default())
                         .unwrap()
-                        .scrub()
+                        .scrub(wal3::Limits::default())
                         .await
                         .unwrap();
                     break;

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
+    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
     SnapshotOptions,
 };
 
@@ -49,7 +49,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
     )
     .await
     .unwrap();
-    let scrubbed_source = reader.scrub().await.unwrap();
+    let scrubbed_source = reader.scrub(Limits::default()).await.unwrap();
     wal3::copy(
         &storage,
         &LogWriterOptions::default(),
@@ -67,7 +67,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
     )
     .await
     .unwrap();
-    let scrubbed_target = copied.scrub().await.unwrap();
+    let scrubbed_target = copied.scrub(Limits::default()).await.unwrap();
     assert_eq!(
         scrubbed_source.calculated_setsum,
         scrubbed_target.calculated_setsum,
@@ -92,13 +92,13 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         .await
         .unwrap();
     // Scrub the old log.
-    let scrubbed_source2 = reader.scrub().await.unwrap();
+    let scrubbed_source2 = reader.scrub(Limits::default()).await.unwrap();
     assert_eq!(
         scrubbed_source.calculated_setsum,
         scrubbed_source2.calculated_setsum
     );
     // Scrub the new log.
-    let scrubbed_target2 = copied.scrub().await.unwrap();
+    let scrubbed_target2 = copied.scrub(Limits::default()).await.unwrap();
     assert_ne!(
         scrubbed_target.calculated_setsum,
         scrubbed_target2.calculated_setsum
