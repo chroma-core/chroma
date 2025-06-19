@@ -1756,7 +1756,7 @@ impl LogServer {
                     .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
             let limits = Limits {
                 max_files: Some(scrub_log.max_files_to_read.into()),
-                max_bytes: Some(scrub_log.max_bytes_to_read.into()),
+                max_bytes: Some(scrub_log.max_bytes_to_read),
                 max_records: None,
             };
             let result = reader.scrub(limits).await;
