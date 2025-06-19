@@ -780,7 +780,7 @@ pub async fn upload_parquet(
                 return Ok((unprefixed_path, setsum, buffer.len()));
             }
             Err(StorageError::Precondition { path: _, source: _ }) => {
-                return Err(Error::LogContentionRetry);
+                return Err(Error::LogContentionFailure);
             }
             Err(err) => {
                 if start.elapsed() > Duration::from_secs(60) {
