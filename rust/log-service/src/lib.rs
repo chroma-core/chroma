@@ -15,13 +15,14 @@ use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::chroma_proto::{
-    log_service_client::LogServiceClient, log_service_server::LogService, CollectionInfo,
-    GetAllCollectionInfoToCompactRequest, GetAllCollectionInfoToCompactResponse,
-    InspectDirtyLogRequest, InspectDirtyLogResponse, InspectLogStateRequest,
-    InspectLogStateResponse, LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord,
-    PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
-    PurgeDirtyForCollectionResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
-    ScoutLogsResponse, SealLogRequest, SealLogResponse, UpdateCollectionLogOffsetRequest,
+    log_service_client::LogServiceClient, log_service_server::LogService,
+    scrub_log_request::LogToScrub, CollectionInfo, GetAllCollectionInfoToCompactRequest,
+    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
+    InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
+    MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
+    PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PushLogsRequest,
+    PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse, ScrubLogRequest, ScrubLogResponse,
+    SealLogRequest, SealLogResponse, UpdateCollectionLogOffsetRequest,
     UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
@@ -484,6 +485,12 @@ pub struct MarkDirty {
     dirty_log: Arc<LogWriter>,
 }
 
+impl MarkDirty {
+    fn path_for_hostname(hostname: &str) -> String {
+        format!("dirty-{}", hostname)
+    }
+}
+
 #[async_trait::async_trait]
 impl wal3::MarkDirty for MarkDirty {
     async fn mark_dirty(
@@ -806,7 +813,7 @@ impl LogServer {
             storage_prefix.clone(),
         );
 
-        let res = log_reader.maximum_log_position().await;
+        let res = log_reader.next_write_timestamp().await;
         if let Err(wal3::Error::UninitializedLog) = res {
             return self
                 .forward_update_collection_log_offset(Request::new(request))
@@ -1176,8 +1183,8 @@ impl LogServer {
             );
             let (start_position, limit_position) = match log_reader.manifest().await {
                 Ok(Some(manifest)) => (
-                    manifest.minimum_log_position(),
-                    manifest.maximum_log_position(),
+                    manifest.oldest_timestamp(),
+                    manifest.next_write_timestamp(),
                 ),
                 Ok(None) | Err(wal3::Error::UninitializedLog) => {
                     tracing::info!("Log is uninitialized on rust log service. Forwarding ScoutLog request to legacy log service");
@@ -1395,7 +1402,7 @@ impl LogServer {
                 Arc::clone(&storage),
                 source_prefix.clone(),
             );
-            if let Err(err) = log_reader.maximum_log_position().await {
+            if let Err(err) = log_reader.next_write_timestamp().await {
                 match err {
                     wal3::Error::UninitializedLog => {
                         return self.forward_fork_logs(Request::new(request)).await;
@@ -1440,7 +1447,7 @@ impl LogServer {
                 target_prefix,
             );
             // This is the next record to insert, so we'll have to adjust downwards.
-            let max_offset = log_reader.maximum_log_position().await.map_err(|err| {
+            let max_offset = log_reader.next_write_timestamp().await.map_err(|err| {
                 Status::new(err.code().into(), format!("Failed to read copied log: {}", err))
             })?;
             if max_offset < offset {
@@ -1721,6 +1728,66 @@ impl LogServer {
             debug: format!("manifest: {mani:#?}\ncompaction cursor: {witness:?}"),
         }))
     }
+
+    async fn scrub_log(
+        &self,
+        request: Request<ScrubLogRequest>,
+    ) -> Result<Response<ScrubLogResponse>, Status> {
+        let span =
+            wrap_span_with_parent_context(tracing::trace_span!("ScrubLog",), request.metadata());
+
+        let scrub_log = request.into_inner();
+        async move {
+            let path = match scrub_log.log_to_scrub {
+                Some(LogToScrub::CollectionId(x)) => {
+                    let collection_id = Uuid::parse_str(&x)
+                        .map(CollectionUuid)
+                        .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                    collection_id.storage_prefix_for_log()
+                }
+                Some(LogToScrub::DirtyLog(host)) => MarkDirty::path_for_hostname(&host),
+                None => {
+                    return Err(Status::not_found("log not found because it's null"));
+                }
+            };
+            let reader =
+                LogReader::open(LogReaderOptions::default(), Arc::clone(&self.storage), path)
+                    .await
+                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+            let limits = Limits {
+                max_files: Some(scrub_log.max_files_to_read.into()),
+                max_bytes: Some(scrub_log.max_bytes_to_read),
+                max_records: None,
+            };
+            let result = reader.scrub(limits).await;
+            match result {
+                Ok(success) => {
+                    let mut errors = vec![];
+                    if success.short_read {
+                        errors.push("short read".to_string())
+                    }
+                    Ok(Response::new(ScrubLogResponse {
+                        calculated_setsum: success.calculated_setsum.hexdigest(),
+                        bytes_read: success.bytes_read,
+                        errors,
+                    }))
+                }
+                Err(errors) => {
+                    let errors = errors
+                        .into_iter()
+                        .map(|err| err.to_string())
+                        .collect::<Vec<_>>();
+                    Ok(Response::new(ScrubLogResponse {
+                        calculated_setsum: "<not calculated; bytes_read will be off>".to_string(),
+                        bytes_read: 0,
+                        errors,
+                    }))
+                }
+            }
+        }
+        .instrument(span)
+        .await
+    }
 }
 
 struct LogServerWrapper {
@@ -1806,6 +1873,13 @@ impl LogService for LogServerWrapper {
         request: Request<InspectLogStateRequest>,
     ) -> Result<Response<InspectLogStateResponse>, Status> {
         self.log_server.inspect_log_state(request).await
+    }
+
+    async fn scrub_log(
+        &self,
+        request: Request<ScrubLogRequest>,
+    ) -> Result<Response<ScrubLogResponse>, Status> {
+        self.log_server.scrub_log(request).await
     }
 }
 
@@ -2114,7 +2188,7 @@ impl Configurable<LogServerConfig> for LogServer {
         let dirty_log = LogWriter::open_or_initialize(
             config.writer.clone(),
             Arc::clone(&storage),
-            &format!("dirty-{}", config.my_member_id),
+            &MarkDirty::path_for_hostname(&config.my_member_id),
             "dirty log writer",
             (),
         )

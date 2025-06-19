@@ -285,3 +285,125 @@ def test_log_failover_with_query_operations(
         result = collection.get(ids=[str(i)], include=["embeddings"])
         assert len(result["embeddings"]) > 0, f"Missing result for ID {i} after failover with new data"
         assert all([math.fabs(x - y) < 0.001 for (x, y) in zip(result["embeddings"][0], embeddings[i])]), f"Embedding mismatch for ID {i}"
+
+@skip_if_not_cluster()
+def test_log_failover_with_compaction_and_gc_delay(
+    client: ClientAPI,
+) -> None:
+    seed = time.time()
+    random.seed(seed)
+    print("Generating data with seed ", seed)
+    reset(client)
+    collection = client.create_collection(
+        name="test",
+        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
+    )
+
+    time.sleep(1)
+
+    print('failing over for', collection.id)
+    channel = grpc.insecure_channel('localhost:50052')
+    log_service_stub = LogServiceStub(channel)
+
+    # Add RECORDS records, where each embedding has 3 dimensions randomly generated between 0 and 1
+    ids = []
+    embeddings = []
+    for i in range(RECORDS):
+        ids.append(str(i))
+        embeddings.append(np.random.rand(1, 3)[0])
+        collection.add(
+            ids=[str(i)],
+            embeddings=[embeddings[-1]],
+        )
+
+    request = SealLogRequest(collection_id=str(collection.id))
+    response = log_service_stub.SealLog(request, timeout=60)
+    request = MigrateLogRequest(collection_id=str(collection.id))
+    response = log_service_stub.MigrateLog(request, timeout=60)
+
+    wait_for_version_increase(client, collection.name, 0)
+    # We sleep for 90 seconds to let GC bulldoze this collection with high probability.
+    time.sleep(90)
+
+    # Add another RECORDS records, where each embedding has 3 dimensions randomly generated between 0
+    # and 1
+    for i in range(RECORDS, RECORDS + RECORDS):
+        ids.append(str(i))
+        embeddings.append(np.random.rand(1, 3)[0])
+        collection.add(
+            ids=[str(i)],
+            embeddings=[embeddings[-1]],
+        )
+
+    results = []
+    for i in range(RECORDS + RECORDS):
+        result = collection.get(ids=[str(i)], include=["embeddings"])
+        if len(result["embeddings"]) == 0:
+            print("missing result", i)
+        results.append(result)
+    for (i, result) in enumerate(results):
+        if len(result["embeddings"]):
+            assert all([math.fabs(x - y) < 0.001 for (x, y) in zip(result["embeddings"][0], embeddings[i])])
+        else:
+            assert False, "missing a result"
+
+@skip_if_not_cluster()
+def test_log_failover_with_migration_and_gc_delay(
+    client: ClientAPI,
+) -> None:
+    seed = time.time()
+    random.seed(seed)
+    print("Generating data with seed ", seed)
+    reset(client)
+    collection = client.create_collection(
+        name="test",
+        metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
+    )
+
+    time.sleep(1)
+
+    print('failing over for', collection.id)
+    channel = grpc.insecure_channel('localhost:50052')
+    log_service_stub = LogServiceStub(channel)
+
+    # Add RECORDS records, where each embedding has 3 dimensions randomly generated between 0 and 1
+    ids = []
+    embeddings = []
+    for i in range(RECORDS):
+        ids.append(str(i))
+        embeddings.append(np.random.rand(1, 3)[0])
+        collection.add(
+            ids=[str(i)],
+            embeddings=[embeddings[-1]],
+        )
+
+    wait_for_version_increase(client, collection.name, 0)
+    request = SealLogRequest(collection_id=str(collection.id))
+    response = log_service_stub.SealLog(request, timeout=60)
+    request = MigrateLogRequest(collection_id=str(collection.id))
+    response = log_service_stub.MigrateLog(request, timeout=60)
+
+    # We sleep for 90 seconds to let GC bulldoze this collection with high probability.
+    time.sleep(90)
+
+    # Add another RECORDS records, where each embedding has 3 dimensions randomly generated between 0
+    # and 1
+    for i in range(RECORDS, RECORDS + RECORDS):
+        ids.append(str(i))
+        embeddings.append(np.random.rand(1, 3)[0])
+        collection.add(
+            ids=[str(i)],
+            embeddings=[embeddings[-1]],
+        )
+
+    results = []
+    for i in range(RECORDS + RECORDS):
+        result = collection.get(ids=[str(i)], include=["embeddings"])
+        if len(result["embeddings"]) == 0:
+            print("missing result", i)
+        results.append(result)
+    for (i, result) in enumerate(results):
+        if len(result["embeddings"]):
+            assert all([math.fabs(x - y) < 0.001 for (x, y) in zip(result["embeddings"][0], embeddings[i])])
+        else:
+            assert False, "missing a result"

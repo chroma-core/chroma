@@ -6,8 +6,8 @@ use tokio::sync::Mutex;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Cursor, CursorName, CursorStoreOptions, Error, GarbageCollectionOptions, LogWriter,
-    LogWriterOptions, Manifest,
+    Cursor, CursorName, CursorStoreOptions, Error, GarbageCollectionOptions, LogReaderOptions,
+    LogWriter, LogWriterOptions, Manifest,
 };
 
 pub mod common;
@@ -34,6 +34,7 @@ async fn writer_thread(
         loop {
             match writer.append(message.clone()).await {
                 Ok(position) => {
+                    let position = position + 1u64;
                     println!("writer succeeds in iteration {i}");
                     successful_writes += 1;
                     witness = cursors
@@ -46,6 +47,12 @@ async fn writer_thread(
                             },
                             &witness,
                         )
+                        .await
+                        .unwrap();
+                    writer
+                        .reader(LogReaderOptions::default())
+                        .unwrap()
+                        .scrub(wal3::Limits::default())
                         .await
                         .unwrap();
                     break;

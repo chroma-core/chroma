@@ -868,17 +868,64 @@ impl SqliteSysDb {
     where
         for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
     {
-        let deleted_rows = sqlx::query(
+        // Delete embedding metadata for the embedding ids matching the segment ids
+        sqlx::query(
             r#"
-            DELETE FROM collections
-            WHERE id = $1
-            AND database_id = (SELECT id FROM databases WHERE name = $2 AND tenant_id = $3)
-            RETURNING id
-        "#,
+            DELETE FROM embedding_metadata
+            WHERE id IN (
+                SELECT id FROM embeddings
+                WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            )
+            "#,
         )
         .bind(collection_id.to_string())
-        .bind(&database)
-        .bind(&tenant)
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete embeddings fulltext search records
+        sqlx::query(
+            r#"
+            DELETE FROM embedding_fulltext_search
+            WHERE rowid IN (
+                SELECT id FROM embeddings
+                WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            )
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete embeddings
+        sqlx::query(
+            r#"
+            DELETE FROM embeddings
+            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete segment metadata
+        sqlx::query(
+            r#"
+            DELETE FROM segment_metadata
+            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete max_seq_id records for segments being deleted
+        sqlx::query(
+            r#"
+            DELETE FROM max_seq_id
+            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            "#,
+        )
+        .bind(collection_id.to_string())
         .execute(&mut *conn)
         .await?;
 
@@ -892,17 +939,6 @@ impl SqliteSysDb {
             .build_sqlx(sea_query::SqliteQueryBuilder);
 
         sqlx::query_with(&sql, values).execute(&mut *conn).await?;
-
-        // Delete segment metadata
-        sqlx::query(
-            r#"
-            DELETE FROM segment_metadata
-            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
-            "#,
-        )
-        .bind(collection_id.to_string())
-        .execute(&mut *conn)
-        .await?;
 
         // Delete collection metadata
         sqlx::query(
@@ -927,6 +963,20 @@ impl SqliteSysDb {
             &self.log_topic_namespace,
             collection_id,
         ))
+        .execute(&mut *conn)
+        .await?;
+
+        let deleted_rows = sqlx::query(
+            r#"
+            DELETE FROM collections
+            WHERE id = $1
+            AND database_id = (SELECT id FROM databases WHERE name = $2 AND tenant_id = $3)
+            RETURNING id
+        "#,
+        )
+        .bind(collection_id.to_string())
+        .bind(&database)
+        .bind(&tenant)
         .execute(&mut *conn)
         .await?;
 
