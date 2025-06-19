@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::config::GrpcLogConfig;
 use crate::types::CollectionInfo;
 use async_trait::async_trait;
@@ -675,9 +677,14 @@ impl GrpcLog {
             return Ok(());
         };
         let mut futures = vec![];
+        let limiter = Arc::new(tokio::sync::Semaphore::new(10));
         for client in assigner.all().into_iter() {
             let mut client = client.clone();
+            let limiter = Arc::clone(&limiter);
             let request = async move {
+                // NOTE(rescrv): This can never fail and the result is to fail open.  Don't
+                // error-check.
+                let _permit = limiter.acquire().await;
                 client
                     .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
                         // NOTE(rescrv):  Use the untyped string representation of the collection ID.
