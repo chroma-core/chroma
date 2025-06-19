@@ -131,6 +131,7 @@ impl chroma_error::ChromaError for Error {
 pub struct ScrubSuccess {
     pub calculated_setsum: Setsum,
     pub bytes_read: u64,
+    pub short_read: bool,
 }
 
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////

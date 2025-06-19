@@ -187,15 +187,10 @@ impl ManifestManager {
         let Some((manifest, e_tag)) = Manifest::load(&throttle, &storage, &prefix).await? else {
             return Err(Error::UninitializedLog);
         };
-        let latest_fragment = manifest.fragments.iter().max_by_key(|f| f.limit.offset());
-        let next_log_position = latest_fragment.map(|f| f.limit).unwrap_or(
-            manifest
-                .initial_offset
-                .unwrap_or(LogPosition::from_offset(1)),
-        );
-        let next_seq_no_to_assign = latest_fragment
-            .map(|f| f.seq_no + 1)
-            .unwrap_or(FragmentSeqNo(1));
+        let next_log_position = manifest.next_write_timestamp();
+        let Some(next_seq_no_to_assign) = manifest.next_fragment_seq_no() else {
+            return Err(Error::LogFull);
+        };
         let next_seq_no_to_apply = next_seq_no_to_assign;
         let stable = ManifestAndETag { manifest, e_tag };
         let staging = Arc::new(Mutex::new(Staging {
@@ -487,6 +482,7 @@ mod tests {
                 snapshots: vec![],
                 fragments: vec![],
                 initial_offset: None,
+                initial_seq_no: None,
             },
             work.0
         );
@@ -516,6 +512,7 @@ mod tests {
                     }
                 ],
                 initial_offset: None,
+                initial_seq_no: None,
             },
             work.2
         );

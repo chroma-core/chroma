@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::config::GrpcLogConfig;
 use crate::types::CollectionInfo;
 use async_trait::async_trait;
@@ -31,7 +33,7 @@ use uuid::Uuid;
 pub enum GrpcPullLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
-    #[error("Failed to fetch")]
+    #[error("Failed to fetch: {0}")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to scout logs: {0}")]
     FailedToScoutLogs(tonic::Status),
@@ -101,7 +103,7 @@ impl ChromaError for GrpcForkLogsError {
 
 #[derive(Error, Debug)]
 pub enum GrpcGetCollectionsWithNewDataError {
-    #[error("Failed to fetch")]
+    #[error("Failed to fetch: {0}")]
     FailedGetCollectionsWithNewData(#[from] tonic::Status),
 }
 
@@ -117,7 +119,7 @@ impl ChromaError for GrpcGetCollectionsWithNewDataError {
 
 #[derive(Error, Debug)]
 pub enum GrpcUpdateCollectionLogOffsetError {
-    #[error("Failed to update collection log offset")]
+    #[error("Failed to update collection log offset: {0}")]
     FailedToUpdateCollectionLogOffset(#[from] tonic::Status),
     #[error(transparent)]
     ClientAssignerError(#[from] ClientAssignmentError),
@@ -675,9 +677,14 @@ impl GrpcLog {
             return Ok(());
         };
         let mut futures = vec![];
+        let limiter = Arc::new(tokio::sync::Semaphore::new(10));
         for client in assigner.all().into_iter() {
             let mut client = client.clone();
+            let limiter = Arc::clone(&limiter);
             let request = async move {
+                // NOTE(rescrv): This can never fail and the result is to fail open.  Don't
+                // error-check.
+                let _permit = limiter.acquire().await;
                 client
                     .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
                         // NOTE(rescrv):  Use the untyped string representation of the collection ID.

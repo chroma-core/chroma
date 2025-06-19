@@ -182,6 +182,10 @@ func (s *logServer) InspectLogState(ctx context.Context, req *logservicepb.Inspe
 	return
 }
 
+func (s *logServer) ScrubLog(ctx context.Context, req *logservicepb.ScrubLogRequest) (res *logservicepb.ScrubLogResponse, err error) {
+	return
+}
+
 func NewLogServer(lr *repository.LogRepository) logservicepb.LogServiceServer {
 	return &logServer{
 		lr: lr,
