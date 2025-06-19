@@ -246,6 +246,8 @@ impl LogReader {
         ))
     }
 
+    // Post process the fragments such that only records starting at from and not exceeding limits
+    // will be processed.  Sets *short_read=true when the limits truncate the log.
     fn post_process_fragments(
         mut fragments: Vec<Fragment>,
         from: LogPosition,
