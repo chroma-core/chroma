@@ -279,11 +279,15 @@ impl LogWriter {
             .map(|writer| writer.manifest_manager.latest())
     }
 
-    pub async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
+    pub async fn garbage_collect(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<(), Error> {
         let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
             let options = options.clone();
             let log = Arc::clone(log);
-            async move { log.garbage_collect(&options).await }
+            async move { log.garbage_collect(&options, keep_at_least).await }
         };
         self.handle_log_contention(once_log_garbage_collect).await
     }
@@ -581,8 +585,17 @@ impl OnceLogWriter {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
+    async fn garbage_collect(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<(), Error> {
         let cutoff = self.garbage_collection_cutoff().await?;
+        let cutoff = if let Some(keep_at_least) = keep_at_least {
+            keep_at_least.min(cutoff)
+        } else {
+            cutoff
+        };
         self.manifest_manager.heartbeat().await?;
         let garbage = self
             .manifest_manager
