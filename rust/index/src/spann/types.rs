@@ -11,6 +11,7 @@ use chroma_blockstore::{
     provider::{BlockfileProvider, CreateError, OpenError},
     BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
 };
+use chroma_cache::AysncPartitionedMutex;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -285,9 +286,8 @@ pub struct SpannIndexWriter {
     hnsw_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     // Posting list of the centroids.
-    // TODO(Sanket): For now the lock is very coarse grained. But this should
-    // be changed in future if perf is not satisfactory.
-    pub posting_list_writer: Arc<tokio::sync::Mutex<BlockfileWriter>>,
+    pub posting_list_writer: BlockfileWriter,
+    pub posting_list_partitioned_mutex: Arc<AysncPartitionedMutex<u32>>,
     pub next_head_id: Arc<AtomicU32>,
     // Version number of each point.
     // TODO(Sanket): Finer grained locking for this map in future if perf is not satisfactory.
@@ -429,7 +429,8 @@ impl SpannIndexWriter {
             cleaned_up_hnsw_index: None,
             hnsw_provider,
             blockfile_provider,
-            posting_list_writer: Arc::new(tokio::sync::Mutex::new(posting_list_writer)),
+            posting_list_writer,
+            posting_list_partitioned_mutex: Arc::new(AysncPartitionedMutex::new(())),
             next_head_id: Arc::new(AtomicU32::new(next_head_id)),
             versions_map: Arc::new(tokio::sync::RwLock::new(versions_map)),
             dimensionality,
@@ -938,10 +939,10 @@ impl SpannIndexWriter {
         let doc_versions;
         let doc_embeddings;
         {
-            let write_guard = self.posting_list_writer.lock().await;
             // TODO(Sanket): Check if head is deleted, can happen if another concurrent thread
             // deletes it.
-            (doc_offset_ids, doc_versions, doc_embeddings) = write_guard
+            (doc_offset_ids, doc_versions, doc_embeddings) = self
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
                 .await
                 .map_err(|e| {
@@ -1060,7 +1061,7 @@ impl SpannIndexWriter {
         let mut new_head_embeddings = vec![None; 2];
         let clustering_output;
         {
-            let write_guard = self.posting_list_writer.lock().await;
+            let write_guard = self.posting_list_partitioned_mutex.lock(&head_id).await;
             if self.is_head_deleted(head_id as usize).await? {
                 tracing::info!(
                     "Head {} got concurrently deleted for adding point {} at version {}. Reassigning now",
@@ -1082,7 +1083,8 @@ impl SpannIndexWriter {
                 ))
                 .await;
             }
-            let (mut doc_offset_ids, mut doc_versions, mut doc_embeddings) = write_guard
+            let (mut doc_offset_ids, mut doc_versions, mut doc_embeddings) = self
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
                 .await
                 .map_err(|e| {
@@ -1151,7 +1153,7 @@ impl SpannIndexWriter {
                     );
                     return Ok(());
                 }
-                write_guard
+                self.posting_list_writer
                     .set("", head_id, &posting_list)
                     .await
                     .map_err(|e| {
@@ -1221,7 +1223,7 @@ impl SpannIndexWriter {
                     doc_versions: &single_doc_versions,
                     doc_embeddings: &single_doc_embeddings,
                 };
-                write_guard
+                self.posting_list_writer
                     .set("", head_id, &single_posting_list)
                     .await
                     .map_err(|e| {
@@ -1277,7 +1279,7 @@ impl SpannIndexWriter {
                             doc_versions: &new_doc_versions[k],
                             doc_embeddings: &new_posting_lists[k],
                         };
-                        write_guard
+                        self.posting_list_writer
                             .set("", head_id, &posting_list)
                             .await
                             .map_err(|e| {
@@ -1308,7 +1310,7 @@ impl SpannIndexWriter {
                             doc_embeddings: &new_posting_lists[k],
                         };
                         // Insert to postings list.
-                        write_guard
+                        self.posting_list_writer
                             .set("", next_id, &posting_list)
                             .await
                             .map_err(|e| {
