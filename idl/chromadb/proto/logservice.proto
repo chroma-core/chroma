@@ -129,6 +129,21 @@ message InspectLogStateResponse {
   string debug = 1;
 }
 
+message ScrubLogRequest {
+  oneof log_to_scrub {
+    string collection_id = 1;
+    string dirty_log = 2;
+  };
+  uint64 max_bytes_to_read = 3;
+  uint32 max_files_to_read = 4;
+}
+
+message ScrubLogResponse {
+  string calculated_setsum = 1;
+  uint64 bytes_read = 2;
+  repeated string errors = 3;
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
@@ -146,4 +161,6 @@ service LogService {
   rpc MigrateLog(MigrateLogRequest) returns (MigrateLogResponse) {}
   // This endpoint can be supported by any log service.
   rpc InspectLogState(InspectLogStateRequest) returns (InspectLogStateResponse) {}
+  // This endpoint should route to the rust log service.
+  rpc ScrubLog(ScrubLogRequest) returns (ScrubLogResponse) {}
 }

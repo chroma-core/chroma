@@ -3,8 +3,8 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Cursor, CursorName, CursorStoreOptions, GarbageCollectionOptions, LogPosition, LogReader,
-    LogReaderOptions, LogWriter, LogWriterOptions, SnapshotOptions,
+    Cursor, CursorName, CursorStoreOptions, GarbageCollectionOptions, Limits, LogPosition,
+    LogReader, LogReaderOptions, LogWriter, LogWriterOptions, SnapshotOptions,
 };
 
 #[tokio::test]
@@ -58,7 +58,7 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
     )
     .await
     .unwrap();
-    let scrubbed_source = reader.scrub().await.unwrap();
+    let scrubbed_source = reader.scrub(wal3::Limits::default()).await.unwrap();
     wal3::copy(
         &storage,
         &LogWriterOptions::default(),
@@ -76,7 +76,7 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
     )
     .await
     .unwrap();
-    let scrubbed_target = copied.scrub().await.unwrap();
+    let scrubbed_target = copied.scrub(Limits::default()).await.unwrap();
     assert_eq!(
         scrubbed_source.calculated_setsum,
         scrubbed_target.calculated_setsum,

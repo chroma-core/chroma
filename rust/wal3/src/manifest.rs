@@ -164,6 +164,7 @@ impl Snapshot {
         Ok(ScrubSuccess {
             calculated_setsum,
             bytes_read,
+            short_read: false,
         })
     }
 
@@ -557,7 +558,7 @@ impl Manifest {
             .find(|f| f.limit.offset() >= position.offset())
     }
 
-    /// Scrub the manifest.
+    /// Scrub the manifest without doing I/O.
     pub fn scrub(&self) -> Result<ScrubSuccess, Box<ScrubError>> {
         let mut calculated_setsum = Setsum::default();
         let mut bytes_read = 0u64;
@@ -618,6 +619,7 @@ impl Manifest {
         Ok(ScrubSuccess {
             calculated_setsum,
             bytes_read,
+            short_read: false,
         })
     }
 

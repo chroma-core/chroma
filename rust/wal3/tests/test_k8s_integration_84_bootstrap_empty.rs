@@ -46,7 +46,14 @@ async fn test_k8s_integration_84_bootstrap_empty() {
         .await
         .unwrap();
     assert_eq!(0, scan.len());
-    reader.scrub().await.unwrap();
+    reader
+        .scrub(Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: None,
+        })
+        .await
+        .unwrap();
 
     let writer = LogWriter::open(options, Arc::clone(&storage), PREFIX, WRITER, mark_dirty)
         .await
@@ -62,5 +69,5 @@ async fn test_k8s_integration_84_bootstrap_empty() {
         .await
         .unwrap();
     assert_eq!(1, scan.len());
-    reader.scrub().await.unwrap();
+    reader.scrub(wal3::Limits::default()).await.unwrap();
 }
