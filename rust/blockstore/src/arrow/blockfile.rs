@@ -168,7 +168,7 @@ impl ArrowUnorderedBlockfileWriter {
         value: V,
     ) -> Result<(), Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        let (_, target_block_id) = loop {
+        let (_guard, target_block_id) = loop {
             // Get the target block id for the key
             let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
 
@@ -285,7 +285,7 @@ impl ArrowUnorderedBlockfileWriter {
         key: K,
     ) -> Result<Option<V::PreparedValue>, Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        let (_, target_block_id) = loop {
+        let (_guard, target_block_id) = loop {
             // Get the target block id for the key
             let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
 
@@ -357,7 +357,7 @@ impl ArrowUnorderedBlockfileWriter {
         key: K,
     ) -> Result<(), Box<dyn ChromaError>> {
         let search_key = CompositeKey::new(prefix.to_string(), key.clone());
-        let (_, target_block_id) = loop {
+        let (_guard, target_block_id) = loop {
             // Get the target block id for the key
             let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
 
