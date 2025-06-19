@@ -31,7 +31,7 @@ use uuid::Uuid;
 pub enum GrpcPullLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
-    #[error("Failed to fetch")]
+    #[error("Failed to fetch: {0}")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to scout logs: {0}")]
     FailedToScoutLogs(tonic::Status),
@@ -101,7 +101,7 @@ impl ChromaError for GrpcForkLogsError {
 
 #[derive(Error, Debug)]
 pub enum GrpcGetCollectionsWithNewDataError {
-    #[error("Failed to fetch")]
+    #[error("Failed to fetch: {0}")]
     FailedGetCollectionsWithNewData(#[from] tonic::Status),
 }
 
@@ -117,7 +117,7 @@ impl ChromaError for GrpcGetCollectionsWithNewDataError {
 
 #[derive(Error, Debug)]
 pub enum GrpcUpdateCollectionLogOffsetError {
-    #[error("Failed to update collection log offset")]
+    #[error("Failed to update collection log offset: {0}")]
     FailedToUpdateCollectionLogOffset(#[from] tonic::Status),
     #[error(transparent)]
     ClientAssignerError(#[from] ClientAssignmentError),
