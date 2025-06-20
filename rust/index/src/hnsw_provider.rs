@@ -27,7 +27,7 @@ use uuid::Uuid;
 // These are the files hnswlib writes to disk. This is strong coupling, but we need to know
 // what files to read from disk. We could in the future have the C++ code return the files
 // but ideally we have a rust implementation of hnswlib
-const FILES: [&str; 4] = [
+pub const FILES: [&str; 4] = [
     "header.bin",
     "data_level0.bin",
     "length.bin",
@@ -783,9 +783,7 @@ mod tests {
 
             if metadata.is_dir() {
                 assert!(
-                    path.ends_with("hnsw")
-                        || path.ends_with("block")
-                        || path.ends_with("sparse_index")
+                    path.ends_with("hnsw") || path.ends_with("block") || path.ends_with("root")
                 );
             } else {
                 panic!("Expected hnsw purge to be successful")

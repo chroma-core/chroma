@@ -90,28 +90,9 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
             "Starting deletion of unused files"
         );
 
-        // Generate list of HNSW files
-        // NOTE(Sanket): input.hnsw_prefixes_for_deletion is no longer used
-        // hence not overriding prefix changes here. We should remove this param.
-        let hnsw_files: Vec<String> = input
-            .hnsw_prefixes_for_deletion
-            .iter()
-            .flat_map(|prefix| {
-                [
-                    "header.bin",
-                    "data_level0.bin",
-                    "length.bin",
-                    "link_lists.bin",
-                ]
-                .iter()
-                .map(|file| format!("hnsw/{}/{}", prefix, file))
-                .collect::<Vec<String>>()
-            })
-            .collect();
-
         // Create a list that contains all files that will be deleted.
         let mut all_files = input.unused_s3_files.clone();
-        all_files.extend(hnsw_files);
+        all_files.extend(input.hnsw_prefixes_for_deletion.clone());
 
         // NOTE(rohit):
         // We don't want to fail the entire operation if one file fails to rename or delete.
@@ -178,6 +159,7 @@ impl DeleteUnusedFilesOperator {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chroma_index::hnsw_provider::FILES;
     use chroma_storage::local::LocalStorage;
     use chroma_storage::PutOptions;
     use std::path::Path;
@@ -198,12 +180,10 @@ mod tests {
         }
 
         // Create HNSW test files
-        let hnsw_files = vec![
-            format!("hnsw/{}/header.bin", "prefix1"),
-            format!("hnsw/{}/data_level0.bin", "prefix1"),
-            format!("hnsw/{}/length.bin", "prefix1"),
-            format!("hnsw/{}/link_lists.bin", "prefix1"),
-        ];
+        let hnsw_files = FILES
+            .iter()
+            .map(|file_name| format!("hnsw/prefix1/{}", file_name))
+            .collect::<Vec<String>>();
         for file in &hnsw_files {
             create_test_file(storage, file, b"test content").await;
         }
@@ -218,7 +198,7 @@ mod tests {
     async fn test_dry_run_mode() {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
-        let (test_files, _) = setup_test_files(&storage).await;
+        let (test_files, hnsw_files) = setup_test_files(&storage).await;
 
         let operator = DeleteUnusedFilesOperator::new(
             storage.clone(),
@@ -227,13 +207,18 @@ mod tests {
         );
         let input = DeleteUnusedFilesInput {
             unused_s3_files: test_files.clone(),
-            hnsw_prefixes_for_deletion: vec!["prefix1".to_string()],
+            hnsw_prefixes_for_deletion: hnsw_files.clone(),
         };
 
         let result = operator.run(&input).await.unwrap();
 
         // Verify original files still exist
         for file in &test_files {
+            assert!(result.deleted_files.contains(file));
+            assert!(Path::new(&tmp_dir.path().join(file)).exists());
+        }
+
+        for file in &hnsw_files {
             assert!(result.deleted_files.contains(file));
             assert!(Path::new(&tmp_dir.path().join(file)).exists());
         }
@@ -252,7 +237,7 @@ mod tests {
         );
         let input = DeleteUnusedFilesInput {
             unused_s3_files: test_files.clone(),
-            hnsw_prefixes_for_deletion: vec!["prefix1".to_string()],
+            hnsw_prefixes_for_deletion: hnsw_files.clone(),
         };
 
         let result = operator.run(&input).await.unwrap();
@@ -293,7 +278,7 @@ mod tests {
         );
         let input = DeleteUnusedFilesInput {
             unused_s3_files: test_files.clone(),
-            hnsw_prefixes_for_deletion: vec!["prefix1".to_string()],
+            hnsw_prefixes_for_deletion: hnsw_files.clone(),
         };
 
         let result = operator.run(&input).await.unwrap();

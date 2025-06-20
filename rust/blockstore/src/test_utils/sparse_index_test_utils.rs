@@ -24,6 +24,7 @@ pub async fn create_test_sparse_index(
     root_id: Uuid,
     block_ids: Vec<Uuid>,
     prefix: Option<String>,
+    prefix_path: String,
 ) -> Result<Uuid, Box<dyn ChromaError>> {
     if block_ids.is_empty() {
         return Err(Box::new(TestSparseIndexError::EmptyBlockIds));
@@ -44,7 +45,6 @@ pub async fn create_test_sparse_index(
     sparse_index.set_count(block_ids[0], 1)?;
 
     // Create and save the sparse index file
-    let prefix_path = String::from("");
     let root_writer = RootWriter::new(Version::V1_1, root_id, sparse_index, prefix_path);
     let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
     root_manager.flush::<&str>(&root_writer).await?;
@@ -87,9 +87,16 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
 
+        let prefix_path = "";
         let block_ids = vec![Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
-        let result =
-            create_test_sparse_index(&storage, Uuid::new_v4(), block_ids.clone(), None).await;
+        let result = create_test_sparse_index(
+            &storage,
+            Uuid::new_v4(),
+            block_ids.clone(),
+            None,
+            prefix_path.to_string(),
+        )
+        .await;
         assert!(result.is_ok());
 
         // Verify the sparse index was created by trying to read it
@@ -97,7 +104,6 @@ mod tests {
         let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
 
         // Verify all block IDs are present in the sparse index
-        let prefix_path = "";
         let stored_block_ids = root_manager
             .get_all_block_ids(&root_id, prefix_path)
             .await
@@ -113,7 +119,8 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(temp_dir.path().to_str().unwrap()));
 
-        let result = create_test_sparse_index(&storage, Uuid::new_v4(), vec![], None).await;
+        let result =
+            create_test_sparse_index(&storage, Uuid::new_v4(), vec![], None, "".to_string()).await;
         assert!(matches!(
             result,
             Err(e) if e.to_string().contains("Cannot create sparse index with empty block IDs")
@@ -127,7 +134,9 @@ mod tests {
 
         let block_ids = vec![Uuid::new_v4(), Uuid::new_v4()];
         let prefix = Some("custom".to_string());
-        let result = create_test_sparse_index(&storage, Uuid::new_v4(), block_ids, prefix).await;
+        let result =
+            create_test_sparse_index(&storage, Uuid::new_v4(), block_ids, prefix, "".to_string())
+                .await;
         assert!(result.is_ok());
     }
 }

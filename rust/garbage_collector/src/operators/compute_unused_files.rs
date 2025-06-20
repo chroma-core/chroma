@@ -5,6 +5,10 @@ use chroma_blockstore::{
 };
 use chroma_cache::nop::NopCache;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::{
+    hnsw_provider::{HnswIndexProvider, FILES},
+    IndexUuid,
+};
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
@@ -81,7 +85,23 @@ impl ComputeUnusedFilesOperator {
             for (file_type, file_paths) in &segment_compaction_info.file_paths {
                 // For hnsw_index files, just add it without comparing with newer version.
                 if file_type == "hnsw_index" || file_type == HNSW_PATH {
-                    unused_hnsw_prefixes.extend(file_paths.paths.clone());
+                    for file_path in file_paths.paths.iter() {
+                        let (prefix, hnsw_id) = Segment::extract_prefix_and_id(file_path);
+                        let hnsw_uuid = IndexUuid(Uuid::parse_str(hnsw_id).map_err(|e| {
+                            tracing::error!(error = %e, "Failed to parse UUID");
+                            ComputeUnusedFilesError::InvalidUuid(e, hnsw_id.to_string())
+                        })?);
+                        for file in FILES.iter() {
+                            let hnsw_prefix =
+                                HnswIndexProvider::format_key(prefix, &hnsw_uuid, file);
+                            tracing::debug!(
+                                line = line!(),
+                                "ComputeUnusedFilesOperator: unused_hnsw_prefix: {:?}",
+                                hnsw_prefix
+                            );
+                            unused_hnsw_prefixes.push(hnsw_prefix);
+                        }
+                    }
                     continue;
                 }
                 for file_path in &file_paths.paths {
@@ -363,6 +383,7 @@ mod tests {
             Uuid::new_v4(),
             block_ids,
             None, // Use default "test" prefix
+            "".to_string(),
         )
         .await?;
 
@@ -399,6 +420,7 @@ mod tests {
 
         // Create version_to_segment_info map
         let mut version_to_segment_info = HashMap::new();
+        let hnsw_id = IndexUuid(uuid::Uuid::new_v4());
         let prefix_path = "";
         // Older version has files 1 and 2
         version_to_segment_info.insert(
@@ -408,7 +430,7 @@ mod tests {
                     "data".to_string(),
                     vec![uuid1.to_string(), uuid2.to_string()],
                 ),
-                ("hnsw_index".to_string(), vec!["hnsw1".to_string()]),
+                ("hnsw_index".to_string(), vec![hnsw_id.to_string()]),
             ]),
         );
 
@@ -447,8 +469,11 @@ mod tests {
             let s3_key = BlockManager::format_key(prefix_path, &block_id);
             assert!(!unused_files.contains(&s3_key));
         }
-        // Check that hnsw1 is marked as unused
-        assert!(unused_hnsw_prefixes.contains(&"hnsw1".to_string()));
+        // Check that hnsw is marked as unused
+        for file in FILES.iter() {
+            let s3_key = HnswIndexProvider::format_key(prefix_path, &hnsw_id, file);
+            assert!(unused_hnsw_prefixes.contains(&s3_key));
+        }
     }
 
     #[tokio::test]
@@ -478,6 +503,8 @@ mod tests {
         let operator =
             ComputeUnusedFilesOperator::new("test_collection".to_string(), storage.clone(), 2);
 
+        let hnsw_id = IndexUuid(uuid::Uuid::new_v4());
+
         let input = ComputeUnusedFilesInput {
             oldest_version_to_keep: 3,
             version_file: Arc::new(chroma_proto::CollectionVersionFile {
@@ -488,7 +515,7 @@ mod tests {
                             version: 1,
                             segment_info: Some(create_test_segment_info(vec![
                                 ("data".to_string(), vec![uuid1.to_string()]),
-                                ("hnsw_index".to_string(), vec!["hnsw1".to_string()]),
+                                ("hnsw_index".to_string(), vec![hnsw_id.to_string()]),
                             ])),
                             collection_info_mutable: None,
                             created_at_secs: 0,
@@ -566,7 +593,11 @@ mod tests {
             let s3_key = BlockManager::format_key(prefix_path, &block_id);
             assert!(!result.unused_block_ids.contains(&s3_key));
         }
-        assert!(result.unused_hnsw_prefixes.contains(&"hnsw1".to_string()));
+        // Check that hnsw is marked as unused
+        for file in FILES.iter() {
+            let s3_key = HnswIndexProvider::format_key(prefix_path, &hnsw_id, file);
+            assert!(result.unused_hnsw_prefixes.contains(&s3_key));
+        }
     }
 
     #[tokio::test]
