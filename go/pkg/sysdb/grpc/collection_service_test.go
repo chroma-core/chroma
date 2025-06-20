@@ -761,6 +761,31 @@ func (suite *CollectionServiceTestSuite) TestFork() {
 	suite.Error(err)
 }
 
+func (suite *CollectionServiceTestSuite) TestCheckCollectionsResponsePopulation() {
+    // Simulate input data
+    request := &coordinatorpb.CheckCollectionsRequest{
+        // Add necessary fields based on your service's requirements
+    }
+
+    // Call the service method
+    response, err := suite.s.CheckCollections(context.Background(), request)
+
+    // Assert that no error occurred
+    suite.NoError(err)
+
+    // Assert that the Collections array in the response is not nil
+    suite.NotNil(response.Collections, "Collections array should not be nil.")
+
+    // Assert that the Collections array contains at least one item
+    suite.Greater(len(response.Collections), 0, "Collections array should not be empty.")
+
+    // Validate the individual items in the Collections array
+    for _, collection := range response.Collections {
+        suite.NotEmpty(collection.Id, "Collection ID should not be empty.")
+        suite.NotEmpty(collection.Name, "Collection Name should not be empty.")
+    }
+}
+
 func TestCollectionServiceTestSuite(t *testing.T) {
 	testSuite := new(CollectionServiceTestSuite)
 	suite.Run(t, testSuite)
