@@ -834,8 +834,12 @@ impl Manifest {
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);
-        if garbage.fragments_to_drop_start < garbage.fragments_to_drop_limit {
+        if garbage.fragments_to_drop_start > FragmentSeqNo(0)
+            || garbage.fragments_to_drop_start < garbage.fragments_to_drop_limit
+        {
             new.initial_seq_no = Some(garbage.fragments_to_drop_limit);
+        } else if new.initial_seq_no.is_none() {
+            new.initial_seq_no = Some(FragmentSeqNo(1));
         }
         new.scrub()?;
         Ok(new)
@@ -1482,5 +1486,36 @@ mod tests {
             empty_manifest.next_write_timestamp(),
             LogPosition::from_offset(500)
         );
+    }
+
+    #[test]
+    fn apply_garbage_equal_nonzero_fragment_seq_nos() {
+        let manifest = Manifest {
+            writer: "test_writer".to_string(),
+            setsum: Setsum::default(),
+            collected: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+
+        let garbage = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            fragments_to_drop_start: FragmentSeqNo(5),
+            fragments_to_drop_limit: FragmentSeqNo(5),
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: LogPosition::from_offset(100),
+            snapshot_for_root: None,
+        };
+
+        let result = manifest.apply_garbage(garbage).unwrap();
+
+        // When fragments_to_drop_start == fragments_to_drop_limit and both are non-zero,
+        // initial_seq_no should be set to the limit value
+        assert_eq!(result.initial_seq_no, Some(FragmentSeqNo(5)));
+        assert_eq!(result.initial_offset, Some(LogPosition::from_offset(100)));
     }
 }
