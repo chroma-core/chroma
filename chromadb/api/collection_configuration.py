@@ -99,7 +99,6 @@ def load_collection_configuration_from_json(
                 raise ValueError(
                     f"Could not build embedding function {ef_config['name']} from config {ef_config['config']}: {e}"
                 )
-
     else:
         ef = None
 
@@ -148,11 +147,6 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
     if ef is None:
         ef = None
         ef_config = {"type": "legacy"}
-        return {
-            "hnsw": hnsw_config,
-            "spann": spann_config,
-            "embedding_function": ef_config,
-        }
 
     if ef is not None:
         try:
@@ -260,16 +254,6 @@ class CreateCollectionConfiguration(TypedDict, total=False):
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
 
 
-def load_collection_configuration_from_create_collection_configuration(
-    config: CreateCollectionConfiguration,
-) -> CollectionConfiguration:
-    return CollectionConfiguration(
-        hnsw=config.get("hnsw"),
-        spann=config.get("spann"),
-        embedding_function=config.get("embedding_function"),
-    )
-
-
 def create_collection_configuration_from_legacy_collection_metadata(
     metadata: CollectionMetadata,
 ) -> CreateCollectionConfiguration:
@@ -299,13 +283,6 @@ def create_collection_configuration_from_legacy_metadata_dict(
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
 
     return CreateCollectionConfiguration(hnsw=hnsw_config)
-
-
-def load_create_collection_configuration_from_json_str(
-    json_str: str,
-) -> CreateCollectionConfiguration:
-    json_map = json.loads(json_str)
-    return load_create_collection_configuration_from_json(json_map)
 
 
 # TODO: make warnings prettier and add link to migration docs
