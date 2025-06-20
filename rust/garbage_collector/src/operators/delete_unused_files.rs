@@ -2,7 +2,6 @@ use crate::types::CleanupMode;
 use crate::types::RENAMED_FILE_PREFIX;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::HNSW_INDEX_S3_PREFIX;
 use chroma_storage::Storage;
 use chroma_storage::{DeleteOptions, StorageError};
 use chroma_system::{Operator, OperatorType};
@@ -92,6 +91,8 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
         );
 
         // Generate list of HNSW files
+        // NOTE(Sanket): input.hnsw_prefixes_for_deletion is no longer used
+        // hence not overriding prefix changes here. We should remove this param.
         let hnsw_files: Vec<String> = input
             .hnsw_prefixes_for_deletion
             .iter()
@@ -103,7 +104,7 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
                     "link_lists.bin",
                 ]
                 .iter()
-                .map(|file| format!("{}{}/{}", HNSW_INDEX_S3_PREFIX, prefix, file))
+                .map(|file| format!("hnsw/{}/{}", prefix, file))
                 .collect::<Vec<String>>()
             })
             .collect();
@@ -198,10 +199,10 @@ mod tests {
 
         // Create HNSW test files
         let hnsw_files = vec![
-            format!("{}{}/header.bin", HNSW_INDEX_S3_PREFIX, "prefix1"),
-            format!("{}{}/data_level0.bin", HNSW_INDEX_S3_PREFIX, "prefix1"),
-            format!("{}{}/length.bin", HNSW_INDEX_S3_PREFIX, "prefix1"),
-            format!("{}{}/link_lists.bin", HNSW_INDEX_S3_PREFIX, "prefix1"),
+            format!("hnsw/{}/header.bin", "prefix1"),
+            format!("hnsw/{}/data_level0.bin", "prefix1"),
+            format!("hnsw/{}/length.bin", "prefix1"),
+            format!("hnsw/{}/link_lists.bin", "prefix1"),
         ];
         for file in &hnsw_files {
             create_test_file(storage, file, b"test content").await;

@@ -65,12 +65,14 @@ impl ChromaError for ArrowBlockfileError {
 impl ArrowOrderedBlockfileWriter {
     pub(super) fn new<K: ArrowWriteableKey, V: ArrowWriteableValue>(
         id: Uuid,
+        prefix_path: &str,
         block_manager: BlockManager,
         root_manager: RootManager,
     ) -> Self {
         let initial_block = block_manager.create::<K, V, OrderedBlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
-        let root_writer = RootWriter::new(CURRENT_VERSION, id, sparse_index);
+        let root_writer =
+            RootWriter::new(CURRENT_VERSION, id, sparse_index, prefix_path.to_string());
 
         Self {
             block_manager,
@@ -233,7 +235,7 @@ impl ArrowOrderedBlockfileWriter {
 
         let new_delta = self
             .block_manager
-            .fork::<K, V, OrderedBlockDelta>(new_delta_block_id)
+            .fork::<K, V, OrderedBlockDelta>(new_delta_block_id, &self.root.prefix_path)
             .await
             .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
@@ -362,7 +364,7 @@ mod tests {
     use crate::arrow::block::delta::OrderedBlockDelta;
     use crate::arrow::block::Block;
     use crate::arrow::ordered_blockfile_writer::{ArrowOrderedBlockfileWriter, Inner};
-    use crate::arrow::provider::{BlockManager, RootManager};
+    use crate::arrow::provider::{BlockManager, BlockfileReaderOptions, RootManager};
     use crate::arrow::root::{RootWriter, Version};
     use crate::arrow::sparse_index::SparseIndexWriter;
     use crate::key::CompositeKey;
@@ -390,7 +392,9 @@ mod tests {
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path).ordered_mutations())
+            .write::<&str, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+            )
             .await
             .unwrap();
         let id = writer.id();
@@ -408,7 +412,11 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
-        let reader = blockfile_provider.read::<&str, &[u32]>(&id).await.unwrap();
+        let read_options = BlockfileReaderOptions::new(id, prefix_path);
+        let reader = blockfile_provider
+            .read::<&str, &[u32]>(read_options)
+            .await
+            .unwrap();
 
         let count = reader.count().await;
         match count {
@@ -505,7 +513,9 @@ mod tests {
         );
         let prefix_path = String::from("");
         let writer = blockfile_provider
-            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path).ordered_mutations())
+            .write::<&str, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+            )
             .await
             .unwrap();
         let id = writer.id();
@@ -523,7 +533,11 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
-        let reader = blockfile_provider.read::<&str, &[u32]>(&id).await.unwrap();
+        let read_options = BlockfileReaderOptions::new(id, prefix_path);
+        let reader = blockfile_provider
+            .read::<&str, &[u32]>(read_options)
+            .await
+            .unwrap();
 
         let value = reader.get(prefix_1, key1).await.unwrap().unwrap();
         assert_eq!(value, [1, 2, 3]);
@@ -563,8 +577,9 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
+        let read_options = BlockfileReaderOptions::new(id_1, prefix_path.clone());
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_1)
+            .read::<&str, &[u32]>(read_options)
             .await
             .unwrap();
 
@@ -602,8 +617,9 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
+        let read_options = BlockfileReaderOptions::new(id_2, prefix_path.clone());
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_2)
+            .read::<&str, &[u32]>(read_options)
             .await
             .unwrap();
         for i in 0..5 {
@@ -624,7 +640,7 @@ mod tests {
         // Add 1200 more entries, causing splits
         let writer = blockfile_provider
             .write::<&str, Vec<u32>>(
-                BlockfileWriterOptions::new(prefix_path)
+                BlockfileWriterOptions::new(prefix_path.clone())
                     .fork(id_2)
                     .ordered_mutations(),
             )
@@ -639,8 +655,9 @@ mod tests {
         let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
+        let read_options = BlockfileReaderOptions::new(id_3, prefix_path);
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_3)
+            .read::<&str, &[u32]>(read_options)
             .await
             .unwrap();
         for i in n..n * 2 {
@@ -675,7 +692,9 @@ mod tests {
         let prefix_path = String::from("");
 
         let writer = blockfile_provider
-            .write::<&str, String>(BlockfileWriterOptions::new(prefix_path).ordered_mutations())
+            .write::<&str, String>(
+                BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+            )
             .await
             .unwrap();
         let id = writer.id();
@@ -694,7 +713,11 @@ mod tests {
         let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
-        let reader = blockfile_provider.read::<&str, &str>(&id).await.unwrap();
+        let read_options = BlockfileReaderOptions::new(id, prefix_path);
+        let reader = blockfile_provider
+            .read::<&str, &str>(read_options)
+            .await
+            .unwrap();
         let val_1 = reader.get("key", "1").await.unwrap().unwrap();
         let val_2 = reader.get("key", "2").await.unwrap().unwrap();
 
@@ -735,7 +758,11 @@ mod tests {
         let flusher = writer.commit::<&str, String>().await.unwrap();
         flusher.flush::<&str, String>().await.unwrap();
 
-        let reader = blockfile_provider.read::<&str, &str>(&id).await.unwrap();
+        let read_options = BlockfileReaderOptions::new(id, prefix_path.clone());
+        let reader = blockfile_provider
+            .read::<&str, &str>(read_options)
+            .await
+            .unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
             let value = reader.get("key", &key).await.unwrap();
@@ -744,7 +771,7 @@ mod tests {
 
         let writer = blockfile_provider
             .write::<&str, String>(
-                BlockfileWriterOptions::new(prefix_path)
+                BlockfileWriterOptions::new(prefix_path.clone())
                     .fork(id)
                     .ordered_mutations(),
             )
@@ -767,7 +794,11 @@ mod tests {
         flusher.flush::<&str, String>().await.unwrap();
 
         // Check that the deleted keys are gone
-        let reader = blockfile_provider.read::<&str, &str>(&id).await.unwrap();
+        let read_options = BlockfileReaderOptions::new(id, prefix_path);
+        let reader = blockfile_provider
+            .read::<&str, &str>(read_options)
+            .await
+            .unwrap();
         for i in 0..n {
             let key = format!("{:04}", i);
             if deleted_keys.contains(&i) {
@@ -831,8 +862,9 @@ mod tests {
         let id_2 = flusher.id();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
+        let read_options = BlockfileReaderOptions::new(id_2, prefix_path.clone());
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_2)
+            .read::<&str, &[u32]>(read_options)
             .await
             .unwrap();
 
@@ -849,7 +881,7 @@ mod tests {
 
         let writer = blockfile_provider
             .write::<&str, Vec<u32>>(
-                BlockfileWriterOptions::new(prefix_path)
+                BlockfileWriterOptions::new(prefix_path.clone())
                     .fork(id_2)
                     .ordered_mutations(),
             )
@@ -868,8 +900,9 @@ mod tests {
         let id_3 = flusher.id();
         flusher.flush::<&str, Vec<u32>>().await.unwrap();
 
+        let read_options = BlockfileReaderOptions::new(id_3, prefix_path);
         let reader = blockfile_provider
-            .read::<&str, &[u32]>(&id_3)
+            .read::<&str, &[u32]>(read_options)
             .await
             .unwrap();
 
@@ -893,7 +926,9 @@ mod tests {
         let initial_block = block_manager.create::<&str, String, OrderedBlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let file_id = Uuid::new_v4();
-        let root_writer = RootWriter::new(Version::V1, file_id, sparse_index);
+        let prefix_path = "";
+        let root_writer =
+            RootWriter::new(Version::V1, file_id, sparse_index, prefix_path.to_string());
 
         let writer = ArrowOrderedBlockfileWriter {
             block_manager,
@@ -921,7 +956,11 @@ mod tests {
         flusher.flush::<&str, String>().await.unwrap();
 
         // Get the RootReader and verify the counts
-        let root_reader = root_manager.get::<&str>(&file_id).await.unwrap().unwrap();
+        let root_reader = root_manager
+            .get::<&str>(&file_id, prefix_path)
+            .await
+            .unwrap()
+            .unwrap();
         let count_in_index: u32 = root_reader
             .sparse_index
             .data
@@ -970,15 +1009,27 @@ mod tests {
             )
             .unwrap();
         let first_write_id = Uuid::new_v4();
-        let old_root_writer = RootWriter::new(Version::V1, first_write_id, sparse_index);
+        let prefix_path = "";
+        let old_root_writer = RootWriter::new(
+            Version::V1,
+            first_write_id,
+            sparse_index,
+            prefix_path.to_string(),
+        );
 
         // Flush the blocks and the root
         let old_block_1_record_batch = old_block_delta_1.finish::<&str, String>(None);
         let old_block_1 = Block::from_record_batch(old_block_id_1, old_block_1_record_batch);
         let old_block_2_record_batch = old_block_delta_2.finish::<&str, String>(None);
         let old_block_2 = Block::from_record_batch(old_block_id_2, old_block_2_record_batch);
-        block_manager.flush(&old_block_1).await.unwrap();
-        block_manager.flush(&old_block_2).await.unwrap();
+        block_manager
+            .flush(&old_block_1, prefix_path)
+            .await
+            .unwrap();
+        block_manager
+            .flush(&old_block_2, prefix_path)
+            .await
+            .unwrap();
         root_manager.flush::<&str>(&old_root_writer).await.unwrap();
 
         // We now have a v1 blockfile with 2 blocks and no counts in the root
@@ -996,8 +1047,9 @@ mod tests {
             root_cache,
         );
 
+        let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
         let reader = blockfile_provider
-            .read::<&str, &str>(&first_write_id)
+            .read::<&str, &str>(read_options)
             .await
             .unwrap();
         let reader = match reader {
@@ -1013,10 +1065,9 @@ mod tests {
 
         // Test that a v1.1 writer can read a v1 blockfile and dirty a block
         // successfully hydrating counts for ALL blocks it needs to set counts for
-        let prefix_path = String::from("");
         let writer = blockfile_provider
             .write::<&str, String>(
-                BlockfileWriterOptions::new(prefix_path)
+                BlockfileWriterOptions::new(prefix_path.to_string())
                     .fork(first_write_id)
                     .ordered_mutations(),
             )
@@ -1056,8 +1107,9 @@ mod tests {
 
         // Verify that the counts were correctly migrated
 
+        let read_options = BlockfileReaderOptions::new(second_write_id, prefix_path.to_string());
         let blockfile_reader = blockfile_provider
-            .read::<&str, &str>(&second_write_id)
+            .read::<&str, &str>(read_options)
             .await
             .unwrap();
 

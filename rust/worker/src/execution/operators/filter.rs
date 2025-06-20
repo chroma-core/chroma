@@ -1170,6 +1170,9 @@ mod tests {
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
                             }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
+                            }
                         }
                     }
                 };

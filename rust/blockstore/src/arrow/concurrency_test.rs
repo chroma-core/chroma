@@ -1,7 +1,10 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        arrow::{
+            config::TEST_MAX_BLOCK_SIZE_BYTES,
+            provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
+        },
         BlockfileWriterOptions,
     };
     use chroma_cache::new_cache_for_test;
@@ -72,8 +75,12 @@ mod tests {
                 flusher.flush::<&str, u32>().await.unwrap();
             });
 
+            let read_options = BlockfileReaderOptions::new(id, "".to_string());
             let reader = future::block_on(async {
-                blockfile_provider.read::<&str, u32>(&id).await.unwrap()
+                blockfile_provider
+                    .read::<&str, u32>(read_options)
+                    .await
+                    .unwrap()
             });
             // Read the data back
             for i in 0..n {
@@ -123,7 +130,11 @@ mod tests {
                 // Clear cache.
                 blockfile_provider.clear().await.expect("Clear bf provider");
 
-                blockfile_provider.read::<&str, u32>(&id).await.unwrap()
+                let read_options = BlockfileReaderOptions::new(id, "".to_string());
+                blockfile_provider
+                    .read::<&str, u32>(read_options)
+                    .await
+                    .unwrap()
             });
             // Make the max threads the number of cores * 2
             let max_threads = num_cpus::get() * 2;

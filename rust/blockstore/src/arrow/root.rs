@@ -75,14 +75,21 @@ pub struct RootWriter {
     // Metadata
     pub(super) id: Uuid,
     pub(super) version: Version,
+    pub(super) prefix_path: String,
 }
 
 impl RootWriter {
-    pub(crate) fn new(version: Version, id: Uuid, sparse_index: SparseIndexWriter) -> Self {
+    pub(crate) fn new(
+        version: Version,
+        id: Uuid,
+        sparse_index: SparseIndexWriter,
+        prefix_path: String,
+    ) -> Self {
         Self {
             version,
             sparse_index,
             id,
+            prefix_path,
         }
     }
 
@@ -228,6 +235,7 @@ pub struct RootReader {
     // Metadata
     pub(super) id: Uuid,
     pub(super) version: Version,
+    pub(super) prefix_path: String,
 }
 
 impl chroma_cache::Weighted for RootReader {
@@ -297,6 +305,7 @@ impl RootReader {
 
     pub(super) fn from_bytes<'data, K: ArrowReadableKey<'data>>(
         bytes: &[u8],
+        prefix_path: &str,
         id: Uuid,
     ) -> Result<Self, FromBytesError> {
         let mut cursor = std::io::Cursor::new(bytes);
@@ -374,6 +383,7 @@ impl RootReader {
             version,
             sparse_index: sparse_index_reader,
             id,
+            prefix_path: prefix_path.to_string(),
         })
     }
 
@@ -383,6 +393,7 @@ impl RootReader {
             version: self.version,
             sparse_index: new_sparse_index,
             id: new_id,
+            prefix_path: self.prefix_path.clone(),
         }
     }
 
@@ -453,7 +464,13 @@ mod test {
         let sparse_index = SparseIndexWriter::new(block_ids[0]);
 
         let bf_id = Uuid::new_v4();
-        let root_writer = RootWriter::new(CURRENT_VERSION, bf_id, sparse_index);
+        let prefix_path = "";
+        let root_writer = RootWriter::new(
+            CURRENT_VERSION,
+            bf_id,
+            sparse_index,
+            prefix_path.to_string(),
+        );
 
         root_writer
             .sparse_index
@@ -488,8 +505,8 @@ mod test {
         let bytes = root_writer
             .to_bytes::<&str>()
             .expect("To be able to serialize");
-        let root_reader =
-            RootReader::from_bytes::<&str>(&bytes, bf_id).expect("To be able to deserialize");
+        let root_reader = RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id)
+            .expect("To be able to deserialize");
 
         // Check that the sparse index is the same
         assert_eq!(
@@ -540,9 +557,11 @@ mod test {
             CompositeKey::new("prefix".to_string(), "d"),
         ];
         let sparse_index = SparseIndexWriter::new(block_ids[0]);
+        let prefix_path = "";
 
         let bf_id = Uuid::new_v4();
-        let root_writer = RootWriter::new(Version::V1, bf_id, sparse_index);
+        let root_writer =
+            RootWriter::new(Version::V1, bf_id, sparse_index, prefix_path.to_string());
         root_writer
             .sparse_index
             .set_count(block_ids[0], counts[0])
@@ -562,8 +581,8 @@ mod test {
             .to_bytes::<&str>()
             .expect("To be able to serialize");
 
-        let root_reader =
-            RootReader::from_bytes::<&str>(&bytes, bf_id).expect("To be able to deserialize");
+        let root_reader = RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id)
+            .expect("To be able to deserialize");
 
         // Check the version is still v1
         assert_eq!(root_reader.version, Version::V1);
