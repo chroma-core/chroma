@@ -840,11 +840,11 @@ impl Manifest {
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);
-        if garbage.fragments_to_drop_start > FragmentSeqNo(0)
+        if garbage.fragments_to_drop_start != FragmentSeqNo(0)
             || garbage.fragments_to_drop_start < garbage.fragments_to_drop_limit
         {
             new.initial_seq_no = Some(garbage.fragments_to_drop_limit);
-        } else if new.initial_seq_no.is_none() {
+        } else {
             new.initial_seq_no = Some(FragmentSeqNo(1));
         }
         new.scrub()?;
