@@ -157,6 +157,7 @@ impl Garbage {
             options.throughput as f64,
             options.headroom as f64,
         );
+        let mut retry_count = 0;
         loop {
             let path = Self::path(prefix);
             let payload = serde_json::to_string(&self)
@@ -176,13 +177,14 @@ impl Garbage {
                 }
                 Err(e) => {
                     tracing::error!("error uploading manifest: {e:?}");
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(3_600) {
-                        backoff = Duration::from_secs(3_600);
+                    let backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
+                        return Err(Arc::new(e).into());
                     }
                     tokio::time::sleep(backoff).await;
                 }
             }
+            retry_count += 1;
         }
     }
 

@@ -370,12 +370,7 @@ impl GarbageCollectorOrchestrator {
             })
             .collect();
 
-        self.pending_mark_versions_at_sysdb_tasks = output
-            .versions
-            .keys()
-            .filter(|collection_id| !self.soft_deleted_collections_to_gc.contains(collection_id))
-            .cloned()
-            .collect();
+        self.pending_mark_versions_at_sysdb_tasks = output.versions.keys().cloned().collect();
 
         for (collection_id, versions) in &output.versions {
             let version_file = self
