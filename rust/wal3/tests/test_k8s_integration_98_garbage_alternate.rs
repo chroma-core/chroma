@@ -87,7 +87,7 @@ async fn garbage_collector_thread(
         println!("gc grabs lock in iteration {i}");
         loop {
             match writer
-                .garbage_collect(&GarbageCollectionOptions::default())
+                .garbage_collect(&GarbageCollectionOptions::default(), None)
                 .await
             {
                 Ok(()) => break,

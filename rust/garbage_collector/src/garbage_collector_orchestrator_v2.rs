@@ -296,8 +296,10 @@ impl GarbageCollectorOrchestrator {
             .await
             {
                 Ok(log) => {
+                    // TODO(rescrv,codetheweb):  Thread through the minimum compaction offset to
+                    // keep_at_least.
                     if let Err(err) = log
-                        .garbage_collect(&GarbageCollectionOptions::default())
+                        .garbage_collect(&GarbageCollectionOptions::default(), None)
                         .await
                     {
                         tracing::error!("could not garbage collect log: {err:?}");
