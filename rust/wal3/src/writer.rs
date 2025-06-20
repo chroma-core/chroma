@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{DeleteOptions, GetOptions, PutOptions, Storage, StorageError};
+use chroma_storage::{DeleteOptions, ETag, GetOptions, PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -582,6 +582,15 @@ impl OnceLogWriter {
 
     #[tracing::instrument(skip(self))]
     async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
+        self.garbage_collect_recursive(options, false, None).await
+    }
+
+    async fn garbage_collect_recursive(
+        &self,
+        options: &GarbageCollectionOptions,
+        base: bool,
+        existing: Option<&ETag>,
+    ) -> Result<(), Error> {
         let cutoff = self.garbage_collection_cutoff().await?;
         self.manifest_manager.heartbeat().await?;
         let garbage = self
@@ -590,16 +599,40 @@ impl OnceLogWriter {
             .compute_garbage(options, cutoff, &())
             .await?;
         let (garbage, e_tag) = match garbage
-            .install(&self.options.throttle_manifest, &self.storage, &self.prefix)
+            .install(
+                &self.options.throttle_manifest,
+                &self.storage,
+                &self.prefix,
+                existing,
+            )
             .await
         {
             Ok(e_tag) => (garbage, e_tag),
-            Err(Error::LogContentionRetry) => {
+            Err(Error::LogContentionFailure)
+            | Err(Error::LogContentionRetry)
+            | Err(Error::LogContentionDurable) => {
                 match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
                     .await
                 {
-                    Ok(Some((garbage, e_tag))) => (garbage, e_tag),
-                    Ok(None) => return Err(Error::LogContentionFailure),
+                    Ok(Some((garbage, e_tag))) => {
+                        if garbage.is_empty() {
+                            if base {
+                                return Err(Error::LogContentionRetry);
+                            } else {
+                                return Box::pin(self.garbage_collect_recursive(
+                                    options,
+                                    true,
+                                    e_tag.as_ref(),
+                                ))
+                                .await;
+                            }
+                        } else {
+                            (garbage, e_tag)
+                        }
+                    }
+                    Ok(None) => {
+                        return Err(Error::LogContentionFailure);
+                    }
                     Err(err) => {
                         return Err(err);
                     }
@@ -609,10 +642,15 @@ impl OnceLogWriter {
                 return Err(err);
             }
         };
+        let Some(e_tag) = e_tag else {
+            return Err(Error::GarbageCollection(
+                "installed garbage without an ETag".to_string(),
+            ));
+        };
         let paths = garbage
             .prefixed_paths_to_delete(&self.prefix)
             .collect::<Vec<_>>();
-        self.manifest_manager.apply_garbage(garbage).await?;
+        self.manifest_manager.apply_garbage(garbage.clone()).await?;
         let exp_backoff: ExponentialBackoff = options.throttle.into();
         let start = Instant::now();
         for path in paths {
@@ -637,33 +675,14 @@ impl OnceLogWriter {
                 }
             }
         }
-        loop {
-            let options = if let Some(e_tag) = e_tag.as_ref() {
-                DeleteOptions::if_matches(e_tag, StorageRequestPriority::P0)
-            } else {
-                DeleteOptions::default()
-            };
-            match self
-                .storage
-                .delete(&Garbage::path(&self.prefix), options)
-                .await
-            {
-                Ok(()) => break,
-                Err(StorageError::NotFound { .. }) => break,
-                Err(err) => {
-                    tracing::error!("could not cleanup garbage: {err:?}");
-                    if start.elapsed() > Duration::from_secs(600) {
-                        tracing::error!("could not cleanup garbage within 10 minutes, returning");
-                        return Err(Error::StorageError(Arc::new(err)));
-                    }
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(600) {
-                        backoff = Duration::from_secs(600);
-                    }
-                    tokio::time::sleep(backoff).await;
-                }
-            }
-        }
+        garbage
+            .reset(
+                &self.options.throttle_manifest,
+                &self.storage,
+                &self.prefix,
+                &e_tag,
+            )
+            .await?;
         Ok(())
     }
 
