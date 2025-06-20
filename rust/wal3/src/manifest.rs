@@ -219,6 +219,7 @@ impl Snapshot {
             options.throughput as f64,
             options.headroom as f64,
         );
+        let mut retry_count = 0;
         loop {
             let path = format!("{}/{}", prefix, self.path);
             let payload = serde_json::to_string(&self)
@@ -241,13 +242,14 @@ impl Snapshot {
                 }
                 Err(e) => {
                     tracing::error!("error uploading manifest: {e:?}");
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(3_600) {
-                        backoff = Duration::from_secs(3_600);
+                    let backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
+                        return Err(Arc::new(e).into());
                     }
                     tokio::time::sleep(backoff).await;
                 }
             }
+            retry_count += 1;
         }
     }
 
@@ -758,6 +760,7 @@ impl Manifest {
             new.next_write_timestamp(),
             current,
         );
+        let mut retry_count = 0;
         loop {
             let payload = serde_json::to_string(&new)
                 .map_err(|e| {
@@ -790,13 +793,18 @@ impl Manifest {
                 }
                 Err(e) => {
                     tracing::error!("error uploading manifest: {e:?}");
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(3_600) {
-                        backoff = Duration::from_secs(3_600);
+                    let backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
+                        // NOTE(rescrv):  This is "durable" because it's a manifest failure.  See the
+                        // comment in the Error enum for why this makes sense.  By returning
+                        // "durable" rather than the underlying error we force an end-to-end
+                        // recovery.
+                        return Err(Error::LogContentionDurable);
                     }
                     tokio::time::sleep(backoff).await;
                 }
             }
+            retry_count += 1;
         }
     }
 

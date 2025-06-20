@@ -14,7 +14,7 @@ use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
 pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
     EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "error,opentelemetry_sdk=info,garbage_collector=debug,".to_string()
+        "error,opentelemetry_sdk=info,garbage_collector=debug,chroma_storage=debug,".to_string()
             + &vec![
                 "chroma",
                 "chroma-blockstore",
@@ -26,7 +26,6 @@ pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
                 "chroma-log-service",
                 "chroma-frontend",
                 "chroma-index",
-                "chroma-storage",
                 "chroma-test",
                 "chroma-types",
                 "compaction_service",

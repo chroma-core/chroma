@@ -8,8 +8,6 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
-	trace_log "github.com/pingcap/log"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -67,7 +65,6 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 		FirstUninsertedRecordOffset:  int64(limit + 1),
 		IsSealed:                     isSealed,
 	}
-	trace_log.Info("Scouted Logs", zap.Int64("start", int64(start+1)), zap.Int64("limit", int64(limit+1)), zap.String("collectionId", req.CollectionId))
 	return
 }
 
