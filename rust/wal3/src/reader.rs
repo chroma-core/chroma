@@ -436,13 +436,15 @@ impl LogReader {
             short_read,
         };
         if !short_read && manifest_scrub_success != observed_scrub_success {
-            Err(vec![Error::ScrubError(
+            let mut ret = vec![Error::ScrubError(
                 ScrubError::OverallMismatch {
                     manifest: manifest_scrub_success,
                     observed: observed_scrub_success,
                 }
                 .into(),
-            )])
+            )];
+            ret.extend(errors);
+            Err(ret)
         } else if short_read {
             Err(vec![Error::Success])
         } else {
