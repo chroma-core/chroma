@@ -65,7 +65,7 @@ message Collection {
   optional string lineage_file_path = 15;
   google.protobuf.Timestamp updated_at = 16;
   // This is the database id of the collection.
-  string database_id = 17;
+  optional string database_id = 17;
 }
 
 message Database {

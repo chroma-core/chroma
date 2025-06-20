@@ -523,7 +523,7 @@ mod tests {
                 dimension: None,
                 tenant: "test-tenant".to_string(),
                 database: "test-database".to_string(),
-                database_id: database_id.clone(),
+                database_id: Some(database_id.clone()),
                 ..Default::default()
             }),
             knn: Some(chroma_proto::Segment {

@@ -274,8 +274,12 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             }
             None => SystemTime::now(),
         };
-        let database_id = DatabaseUuid::from_str(&proto_collection.database_id)
-            .map_err(|_| CollectionConversionError::InvalidUuid)?;
+        // TOOD(Sanket): this should be updated to error with "missing field" once all SysDb deployments are up-to-date
+        let database_id = match proto_collection.database_id {
+            Some(db_id) => DatabaseUuid::from_str(&db_id)
+                .map_err(|_| CollectionConversionError::InvalidUuid)?,
+            None => DatabaseUuid::new(),
+        };
         Ok(Collection {
             collection_id,
             name: proto_collection.name,
@@ -335,7 +339,7 @@ impl TryFrom<Collection> for chroma_proto::Collection {
             root_collection_id: value.root_collection_id.map(|uuid| uuid.0.to_string()),
             lineage_file_path: value.lineage_file_path,
             updated_at: Some(value.updated_at.into()),
-            database_id: value.database_id.0.to_string(),
+            database_id: Some(value.database_id.0.to_string()),
         })
     }
 }
@@ -388,7 +392,7 @@ mod test {
                 seconds: 1,
                 nanos: 1,
             }),
-            database_id: "00000000-0000-0000-0000-000000000000".to_string(),
+            database_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(

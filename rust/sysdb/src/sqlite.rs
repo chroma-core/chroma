@@ -290,6 +290,8 @@ impl SqliteSysDb {
                     _ => CreateCollectionError::Internal(e.into()),
                 })?;
         let database_id = database_result.get::<&str, _>(0);
+        let database_uuid = DatabaseUuid::from_str(database_id)
+            .map_err(|_| CreateCollectionError::DatabaseIdParseError)?;
 
         sqlx::query(
             r#"
@@ -344,8 +346,7 @@ impl SqliteSysDb {
             root_collection_id: None,
             lineage_file_path: None,
             updated_at: SystemTime::UNIX_EPOCH,
-            // TODO(Sanket): can populate database_id here if needed.
-            database_id: DatabaseUuid::new(),
+            database_id: database_uuid,
         })
     }
 
@@ -674,6 +675,7 @@ impl SqliteSysDb {
             .column((table::Collections::Table, table::Collections::Dimension))
             .column((table::Databases::Table, table::Databases::TenantId))
             .column((table::Databases::Table, table::Databases::Name))
+            .column((table::Collections::Table, table::Collections::DatabaseId))
             .columns([
                 table::CollectionMetadata::Key,
                 table::CollectionMetadata::StrValue,
@@ -723,6 +725,10 @@ impl SqliteSysDb {
                     }
                     None => InternalCollectionConfiguration::default_hnsw(),
                 };
+                let database_id = match DatabaseUuid::from_str(first_row.get(6)) {
+                    Ok(db_id) => db_id,
+                    Err(_) => return Some(Err(GetCollectionsError::DatabaseId)),
+                };
 
                 Some(Ok(Collection {
                     collection_id,
@@ -741,8 +747,7 @@ impl SqliteSysDb {
                     root_collection_id: None,
                     lineage_file_path: None,
                     updated_at: SystemTime::UNIX_EPOCH,
-                    // TODO(Sanket): can populate database_id here if needed.
-                    database_id: DatabaseUuid::new(),
+                    database_id,
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
