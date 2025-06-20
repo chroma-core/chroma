@@ -854,6 +854,10 @@ func (tc *Catalog) updateCollectionConfiguration(
 		existingConfig.EmbeddingFunction = updateConfig.EmbeddingFunction
 	}
 
+	if updateConfig.QueryConfig != nil {
+		existingConfig.QueryConfig = updateConfig.QueryConfig
+	}
+
 	// Serialize updated config back to JSON
 	updatedConfigBytes, err := json.Marshal(existingConfig)
 	if err != nil {

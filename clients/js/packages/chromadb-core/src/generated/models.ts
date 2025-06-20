@@ -67,6 +67,7 @@ export namespace Api {
   export interface CollectionConfiguration {
     embedding_function?: Api.EmbeddingFunctionConfiguration | null;
     hnsw?: Api.HnswConfiguration | null;
+    query_config?: unknown;
     spann?: Api.SpannConfiguration | null;
   }
 
@@ -335,6 +336,7 @@ export namespace Api {
   export interface UpdateCollectionConfiguration {
     embedding_function?: Api.EmbeddingFunctionConfiguration | null;
     hnsw?: Api.UpdateHnswConfiguration | null;
+    query_config?: unknown;
     spann?: Api.SpannConfiguration | null;
   }
 
