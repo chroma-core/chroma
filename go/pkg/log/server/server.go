@@ -8,8 +8,6 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
-	trace_log "github.com/pingcap/log"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
 
