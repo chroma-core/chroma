@@ -86,6 +86,7 @@ pub struct InternalCollectionConfiguration {
     #[serde(default = "default_vector_index_config")]
     pub vector_index: VectorIndexConfiguration,
     pub embedding_function: Option<EmbeddingFunctionConfiguration>,
+    pub query_config: Option<serde_json::Value>,
 }
 
 impl InternalCollectionConfiguration {
@@ -96,6 +97,7 @@ impl InternalCollectionConfiguration {
         Ok(Self {
             vector_index: VectorIndexConfiguration::Hnsw(hnsw),
             embedding_function: None,
+            query_config: None,
         })
     }
 
@@ -103,6 +105,7 @@ impl InternalCollectionConfiguration {
         Self {
             vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration::default()),
             embedding_function: None,
+            query_config: None,
         }
     }
 
@@ -110,6 +113,7 @@ impl InternalCollectionConfiguration {
         Self {
             vector_index: VectorIndexConfiguration::Spann(InternalSpannConfiguration::default()),
             embedding_function: None,
+            query_config: None,
         }
     }
 
@@ -192,6 +196,9 @@ impl InternalCollectionConfiguration {
         if let Some(embedding_function) = &configuration.embedding_function {
             self.embedding_function = Some(embedding_function.clone());
         }
+        if let Some(query_config) = &configuration.query_config {
+            self.query_config = Some(query_config.clone());
+        }
     }
 
     pub fn try_from_config(
@@ -235,6 +242,7 @@ impl InternalCollectionConfiguration {
                         Ok(InternalCollectionConfiguration {
                             vector_index: VectorIndexConfiguration::Spann(internal_config),
                             embedding_function: value.embedding_function,
+                            query_config: value.query_config,
                         })
                     },
                     KnnIndex::Hnsw => {
@@ -242,6 +250,7 @@ impl InternalCollectionConfiguration {
                         Ok(InternalCollectionConfiguration {
                             vector_index: hnsw.into(),
                             embedding_function: value.embedding_function,
+                            query_config: value.query_config,
                         })
                     }
                 }
@@ -263,6 +272,7 @@ impl InternalCollectionConfiguration {
                         Ok(InternalCollectionConfiguration {
                             vector_index: VectorIndexConfiguration::Hnsw(internal_config),
                             embedding_function: value.embedding_function,
+                            query_config: value.query_config,
                         })
                     }
                     KnnIndex::Spann => {
@@ -270,6 +280,7 @@ impl InternalCollectionConfiguration {
                         Ok(InternalCollectionConfiguration {
                             vector_index: spann.into(),
                             embedding_function: value.embedding_function,
+                            query_config: value.query_config,
                         })
                     }
                 }
@@ -282,6 +293,7 @@ impl InternalCollectionConfiguration {
                 Ok(InternalCollectionConfiguration {
                     vector_index,
                     embedding_function: value.embedding_function,
+                    query_config: value.query_config,
                 })
             }
         }
@@ -299,6 +311,7 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
                 Ok(InternalCollectionConfiguration {
                     vector_index: hnsw.into(),
                     embedding_function: value.embedding_function,
+                    query_config: value.query_config,
                 })
             }
             (None, Some(spann)) => {
@@ -306,11 +319,13 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
                 Ok(InternalCollectionConfiguration {
                     vector_index: spann.into(),
                     embedding_function: value.embedding_function,
+                    query_config: value.query_config,
                 })
             }
             (None, None) => Ok(InternalCollectionConfiguration {
                 vector_index: InternalHnswConfiguration::default().into(),
                 embedding_function: value.embedding_function,
+                query_config: value.query_config,
             }),
         }
     }
@@ -339,6 +354,7 @@ pub struct CollectionConfiguration {
     pub hnsw: Option<HnswConfiguration>,
     pub spann: Option<SpannConfiguration>,
     pub embedding_function: Option<EmbeddingFunctionConfiguration>,
+    pub query_config: Option<serde_json::Value>,
 }
 
 impl From<InternalCollectionConfiguration> for CollectionConfiguration {
@@ -353,6 +369,7 @@ impl From<InternalCollectionConfiguration> for CollectionConfiguration {
                 _ => None,
             },
             embedding_function: value.embedding_function,
+            query_config: value.query_config,
         }
     }
 }
@@ -396,6 +413,7 @@ pub struct UpdateCollectionConfiguration {
     pub hnsw: Option<UpdateHnswConfiguration>,
     pub spann: Option<UpdateSpannConfiguration>,
     pub embedding_function: Option<EmbeddingFunctionConfiguration>,
+    pub query_config: Option<serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -444,6 +462,7 @@ mod tests {
                 ..Default::default()
             }),
             embedding_function: None,
+            query_config: None,
         };
 
         let overridden_config = config
@@ -472,6 +491,7 @@ mod tests {
             hnsw: Some(hnsw_config.clone()),
             spann: None,
             embedding_function: None,
+            query_config: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -504,6 +524,7 @@ mod tests {
             hnsw: Some(hnsw_config.clone()),
             spann: None,
             embedding_function: None,
+            query_config: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -540,6 +561,7 @@ mod tests {
             hnsw: None,
             spann: Some(spann_config.clone()),
             embedding_function: None,
+            query_config: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -573,6 +595,7 @@ mod tests {
             hnsw: None,
             spann: Some(spann_config.clone()),
             embedding_function: None,
+            query_config: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -598,6 +621,7 @@ mod tests {
             hnsw: None,
             spann: None,
             embedding_function: None,
+            query_config: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -622,6 +646,7 @@ mod tests {
             hnsw: None,
             spann: None,
             embedding_function: None,
+            query_config: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -655,6 +680,7 @@ mod tests {
             hnsw: None,
             spann: None,
             embedding_function: None,
+            query_config: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -692,6 +718,7 @@ mod tests {
             hnsw: None,
             spann: None,
             embedding_function: None,
+            query_config: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(

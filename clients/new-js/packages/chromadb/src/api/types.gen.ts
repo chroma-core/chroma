@@ -32,6 +32,7 @@ export type Collection = {
 export type CollectionConfiguration = {
   embedding_function?: null | EmbeddingFunctionConfiguration;
   hnsw?: null | HnswConfiguration;
+  query_config?: unknown;
   spann?: null | SpannConfiguration;
 };
 
@@ -83,11 +84,11 @@ export type DeleteDatabaseResponse = {
 
 export type EmbeddingFunctionConfiguration =
   | {
-      type: "legacy";
-    }
+    type: "legacy";
+  }
   | (EmbeddingFunctionNewConfiguration & {
-      type: "known";
-    });
+    type: "known";
+  });
 
 export type EmbeddingFunctionNewConfiguration = {
   config: unknown;
@@ -196,6 +197,7 @@ export type SpannConfiguration = {
 export type UpdateCollectionConfiguration = {
   embedding_function?: null | EmbeddingFunctionConfiguration;
   hnsw?: null | UpdateHnswConfiguration;
+  query_config?: unknown;
   spann?: null | UpdateSpannConfiguration;
 };
 

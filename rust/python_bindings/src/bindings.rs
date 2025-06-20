@@ -281,6 +281,7 @@ impl Bindings {
                     hnsw: None,
                     spann: None,
                     embedding_function: None,
+                    query_config: None,
                 },
                 self.frontend.get_default_knn_index(),
                 metadata.clone(),
