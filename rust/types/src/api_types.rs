@@ -647,6 +647,8 @@ pub enum CreateCollectionError {
     SpannNotImplemented,
     #[error("HNSW is not supported on this platform")]
     HnswNotSupported,
+    #[error("Failed to parse db id")]
+    DatabaseIdParseError,
 }
 
 impl ChromaError for CreateCollectionError {
@@ -663,6 +665,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::Aborted(_) => ErrorCodes::Aborted,
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
+            CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
         }
     }
 }
@@ -689,6 +692,8 @@ pub enum GetCollectionsError {
     Configuration(#[from] serde_json::Error),
     #[error("Could not deserialize collection ID")]
     CollectionId(#[from] uuid::Error),
+    #[error("Could not deserialize database ID")]
+    DatabaseId,
 }
 
 impl ChromaError for GetCollectionsError {
@@ -697,6 +702,7 @@ impl ChromaError for GetCollectionsError {
             GetCollectionsError::Internal(err) => err.code(),
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
+            GetCollectionsError::DatabaseId => ErrorCodes::Internal,
         }
     }
 }

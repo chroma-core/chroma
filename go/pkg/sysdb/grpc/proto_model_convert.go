@@ -42,6 +42,7 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 		return nil
 	}
 
+	dbId := collection.DatabaseId.String()
 	collectionpb := &coordinatorpb.Collection{
 		Id:                         collection.ID.String(),
 		Name:                       collection.Name,
@@ -60,6 +61,7 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 			Seconds: collection.UpdatedAt,
 			Nanos:   0,
 		},
+		DatabaseId: &dbId,
 	}
 
 	if collection.RootCollectionID != nil {
