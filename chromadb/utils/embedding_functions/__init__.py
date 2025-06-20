@@ -32,6 +32,7 @@ from chromadb.utils.embedding_functions.instructor_embedding_function import (
 )
 from chromadb.utils.embedding_functions.jina_embedding_function import (
     JinaEmbeddingFunction,
+    JinaQueryConfig,
 )
 from chromadb.utils.embedding_functions.voyageai_embedding_function import (
     VoyageAIEmbeddingFunction,
@@ -232,6 +233,7 @@ __all__ = [
     "OllamaEmbeddingFunction",
     "InstructorEmbeddingFunction",
     "JinaEmbeddingFunction",
+    "JinaQueryConfig",
     "MistralEmbeddingFunction",
     "VoyageAIEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
