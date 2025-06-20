@@ -811,6 +811,12 @@ impl Manifest {
     /// Apply the destructive operation specified by the Garbage struct.
     #[allow(clippy::result_large_err)]
     pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Self, Error> {
+        if garbage.fragments_to_drop_start > garbage.fragments_to_drop_limit {
+            return Err(Error::GarbageCollection(format!(
+                "Garbage has start > limit: {:?} > {:?}",
+                garbage.fragments_to_drop_start, garbage.fragments_to_drop_limit
+            )));
+        }
         let mut new = self.clone();
         for to_drop in garbage.snapshots_to_drop.iter() {
             if let Some(index) = new.snapshots.iter().position(|s| s == to_drop) {
@@ -1517,5 +1523,61 @@ mod tests {
         // initial_seq_no should be set to the limit value
         assert_eq!(result.initial_seq_no, Some(FragmentSeqNo(5)));
         assert_eq!(result.initial_offset, Some(LogPosition::from_offset(100)));
+    }
+
+    #[test]
+    fn apply_garbage_validates_fragment_drop_range() {
+        use crate::gc::Garbage;
+
+        let manifest = Manifest::new_empty("test");
+
+        // Test case: fragments_to_drop_start > fragments_to_drop_limit should fail
+        let invalid_garbage = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: FragmentSeqNo(10),
+            fragments_to_drop_limit: FragmentSeqNo(5),
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: LogPosition::from_offset(1),
+        };
+
+        let result = manifest.apply_garbage(invalid_garbage);
+        assert!(result.is_err());
+
+        if let Err(crate::Error::GarbageCollection(msg)) = result {
+            assert!(msg.contains("Garbage has start > limit"));
+            assert!(msg.contains("FragmentSeqNo(10) > FragmentSeqNo(5)"));
+        } else {
+            panic!("Expected GarbageCollection error, got {:?}", result);
+        }
+
+        // Test case: fragments_to_drop_start == fragments_to_drop_limit should succeed
+        let valid_garbage_equal = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: FragmentSeqNo(5),
+            fragments_to_drop_limit: FragmentSeqNo(5),
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: LogPosition::from_offset(1),
+        };
+
+        let result = manifest.apply_garbage(valid_garbage_equal);
+        assert!(result.is_ok());
+
+        // Test case: fragments_to_drop_start < fragments_to_drop_limit should succeed
+        let valid_garbage_less = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: FragmentSeqNo(1),
+            fragments_to_drop_limit: FragmentSeqNo(5),
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: LogPosition::from_offset(1),
+        };
+
+        let result = manifest.apply_garbage(valid_garbage_less);
+        assert!(result.is_ok());
     }
 }
