@@ -24,18 +24,29 @@ type WindowingSystemComponent interface {
 const (
 	defaultState = iota
 	draggingState
+	resizingState
 )
 
 type dragEvent struct {
-	window         *window
-	initialMouseX  int
-	initialMouseY  int
-	initialWindowX int
-	initialWindowY int
+	window              *window
+	initialMouseX       int
+	initialMouseY       int
+	initialWindowX      int
+	initialWindowY      int
+	initialWindowWidth  int
+	initialWindowHeight int
+	isResizing          bool
 }
 
 const (
 	AboutWindow = iota
+	StateWindow
+)
+
+const (
+	minWindowWidth   = 20
+	minWindowHeight  = 5
+	resizeHandleSize = 1 // Size of the resize handle area in the bottom right corner
 )
 
 type borderStyle struct {
@@ -90,9 +101,10 @@ type window struct {
 	width       int
 	height      int
 	focused     bool
+	closable    bool // whether this window can be closed
 }
 
-func newWindow(model WindowingSystemComponent, x int, y int, width int, height int) window {
+func newWindow(model WindowingSystemComponent, x int, y int, width int, height int, closable bool) window {
 	borderStyle := chromaWindowBorderStyle
 	return window{
 		model:       model,
@@ -102,6 +114,7 @@ func newWindow(model WindowingSystemComponent, x int, y int, width int, height i
 		width:       width,
 		height:      height,
 		focused:     false,
+		closable:    closable,
 	}
 }
 
@@ -136,9 +149,34 @@ func (w window) View(buffer [][]renderer.ASCIIPixel) {
 	renderer.SetPixel(buffer, w.x, w.y, renderer.ASCIIPixel{Color: color, Char: w.borderStyle.TopLeft})
 	renderer.SetPixel(buffer, w.x+w.width-1, w.y, renderer.ASCIIPixel{Color: color, Char: w.borderStyle.TopRight})
 	renderer.SetPixel(buffer, w.x, w.y+w.height-1, renderer.ASCIIPixel{Color: color, Char: w.borderStyle.BottomLeft})
-	renderer.SetPixel(buffer, w.x+w.width-1, w.y+w.height-1, renderer.ASCIIPixel{Color: color, Char: w.borderStyle.BottomRight})
 
-	modelBuffer := renderer.NewBuffer(w.width-4, w.height-2)
+	// Draw close button in top left corner for closable windows
+	if w.closable && w.width > 3 { // Only show close button if window is closable and wide enough
+		closeButtonColor := color
+		if w.focused {
+			closeButtonColor = renderer.Red // Make close button red when focused
+		}
+		renderer.SetPixel(buffer, w.x+1, w.y, renderer.ASCIIPixel{Color: closeButtonColor, Char: '×'})
+	}
+
+	// Draw resize handle in bottom right corner (use different character to indicate resize)
+	resizeHandleColor := color
+	if w.focused {
+		resizeHandleColor = renderer.Yellow // Make resize handle more visible when focused
+	}
+	renderer.SetPixel(buffer, w.x+w.width-1, w.y+w.height-1, renderer.ASCIIPixel{Color: resizeHandleColor, Char: '◢'})
+
+	// Ensure minimum buffer size for the window content
+	bufferWidth := w.width - 4
+	bufferHeight := w.height - 2
+	if bufferWidth < 1 {
+		bufferWidth = 1
+	}
+	if bufferHeight < 1 {
+		bufferHeight = 1
+	}
+
+	modelBuffer := renderer.NewBuffer(bufferWidth, bufferHeight)
 	w.model.View(modelBuffer)
 	for i := range modelBuffer {
 		for j := range modelBuffer[i] {
@@ -169,13 +207,16 @@ func NewWMModel() WMModel {
 		Height:     1,
 		background: NewBackgroundModel(),
 		windows: []window{
-			newWindow(SearchBarModel{}, 30, 30, 50, 3).withBorderStyle(lipgloss.NormalBorder()),
+			newWindow(SearchBarModel{}, 30, 30, 50, 3, false).withBorderStyle(lipgloss.NormalBorder()), // Search bar is not closable
 		},
 	}
 }
 
 func (m WMModel) Init() tea.Cmd {
-	return nil
+	cmds := []tea.Cmd{}
+	cmds = append(cmds, m.background.Init())
+	cmds = append(cmds, m.windows[0].Init())
+	return tea.Batch(cmds...)
 }
 
 func (m *WMModel) mouseUpdate(msg tea.MouseMsg) tea.Cmd {
@@ -199,8 +240,49 @@ func (m *WMModel) mouseUpdate(msg tea.MouseMsg) tea.Cmd {
 	switch msg.Action {
 	case tea.MouseActionPress:
 		if msg.Button == tea.MouseButtonLeft {
-			m.state = draggingState
-			m.dragEvent = &dragEvent{window: &m.windows[m.focused], initialMouseX: msg.X, initialMouseY: msg.Y, initialWindowX: m.windows[m.focused].x, initialWindowY: m.windows[m.focused].y}
+			focusedWindow := &m.windows[m.focused]
+
+			// Check if clicking on close button for closable windows
+			if focusedWindow.closable && isMouseOverCloseButton(focusedWindow, msg.X, msg.Y) {
+				// Remove the window from the slice
+				if m.focused > 0 { // Never remove the search bar (index 0)
+					m.windows = append(m.windows[:m.focused], m.windows[m.focused+1:]...)
+					// Adjust focused index if necessary
+					if m.focused >= len(m.windows) {
+						m.focused = len(m.windows) - 1
+					}
+					// Ensure we focus on a valid window
+					if m.focused >= 0 && m.focused < len(m.windows) {
+						for i := range m.windows {
+							m.windows[i].focused = (i == m.focused)
+						}
+					}
+				}
+			} else if isMouseOverResizeHandle(focusedWindow, msg.X, msg.Y) {
+				m.state = resizingState
+				m.dragEvent = &dragEvent{
+					window:              focusedWindow,
+					initialMouseX:       msg.X,
+					initialMouseY:       msg.Y,
+					initialWindowX:      focusedWindow.x,
+					initialWindowY:      focusedWindow.y,
+					initialWindowWidth:  focusedWindow.width,
+					initialWindowHeight: focusedWindow.height,
+					isResizing:          true,
+				}
+			} else {
+				m.state = draggingState
+				m.dragEvent = &dragEvent{
+					window:              focusedWindow,
+					initialMouseX:       msg.X,
+					initialMouseY:       msg.Y,
+					initialWindowX:      focusedWindow.x,
+					initialWindowY:      focusedWindow.y,
+					initialWindowWidth:  focusedWindow.width,
+					initialWindowHeight: focusedWindow.height,
+					isResizing:          false,
+				}
+			}
 		}
 	case tea.MouseActionRelease:
 		if msg.Button == tea.MouseButtonLeft {
@@ -209,9 +291,24 @@ func (m *WMModel) mouseUpdate(msg tea.MouseMsg) tea.Cmd {
 		}
 	}
 
-	if m.state == draggingState {
+	if m.state == draggingState && m.dragEvent != nil && !m.dragEvent.isResizing {
 		m.dragEvent.window.x = m.dragEvent.initialWindowX + msg.X - m.dragEvent.initialMouseX
 		m.dragEvent.window.y = m.dragEvent.initialWindowY + msg.Y - m.dragEvent.initialMouseY
+	} else if m.state == resizingState && m.dragEvent != nil && m.dragEvent.isResizing {
+		// Calculate new size based on mouse movement
+		newWidth := m.dragEvent.initialWindowWidth + msg.X - m.dragEvent.initialMouseX
+		newHeight := m.dragEvent.initialWindowHeight + msg.Y - m.dragEvent.initialMouseY
+
+		// Apply minimum size constraints
+		if newWidth < minWindowWidth {
+			newWidth = minWindowWidth
+		}
+		if newHeight < minWindowHeight {
+			newHeight = minWindowHeight
+		}
+
+		m.dragEvent.window.width = newWidth
+		m.dragEvent.window.height = newHeight
 	}
 	return nil
 }
@@ -220,10 +317,21 @@ func (m WMModel) Update(msg tea.Msg) (renderer.RendererChildModel, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
 	case util.OpenWindowMsg:
+		var newWindowModel WindowingSystemComponent
+		var newWindowWidth int
+		var newWindowHeight int
 		switch msg.WindowId {
 		case AboutWindow:
-			m.windows = append(m.windows, newWindow(AboutModel{}, 20, 20, 29, 11))
+			newWindowModel = AboutModel{}
+			newWindowWidth = 29
+			newWindowHeight = 11
+		case StateWindow:
+			newWindowModel = NewStateModel()
+			newWindowWidth = 60
+			newWindowHeight = 40
 		}
+		m.windows = append(m.windows, newWindow(newWindowModel, 20, 20, newWindowWidth, newWindowHeight, true)) // New windows are closable
+		cmds = append(cmds, newWindowModel.Init())
 	case tea.KeyMsg:
 		window, cmd := m.windows[m.focused].Update(msg)
 		m.windows[m.focused] = window
@@ -235,11 +343,22 @@ func (m WMModel) Update(msg tea.Msg) (renderer.RendererChildModel, tea.Cmd) {
 		searchBar.x = (msg.Width - searchBar.width) / 2
 		searchBar.y = (msg.Height-searchBar.height)/2 + 5
 	case tea.MouseMsg:
-		background, cmd := m.background.Update(msg)
-		cmds = append(cmds, cmd)
-		m.background = background
 		cmds = append(cmds, m.mouseUpdate(msg))
+	case util.AsyncFetchResultMsg:
+		var cmd tea.Cmd
+		m.background, cmd = m.background.Update(msg)
+		cmds = append(cmds, cmd)
+		for i := range m.windows {
+			m.windows[i], cmd = m.windows[i].Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
 	}
+
+	background, cmd := m.background.Update(msg)
+	cmds = append(cmds, cmd)
+	m.background = background
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -248,4 +367,19 @@ func (m WMModel) View(buffer [][]renderer.ASCIIPixel) {
 	for _, window := range m.windows {
 		window.View(buffer)
 	}
+}
+
+// isMouseOverResizeHandle checks if the mouse is over the resize handle (bottom right corner)
+func isMouseOverResizeHandle(window *window, mouseX, mouseY int) bool {
+	return mouseX >= window.x+window.width-resizeHandleSize-1 &&
+		mouseX < window.x+window.width &&
+		mouseY >= window.y+window.height-resizeHandleSize-1 &&
+		mouseY < window.y+window.height
+}
+
+// isMouseOverCloseButton checks if the mouse is over the close button (top left corner)
+func isMouseOverCloseButton(window *window, mouseX, mouseY int) bool {
+	return mouseX >= window.x &&
+		mouseX <= window.x+2 &&
+		mouseY == window.y
 }

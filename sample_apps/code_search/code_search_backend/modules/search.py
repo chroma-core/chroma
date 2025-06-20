@@ -17,13 +17,12 @@ def semantic_search_using_chroma(
         for filter in query.filters
         if isinstance(filter, util.MetadataFilter)
     }
-    # regex_filters = [filter.to_filter() for filter in query.filters if isinstance(filter, util.RegexFilter)]
     result = collection.query(
         query_texts=[query.natural_language_query],
-        n_results=20,
+        n_results=100,
         where=metadata_filters if metadata_filters else None,
     )
-    assert result["documents"] != None and result["metadatas"] != None
+    assert result["documents"] is not None and result["metadatas"] is not None
     output = []
     for doc, metadata in zip(result["documents"][0], result["metadatas"][0]):
         output.append(
@@ -32,11 +31,12 @@ def semantic_search_using_chroma(
                 language=str(metadata["language"]),
                 name=str(metadata["name"]),
                 file_path=str(metadata["file_path"]),
-                start_line=int(metadata["start_line"] or 0),  # TODO: Make this better
+                start_line=int(metadata["start_line"] or 0),
             )
         )
     return output
 
 
 if __name__ == "__main__":
-    raise Exception("search.py is not meant to be run directly.")
+    print("search.py is not meant to be run directly.")
+    exit(1)

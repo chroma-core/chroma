@@ -7,6 +7,8 @@ from flask_cors import CORS
 import inspect
 import util
 import main
+from pathlib import Path
+from vars import REPO_NAME, COMMIT_HASH
 
 app = Flask(__name__)
 # CORS must be enabled so the website can access the API on localhost
@@ -31,6 +33,8 @@ def state():
             "source_code": source_code,
             "chunk_count": chunk_count,
             "collection_name": collection_name,
+            "repo_name": main.REPO_NAME,
+            "commit_hash": main.COMMIT_HASH,
         }
     }
 
@@ -51,6 +55,63 @@ def query():
             "error": f"Warning: the server just tried to send you {len(results)} results. Try limiting the number of results returned."
         }, 500
     return {"result": results}, 200
+
+
+@app.route("/api/file")
+def get_file():
+    """
+    Get a file from the repository data.
+    Uses the configured REPO_NAME and COMMIT_HASH from environment.
+    Query parameters:
+    - path: File path within the repository
+    """
+    file_path = request.args.get("path")
+
+    if not file_path:
+        return {"error": "Missing 'path' parameter"}, 400
+
+    # Use environment variables for repo and commit
+    repo_name = REPO_NAME
+    commit_hash = COMMIT_HASH
+
+    # Sanitize repo name for filesystem (replace / with _)
+    sanitized_repo_name = repo_name.replace("/", "_")
+
+    # Build the full path to the file
+    data_dir = (
+        Path(__file__).parent / "data" / "repos" / sanitized_repo_name / commit_hash
+    )
+    full_file_path = data_dir / file_path
+
+    # Security check: ensure the file path is within the expected directory
+    try:
+        full_file_path = full_file_path.resolve()
+        data_dir = data_dir.resolve()
+        if not str(full_file_path).startswith(str(data_dir)):
+            return {"error": "Invalid file path"}, 400
+    except Exception:
+        return {"error": "Invalid file path"}, 400
+
+    # Check if file exists
+    if not full_file_path.exists() or not full_file_path.is_file():
+        return {"error": f"File not found: {file_path}"}, 404
+
+    try:
+        # Read file content
+        with open(full_file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        return {
+            "repo": repo_name,
+            "commit": commit_hash,
+            "path": file_path,
+            "content": content,
+        }, 200
+    except UnicodeDecodeError:
+        # Handle binary files or files with encoding issues
+        return {"error": "File is not text-readable or has encoding issues"}, 400
+    except Exception as e:
+        return {"error": f"Error reading file: {str(e)}"}, 500
 
 
 if __name__ == "__main__":

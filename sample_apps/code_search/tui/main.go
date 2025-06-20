@@ -10,7 +10,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -22,6 +21,7 @@ const (
 type keymap = struct {
 	quit  key.Binding
 	about key.Binding
+	state key.Binding
 }
 
 type ScreenModel interface {
@@ -51,6 +51,10 @@ func newModel() rootModel {
 				key.WithKeys("ctrl+a"),
 				key.WithHelp("ctrl+a", "about"),
 			),
+			state: key.NewBinding(
+				key.WithKeys("ctrl+p"),
+				key.WithHelp("ctrl+p", "state"),
+			),
 		},
 		tooSmall: views.NewTooSmallModel(),
 		screens: []tea.Model{
@@ -63,7 +67,11 @@ func newModel() rootModel {
 }
 
 func (m rootModel) Init() tea.Cmd {
-	return textarea.Blink
+	var cmds []tea.Cmd
+	for i := range m.screens {
+		cmds = append(cmds, m.screens[i].Init())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -88,6 +96,10 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, func() tea.Msg {
 				return util.OpenWindowMsg{WindowId: views.AboutWindow}
 			})
+		case key.Matches(msg, m.keymap.state):
+			cmds = append(cmds, func() tea.Msg {
+				return util.OpenWindowMsg{WindowId: views.StateWindow}
+			})
 		}
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
@@ -107,6 +119,12 @@ func (m rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.screens[0] = newModel.(ScreenModel)
 		cmds = append(cmds, cmd)
 		return m, tea.Batch(cmds...)
+	case util.AsyncFetchResultMsg:
+		for i := range m.screens {
+			m.screens[i], cmd = m.screens[i].Update(msg)
+			cmds = append(cmds, cmd)
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	focusedScreen := m.screens[m.active]
@@ -125,6 +143,7 @@ func (m rootModel) View() string {
 	help := m.help.ShortHelpView([]key.Binding{
 		m.keymap.quit,
 		m.keymap.about,
+		m.keymap.state,
 	})
 
 	if m.isTooSmall() {

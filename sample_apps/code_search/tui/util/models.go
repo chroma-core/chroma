@@ -16,3 +16,15 @@ func (i SearchResult) FilterValue() string { return i.SourceCode }
 type SearchResultsResponse struct {
 	Results []SearchResult `json:"result"`
 }
+
+type State struct {
+	SourceCode     string `json:"source_code"`
+	ChunkCount     int    `json:"chunk_count"`
+	CollectionName string `json:"collection_name"`
+	RepoName       string `json:"repo_name"`
+	CommitHash     string `json:"commit_hash"`
+}
+
+type StateResponse struct {
+	Result State `json:"result"`
+}

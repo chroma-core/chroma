@@ -5,9 +5,11 @@ This is a simple raycast renderer that renders a scene to an ASCII art image.
 package renderer
 
 import (
+	"chroma-core/code-search-tui/util"
 	"math"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/google/uuid"
 )
 
 // Right-handed coordinate system
@@ -66,7 +68,7 @@ func (m Matrix) Transform(v Vector3D) Vector3D {
 	}
 }
 
-func (v Vector3D) Rotate(_ Ray, radians float64) Vector3D {
+func (v Vector3D) Rotate(axis Ray, radians float64) Vector3D {
 	cos := math.Cos(radians)
 	sin := math.Sin(radians)
 	return Vector3D{
@@ -234,7 +236,7 @@ func (camera Camera) Render(s SceneObject, outputBuffer [][]ASCIIPixel) {
 type Scene struct {
 	Objects []SceneObject
 	Camera  Camera
-	Update  func(scene Scene, msg tea.Msg) (Scene, tea.Cmd)
+	Update  func(scene Scene, context RaycastSceneContext, msg tea.Msg) (Scene, tea.Cmd)
 }
 
 func (scene Scene) Render(outputBuffer [][]ASCIIPixel) {
@@ -243,26 +245,38 @@ func (scene Scene) Render(outputBuffer [][]ASCIIPixel) {
 	}
 }
 
+type RaycastSceneContext struct {
+	Id           string
+	ScreenWidth  int
+	ScreenHeight int
+	MouseX       float32
+	MouseY       float32
+}
+
 type RaycastSceneModel struct {
-	Scenes []Scene
+	Context RaycastSceneContext
+	Scenes  []Scene
 }
 
 func NewRaycastSceneModel(scenes []Scene) RaycastSceneModel {
 	return RaycastSceneModel{
+		Context: RaycastSceneContext{
+			Id: uuid.New().String(),
+		},
 		Scenes: scenes,
 	}
 }
 
 func (m RaycastSceneModel) Init() tea.Cmd {
-	return nil
+	return func() tea.Msg {
+		return util.TickMsg{Id: m.Context.Id}
+	}
 }
 
 func (m RaycastSceneModel) View(outputBuffer [][]ASCIIPixel) {
 	aspectRatio := float64(len(outputBuffer[0])) / float64(len(outputBuffer))
 	for _, scene := range m.Scenes {
-		// TODO: This is a hack to make the scene render correctly.
-		// I dont know why I need to divide by 2.5 here.
-		// I think it's just the aspect ratio of the characters in the terminal.
+		// Adjust viewport width for terminal character aspect ratio
 		scene.Camera.ViewportWidth = aspectRatio * scene.Camera.ViewportHeight / 2.5
 		scene.Render(outputBuffer)
 	}
@@ -271,9 +285,18 @@ func (m RaycastSceneModel) View(outputBuffer [][]ASCIIPixel) {
 func (m RaycastSceneModel) Update(msg tea.Msg) (RaycastSceneModel, tea.Cmd) {
 	var cmds []tea.Cmd
 
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.Context.ScreenWidth = msg.Width
+		m.Context.ScreenHeight = msg.Height
+	case tea.MouseMsg:
+		m.Context.MouseX = float32(msg.X) / float32(m.Context.ScreenWidth+1)
+		m.Context.MouseY = float32(msg.Y) / float32(m.Context.ScreenHeight+1)
+	}
+
 	for i, scene := range m.Scenes {
 		if scene.Update != nil {
-			scene, cmd := scene.Update(scene, msg)
+			scene, cmd := scene.Update(scene, m.Context, msg)
 			m.Scenes[i] = scene
 			cmds = append(cmds, cmd)
 		}
