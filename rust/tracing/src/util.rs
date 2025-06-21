@@ -90,3 +90,8 @@ impl Drop for Stopwatch<'_> {
         self.0.record(elapsed, self.1);
     }
 }
+
+pub fn get_current_trace_id() -> TraceId {
+    let span = tracing::Span::current();
+    span.context().span().span_context().trace_id()
+}
