@@ -18,7 +18,7 @@ You can use [Chroma Cloud](https://www.trychroma.com/signup), which is a managed
 
 Regardless of deployment mode, Chroma is composed of five core components. Each plays a distinct role in the system and operates over the shared [Chroma data model](../overview/data-model.md).
 
-(<INSERT DIAGRAM>)
+![architecture](/architecture.png)
 
 **The Gateway**
 
@@ -74,16 +74,16 @@ These components operate differently depending on the deployment mode, particula
 
 **Read Path**
 
-<INSERT DIAGRAM>
+![read_path](/read_path.png)
 
 1. Request arrives at the gateway, where it is authenticated, checked against quota limits, rate limited and transformed into a logical plan.
 2. This logical plan is routed to the relevant query executor. In distributed Chroma, a rendezvous hash on the collection id is used to route the query to the correct nodes and provide cache coherence.
 3. The query executor transforms the logical plan into a physical plan for execution, reads from its storage layer, and performs the query. The query executor pulls data from the log to ensure a consistent read.
-4. The request is returned to the frontend and subsequently to the client.
+4. The request is returned to the gateway and subsequently to the client.
 
 **Write Path**
 
-<INSERT DIAGRAM>
+![write_path](/write_path.png)
 
 1. Request arrives at the gateway, where it is authenticated, checked against quota limits, rate limited and then transformed into a log of operations.
 2. The log of operations is forwarded to the write-ahead-log for persistence
