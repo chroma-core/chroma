@@ -188,6 +188,7 @@ proptest::proptest! {
             snapshots: snapshots.clone(),
         };
         eprintln!("[{:?}, {:?})", start, limit);
+        let mut last_initial_seq_no = FragmentSeqNo(0);
         for offset in start.offset()..limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
@@ -203,6 +204,11 @@ proptest::proptest! {
             assert_eq!(manifest.setsum, new_manifest.setsum, "manifest.setsum mismatch");
             assert_eq!(manifest.collected + dropped, new_manifest.collected, "manifest.collected mismatch");
             assert!(new_manifest.scrub().is_ok(), "scrub error");
+            assert!(new_manifest.initial_seq_no.is_some() || new_manifest.initial_offset.is_none());
+            if new_manifest.initial_seq_no.is_some() {
+                assert!(new_manifest.initial_seq_no.unwrap() >= last_initial_seq_no);
+                last_initial_seq_no = new_manifest.initial_seq_no.unwrap();
+            }
         }
     }
 }
