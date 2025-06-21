@@ -68,6 +68,16 @@ pub struct FrontendConfig {
     pub tenants_to_migrate_immediately: Vec<String>,
     #[serde(default = "Default::default")]
     pub tenants_to_migrate_immediately_threshold: Option<String>,
+    #[serde(default)]
+    pub telemetry: Option<TelemetryConfig>,
+}
+
+// Define TelemetryConfig struct
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct TelemetryConfig {
+    pub user_id: Option<String>,
+    pub is_server: bool,
+    pub chroma_version: Option<String>,
 }
 
 impl FrontendConfig {
@@ -86,6 +96,7 @@ impl FrontendConfig {
             default_knn_index: default_default_knn_index(),
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
+            telemetry: None,
         }
     }
 }
