@@ -2696,7 +2696,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.0",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3620,26 +3620,24 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hf-hub"
-version = "0.4.3"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "629d8f3bbeda9d148036d6b0de0a3ab947abd08ce90626327fc3547a49d59d97"
+checksum = "112fa2f6ad4ab815b9e1b938b4b1e437032d055e2f92ed10fd6ab2e62d02c6b6"
 dependencies = [
- "dirs 6.0.0",
+ "dirs 5.0.1",
  "futures",
  "http 1.1.0",
  "indicatif",
- "libc",
  "log",
  "native-tls",
  "num_cpus",
- "rand 0.9.0",
+ "rand 0.8.5",
  "reqwest 0.12.9",
  "serde",
  "serde_json",
  "thiserror 2.0.4",
  "tokio",
  "ureq",
- "windows-sys 0.60.2",
 ]
 
 [[package]]

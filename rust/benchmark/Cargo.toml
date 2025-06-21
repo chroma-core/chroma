@@ -28,4 +28,4 @@ reqwest = { workspace = true, features = ["stream"] }
 tokio-stream = { version = "0.1.16", features = ["full"] }
 tokio-util = "0.7.12"
 bloom = "0.3.2"
-hf-hub = { version = "0.4", features = ["tokio"] }
+hf-hub = { version = "0.4.1", features = ["tokio"] }
