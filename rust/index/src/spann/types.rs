@@ -536,7 +536,9 @@ impl SpannIndexWriter {
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
-        let mut bf_options = BlockfileWriterOptions::new();
+        // TODO(Sanket-temp): Change this suitably
+        let prefix_path = String::from("");
+        let mut bf_options = BlockfileWriterOptions::new(prefix_path);
         bf_options = bf_options.unordered_mutations();
         bf_options = bf_options.fork(*blockfile_id);
         match blockfile_provider
@@ -558,7 +560,9 @@ impl SpannIndexWriter {
     async fn create_posting_list(
         blockfile_provider: &BlockfileProvider,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
-        let mut bf_options = BlockfileWriterOptions::new();
+        // TODO(Sanket-temp): Change this suitably
+        let prefix_path = String::from("");
+        let mut bf_options = BlockfileWriterOptions::new(prefix_path);
         bf_options = bf_options.unordered_mutations();
         match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)
@@ -2157,6 +2161,8 @@ impl SpannIndexWriter {
             "collection_id",
             self.collection_id.to_string(),
         )];
+        // TODO(Sanket-temp): Change this suitably
+        let prefix_path = String::from("");
         let pl_flusher = {
             let stopwatch = Stopwatch::new(&self.metrics.pl_commit_latency, attribute);
             let pl_writer_clone = self.posting_list_writer.lock().await.clone();
@@ -2176,7 +2182,7 @@ impl SpannIndexWriter {
         let versions_map_flusher = {
             let stopwatch = Stopwatch::new(&self.metrics.versions_map_commit_latency, attribute);
             // Versions map. Create a writer, write all the data and commit.
-            let mut bf_options = BlockfileWriterOptions::new();
+            let mut bf_options = BlockfileWriterOptions::new(prefix_path.clone());
             bf_options = bf_options.unordered_mutations();
             let versions_map_bf_writer = self
                 .blockfile_provider
@@ -2218,7 +2224,7 @@ impl SpannIndexWriter {
             versions_map_flusher
         };
         // Next head.
-        let mut bf_options = BlockfileWriterOptions::new();
+        let mut bf_options = BlockfileWriterOptions::new(prefix_path);
         bf_options = bf_options.unordered_mutations();
         let max_head_id_bf = self
             .blockfile_provider

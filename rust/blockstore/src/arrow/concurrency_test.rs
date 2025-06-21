@@ -30,8 +30,9 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
+            let prefix_path = String::from("");
             let writer = future::block_on(
-                blockfile_provider.write::<&str, u32>(BlockfileWriterOptions::default()),
+                blockfile_provider.write::<&str, u32>(BlockfileWriterOptions::new(prefix_path)),
             )
             .unwrap();
             let id = writer.id();
@@ -105,9 +106,10 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
+            let prefix_path = String::from("");
             let reader = future::block_on(async {
                 let writer = blockfile_provider
-                    .write::<&str, u32>(BlockfileWriterOptions::default())
+                    .write::<&str, u32>(BlockfileWriterOptions::new(prefix_path))
                     .await
                     .expect("Failed to create writer");
                 let id = writer.id();
