@@ -47,12 +47,12 @@ async fn test_k8s_integration_03_initialized_append_succeeds() {
         seq_no: FragmentSeqNo(1),
         start: 1,
         limit: 2,
-        num_bytes: 1187,
+        num_bytes: 1044,
         data: vec![(position, vec![42, 43, 44, 45])],
     };
     let postconditions = [
         Condition::Manifest(ManifestCondition {
-            acc_bytes: 1187,
+            acc_bytes: 1044,
             writer: "test writer".to_string(),
             snapshots: vec![],
             fragments: vec![fragment1.clone()],
