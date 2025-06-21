@@ -1455,7 +1455,8 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         if let Some(sqlite_conf) = &config.sqlitedb {
             SqliteDb::try_from_config(sqlite_conf, registry)
                 .await
-                .map_err(|e| e.boxed())?;
+                .expect("Failed to create SqliteDb");
+            // .map_err(|e| e.boxed())?;
         };
 
         // Create segment manager if configured
