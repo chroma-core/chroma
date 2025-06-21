@@ -19,19 +19,19 @@ use rand::{seq::SliceRandom, thread_rng};
 use worker::{
     config::RootConfig,
     execution::orchestration::{
-        knn::KnnOrchestrator,
-        knn_filter::{KnnFilterOrchestrator, KnnFilterOutput},
+        filter::{FilterOrchestrator, FilterOrchestratorOutput},
+        knn_hnsw::KnnHnswOrchestrator,
     },
 };
 
 fn trivial_knn_filter(
     test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
-) -> KnnFilterOrchestrator {
+) -> FilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
     let hnsw_provider = test_segments.hnsw_provider.clone();
     let collection_uuid = test_segments.collection.collection_id;
-    KnnFilterOrchestrator::new(
+    FilterOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
         hnsw_provider,
@@ -45,11 +45,11 @@ fn trivial_knn_filter(
 fn always_true_knn_filter(
     test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
-) -> KnnFilterOrchestrator {
+) -> FilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
     let hnsw_provider = test_segments.hnsw_provider.clone();
     let collection_uuid = test_segments.collection.collection_id;
-    KnnFilterOrchestrator::new(
+    FilterOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
         hnsw_provider,
@@ -63,11 +63,11 @@ fn always_true_knn_filter(
 fn always_false_knn_filter(
     test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
-) -> KnnFilterOrchestrator {
+) -> FilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
     let hnsw_provider = test_segments.hnsw_provider.clone();
     let collection_uuid = test_segments.collection.collection_id;
-    KnnFilterOrchestrator::new(
+    FilterOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
         hnsw_provider,
@@ -81,14 +81,14 @@ fn always_false_knn_filter(
 fn knn(
     test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
-    knn_filter_output: KnnFilterOutput,
+    filter_output: FilterOrchestratorOutput,
     query: Vec<f32>,
-) -> KnnOrchestrator {
-    KnnOrchestrator::new(
+) -> KnnHnswOrchestrator {
+    KnnHnswOrchestrator::new(
         test_segments.blockfile_provider.clone(),
         dispatcher_handle.clone(),
         1000,
-        knn_filter_output.clone(),
+        filter_output.clone(),
         Knn {
             embedding: query,
             fetch: Sift1MData::k() as u32,
@@ -103,8 +103,8 @@ fn knn(
 async fn bench_routine(
     input: (
         System,
-        KnnFilterOrchestrator,
-        impl Fn(KnnFilterOutput) -> Vec<(KnnOrchestrator, Vec<u32>)>,
+        FilterOrchestrator,
+        impl Fn(FilterOrchestratorOutput) -> Vec<(KnnHnswOrchestrator, Vec<u32>)>,
     ),
 ) {
     let (system, knn_filter, knn_constructor) = input;
@@ -150,7 +150,7 @@ fn bench_query(criterion: &mut Criterion) {
         (
             system.clone(),
             trivial_knn_filter(&test_segments, dispatcher_handle.clone().clone()),
-            |knn_filter_output: KnnFilterOutput| {
+            |filter_output: FilterOrchestratorOutput| {
                 sift1m_queries
                     .iter()
                     .take(4)
@@ -159,7 +159,7 @@ fn bench_query(criterion: &mut Criterion) {
                             knn(
                                 &test_segments,
                                 dispatcher_handle.clone(),
-                                knn_filter_output.clone(),
+                                filter_output.clone(),
                                 query.clone(),
                             ),
                             expected.clone(),
@@ -174,7 +174,7 @@ fn bench_query(criterion: &mut Criterion) {
         (
             system.clone(),
             always_true_knn_filter(&test_segments, dispatcher_handle.clone().clone()),
-            |knn_filter_output: KnnFilterOutput| {
+            |filter_output: FilterOrchestratorOutput| {
                 sift1m_queries
                     .iter()
                     .take(4)
@@ -183,7 +183,7 @@ fn bench_query(criterion: &mut Criterion) {
                             knn(
                                 &test_segments,
                                 dispatcher_handle.clone(),
-                                knn_filter_output.clone(),
+                                filter_output.clone(),
                                 query.clone(),
                             ),
                             expected.clone(),
@@ -198,7 +198,7 @@ fn bench_query(criterion: &mut Criterion) {
         (
             system.clone(),
             always_false_knn_filter(&test_segments, dispatcher_handle.clone().clone()),
-            |knn_filter_output: KnnFilterOutput| {
+            |filter_output: FilterOrchestratorOutput| {
                 sift1m_queries
                     .iter()
                     .take(4)
@@ -207,7 +207,7 @@ fn bench_query(criterion: &mut Criterion) {
                             knn(
                                 &test_segments,
                                 dispatcher_handle.clone(),
-                                knn_filter_output.clone(),
+                                filter_output.clone(),
                                 query.clone(),
                             ),
                             Vec::new(),
