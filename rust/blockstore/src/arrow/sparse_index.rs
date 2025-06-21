@@ -127,6 +127,43 @@ impl SparseIndexWriter {
         }
     }
 
+    pub(super) fn apply_updates(
+        &self,
+        blocks_to_replace: Vec<(Uuid, Uuid)>,
+        blocks_to_add: Vec<(CompositeKey, Uuid)>,
+    ) -> Result<(), AddError> {
+        let mut lock_guard = self.data.lock();
+        for (old_block_id, new_block_id) in blocks_to_replace {
+            if let Some(old_start_key) = lock_guard.reverse.remove(&old_block_id) {
+                lock_guard.forward.remove(&old_start_key);
+                lock_guard
+                    .forward
+                    .insert(old_start_key.clone(), new_block_id);
+                lock_guard
+                    .reverse
+                    .insert(new_block_id, old_start_key.clone());
+                let old_count = lock_guard
+                    .counts
+                    .remove(&old_start_key)
+                    .expect("Invariant Violation, these maps are always in sync");
+                lock_guard.counts.insert(old_start_key, old_count);
+            }
+        }
+
+        for (start_key, block_id) in blocks_to_add {
+            if lock_guard.reverse.contains_key(&block_id) {
+                return Err(AddError::BlockIdExists);
+            }
+            lock_guard
+                .forward
+                .insert(SparseIndexDelimiter::Key(start_key.clone()), block_id);
+            lock_guard
+                .reverse
+                .insert(block_id, SparseIndexDelimiter::Key(start_key));
+        }
+        Ok(())
+    }
+
     pub(crate) fn add_block(
         &self,
         start_key: CompositeKey,
