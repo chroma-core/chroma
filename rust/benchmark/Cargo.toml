@@ -8,12 +8,14 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = "1.0.93"
+arrow = { workspace = true }
 async-tempfile = "0.6.0"
 async-compression = { version = "0.4.18", features = ["tokio", "gzip", "bzip2"] }
 
 bincode = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true }
+parquet = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -26,3 +28,4 @@ reqwest = { workspace = true, features = ["stream"] }
 tokio-stream = { version = "0.1.16", features = ["full"] }
 tokio-util = "0.7.12"
 bloom = "0.3.2"
+hf-hub = { version = "0.4.1", features = ["tokio"] }
