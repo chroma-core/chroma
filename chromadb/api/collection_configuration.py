@@ -1,10 +1,12 @@
 from typing import TypedDict, Dict, Any, Optional, cast, get_args
 import json
+import copy
 from chromadb.api.types import (
     Space,
     CollectionMetadata,
     UpdateMetadata,
     EmbeddingFunction,
+    QueryConfig,
 )
 from chromadb.utils.embedding_functions import (
     known_embedding_functions,
@@ -41,6 +43,7 @@ class CollectionConfiguration(TypedDict, total=True):
     hnsw: Optional[HNSWConfiguration]
     spann: Optional[SpannConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
+    query_embedding_function: Optional[EmbeddingFunction]  # type: ignore
 
 
 def load_collection_configuration_from_json_str(
@@ -63,6 +66,8 @@ def load_collection_configuration_from_json(
     hnsw_config = None
     spann_config = None
     ef_config = None
+
+    query_ef = None
 
     # Process vector index configuration (HNSW or SPANN)
     if config_json_map.get("hnsw") is not None:
@@ -100,6 +105,19 @@ def load_collection_configuration_from_json(
                     f"Could not build embedding function {ef_config['name']} from config {ef_config['config']}: {e}"
                 )
 
+            if config_json_map.get("query_config") is not None:
+                query_config = config_json_map["query_config"]
+                query_ef_config = copy.deepcopy(ef_config)
+                query_ef = known_embedding_functions[ef_name]
+                for k, v in query_config.items():
+                    query_ef_config["config"][k] = v
+
+                try:
+                    query_ef = query_ef.build_from_config(query_ef_config["config"])  # type: ignore
+                except Exception as e:
+                    raise ValueError(
+                        f"Could not build query embedding function {query_ef_config['name']} from config {query_ef_config['config']}: {e}"
+                    )
     else:
         ef = None
 
@@ -107,6 +125,7 @@ def load_collection_configuration_from_json(
         hnsw=hnsw_config,
         spann=spann_config,
         embedding_function=ef,  # type: ignore
+        query_embedding_function=query_ef,  # type: ignore
     )
 
 
@@ -258,16 +277,7 @@ class CreateCollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[CreateHNSWConfiguration]
     spann: Optional[CreateSpannConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
-
-
-def load_collection_configuration_from_create_collection_configuration(
-    config: CreateCollectionConfiguration,
-) -> CollectionConfiguration:
-    return CollectionConfiguration(
-        hnsw=config.get("hnsw"),
-        spann=config.get("spann"),
-        embedding_function=config.get("embedding_function"),
-    )
+    query_config: Optional[QueryConfig]
 
 
 def create_collection_configuration_from_legacy_collection_metadata(
@@ -299,13 +309,6 @@ def create_collection_configuration_from_legacy_metadata_dict(
     hnsw_config = populate_create_hnsw_defaults(hnsw_config)
 
     return CreateCollectionConfiguration(hnsw=hnsw_config)
-
-
-def load_create_collection_configuration_from_json_str(
-    json_str: str,
-) -> CreateCollectionConfiguration:
-    json_map = json.loads(json_str)
-    return load_create_collection_configuration_from_json(json_map)
 
 
 # TODO: make warnings prettier and add link to migration docs
@@ -353,6 +356,7 @@ def create_collection_configuration_to_json(
 ) -> Dict[str, Any]:
     """Convert a CreateCollection configuration to a JSON-serializable dict"""
     ef_config: Dict[str, Any] | None = None
+    query_config: Dict[str, Any] | None = None
     hnsw_config = config.get("hnsw")
     spann_config = config.get("spann")
     if hnsw_config is not None:
@@ -389,6 +393,15 @@ def create_collection_configuration_to_json(
                 "config": ef.get_config(),
             }
             register_embedding_function(type(ef))  # type: ignore
+
+            q = config.get("query_config")
+            if q is not None:
+                if q.name() == ef.name():
+                    query_config = q.get_config()
+                else:
+                    raise ValueError(
+                        f"query config name {q.name()} does not match embedding function name {ef.name()}"
+                    )
     except Exception as e:
         warnings.warn(
             f"legacy embedding function config: {e}",
@@ -402,6 +415,7 @@ def create_collection_configuration_to_json(
         "hnsw": hnsw_config,
         "spann": spann_config,
         "embedding_function": ef_config,
+        "query_config": query_config,
     }
 
 
@@ -473,6 +487,7 @@ class UpdateCollectionConfiguration(TypedDict, total=False):
     hnsw: Optional[UpdateHNSWConfiguration]
     spann: Optional[UpdateSpannConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
+    query_config: Optional[QueryConfig]
 
 
 def update_collection_configuration_from_legacy_collection_metadata(
@@ -528,6 +543,7 @@ def update_collection_configuration_to_json(
     hnsw_config = config.get("hnsw")
     spann_config = config.get("spann")
     ef = config.get("embedding_function")
+    query_config: Dict[str, Any] | None = None
     if hnsw_config is None and spann_config is None and ef is None:
         return {}
 
@@ -555,6 +571,14 @@ def update_collection_configuration_to_json(
                 "config": ef.get_config(),
             }
             register_embedding_function(type(ef))  # type: ignore
+            q = config.get("query_config")
+            if q is not None:
+                if q.name() == ef.name():
+                    query_config = q.get_config()
+                else:
+                    raise ValueError(
+                        f"query config name {q.name()} does not match embedding function name {ef.name()}"
+                    )
     else:
         ef_config = None
 
@@ -562,6 +586,7 @@ def update_collection_configuration_to_json(
         "hnsw": hnsw_config,
         "spann": spann_config,
         "embedding_function": ef_config,
+        "query_config": query_config,
     }
 
 
@@ -710,10 +735,26 @@ def overwrite_collection_configuration(
         else:
             updated_embedding_function = update_ef
 
+    query_ef = None
+    if updated_embedding_function is not None:
+        q = update_config.get("query_config")
+        if q is not None:
+            if q.name() != updated_embedding_function.name():
+                raise ValueError(
+                    f"query config name {q.name()} does not match embedding function name {updated_embedding_function.name()}"
+                )
+            else:
+                ef_config = copy.deepcopy(updated_embedding_function.get_config())
+                query_config = q.get_config()
+                for k, v in query_config.items():
+                    ef_config[k] = v
+                query_ef = updated_embedding_function.build_from_config(ef_config)
+
     return CollectionConfiguration(
         hnsw=updated_hnsw_config,
         spann=updated_spann_config,
         embedding_function=updated_embedding_function,
+        query_embedding_function=query_ef,
     )
 
 
