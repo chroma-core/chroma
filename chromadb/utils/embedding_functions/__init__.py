@@ -65,8 +65,14 @@ from chromadb.utils.embedding_functions.together_ai_embedding_function import (
 from chromadb.utils.embedding_functions.mistral_embedding_function import (
     MistralEmbeddingFunction,
 )
+<<<<<<< HEAD
 from chromadb.utils.embedding_functions.morph_embedding_function import (
     MorphEmbeddingFunction,
+=======
+from chromadb.utils.embedding_functions.nomic_embedding_function import (
+    NomicEmbeddingFunction,
+    NomicQueryConfig,
+>>>>>>> 27f6cd510 ([ENH] Add nomic embedding function)
 )
 from chromadb.utils.embedding_functions.huggingface_sparse_embedding_function import (
     HuggingFaceSparseEmbeddingFunction,
@@ -95,6 +101,7 @@ _all_classes: Set[str] = {
     "JinaEmbeddingFunction",
     "MistralEmbeddingFunction",
     "MorphEmbeddingFunction",
+    "NomicEmbeddingFunction",
     "VoyageAIEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
     "OpenCLIPEmbeddingFunction",
@@ -158,7 +165,11 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "instructor": InstructorEmbeddingFunction,
     "jina": JinaEmbeddingFunction,
     "mistral": MistralEmbeddingFunction,
+<<<<<<< HEAD
     "morph": MorphEmbeddingFunction,
+=======
+    "nomic": NomicEmbeddingFunction,
+>>>>>>> 27f6cd510 ([ENH] Add nomic embedding function)
     "voyageai": VoyageAIEmbeddingFunction,
     "onnx_mini_lm_l6_v2": ONNXMiniLM_L6_V2,
     "open_clip": OpenCLIPEmbeddingFunction,
@@ -248,7 +259,12 @@ __all__ = [
     "JinaEmbeddingFunction",
     "JinaQueryConfig",
     "MistralEmbeddingFunction",
+<<<<<<< HEAD
     "MorphEmbeddingFunction",
+=======
+    "NomicEmbeddingFunction",
+    "NomicQueryConfig",
+>>>>>>> 27f6cd510 ([ENH] Add nomic embedding function)
     "VoyageAIEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
     "OpenCLIPEmbeddingFunction",
