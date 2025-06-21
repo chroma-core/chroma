@@ -254,6 +254,7 @@ jobs:
       shell: bash
       env:
         ENV_FILE: ${{ contains(inputs.runner, 'ubuntu') && 'compose-env.linux' || 'compose-env.windows' }}
+        CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-windows-smoke:
