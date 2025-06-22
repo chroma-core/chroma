@@ -2,7 +2,7 @@
 
 Our fully managed hosted service, **Chroma Cloud** is here. You can now [sign up](https://trychroma.com/signup) for early access.
 
-**Chroma Cloud** is a managed offering of [Distributed Chroma](LINK HERE), operated by the same database and search engineers who designed the system. Under the hood, it's the exact same Apache 2.0–licensed Chroma—no forks, no divergence, just the open-source engine running at scale. Chroma cloud is serverless - you don’t have to provision servers or think about operations, and is billed [based on usage](./pricing.md)
+**Chroma Cloud** is a managed offering of [Distributed Chroma](../docs/overview/architecture.md), operated by the same database and search engineers who designed the system. Under the hood, it's the exact same Apache 2.0–licensed Chroma—no forks, no divergence, just the open-source engine running at scale. Chroma cloud is serverless - you don’t have to provision servers or think about operations, and is billed [based on usage](./pricing.md)
 
 **Easy to use and operate**
 

@@ -36,6 +36,11 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
 
       if (node.type === "heading") {
         const title = node.children[0].children[0].attributes.content;
+        if (!title) {
+          console.warn(
+            `Heading without content found in node: ${JSON.stringify(node)}`,
+          );
+        }
         const id =
           node.attributes.id ||
           title.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, ""); // Generate an ID if missing

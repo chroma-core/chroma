@@ -1,3 +1,12 @@
+---
+{
+  "id": "architecture",
+  "title": "Architecture",
+  "section": "Overview",
+  "order": 3
+}
+---
+
 # Architecture
 
 Chroma is designed with a modular architecture that prioritizes performance and ease of use. It scales seamlessly from local development to large-scale production, while exposing a consistent API across all deployment modes.
@@ -60,7 +69,7 @@ Chroma’s internal catalog.
 - In distributed mode, also manages cluster state (e.g., query/compactor node membership)
 - Backed by a SQL database
 
-## **Storage & Runtime**
+## Storage & Runtime
 
 These components operate differently depending on the deployment mode, particularly in how they use storage and the runtime they operate in.
 
