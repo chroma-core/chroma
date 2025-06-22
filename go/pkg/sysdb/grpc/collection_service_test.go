@@ -655,17 +655,12 @@ func (suite *CollectionServiceTestSuite) TestServer_CheckCollections() {
 }
 
 func (suite *CollectionServiceTestSuite) TestGetCollectionSize() {
-	collection := daotest.NewTestCollection(
-		daotest.TestTenantID,
-		suite.databaseId,
-		"collection_service_test_get_collection_size",
-		daotest.WithTotalRecordsPostCompaction(100),
-	)
-	collectionID, err := dao.CreateTestCollection(suite.db, collection)
+	collectionName := "collection_service_test_get_collection_size"
+	collectionID, err := dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, 128, suite.databaseId, nil))
 	suite.NoError(err)
 
 	req := coordinatorpb.GetCollectionSizeRequest{
-		Id: collection.ID,
+		Id: collectionID,
 	}
 	res, err := suite.s.GetCollectionSize(context.Background(), &req)
 	suite.NoError(err)
