@@ -749,13 +749,12 @@ mod tests {
             .get_collection_with_segments(collection_id.to_string())
             .await
             .unwrap();
-        let db_id = Uuid::from_str(
-            &collection_with_segments
-                .collection
-                .expect("Expected collection to be found")
-                .database_id,
-        )
-        .expect("Failed to parse database ID");
+        let db_id = collection_with_segments
+            .collection
+            .expect("Expected collection to be found")
+            .database_id
+            .expect("Expected database ID to be present");
+        let db_id = Uuid::from_str(&db_id).expect("Failed to parse database ID");
 
         let mut segment_id_str = String::from("");
         for segment in collection_with_segments.segments {
