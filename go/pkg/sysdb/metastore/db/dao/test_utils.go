@@ -125,49 +125,33 @@ func CleanUpTestTenant(db *gorm.DB, tenantName string) error {
 	return nil
 }
 
-func CreateTestCollection(db *gorm.DB, collectionName string, dimension int32, databaseID string, lineageFileName *string) (string, error) {
-	log.Info("create test collection", zap.String("collectionName", collectionName), zap.Int32("dimension", dimension), zap.String("databaseID", databaseID))
+func CreateTestCollection(db *gorm.DB, collection *dbmodel.Collection) (string, error) {
+	log.Info("create test collection", zap.String("collectionID", collection.ID), zap.Stringp("collectionName", collection.Name), zap.Int32p("dimension", collection.Dimension), zap.String("databaseID", collection.DatabaseID))
 	collectionDb := &collectionDb{
 		db: db,
 	}
 	segmentDb := &segmentDb{
 		db: db,
 	}
-	collectionId := types.NewUniqueID().String()
-
-	defaultConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
-	err := collectionDb.Insert(&dbmodel.Collection{
-		ID:                         collectionId,
-		Name:                       &collectionName,
-		ConfigurationJsonStr:       &defaultConfigurationJsonStr,
-		Dimension:                  &dimension,
-		DatabaseID:                 databaseID,
-		CreatedAt:                  time.Now(),
-		TotalRecordsPostCompaction: uint64(100),
-		SizeBytesPostCompaction:    uint64(500000),
-		LastCompactionTimeSecs:     uint64(1741037006),
-		Tenant:                     "test_tenant",
-		LineageFileName:            lineageFileName,
-	})
-	if err != nil {
+	if err := collectionDb.Insert(collection); err != nil {
 		return "", err
 	}
 
 	for _, scope := range GetSegmentScopes() {
 		segmentId := types.NewUniqueID().String()
-		err = segmentDb.Insert(&dbmodel.Segment{
-			CollectionID: &collectionId,
+		if err := segmentDb.Insert(&dbmodel.Segment{
+			CollectionID: &collection.ID,
 			ID:           segmentId,
 			Type:         SegmentType,
 			Scope:        scope,
-		})
-		if err != nil {
+		}); err != nil {
 			return "", err
 		}
 	}
 	// Avoid to have the same create time for a collection, postgres have a millisecond precision, in unit test we can have multiple collections created in the same millisecond
+	// TODO(eculver): this can be removed when we replace calls to this method with collection values that have timestamps that are unique
 	time.Sleep(10 * time.Millisecond)
-	return collectionId, nil
+	return collection.ID, nil
 }
 
 func CleanUpTestCollection(db *gorm.DB, collectionId string) error {
