@@ -461,12 +461,12 @@ impl SysDb {
 
     pub async fn get_last_compaction_time(
         &mut self,
-        tanant_ids: Vec<String>,
+        tenant_ids: Vec<String>,
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tanant_ids).await,
+            SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tenant_ids).await,
             SysDb::Sqlite(_) => todo!(),
-            SysDb::Test(test) => test.get_last_compaction_time(tanant_ids).await,
+            SysDb::Test(test) => test.get_last_compaction_time(tenant_ids).await,
         }
     }
 

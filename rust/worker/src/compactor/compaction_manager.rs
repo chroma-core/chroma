@@ -4,6 +4,10 @@ use super::OneOffCompactMessage;
 use super::RebuildMessage;
 use crate::compactor::types::ScheduledCompactMessage;
 use crate::config::CompactionServiceConfig;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogError;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogInput;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogOutput;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use async_trait::async_trait;
@@ -18,8 +22,10 @@ use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
+use chroma_system::wrap;
 use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
+use chroma_system::TaskResult;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
 use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
@@ -187,13 +193,40 @@ impl CompactionManager {
     }
 
     #[instrument(name = "CompactionManager::rebuild_batch")]
-    pub(crate) async fn rebuild_batch(&mut self, collection_ids: Vec<CollectionUuid>) {
+    pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
         let _ = collection_ids
             .iter()
             .map(|id| self.compact(*id, true))
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
             .await;
+    }
+
+    #[instrument(name = "CompactionManager::purge_dirty_log", skip(ctx))]
+    pub(crate) async fn purge_dirty_log(&mut self, ctx: &ComponentContext<Self>) {
+        let purge_dirty_log = PurgeDirtyLog {
+            log_client: self.log.clone(),
+            // TODO: Make this configurable
+            timeout: Duration::from_secs(60),
+        };
+        let purge_dirty_log_input = PurgeDirtyLogInput {
+            collection_uuids: self.scheduler.drain_deleted_collections(),
+        };
+        let purge_dirty_log_task = wrap(
+            Box::new(purge_dirty_log),
+            purge_dirty_log_input,
+            ctx.receiver(),
+        );
+        let Some(mut dispatcher) = self.dispatcher.clone() else {
+            tracing::error!("Unable to create background task to purge dirty log: Dispatcher is not set for compaction manager");
+            return;
+        };
+        if let Err(err) = dispatcher
+            .send(purge_dirty_log_task, Some(Span::current()))
+            .await
+        {
+            tracing::error!("Unable to create background task to purge dirty log: {err}")
+        };
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
@@ -342,6 +375,7 @@ impl Handler<ScheduledCompactMessage> for CompactionManager {
     ) {
         tracing::info!("CompactionManager: Performing scheduled compaction");
         let _ = self.compact_batch().await;
+        self.purge_dirty_log(ctx).await;
 
         // Compaction is done, schedule the next compaction
         ctx.scheduler.schedule(
@@ -382,7 +416,11 @@ impl Handler<RebuildMessage> for CompactionManager {
             "Rebuild started for collections: {:?}",
             message.collection_ids
         );
-        self.rebuild_batch(message.collection_ids).await;
+        self.rebuild_batch(&message.collection_ids).await;
+        tracing::info!(
+            "Rebuild completed for collections: {:?}",
+            message.collection_ids
+        );
     }
 }
 
@@ -396,6 +434,21 @@ impl Handler<Memberlist> for CompactionManager {
             if let Err(e) = on_next_memberlist_update.send(()) {
                 tracing::error!("Failed to send on_next_memberlist_update: {:?}", e);
             }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        if let Err(err) = message.into_inner() {
+            tracing::error!("Error when purging dirty log: {err}");
         }
     }
 }

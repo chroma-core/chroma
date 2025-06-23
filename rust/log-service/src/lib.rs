@@ -3,6 +3,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -1524,19 +1525,26 @@ impl LogServer {
         );
         async move {
             let request = request.into_inner();
-            let collection_id = Uuid::parse_str(&request.collection_id)
-                .map(CollectionUuid)
-                .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-            tracing::info!("purge_dirty_for_collection {collection_id}");
-            let dirty_marker = DirtyMarker::Purge { collection_id };
-            let dirty_marker_json = serde_json::to_string(&dirty_marker)
+            let collection_ids = request
+                .collection_ids
+                .iter()
+                .map(|id| CollectionUuid::from_str(id))
+                .collect::<Result<Vec<_>, _>>()
                 .map_err(|err| {
-                    tracing::error!("Failed to serialize dirty marker: {}", err);
-                    wal3::Error::Internal
+                    Status::invalid_argument(format!("Failed to parse collection id: {err}"))
+                })?;
+            tracing::info!("Purging collections in dirty log: [{collection_ids:?}]");
+            let dirty_marker_json_blobs = collection_ids
+                .into_iter()
+                .map(|collection_id| {
+                    serde_json::to_string(&DirtyMarker::Purge { collection_id }).map(Into::into)
                 })
-                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+                .collect::<Result<_, _>>()
+                .map_err(|err| {
+                    Status::invalid_argument(format!("Failed to serialize dirty marker: {err}"))
+                })?;
             self.dirty_log
-                .append(Vec::from(dirty_marker_json))
+                .append_many(dirty_marker_json_blobs)
                 .await
                 .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
             Ok(Response::new(PurgeDirtyForCollectionResponse {}))

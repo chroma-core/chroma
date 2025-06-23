@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
@@ -26,6 +26,7 @@ pub(crate) struct Scheduler {
     assignment_policy: Box<dyn AssignmentPolicy>,
     oneoff_collections: HashSet<CollectionUuid>,
     disabled_collections: HashSet<CollectionUuid>,
+    deleted_collections: HashSet<CollectionUuid>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -57,6 +58,7 @@ impl Scheduler {
             assignment_policy,
             oneoff_collections: HashSet::new(),
             disabled_collections,
+            deleted_collections: HashSet::new(),
         }
     }
 
@@ -68,6 +70,10 @@ impl Scheduler {
         self.oneoff_collections.iter().cloned().collect()
     }
 
+    pub(crate) fn drain_deleted_collections(&mut self) -> Vec<CollectionUuid> {
+        self.deleted_collections.drain().collect()
+    }
+
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
         let collections = self
             .log
@@ -75,7 +81,10 @@ impl Scheduler {
             .await;
 
         match collections {
-            Ok(collections) => collections,
+            Ok(collections) => {
+                tracing::info!("Collections with new data: {collections:?}");
+                collections
+            }
             Err(e) => {
                 tracing::error!("Error: {:?}", e);
                 Vec::new()
@@ -87,110 +96,94 @@ impl Scheduler {
         &mut self,
         collections: Vec<CollectionInfo>,
     ) -> Vec<CollectionRecord> {
+        let mut disabled_collections = Vec::new();
+        let collection_id_to_log_info = collections
+            .into_iter()
+            .filter_map(|collection| {
+                if self
+                    .disabled_collections
+                    .contains(&collection.collection_id)
+                {
+                    disabled_collections.push(collection);
+                    None
+                } else {
+                    Some((collection.collection_id, collection))
+                }
+            })
+            .collect::<HashMap<_, _>>();
+
+        if !disabled_collections.is_empty() {
+            tracing::info!(
+                "Disabled collections are excluded from compaction: {disabled_collections:?}"
+            );
+        }
+
+        let collection_id_to_sysdb_info = match self
+            .sysdb
+            .get_collections(GetCollectionsOptions {
+                collection_ids: Some(collection_id_to_log_info.keys().cloned().collect()),
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(collections) => collections
+                .into_iter()
+                .map(|collection| (collection.collection_id, collection))
+                .collect::<HashMap<_, _>>(),
+            Err(err) => {
+                tracing::error!("Unable to fetch collection information from sysdb: {err}");
+                return Vec::new();
+            }
+        };
+
+        let sysdb_tenants = collection_id_to_sysdb_info
+            .values()
+            .map(|collection| collection.tenant.clone())
+            .collect();
+
+        let tenant_to_last_compaction_time =
+            match self.sysdb.get_last_compaction_time(sysdb_tenants).await {
+                Ok(tenants) => tenants
+                    .into_iter()
+                    .map(|tenant| (tenant.id, tenant.last_compaction_time))
+                    .collect::<HashMap<_, _>>(),
+                Err(err) => {
+                    tracing::error!(
+                        "Unable to fetch tenant last compaction time from sysdb: {err}"
+                    );
+                    return Vec::new();
+                }
+            };
+
         let mut collection_records = Vec::new();
-        for collection_info in collections {
-            if self
-                .disabled_collections
-                .contains(&collection_info.collection_id)
-            {
-                tracing::info!(
-                    "Ignoring collection: {:?} because it disabled for compaction",
-                    collection_info.collection_id
-                );
+        for (collection_id, log_info) in collection_id_to_log_info {
+            let Some(sysdb_info) = collection_id_to_sysdb_info.get(&collection_id) else {
+                self.deleted_collections.insert(collection_id);
+                continue;
+            };
+            let Some(last_compaction_time) = tenant_to_last_compaction_time
+                .get(&sysdb_info.tenant)
+                .cloned()
+            else {
+                tracing::error!("Unable to find last compaction info for tenant [{}]. Skipping compaction for collection [{collection_id}]", &sysdb_info.tenant);
+                continue;
+            };
+            let next_log_to_compact = sysdb_info.log_position.saturating_add(1);
+            if next_log_to_compact < log_info.first_log_offset {
+                tracing::error!("Next log to compact for collection [{collection_id}] at [{next_log_to_compact}] is already purged in log service: the first available log is at [{}]", log_info.first_log_offset);
                 continue;
             }
-            // TODO: add a cache to avoid fetching the same collection multiple times
-            let result = self
-                .sysdb
-                .get_collections(GetCollectionsOptions {
-                    collection_id: Some(collection_info.collection_id),
-                    ..Default::default()
-                })
-                .await;
-
-            match result {
-                Ok(collection) => {
-                    if collection.is_empty() {
-                        tracing::info!(
-                            "Collection not found, purging: {:?}",
-                            collection_info.collection_id
-                        );
-                        if let Err(err) = self
-                            .log
-                            .purge_dirty_for_collection(collection_info.collection_id)
-                            .await
-                        {
-                            // NOTE(rescrv):  This is something we ideally want to know about, but
-                            // cannot act on except to skip the collection.  Some day we'll have
-                            // something by which we can say, "Watch for this condition."
-                            tracing::warn!(
-                                "Error purging dirty records for collection: {:?}, error: {:?}",
-                                collection_info.collection_id,
-                                err
-                            );
-                        }
-                        continue;
-                    }
-
-                    // TODO: make querying the last compaction time in batch
-                    let log_position_in_collection = collection[0].log_position;
-                    let tenant_ids = vec![collection[0].tenant.clone()];
-                    let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
-
-                    let last_compaction_time = match tenant {
-                        Ok(tenant) => {
-                            if tenant.is_empty() {
-                                tracing::info!(
-                                    "Ignoring collection: {:?}",
-                                    collection_info.collection_id
-                                );
-                                continue;
-                            }
-                            tenant[0].last_compaction_time
-                        }
-                        Err(e) => {
-                            tracing::error!("Error: {:?}", e);
-                            // Ignore this collection id for this compaction iteration
-                            tracing::info!(
-                                "Ignoring collection: {:?}",
-                                collection_info.collection_id
-                            );
-                            continue;
-                        }
-                    };
-
-                    let mut offset = collection_info.first_log_offset;
-                    // offset in log is the first offset in the log that has not been compacted. Note that
-                    // since the offset is the first offset of log we get from the log service, we should
-                    // use this offset to pull data from the log service.
-                    if log_position_in_collection + 1 < offset {
-                        panic!(
-                            "offset in sysdb ({}) is less than offset in log ({}) for {}",
-                            log_position_in_collection + 1,
-                            offset,
-                            collection[0].collection_id,
-                        )
-                    } else {
-                        // The offset in sysdb is the last offset that has been compacted.
-                        // We need to start from the next offset.
-                        offset = log_position_in_collection + 1;
-                    }
-
-                    collection_records.push(CollectionRecord {
-                        collection_id: collection[0].collection_id,
-                        tenant_id: collection[0].tenant.clone(),
-                        last_compaction_time,
-                        first_record_time: collection_info.first_log_ts,
-                        offset,
-                        collection_version: collection[0].version,
-                        collection_logical_size_bytes: collection[0].size_bytes_post_compaction,
-                    });
-                }
-                Err(e) => {
-                    tracing::error!("Error: {:?}", e);
-                }
-            }
+            collection_records.push(CollectionRecord {
+                collection_id,
+                tenant_id: sysdb_info.tenant.clone(),
+                last_compaction_time,
+                first_record_time: log_info.first_log_ts,
+                offset: next_log_to_compact,
+                collection_version: sysdb_info.version,
+                collection_logical_size_bytes: sysdb_info.size_bytes_post_compaction,
+            });
         }
+
         collection_records
     }
 
