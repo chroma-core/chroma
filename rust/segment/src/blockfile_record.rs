@@ -20,7 +20,6 @@ use std::ops::RangeBounds;
 use std::sync::atomic::{self, AtomicU32};
 use std::sync::Arc;
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct RecordSegmentWriter {
@@ -213,60 +212,44 @@ impl RecordSegmentWriter {
                         }
                     };
 
-                    let (user_id_to_id_bf_prefix, user_id_to_id_bf_id) =
-                        Segment::extract_prefix_and_id(user_id_to_id_bf_path);
-                    let user_id_to_bf_uuid = match Uuid::parse_str(user_id_to_id_bf_id) {
-                        Ok(user_id_to_bf_uuid) => user_id_to_bf_uuid,
-                        Err(_) => {
-                            return Err(RecordSegmentWriterCreationError::InvalidUuid(
-                                USER_ID_TO_OFFSET_ID.to_string(),
-                            ))
-                        }
-                    };
-                    let (id_to_user_id_bf_prefix, id_to_user_id_bf_id) =
-                        Segment::extract_prefix_and_id(id_to_user_id_bf_path);
+                    let (user_id_to_id_bf_prefix, user_id_to_id_bf_uuid) =
+                        Segment::extract_prefix_and_id(user_id_to_id_bf_path).map_err(|_| {
+                            RecordSegmentWriterCreationError::InvalidUuid(
+                                user_id_to_id_bf_path.to_string(),
+                            )
+                        })?;
+                    let (id_to_user_id_bf_prefix, id_to_user_id_bf_uuid) =
+                        Segment::extract_prefix_and_id(id_to_user_id_bf_path).map_err(|_| {
+                            RecordSegmentWriterCreationError::InvalidUuid(
+                                id_to_user_id_bf_path.to_string(),
+                            )
+                        })?;
                     if user_id_to_id_bf_prefix != id_to_user_id_bf_prefix {
                         return Err(RecordSegmentWriterCreationError::InvalidPrefixPath);
                     }
-                    let id_to_user_id_bf_uuid = match Uuid::parse_str(id_to_user_id_bf_id) {
-                        Ok(id_to_user_id_bf_uuid) => id_to_user_id_bf_uuid,
-                        Err(_) => {
-                            return Err(RecordSegmentWriterCreationError::InvalidUuid(
-                                OFFSET_ID_TO_USER_ID.to_string(),
-                            ))
-                        }
-                    };
-                    let (id_to_data_bf_prefix, id_to_data_bf_id) =
-                        Segment::extract_prefix_and_id(id_to_data_bf_path);
+                    let (id_to_data_bf_prefix, id_to_data_bf_uuid) =
+                        Segment::extract_prefix_and_id(id_to_data_bf_path).map_err(|_| {
+                            RecordSegmentWriterCreationError::InvalidUuid(
+                                id_to_data_bf_path.to_string(),
+                            )
+                        })?;
                     if user_id_to_id_bf_prefix != id_to_data_bf_prefix {
                         return Err(RecordSegmentWriterCreationError::InvalidPrefixPath);
                     }
-                    let id_to_data_bf_uuid = match Uuid::parse_str(id_to_data_bf_id) {
-                        Ok(id_to_data_bf_uuid) => id_to_data_bf_uuid,
-                        Err(_) => {
-                            return Err(RecordSegmentWriterCreationError::InvalidUuid(
-                                OFFSET_ID_TO_DATA.to_string(),
-                            ))
-                        }
-                    };
-                    let (max_offset_id_bf_prefix, max_offset_id_bf_id) =
-                        Segment::extract_prefix_and_id(max_offset_id_bf_path);
+                    let (max_offset_id_bf_prefix, max_offset_id_bf_uuid) =
+                        Segment::extract_prefix_and_id(max_offset_id_bf_path).map_err(|_| {
+                            RecordSegmentWriterCreationError::InvalidUuid(
+                                max_offset_id_bf_path.to_string(),
+                            )
+                        })?;
                     if user_id_to_id_bf_prefix != max_offset_id_bf_prefix {
                         return Err(RecordSegmentWriterCreationError::InvalidPrefixPath);
                     }
-                    let max_offset_id_bf_uuid = match Uuid::parse_str(max_offset_id_bf_id) {
-                        Ok(max_offset_id_bf_uuid) => max_offset_id_bf_uuid,
-                        Err(_) => {
-                            return Err(RecordSegmentWriterCreationError::InvalidUuid(
-                                MAX_OFFSET_ID.to_string(),
-                            ))
-                        }
-                    };
 
                     let user_id_to_id = match blockfile_provider
                         .write::<&str, u32>(
                             BlockfileWriterOptions::new(user_id_to_id_bf_prefix.to_string())
-                                .fork(user_id_to_bf_uuid),
+                                .fork(user_id_to_id_bf_uuid),
                         )
                         .await
                     {
@@ -797,21 +780,16 @@ impl RecordSegmentReader<'_> {
                     }
                 };
 
-                let (max_offset_id_bf_uuid, max_offset_segment_path) = {
-                    let (prefix, id) = Segment::extract_prefix_and_id(max_offset_id_bf_path);
-                    match Uuid::parse_str(id) {
-                        Ok(uuid) => (uuid, prefix.to_string()),
-                        Err(_) => {
-                            return Err(Box::new(RecordSegmentReaderCreationError::InvalidUuid(
-                                MAX_OFFSET_ID.to_string(),
-                            )));
-                        }
-                    }
-                };
+                let (max_offset_segment_path, max_offset_id_bf_uuid) =
+                    Segment::extract_prefix_and_id(max_offset_id_bf_path).map_err(|_| {
+                        RecordSegmentReaderCreationError::InvalidUuid(
+                            max_offset_id_bf_path.to_string(),
+                        )
+                    })?;
 
                 let read_options = BlockfileReaderOptions::new(
                     max_offset_id_bf_uuid,
-                    max_offset_segment_path.clone(),
+                    max_offset_segment_path.to_string(),
                 );
                 let max_offset_id_bf_reader =
                     match blockfile_provider.read::<&str, u32>(read_options).await {
@@ -827,17 +805,12 @@ impl RecordSegmentReader<'_> {
                     None => 0,
                 };
 
-                let (user_id_to_id_bf_uuid, user_id_to_id_segment_path) = {
-                    let (prefix, id) = Segment::extract_prefix_and_id(user_id_to_id_bf_path);
-                    match Uuid::parse_str(id) {
-                        Ok(uuid) => (uuid, prefix.to_string()),
-                        Err(_) => {
-                            return Err(Box::new(RecordSegmentReaderCreationError::InvalidUuid(
-                                USER_ID_TO_OFFSET_ID.to_string(),
-                            )));
-                        }
-                    }
-                };
+                let (user_id_to_id_segment_path, user_id_to_id_bf_uuid) =
+                    Segment::extract_prefix_and_id(user_id_to_id_bf_path).map_err(|_| {
+                        RecordSegmentReaderCreationError::InvalidUuid(
+                            user_id_to_id_bf_path.to_string(),
+                        )
+                    })?;
 
                 if user_id_to_id_segment_path != max_offset_segment_path {
                     return Err(Box::new(
@@ -845,8 +818,10 @@ impl RecordSegmentReader<'_> {
                     ));
                 }
 
-                let read_options =
-                    BlockfileReaderOptions::new(user_id_to_id_bf_uuid, user_id_to_id_segment_path);
+                let read_options = BlockfileReaderOptions::new(
+                    user_id_to_id_bf_uuid,
+                    user_id_to_id_segment_path.to_string(),
+                );
                 let user_id_to_id = match blockfile_provider.read::<&str, u32>(read_options).await {
                     Ok(user_id_to_id) => user_id_to_id,
                     Err(e) => {
@@ -856,17 +831,12 @@ impl RecordSegmentReader<'_> {
                     }
                 };
 
-                let (id_to_user_id_bf_uuid, id_to_user_id_segment_path) = {
-                    let (prefix, id) = Segment::extract_prefix_and_id(id_to_user_id_bf_path);
-                    match Uuid::parse_str(id) {
-                        Ok(uuid) => (uuid, prefix.to_string()),
-                        Err(_) => {
-                            return Err(Box::new(RecordSegmentReaderCreationError::InvalidUuid(
-                                OFFSET_ID_TO_USER_ID.to_string(),
-                            )));
-                        }
-                    }
-                };
+                let (id_to_user_id_segment_path, id_to_user_id_bf_uuid) =
+                    Segment::extract_prefix_and_id(id_to_user_id_bf_path).map_err(|_| {
+                        RecordSegmentReaderCreationError::InvalidUuid(
+                            id_to_user_id_bf_path.to_string(),
+                        )
+                    })?;
 
                 if id_to_user_id_segment_path != max_offset_segment_path {
                     return Err(Box::new(
@@ -874,8 +844,10 @@ impl RecordSegmentReader<'_> {
                     ));
                 }
 
-                let read_options =
-                    BlockfileReaderOptions::new(id_to_user_id_bf_uuid, id_to_user_id_segment_path);
+                let read_options = BlockfileReaderOptions::new(
+                    id_to_user_id_bf_uuid,
+                    id_to_user_id_segment_path.to_string(),
+                );
                 let id_to_user_id = match blockfile_provider.read::<u32, &str>(read_options).await {
                     Ok(id_to_user_id) => id_to_user_id,
                     Err(e) => {
@@ -885,17 +857,12 @@ impl RecordSegmentReader<'_> {
                     }
                 };
 
-                let (id_to_data_bf_uuid, id_to_data_segment_path) = {
-                    let (prefix, id) = Segment::extract_prefix_and_id(id_to_data_bf_path);
-                    match Uuid::parse_str(id) {
-                        Ok(uuid) => (uuid, prefix.to_string()),
-                        Err(_) => {
-                            return Err(Box::new(RecordSegmentReaderCreationError::InvalidUuid(
-                                OFFSET_ID_TO_DATA.to_string(),
-                            )));
-                        }
-                    }
-                };
+                let (id_to_data_segment_path, id_to_data_bf_uuid) =
+                    Segment::extract_prefix_and_id(id_to_data_bf_path).map_err(|_| {
+                        RecordSegmentReaderCreationError::InvalidUuid(
+                            id_to_data_bf_path.to_string(),
+                        )
+                    })?;
 
                 if id_to_data_segment_path != max_offset_segment_path {
                     return Err(Box::new(
@@ -903,8 +870,10 @@ impl RecordSegmentReader<'_> {
                     ));
                 }
 
-                let read_options =
-                    BlockfileReaderOptions::new(id_to_data_bf_uuid, id_to_data_segment_path);
+                let read_options = BlockfileReaderOptions::new(
+                    id_to_data_bf_uuid,
+                    id_to_data_segment_path.to_string(),
+                );
                 let id_to_data = match blockfile_provider
                     .read::<u32, DataRecord>(read_options)
                     .await

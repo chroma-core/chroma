@@ -11,7 +11,6 @@ use chroma_types::{
 };
 use std::collections::{HashMap, HashSet};
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct ComputeUnusedBetweenVersionsOperator {
@@ -41,10 +40,9 @@ impl ComputeUnusedBetweenVersionsOperator {
         for file_path in version_files.keys() {
             tracing::info!(file_path = %file_path, "Processing sparse index file");
 
-            let (prefix, id) = Segment::extract_prefix_and_id(file_path);
-            let id = match Uuid::parse_str(id) {
+            let (prefix, id) = match Segment::extract_prefix_and_id(file_path) {
                 Ok(id) => {
-                    tracing::debug!(uuid = %id, "Successfully parsed UUID from file path");
+                    tracing::debug!(uuid = %id.1, "Successfully parsed UUID from file path");
                     id
                 }
                 Err(e) => {
@@ -337,6 +335,7 @@ mod tests {
     use chroma_cache::UnboundedCacheConfig;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_sysdb::{SysDb, TestSysDb};
+    use uuid::Uuid;
 
     async fn _create_sparse_index(storage: &Storage, keys: Vec<String>) -> Uuid {
         let block_cache = Box::new(UnboundedCacheConfig {}.build());

@@ -13,7 +13,6 @@ use chroma_types::{MaterializedLogOperation, Segment};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use thiserror::Error;
-use uuid::Uuid;
 
 const HNSW_INDEX: &str = "hnsw_index";
 
@@ -125,15 +124,8 @@ impl DistributedHNSWSegmentWriter {
                 }
             };
 
-            let (prefix_path, index_id) = Segment::extract_prefix_and_id(index_path);
-            let index_uuid = match Uuid::parse_str(index_id) {
-                Ok(uuid) => uuid,
-                Err(_) => {
-                    return Err(Box::new(
-                        DistributedHNSWSegmentFromSegmentError::InvalidUUID,
-                    ))
-                }
-            };
+            let (prefix_path, index_uuid) = Segment::extract_prefix_and_id(index_path)
+                .map_err(|_| Box::new(DistributedHNSWSegmentFromSegmentError::InvalidUUID))?;
             let index_uuid = IndexUuid(index_uuid);
 
             let index = match hnsw_index_provider
@@ -349,15 +341,8 @@ impl DistributedHNSWSegmentReader {
                 }
             };
 
-            let (prefix_path, index_id) = Segment::extract_prefix_and_id(index_path);
-            let index_uuid = match Uuid::parse_str(index_id) {
-                Ok(uuid) => uuid,
-                Err(_) => {
-                    return Err(Box::new(
-                        DistributedHNSWSegmentFromSegmentError::InvalidUUID,
-                    ))
-                }
-            };
+            let (prefix_path, index_uuid) = Segment::extract_prefix_and_id(index_path)
+                .map_err(|_| Box::new(DistributedHNSWSegmentFromSegmentError::InvalidUUID))?;
             let index_uuid = IndexUuid(index_uuid);
             let index = match hnsw_index_provider
                 .open(

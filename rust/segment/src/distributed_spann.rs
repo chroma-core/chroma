@@ -28,7 +28,6 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct SpannSegmentWriter {
@@ -115,13 +114,8 @@ impl SpannSegmentWriter {
         let (hnsw_id, segment_prefix_hnsw) = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_path) => {
-                    let (prefix, index_id) = Segment::extract_prefix_and_id(index_path);
-                    let index_uuid = match Uuid::parse_str(index_id) {
-                        Ok(uuid) => uuid,
-                        Err(e) => {
-                            return Err(SpannSegmentWriterError::IndexIdParsingError(e));
-                        }
-                    };
+                    let (prefix, index_uuid) = Segment::extract_prefix_and_id(index_path)
+                        .map_err(SpannSegmentWriterError::IndexIdParsingError)?;
                     (Some(IndexUuid(index_uuid)), Some(prefix.to_string()))
                 }
                 None => {
@@ -133,13 +127,9 @@ impl SpannSegmentWriter {
         let (versions_map_id, segment_prefix_vf) = match segment.file_path.get(VERSION_MAP_PATH) {
             Some(version_map_paths) => match version_map_paths.first() {
                 Some(version_map_path) => {
-                    let (prefix, version_map_id) = Segment::extract_prefix_and_id(version_map_path);
-                    let version_map_uuid = match Uuid::parse_str(version_map_id) {
-                        Ok(uuid) => uuid,
-                        Err(e) => {
-                            return Err(SpannSegmentWriterError::IndexIdParsingError(e));
-                        }
-                    };
+                    let (prefix, version_map_uuid) =
+                        Segment::extract_prefix_and_id(version_map_path)
+                            .map_err(SpannSegmentWriterError::IndexIdParsingError)?;
                     (Some(version_map_uuid), Some(prefix.to_string()))
                 }
                 None => {
@@ -154,14 +144,9 @@ impl SpannSegmentWriter {
         let (posting_list_id, segment_prefix_pl) = match segment.file_path.get(POSTING_LIST_PATH) {
             Some(posting_list_paths) => match posting_list_paths.first() {
                 Some(posting_list_path) => {
-                    let (prefix, posting_list_id) =
-                        Segment::extract_prefix_and_id(posting_list_path);
-                    let posting_list_uuid = match Uuid::parse_str(posting_list_id) {
-                        Ok(uuid) => uuid,
-                        Err(e) => {
-                            return Err(SpannSegmentWriterError::IndexIdParsingError(e));
-                        }
-                    };
+                    let (prefix, posting_list_uuid) =
+                        Segment::extract_prefix_and_id(posting_list_path)
+                            .map_err(SpannSegmentWriterError::IndexIdParsingError)?;
                     (Some(posting_list_uuid), Some(prefix.to_string()))
                 }
                 None => {
@@ -178,14 +163,9 @@ impl SpannSegmentWriter {
             match segment.file_path.get(MAX_HEAD_ID_BF_PATH) {
                 Some(max_head_id_bf_paths) => match max_head_id_bf_paths.first() {
                     Some(max_head_id_bf_path) => {
-                        let (prefix, max_head_id_bf_id) =
-                            Segment::extract_prefix_and_id(max_head_id_bf_path);
-                        let max_head_id_bf_uuid = match Uuid::parse_str(max_head_id_bf_id) {
-                            Ok(uuid) => uuid,
-                            Err(e) => {
-                                return Err(SpannSegmentWriterError::IndexIdParsingError(e));
-                            }
-                        };
+                        let (prefix, max_head_id_bf_uuid) =
+                            Segment::extract_prefix_and_id(max_head_id_bf_path)
+                                .map_err(SpannSegmentWriterError::IndexIdParsingError)?;
                         (Some(max_head_id_bf_uuid), Some(prefix.to_string()))
                     }
                     None => {
@@ -482,13 +462,8 @@ impl<'me> SpannSegmentReader<'me> {
         let (hnsw_id, segment_prefix_hnsw) = match segment.file_path.get(HNSW_PATH) {
             Some(hnsw_path) => match hnsw_path.first() {
                 Some(index_path) => {
-                    let (prefix, index_id) = Segment::extract_prefix_and_id(index_path);
-                    let index_uuid = match Uuid::parse_str(index_id) {
-                        Ok(uuid) => uuid,
-                        Err(e) => {
-                            return Err(SpannSegmentReaderError::IndexIdParsingError(e));
-                        }
-                    };
+                    let (prefix, index_uuid) = Segment::extract_prefix_and_id(index_path)
+                        .map_err(SpannSegmentReaderError::IndexIdParsingError)?;
                     (Some(IndexUuid(index_uuid)), Some(prefix.to_string()))
                 }
                 None => {
@@ -500,13 +475,9 @@ impl<'me> SpannSegmentReader<'me> {
         let (versions_map_id, segment_prefix_vf) = match segment.file_path.get(VERSION_MAP_PATH) {
             Some(version_map_paths) => match version_map_paths.first() {
                 Some(version_map_path) => {
-                    let (prefix, version_map_id) = Segment::extract_prefix_and_id(version_map_path);
-                    let version_map_uuid = match Uuid::parse_str(version_map_id) {
-                        Ok(uuid) => uuid,
-                        Err(e) => {
-                            return Err(SpannSegmentReaderError::IndexIdParsingError(e));
-                        }
-                    };
+                    let (prefix, version_map_uuid) =
+                        Segment::extract_prefix_and_id(version_map_path)
+                            .map_err(SpannSegmentReaderError::IndexIdParsingError)?;
                     (Some(version_map_uuid), Some(prefix.to_string()))
                 }
                 None => {
@@ -521,14 +492,9 @@ impl<'me> SpannSegmentReader<'me> {
         let (posting_list_id, segment_prefix_pl) = match segment.file_path.get(POSTING_LIST_PATH) {
             Some(posting_list_paths) => match posting_list_paths.first() {
                 Some(posting_list_path) => {
-                    let (prefix, posting_list_id) =
-                        Segment::extract_prefix_and_id(posting_list_path);
-                    let posting_list_uuid = match Uuid::parse_str(posting_list_id) {
-                        Ok(uuid) => uuid,
-                        Err(e) => {
-                            return Err(SpannSegmentReaderError::IndexIdParsingError(e));
-                        }
-                    };
+                    let (prefix, posting_list_uuid) =
+                        Segment::extract_prefix_and_id(posting_list_path)
+                            .map_err(SpannSegmentReaderError::IndexIdParsingError)?;
                     (Some(posting_list_uuid), Some(prefix.to_string()))
                 }
                 None => {

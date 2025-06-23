@@ -20,7 +20,6 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct ComputeUnusedFilesOperator {
@@ -86,14 +85,14 @@ impl ComputeUnusedFilesOperator {
                 // For hnsw_index files, just add it without comparing with newer version.
                 if file_type == "hnsw_index" || file_type == HNSW_PATH {
                     for file_path in file_paths.paths.iter() {
-                        let (prefix, hnsw_id) = Segment::extract_prefix_and_id(file_path);
-                        let hnsw_uuid = IndexUuid(Uuid::parse_str(hnsw_id).map_err(|e| {
-                            tracing::error!(error = %e, "Failed to parse UUID");
-                            ComputeUnusedFilesError::InvalidUuid(e, hnsw_id.to_string())
-                        })?);
+                        let (prefix, hnsw_uuid) = Segment::extract_prefix_and_id(file_path)
+                            .map_err(|e| {
+                                tracing::error!(error = %e, "Failed to extract prefix and ID");
+                                ComputeUnusedFilesError::InvalidUuid(e, file_path.to_string())
+                            })?;
                         for file in FILES.iter() {
                             let hnsw_prefix =
-                                HnswIndexProvider::format_key(prefix, &hnsw_uuid, file);
+                                HnswIndexProvider::format_key(prefix, &IndexUuid(hnsw_uuid), file);
                             tracing::debug!(
                                 line = line!(),
                                 "ComputeUnusedFilesOperator: unused_hnsw_prefix: {:?}",
@@ -170,13 +169,12 @@ impl ComputeUnusedFilesOperator {
         let mut s3_files = Vec::new();
 
         for si_path in si_ids {
-            let (prefix, si_id) = Segment::extract_prefix_and_id(&si_path);
-            let uuid = Uuid::parse_str(si_id).map_err(|e| {
+            let (prefix, si_id) = Segment::extract_prefix_and_id(&si_path).map_err(|e| {
                 tracing::error!(error = %e, "Failed to parse UUID");
-                ComputeUnusedFilesError::InvalidUuid(e, si_id.to_string())
+                ComputeUnusedFilesError::InvalidUuid(e, si_path.to_string())
             })?;
 
-            let block_ids = match self.root_manager.get_all_block_ids(&uuid, prefix).await {
+            let block_ids = match self.root_manager.get_all_block_ids(&si_id, prefix).await {
                 Ok(ids) => ids,
                 Err(e) => {
                     tracing::error!(error = %e, "Failed to get block IDs");

@@ -10,7 +10,6 @@ use chroma_types::{
 };
 use std::collections::HashMap;
 use thiserror::Error;
-use uuid::Uuid;
 
 impl std::fmt::Debug for FetchSparseIndexFilesOperator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -132,8 +131,7 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                             }
                             // Attempt to fetch each file
                             for file_path in &file_paths.paths {
-                                let (prefix, file_id) = Segment::extract_prefix_and_id(file_path);
-                                let file_uuid = Uuid::parse_str(file_id)
+                                let (prefix, file_uuid) = Segment::extract_prefix_and_id(file_path)
                                     .map_err(|_| FetchSparseIndexFilesError::ParsingIdFailed)?;
                                 let s3_key = RootManager::get_storage_key(prefix, &file_uuid);
                                 match self

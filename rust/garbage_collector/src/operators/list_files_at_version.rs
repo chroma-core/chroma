@@ -17,7 +17,6 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct ListFilesAtVersionInput {
@@ -117,15 +116,12 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                 for (file_type, segment_paths) in &segment.file_paths {
                     if file_type == "hnsw_index" || file_type == HNSW_PATH {
                         for path in &segment_paths.paths {
-                            let (prefix, hnsw_index_id) = Segment::extract_prefix_and_id(path);
+                            let (prefix, hnsw_index_uuid) = Segment::extract_prefix_and_id(path)
+                                .map_err(ListFilesAtVersionError::InvalidUuid)?;
                             for hnsw_file in FILES {
-                                let hnsw_index_uuid = IndexUuid(
-                                    Uuid::parse_str(hnsw_index_id)
-                                        .map_err(ListFilesAtVersionError::InvalidUuid)?,
-                                );
                                 let s3_key = HnswIndexProvider::format_key(
                                     prefix,
-                                    &hnsw_index_uuid,
+                                    &IndexUuid(hnsw_index_uuid),
                                     hnsw_file,
                                 );
                                 file_paths.insert(s3_key);
@@ -134,8 +130,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                     } else {
                         // Must be a sparse index
                         for path in &segment_paths.paths {
-                            let (prefix, sparse_index_id) = Segment::extract_prefix_and_id(path);
-                            let sparse_index_uuid = Uuid::parse_str(sparse_index_id)
+                            let (prefix, sparse_index_uuid) = Segment::extract_prefix_and_id(path)
                                 .map_err(ListFilesAtVersionError::InvalidUuid)?;
                             let file_path =
                                 RootManager::get_storage_key(prefix, &sparse_index_uuid);
