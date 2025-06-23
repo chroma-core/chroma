@@ -32,7 +32,10 @@ const buildDockerImage = async (
   throw new Error("Could not retrieve the sha256 hash of the Docker image.");
 };
 
-export const startContainer = async (buildContextDir: string, verbose?: boolean) => {
+export const startContainer = async (
+  buildContextDir: string,
+  verbose?: boolean,
+) => {
   let container: GenericContainer;
   if (process.env.PREBUILT_CHROMADB_IMAGE) {
     container = new GenericContainer(process.env.PREBUILT_CHROMADB_IMAGE);
@@ -89,7 +92,7 @@ export const startContainer = async (buildContextDir: string, verbose?: boolean)
 };
 
 export const startChromaServer = async (buildContextDir: string) => {
-  const host = "localhost";
+  const host = "127.0.0.1";
   const port = CHROMADB_PORT;
   const url = `http://${host}:${port}`;
   const heartbeatUrl = `${url}/api/v2/heartbeat`;

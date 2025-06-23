@@ -21,7 +21,7 @@ const main = async () => {
         {
           name: "@hey-api/client-fetch",
           throwOnError: true,
-          baseUrl: "http://localhost:8000"
+          baseUrl: "http://localhost:8000",
         },
         { name: "@hey-api/sdk", asClass: true },
         "@hey-api/typescript",
@@ -33,13 +33,13 @@ const main = async () => {
     // Fix HashMap type definition
     const typesPath = join(__dirname, "../src/api/types.gen.ts");
     let typesContent = await readFile(typesPath, "utf-8");
-    
+
     // Fix the HashMap type to include null and remove duplicate number
     typesContent = typesContent.replace(
       /export type HashMap = \{\s*\[key: string\]: boolean \| number \| number \| string;\s*\};/,
-      "export type HashMap = {\n  [key: string]: boolean | number | string | null;\n};"
+      "export type HashMap = {\n  [key: string]: boolean | number | string | null;\n};",
     );
-    
+
     await writeFile(typesPath, typesContent);
     console.log("✅ Fixed HashMap type definition!");
   } finally {

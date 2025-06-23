@@ -5,7 +5,9 @@ import { EMBEDDINGS, IDS } from "./utils/data";
 describe("peek records", () => {
   // connects to the unauthenticated chroma instance started in
   // the global jest setup file.
-  const client = new ChromaClient();
+  const client = new ChromaClient({
+    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+  });
 
   beforeEach(async () => {
     await client.reset();
