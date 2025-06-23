@@ -169,6 +169,7 @@ impl Scheduler {
                 continue;
             };
             let next_log_to_compact = sysdb_info.log_position.saturating_add(1);
+            println!("[{collection_id}]: {next_log_to_compact}, {log_info:?}");
             if next_log_to_compact < log_info.first_log_offset {
                 tracing::error!("Next log to compact for collection [{collection_id}] at [{next_log_to_compact}] is already purged in log service: the first available log is at [{}]", log_info.first_log_offset);
                 continue;
@@ -505,8 +506,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(expected = "is less than offset")]
-    async fn test_scheduler_panic() {
+    async fn test_scheduler_invalid_offsets() {
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
@@ -600,17 +600,13 @@ mod tests {
                 },
             },
         );
-        let _ = log
-            .update_collection_log_offset(&tenant_1, collection_uuid_1, 2)
-            .await;
-
         let mut sysdb = SysDb::Test(TestSysDb::new());
 
         match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);
                 let last_compaction_time_1 = 2;
-                sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
+                sysdb.add_tenant_last_compaction_time(tenant_1.clone(), last_compaction_time_1);
             }
             _ => panic!("Invalid sysdb type"),
         }
@@ -628,6 +624,27 @@ mod tests {
 
         let mut scheduler = Scheduler::new(
             my_member.member_id.clone(),
+            log.clone(),
+            sysdb.clone(),
+            scheduler_policy.clone(),
+            max_concurrent_jobs,
+            1,
+            assignment_policy.clone(),
+            HashSet::new(),
+        );
+
+        scheduler.set_memberlist(vec![my_member.clone()]);
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        assert_eq!(jobs.count(), 1);
+
+        // Update compaction offset in log so that it's ahead of the value in sysdb
+        let _ = log
+            .update_collection_log_offset(&tenant_1, collection_uuid_1, 2)
+            .await;
+
+        let mut scheduler = Scheduler::new(
+            my_member.member_id.clone(),
             log,
             sysdb.clone(),
             scheduler_policy,
@@ -639,5 +656,7 @@ mod tests {
 
         scheduler.set_memberlist(vec![my_member.clone()]);
         scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        assert_eq!(jobs.count(), 0);
     }
 }
