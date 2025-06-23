@@ -46,7 +46,7 @@ impl BlockfileFlusher {
         }
     }
 
-    pub fn prefix_path(&self) -> String {
+    pub fn prefix_path(&self) -> &str {
         match self {
             BlockfileFlusher::MemoryBlockfileFlusher(flusher) => flusher.prefix_path(),
             BlockfileFlusher::ArrowBlockfileFlusher(flusher) => flusher.prefix_path(),

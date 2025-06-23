@@ -248,6 +248,8 @@ pub enum CollectionConversionError {
     InvalidUuid,
     #[error(transparent)]
     MetadataValueConversionError(#[from] MetadataValueConversionError),
+    #[error("Missing Database Id")]
+    MissingDatabaseId,
 }
 
 impl ChromaError for CollectionConversionError {
@@ -256,6 +258,7 @@ impl ChromaError for CollectionConversionError {
             CollectionConversionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
             CollectionConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
             CollectionConversionError::MetadataValueConversionError(e) => e.code(),
+            CollectionConversionError::MissingDatabaseId => ErrorCodes::Internal,
         }
     }
 }
@@ -281,11 +284,12 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             }
             None => SystemTime::now(),
         };
-        // TOOD(Sanket): this should be updated to error with "missing field" once all SysDb deployments are up-to-date
         let database_id = match proto_collection.database_id {
             Some(db_id) => DatabaseUuid::from_str(&db_id)
                 .map_err(|_| CollectionConversionError::InvalidUuid)?,
-            None => DatabaseUuid::new(),
+            None => {
+                return Err(CollectionConversionError::MissingDatabaseId);
+            }
         };
         Ok(Collection {
             collection_id,

@@ -2383,7 +2383,7 @@ impl SpannIndexFlusher {
             versions_map_id: self.versions_map_flusher.id(),
             max_head_id_id: self.max_head_id_flusher.id(),
             hnsw_id: self.hnsw_flusher.index_id,
-            prefix_path: self.max_head_id_flusher.prefix_path(),
+            prefix_path: self.max_head_id_flusher.prefix_path().to_string(),
         };
         let attribute = &[KeyValue::new(
             "collection_id",

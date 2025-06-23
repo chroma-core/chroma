@@ -286,7 +286,7 @@ impl FullTextIndexFlusher {
         self.posting_lists_blockfile_flusher.id()
     }
 
-    pub fn prefix_path(&self) -> String {
+    pub fn prefix_path(&self) -> &str {
         self.posting_lists_blockfile_flusher.prefix_path()
     }
 }

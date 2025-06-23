@@ -584,7 +584,7 @@ impl Debug for RecordSegmentFlusher {
 
 impl RecordSegmentFlusher {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
-        let prefix_path = self.user_id_to_id_flusher.prefix_path();
+        let prefix_path = self.user_id_to_id_flusher.prefix_path().to_string();
         let user_id_to_id_bf_id = self.user_id_to_id_flusher.id();
         let id_to_user_id_bf_id = self.id_to_user_id_flusher.id();
         let id_to_data_bf_id = self.id_to_data_flusher.id();

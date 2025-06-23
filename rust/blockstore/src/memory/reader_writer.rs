@@ -23,8 +23,8 @@ impl MemoryBlockfileFlusher {
         self.id
     }
 
-    pub(crate) fn prefix_path(&self) -> String {
-        String::from("")
+    pub(crate) fn prefix_path(&self) -> &str {
+        ""
     }
 }
 

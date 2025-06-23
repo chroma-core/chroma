@@ -80,7 +80,7 @@ impl ArrowBlockfileFlusher {
         self.blocks.iter().fold(0, |acc, block| acc + block.len())
     }
 
-    pub(crate) fn prefix_path(&self) -> String {
-        self.root.prefix_path.clone()
+    pub(crate) fn prefix_path(&self) -> &str {
+        &self.root.prefix_path
     }
 }
