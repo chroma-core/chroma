@@ -31,7 +31,7 @@ jobs:
               workflow_id: 'deploy.yaml',
               ref: 'main',
               inputs: {
-                'planes': '${{ inputs.plane }}',
+                'plane': '${{ inputs.plane }}',
                  environment: 'staging',
                 'ignore-lock': ${{ inputs.ignore-lock }},
               }
