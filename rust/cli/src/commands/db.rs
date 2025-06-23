@@ -1,19 +1,24 @@
 use crate::client::admin_client::get_admin_client;
 use crate::ui_utils::copy_to_clipboard;
-use crate::utils::{get_current_profile, CliError, Profile, UtilsError, SELECTION_LIMIT};
+use crate::utils::{
+    get_current_profile, CliError, Profile, UtilsError, CHROMA_API_KEY_ENV_VAR,
+    CHROMA_DATABASE_ENV_VAR, CHROMA_TENANT_ENV_VAR, SELECTION_LIMIT,
+};
 use chroma_types::Database;
 use clap::{Args, Subcommand, ValueEnum};
 use colored::Colorize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::{Input, Select};
-use std::fmt;
+use std::error::Error;
+use std::path::Path;
+use std::{fmt, fs};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum DbError {
-    #[error("")]
+    #[error("No databases found")]
     NoDBs,
     #[error("Database name cannot be empty")]
     EmptyDbName,
@@ -23,6 +28,8 @@ pub enum DbError {
     DbNotFound(String),
     #[error("Failed to get runtime for DB commands")]
     RuntimeError,
+    #[error("Failed to create or update .env file with Chroma environment variables")]
+    EnvFile,
 }
 
 #[derive(Debug, Clone, ValueEnum, EnumIter)]
@@ -98,6 +105,10 @@ pub struct ConnectArgs {
         help = "The programming language to use for the connection snippet"
     )]
     language: Option<Language>,
+    #[clap(long = "env-file", default_value_t = false, conflicts_with_all = ["language", "env_vars"], help = "Add Chroma environment variables to a .env file in the current directory")]
+    env_file: bool,
+    #[clap(long = "env-vars", default_value_t = false, conflicts_with_all = ["language", "env_file"], help = "Output Chroma environment variables")]
+    env_vars: bool,
 }
 
 #[derive(Args, Debug)]
@@ -144,6 +155,13 @@ fn no_dbs_message(profile_name: &str) -> String {
         "Profile {} has 0 DBs. To create a new Chroma DB use: {}",
         profile_name,
         "chroma db create <db name>".yellow()
+    )
+}
+
+fn env_file_created_message() -> String {
+    format!(
+        "{}",
+        "Chroma environment variables set in .env!".blue().bold()
     )
 }
 
@@ -318,6 +336,48 @@ fn confirm_db_deletion(name: &str) -> Result<bool, CliError> {
     Ok(confirm.eq(name))
 }
 
+fn create_env_connection(current_profile: Profile, db_name: String) -> Result<(), Box<dyn Error>> {
+    let env_path = ".env";
+    let chroma_keys = [
+        CHROMA_API_KEY_ENV_VAR,
+        CHROMA_TENANT_ENV_VAR,
+        CHROMA_DATABASE_ENV_VAR,
+    ];
+
+    let mut lines = Vec::new();
+
+    if Path::new(env_path).exists() {
+        let content = fs::read_to_string(env_path)?;
+
+        for line in content.lines() {
+            let keep = if let Some(eq_pos) = line.find('=') {
+                let key = line[..eq_pos].trim();
+                !chroma_keys.contains(&key)
+            } else {
+                true
+            };
+
+            if keep {
+                lines.push(line.to_string());
+            }
+        }
+    }
+
+    lines.push(format!(
+        "{}={}",
+        CHROMA_API_KEY_ENV_VAR, current_profile.api_key
+    ));
+    lines.push(format!(
+        "{}={}",
+        CHROMA_TENANT_ENV_VAR, current_profile.tenant_id
+    ));
+    lines.push(format!("{}={}", CHROMA_DATABASE_ENV_VAR, db_name));
+
+    fs::write(env_path, lines.join("\n") + "\n")?;
+
+    Ok(())
+}
+
 pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), CliError> {
     let admin_client = get_admin_client(Some(&current_profile), args.db_args.dev);
     let dbs = admin_client.list_databases().await?;
@@ -329,6 +389,21 @@ pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), 
 
     if !dbs.iter().any(|db| db.name == name) {
         return Err(CliError::Db(DbError::DbNotFound(name)));
+    }
+
+    if args.env_file {
+        if create_env_connection(current_profile, name).is_err() {
+            return Err(DbError::EnvFile.into());
+        }
+        println!("{}", env_file_created_message());
+        return Ok(());
+    }
+
+    if args.env_vars {
+        println!("{}={}", CHROMA_API_KEY_ENV_VAR, current_profile.api_key);
+        println!("{}={}", CHROMA_TENANT_ENV_VAR, current_profile.tenant_id);
+        println!("{}={}", CHROMA_DATABASE_ENV_VAR, name);
+        return Ok(());
     }
 
     let language = match args.language {
