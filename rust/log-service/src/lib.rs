@@ -247,7 +247,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
     )
     .await?;
     active.keep_alive(Duration::from_secs(60));
-    tracing::info!("Opened log at {}", prefix);
+    tracing::event!(tracing::Level::INFO, name =? "opened log", prefix =? prefix,);
     let opened = Arc::new(opened);
     active.log = Some(Arc::clone(&opened));
     let handle_clone = handle.clone();
@@ -356,10 +356,11 @@ impl RollupPerCollection {
             .map(|x| x.1.position)
             .unwrap_or(LogPosition::from_offset(1));
         if self.start_log_position > self.limit_log_position {
-            tracing::error!(
-                "invariant violation; will patch: {:?} > {:?}",
-                self.start_log_position,
-                self.limit_log_position
+            tracing::event!(
+                tracing::Level::INFO,
+                name =? "late arriving request",
+                start =? self.start_log_position,
+                limit =? self.limit_log_position
             );
         }
         self.limit_log_position = self.limit_log_position.max(self.start_log_position);
@@ -578,7 +579,11 @@ impl LogServer {
             return Ok(());
         }
 
-        tracing::info!("log transfer to {collection_id}");
+        tracing::event!(
+            tracing::Level::INFO,
+            name =? "log transfer",
+            collection_id =? collection_id,
+        );
         let scout_request = Request::new(ScoutLogsRequest {
             collection_id: collection_id.to_string(),
         });
@@ -592,7 +597,13 @@ impl LogServer {
                 "effectuate logs saw invalid offset",
             ));
         }
-        tracing::info!("scouted {collection_id} start={start} limit={limit}");
+        tracing::event!(
+            tracing::Level::INFO,
+            name =? "scouted",
+            collection_id =? collection_id,
+            start =? start,
+            limit =? limit
+        );
         const STEP: u64 = 100;
         let num_steps = (limit.saturating_sub(start) + STEP - 1) / STEP;
         let actual_steps = (0..num_steps)
@@ -956,10 +967,10 @@ impl LogServer {
         let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
             return Err(Error::CouldNotGetDirtyLogCursors);
         };
-        tracing::info!(
-            "Advancing dirty log cursor {:?} -> {:?}",
-            cursor.position,
-            new_cursor.position
+        tracing::event!(
+            tracing::Level::INFO, name =? "advance dirty log cursor",
+            cursor =? cursor.position,
+            new_cursor =? new_cursor.position,
         );
         if let Some(witness) = witness {
             cursors.save(&STABLE_PREFIX, &new_cursor, &witness).await?;
@@ -994,7 +1005,6 @@ impl LogServer {
             .map(|w| w.cursor())
             .unwrap_or(&default)
             .clone();
-        tracing::info!("cursoring from {cursor:?}");
         let dirty_fragments = reader
             .scan(
                 cursor.position,
@@ -1323,7 +1333,8 @@ impl LogServer {
                         let cache_value = CachedBytes {
                             bytes: Clone::clone(&*answer),
                         };
-                        let insert_span = tracing::info_span!("cache insert");
+                        let insert_span =
+                            tracing::info_span!("cache insert", cache_key = ?cache_key);
                         cache
                             .insert(cache_key, cache_value)
                             .instrument(insert_span)
