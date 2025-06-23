@@ -344,10 +344,11 @@ mod tests {
             block_cache,
             sparse_index_cache,
         );
+        let prefix_path = String::from("");
 
         // Create a new blockfile
         let writer = provider
-            .write::<u32, u32>(BlockfileWriterOptions::new().ordered_mutations())
+            .write::<u32, u32>(BlockfileWriterOptions::new(prefix_path).ordered_mutations())
             .await
             .unwrap();
 

@@ -93,12 +93,13 @@ fn bench_literal(criterion: &mut Criterion) {
         new_cache_for_test(),
     );
     let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-    let blockfile_writer = runtime
-        .block_on(
-            blockfile_provider
-                .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations()),
-        )
-        .expect("Blockfile writer should be creatable");
+    let prefix_path = String::from("");
+    let blockfile_writer =
+        runtime
+            .block_on(blockfile_provider.write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path).ordered_mutations(),
+            ))
+            .expect("Blockfile writer should be creatable");
     let blockfile_id = blockfile_writer.id();
     let tokenizer = NgramTokenizer::new(3, 3, false).expect("Tokenizer should be creatable");
     let mut full_text_writer = FullTextIndexWriter::new(blockfile_writer, tokenizer.clone());

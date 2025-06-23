@@ -471,8 +471,9 @@ mod tests {
     #[tokio::test]
     async fn test_new_writer() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
@@ -482,8 +483,9 @@ mod tests {
     #[tokio::test]
     async fn test_new_writer_then_reader() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -505,8 +507,9 @@ mod tests {
     #[tokio::test]
     async fn test_index_and_search_single_document() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -543,8 +546,9 @@ mod tests {
     #[tokio::test]
     async fn test_repeating_character_in_query() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -575,8 +579,9 @@ mod tests {
     #[tokio::test]
     async fn test_query_of_repeating_character() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -613,8 +618,9 @@ mod tests {
     #[tokio::test]
     async fn test_repeating_character_in_document() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -645,8 +651,9 @@ mod tests {
     #[tokio::test]
     async fn test_search_absent_token() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -677,8 +684,9 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_candidates_within_document() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -718,8 +726,9 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_simple_documents() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -759,8 +768,9 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_complex_documents() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -814,8 +824,9 @@ mod tests {
     #[tokio::test]
     async fn test_index_multiple_character_repeating() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -870,8 +881,9 @@ mod tests {
     #[tokio::test]
     async fn test_index_special_characters() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -918,8 +930,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_all_results_for_token() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -972,8 +985,9 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path).ordered_mutations())
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1010,8 +1024,9 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path).ordered_mutations())
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1051,8 +1066,11 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+            )
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1084,7 +1102,7 @@ mod tests {
         // Update document document 1 with same content, update document 3 with new content
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
-                BlockfileWriterOptions::new()
+                BlockfileWriterOptions::new(prefix_path)
                     .ordered_mutations()
                     .fork(pl_blockfile_id),
             )
@@ -1135,8 +1153,11 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+            )
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1155,7 +1176,7 @@ mod tests {
         // Add document to index
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
-                BlockfileWriterOptions::new()
+                BlockfileWriterOptions::new(prefix_path.clone())
                     .ordered_mutations()
                     .fork(pl_blockfile_id),
             )
@@ -1177,7 +1198,7 @@ mod tests {
         // Update document with same content, should be a noop
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
-                BlockfileWriterOptions::new()
+                BlockfileWriterOptions::new(prefix_path)
                     .ordered_mutations()
                     .fork(pl_blockfile_id),
             )
@@ -1215,8 +1236,9 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1247,7 +1269,7 @@ mod tests {
 
         // Delete document 3
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().fork(pl_blockfile_id))
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path).fork(pl_blockfile_id))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
