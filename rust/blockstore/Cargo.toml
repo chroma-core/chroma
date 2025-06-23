@@ -23,12 +23,14 @@ tokio = { workspace = true }
 num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
 itertools = { workspace = true }
+opentelemetry = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-types = { workspace = true }
+chroma-tracing = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

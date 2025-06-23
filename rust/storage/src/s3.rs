@@ -122,6 +122,7 @@ impl S3Storage {
             .bucket(self.bucket.clone())
             .key(key)
             .send()
+            .instrument(tracing::trace_span!("cold S3 get"))
             .await;
         match res {
             Ok(res) => {
@@ -221,6 +222,7 @@ impl S3Storage {
             .key(&key)
             .range(range_str)
             .send()
+            .instrument(tracing::trace_span!("cold S3 get"))
             .await;
         match res {
             Ok(output) => Ok(output),
@@ -317,11 +319,7 @@ impl S3Storage {
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        let (mut stream, e_tag) = self
-            .get_stream_and_e_tag(key)
-            .instrument(tracing::trace_span!("S3 get stream"))
-            .await?;
-        let read_block_span = tracing::trace_span!("S3 read bytes to end");
+        let (mut stream, e_tag) = self.get_stream_and_e_tag(key).await?;
         let buf = async {
             let mut buf: Vec<u8> = Vec::new();
             while let Some(res) = stream.next().await {
@@ -337,7 +335,6 @@ impl S3Storage {
             }
             Ok(Some(buf))
         }
-        .instrument(read_block_span)
         .await?;
         match buf {
             Some(buf) => Ok((Arc::new(buf), e_tag)),
