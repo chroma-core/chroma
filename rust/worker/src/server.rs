@@ -513,6 +513,7 @@ mod tests {
 
     fn scan() -> chroma_proto::ScanOperator {
         let collection_id = Uuid::new_v4().to_string();
+        let database_id = Uuid::new_v4().to_string();
         chroma_proto::ScanOperator {
             collection: Some(chroma_proto::Collection {
                 id: collection_id.clone(),
@@ -522,6 +523,7 @@ mod tests {
                 dimension: None,
                 tenant: "test-tenant".to_string(),
                 database: "test-database".to_string(),
+                database_id: Some(database_id.clone()),
                 ..Default::default()
             }),
             knn: Some(chroma_proto::Segment {
