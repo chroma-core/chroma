@@ -9,11 +9,12 @@ use chroma_sqlite::table;
 use chroma_types::{
     Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
     CreateCollectionError, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
-    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
-    ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError,
+    CreateTenantError, CreateTenantResponse, Database, DatabaseUuid, DeleteCollectionError,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
+    GetCollectionsError, GetDatabaseError, GetSegmentsError, GetTenantError, GetTenantResponse,
+    InternalCollectionConfiguration, ListDatabasesError, Metadata, MetadataValue, ResetError,
+    ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionConfiguration,
+    UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -289,6 +290,8 @@ impl SqliteSysDb {
                     _ => CreateCollectionError::Internal(e.into()),
                 })?;
         let database_id = database_result.get::<&str, _>(0);
+        let database_uuid = DatabaseUuid::from_str(database_id)
+            .map_err(|_| CreateCollectionError::DatabaseIdParseError)?;
 
         sqlx::query(
             r#"
@@ -343,6 +346,7 @@ impl SqliteSysDb {
             root_collection_id: None,
             lineage_file_path: None,
             updated_at: SystemTime::UNIX_EPOCH,
+            database_id: database_uuid,
         })
     }
 
@@ -671,6 +675,7 @@ impl SqliteSysDb {
             .column((table::Collections::Table, table::Collections::Dimension))
             .column((table::Databases::Table, table::Databases::TenantId))
             .column((table::Databases::Table, table::Databases::Name))
+            .column((table::Collections::Table, table::Collections::DatabaseId))
             .columns([
                 table::CollectionMetadata::Key,
                 table::CollectionMetadata::StrValue,
@@ -720,6 +725,10 @@ impl SqliteSysDb {
                     }
                     None => InternalCollectionConfiguration::default_hnsw(),
                 };
+                let database_id = match DatabaseUuid::from_str(first_row.get(6)) {
+                    Ok(db_id) => db_id,
+                    Err(_) => return Some(Err(GetCollectionsError::DatabaseId)),
+                };
 
                 Some(Ok(Collection {
                     collection_id,
@@ -738,6 +747,7 @@ impl SqliteSysDb {
                     root_collection_id: None,
                     lineage_file_path: None,
                     updated_at: SystemTime::UNIX_EPOCH,
+                    database_id,
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
