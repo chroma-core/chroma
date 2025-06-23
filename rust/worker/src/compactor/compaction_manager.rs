@@ -204,13 +204,18 @@ impl CompactionManager {
 
     #[instrument(name = "CompactionManager::purge_dirty_log", skip(ctx))]
     pub(crate) async fn purge_dirty_log(&mut self, ctx: &ComponentContext<Self>) {
+        let deleted_collection_uuids = self.scheduler.drain_deleted_collections();
+        if deleted_collection_uuids.is_empty() {
+            tracing::info!("Skipping purge dirty log because there is no deleted collections");
+            return;
+        }
         let purge_dirty_log = PurgeDirtyLog {
             log_client: self.log.clone(),
             // TODO: Make this configurable
             timeout: Duration::from_secs(60),
         };
         let purge_dirty_log_input = PurgeDirtyLogInput {
-            collection_uuids: self.scheduler.drain_deleted_collections(),
+            collection_uuids: deleted_collection_uuids.clone(),
         };
         let purge_dirty_log_task = wrap(
             Box::new(purge_dirty_log),
@@ -225,8 +230,12 @@ impl CompactionManager {
             .send(purge_dirty_log_task, Some(Span::current()))
             .await
         {
-            tracing::error!("Unable to create background task to purge dirty log: {err}")
+            tracing::error!("Unable to create background task to purge dirty log: {err}");
+            return;
         };
+        tracing::info!(
+            "Purging dirty logs for deleted collections: [{deleted_collection_uuids:?}]",
+        );
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
