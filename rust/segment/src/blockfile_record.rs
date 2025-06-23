@@ -1,3 +1,5 @@
+use crate::types::construct_prefix_path;
+
 use super::distributed_spann::SpannSegmentWriterError;
 use super::types::{HydratedMaterializedLogRecord, LogMaterializerError, MaterializeLogsResult};
 use chroma_blockstore::provider::{BlockfileProvider, CreateError, OpenError};
@@ -7,8 +9,8 @@ use chroma_blockstore::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::fulltext::types::FullTextIndexError;
 use chroma_types::{
-    DataRecord, MaterializedLogOperation, Segment, SegmentType, SegmentUuid, MAX_OFFSET_ID,
-    OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
+    DataRecord, DatabaseUuid, MaterializedLogOperation, Segment, SegmentType, SegmentUuid,
+    MAX_OFFSET_ID, OFFSET_ID_TO_DATA, OFFSET_ID_TO_USER_ID, USER_ID_TO_OFFSET_ID,
 };
 use futures::{Stream, StreamExt, TryStreamExt};
 use std::collections::HashMap;
@@ -92,6 +94,8 @@ impl RecordSegmentWriter {
     }
 
     pub async fn from_segment(
+        tenant: &str,
+        database_id: &DatabaseUuid,
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
     ) -> Result<Self, RecordSegmentWriterCreationError> {
@@ -100,6 +104,8 @@ impl RecordSegmentWriter {
             return Err(RecordSegmentWriterCreationError::InvalidSegmentType);
         }
 
+        let prefix_path =
+            construct_prefix_path(tenant, database_id, &segment.collection, &segment.id);
         let (user_id_to_id, id_to_user_id, id_to_data, max_offset_id) = match segment
             .file_path
             .len()
@@ -107,7 +113,7 @@ impl RecordSegmentWriter {
             0 => {
                 tracing::debug!("No files found, creating new blockfiles for record segment");
                 let user_id_to_id = match blockfile_provider
-                    .write::<&str, u32>(BlockfileWriterOptions::default())
+                    .write::<&str, u32>(BlockfileWriterOptions::new(prefix_path.clone()))
                     .await
                 {
                     Ok(user_id_to_id) => user_id_to_id,
@@ -116,7 +122,7 @@ impl RecordSegmentWriter {
                     }
                 };
                 let id_to_user_id = match blockfile_provider
-                    .write::<u32, String>(BlockfileWriterOptions::default())
+                    .write::<u32, String>(BlockfileWriterOptions::new(prefix_path.clone()))
                     .await
                 {
                     Ok(id_to_user_id) => id_to_user_id,
@@ -125,7 +131,7 @@ impl RecordSegmentWriter {
                     }
                 };
                 let id_to_data = match blockfile_provider
-                    .write::<u32, &DataRecord>(BlockfileWriterOptions::default())
+                    .write::<u32, &DataRecord>(BlockfileWriterOptions::new(prefix_path.clone()))
                     .await
                 {
                     Ok(id_to_data) => id_to_data,
@@ -134,7 +140,7 @@ impl RecordSegmentWriter {
                     }
                 };
                 let max_offset_id = match blockfile_provider
-                    .write::<&str, u32>(BlockfileWriterOptions::default())
+                    .write::<&str, u32>(BlockfileWriterOptions::new(prefix_path))
                     .await
                 {
                     Ok(max_offset_id) => max_offset_id,
@@ -242,7 +248,9 @@ impl RecordSegmentWriter {
                 };
 
                 let user_id_to_id = match blockfile_provider
-                    .write::<&str, u32>(BlockfileWriterOptions::new().fork(user_id_to_bf_uuid))
+                    .write::<&str, u32>(
+                        BlockfileWriterOptions::new(prefix_path.clone()).fork(user_id_to_bf_uuid),
+                    )
                     .await
                 {
                     Ok(user_id_to_id) => user_id_to_id,
@@ -251,7 +259,10 @@ impl RecordSegmentWriter {
                     }
                 };
                 let id_to_user_id = match blockfile_provider
-                    .write::<u32, String>(BlockfileWriterOptions::new().fork(id_to_user_id_bf_uuid))
+                    .write::<u32, String>(
+                        BlockfileWriterOptions::new(prefix_path.clone())
+                            .fork(id_to_user_id_bf_uuid),
+                    )
                     .await
                 {
                     Ok(id_to_user_id) => id_to_user_id,
@@ -261,7 +272,7 @@ impl RecordSegmentWriter {
                 };
                 let id_to_data = match blockfile_provider
                     .write::<u32, &DataRecord>(
-                        BlockfileWriterOptions::new().fork(id_to_data_bf_uuid),
+                        BlockfileWriterOptions::new(prefix_path.clone()).fork(id_to_data_bf_uuid),
                     )
                     .await
                 {
@@ -271,7 +282,9 @@ impl RecordSegmentWriter {
                     }
                 };
                 let max_offset_id_bf = match blockfile_provider
-                    .write::<&str, u32>(BlockfileWriterOptions::new().fork(max_offset_id_bf_uuid))
+                    .write::<&str, u32>(
+                        BlockfileWriterOptions::new(prefix_path).fork(max_offset_id_bf_uuid),
+                    )
                     .await
                 {
                     Ok(max_offset_id) => max_offset_id,
@@ -921,6 +934,8 @@ mod tests {
                 let offset_id = Arc::new(AtomicU32::new(1));
 
                 let record_segment_writer = future::block_on(RecordSegmentWriter::from_segment(
+                    &test_segment.collection.tenant,
+                    &test_segment.collection.database_id,
                     &test_segment.record_segment,
                     &test_segment.blockfile_provider,
                 ))
