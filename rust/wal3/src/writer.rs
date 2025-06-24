@@ -598,6 +598,9 @@ impl OnceLogWriter {
             // TODO(rescrv):  Evaluate putting a cache in here.
             .compute_garbage(options, cutoff, &())
             .await?;
+        let Some(garbage) = garbage else {
+            return Ok(());
+        };
         let (garbage, e_tag) = match garbage
             .install(
                 &self.options.throttle_manifest,
