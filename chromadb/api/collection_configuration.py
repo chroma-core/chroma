@@ -8,6 +8,7 @@ from chromadb.api.types import (
     EmbeddingFunction,
     QueryConfig,
 )
+from chromadb.base_types import CollectionSchema, ValueType
 from chromadb.utils.embedding_functions import (
     known_embedding_functions,
     register_embedding_function,
@@ -44,6 +45,7 @@ class CollectionConfiguration(TypedDict, total=True):
     spann: Optional[SpannConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
     query_embedding_function: Optional[EmbeddingFunction]  # type: ignore
+    schema: Optional[Dict[str, Dict[ValueType, CollectionSchema]]]
 
 
 def load_collection_configuration_from_json_str(
@@ -126,6 +128,7 @@ def load_collection_configuration_from_json(
         spann=spann_config,
         embedding_function=ef,  # type: ignore
         query_embedding_function=query_ef,  # type: ignore
+        schema=config_json_map.get("schema"),
     )
 
 
@@ -139,6 +142,7 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         spann_config = config.get("spann")
         ef = config.get("embedding_function")
         query_ef = config.get("query_embedding_function")
+        schema = config.get("schema")
     else:
         try:
             hnsw_config = config.get_parameter("hnsw").value
@@ -211,6 +215,7 @@ def collection_configuration_to_json(config: CollectionConfiguration) -> Dict[st
         "spann": spann_config,
         "embedding_function": ef_config,
         "query_embedding_function": query_ef_config,
+        "schema": schema,
     }
 
 
@@ -292,6 +297,7 @@ class CreateCollectionConfiguration(TypedDict, total=False):
     spann: Optional[CreateSpannConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
     query_config: Optional[QueryConfig]
+    schema: Optional[Dict[str, Dict[ValueType, CollectionSchema]]]
 
 
 def create_collection_configuration_from_legacy_collection_metadata(
@@ -430,6 +436,7 @@ def create_collection_configuration_to_json(
         "spann": spann_config,
         "embedding_function": ef_config,
         "query_config": query_config,
+        "schema": config.get("schema"),
     }
 
 
@@ -502,6 +509,7 @@ class UpdateCollectionConfiguration(TypedDict, total=False):
     spann: Optional[UpdateSpannConfiguration]
     embedding_function: Optional[EmbeddingFunction]  # type: ignore
     query_config: Optional[QueryConfig]
+    schema: Optional[Dict[str, Dict[ValueType, CollectionSchema]]]
 
 
 def update_collection_configuration_from_legacy_collection_metadata(
@@ -556,10 +564,17 @@ def update_collection_configuration_to_json(
     """Convert an UpdateCollectionConfiguration to a JSON-serializable dict"""
     hnsw_config = config.get("hnsw")
     spann_config = config.get("spann")
+    schema = config.get("schema")
     ef = config.get("embedding_function")
     q = config.get("query_config")
     query_config: Dict[str, Any] | None = None
-    if hnsw_config is None and spann_config is None and ef is None and q is None:
+    if (
+        hnsw_config is None
+        and spann_config is None
+        and ef is None
+        and q is None
+        and schema is None
+    ):
         return {}
 
     if hnsw_config is not None:
@@ -601,6 +616,7 @@ def update_collection_configuration_to_json(
         "spann": spann_config,
         "embedding_function": ef_config,
         "query_config": query_config,
+        "schema": schema,
     }
 
 
@@ -764,12 +780,38 @@ def overwrite_collection_configuration(
                     ef_config[k] = v
                 query_ef = updated_embedding_function.build_from_config(ef_config)
 
+    existing_schema = existing_config.get("schema")
+    new_diff_schema = update_config.get("schema")
+    updated_schema: Optional[Dict[str, Dict[ValueType, CollectionSchema]]] = None
+    if existing_schema is not None:
+        if new_diff_schema is not None:
+            updated_schema = overwrite_schema(existing_schema, new_diff_schema)
+        else:
+            updated_schema = existing_schema
+    else:
+        updated_schema = new_diff_schema
+
     return CollectionConfiguration(
         hnsw=updated_hnsw_config,
         spann=updated_spann_config,
         embedding_function=updated_embedding_function,
         query_embedding_function=query_ef,
+        schema=updated_schema,
     )
+
+
+def overwrite_schema(
+    existing_schema: Dict[str, Dict[ValueType, CollectionSchema]],
+    new_diff_schema: Dict[str, Dict[ValueType, CollectionSchema]],
+) -> Dict[str, Dict[ValueType, CollectionSchema]]:
+    """Overwrite a schema with a new configuration"""
+    for new_key, new_value in new_diff_schema.items():
+        if new_key in existing_schema:
+            for value_type, new_schema in new_value.items():
+                existing_schema[new_key][value_type] = new_schema
+        else:
+            existing_schema[new_key] = new_value
+    return existing_schema
 
 
 def validate_embedding_function_conflict_on_create(
