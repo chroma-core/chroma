@@ -1,5 +1,7 @@
+use chroma_blockstore::arrow::provider::BlockManager;
 use chroma_blockstore::test_utils::sparse_index_test_utils::create_test_sparse_index;
-use chroma_index::hnsw_provider::FILES;
+use chroma_blockstore::RootManager;
+use chroma_index::hnsw_provider::{HnswIndexProvider, FILES};
 use chroma_segment::types::ChromaSegmentFlusher;
 use chroma_storage::Storage;
 use chroma_types::{CollectionUuid, DatabaseUuid, SegmentFlushInfo, SegmentUuid};
@@ -84,7 +86,13 @@ fn new_hnsw_index_strategy(prefix_path: String) -> BoxedStrategy<SegmentFileRefe
     let hnsw_index = FileReference::Hnsw {
         file_paths: FILES
             .iter()
-            .map(|file_name| format!("{}/hnsw/{}/{}", prefix_path, hnsw_index_id, file_name))
+            .map(|file_name| {
+                HnswIndexProvider::format_key(
+                    &prefix_path,
+                    &chroma_index::IndexUuid(hnsw_index_id),
+                    file_name,
+                )
+            })
             .collect::<Vec<String>>(),
     };
     Just(SegmentFileReference {
@@ -102,7 +110,10 @@ fn new_or_forked_sparse_index_strategy(
     let new_block_paths_strategy = (1..10).prop_map(move |num| {
         let mut block_paths = vec![];
         for _ in 0..num {
-            block_paths.push(format!("{}/block/{}", prefix_path_clone, Uuid::new_v4()));
+            block_paths.push(BlockManager::format_key(
+                &prefix_path_clone,
+                &Uuid::new_v4(),
+            ));
         }
         block_paths
     });
@@ -139,7 +150,7 @@ fn new_or_forked_sparse_index_strategy(
         .prop_map(move |block_paths| {
             let sparse_index_id = Uuid::new_v4();
             let sparse_index = FileReference::SparseIndex {
-                path: format!("{}/root/{}", prefix_path, sparse_index_id),
+                path: RootManager::get_storage_key(&prefix_path, &sparse_index_id),
                 block_paths: block_paths.into_iter().collect(),
             };
             SegmentFileReference {
@@ -264,9 +275,10 @@ impl SegmentFilePaths {
                                 file_paths: FILES
                                     .iter()
                                     .map(|file_name| {
-                                        format!(
-                                            "{}/hnsw/{}/{}",
-                                            prefix_path, hnsw_index_id, file_name
+                                        HnswIndexProvider::format_key(
+                                            &prefix_path,
+                                            &chroma_index::IndexUuid(hnsw_index_id),
+                                            file_name,
                                         )
                                     })
                                     .collect::<Vec<String>>(),
