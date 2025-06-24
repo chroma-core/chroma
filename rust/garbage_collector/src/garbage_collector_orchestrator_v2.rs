@@ -70,7 +70,6 @@ pub struct GarbageCollectorOrchestrator {
     num_pending_tasks: usize,
     min_versions_to_keep: u32,
     graph: Option<VersionGraph>,
-    collections_to_gc: HashSet<CollectionUuid>,
     soft_deleted_collections_to_gc: HashSet<CollectionUuid>,
     tenant: Option<String>,
     database_name: Option<String>,
@@ -116,7 +115,6 @@ impl GarbageCollectorOrchestrator {
             num_pending_tasks: 0,
             min_versions_to_keep,
             graph: None,
-            collections_to_gc: HashSet::new(),
             soft_deleted_collections_to_gc: HashSet::new(),
             tenant: None,
             database_name: None,
@@ -152,6 +150,8 @@ pub enum GarbageCollectorError {
     ListFilesAtVersion(#[from] ListFilesAtVersionError),
     #[error("Failed to delete unused files: {0}")]
     DeleteUnusedFiles(#[from] DeleteUnusedFilesError),
+    #[error("Failed to delete unused logs: {0}")]
+    DeleteUnusedLogs(#[from] DeleteUnusedLogsError),
     #[error("Failed to delete versions at sysdb: {0}")]
     DeleteVersionsAtSysDb(#[from] DeleteVersionsAtSysDbError),
 
@@ -287,7 +287,6 @@ impl GarbageCollectorOrchestrator {
 
         let collection_ids = output.version_files.keys().cloned().collect::<Vec<_>>();
 
-        self.collections_to_gc = HashSet::from_iter(collection_ids.iter().cloned());
         self.soft_deleted_collections_to_gc = self
             .get_eligible_soft_deleted_collections_to_gc(collection_ids)
             .await?;

@@ -82,7 +82,9 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                     if let Err(err) =
                         wal3::destroy(storage_clone, &collection_id.storage_prefix_for_log()).await
                     {
-                        tracing::error!("could not destroy/hard delete wal3 instance: {err:?}");
+                        tracing::error!(
+                            "Unable to destroy log for collection [{collection_id}]: {err:?}"
+                        );
                     }
                 })
             }
