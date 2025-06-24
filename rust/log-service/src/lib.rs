@@ -362,18 +362,11 @@ impl RollupPerCollection {
         self.start_log_position = witness
             .map(|x| x.cursor.position)
             .unwrap_or(LogPosition::from_offset(1));
-        if self.start_log_position > self.limit_log_position {
-            tracing::error!(
-                "invariant violation; will patch: {:?} > {:?}",
-                self.start_log_position,
-                self.limit_log_position
-            );
-        }
         self.limit_log_position = self.limit_log_position.max(self.start_log_position);
     }
 
     fn is_empty(&self) -> bool {
-        self.start_log_position == self.limit_log_position
+        self.start_log_position >= self.limit_log_position
     }
 
     fn dirty_marker(&self, collection_id: CollectionUuid) -> DirtyMarker {
@@ -906,7 +899,7 @@ impl LogServer {
                 rollup.start_log_position,
                 LogPosition::from_offset(adjusted_log_offset as u64),
             );
-            if rollup.start_log_position >= rollup.limit_log_position {
+            if rollup.is_empty() {
                 entry.remove();
             }
         }
@@ -1572,7 +1565,7 @@ impl LogServer {
                     format!("max_offset={:?} < offset={:?}", max_offset, offset),
                 ));
             }
-            if offset != max_offset{
+            if offset != max_offset {
                 let mark_dirty = MarkDirty {
                     collection_id: target_collection_id,
                     dirty_log: Arc::clone(&self.dirty_log),

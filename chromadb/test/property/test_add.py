@@ -21,6 +21,31 @@ from chromadb.utils.batch_utils import create_batches
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
+@given(
+    collection=collection_st,
+    record_set=strategies.recordsets(collection_st, min_size=1, max_size=5),
+)
+@settings(
+    deadline=None,
+    parent=override_hypothesis_profile(
+        normal=hypothesis.settings(max_examples=500),
+        fast=hypothesis.settings(max_examples=200),
+    ),
+)
+def test_add_miniscule(
+    client: ClientAPI,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+) -> None:
+    if (
+        client.get_settings().chroma_api_impl
+        == "chromadb.api.async_fastapi.AsyncFastAPI"
+    ):
+        pytest.skip(
+            "TODO @jai, come back and debug why CI runners fail with async + sync"
+        )
+    _test_add(client, collection, record_set, True)
+
 
 # Hypothesis tends to generate smaller values so we explicitly segregate the
 # the tests into tiers, Small, Medium. Hypothesis struggles to generate large
