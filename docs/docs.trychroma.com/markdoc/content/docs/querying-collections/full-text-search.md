@@ -14,12 +14,12 @@ In order to filter on document contents, you must supply a `where_document` filt
 }
 ```
 
-You can also filter documents using a regex pattern, with the `$regex` and `$not_regex` keys:
+You can also filter documents using a [regular expression](https://regex101.com) pattern, with the `$regex` and `$not_regex` keys:
 
 ```python
-# Filtering for a regex pattern
+# Filtering using a regex pattern for an email address
 {
-    "$regex": ".+"
+    "$regex": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
 }
 ```
 
