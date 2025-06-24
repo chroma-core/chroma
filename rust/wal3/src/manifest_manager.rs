@@ -383,7 +383,7 @@ impl ManifestManager {
         options: &GarbageCollectionOptions,
         first_to_keep: LogPosition,
         cache: &dyn SnapshotCache,
-    ) -> Result<Garbage, Error> {
+    ) -> Result<Option<Garbage>, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
         let stable = {
             let staging = self.staging.lock().unwrap();
