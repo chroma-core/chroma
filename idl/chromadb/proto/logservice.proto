@@ -90,7 +90,7 @@ message UpdateCollectionLogOffsetResponse {
 }
 
 message PurgeDirtyForCollectionRequest {
-  string collection_id = 1;
+  repeated string collection_ids = 1;
 }
 
 message PurgeDirtyForCollectionResponse {

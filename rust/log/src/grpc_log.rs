@@ -671,7 +671,7 @@ impl GrpcLog {
 
     pub(super) async fn purge_dirty_for_collection(
         &mut self,
-        collection_id: CollectionUuid,
+        collection_ids: Vec<CollectionUuid>,
     ) -> Result<(), GrpcPurgeDirtyForCollectionError> {
         let Some(assigner) = self.alt_client_assigner.as_mut() else {
             return Ok(());
@@ -681,6 +681,7 @@ impl GrpcLog {
         for client in assigner.all().into_iter() {
             let mut client = client.clone();
             let limiter = Arc::clone(&limiter);
+            let collection_ids_clone = collection_ids.clone();
             let request = async move {
                 // NOTE(rescrv): This can never fail and the result is to fail open.  Don't
                 // error-check.
@@ -688,7 +689,10 @@ impl GrpcLog {
                 client
                     .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
                         // NOTE(rescrv):  Use the untyped string representation of the collection ID.
-                        collection_id: collection_id.0.to_string(),
+                        collection_ids: collection_ids_clone
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect(),
                     })
                     .await
                     .map_err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty)
