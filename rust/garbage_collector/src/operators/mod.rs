@@ -11,3 +11,4 @@ pub mod fetch_version_file;
 pub mod get_version_file_paths;
 pub mod list_files_at_version;
 pub mod mark_versions_at_sysdb;
+pub mod truncate_dirty_log;
