@@ -935,7 +935,7 @@ impl LogServer {
         }
         // Then allocate the collection ID strings outside the lock.
         let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
-        for (collection_id, rollup) in selected_rollups.into_iter().take(100) {
+        for (collection_id, rollup) in selected_rollups.into_iter() {
             all_collection_info.push(CollectionInfo {
                 collection_id: collection_id.to_string(),
                 first_log_offset: rollup.start_log_position.offset() as i64,
@@ -1162,16 +1162,37 @@ impl LogServer {
             };
             Ok::<Option<Witness>, Error>(witness)
         };
+        let mut futures = Vec::with_capacity(rollups.len());
         for (collection_id, mut rollup) in std::mem::take(rollups) {
-            let witness = load_witness(&self.storage, collection_id).await?;
-            // NOTE(rescrv):  There are two spreads that we have.
-            // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
-            // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
-            // data that needs to be compacted.
-            if let Some(witness) = witness {
-                rollup.witness_cursor(Some(&witness));
-            }
-            if !rollup.is_empty() {
+            let load_witness = &load_witness;
+            futures.push(async move {
+                let witness = match load_witness(&self.storage, collection_id).await {
+                    Ok(witness) => witness,
+                    Err(err) => {
+                        tracing::warn!("could not load cursor: {err}");
+                        return Some((collection_id, rollup));
+                    }
+                };
+                // NOTE(rescrv):  There are two spreads that we have.
+                // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
+                // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
+                // data that needs to be compacted.
+                if let Some(witness) = witness {
+                    rollup.witness_cursor(Some(&witness));
+                }
+                if !rollup.is_empty() {
+                    Some((collection_id, rollup))
+                } else {
+                    None
+                }
+            });
+        }
+        if !futures.is_empty() {
+            for (collection_id, rollup) in futures::future::join_all(futures)
+                .await
+                .into_iter()
+                .flatten()
+            {
                 rollups.insert(collection_id, rollup);
             }
         }
