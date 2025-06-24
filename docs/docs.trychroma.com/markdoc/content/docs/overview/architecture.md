@@ -1,12 +1,3 @@
----
-{
-  "id": "architecture",
-  "title": "Architecture",
-  "section": "Overview",
-  "order": 3
-}
----
-
 # Architecture
 
 Chroma is designed with a modular architecture that prioritizes performance and ease of use. It scales seamlessly from local development to large-scale production, while exposing a consistent API across all deployment modes.
@@ -25,11 +16,11 @@ You can use [Chroma Cloud](https://www.trychroma.com/signup), which is a managed
 
 ## Core Components
 
-Regardless of deployment mode, Chroma is composed of five core components. Each plays a distinct role in the system and operates over the shared [Chroma data model](../overview/data-model.md).
+Regardless of deployment mode, Chroma is composed of five core components. Each plays a distinct role in the system and operates over the shared [Chroma data model](../overview/data-model).
 
 ![architecture](/architecture.png)
 
-**The Gateway**
+### The Gateway
 
 The entrypoint for all client traffic.
 
@@ -37,7 +28,7 @@ The entrypoint for all client traffic.
 - Handles authentication, rate-limiting, quota management, and request validation
 - Routes requests to downstream services
 
-**The Log**
+### The Log
 
 Chroma’s write-ahead log.
 
@@ -46,14 +37,14 @@ Chroma’s write-ahead log.
 - Provides durability and replay in distributed deployments
 
 
-**The Query Executor**
+### The Query Executor
 
 Responsible for **all read operations.**
 
 - Vector similarity, full-text and metadata search
 - It maintains a combination of in-memory and on-disk indexes, and coordinates with the Log to serve consistent results.
 
-**The Compactor**
+### The Compactor
 
 A service that periodically builds and maintains indexes.
 
@@ -61,7 +52,7 @@ A service that periodically builds and maintains indexes.
 - Writes materialized index data to shared storage
 - Updates the System Database with metadata about new index versions
 
-**The System Database**
+### The System Database
 
 Chroma’s internal catalog.
 
@@ -81,7 +72,7 @@ These components operate differently depending on the deployment mode, particula
 
 ## Request Sequences
 
-**Read Path**
+### Read Path
 
 ![read_path](/read_path.png)
 
@@ -90,7 +81,7 @@ These components operate differently depending on the deployment mode, particula
 3. The query executor transforms the logical plan into a physical plan for execution, reads from its storage layer, and performs the query. The query executor pulls data from the log to ensure a consistent read.
 4. The request is returned to the gateway and subsequently to the client.
 
-**Write Path**
+### Write Path
 
 ![write_path](/write_path.png)
 

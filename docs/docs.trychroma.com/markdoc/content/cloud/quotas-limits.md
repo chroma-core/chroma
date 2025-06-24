@@ -2,7 +2,7 @@
 
 To ensure the stability and fairness of Chroma Cloud in a multi-tenant environment, we enforce input and query quotas across all user-facing operations. These limits are designed to strike a balance between performance, reliability, and ease of use for the majority of workloads.
 
-Most quotas can be increased upon request, once a clear need has been demonstrated. If your application requires higher limits, contact us and we’ll be happy to help.
+Most quotas can be increased upon request, once a clear need has been demonstrated. If your application requires higher limits, [contact us](mailto:support@trychroma.com) and we’ll be happy to help.
 
 | **Quota** | **Value** |
 | --- | --- |

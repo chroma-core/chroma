@@ -1,12 +1,3 @@
----
-{
-  "id": "data-model",
-  "title": "Data Model",
-  "section": "Overview",
-  "order": 4
-}
----
-
 # Chroma Data Model
 
 Chroma’s data model is designed to balance simplicity, flexibility, and scalability. It introduces a few core abstractions—**Tenants**, **Databases**, and **Collections**—that allow you to organize, retrieve, and manage data efficiently across environments and use cases.
