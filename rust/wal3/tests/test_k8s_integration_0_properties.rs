@@ -134,7 +134,8 @@ proptest::proptest! {
         let limit = manifest.next_write_timestamp();
         let cache = TestingSnapshotCache::default();
         let mut count = 0;
-        for offset in start.offset()..limit.offset() {
+        let mut last_limit = 0;
+        for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
             let Some(garbage) = rt.block_on(Garbage::new(&storage, "manifests_gargage", &manifest, &throttle, &cache, position)).unwrap() else {
@@ -160,8 +161,10 @@ proptest::proptest! {
             assert_eq!(manifest.collected + dropped, new_manifest.collected, "manifest.collected mismatch");
             assert!(new_manifest.scrub().is_ok(), "scrub error");
             count += 1;
+            last_limit = offset;
         }
-        assert!(count > 1);
+        assert!(count >= 1);
+        assert!(LogPosition::from_offset(last_limit) == manifest.next_write_timestamp());
     }
 }
 
@@ -180,7 +183,7 @@ proptest::proptest! {
         let fragments = deltas_to_fragment_sequence(&deltas);
         println!("fragments = {fragments:#?}");
         let mut snapshots = vec![];
-        for fragment in fragments.into_iter() {
+        for fragment in fragments.iter().cloned() {
             assert!(manifest.can_apply_fragment(&fragment));
             manifest.apply_fragment(fragment);
             if let Some(snapshot) = manifest.generate_snapshot(SnapshotOptions {
@@ -199,7 +202,7 @@ proptest::proptest! {
         };
         eprintln!("[{:?}, {:?})", start, limit);
         let mut last_initial_seq_no = FragmentSeqNo(0);
-        for offset in start.offset()..limit.offset() {
+        for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
             let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_gargage", &manifest, &throttle, &cache, position)).unwrap();
@@ -226,7 +229,7 @@ proptest::proptest! {
                 last_initial_seq_no = new_manifest.initial_seq_no.unwrap();
             }
         }
-        assert!(last_initial_seq_no > FragmentSeqNo(0))
+        assert_eq!(last_initial_seq_no, fragments.last().unwrap().seq_no + 1);
     }
 }
 
