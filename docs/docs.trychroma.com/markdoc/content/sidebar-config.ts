@@ -82,7 +82,7 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "query-and-get", name: "Query And Get" },
           { id: "metadata-filtering", name: "Metadata Filtering" },
-          { id: "full-text-search", name: "Full Text Search" },
+          { id: "full-text-search", name: "Full Text Search and Regex" },
         ],
       },
       {
