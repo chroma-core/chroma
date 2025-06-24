@@ -91,10 +91,10 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 prompt = f"{user_query}. Use this as context for answering: {context}"
 
 response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant"},
-            {"role": "user", "content": prompt}
-        ]
-    )
+    model="gpt-4",
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant"},
+        {"role": "user", "content": prompt}
+    ]
+)
 ```
