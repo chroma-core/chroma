@@ -868,22 +868,22 @@ impl LogServer {
                 .as_micros() as u64,
             writer: "TODO".to_string(),
         };
-        if let Some(witness) = witness.as_ref() {
+        let witness = if let Some(witness) = witness.as_ref() {
             cursor_store
                 .save(cursor_name, &cursor, witness)
                 .await
                 .map_err(|err| {
                     Status::new(err.code().into(), format!("Failed to save cursor: {}", err))
-                })?;
+                })?
         } else {
             cursor_store
                 .init(cursor_name, cursor)
                 .await
                 .map_err(|err| {
                     Status::new(err.code().into(), format!("Failed to init cursor: {}", err))
-                })?;
-        }
-        if let (Some(cache), Some(witness)) = (self.cache.as_ref(), witness.as_ref()) {
+                })?
+        };
+        if let Some(cache) = self.cache.as_ref() {
             let cache_key = cache_key_for_cursor(collection_id, cursor_name);
             match serde_json::to_string(&witness) {
                 Ok(json_witness) => {
@@ -925,9 +925,16 @@ impl LogServer {
         {
             let need_to_compact = self.need_to_compact.lock();
             for (collection_id, rollup) in need_to_compact.iter() {
-                if rollup.limit_log_position >= rollup.start_log_position
+                if (rollup.limit_log_position >= rollup.start_log_position
                     && rollup.limit_log_position - rollup.start_log_position
-                        >= request.min_compaction_size
+                        >= request.min_compaction_size)
+                    || rollup.reinsert_count >= self.config.reinsert_threshold
+                    || SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("time never moves to before epoch")
+                        .as_micros()
+                        .saturating_sub(rollup.initial_insertion_epoch_us as u128)
+                        >= self.config.timeout_us as u128
                 {
                     selected_rollups.push((*collection_id, *rollup));
                 }
@@ -935,7 +942,7 @@ impl LogServer {
         }
         // Then allocate the collection ID strings outside the lock.
         let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
-        for (collection_id, rollup) in selected_rollups.into_iter() {
+        for (collection_id, rollup) in selected_rollups.into_iter().take(100) {
             all_collection_info.push(CollectionInfo {
                 collection_id: collection_id.to_string(),
                 first_log_offset: rollup.start_log_position.offset() as i64,
@@ -951,12 +958,13 @@ impl LogServer {
     ///
     /// This will rewrite the dirty log's coalesced contents at the tail and adjust the cursor to
     /// said position so that the next read is O(1) if there are no more writes.
-    #[tracing::instrument(skip(self), err(Display))]
+    #[tracing::instrument(skip(self))]
     async fn roll_dirty_log(&self) -> Result<(), Error> {
         // Ensure at most one request at a time.
         let _guard = self.rolling_up.lock().await;
         let mut rollup = self.read_and_coalesce_dirty_log().await?;
         if rollup.rollups.is_empty() {
+            tracing::info!("rollups is empty");
             let backpressure = vec![];
             self.set_backpressure(&backpressure);
             let mut need_to_compact = self.need_to_compact.lock();
@@ -964,6 +972,11 @@ impl LogServer {
             std::mem::swap(&mut *need_to_compact, &mut rollups);
             return Ok(());
         };
+        let collections = rollup.rollups.len();
+        tracing::event!(
+            tracing::Level::INFO,
+            collections = ?collections,
+        );
         self.enrich_dirty_log(&mut rollup.rollups).await?;
         self.save_dirty_log(rollup).await
     }
@@ -1051,6 +1064,7 @@ impl LogServer {
                 last_record_witnessed,
                 rollups,
             };
+            tracing::info!("empty dirty log");
             return Ok(rollup);
         }
         if dirty_fragments.len() >= 1000 {
@@ -1161,7 +1175,9 @@ impl LogServer {
             // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
             // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
             // data that needs to be compacted.
-            rollup.witness_cursor(witness.as_ref());
+            if let Some(witness) = witness {
+                rollup.witness_cursor(Some(&witness));
+            }
             if !rollup.is_empty() {
                 rollups.insert(collection_id, rollup);
             }
