@@ -53,10 +53,15 @@ type SpannConfiguration struct {
 	MergeThreshold        int    `json:"merge_threshold"`
 }
 
+type CollectionSchema struct {
+	MetadataIndex bool `json:"metadata_index"`
+}
+
 type InternalCollectionConfiguration struct {
-	VectorIndex       *VectorIndexConfiguration       `json:"vector_index"`
-	EmbeddingFunction *EmbeddingFunctionConfiguration `json:"embedding_function,omitempty"`
-	QueryConfig       interface{}                     `json:"query_config,omitempty"`
+	VectorIndex       *VectorIndexConfiguration              `json:"vector_index"`
+	EmbeddingFunction *EmbeddingFunctionConfiguration        `json:"embedding_function,omitempty"`
+	QueryConfig       interface{}                            `json:"query_config,omitempty"`
+	Schema            map[string]map[string]CollectionSchema `json:"schema,omitempty"`
 }
 
 // DefaultHnswCollectionConfiguration returns a default configuration using HNSW
@@ -126,7 +131,8 @@ type UpdateVectorIndexConfiguration struct {
 }
 
 type InternalUpdateCollectionConfiguration struct {
-	VectorIndex       *UpdateVectorIndexConfiguration `json:"vector_index,omitempty"`
-	EmbeddingFunction *EmbeddingFunctionConfiguration `json:"embedding_function,omitempty"`
-	QueryConfig       interface{}                     `json:"query_config,omitempty"`
+	VectorIndex       *UpdateVectorIndexConfiguration        `json:"vector_index,omitempty"`
+	EmbeddingFunction *EmbeddingFunctionConfiguration        `json:"embedding_function,omitempty"`
+	QueryConfig       interface{}                            `json:"query_config,omitempty"`
+	Schema            map[string]map[string]CollectionSchema `json:"schema,omitempty"`
 }
