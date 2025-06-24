@@ -709,11 +709,7 @@ mod tests {
             let metadata = entry.metadata().await.expect("Failed to read metadata");
 
             if metadata.is_dir() {
-                assert!(
-                    path.ends_with("hnsw")
-                        || path.ends_with("block")
-                        || path.ends_with("sparse_index")
-                );
+                assert!(path.ends_with("tenant"));
             } else {
                 panic!("Expected hnsw purge to be successful")
             }

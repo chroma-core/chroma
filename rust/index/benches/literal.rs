@@ -3,7 +3,9 @@ use std::fs::{read_dir, File};
 use arrow::array::AsArray;
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_blockstore::{
-    arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider, BlockfileWriterOptions,
+    arrow::provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
+    provider::BlockfileProvider,
+    BlockfileWriterOptions,
 };
 use chroma_cache::new_cache_for_test;
 use chroma_index::fulltext::types::{DocumentMutation, FullTextIndexReader, FullTextIndexWriter};
@@ -94,12 +96,11 @@ fn bench_literal(criterion: &mut Criterion) {
     );
     let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
     let prefix_path = String::from("");
-    let blockfile_writer =
-        runtime
-            .block_on(blockfile_provider.write::<u32, Vec<u32>>(
-                BlockfileWriterOptions::new(prefix_path).ordered_mutations(),
-            ))
-            .expect("Blockfile writer should be creatable");
+    let blockfile_writer = runtime
+        .block_on(blockfile_provider.write::<u32, Vec<u32>>(
+            BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+        ))
+        .expect("Blockfile writer should be creatable");
     let blockfile_id = blockfile_writer.id();
     let tokenizer = NgramTokenizer::new(3, 3, false).expect("Tokenizer should be creatable");
     let mut full_text_writer = FullTextIndexWriter::new(blockfile_writer, tokenizer.clone());
@@ -120,9 +121,10 @@ fn bench_literal(criterion: &mut Criterion) {
     runtime
         .block_on(flusher.flush())
         .expect("Changes should be flushable");
+    let reader_options = BlockfileReaderOptions::new(blockfile_id, prefix_path);
     let full_text_readar = FullTextIndexReader::new(
         runtime
-            .block_on(blockfile_provider.read(&blockfile_id))
+            .block_on(blockfile_provider.read(reader_options))
             .expect("Blockfile reader should be creatable"),
         tokenizer,
     );

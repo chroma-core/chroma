@@ -3327,6 +3327,7 @@ dependencies = [
  "chroma-index",
  "chroma-jemalloc-pprof-server",
  "chroma-memberlist",
+ "chroma-segment",
  "chroma-storage",
  "chroma-sysdb",
  "chroma-system",
