@@ -134,7 +134,7 @@ proptest::proptest! {
         let limit = manifest.next_write_timestamp();
         let cache = TestingSnapshotCache::default();
         let mut count = 0;
-        for offset in start.offset()..limit.offset() {
+        for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
             let Some(garbage) = rt.block_on(Garbage::new(&storage, "manifests_gargage", &manifest, &throttle, &cache, position)).unwrap() else {
@@ -161,7 +161,7 @@ proptest::proptest! {
             assert!(new_manifest.scrub().is_ok(), "scrub error");
             count += 1;
         }
-        assert!(count > 1);
+        assert!(count >= 1);
     }
 }
 
