@@ -139,7 +139,10 @@ proptest::proptest! {
             let garbage = rt.block_on(Garbage::new(&storage, "manifests_gargage", &manifest, &throttle, &cache, position)).unwrap();
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.setsum_to_discard;
-            let new_manifest = manifest.apply_garbage(garbage.clone()).unwrap();
+            if garbage.is_empty() {
+                continue;
+            }
+            let new_manifest = manifest.apply_garbage(garbage.clone()).unwrap().unwrap();
             eprintln!("manifest.setsum = {}", manifest.setsum.hexdigest());
             eprintln!("new_manifest.setsum = {}", new_manifest.setsum.hexdigest());
             eprintln!("dropped = {}", dropped.hexdigest());
@@ -196,7 +199,10 @@ proptest::proptest! {
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.setsum_to_discard;
             cache.snapshots.extend(garbage.snapshots_to_make.clone());
-            let new_manifest = manifest.apply_garbage(garbage.clone()).unwrap();
+            if garbage.is_empty() {
+                continue;
+            }
+            let new_manifest = manifest.apply_garbage(garbage.clone()).unwrap().unwrap();
             eprintln!("manifest.setsum = {}", manifest.setsum.hexdigest());
             eprintln!("new_manifest.setsum = {}", new_manifest.setsum.hexdigest());
             eprintln!("dropped = {}", dropped.hexdigest());

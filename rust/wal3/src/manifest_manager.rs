@@ -91,8 +91,11 @@ impl Staging {
         self.last_batch = Instant::now();
         let garbage = self.garbage.take();
         let snapshot = if let Some(garbage) = garbage.as_ref() {
-            new_manifest = match new_manifest.apply_garbage(garbage.clone()) {
-                Ok(manifest) => manifest,
+            match new_manifest.apply_garbage(garbage.clone()) {
+                Ok(Some(manifest)) => new_manifest = manifest,
+                Ok(None) => {
+                    tracing::error!("given empty garbage that did not apply");
+                }
                 Err(err) => {
                     tracing::error!("could not apply garabage: {err:?}");
                     for notifier in notifiers {
@@ -142,7 +145,7 @@ impl Staging {
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
         if let Some(garbage) = self.garbage.take() {
-            let new_manifest = self.stable.manifest.apply_garbage(garbage).ok()?;
+            let new_manifest = self.stable.manifest.apply_garbage(garbage).ok()??;
             Some((
                 self.stable.manifest.clone(),
                 self.stable.e_tag.clone(),

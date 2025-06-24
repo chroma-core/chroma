@@ -801,7 +801,7 @@ impl Manifest {
 
     /// Apply the destructive operation specified by the Garbage struct.
     #[allow(clippy::result_large_err)]
-    pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Self, Error> {
+    pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Option<Self>, Error> {
         if garbage.fragments_to_drop_start > garbage.fragments_to_drop_limit {
             return Err(Error::GarbageCollection(format!(
                 "Garbage has start > limit: {:?} > {:?}",
@@ -809,9 +809,7 @@ impl Manifest {
             )));
         }
         if garbage.fragments_to_drop_limit == FragmentSeqNo(0) {
-            return Err(Error::GarbageCollection(
-                "Garbage has zero limit".to_string(),
-            ));
+            return Ok(None);
         }
         let mut new = self.clone();
         for to_drop in garbage.snapshots_to_drop.iter() {
@@ -842,7 +840,7 @@ impl Manifest {
             new.initial_seq_no = Some(FragmentSeqNo(1));
         }
         new.scrub()?;
-        Ok(new)
+        Ok(Some(new))
     }
 }
 
@@ -1501,7 +1499,7 @@ mod tests {
             snapshot_for_root: None,
         };
 
-        let result = manifest.apply_garbage(garbage).unwrap();
+        let result = manifest.apply_garbage(garbage).unwrap().unwrap();
 
         // When fragments_to_drop_start == fragments_to_drop_limit and both are non-zero,
         // initial_seq_no should be set to the limit value
@@ -1549,6 +1547,7 @@ mod tests {
 
         let result = manifest.apply_garbage(valid_garbage_equal);
         assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
 
         // Test case: fragments_to_drop_start < fragments_to_drop_limit should succeed
         let valid_garbage_less = Garbage {
