@@ -145,15 +145,16 @@ impl SysDb {
             SysDb::Grpc(grpc) => {
                 // TODO(c-gamble): Move this to config
                 let max_get_collections_limit = 100u32;
-                if options.limit.is_none() {
-                    options.limit = Some(max_get_collections_limit);
-                } else if let Some(limit) = options.limit {
-                    if limit > max_get_collections_limit {
-                        return Err(GetCollectionsError::MaximumLimitExceeded(
-                            limit,
-                            max_get_collections_limit,
-                        ));
+                match options.limit {
+                    Some(limit) => {
+                        if limit > max_get_collections_limit {
+                            return Err(GetCollectionsError::MaximumLimitExceeded(
+                                limit,
+                                max_get_collections_limit,
+                            ));
+                        }
                     }
+                    None => options.limit = Some(max_get_collections_limit),
                 }
                 grpc.get_collections(options).await
             }
