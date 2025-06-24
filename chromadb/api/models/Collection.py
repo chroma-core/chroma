@@ -77,14 +77,19 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         """
 
-        add_request = self._validate_and_prepare_add_request(
+        curr_schema = self._model.get_configuration().get("schema")
+        add_request, new_attributes = self._validate_and_prepare_add_request(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
             images=images,
             uris=uris,
+            schema=curr_schema,
         )
+
+        if len(new_attributes.keys()) > 0:
+            self.modify(configuration={"schema": new_attributes})
 
         self._client._add(
             collection_id=self.id,
@@ -255,6 +260,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         # Note there is a race condition here where the metadata can be updated
         # but another thread sees the cached local metadata.
         # TODO: fixme
+
         self._client._modify(
             id=self.id,
             new_name=name,
@@ -317,14 +323,19 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             None
         """
-        update_request = self._validate_and_prepare_update_request(
+        curr_schema = self._model.get_configuration().get("schema")
+        update_request, new_attributes = self._validate_and_prepare_update_request(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
             images=images,
             uris=uris,
+            schema=curr_schema,
         )
+
+        if len(new_attributes.keys()) > 0:
+            self.modify(configuration={"schema": new_attributes})
 
         self._client._update(
             collection_id=self.id,
@@ -362,14 +373,19 @@ class Collection(CollectionCommon["ServerAPI"]):
         Returns:
             None
         """
-        upsert_request = self._validate_and_prepare_upsert_request(
+        curr_schema = self._model.get_configuration().get("schema")
+        upsert_request, new_attributes = self._validate_and_prepare_upsert_request(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
             images=images,
             uris=uris,
+            schema=curr_schema,
         )
+
+        if len(new_attributes.keys()) > 0:
+            self.modify(configuration={"schema": new_attributes})
 
         self._client._upsert(
             collection_id=self.id,

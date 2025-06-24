@@ -434,6 +434,7 @@ pub mod test {
                     },
                 ),
                 embedding_function: None,
+                schema: None,
             },
             ..Default::default()
         };

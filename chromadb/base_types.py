@@ -1,5 +1,5 @@
 from typing import Dict, List, Mapping, Optional, Sequence, Union
-from typing_extensions import Literal
+from typing_extensions import Literal, TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
@@ -36,3 +36,9 @@ WhereDocumentOperator = Union[
     LogicalOperator,
 ]
 WhereDocument = Dict[WhereDocumentOperator, Union[str, List["WhereDocument"]]]
+
+ValueType = Literal["int", "float", "string", "boolean"]
+
+
+class CollectionSchema(TypedDict):
+    metadata_index: bool

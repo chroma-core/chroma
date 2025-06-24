@@ -294,6 +294,7 @@ class RustBindingsAPI(ServerAPI):
             )
         else:
             new_configuration_json_str = None
+
         self.bindings.update_collection(
             str(id), new_name, new_metadata, new_configuration_json_str
         )

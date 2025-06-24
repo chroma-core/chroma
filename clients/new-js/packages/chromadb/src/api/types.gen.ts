@@ -32,7 +32,16 @@ export type Collection = {
 export type CollectionConfiguration = {
   embedding_function?: null | EmbeddingFunctionConfiguration;
   hnsw?: null | HnswConfiguration;
+  schema?: {
+    [key: string]: {
+      [key: string]: CollectionSchema;
+    };
+  } | null;
   spann?: null | SpannConfiguration;
+};
+
+export type CollectionSchema = {
+  metadata_index: boolean;
 };
 
 /**
@@ -196,6 +205,11 @@ export type SpannConfiguration = {
 export type UpdateCollectionConfiguration = {
   embedding_function?: null | EmbeddingFunctionConfiguration;
   hnsw?: null | UpdateHnswConfiguration;
+  schema?: {
+    [key: string]: {
+      [key: string]: CollectionSchema;
+    };
+  } | null;
   spann?: null | UpdateSpannConfiguration;
 };
 
