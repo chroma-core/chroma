@@ -70,6 +70,8 @@ pub struct Metrics {
     log_total_uncompacted_records_count: opentelemetry::metrics::Gauge<f64>,
     /// The rate at which records are read from the dirty log.
     dirty_log_records_read: opentelemetry::metrics::Counter<u64>,
+    /// A gauge for the number of dirty log collections as of the last rollup.
+    dirty_log_collections: opentelemetry::metrics::Gauge<u64>,
 }
 
 impl Metrics {
@@ -79,6 +81,7 @@ impl Metrics {
                 .f64_gauge("log_total_uncompacted_records_count")
                 .build(),
             dirty_log_records_read: meter.u64_counter("dirty_log_records_read").build(),
+            dirty_log_collections: meter.u64_gauge("dirty_log_collections").build(),
         }
     }
 }
@@ -991,6 +994,9 @@ impl LogServer {
             tracing::Level::INFO,
             collections = ?collections,
         );
+        self.metrics
+            .dirty_log_collections
+            .record(collections as u64, &[]);
         self.enrich_dirty_log(&mut rollup.rollups).await?;
         self.save_dirty_log(rollup).await
     }
@@ -1900,6 +1906,8 @@ impl LogServer {
         if let Err(wal3::Error::UninitializedLog) = mani {
             return Ok(Response::new(InspectLogStateResponse {
                 debug: "log uninitialized\n".to_string(),
+                start: 0,
+                limit: 0,
             }));
         }
         let mani = mani.map_err(|err| Status::unknown(err.to_string()))?;
@@ -1914,9 +1922,20 @@ impl LogServer {
         let witness = cursor_store.load(cursor_name).await.map_err(|err| {
             Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
         })?;
-
+        let (start, limit) = if let Some(mani) = mani.as_ref() {
+            let start = witness
+                .as_ref()
+                .map(|w| w.cursor.position)
+                .unwrap_or(mani.oldest_timestamp());
+            let limit = mani.next_write_timestamp();
+            (start.offset(), limit.offset())
+        } else {
+            (0, 0)
+        };
         Ok(Response::new(InspectLogStateResponse {
             debug: format!("manifest: {mani:#?}\ncompaction cursor: {witness:?}"),
+            start,
+            limit,
         }))
     }
 
