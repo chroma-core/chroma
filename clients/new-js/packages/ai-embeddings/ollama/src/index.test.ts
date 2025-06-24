@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, jest } from "@jest/globals";
 import { OllamaEmbeddingFunction } from "./index";
-import { startOllamaContainer } from "../start-ollama";
+
+// Mock the ollama package
+const mockEmbed = jest.fn() as jest.MockedFunction<any>;
+jest.mock("ollama", () => ({
+  Ollama: jest.fn().mockImplementation(() => ({
+    embed: mockEmbed,
+  })),
+}));
 
 describe("OllamaEmbeddingFunction", () => {
   beforeEach(() => {
@@ -30,24 +37,34 @@ describe("OllamaEmbeddingFunction", () => {
   });
 
   const generateEmbeddingsTest = "should generate embeddings";
-  it(
-    generateEmbeddingsTest,
-    async () => {
-      const { ollamaUrl } = await startOllamaContainer({ verbose: true });
-      const embedder = new OllamaEmbeddingFunction({
-        url: ollamaUrl,
-      });
-      const texts = ["Hello world", "Test text"];
-      const embeddings = await embedder.generate(texts);
+  it(generateEmbeddingsTest, async () => {
+    // Mock the embeddings response
+    const mockEmbeddings = [
+      Array(384).fill(0).map((_, i) => i / 1000),
+      Array(384).fill(0).map((_, i) => (i + 100) / 1000),
+    ];
 
-      expect(embeddings.length).toBe(texts.length);
+    mockEmbed.mockResolvedValueOnce({
+      embeddings: mockEmbeddings,
+    });
 
-      embeddings.forEach((embedding) => {
-        expect(embedding.length).toBeGreaterThan(0);
-      });
+    const embedder = new OllamaEmbeddingFunction({
+      url: "http://localhost:11434",
+    });
+    const texts = ["Hello world", "Test text"];
+    const embeddings = await embedder.generate(texts);
 
-      expect(embeddings[0]).not.toEqual(embeddings[1]);
-    },
-    1000000,
-  );
+    expect(embeddings.length).toBe(texts.length);
+
+    embeddings.forEach((embedding) => {
+      expect(embedding.length).toBeGreaterThan(0);
+    });
+
+    expect(embeddings[0]).not.toEqual(embeddings[1]);
+
+    expect(mockEmbed).toHaveBeenCalledWith({
+      model: "chroma/all-minilm-l6-v2-f32",
+      input: texts,
+    });
+  });
 });

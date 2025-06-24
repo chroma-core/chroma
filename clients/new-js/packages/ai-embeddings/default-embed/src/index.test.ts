@@ -39,7 +39,7 @@ describe("DefaultEmbeddingFunction", () => {
     expect(embedder.name).toBe("default");
     expect(embedder.getConfig().model_name).toBe("Xenova/all-MiniLM-L6-v2");
     expect(embedder.getConfig().revision).toBe("main");
-    expect(embedder.getConfig().dtype).toBeUndefined();
+    expect(embedder.getConfig().dtype).toBe("fp32");
   });
 
   it("should initialize with custom parameters", () => {
@@ -81,7 +81,7 @@ describe("DefaultEmbeddingFunction", () => {
 
   it("should build from config", () => {
     const config = {
-      model: "config-model",
+      model_name: "config-model",
       revision: "config-revision",
       dtype: "q8" as const,
     };

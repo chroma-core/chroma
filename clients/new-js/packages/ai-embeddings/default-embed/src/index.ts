@@ -73,7 +73,13 @@ export class DefaultEmbeddingFunction {
   public static buildFromConfig(
     config: DefaultEmbeddingFunctionConfig,
   ): DefaultEmbeddingFunction {
-    return new DefaultEmbeddingFunction(config);
+    return new DefaultEmbeddingFunction({
+      modelName: config.model_name,
+      revision: config.revision,
+      dtype: config.dtype,
+      quantized: config.quantized,
+      wasm: config.wasm,
+    });
   }
 
   public async generate(texts: string[]): Promise<number[][]> {
