@@ -883,7 +883,7 @@ impl LogServer {
                     Status::new(err.code().into(), format!("Failed to init cursor: {}", err))
                 })?;
         }
-        if let Some(cache) = self.cache.as_ref() {
+        if let (Some(cache), Some(witness)) = (self.cache.as_ref(), witness.as_ref()) {
             let cache_key = cache_key_for_cursor(collection_id, cursor_name);
             match serde_json::to_string(&witness) {
                 Ok(json_witness) => {
