@@ -169,7 +169,6 @@ impl Scheduler {
                 continue;
             };
             let next_log_to_compact = sysdb_info.log_position.saturating_add(1);
-            println!("[{collection_id}]: {next_log_to_compact}, {log_info:?}");
             if next_log_to_compact < log_info.first_log_offset {
                 tracing::error!("Next log to compact for collection [{collection_id}] at [{next_log_to_compact}] is already purged in log service: the first available log is at [{}]", log_info.first_log_offset);
                 continue;

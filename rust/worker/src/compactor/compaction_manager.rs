@@ -64,6 +64,7 @@ pub(crate) struct CompactionManager {
     max_compaction_size: usize,
     max_partition_size: usize,
     fetch_log_batch_size: u32,
+    purge_dirty_log_timeout_seconds: u64,
     on_next_memberlist_signal: Option<oneshot::Sender<()>>,
 }
 
@@ -98,6 +99,7 @@ impl CompactionManager {
         max_compaction_size: usize,
         max_partition_size: usize,
         fetch_log_batch_size: u32,
+        purge_dirty_log_timeout_seconds: u64,
     ) -> Self {
         CompactionManager {
             system,
@@ -116,6 +118,7 @@ impl CompactionManager {
             max_partition_size,
             on_next_memberlist_signal: None,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         }
     }
 
@@ -211,8 +214,7 @@ impl CompactionManager {
         }
         let purge_dirty_log = PurgeDirtyLog {
             log_client: self.log.clone(),
-            // TODO: Make this configurable
-            timeout: Duration::from_secs(60),
+            timeout: Duration::from_secs(self.purge_dirty_log_timeout_seconds),
         };
         let purge_dirty_log_input = PurgeDirtyLogInput {
             collection_uuids: deleted_collection_uuids.clone(),
@@ -282,6 +284,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let max_compaction_size = config.compactor.max_compaction_size;
         let max_partition_size = config.compactor.max_partition_size;
         let fetch_log_batch_size = config.compactor.fetch_log_batch_size;
+        let purge_dirty_log_timeout_seconds = config.compactor.purge_dirty_log_timeout_seconds;
         let mut disabled_collections =
             HashSet::with_capacity(config.compactor.disabled_collections.len());
         for collection_id_str in &config.compactor.disabled_collections {
@@ -340,6 +343,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             max_compaction_size,
             max_partition_size,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         ))
     }
 }
@@ -680,6 +684,7 @@ mod tests {
         let max_compaction_size = 1000;
         let max_partition_size = 1000;
         let fetch_log_batch_size = 100;
+        let purge_dirty_log_timeout_seconds = 60;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
@@ -744,6 +749,7 @@ mod tests {
             max_compaction_size,
             max_partition_size,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         );
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
