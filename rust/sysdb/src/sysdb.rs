@@ -139,10 +139,25 @@ impl SysDb {
 
     pub async fn get_collections(
         &mut self,
-        options: GetCollectionsOptions,
+        mut options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections(options).await,
+            SysDb::Grpc(grpc) => {
+                // TODO(c-gamble): Move this to config
+                let max_get_collections_limit = 100u32;
+                match options.limit {
+                    Some(limit) => {
+                        if limit > max_get_collections_limit {
+                            return Err(GetCollectionsError::MaximumLimitExceeded(
+                                limit,
+                                max_get_collections_limit,
+                            ));
+                        }
+                    }
+                    None => options.limit = Some(max_get_collections_limit),
+                }
+                grpc.get_collections(options).await
+            }
             SysDb::Sqlite(sqlite) => sqlite.get_collections(options).await,
             SysDb::Test(test) => test.get_collections(options).await,
         }
