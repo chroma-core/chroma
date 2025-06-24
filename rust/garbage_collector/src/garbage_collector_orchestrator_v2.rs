@@ -11,6 +11,7 @@ use crate::operators::delete_unused_files::{
     DeleteUnusedFilesError, DeleteUnusedFilesInput, DeleteUnusedFilesOperator,
     DeleteUnusedFilesOutput,
 };
+use crate::operators::delete_unused_logs::{DeleteUnusedLogsError, DeleteUnusedLogsOutput};
 use crate::operators::delete_versions_at_sysdb::{
     DeleteVersionsAtSysDbError, DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOperator,
     DeleteVersionsAtSysDbOutput,
@@ -46,7 +47,6 @@ use std::time::SystemTime;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
-use wal3::{GarbageCollectionOptions, LogWriter, LogWriterOptions};
 
 #[derive(Debug)]
 pub struct GarbageCollectorOrchestrator {
@@ -70,6 +70,7 @@ pub struct GarbageCollectorOrchestrator {
     num_pending_tasks: usize,
     min_versions_to_keep: u32,
     graph: Option<VersionGraph>,
+    collections_to_gc: HashSet<CollectionUuid>,
     soft_deleted_collections_to_gc: HashSet<CollectionUuid>,
     tenant: Option<String>,
     database_name: Option<String>,
@@ -115,6 +116,7 @@ impl GarbageCollectorOrchestrator {
             num_pending_tasks: 0,
             min_versions_to_keep,
             graph: None,
+            collections_to_gc: HashSet::new(),
             soft_deleted_collections_to_gc: HashSet::new(),
             tenant: None,
             database_name: None,
@@ -285,33 +287,7 @@ impl GarbageCollectorOrchestrator {
 
         let collection_ids = output.version_files.keys().cloned().collect::<Vec<_>>();
 
-        for collection_id in collection_ids.iter() {
-            match LogWriter::open(
-                LogWriterOptions::default(),
-                Arc::new(self.storage.clone()),
-                &collection_id.storage_prefix_for_log(),
-                "garbage collection service",
-                (),
-            )
-            .await
-            {
-                Ok(log) => {
-                    if let Err(err) = log
-                        .garbage_collect(&GarbageCollectionOptions::default())
-                        .await
-                    {
-                        tracing::error!("could not garbage collect log: {err:?}");
-                        continue;
-                    }
-                }
-                Err(wal3::Error::UninitializedLog) => {}
-                Err(err) => {
-                    tracing::error!("could not garbage collect log: {err:?}");
-                    continue;
-                }
-            }
-        }
-
+        self.collections_to_gc = HashSet::from_iter(collection_ids.iter().cloned());
         self.soft_deleted_collections_to_gc = self
             .get_eligible_soft_deleted_collections_to_gc(collection_ids)
             .await?;
@@ -840,15 +816,6 @@ impl GarbageCollectorOrchestrator {
             );
 
             for collection_id in ordered_soft_deleted_to_hard_delete_collections {
-                if let Err(err) = wal3::destroy(
-                    Arc::new(self.storage.clone()),
-                    &collection_id.storage_prefix_for_log(),
-                )
-                .await
-                {
-                    tracing::error!("could not destroy/hard delete wal3 instance: {err:?}");
-                    return Err(GarbageCollectorError::Wal3(err));
-                }
                 self.sysdb_client
                     .finish_collection_deletion(
                         self.tenant
@@ -974,6 +941,21 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
 
         let res = self.handle_delete_unused_files_output(output, ctx).await;
         self.ok_or_terminate(res, ctx).await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<DeleteUnusedLogsOutput, DeleteUnusedLogsError>>
+    for GarbageCollectorOrchestrator
+{
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<DeleteUnusedLogsOutput, DeleteUnusedLogsError>,
+        ctx: &ComponentContext<GarbageCollectorOrchestrator>,
+    ) {
+        self.ok_or_terminate(message.into_inner(), ctx).await;
     }
 }
 
