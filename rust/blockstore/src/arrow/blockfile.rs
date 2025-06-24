@@ -761,7 +761,7 @@ mod tests {
     use crate::{BlockfileReader, BlockfileWriter, BlockfileWriterOptions};
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{DataRecord, MetadataValue};
+    use chroma_types::{CollectionUuid, DataRecord, DatabaseUuid, MetadataValue, SegmentUuid};
     use futures::{StreamExt, TryStreamExt};
     use parking_lot::Mutex;
     use proptest::prelude::*;
@@ -816,6 +816,125 @@ mod tests {
             Ok(c) => assert_eq!(2, c),
             Err(_) => panic!("Error getting count"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_new_prefix() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let tenant = "test_tenant";
+        let db_id = DatabaseUuid::new();
+        let coll_id = CollectionUuid::new();
+        let segment_id = SegmentUuid::new();
+        let prefix_path = format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}",
+            tenant, db_id, coll_id, segment_id
+        );
+        let writer = blockfile_provider
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
+            .await
+            .unwrap();
+        let id = writer.id();
+
+        let prefix_1 = "key";
+        let key1 = "zzzz";
+        let value1 = vec![1, 2, 3];
+        writer.set(prefix_1, key1, value1.clone()).await.unwrap();
+
+        let prefix_2 = "key";
+        let key2 = "aaaa";
+        let value2 = vec![4, 5, 6];
+        writer.set(prefix_2, key2, value2.clone()).await.unwrap();
+
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
+        flusher.flush::<&str, Vec<u32>>().await.unwrap();
+
+        let read_options = BlockfileReaderOptions::new(id, prefix_path.clone());
+        let reader = blockfile_provider
+            .read::<&str, &[u32]>(read_options)
+            .await
+            .unwrap();
+
+        let count = reader.count().await;
+        match count {
+            Ok(c) => assert_eq!(2, c),
+            Err(_) => panic!("Error getting count"),
+        }
+        let value = reader
+            .get(prefix_1, key1)
+            .await
+            .expect("Failed to get value for key1")
+            .expect("Key1 not found");
+        assert_eq!(value, value1);
+        let value = reader
+            .get(prefix_2, key2)
+            .await
+            .expect("Failed to get value for key2")
+            .expect("Key2 not found");
+        assert_eq!(value, value2);
+
+        let writer = blockfile_provider
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()).fork(id))
+            .await
+            .unwrap();
+        let id = writer.id();
+
+        let prefix_3 = "key";
+        let key3 = "bbbb";
+        let value3 = vec![7, 8, 9];
+        writer.set(prefix_3, key3, value3.clone()).await.unwrap();
+
+        let prefix_4 = "key";
+        let key4 = "cccc";
+        let value4 = vec![10, 11, 12];
+        writer.set(prefix_4, key4, value4.clone()).await.unwrap();
+
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
+        flusher.flush::<&str, Vec<u32>>().await.unwrap();
+
+        let read_options = BlockfileReaderOptions::new(id, prefix_path);
+        let reader = blockfile_provider
+            .read::<&str, &[u32]>(read_options)
+            .await
+            .unwrap();
+
+        let count = reader.count().await;
+        match count {
+            Ok(c) => assert_eq!(4, c),
+            Err(_) => panic!("Error getting count"),
+        }
+        let value = reader
+            .get(prefix_1, key1)
+            .await
+            .expect("Failed to get value for key1")
+            .expect("Key1 not found");
+        assert_eq!(value, value1);
+        let value = reader
+            .get(prefix_2, key2)
+            .await
+            .expect("Failed to get value for key2")
+            .expect("Key2 not found");
+        assert_eq!(value, value2);
+        let value = reader
+            .get(prefix_3, key3)
+            .await
+            .expect("Failed to get value for key3")
+            .expect("Key3 not found");
+        assert_eq!(value, value3);
+        let value = reader
+            .get(prefix_4, key4)
+            .await
+            .expect("Failed to get value for key4")
+            .expect("Key4 not found");
+        assert_eq!(value, value4);
     }
 
     #[tokio::test]

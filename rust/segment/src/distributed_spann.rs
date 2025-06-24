@@ -597,7 +597,7 @@ mod test {
     };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
-        Chunk, Collection, CollectionUuid, InternalCollectionConfiguration,
+        Chunk, Collection, CollectionUuid, DatabaseUuid, InternalCollectionConfiguration,
         InternalSpannConfiguration, LogRecord, Operation, OperationRecord, SegmentUuid,
         SpannPostingList,
     };
@@ -649,6 +649,7 @@ mod test {
         .await
         .expect("Error converting config to gc context");
 
+        let db_id = DatabaseUuid::new();
         let collection = chroma_types::Collection {
             collection_id,
             name: "test".to_string(),
@@ -660,6 +661,7 @@ mod test {
             dimension: None,
             tenant: "test".to_string(),
             database: "test".to_string(),
+            database_id: db_id,
             ..Default::default()
         };
 
@@ -717,6 +719,17 @@ mod test {
         assert!(spann_segment.file_path.contains_key("version_map_path"),);
         assert!(spann_segment.file_path.contains_key("posting_list_path"),);
         assert!(spann_segment.file_path.contains_key("max_head_id_path"),);
+        let prefix = format!(
+            "tenant/test/database/{}/collection/{}/segment/{}",
+            db_id, spann_segment.collection, spann_segment.id,
+        );
+        for (_, file_path) in spann_segment.file_path.iter() {
+            assert_eq!(file_path.len(), 1);
+            assert!(file_path
+                .first()
+                .expect("File path should have at least one entry")
+                .starts_with(&prefix));
+        }
         // Load this segment and check if the embeddings are present. New cache
         // so that the previous cache is not used.
         let block_cache = new_cache_for_test();
