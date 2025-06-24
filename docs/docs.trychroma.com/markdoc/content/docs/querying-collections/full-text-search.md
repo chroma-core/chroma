@@ -59,7 +59,7 @@ You can also use the logical operators `$and` and `$or` to combine multiple filt
 {
     "$and": [
         {"$contains": "search_string_1"},
-        {"regex": "[a-z]+"},
+        {"$regex": "[a-z]+"},
     ]
 }
 ```
