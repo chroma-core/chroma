@@ -11,7 +11,9 @@ use crate::operators::delete_unused_files::{
     DeleteUnusedFilesError, DeleteUnusedFilesInput, DeleteUnusedFilesOperator,
     DeleteUnusedFilesOutput,
 };
-use crate::operators::delete_unused_logs::{DeleteUnusedLogsError, DeleteUnusedLogsOutput};
+use crate::operators::delete_unused_logs::{
+    DeleteUnusedLogsError, DeleteUnusedLogsInput, DeleteUnusedLogsOperator, DeleteUnusedLogsOutput,
+};
 use crate::operators::delete_versions_at_sysdb::{
     DeleteVersionsAtSysDbError, DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOperator,
     DeleteVersionsAtSysDbOutput,
@@ -47,6 +49,7 @@ use std::time::SystemTime;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
+use wal3::LogPosition;
 
 #[derive(Debug)]
 pub struct GarbageCollectorOrchestrator {
@@ -66,6 +69,8 @@ pub struct GarbageCollectorOrchestrator {
     versions_to_delete_output: Option<ComputeVersionsToDeleteOutput>,
     pending_mark_versions_at_sysdb_tasks: HashSet<CollectionUuid>,
     pending_list_files_at_version_tasks: HashSet<(CollectionUuid, i64)>,
+    delete_unused_file_output: Option<DeleteUnusedFilesOutput>,
+    delete_unused_log_output: Option<DeleteUnusedLogsOutput>,
     file_ref_counts: HashMap<String, u32>,
     num_pending_tasks: usize,
     min_versions_to_keep: u32,
@@ -112,6 +117,8 @@ impl GarbageCollectorOrchestrator {
             versions_to_delete_output: None,
             pending_mark_versions_at_sysdb_tasks: HashSet::new(),
             pending_list_files_at_version_tasks: HashSet::new(),
+            delete_unused_file_output: None,
+            delete_unused_log_output: None,
             num_pending_tasks: 0,
             min_versions_to_keep,
             graph: None,
@@ -426,9 +433,84 @@ impl GarbageCollectorOrchestrator {
         self.pending_mark_versions_at_sysdb_tasks
             .remove(&collection_id);
 
-        self.advance_after_list_files_and_mark_version_tasks_complete(ctx)
-            .await?;
+        self.start_delete_unused_log_operator(ctx).await?;
 
+        self.try_start_delete_unused_files_operator(ctx).await?;
+
+        Ok(())
+    }
+
+    async fn start_delete_unused_log_operator(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+    ) -> Result<(), GarbageCollectorError> {
+        let collections_to_destroy = self.soft_deleted_collections_to_gc.clone();
+        let mut collections_to_garbage_collect = HashMap::new();
+        let versions_to_delete = self.versions_to_delete_output.as_ref().ok_or(
+            GarbageCollectorError::InvariantViolation(
+                "Expected versions_to_delete_output to be set".to_string(),
+            ),
+        )?;
+
+        for (collection_id, versions) in &versions_to_delete.versions {
+            let Some(&min_version_to_keep) = versions
+                .iter()
+                .filter_map(|(version, action)| {
+                    matches!(action, CollectionVersionAction::Keep).then_some(version)
+                })
+                .min()
+            else {
+                continue;
+            };
+            let version_file = self.version_files.get(collection_id).ok_or(
+                GarbageCollectorError::InvariantViolation(
+                    "Expected version file to be present".to_string(),
+                ),
+            )?;
+            let version_history = &version_file
+                .as_ref()
+                .version_history
+                .as_ref()
+                .ok_or(GarbageCollectorError::InvariantViolation(
+                    "Expected version file to contain version history".to_string(),
+                ))?
+                .versions;
+            let min_log_offset = version_history
+                .iter()
+                .find(|version_info| version_info.version == min_version_to_keep)
+                .ok_or(GarbageCollectorError::InvariantViolation(
+                    "Expected min kept version to be present in version history".to_string(),
+                ))?
+                .collection_info_mutable
+                .as_ref()
+                .ok_or(GarbageCollectorError::InvariantViolation(
+                    "Expected collection info to be present in version history".to_string(),
+                ))?
+                .current_log_position
+                .try_into()
+                .map_err(|_| {
+                    GarbageCollectorError::InvariantViolation(
+                        "Expected log offset to be unsigned".to_string(),
+                    )
+                })?;
+            collections_to_garbage_collect
+                .insert(*collection_id, LogPosition::from_offset(min_log_offset));
+        }
+
+        let task = wrap(
+            Box::new(DeleteUnusedLogsOperator {
+                storage: self.storage.clone(),
+            }),
+            DeleteUnusedLogsInput {
+                collections_to_destroy,
+                collections_to_garbage_collect,
+            },
+            ctx.receiver(),
+        );
+        self.dispatcher()
+            .send(task, Some(Span::current()))
+            .await
+            .map_err(GarbageCollectorError::Channel)?;
         Ok(())
     }
 
@@ -561,13 +643,12 @@ impl GarbageCollectorOrchestrator {
         self.pending_list_files_at_version_tasks
             .remove(&(output.collection_id, output.version));
 
-        self.advance_after_list_files_and_mark_version_tasks_complete(ctx)
-            .await?;
+        self.try_start_delete_unused_files_operator(ctx).await?;
 
         Ok(())
     }
 
-    async fn advance_after_list_files_and_mark_version_tasks_complete(
+    async fn try_start_delete_unused_files_operator(
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
@@ -644,11 +725,18 @@ impl GarbageCollectorOrchestrator {
         Ok(())
     }
 
-    async fn handle_delete_unused_files_output(
+    async fn try_start_delete_versions_at_sysdb_operator(
         &mut self,
-        output: DeleteUnusedFilesOutput,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
+        let Some(output) = self.delete_unused_file_output.as_ref() else {
+            return Ok(());
+        };
+
+        if self.delete_unused_log_output.is_none() {
+            return Ok(());
+        }
+
         if self.cleanup_mode == CleanupMode::DryRun {
             tracing::info!("Dry run mode, skipping actual deletion");
             let response = GarbageCollectorResponse {
@@ -938,7 +1026,8 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
             None => return,
         };
 
-        let res = self.handle_delete_unused_files_output(output, ctx).await;
+        self.delete_unused_file_output = Some(output);
+        let res = self.try_start_delete_versions_at_sysdb_operator(ctx).await;
         self.ok_or_terminate(res, ctx).await;
     }
 }
@@ -954,7 +1043,14 @@ impl Handler<TaskResult<DeleteUnusedLogsOutput, DeleteUnusedLogsError>>
         message: TaskResult<DeleteUnusedLogsOutput, DeleteUnusedLogsError>,
         ctx: &ComponentContext<GarbageCollectorOrchestrator>,
     ) {
-        self.ok_or_terminate(message.into_inner(), ctx).await;
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        self.delete_unused_log_output = Some(output);
+        let res = self.try_start_delete_versions_at_sysdb_operator(ctx).await;
+        self.ok_or_terminate(res, ctx).await;
     }
 }
 

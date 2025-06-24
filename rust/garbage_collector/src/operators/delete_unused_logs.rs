@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -7,17 +10,17 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::CollectionUuid;
 use futures::future::join_all;
 use thiserror::Error;
-use wal3::{GarbageCollectionOptions, LogWriter, LogWriterOptions};
+use wal3::{GarbageCollectionOptions, LogPosition, LogWriter, LogWriterOptions};
 
 #[derive(Clone, Debug)]
 pub struct DeleteUnusedLogsOperator {
-    storage: Arc<Storage>,
+    pub storage: Storage,
 }
 
 #[derive(Clone, Debug)]
 pub struct DeleteUnusedLogsInput {
-    collections_to_destroy: Vec<CollectionUuid>,
-    collections_to_garbage_collect: Vec<CollectionUuid>,
+    pub collections_to_destroy: HashSet<CollectionUuid>,
+    pub collections_to_garbage_collect: HashMap<CollectionUuid, LogPosition>,
 }
 
 pub type DeleteUnusedLogsOutput = ();
@@ -46,10 +49,12 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
         &self,
         input: &DeleteUnusedLogsInput,
     ) -> Result<DeleteUnusedLogsOutput, DeleteUnusedLogsError> {
+        let storage_arc = Arc::new(self.storage.clone());
         if !input.collections_to_garbage_collect.is_empty() {
             let mut log_gc_futures = Vec::with_capacity(input.collections_to_garbage_collect.len());
-            for collection_id in &input.collections_to_garbage_collect {
-                let storage_clone = self.storage.clone();
+            for (collection_id, minimum_log_offset_to_keep) in &input.collections_to_garbage_collect
+            {
+                let storage_clone = storage_arc.clone();
                 log_gc_futures.push(async move {
                     let writer = match LogWriter::open(
                         LogWriterOptions::default(),
@@ -67,7 +72,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             return
                         }
                     };
-                    if let Err(err) = writer.garbage_collect(&GarbageCollectionOptions::default()).await {
+                    if let Err(err) = writer.garbage_collect(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
                         tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
                     }
                 });
@@ -77,7 +82,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
         if !input.collections_to_destroy.is_empty() {
             let mut log_destroy_futures = Vec::with_capacity(input.collections_to_destroy.len());
             for collection_id in &input.collections_to_destroy {
-                let storage_clone = self.storage.clone();
+                let storage_clone = storage_arc.clone();
                 log_destroy_futures.push(async move {
                     if let Err(err) =
                         wal3::destroy(storage_clone, &collection_id.storage_prefix_for_log()).await
@@ -97,11 +102,11 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
         let mut dirty_log_writers = Vec::new();
         let mut replica_id = 0;
         loop {
-            let log_service_name = format!("rust-log-service-{replica_id}");
+            let dirty_log_prefix = format!("dirty-rust-log-service-{replica_id}");
             match LogWriter::open(
                 LogWriterOptions::default(),
-                self.storage.clone(),
-                &log_service_name,
+                storage_arc.clone(),
+                &dirty_log_prefix,
                 "garbage collection service",
                 (),
             )
@@ -110,7 +115,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                 Ok(log_writer) => dirty_log_writers.push(log_writer),
                 Err(wal3::Error::UninitializedLog) => break,
                 Err(err) => {
-                    tracing::error!("Unable to open dirty log [{log_service_name}]: {err}");
+                    tracing::error!("Unable to open dirty log [{dirty_log_prefix}]: {err}");
                     break;
                 }
             };
@@ -122,7 +127,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
         }
         join_all(dirty_log_writers.into_iter().map(|writer| async move {
             if let Err(err) = writer
-                .garbage_collect(&GarbageCollectionOptions::default())
+                .garbage_collect(&GarbageCollectionOptions::default(), None)
                 .await
             {
                 tracing::error!("Unable to garbage collect dirty log: {err}");
