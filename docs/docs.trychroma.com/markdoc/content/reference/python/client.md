@@ -266,7 +266,7 @@ List all collections.
 
 **Arguments**:
 
-- `limit` - The maximum number of entries to return. Defaults to None.
+- `limit` - The maximum number of entries to return. The maximum value is 100. If no value is provided, the maximum will be used as the default. If a value is provided that exceeds the maximum, an error will be thrown.
 - `offset` - The number of entries to skip before returning. Defaults to None.
 
 
