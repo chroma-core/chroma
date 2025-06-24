@@ -122,13 +122,15 @@ const sidebarConfig: AppSection[] = [
     id: "guides",
     name: "Guides",
     icon: GraduationCap,
-    default: "/build/intro-to-retrieval",
+    default: "/build/building-with-ai",
     subsections: [
       {
         id: "build",
         name: "Build",
         pages: [
+          { id: "building-with-ai", name: "Building With AI" },
           { id: "intro-to-retrieval", name: "Introduction to Retrieval" },
+          { id: "chunking", name: "Chunking" },
           { id: "embeddings", name: "Embeddings" },
           { id: "organizing-collections", name: "Organizing Collections" },
         ],

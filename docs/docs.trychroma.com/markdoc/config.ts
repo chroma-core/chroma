@@ -3,7 +3,7 @@ import React from "react";
 import InlineCode from "@/components/markdoc/inline-code";
 import CodeBlock from "@/components/markdoc/code-block";
 import TabbedUseCaseCodeBlock from "@/components/markdoc/tabbed-use-case-code-block";
-import Tab, { Tabs } from "@/components/markdoc/tabs";
+import Tab, { CustomTabs, Tabs } from "@/components/markdoc/tabs";
 import {
   Table,
   TableHeader,
@@ -93,6 +93,10 @@ const markdocConfig: MarkDocConfig = {
       render: "Tabs",
       selfClosing: false,
     },
+    CustomTabs: {
+      render: "CustomTabs",
+      selfClosing: false,
+    },
     CenteredContent: {
       render: "CenteredContent",
       selfClosing: false,
@@ -149,6 +153,7 @@ const markdocConfig: MarkDocConfig = {
     TabbedUseCaseCodeBlock,
     Tab,
     Tabs: Tabs,
+    CustomTabs,
     Table,
     TableHeader,
     TableBody,
