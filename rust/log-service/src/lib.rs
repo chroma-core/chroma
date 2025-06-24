@@ -1537,11 +1537,12 @@ impl LogServer {
             let dirty_marker_json_blobs = collection_ids
                 .into_iter()
                 .map(|collection_id| {
-                    serde_json::to_string(&DirtyMarker::Purge { collection_id }).map(Into::into)
+                    serde_json::to_string(&DirtyMarker::Purge { collection_id })
+                        .map(String::into_bytes)
                 })
                 .collect::<Result<_, _>>()
                 .map_err(|err| {
-                    Status::invalid_argument(format!("Failed to serialize dirty marker: {err}"))
+                    Status::internal(format!("Failed to serialize dirty marker: {err}"))
                 })?;
             self.dirty_log
                 .append_many(dirty_marker_json_blobs)
