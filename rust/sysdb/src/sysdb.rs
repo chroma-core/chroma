@@ -139,8 +139,13 @@ impl SysDb {
 
     pub async fn get_collections(
         &mut self,
-        options: GetCollectionsOptions,
+        mut options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
+        // TODO(c-gamble): Move this to config
+        if options.limit.is_none() || options.limit.map_or(false, |limit| limit > 100) {
+            options.limit = Some(100);
+        }
+
         match self {
             SysDb::Grpc(grpc) => grpc.get_collections(options).await,
             SysDb::Sqlite(sqlite) => sqlite.get_collections(options).await,
