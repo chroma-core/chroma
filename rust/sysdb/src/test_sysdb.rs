@@ -239,11 +239,10 @@ impl TestSysDb {
         let inner = self.inner.lock();
         let mut tenants = Vec::new();
         for tenant_id in tenant_ids {
-            let last_compaction_time = match inner.tenant_last_compaction_time.get(&tenant_id) {
-                Some(last_compaction_time) => *last_compaction_time,
-                None => {
-                    return Err(GetLastCompactionTimeError::TenantNotFound);
-                }
+            let Some(last_compaction_time) =
+                inner.tenant_last_compaction_time.get(&tenant_id).cloned()
+            else {
+                continue;
             };
             tenants.push(Tenant {
                 id: tenant_id,

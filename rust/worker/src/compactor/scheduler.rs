@@ -26,6 +26,7 @@ pub(crate) struct Scheduler {
     assignment_policy: Box<dyn AssignmentPolicy>,
     oneoff_collections: HashSet<CollectionUuid>,
     disabled_collections: HashSet<CollectionUuid>,
+    deleted_collections: HashSet<CollectionUuid>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -57,6 +58,7 @@ impl Scheduler {
             assignment_policy,
             oneoff_collections: HashSet::new(),
             disabled_collections,
+            deleted_collections: HashSet::new(),
         }
     }
 
@@ -68,6 +70,10 @@ impl Scheduler {
         self.oneoff_collections.iter().cloned().collect()
     }
 
+    pub(crate) fn drain_deleted_collections(&mut self) -> Vec<CollectionUuid> {
+        self.deleted_collections.drain().collect()
+    }
+
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
         let collections = self
             .log
@@ -75,7 +81,10 @@ impl Scheduler {
             .await;
 
         match collections {
-            Ok(collections) => collections,
+            Ok(collections) => {
+                tracing::info!("Collections with new data: {collections:?}");
+                collections
+            }
             Err(e) => {
                 tracing::error!("Error: {:?}", e);
                 Vec::new()
@@ -111,24 +120,8 @@ impl Scheduler {
             match result {
                 Ok(collection) => {
                     if collection.is_empty() {
-                        tracing::info!(
-                            "Collection not found, purging: {:?}",
-                            collection_info.collection_id
-                        );
-                        if let Err(err) = self
-                            .log
-                            .purge_dirty_for_collection(collection_info.collection_id)
-                            .await
-                        {
-                            // NOTE(rescrv):  This is something we ideally want to know about, but
-                            // cannot act on except to skip the collection.  Some day we'll have
-                            // something by which we can say, "Watch for this condition."
-                            tracing::warn!(
-                                "Error purging dirty records for collection: {:?}, error: {:?}",
-                                collection_info.collection_id,
-                                err
-                            );
-                        }
+                        self.deleted_collections
+                            .insert(collection_info.collection_id);
                         continue;
                     }
 
