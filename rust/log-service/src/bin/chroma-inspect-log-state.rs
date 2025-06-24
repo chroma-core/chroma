@@ -24,4 +24,7 @@ async fn main() {
         .expect("could not inspect log state");
     let state = state.into_inner();
     println!("{}", state.debug);
+    println!("start: {}", state.start);
+    println!("limit: {}", state.limit);
+    println!("records: {}", state.limit.wrapping_sub(state.start));
 }
