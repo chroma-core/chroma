@@ -625,15 +625,6 @@ impl Manifest {
         })
     }
 
-    /// Return the lowest addressable fragment sequence number.
-    pub fn oldest_fragment_seq_no(&self) -> FragmentSeqNo {
-        self.fragments
-            .iter()
-            .map(|f| f.seq_no)
-            .min()
-            .unwrap_or(self.initial_seq_no.unwrap_or(FragmentSeqNo::BEGIN))
-    }
-
     /// The next sequence number to generate, or None if the log has exhausted them.
     pub fn next_fragment_seq_no(&self) -> Option<FragmentSeqNo> {
         if let Some(max_seq_no) = self.fragments.iter().map(|f| f.seq_no).max() {
@@ -817,6 +808,11 @@ impl Manifest {
                 garbage.fragments_to_drop_start, garbage.fragments_to_drop_limit
             )));
         }
+        if garbage.fragments_to_drop_limit == FragmentSeqNo(0) {
+            return Err(Error::GarbageCollection(
+                "Garbage has zero limit".to_string(),
+            ));
+        }
         let mut new = self.clone();
         for to_drop in garbage.snapshots_to_drop.iter() {
             if let Some(index) = new.snapshots.iter().position(|s| s == to_drop) {
@@ -840,9 +836,7 @@ impl Manifest {
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);
-        if garbage.fragments_to_drop_start != FragmentSeqNo(0)
-            || garbage.fragments_to_drop_start < garbage.fragments_to_drop_limit
-        {
+        if garbage.fragments_to_drop_limit != FragmentSeqNo(0) {
             new.initial_seq_no = Some(garbage.fragments_to_drop_limit);
         } else {
             new.initial_seq_no = Some(FragmentSeqNo(1));
@@ -1152,7 +1146,6 @@ mod tests {
         );
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
         assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
-        assert_eq!(manifest.oldest_fragment_seq_no(), FragmentSeqNo(10));
         assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
 
         let fragment = Fragment {
@@ -1185,10 +1178,6 @@ mod tests {
             manifest_with_fragment.next_fragment_seq_no(),
             Some(FragmentSeqNo(11)),
         );
-        assert_eq!(
-            manifest_with_fragment.oldest_fragment_seq_no(),
-            FragmentSeqNo(10)
-        );
     }
 
     #[test]
@@ -1208,7 +1197,6 @@ mod tests {
             manifest.next_write_timestamp(),
             LogPosition::from_offset(100)
         );
-        assert_eq!(manifest.oldest_fragment_seq_no(), FragmentSeqNo(10));
         assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
 
         let fragment = Fragment {
@@ -1232,10 +1220,6 @@ mod tests {
         assert_eq!(
             manifest_with_fragment.oldest_timestamp(),
             LogPosition::from_offset(100)
-        );
-        assert_eq!(
-            manifest_with_fragment.oldest_fragment_seq_no(),
-            FragmentSeqNo(10)
         );
         assert_eq!(
             manifest_with_fragment.next_fragment_seq_no(),
