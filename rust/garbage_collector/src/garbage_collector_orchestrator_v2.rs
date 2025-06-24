@@ -456,7 +456,8 @@ impl GarbageCollectorOrchestrator {
             let Some(&min_version_to_keep) = versions
                 .iter()
                 .filter_map(|(version, action)| {
-                    matches!(action, CollectionVersionAction::Keep).then_some(version)
+                    (matches!(action, CollectionVersionAction::Keep) && *version > 0)
+                        .then_some(version)
                 })
                 .min()
             else {

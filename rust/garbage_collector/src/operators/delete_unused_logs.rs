@@ -49,6 +49,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
         &self,
         input: &DeleteUnusedLogsInput,
     ) -> Result<DeleteUnusedLogsOutput, DeleteUnusedLogsError> {
+        tracing::info!("Garbage collecting logs: {input:?}");
         let storage_arc = Arc::new(self.storage.clone());
         if !input.collections_to_garbage_collect.is_empty() {
             let mut log_gc_futures = Vec::with_capacity(input.collections_to_garbage_collect.len());
@@ -72,7 +73,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             return Err(DeleteUnusedLogsError::Wal3(err))
                         }
                     };
-                    return match writer.garbage_collect(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
+                    match writer.garbage_collect(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
                         Ok(()) => Ok(()),
                         Err(err) => {
                             tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
@@ -88,11 +89,8 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
             for collection_id in &input.collections_to_destroy {
                 let storage_clone = storage_arc.clone();
                 log_destroy_futures.push(async move {
-                    return match wal3::destroy(
-                        storage_clone,
-                        &collection_id.storage_prefix_for_log(),
-                    )
-                    .await
+                    match wal3::destroy(storage_clone, &collection_id.storage_prefix_for_log())
+                        .await
                     {
                         Ok(()) => Ok(()),
                         Err(err) => {
@@ -101,7 +99,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             );
                             Err(DeleteUnusedLogsError::Wal3(err))
                         }
-                    };
+                    }
                 })
             }
             try_join_all(log_destroy_futures).await?;

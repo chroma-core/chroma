@@ -75,7 +75,7 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
             return Err(TruncateDirtyLogError::NoLogServiceFound);
         }
         try_join_all(dirty_log_writers.into_iter().map(|writer| async move {
-            return match writer
+            match writer
                 .garbage_collect(&GarbageCollectionOptions::default(), None)
                 .await
             {
@@ -84,7 +84,7 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
                     tracing::error!("Unable to garbage collect dirty log: {err}");
                     Err(TruncateDirtyLogError::Wal3(err))
                 }
-            };
+            }
         }))
         .await?;
         Ok(())
