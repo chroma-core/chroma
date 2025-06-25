@@ -4,6 +4,8 @@ use chroma_types::{
     CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 
+use crate::quota::{DefaultQuota, UsageType};
+
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ToRecordsError {
     #[error("Inconsistent number of IDs, embeddings, documents, URIs and metadatas")]
@@ -91,6 +93,15 @@ pub(crate) fn to_records<
     }
 
     Ok((records, total_bytes))
+}
+
+pub(crate) fn ensure_limit(limit: Option<u32>) -> Option<u32> {
+    match limit {
+        Some(provided_limit) => Some(provided_limit),
+        // SAFETY(c-gamble): This is a safe cast because the default value is
+        // `1000usize`, which is less than 2 ^ 32 - 1.
+        None => Some(UsageType::LimitValue.default_quota() as u32),
+    }
 }
 
 #[cfg(test)]
