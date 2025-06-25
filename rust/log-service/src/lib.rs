@@ -369,7 +369,9 @@ impl RollupPerCollection {
         self.start_log_position = manifest
             .map(|m| m.oldest_timestamp())
             .unwrap_or(LogPosition::from_offset(1));
-        self.limit_log_position = self.limit_log_position.max(self.start_log_position);
+        self.limit_log_position = manifest
+            .map(|m| m.next_write_timestamp())
+            .unwrap_or(LogPosition::from_offset(1));
     }
 
     fn is_empty(&self) -> bool {
