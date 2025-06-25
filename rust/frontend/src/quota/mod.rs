@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt,
     future::{ready, Future},
     pin::Pin,
@@ -6,10 +7,12 @@ use std::{
 
 use chroma_error::ChromaError;
 use chroma_types::{CollectionUuid, Metadata, UpdateMetadata, Where};
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 use thiserror::Error;
 use validator::Validate;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumIter)]
 pub enum Action {
     CreateDatabase,
     CreateCollection,
@@ -220,7 +223,7 @@ impl<'other> QuotaPayload<'other> {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumIter)]
 pub enum UsageType {
     MetadataKeySizeBytes,       // Max metadata key size in bytes
     MetadataValueSizeBytes,     // Max metadata value size in bytes
@@ -342,6 +345,16 @@ impl DefaultQuota for UsageType {
             UsageType::NumForks => 256,
         }
     }
+}
+
+lazy_static::lazy_static! {
+    pub static ref DEFAULT_QUOTAS: HashMap<UsageType, usize> = {
+        let mut m = HashMap::new();
+        for usage_type in UsageType::iter() {
+            m.insert(usage_type.clone(), usage_type.default_quota());
+        }
+        m
+    };
 }
 
 #[derive(Debug, Validate)]
