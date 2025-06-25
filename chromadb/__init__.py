@@ -50,6 +50,8 @@ __all__ = [
     "TokenTransportHeader",
 ]
 
+from chromadb.types import CloudClientArg
+
 logger = logging.getLogger(__name__)
 
 __settings = Settings()
@@ -313,13 +315,21 @@ def CloudClient(
         database: The database to use for this client.
         api_key: The api key to use for this client.
     """
+    required_args = [
+        CloudClientArg(name="tenant", env_var="CHROMA_TENANT", value=tenant),
+        CloudClientArg(name="database", env_var="CHROMA_DATABASE", value=database),
+        CloudClientArg(name="api_key", env_var="CHROMA_API_KEY", value=api_key),
+    ]
 
     # If any of tenant, database, or api_key is not provided, try to load it from the environment variable
-    if not all([tenant, database, api_key]):
+    if not all([arg.value for arg in required_args]):
         import os
-        tenant = tenant or os.environ.get("CHROMA_TENANT")
-        database = database or os.environ.get("CHROMA_DATABASE")
-        api_key = api_key or os.environ.get("CHROMA_API_KEY")
+        for arg in required_args:
+            arg.value = arg.value or os.environ.get(arg.env_var)
+
+    missing_args = [arg for arg in required_args if arg.value is None]
+    if missing_args:
+        raise ValueError(f"Missing required arguments: {", ".join([arg.name for arg in missing_args])}. Please provide them or set the environment variables: {", ".join([arg.env_var for arg in missing_args])}")
 
     if settings is None:
         settings = Settings()
