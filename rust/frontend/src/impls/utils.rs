@@ -1,6 +1,6 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    error::MaximumLimitExceededError, Operation, OperationRecord, ScalarEncoding, UpdateMetadata,
+    MaximumLimitExceededError, Operation, OperationRecord, ScalarEncoding, UpdateMetadata,
     UpdateMetadataValue, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 

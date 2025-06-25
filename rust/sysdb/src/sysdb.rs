@@ -7,7 +7,6 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
-use chroma_types::error::MaximumLimitExceededError;
 use chroma_types::{
     chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
     CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
@@ -23,7 +22,8 @@ use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
+    ForkCollectionError, MaximumLimitExceededError, Segment, SegmentConversionError, SegmentScope,
+    Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;

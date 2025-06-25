@@ -35,10 +35,3 @@ impl From<QueryConversionError> for Status {
         Self::invalid_argument(value.to_string())
     }
 }
-
-#[derive(Debug, Error)]
-#[error("Provided limit `{provided}` exceeds maximum allowable limit `{max}`")]
-pub struct MaximumLimitExceededError {
-    pub provided: u32,
-    pub max: u32,
-}
