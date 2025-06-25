@@ -349,9 +349,7 @@ impl DefaultQuota for UsageType {
 
 lazy_static::lazy_static! {
     pub static ref DEFAULT_QUOTAS: HashMap<UsageType, usize> = {
-        let mut m = HashMap::new();
-        UsageType::iter().map(|usage_type| (usage_type.clone(), usage_type.default_quota())).collect();
-        m
+        UsageType::iter().map(|usage_type| (usage_type.clone(), usage_type.default_quota())).collect()
     };
 }
 
