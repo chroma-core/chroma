@@ -651,6 +651,10 @@ impl GrpcLog {
             }
         }
 
+        // NOTE(rescrv):  What we want is to return each collection once.  If there are two of the
+        // same collection, assume that the older offset is correct.  In the event that a writer
+        // migrates from one server to another the dirty log entries will be fractured between two
+        // servers.  To not panic the compactor, we sort by (collection_id, offset) and then dedup.
         all_collections.sort_by_key(|x| (x.collection_id, x.first_log_offset));
         all_collections.dedup_by_key(|x| x.collection_id);
 
