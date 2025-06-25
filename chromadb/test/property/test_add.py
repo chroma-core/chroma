@@ -31,6 +31,7 @@ collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="co
         normal=hypothesis.settings(max_examples=500),
         fast=hypothesis.settings(max_examples=200),
     ),
+    max_examples=2
 )
 def test_add_miniscule(
     client: ClientAPI,

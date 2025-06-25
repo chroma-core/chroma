@@ -170,7 +170,7 @@ compaction_service:
 
 log_service:
     num_records_before_backpressure: 100000
-    reinsert_threshold: 1
+    reinsert_threshold: 0
     opentelemetry:
         service_name: "rust-log-service"
         endpoint: "http://otel-collector:4317"
