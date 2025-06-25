@@ -1,7 +1,7 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    Operation, OperationRecord, ScalarEncoding, UpdateMetadata, UpdateMetadataValue,
-    CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
+    MaximumLimitExceededError, Operation, OperationRecord, ScalarEncoding, UpdateMetadata,
+    UpdateMetadataValue, CHROMA_DOCUMENT_KEY, CHROMA_URI_KEY,
 };
 
 use crate::quota::{DefaultQuota, UsageType};
@@ -95,12 +95,21 @@ pub(crate) fn to_records<
     Ok((records, total_bytes))
 }
 
-pub(crate) fn ensure_limit(limit: Option<u32>) -> Option<u32> {
+pub(crate) fn ensure_limit<T>(limit: Option<u32>) -> Result<Option<u32>, T>
+where
+    T: From<MaximumLimitExceededError>,
+{
+    // SAFETY(c-gamble): This is a safe cast because the default value is
+    // `1000usize`, which is less than 2 ^ 32 - 1.
+    let max_limit = UsageType::LimitValue.default_quota() as u32;
     match limit {
-        Some(provided_limit) => Some(provided_limit),
-        // SAFETY(c-gamble): This is a safe cast because the default value is
-        // `1000usize`, which is less than 2 ^ 32 - 1.
-        None => Some(UsageType::LimitValue.default_quota() as u32),
+        Some(provided_limit) if provided_limit <= max_limit => Ok(Some(provided_limit)),
+        Some(provided_limit) => Err(MaximumLimitExceededError {
+            provided: provided_limit,
+            max: max_limit,
+        }
+        .into()),
+        None => Ok(Some(max_limit)),
     }
 }
 
