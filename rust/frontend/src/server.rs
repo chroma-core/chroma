@@ -952,10 +952,12 @@ async fn create_collection(
         Some(c) => Some(InternalCollectionConfiguration::try_from_config(
             c,
             server.config.frontend.default_knn_index,
+            payload_clone.metadata,
         )?),
         None => Some(InternalCollectionConfiguration::try_from_config(
             CollectionConfiguration::default(),
             server.config.frontend.default_knn_index,
+            payload_clone.metadata,
         )?),
     };
 
