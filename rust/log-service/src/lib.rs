@@ -487,7 +487,7 @@ pub struct MarkDirty {
 }
 
 impl MarkDirty {
-    fn path_for_hostname(hostname: &str) -> String {
+    pub fn path_for_hostname(hostname: &str) -> String {
         format!("dirty-{}", hostname)
     }
 }
