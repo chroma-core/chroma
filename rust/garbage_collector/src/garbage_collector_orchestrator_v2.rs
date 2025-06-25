@@ -433,17 +433,20 @@ impl GarbageCollectorOrchestrator {
         self.pending_mark_versions_at_sysdb_tasks
             .remove(&collection_id);
 
-        self.start_delete_unused_log_operator(ctx).await?;
+        self.try_start_delete_unused_logs_operator(ctx).await?;
 
         self.try_start_delete_unused_files_operator(ctx).await?;
 
         Ok(())
     }
 
-    async fn start_delete_unused_log_operator(
+    async fn try_start_delete_unused_logs_operator(
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
+        if !self.pending_mark_versions_at_sysdb_tasks.is_empty() {
+            return Ok(());
+        }
         let collections_to_destroy = self.soft_deleted_collections_to_gc.clone();
         let mut collections_to_garbage_collect = HashMap::new();
         let versions_to_delete = self.versions_to_delete_output.as_ref().ok_or(

@@ -1292,12 +1292,7 @@ func (tc *Catalog) createFirstVersionFile(ctx context.Context, databaseID string
 		VersionHistory: &coordinatorpb.CollectionVersionHistory{
 			Versions: []*coordinatorpb.CollectionVersionInfo{
 				{
-					Version: 0,
-					CollectionInfoMutable: &coordinatorpb.CollectionInfoMutable{
-						CurrentLogPosition:       0,
-						CurrentCollectionVersion: 0,
-						UpdatedAtSecs:            int64(ts),
-					},
+					Version:       0,
 					CreatedAtSecs: int64(ts),
 					SegmentInfo: &coordinatorpb.CollectionSegmentInfo{
 						SegmentCompactionInfo: segmentCompactionInfos,
