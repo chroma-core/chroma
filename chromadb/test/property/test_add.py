@@ -44,7 +44,7 @@ def test_add_miniscule(
         pytest.skip(
             "TODO @jai, come back and debug why CI runners fail with async + sync"
         )
-    _test_add(client, collection, record_set, True)
+    _test_add(client, collection, record_set, True, always_compact=True)
 
 
 # Hypothesis tends to generate smaller values so we explicitly segregate the
@@ -129,6 +129,7 @@ def _test_add(
     record_set: strategies.RecordSet,
     should_compact: bool,
     batch_ann_accuracy: bool = False,
+    always_compact: bool = False,
 ) -> None:
     create_isolated_database(client)
 
@@ -157,7 +158,7 @@ def _test_add(
     if (
         not NOT_CLUSTER_ONLY
         and should_compact
-        and len(normalized_record_set["ids"]) > 10
+        and (len(normalized_record_set["ids"]) > 10 or always_compact)
     ):
         # Wait for the model to be updated
         wait_for_version_increase(client, collection.name, initial_version)
