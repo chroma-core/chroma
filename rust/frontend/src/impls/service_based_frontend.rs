@@ -294,7 +294,16 @@ impl ServiceBasedFrontend {
         }: ListDatabasesRequest,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         self.sysdb_client
-            .list_databases(tenant_id, limit, offset)
+            .list_databases(
+                tenant_id,
+                match limit {
+                    Some(provided_limit) => Some(provided_limit),
+                    // SAFETY(c-gamble): This is safe because we are casting a usize
+                    // `1000` to a u32, and 1000 < 2^32 - 1.
+                    None => Some(UsageType::LimitValue.default_quota() as u32),
+                },
+                offset,
+            )
             .await
     }
 
@@ -338,7 +347,12 @@ impl ServiceBasedFrontend {
             .get_collections(GetCollectionsOptions {
                 tenant: Some(tenant_id.clone()),
                 database: Some(database_name.clone()),
-                limit,
+                limit: match limit {
+                    Some(provided_limit) => Some(provided_limit),
+                    // SAFETY(c-gamble): This is safe because we are casting a usize
+                    // `1000` to a u32, and 1000 < 2^32 - 1.
+                    None => Some(UsageType::LimitValue.default_quota() as u32),
+                },
                 offset,
                 ..Default::default()
             })
