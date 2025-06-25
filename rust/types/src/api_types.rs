@@ -379,6 +379,8 @@ pub enum ListDatabasesError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
+    #[error("Provided limit `{0}` exceeds maximum allowable limit `{1}`")]
+    MaximumLimitExceeded(u32, u32),
 }
 
 impl ChromaError for ListDatabasesError {
@@ -386,6 +388,7 @@ impl ChromaError for ListDatabasesError {
         match self {
             ListDatabasesError::Internal(status) => status.code(),
             ListDatabasesError::InvalidID(_) => ErrorCodes::InvalidArgument,
+            ListDatabasesError::MaximumLimitExceeded(_, _) => ErrorCodes::InvalidArgument,
         }
     }
 }
