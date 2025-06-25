@@ -1,5 +1,8 @@
 use crate::{
-    config::FrontendConfig, executor::Executor, types::errors::ValidationError,
+    config::FrontendConfig,
+    executor::Executor,
+    quota::{DefaultQuota, UsageType},
+    types::errors::ValidationError,
     CollectionsWithSegmentsProvider,
 };
 use backon::{ExponentialBuilder, Retryable};
@@ -1230,7 +1233,12 @@ impl ServiceBasedFrontend {
                 },
                 limit: Limit {
                     skip: offset,
-                    fetch: limit,
+                    fetch: match limit {
+                        Some(provided_limit) => Some(provided_limit),
+                        // SAFETY(c-gamble): This is safe because we are casting a usize
+                        // `1000` to a u32, and 1000 < 2^32 - 1.
+                        None => Some(UsageType::LimitValue.default_quota() as u32),
+                    },
                 },
                 proj: Projection {
                     document: include.0.contains(&Include::Document),
