@@ -7,6 +7,7 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
+use chroma_types::error::MaximumLimitExceededError;
 use chroma_types::{
     chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
     CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
@@ -101,9 +102,11 @@ impl SysDb {
                 match limit {
                     Some(provided_limit) => {
                         if provided_limit > MAX_LIMIT_VALUE {
-                            return Err(ListDatabasesError::MaximumLimitExceeded(
-                                provided_limit,
-                                MAX_LIMIT_VALUE,
+                            return Err(ListDatabasesError::InvalidLimit(
+                                MaximumLimitExceededError {
+                                    provided: provided_limit,
+                                    max: MAX_LIMIT_VALUE,
+                                },
                             ));
                         }
                     }
@@ -160,9 +163,11 @@ impl SysDb {
                 match options.limit {
                     Some(limit) => {
                         if limit > MAX_LIMIT_VALUE {
-                            return Err(GetCollectionsError::MaximumLimitExceeded(
-                                limit,
-                                MAX_LIMIT_VALUE,
+                            return Err(GetCollectionsError::InvalidLimit(
+                                MaximumLimitExceededError {
+                                    provided: limit,
+                                    max: MAX_LIMIT_VALUE,
+                                },
                             ));
                         }
                     }
