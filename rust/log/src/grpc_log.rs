@@ -138,7 +138,7 @@ impl ChromaError for GrpcUpdateCollectionLogOffsetError {
 
 #[derive(Error, Debug)]
 pub enum GrpcPurgeDirtyForCollectionError {
-    #[error("Failed to update collection log offset")]
+    #[error("Failed to purge dirty: {0}")]
     FailedToPurgeDirty(#[from] tonic::Status),
 }
 
