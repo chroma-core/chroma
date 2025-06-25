@@ -1088,6 +1088,9 @@ impl LogServer {
                     rollup.largest_log_position_read =
                         std::cmp::max(max, rollup.largest_log_position_read);
                 }
+                // We create a new hash set for forget because we cannot borrow rollup mutably
+                // twice.  Further, we need to track every forget call to remove down below before
+                // we return the rollup.
                 let mut forget = HashSet::default();
                 DirtyMarker::coalesce_markers(&records, &mut rollup.rollups, &mut forget)?;
                 rollup.forget.extend(forget);
