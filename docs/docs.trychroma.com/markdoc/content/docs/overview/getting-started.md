@@ -17,9 +17,27 @@ Chroma is an AI-native open-source vector database. It comes with everything you
 
 {% Tab label="python" %}
 
+{% TabbedUseCaseCodeBlock language="Terminal" %}
+
+{% Tab label="pip" %}
 ```terminal
 pip install chromadb
 ```
+{% /Tab %}
+
+{% Tab label="poetry" %}
+```terminal
+poetry add chromadb
+```
+{% /Tab %}
+
+{% Tab label="uv" %}
+```terminal
+uv pip install chromadb
+```
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
 
 {% /Tab %}
 
@@ -252,6 +270,21 @@ For example - what if we tried querying with `"This is a document about florida"
 
 {% Tab label="python" %}
 ```python
+import chromadb
+chroma_client = chromadb.Client()
+
+# switch `create_collection` to `get_or_create_collection` to avoid creating a new collection every time
+collection = chroma_client.get_or_create_collection(name="my_collection")
+
+# switch `add` to `upsert` to avoid adding the same documents every time
+collection.upsert(
+    documents=[
+        "This is a document about pineapple",
+        "This is a document about oranges"
+    ],
+    ids=["id1", "id2"]
+)
+
 results = collection.query(
     query_texts=["This is a query document about florida"], # Chroma will embed this for you
     n_results=2 # how many results to return
@@ -263,6 +296,23 @@ print(results)
 
 {% Tab label="typescript" %}
 ```typescript
+import { ChromaClient } from "chromadb";
+const client = new ChromaClient();
+
+// switch `createCollection` to `getOrCreateCollection` to avoid creating a new collection every time
+const collection = await client.getOrCreateCollection({
+    name: "my_collection",
+});
+
+// switch `addRecords` to `upsertRecords` to avoid adding the same documents every time
+await collection.upsert({
+    documents: [
+        "This is a document about pineapple",
+        "This is a document about oranges",
+    ],
+    ids: ["id1", "id2"],
+});
+
 const results = await collection.query({
     queryTexts: "This is a query document about florida", // Chroma will embed this for you
     nResults: 2, // how many results to return
