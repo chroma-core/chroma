@@ -727,7 +727,7 @@ impl OnceLogWriter {
         let mut collect_up_to = None;
         for cursor_name in cursors.list().await? {
             let witness = cursors.load(&cursor_name).await?;
-            let Some(cursor) = witness.map(|w| w.1) else {
+            let Some(cursor) = witness.map(|w| w.cursor) else {
                 return Err(Error::LogContentionFailure);
             };
             if cursor.position <= collect_up_to.unwrap_or(cursor.position) {
