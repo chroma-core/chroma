@@ -381,6 +381,15 @@ impl std::fmt::Debug for LogWriter {
     }
 }
 
+impl Drop for LogWriter {
+    fn drop(&mut self) {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(writer) = inner.writer.as_mut() {
+            writer.shutdown();
+        }
+    }
+}
+
 /////////////////////////////////////////// OnceLogWriter //////////////////////////////////////////
 
 /// OnceLogWriter writes to a log once until contention is discovered.  It must then be thrown away
