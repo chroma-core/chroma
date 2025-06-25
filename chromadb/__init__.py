@@ -329,7 +329,10 @@ def CloudClient(
 
     missing_args = [arg for arg in required_args if arg.value is None]
     if missing_args:
-        raise ValueError(f"Missing required arguments: {", ".join([arg.name for arg in missing_args])}. Please provide them or set the environment variables: {", ".join([arg.env_var for arg in missing_args])}")
+        raise ValueError(
+            f"Missing required arguments: {', '.join([arg.name for arg in missing_args])}. "
+            f"Please provide them or set the environment variables: {', '.join([arg.env_var for arg in missing_args])}"
+        )
 
     if settings is None:
         settings = Settings()
