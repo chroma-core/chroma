@@ -479,7 +479,7 @@ impl GarbageCollectorOrchestrator {
                     "Expected version file to contain version history".to_string(),
                 ))?
                 .versions;
-            let min_log_offset = version_history
+            let min_compaction_log_offset = version_history
                 .iter()
                 .find(|version_info| version_info.version == min_version_to_keep)
                 .ok_or(GarbageCollectorError::InvariantViolation(
@@ -497,8 +497,11 @@ impl GarbageCollectorOrchestrator {
                         "Expected log offset to be unsigned".to_string(),
                     )
                 })?;
-            collections_to_garbage_collect
-                .insert(*collection_id, LogPosition::from_offset(min_log_offset));
+            collections_to_garbage_collect.insert(
+                *collection_id,
+                // The minimum offset to keep is one after the minimum compaction offset
+                LogPosition::from_offset(min_compaction_log_offset) + 1u64,
+            );
         }
 
         let task = wrap(
