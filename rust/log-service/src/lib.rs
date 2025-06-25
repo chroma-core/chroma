@@ -365,6 +365,13 @@ impl RollupPerCollection {
         self.limit_log_position = self.limit_log_position.max(self.start_log_position);
     }
 
+    fn witness_manifest(&mut self, manifest: Option<&Manifest>) {
+        self.start_log_position = manifest
+            .map(|m| m.oldest_timestamp())
+            .unwrap_or(LogPosition::from_offset(1));
+        self.limit_log_position = self.limit_log_position.max(self.start_log_position);
+    }
+
     fn is_empty(&self) -> bool {
         self.start_log_position >= self.limit_log_position
     }
@@ -1146,7 +1153,7 @@ impl LogServer {
                 let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
                 if let Ok(Some(json_witness)) = cache.get(&cache_key).instrument(cache_span).await {
                     let witness: Witness = serde_json::from_slice(&json_witness.bytes)?;
-                    return Ok(Some(witness));
+                    return Ok((Some(witness), None));
                 }
                 let load_span = tracing::info_span!("cursor load");
                 let res = cursor_store.load(cursor).instrument(load_span).await?;
@@ -1163,13 +1170,26 @@ impl LogServer {
                 let span = tracing::info_span!("cursor load", collection_id = ?collection_id);
                 cursor_store.load(cursor).instrument(span).await?
             };
-            Ok::<Option<Witness>, Error>(witness)
+            // NOTE(rescrv):  This may turn out to be a bad idea, but do not load the manifest from
+            // cache in order to prevent a stale cache from perpetually returning a stale result.
+            let manifest = if witness.is_none() {
+                let reader = LogReader::open(
+                    LogReaderOptions::default(),
+                    Arc::clone(storage),
+                    collection_id.storage_prefix_for_log(),
+                )
+                .await?;
+                reader.manifest().await?
+            } else {
+                None
+            };
+            Ok::<(Option<Witness>, Option<Manifest>), Error>((witness, manifest))
         };
         let mut futures = Vec::with_capacity(rollups.len());
         for (collection_id, mut rollup) in std::mem::take(rollups) {
             let load_witness = &load_witness;
             futures.push(async move {
-                let witness = match load_witness(&self.storage, collection_id).await {
+                let (witness, manifest) = match load_witness(&self.storage, collection_id).await {
                     Ok(witness) => witness,
                     Err(err) => {
                         tracing::warn!("could not load cursor: {err}");
@@ -1180,9 +1200,15 @@ impl LogServer {
                 // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
                 // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
                 // data that needs to be compacted.
-                if let Some(witness) = witness {
-                    rollup.witness_cursor(Some(&witness));
-                }
+                match (&witness, &manifest) {
+                    (Some(witness), Some(_)) | (Some(witness), None) => {
+                        rollup.witness_cursor(Some(witness));
+                    }
+                    (None, Some(manifest)) => {
+                        rollup.witness_manifest(Some(manifest));
+                    }
+                    (None, None) => {}
+                };
                 if !rollup.is_empty() {
                     Some((collection_id, rollup))
                 } else {
