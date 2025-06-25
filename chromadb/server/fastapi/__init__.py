@@ -711,7 +711,7 @@ class FastAPI(Server):
         request: Request,
         tenant: str,
         database_name: str,
-        limit: Optional[int] = None,
+        limit: Optional[int] = 100,
         offset: Optional[int] = None,
     ) -> Sequence[CollectionModel]:
         def process_list_collections(

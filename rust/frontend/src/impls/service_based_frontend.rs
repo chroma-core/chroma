@@ -331,11 +331,12 @@ impl ServiceBasedFrontend {
             ..
         }: ListCollectionsRequest,
     ) -> Result<ListCollectionsResponse, GetCollectionsError> {
+        let limit = limit.unwrap_or(100);
         self.sysdb_client
             .get_collections(GetCollectionsOptions {
                 tenant: Some(tenant_id.clone()),
                 database: Some(database_name.clone()),
-                limit,
+                limit: Some(limit),
                 offset,
                 ..Default::default()
             })

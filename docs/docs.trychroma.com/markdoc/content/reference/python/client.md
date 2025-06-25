@@ -258,7 +258,7 @@ class ClientAPI(BaseAPI, ABC)
 ## list\_collections
 
 ```python
-def list_collections(limit: Optional[int] = None,
+def list_collections(limit: Optional[int] = 100,
                      offset: Optional[int] = None) -> Sequence[Collection]
 ```
 
@@ -266,7 +266,7 @@ List all collections.
 
 **Arguments**:
 
-- `limit` - The maximum number of entries to return. Defaults to None.
+- `limit` - The maximum number of entries to return. Defaults to 100.
 - `offset` - The number of entries to skip before returning. Defaults to None.
 
 

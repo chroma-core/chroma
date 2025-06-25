@@ -336,7 +336,7 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     @abstractmethod
     async def list_collections(
         self,
-        limit: Optional[int] = None,
+        limit: Optional[int] = 100,
         offset: Optional[int] = None,
     ) -> Sequence[AsyncCollection]:
         """List all collections.
@@ -562,7 +562,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     @abstractmethod
     async def list_collections(
         self,
-        limit: Optional[int] = None,
+        limit: Optional[int] = 100,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,

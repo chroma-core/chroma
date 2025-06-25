@@ -180,7 +180,7 @@ class RustBindingsAPI(ServerAPI):
     @override
     def list_collections(
         self,
-        limit: Optional[int] = None,
+        limit: Optional[int] = 100,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,

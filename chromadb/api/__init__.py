@@ -343,7 +343,7 @@ class ClientAPI(BaseAPI, ABC):
     @abstractmethod
     def list_collections(
         self,
-        limit: Optional[int] = None,
+        limit: Optional[int] = 100,
         offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         """List all collections.
@@ -576,7 +576,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @abstractmethod
     def list_collections(
         self,
-        limit: Optional[int] = None,
+        limit: Optional[int] = 100,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,

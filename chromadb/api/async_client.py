@@ -159,7 +159,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
 
     @override
     async def list_collections(
-        self, limit: Optional[int] = None, offset: Optional[int] = None
+        self, limit: Optional[int] = 100, offset: Optional[int] = None
     ) -> Sequence[AsyncCollection]:
         models = await self._server.list_collections(
             limit, offset, tenant=self.tenant, database=self.database
