@@ -1,5 +1,6 @@
 use crate::collection_configuration::InternalCollectionConfiguration;
 use crate::collection_configuration::UpdateCollectionConfiguration;
+use crate::error::MaximumLimitExceededError;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
@@ -379,6 +380,8 @@ pub enum ListDatabasesError {
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Invalid database id [{0}]")]
     InvalidID(String),
+    #[error(transparent)]
+    InvalidLimit(#[from] MaximumLimitExceededError),
 }
 
 impl ChromaError for ListDatabasesError {
@@ -386,6 +389,7 @@ impl ChromaError for ListDatabasesError {
         match self {
             ListDatabasesError::Internal(status) => status.code(),
             ListDatabasesError::InvalidID(_) => ErrorCodes::InvalidArgument,
+            ListDatabasesError::InvalidLimit(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -694,8 +698,8 @@ pub enum GetCollectionsError {
     CollectionId(#[from] uuid::Error),
     #[error("Could not deserialize database ID")]
     DatabaseId,
-    #[error("Provided limit `{0}` exceeds maximum allowable limit `{1}`")]
-    MaximumLimitExceeded(u32, u32),
+    #[error(transparent)]
+    InvalidLimit(#[from] MaximumLimitExceededError),
 }
 
 impl ChromaError for GetCollectionsError {
@@ -705,7 +709,7 @@ impl ChromaError for GetCollectionsError {
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
             GetCollectionsError::DatabaseId => ErrorCodes::Internal,
-            GetCollectionsError::MaximumLimitExceeded(_, _) => ErrorCodes::InvalidArgument,
+            GetCollectionsError::InvalidLimit(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -1715,6 +1719,8 @@ pub enum QueryError {
     Executor(#[from] ExecutorError),
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
+    #[error(transparent)]
+    InvalidLimit(#[from] MaximumLimitExceededError),
 }
 
 impl ChromaError for QueryError {
@@ -1722,6 +1728,7 @@ impl ChromaError for QueryError {
         match self {
             QueryError::Executor(e) => e.code(),
             QueryError::Other(err) => err.code(),
+            QueryError::InvalidLimit(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
