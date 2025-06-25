@@ -1,6 +1,5 @@
 use crate::collection_configuration::InternalCollectionConfiguration;
 use crate::collection_configuration::UpdateCollectionConfiguration;
-use crate::error::MaximumLimitExceededError;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
@@ -16,6 +15,7 @@ use crate::CollectionConversionError;
 use crate::CollectionUuid;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
+use crate::MaximumLimitExceededError;
 use crate::Metadata;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
