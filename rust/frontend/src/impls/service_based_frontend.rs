@@ -1,9 +1,6 @@
 use crate::{
-    config::FrontendConfig,
-    executor::Executor,
-    quota::{DefaultQuota, UsageType},
-    types::errors::ValidationError,
-    CollectionsWithSegmentsProvider,
+    config::FrontendConfig, executor::Executor, impls::utils::ensure_limit,
+    types::errors::ValidationError, CollectionsWithSegmentsProvider,
 };
 use backon::{ExponentialBuilder, Retryable};
 use chroma_config::{registry, Configurable};
@@ -294,16 +291,7 @@ impl ServiceBasedFrontend {
         }: ListDatabasesRequest,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         self.sysdb_client
-            .list_databases(
-                tenant_id,
-                match limit {
-                    Some(provided_limit) => Some(provided_limit),
-                    // SAFETY(c-gamble): This is safe because we are casting a usize
-                    // `1000` to a u32, and 1000 < 2^32 - 1.
-                    None => Some(UsageType::LimitValue.default_quota() as u32),
-                },
-                offset,
-            )
+            .list_databases(tenant_id, ensure_limit(limit), offset)
             .await
     }
 
@@ -347,12 +335,7 @@ impl ServiceBasedFrontend {
             .get_collections(GetCollectionsOptions {
                 tenant: Some(tenant_id.clone()),
                 database: Some(database_name.clone()),
-                limit: match limit {
-                    Some(provided_limit) => Some(provided_limit),
-                    // SAFETY(c-gamble): This is safe because we are casting a usize
-                    // `1000` to a u32, and 1000 < 2^32 - 1.
-                    None => Some(UsageType::LimitValue.default_quota() as u32),
-                },
+                limit: ensure_limit(limit),
                 offset,
                 ..Default::default()
             })
@@ -1247,12 +1230,7 @@ impl ServiceBasedFrontend {
                 },
                 limit: Limit {
                     skip: offset,
-                    fetch: match limit {
-                        Some(provided_limit) => Some(provided_limit),
-                        // SAFETY(c-gamble): This is safe because we are casting a usize
-                        // `1000` to a u32, and 1000 < 2^32 - 1.
-                        None => Some(UsageType::LimitValue.default_quota() as u32),
-                    },
+                    fetch: ensure_limit(limit),
                 },
                 proj: Projection {
                     document: include.0.contains(&Include::Document),
