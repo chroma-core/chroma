@@ -48,7 +48,7 @@ await collection.query(
 
 {% /TabbedCodeBlock %}
 
-10,000 such queries for `"hello world"` (11 characters) with a vector search against 10 GiB of data would incur:
+For the query above (a single vector search and a 10-character full-text search), querying against 10 GiB of data incurs:
 
 - 10,000 queries × 10 units (1 vector + 9 full-text) = 100,000 query units
 - 10 GiB = 0.01 TiB scanned → 100,000 × 0.01 TiB × $0.0075 = **$7.50**
@@ -58,8 +58,8 @@ await collection.query(
 Storage is billed at **$0.33 per GiB per month**, prorated by the hour:
 
 - Storage usage is measured in **GiB-hours** to account for fluctuations over time.
-- Storage is billed based on the logical amount of data written
-- All caching, including SSD caches used internally by Chroma are not billed to you.
+- Storage is billed based on the logical amount of data written.
+- All caching, including SSD caches used internally by Chroma, are not billed to you.
 
 ## Frequently Asked Questions
 
@@ -77,9 +77,4 @@ Yes. We offer a BYOC (bring your own cloud) option for single-tenant deployments
 
 **Do I get charged for background indexing?**
 
-No. You’re only billed for the logical data you write and the storage you consume. Background jobs like compaction or reindexing do not generate extra write or read charges.
-
-**Is pricing different in enterprise plans?**
-
-No, pricing is the same unless you have a custom contract. Enterprise features like VPC peering, SSO, and audit logs are available on request.
-
+No. You’re only billed for the logical data you write and the storage you consume. Background jobs like compaction or reindexing do not generate additional write or read charges.
