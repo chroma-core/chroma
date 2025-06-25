@@ -171,7 +171,17 @@ def _field_matches(
 def ids_match(collection: Collection, record_set: RecordSet) -> None:
     """The actual embedding ids is equal to the expected ids"""
     normalized_record_set = wrap_all(record_set)
-    actual_ids = collection.get(ids=normalized_record_set["ids"], include=[])["ids"]
+    total_documents = collection.count()
+    actual_ids = list()
+    
+    limit = 100
+    offset = 0
+    while len(actual_ids) < total_documents:
+        actual_ids.extend(collection.get(ids=normalized_record_set["ids"], include=[], limit=limit, offset=offset)["ids"])
+        offset += limit
+
+    actual_ids = set(actual_ids)
+    
     # The test_out_of_order_ids test fails because of this in test_add.py
     # Here we sort the ids to match the input order
     embedding_id_to_index = {id: i for i, id in enumerate(normalized_record_set["ids"])}
