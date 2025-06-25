@@ -296,8 +296,8 @@ async def AsyncHttpClient(
 
 
 def CloudClient(
-    tenant: str,
-    database: str,
+    tenant: Optional[str] = None,
+    database: Optional[str] = None,
     api_key: Optional[str] = None,
     settings: Optional[Settings] = None,
     *,  # Following arguments are keyword-only, intended for testing only.
@@ -314,18 +314,12 @@ def CloudClient(
         api_key: The api key to use for this client.
     """
 
-    # If no API key is provided, try to load it from the environment variable
-    if api_key is None:
+    # If any of tenant, database, or api_key is not provided, try to load it from the environment variable
+    if not all([tenant, database, api_key]):
         import os
-
-        api_key = os.environ.get("CHROMA_API_KEY")
-
-    # If the API key is still not provided, prompt the user
-    if api_key is None:
-        print(
-            "\033[93mDon't have an API key?\033[0m Get one at https://app.trychroma.com"
-        )
-        api_key = input("Please enter your Chroma API key: ")
+        tenant = tenant or os.environ.get("CHROMA_TENANT")
+        database = database or os.environ.get("CHROMA_DATABASE")
+        api_key = api_key or os.environ.get("CHROMA_API_KEY")
 
     if settings is None:
         settings = Settings()
