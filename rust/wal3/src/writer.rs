@@ -454,9 +454,12 @@ impl OnceLogWriter {
                 that.batch_manager.wait_for_writable().await;
                 match that.batch_manager.take_work(&that.manifest_manager) {
                     Ok(Some((fragment_seq_no, log_position, work))) => {
-                        Arc::clone(&that)
-                            .append_batch(fragment_seq_no, log_position, work)
-                            .await;
+                        let _ = tokio::task::spawn(Arc::clone(&that).append_batch(
+                            fragment_seq_no,
+                            log_position,
+                            work,
+                        ))
+                        .await;
                     }
                     Ok(None) => {
                         tokio::time::sleep(that.batch_manager.until_next_time()).await;
@@ -508,7 +511,7 @@ impl OnceLogWriter {
             self.batch_manager.take_work(&self.manifest_manager)?
         {
             let this = Arc::clone(self);
-            this.append_batch(fragment_seq_no, log_position, work).await
+            tokio::task::spawn(this.append_batch(fragment_seq_no, log_position, work));
         }
         let span = tracing::info_span!("wait_for_durability");
         rx.instrument(span).await.map_err(|_| Error::Internal)?
