@@ -69,10 +69,14 @@ fn default_batch_size() -> usize {
     100
 }
 
+fn default_space() -> HnswSpace {
+    HnswSpace::L2
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InternalHnswConfiguration {
-    #[serde(default)]
+    #[serde(default = "default_space")]
     pub space: HnswSpace,
     #[serde(default = "default_construction_ef")]
     pub ef_construction: usize,
@@ -104,8 +108,7 @@ impl Default for InternalHnswConfiguration {
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct HnswConfiguration {
-    #[serde(default)]
-    pub space: HnswSpace,
+    pub space: Option<HnswSpace>,
     pub ef_construction: Option<usize>,
     pub ef_search: Option<usize>,
     pub max_neighbors: Option<usize>,
@@ -122,7 +125,7 @@ pub struct HnswConfiguration {
 impl From<InternalHnswConfiguration> for HnswConfiguration {
     fn from(config: InternalHnswConfiguration) -> Self {
         Self {
-            space: config.space,
+            space: Some(config.space),
             ef_construction: Some(config.ef_construction),
             ef_search: Some(config.ef_search),
             max_neighbors: Some(config.max_neighbors),
@@ -137,7 +140,7 @@ impl From<InternalHnswConfiguration> for HnswConfiguration {
 impl From<HnswConfiguration> for InternalHnswConfiguration {
     fn from(config: HnswConfiguration) -> Self {
         Self {
-            space: config.space,
+            space: config.space.unwrap_or(default_space()),
             ef_construction: config.ef_construction.unwrap_or(default_construction_ef()),
             ef_search: config.ef_search.unwrap_or(default_search_ef()),
             max_neighbors: config.max_neighbors.unwrap_or(default_m()),

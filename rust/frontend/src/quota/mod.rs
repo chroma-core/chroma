@@ -341,7 +341,7 @@ impl DefaultQuota for UsageType {
             UsageType::NumCollections => 1_000_000,
             UsageType::NumDatabases => 10,
             UsageType::NumQueryIDs => 1000,
-            UsageType::RegexPatternLength => 0,
+            UsageType::RegexPatternLength => 256,
             UsageType::NumForks => 256,
         }
     }
