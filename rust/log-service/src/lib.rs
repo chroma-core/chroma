@@ -1005,7 +1005,10 @@ impl LogServer {
             markers.push(serde_json::to_string(&DirtyMarker::Cleared).map(Vec::from)?);
         }
         let mut new_cursor = rollup.cursor.clone();
-        self.dirty_log.append_many(markers).await?;
+        match self.dirty_log.append_many(markers).await {
+            Ok(_) | Err(wal3::Error::LogContentionDurable) => Ok(()),
+            Err(err) => Err(err),
+        }?;
         new_cursor.position = rollup.last_record_witnessed + 1u64;
         let Some(cursors) = self.dirty_log.cursors(CursorStoreOptions::default()) else {
             return Err(Error::CouldNotGetDirtyLogCursors);
