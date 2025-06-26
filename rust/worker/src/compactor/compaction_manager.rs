@@ -29,13 +29,19 @@ use chroma_system::TaskResult;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
 use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
+use futures::FutureExt;
 use futures::StreamExt;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::future::Future;
+use std::panic::AssertUnwindSafe;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::select;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tracing::instrument;
 use tracing::span;
@@ -43,9 +49,17 @@ use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
-pub(crate) struct CompactionManager {
+type BoxedFuture =
+    Pin<Box<dyn Future<Output = Result<CompactionResponse, Box<dyn ChromaError>>> + Send>>;
+
+struct CompactionTask {
+    collection_id: CollectionUuid,
+    future: BoxedFuture,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompactionManagerContext {
     system: System,
-    scheduler: Scheduler,
     // Dependencies
     log: Log,
     sysdb: SysDb,
@@ -65,6 +79,14 @@ pub(crate) struct CompactionManager {
     max_partition_size: usize,
     fetch_log_batch_size: u32,
     purge_dirty_log_timeout_seconds: u64,
+}
+
+pub(crate) struct CompactionManager {
+    scheduler: Scheduler,
+    context: CompactionManagerContext,
+    compact_awaiter_channel: mpsc::Sender<CompactionTask>,
+    compact_awaiter_completion_channel: mpsc::UnboundedReceiver<CompactionResponse>,
+    compact_awaiter: tokio::task::JoinHandle<()>,
     on_next_memberlist_signal: Option<oneshot::Sender<()>>,
 }
 
@@ -101,108 +123,40 @@ impl CompactionManager {
         fetch_log_batch_size: u32,
         purge_dirty_log_timeout_seconds: u64,
     ) -> Self {
+        let (compact_awaiter_tx, compact_awaiter_rx) =
+            mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
+
+        // Using unbounded channel for the completion channel as its size
+        // is bounded by max_concurrent_jobs. It's far more important for the
+        // completion channel to not block or drop messages.
+        let (completion_tx, completion_rx) = mpsc::unbounded_channel::<CompactionResponse>();
+        let compact_awaiter = tokio::spawn(async {
+            compact_awaiter_loop(compact_awaiter_rx, completion_tx).await;
+        });
         CompactionManager {
-            system,
-            scheduler,
-            log,
-            sysdb,
-            storage,
-            blockfile_provider,
-            hnsw_index_provider,
-            spann_provider,
-            dispatcher: None,
-            compaction_manager_queue_size,
-            compaction_interval,
-            min_compaction_size,
-            max_compaction_size,
-            max_partition_size,
+            scheduler: scheduler,
+            context: CompactionManagerContext {
+                system,
+                log,
+                sysdb,
+                storage,
+                blockfile_provider,
+                hnsw_index_provider,
+                spann_provider,
+                dispatcher: None,
+                compaction_manager_queue_size,
+                compaction_interval,
+                min_compaction_size,
+                max_compaction_size,
+                max_partition_size,
+                fetch_log_batch_size,
+                purge_dirty_log_timeout_seconds,
+            },
             on_next_memberlist_signal: None,
-            fetch_log_batch_size,
-            purge_dirty_log_timeout_seconds,
+            compact_awaiter_channel: compact_awaiter_tx,
+            compact_awaiter_completion_channel: completion_rx,
+            compact_awaiter: compact_awaiter,
         }
-    }
-
-    #[instrument(name = "CompactionManager::compact")]
-    async fn compact(
-        &self,
-        collection_id: CollectionUuid,
-        rebuild: bool,
-    ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
-        let dispatcher = match self.dispatcher {
-            Some(ref dispatcher) => dispatcher.clone(),
-            None => {
-                tracing::error!("No dispatcher found");
-                return Err(Box::new(CompactionError::FailedToCompact));
-            }
-        };
-
-        let orchestrator = CompactOrchestrator::new(
-            collection_id,
-            rebuild,
-            self.fetch_log_batch_size,
-            self.max_compaction_size,
-            self.max_partition_size,
-            self.log.clone(),
-            self.sysdb.clone(),
-            self.blockfile_provider.clone(),
-            self.hnsw_index_provider.clone(),
-            self.spann_provider.clone(),
-            dispatcher,
-            None,
-        );
-
-        match orchestrator.run(self.system.clone()).await {
-            Ok(result) => {
-                tracing::info!("Compaction Job completed: {:?}", result);
-                return Ok(result);
-            }
-            Err(e) => {
-                tracing::error!("Compaction Job failed: {:?}", e);
-                return Err(Box::new(e));
-            }
-        }
-    }
-
-    #[instrument(name = "CompactionManager::compact_batch")]
-    pub(crate) async fn compact_batch(&mut self) -> Vec<CollectionUuid> {
-        self.scheduler.schedule().await;
-        let job_futures = self
-            .scheduler
-            .get_jobs()
-            .map(|job| {
-                let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id);
-                instrumented_span.follows_from(Span::current());
-                self.compact(job.collection_id, false).instrument(instrumented_span)
-            })
-            .collect::<FuturesUnordered<_>>();
-
-        tracing::info!("Running {} compaction jobs", job_futures.len());
-
-        job_futures
-            .filter_map(|result| async move {
-                match result {
-                    Ok(response) => {
-                        tracing::info!("Compaction completed: {response:?}");
-                        Some(response.collection_id)
-                    }
-                    Err(err) => {
-                        tracing::error!("Compaction failed {err}");
-                        None
-                    }
-                }
-            })
-            .collect()
-            .await
-    }
-
-    #[instrument(name = "CompactionManager::rebuild_batch")]
-    pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
-        let _ = collection_ids
-            .iter()
-            .map(|id| self.compact(*id, true))
-            .collect::<FuturesUnordered<_>>()
-            .collect::<Vec<_>>()
-            .await;
     }
 
     #[instrument(name = "CompactionManager::purge_dirty_log", skip(ctx))]
@@ -241,7 +195,106 @@ impl CompactionManager {
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
-        self.dispatcher = Some(dispatcher);
+        self.context.dispatcher = Some(dispatcher);
+    }
+
+    fn process_completions(&mut self) -> Vec<CompactionResponse> {
+        let compact_awaiter_completion_channel = &mut self.compact_awaiter_completion_channel;
+        let mut completed_collections = Vec::new();
+        while let Ok(resp) = compact_awaiter_completion_channel.try_recv() {
+            self.scheduler.complete_collection(resp.collection_id);
+            completed_collections.push(resp);
+        }
+        completed_collections
+    }
+
+    #[instrument(name = "CompactionManager::start_compaction_batch", skip(self))]
+    async fn start_compaction_batch(&mut self) {
+        self.process_completions();
+        let compact_awaiter_channel = &self.compact_awaiter_channel;
+        self.scheduler.schedule().await;
+        let jobs_iter = self.scheduler.get_jobs();
+        for job in jobs_iter {
+            let instrumented_span = span!(
+                parent: None,
+                tracing::Level::INFO,
+                "Compacting job",
+                collection_id = ?job.collection_id
+            );
+            instrumented_span.follows_from(Span::current());
+            let future = self
+                .context
+                .clone()
+                .compact(job.collection_id, false)
+                .instrument(instrumented_span);
+            compact_awaiter_channel
+                .send(CompactionTask {
+                    collection_id: job.collection_id,
+                    future: Box::pin(future),
+                })
+                .await
+                .unwrap();
+        }
+    }
+
+    #[instrument(name = "CompactionManager::rebuild_batch", skip(self))]
+    pub(crate) async fn rebuild_batch(&mut self, collection_ids: Vec<CollectionUuid>) {
+        let _ = collection_ids
+            .iter()
+            .map(|id| self.context.clone().compact(*id, true))
+            .collect::<FuturesUnordered<_>>()
+            .collect::<Vec<_>>()
+            .await;
+    }
+}
+
+impl Drop for CompactionManager {
+    fn drop(&mut self) {
+        self.compact_awaiter.abort();
+    }
+}
+
+impl CompactionManagerContext {
+    #[instrument(name = "CompactionManager::compact", skip(self))]
+    async fn compact(
+        self,
+        collection_id: CollectionUuid,
+        rebuild: bool,
+    ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
+        tracing::info!("Compacting collection: {}", collection_id);
+        let dispatcher = match self.dispatcher {
+            Some(ref dispatcher) => dispatcher.clone(),
+            None => {
+                tracing::error!("No dispatcher found");
+                return Err(Box::new(CompactionError::FailedToCompact));
+            }
+        };
+
+        let orchestrator = CompactOrchestrator::new(
+            collection_id,
+            rebuild,
+            self.fetch_log_batch_size,
+            self.max_compaction_size,
+            self.max_partition_size,
+            self.log.clone(),
+            self.sysdb.clone(),
+            self.blockfile_provider.clone(),
+            self.hnsw_index_provider.clone(),
+            self.spann_provider.clone(),
+            dispatcher,
+            None,
+        );
+
+        match orchestrator.run(self.system.clone()).await {
+            Ok(result) => {
+                tracing::info!("Compaction Job completed: {:?}", result);
+                return Ok(result);
+            }
+            Err(e) => {
+                tracing::error!("Compaction Job failed: {:?}", e);
+                return Err(Box::new(e));
+            }
+        }
     }
 }
 
@@ -348,6 +401,36 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
     }
 }
 
+async fn compact_awaiter_loop(
+    mut job_rx: mpsc::Receiver<CompactionTask>,
+    completion_tx: mpsc::UnboundedSender<CompactionResponse>,
+) {
+    let mut futures = FuturesUnordered::new();
+    loop {
+        select! {
+            Some(job) = job_rx.recv() => {
+                futures.push(async move {
+                    let _ = AssertUnwindSafe(job.future).catch_unwind().await;
+                    CompactionResponse {
+                        collection_id: job.collection_id,
+                    }
+                });
+            }
+            Some(compaction_response) = futures.next() => {
+                match completion_tx.send(compaction_response) {
+                    Ok(_) => {},
+                    Err(_) => {
+                        tracing::error!("Failed to send compaction response");
+                    }
+                }
+            }
+            else => {
+                break;
+            }
+        }
+    }
+}
+
 // ============== Component Implementation ==============
 #[async_trait]
 impl Component for CompactionManager {
@@ -356,14 +439,14 @@ impl Component for CompactionManager {
     }
 
     fn queue_size(&self) -> usize {
-        self.compaction_manager_queue_size
+        self.context.compaction_manager_queue_size
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
         tracing::info!("Starting CompactionManager");
         ctx.scheduler.schedule(
             ScheduledCompactMessage {},
-            self.compaction_interval,
+            self.context.compaction_interval,
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
         );
@@ -387,13 +470,13 @@ impl Handler<ScheduledCompactMessage> for CompactionManager {
         ctx: &ComponentContext<CompactionManager>,
     ) {
         tracing::info!("CompactionManager: Performing scheduled compaction");
-        let _ = self.compact_batch().await;
+        let _ = self.start_compaction_batch().await;
         self.purge_dirty_log(ctx).await;
 
-        // Compaction is done, schedule the next compaction
+        // Compactions are kicked off, schedule the next compaction
         ctx.scheduler.schedule(
             ScheduledCompactMessage {},
-            self.compaction_interval,
+            self.context.compaction_interval.clone(),
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
         );
@@ -516,7 +599,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use tokio::fs;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_compaction_manager() {
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
@@ -761,11 +844,27 @@ mod tests {
         });
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
-        let compacted = manager.compact_batch().await;
-        assert!(
-            (compacted == vec![collection_uuid_1, collection_uuid_2])
-                || (compacted == vec![collection_uuid_2, collection_uuid_1])
-        );
+        manager.start_compaction_batch().await;
+
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(10);
+        let expected_compactions = HashSet::from([collection_uuid_1, collection_uuid_2]);
+
+        let mut completed_compactions = HashSet::new();
+
+        while completed_compactions.len() < expected_compactions.len() && start.elapsed() < timeout
+        {
+            let completed = manager.process_completions();
+            completed_compactions.extend(
+                completed
+                    .iter()
+                    .map(|c| c.collection_id)
+                    .collect::<Vec<CollectionUuid>>(),
+            );
+        }
+
+        assert_eq!(completed_compactions, expected_compactions);
+
         check_purge_successful(tmpdir.path()).await;
     }
 
