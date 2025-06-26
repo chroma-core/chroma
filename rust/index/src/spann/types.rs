@@ -1437,7 +1437,6 @@ impl SpannIndexWriter {
                     doc_versions: &[version],
                     doc_embeddings: embeddings,
                 };
-                let _write_guard = self.posting_list_partitioned_mutex.lock(&id).await;
                 self.posting_list_writer
                     .set("", next_id, &posting_list)
                     .await
