@@ -6,8 +6,9 @@ use axum::http::HeaderMap;
 use axum::http::StatusCode;
 
 use chroma_types::{Collection, GetUserIdentityResponse};
+use serde::Serialize;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize)]
 pub enum AuthzAction {
     Reset,
     CreateTenant,
@@ -62,7 +63,7 @@ impl Display for AuthzAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AuthzResource {
     pub tenant: Option<String>,
     pub database: Option<String>,
