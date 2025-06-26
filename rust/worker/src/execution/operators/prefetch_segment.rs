@@ -5,7 +5,6 @@ use chroma_types::{Segment, SegmentType};
 use futures::{stream::FuturesUnordered, StreamExt};
 use thiserror::Error;
 use tonic::async_trait;
-use uuid::Uuid;
 
 #[derive(Debug, Default)]
 pub struct PrefetchSegmentOperator {}
@@ -77,9 +76,12 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
             .segment
             .filepaths_to_prefetch()
             .into_iter()
-            .map(|blockfile_id| async move {
-                let blockfile_id = Uuid::parse_str(&blockfile_id)?;
-                let count = input.blockfile_provider.prefetch(&blockfile_id).await?;
+            .map(|blockfile_path| async move {
+                let (prefix, blockfile_id) = Segment::extract_prefix_and_id(&blockfile_path)?;
+                let count = input
+                    .blockfile_provider
+                    .prefetch(&blockfile_id, prefix)
+                    .await?;
                 Ok::<_, PrefetchSegmentError>(count)
             })
             .collect::<FuturesUnordered<_>>();

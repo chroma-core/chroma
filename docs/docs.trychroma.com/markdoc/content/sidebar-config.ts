@@ -29,6 +29,14 @@ const sidebarConfig: AppSection[] = [
             name: "Getting Started",
           },
           {
+            id: 'architecture',
+            name: "Architecture",
+          },
+          {
+            id: "data-model",
+            name: "Data Model",
+          },
+          {
             id: "roadmap",
             name: "Roadmap",
           },
@@ -82,7 +90,7 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "query-and-get", name: "Query And Get" },
           { id: "metadata-filtering", name: "Metadata Filtering" },
-          { id: "full-text-search", name: "Full Text Search" },
+          { id: "full-text-search", name: "Full Text Search and Regex" },
         ],
       },
       {
@@ -100,7 +108,7 @@ const sidebarConfig: AppSection[] = [
     name: "Chroma Cloud",
     icon: CloudIcon,
     tag: "",
-    pages: [{ id: "getting-started", name: "Getting Started" }],
+    pages: [{ id: "getting-started", name: "Getting Started" }, { id: "pricing", name: "Pricing" }, { id: "quotas-limits", name: "Quotas & Limits" }],
   },
   {
     id: "production",

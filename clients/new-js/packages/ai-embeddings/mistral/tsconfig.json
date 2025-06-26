@@ -7,9 +7,19 @@
     "stripInternal": true,
     "composite": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "test", "**/*.test.ts"],
+  "include": [
+    "src/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "**/*.test.ts"
+  ],
   "references": [
+    {
+      "path": "../common"
+    },
     {
       "path": "../../chromadb"
     }

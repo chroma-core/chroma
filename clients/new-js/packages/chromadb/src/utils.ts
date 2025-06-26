@@ -312,9 +312,14 @@ export const validateBaseRecordSet = ({
   }
 };
 
-export const validateMaxBatchSize = (recordSetLength: number, maxBatchSize: number) => {
+export const validateMaxBatchSize = (
+  recordSetLength: number,
+  maxBatchSize: number,
+) => {
   if (recordSetLength > maxBatchSize) {
-    throw new ChromaValueError(`Record set length ${recordSetLength} exceeds max batch size ${maxBatchSize}`);
+    throw new ChromaValueError(
+      `Record set length ${recordSetLength} exceeds max batch size ${maxBatchSize}`,
+    );
   }
 };
 
@@ -330,7 +335,8 @@ export const validateWhere = (where: Where) => {
 
   if (Object.keys(where).length != 1) {
     throw new ChromaValueError(
-      `Expected 'where' to have exactly one operator, but got ${Object.keys(where).length
+      `Expected 'where' to have exactly one operator, but got ${
+        Object.keys(where).length
       }`,
     );
   }
@@ -561,16 +567,20 @@ const packEmbedding = (embedding: number[]): ArrayBuffer => {
   return buffer;
 };
 
-export const optionalEmbeddingsToBase64Bytes = (embeddings: number[][] | undefined) => {
+export const optionalEmbeddingsToBase64Bytes = (
+  embeddings: number[][] | undefined,
+) => {
   if (!embeddings) {
     return undefined;
   }
 
-  return embeddings.map(embedding => {
+  return embeddings.map((embedding) => {
     const buffer = packEmbedding(embedding);
 
     const uint8Array = new Uint8Array(buffer);
-    const binaryString = Array.from(uint8Array, byte => String.fromCharCode(byte)).join('');
+    const binaryString = Array.from(uint8Array, (byte) =>
+      String.fromCharCode(byte),
+    ).join("");
     return btoa(binaryString);
   });
 };

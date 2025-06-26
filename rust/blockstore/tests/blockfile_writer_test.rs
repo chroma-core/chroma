@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use chroma_blockstore::arrow::provider::ArrowBlockfileProvider;
+    use chroma_blockstore::arrow::provider::{ArrowBlockfileProvider, BlockfileReaderOptions};
     use chroma_blockstore::{
         BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
     };
@@ -271,7 +271,8 @@ mod tests {
             let ref_last_commit = ref_state.last_commit.as_ref().unwrap();
             let last_blockfile_id = state.last_blockfile_id.unwrap();
 
-            let reader = block_on(state.provider.read::<&str, &[u32]>(&last_blockfile_id)).unwrap();
+            let read_options = BlockfileReaderOptions::new(last_blockfile_id, "".to_string());
+            let reader = block_on(state.provider.read::<&str, &[u32]>(read_options)).unwrap();
 
             // Check count
             assert_eq!(block_on(reader.count()).unwrap(), ref_last_commit.len());

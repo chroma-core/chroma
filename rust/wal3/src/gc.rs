@@ -61,7 +61,7 @@ impl Garbage {
         throttle: &ThrottleOptions,
         snapshots: &dyn SnapshotCache,
         first_to_keep: LogPosition,
-    ) -> Result<Self, Error> {
+    ) -> Result<Option<Self>, Error> {
         let dropped_snapshots = manifest
             .snapshots
             .iter()
@@ -119,7 +119,11 @@ impl Garbage {
                 "setsums don't balance".to_string(),
             ))));
         }
-        Ok(ret)
+        if !first {
+            Ok(Some(ret))
+        } else {
+            Ok(None)
+        }
     }
 
     #[tracing::instrument(skip(storage), err(Display))]

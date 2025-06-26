@@ -65,6 +65,10 @@ fn default_m_spann() -> usize {
     64
 }
 
+fn default_space_spann() -> HnswSpace {
+    HnswSpace::L2
+}
+
 #[derive(Debug, Error)]
 pub enum DistributedSpannParametersFromSegmentError {
     #[error("Invalid metadata: {0}")]
@@ -117,7 +121,7 @@ pub struct InternalSpannConfiguration {
     #[serde(default = "default_num_centers_to_merge_to")]
     #[validate(range(max = 8))]
     pub num_centers_to_merge_to: u32,
-    #[serde(default)]
+    #[serde(default = "default_space_spann")]
     pub space: HnswSpace,
     #[serde(default = "default_construction_ef_spann")]
     #[validate(range(max = 200))]
@@ -141,8 +145,7 @@ impl Default for InternalSpannConfiguration {
 pub struct SpannConfiguration {
     pub search_nprobe: Option<u32>,
     pub write_nprobe: Option<u32>,
-    #[serde(default)]
-    pub space: HnswSpace,
+    pub space: Option<HnswSpace>,
     pub ef_construction: Option<usize>,
     pub ef_search: Option<usize>,
     pub max_neighbors: Option<usize>,
@@ -156,7 +159,7 @@ impl From<InternalSpannConfiguration> for SpannConfiguration {
         Self {
             search_nprobe: Some(config.search_nprobe),
             write_nprobe: Some(config.write_nprobe),
-            space: config.space,
+            space: Some(config.space),
             ef_construction: Some(config.ef_construction),
             ef_search: Some(config.ef_search),
             max_neighbors: Some(config.max_neighbors),
@@ -172,7 +175,7 @@ impl From<SpannConfiguration> for InternalSpannConfiguration {
         Self {
             search_nprobe: config.search_nprobe.unwrap_or(default_search_nprobe()),
             write_nprobe: config.write_nprobe.unwrap_or(default_write_nprobe()),
-            space: config.space,
+            space: config.space.unwrap_or(default_space_spann()),
             ef_construction: config
                 .ef_construction
                 .unwrap_or(default_construction_ef_spann()),
@@ -192,4 +195,12 @@ impl Default for SpannConfiguration {
     fn default() -> Self {
         InternalSpannConfiguration::default().into()
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+#[serde(deny_unknown_fields)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct UpdateSpannConfiguration {
+    pub search_nprobe: Option<u32>,
+    pub ef_search: Option<usize>,
 }

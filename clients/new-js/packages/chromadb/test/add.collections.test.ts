@@ -3,7 +3,9 @@ import { DOCUMENTS, EMBEDDINGS, IDS, METADATAS } from "./utils/data";
 import { ChromaClient } from "../src";
 
 describe("add collections", () => {
-  const client = new ChromaClient();
+  const client = new ChromaClient({
+    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+  });
 
   beforeEach(async () => {
     await client.reset();

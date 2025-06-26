@@ -4,6 +4,10 @@ use super::OneOffCompactMessage;
 use super::RebuildMessage;
 use crate::compactor::types::ScheduledCompactMessage;
 use crate::config::CompactionServiceConfig;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogError;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogInput;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogOutput;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use async_trait::async_trait;
@@ -18,8 +22,10 @@ use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
+use chroma_system::wrap;
 use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
+use chroma_system::TaskResult;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
 use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
@@ -58,6 +64,7 @@ pub(crate) struct CompactionManager {
     max_compaction_size: usize,
     max_partition_size: usize,
     fetch_log_batch_size: u32,
+    purge_dirty_log_timeout_seconds: u64,
     on_next_memberlist_signal: Option<oneshot::Sender<()>>,
 }
 
@@ -92,6 +99,7 @@ impl CompactionManager {
         max_compaction_size: usize,
         max_partition_size: usize,
         fetch_log_batch_size: u32,
+        purge_dirty_log_timeout_seconds: u64,
     ) -> Self {
         CompactionManager {
             system,
@@ -110,6 +118,7 @@ impl CompactionManager {
             max_partition_size,
             on_next_memberlist_signal: None,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         }
     }
 
@@ -187,13 +196,48 @@ impl CompactionManager {
     }
 
     #[instrument(name = "CompactionManager::rebuild_batch")]
-    pub(crate) async fn rebuild_batch(&mut self, collection_ids: Vec<CollectionUuid>) {
+    pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
         let _ = collection_ids
             .iter()
             .map(|id| self.compact(*id, true))
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
             .await;
+    }
+
+    #[instrument(name = "CompactionManager::purge_dirty_log", skip(ctx))]
+    pub(crate) async fn purge_dirty_log(&mut self, ctx: &ComponentContext<Self>) {
+        let deleted_collection_uuids = self.scheduler.drain_deleted_collections();
+        if deleted_collection_uuids.is_empty() {
+            tracing::info!("Skipping purge dirty log because there is no deleted collections");
+            return;
+        }
+        let purge_dirty_log = PurgeDirtyLog {
+            log_client: self.log.clone(),
+            timeout: Duration::from_secs(self.purge_dirty_log_timeout_seconds),
+        };
+        let purge_dirty_log_input = PurgeDirtyLogInput {
+            collection_uuids: deleted_collection_uuids.clone(),
+        };
+        let purge_dirty_log_task = wrap(
+            Box::new(purge_dirty_log),
+            purge_dirty_log_input,
+            ctx.receiver(),
+        );
+        let Some(mut dispatcher) = self.dispatcher.clone() else {
+            tracing::error!("Unable to create background task to purge dirty log: Dispatcher is not set for compaction manager");
+            return;
+        };
+        if let Err(err) = dispatcher
+            .send(purge_dirty_log_task, Some(Span::current()))
+            .await
+        {
+            tracing::error!("Unable to create background task to purge dirty log: {err}");
+            return;
+        };
+        tracing::info!(
+            "Purging dirty logs for deleted collections: [{deleted_collection_uuids:?}]",
+        );
     }
 
     pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
@@ -240,6 +284,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let max_compaction_size = config.compactor.max_compaction_size;
         let max_partition_size = config.compactor.max_partition_size;
         let fetch_log_batch_size = config.compactor.fetch_log_batch_size;
+        let purge_dirty_log_timeout_seconds = config.compactor.purge_dirty_log_timeout_seconds;
         let mut disabled_collections =
             HashSet::with_capacity(config.compactor.disabled_collections.len());
         for collection_id_str in &config.compactor.disabled_collections {
@@ -298,6 +343,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             max_compaction_size,
             max_partition_size,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         ))
     }
 }
@@ -342,6 +388,7 @@ impl Handler<ScheduledCompactMessage> for CompactionManager {
     ) {
         tracing::info!("CompactionManager: Performing scheduled compaction");
         let _ = self.compact_batch().await;
+        self.purge_dirty_log(ctx).await;
 
         // Compaction is done, schedule the next compaction
         ctx.scheduler.schedule(
@@ -382,7 +429,11 @@ impl Handler<RebuildMessage> for CompactionManager {
             "Rebuild started for collections: {:?}",
             message.collection_ids
         );
-        self.rebuild_batch(message.collection_ids).await;
+        self.rebuild_batch(&message.collection_ids).await;
+        tracing::info!(
+            "Rebuild completed for collections: {:?}",
+            message.collection_ids
+        );
     }
 }
 
@@ -396,6 +447,21 @@ impl Handler<Memberlist> for CompactionManager {
             if let Err(e) = on_next_memberlist_update.send(()) {
                 tracing::error!("Failed to send on_next_memberlist_update: {:?}", e);
             }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        if let Err(err) = message.into_inner() {
+            tracing::error!("Error when purging dirty log: {err}");
         }
     }
 }
@@ -618,6 +684,7 @@ mod tests {
         let max_compaction_size = 1000;
         let max_partition_size = 1000;
         let fetch_log_batch_size = 100;
+        let purge_dirty_log_timeout_seconds = 60;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
@@ -682,6 +749,7 @@ mod tests {
             max_compaction_size,
             max_partition_size,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         );
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
@@ -709,11 +777,7 @@ mod tests {
             let metadata = entry.metadata().await.expect("Failed to read metadata");
 
             if metadata.is_dir() {
-                assert!(
-                    path.ends_with("hnsw")
-                        || path.ends_with("block")
-                        || path.ends_with("sparse_index")
-                );
+                assert!(path.ends_with("tenant"));
             } else {
                 panic!("Expected hnsw purge to be successful")
             }

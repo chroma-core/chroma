@@ -4,7 +4,11 @@ import { AdminClient, CloudClient } from "../src";
 describe("AdminClient", () => {
   // connects to the unauthenticated chroma instance started in
   // the global jest setup file.
-  const adminClient = new AdminClient();
+  const adminClient = new AdminClient({
+    host: process.env.DEFAULT_CHROMA_INSTANCE_HOST || "localhost",
+    port: parseInt(process.env.DEFAULT_CHROMA_INSTANCE_PORT || "8000"),
+    ssl: false,
+  });
 
   test("it should create the admin client connection", async () => {
     expect(adminClient).toBeDefined();

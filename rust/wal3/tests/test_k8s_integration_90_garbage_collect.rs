@@ -42,7 +42,7 @@ async fn test_k8s_integration_90_garbage_collect() {
     }
 
     let res = log
-        .garbage_collect(&GarbageCollectionOptions::default())
+        .garbage_collect(&GarbageCollectionOptions::default(), None)
         .await;
     assert!(matches!(res, Err(Error::NoSuchCursor(_))));
 
@@ -64,7 +64,7 @@ async fn test_k8s_integration_90_garbage_collect() {
         .await
         .unwrap();
 
-    log.garbage_collect(&GarbageCollectionOptions::default())
+    log.garbage_collect(&GarbageCollectionOptions::default(), None)
         .await
         .unwrap();
 
@@ -81,7 +81,7 @@ async fn test_k8s_integration_90_garbage_collect() {
         .await
         .unwrap();
 
-    log.garbage_collect(&GarbageCollectionOptions::default())
+    log.garbage_collect(&GarbageCollectionOptions::default(), None)
         .await
         .unwrap();
 }

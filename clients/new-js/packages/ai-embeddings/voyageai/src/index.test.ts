@@ -10,7 +10,7 @@ describe("VoyageAIEmbeddingFunction", () => {
 
   const defaultParametersTest = "should initialize with default parameters";
   if (!process.env.VOYAGE_API_KEY) {
-    it.skip(defaultParametersTest, () => {});
+    it.skip(defaultParametersTest, () => { });
   } else {
     it(defaultParametersTest, () => {
       const embedder = new VoyageAIEmbeddingFunction({ modelName: MODEL });
@@ -24,7 +24,7 @@ describe("VoyageAIEmbeddingFunction", () => {
 
   const customParametersTest = "should initialize with custom parameters";
   if (!process.env.VOYAGE_API_KEY) {
-    it.skip(customParametersTest, () => {});
+    it.skip(customParametersTest, () => { });
   } else {
     it(customParametersTest, () => {
       const embedder = new VoyageAIEmbeddingFunction({
@@ -70,12 +70,13 @@ describe("VoyageAIEmbeddingFunction", () => {
 
   const buildFromConfigTest = "should build from config";
   if (!process.env.VOYAGE_API_KEY) {
-    it.skip(buildFromConfigTest, () => {});
+    it.skip(buildFromConfigTest, () => { });
   } else {
     it(buildFromConfigTest, () => {
       const config = {
         api_key_env_var: "VOYAGE_API_KEY",
         model_name: "config-model",
+        truncation: true,
       };
 
       const embedder = VoyageAIEmbeddingFunction.buildFromConfig(config);
@@ -85,7 +86,7 @@ describe("VoyageAIEmbeddingFunction", () => {
 
     const generateEmbeddingsTest = "should generate embeddings";
     if (!process.env.VOYAGE_API_KEY) {
-      it.skip(generateEmbeddingsTest, () => {});
+      it.skip(generateEmbeddingsTest, () => { });
     } else {
       it(generateEmbeddingsTest, async () => {
         const embedder = new VoyageAIEmbeddingFunction({ modelName: MODEL });

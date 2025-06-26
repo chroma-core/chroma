@@ -1,3 +1,6 @@
+use crate::operators::truncate_dirty_log::{
+    TruncateDirtyLogError, TruncateDirtyLogOperator, TruncateDirtyLogOutput,
+};
 use crate::types::CleanupMode;
 use crate::{config::GarbageCollectorConfig, types::GarbageCollectorResponse};
 use async_trait::async_trait;
@@ -10,7 +13,8 @@ use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
 use chroma_sysdb::{CollectionToGcInfo, SysDb, SysDbConfig};
 use chroma_system::{
-    Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    TaskResult,
 };
 use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
@@ -223,6 +227,26 @@ impl GarbageCollector {
             )],
         );
         Ok(result)
+    }
+
+    async fn truncate_dirty_log(&self, ctx: &ComponentContext<Self>) {
+        let Some(mut dispatcher) = self.dispatcher.as_ref().cloned() else {
+            tracing::error!("Uninitialized dispatcher for garbage collector");
+            return;
+        };
+        let truncate_dirty_log_task = wrap(
+            Box::new(TruncateDirtyLogOperator {
+                storage: self.storage.clone(),
+            }),
+            (),
+            ctx.receiver(),
+        );
+        if let Err(err) = dispatcher
+            .send(truncate_dirty_log_task, Some(Span::current()))
+            .await
+        {
+            tracing::error!("Unable to dispatch truncate dirty log task: {err}");
+        }
     }
 }
 
@@ -452,6 +476,9 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             }
         };
 
+        tracing::info!("Garbage collecting dirty log");
+        self.truncate_dirty_log(ctx).await;
+
         // Schedule next run
         ctx.scheduler.schedule(
             GarbageCollectMessage {
@@ -468,6 +495,21 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             num_skipped_jobs,
             num_hard_deleted_databases: num_hard_deleted_databases as u32,
         };
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<TruncateDirtyLogOutput, TruncateDirtyLogError>> for GarbageCollector {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<TruncateDirtyLogOutput, TruncateDirtyLogError>,
+        _ctx: &ComponentContext<Self>,
+    ) {
+        if let Err(err) = message.into_inner() {
+            tracing::error!("Failed to truncate dirty log: {err}");
+        }
     }
 }
 

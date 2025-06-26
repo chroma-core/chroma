@@ -274,6 +274,7 @@ impl Bindings {
             Some(c) => Some(InternalCollectionConfiguration::try_from_config(
                 c,
                 self.frontend.get_default_knn_index(),
+                metadata.clone(),
             )?),
             None => Some(InternalCollectionConfiguration::try_from_config(
                 CollectionConfiguration {
@@ -282,6 +283,7 @@ impl Bindings {
                     embedding_function: None,
                 },
                 self.frontend.get_default_knn_index(),
+                metadata.clone(),
             )?),
         };
 
