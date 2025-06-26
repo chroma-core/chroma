@@ -264,7 +264,7 @@ From the above - you can see that our query about `hawaii` is semantically most 
 
 ### 7. Try it out yourself
 
-For example - what if we tried querying with `"This is a document about florida"`?
+What if we tried querying with `"This is a document about florida"`? Here is a full example.
 
 {% TabbedCodeBlock %}
 

@@ -68,7 +68,7 @@ const sidebarConfig: AppSection[] = [
         id: "collections",
         name: "Collections",
         pages: [
-          { id: "create-get-delete", name: "Create, Get, Delete" },
+          { id: "manage-collections", name: "Manage Collections" },
           { id: "configure", name: "Configure" },
           { id: "add-data", name: "Add Data" },
           { id: "update-data", name: "Update Data" },
