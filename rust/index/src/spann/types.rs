@@ -39,6 +39,8 @@ use crate::{
 
 use super::utils::{rng_query, KMeansAlgorithmInput, KMeansError, RngQueryError};
 
+const PL_BLOCK_SIZE: usize = 5 * 1024 * 1024; // 5 MiB
+
 #[derive(Clone, Debug)]
 pub struct VersionsMapInner {
     pub versions_map: HashMap<u32, u32>,
@@ -573,7 +575,8 @@ impl SpannIndexWriter {
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
-        let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string());
+        let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string())
+            .max_block_size_bytes(PL_BLOCK_SIZE);
         bf_options = bf_options.unordered_mutations();
         match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)

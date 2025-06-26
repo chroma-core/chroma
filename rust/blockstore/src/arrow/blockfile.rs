@@ -62,11 +62,17 @@ impl ArrowUnorderedBlockfileWriter {
         prefix_path: &str,
         block_manager: BlockManager,
         root_manager: RootManager,
+        max_block_size_bytes: usize,
     ) -> Self {
         let initial_block = block_manager.create::<K, V, UnorderedBlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
-        let root_writer =
-            RootWriter::new(CURRENT_VERSION, id, sparse_index, prefix_path.to_string());
+        let root_writer = RootWriter::new(
+            CURRENT_VERSION,
+            id,
+            sparse_index,
+            prefix_path.to_string(),
+            max_block_size_bytes,
+        );
 
         let block_deltas = Arc::new(Mutex::new(HashMap::new()));
         {
@@ -195,8 +201,8 @@ impl ArrowUnorderedBlockfileWriter {
             // Then check if its over size and split as needed
             delta.add(prefix, key, value);
 
-            if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
-                let new_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
+            if delta.get_size::<K, V>() > self.root.max_block_size_bytes {
+                let new_blocks = delta.split::<K, V>(self.root.max_block_size_bytes);
                 // First add to deltas before making it visible through the sparse index.
                 // This prevents dangling references.
                 let blocks_to_add = {
@@ -248,10 +254,10 @@ impl ArrowUnorderedBlockfileWriter {
             // Then check if its over size and split as needed
             new_delta.add(prefix, key, value);
 
-            if new_delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
+            if new_delta.get_size::<K, V>() > self.root.max_block_size_bytes {
                 // First add to deltas before making it visible through the sparse index.
                 // This prevents dangling references.
-                let new_blocks = new_delta.split::<K, V>(self.block_manager.max_block_size_bytes());
+                let new_blocks = new_delta.split::<K, V>(self.root.max_block_size_bytes);
                 let (blocks_to_add, blocks_to_replace) = {
                     let mut blocks_to_add = Vec::with_capacity(new_blocks.len());
                     let mut deltas = self.block_deltas.lock();
@@ -777,7 +783,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
                 .await
             {
                 Ok(Some(block)) => {
-                    if block.get_size() > self.block_manager.max_block_size_bytes() {
+                    if block.get_size() > self.root.max_block_size_bytes {
                         return false;
                     }
                 }
@@ -2059,8 +2065,14 @@ mod tests {
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let file_id = Uuid::new_v4();
         let prefix_path = "";
-        let root_writer =
-            RootWriter::new(Version::V1, file_id, sparse_index, prefix_path.to_string());
+        let max_block_size_bytes = 8 * 1024 * 1024; // 8 MB
+        let root_writer = RootWriter::new(
+            Version::V1,
+            file_id,
+            sparse_index,
+            prefix_path.to_string(),
+            max_block_size_bytes,
+        );
 
         let block_deltas = Arc::new(Mutex::new(HashMap::new()));
         {
@@ -2092,7 +2104,7 @@ mod tests {
 
         // Get the RootReader and verify the counts
         let root_reader = root_manager
-            .get::<&str>(&file_id, prefix_path)
+            .get::<&str>(&file_id, prefix_path, max_block_size_bytes)
             .await
             .unwrap()
             .unwrap();
@@ -2145,11 +2157,13 @@ mod tests {
             .unwrap();
         let first_write_id = Uuid::new_v4();
         let prefix_path = "";
+        let max_block_size_bytes = 8 * 1024 * 1024; // 8 MB
         let old_root_writer = RootWriter::new(
             Version::V1,
             first_write_id,
             sparse_index,
             prefix_path.to_string(),
+            max_block_size_bytes,
         );
 
         // Flush the blocks and the root
@@ -2251,7 +2265,7 @@ mod tests {
             _ => panic!("Unexpected reader type"),
         };
 
-        assert_eq!(reader.root.version, Version::V1_1);
+        assert_eq!(reader.root.version, Version::V1_2);
         assert_eq!(reader.root.sparse_index.len(), 2);
 
         // Manually verify sparse index counts
