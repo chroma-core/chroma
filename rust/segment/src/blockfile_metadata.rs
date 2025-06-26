@@ -21,6 +21,7 @@ use chroma_types::F32_METADATA;
 use chroma_types::FULL_TEXT_PLS;
 use chroma_types::STRING_METADATA;
 use chroma_types::U32_METADATA;
+use chroma_types::{CollectionSchema, ValueType};
 use chroma_types::{MaterializedLogOperation, MetadataValue, Segment, SegmentUuid};
 use core::panic;
 use roaring::RoaringBitmap;
@@ -37,6 +38,7 @@ pub struct MetadataSegmentWriter<'me> {
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub id: SegmentUuid,
+    pub schema: Option<HashMap<String, HashMap<ValueType, CollectionSchema>>>,
 }
 
 impl Debug for MetadataSegmentWriter<'_> {
@@ -102,6 +104,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         database_id: &DatabaseUuid,
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
+        schema: Option<HashMap<String, HashMap<ValueType, CollectionSchema>>>,
     ) -> Result<MetadataSegmentWriter<'me>, MetadataSegmentError> {
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
@@ -316,6 +319,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             f32_metadata_index_writer: Some(f32_metadata_index_writer),
             u32_metadata_index_writer: Some(u32_metadata_index_writer),
             id: segment.id,
+            schema,
         })
     }
 
@@ -325,6 +329,37 @@ impl<'me> MetadataSegmentWriter<'me> {
         key: &MetadataValue,
         offset_id: u32,
     ) -> Result<(), MetadataIndexError> {
+        let mut should_index = true;
+        if let Some(schema) = &self.schema {
+            let schema_key = prefix;
+            if let Some(value_type_map) = schema.get(schema_key) {
+                match key {
+                    MetadataValue::Str(_) => {
+                        if let Some(value_type_map) = value_type_map.get(&ValueType::String) {
+                            should_index = value_type_map.metadata_index;
+                        }
+                    }
+                    MetadataValue::Int(_) => {
+                        if let Some(value_type_map) = value_type_map.get(&ValueType::Int) {
+                            should_index = value_type_map.metadata_index;
+                        }
+                    }
+                    MetadataValue::Float(_) => {
+                        if let Some(value_type_map) = value_type_map.get(&ValueType::Float) {
+                            should_index = value_type_map.metadata_index;
+                        }
+                    }
+                    MetadataValue::Bool(_) => {
+                        if let Some(value_type_map) = value_type_map.get(&ValueType::Boolean) {
+                            should_index = value_type_map.metadata_index;
+                        }
+                    }
+                }
+            }
+        }
+        if !should_index {
+            return Ok(());
+        }
         match key {
             MetadataValue::Str(v) => {
                 match &self.string_metadata_index_writer {
@@ -391,6 +426,37 @@ impl<'me> MetadataSegmentWriter<'me> {
         key: &MetadataValue,
         offset_id: u32,
     ) -> Result<(), MetadataIndexError> {
+        let mut should_index = true;
+        if let Some(schema) = &self.schema {
+            let schema_key = prefix;
+            if let Some(value_type_map) = schema.get(schema_key) {
+                match key {
+                    MetadataValue::Str(_) => {
+                        if let Some(value_type_map) = value_type_map.get(&ValueType::String) {
+                            should_index = value_type_map.metadata_index;
+                        }
+                    }
+                    MetadataValue::Int(_) => {
+                        if let Some(value_type_map) = value_type_map.get(&ValueType::Int) {
+                            should_index = value_type_map.metadata_index;
+                        }
+                    }
+                    MetadataValue::Float(_) => {
+                        if let Some(value_type_map) = value_type_map.get(&ValueType::Float) {
+                            should_index = value_type_map.metadata_index;
+                        }
+                    }
+                    MetadataValue::Bool(_) => {
+                        if let Some(value_type_map) = value_type_map.get(&ValueType::Boolean) {
+                            should_index = value_type_map.metadata_index;
+                        }
+                    }
+                }
+            }
+        }
+        if !should_index {
+            return Ok(());
+        }
         match key {
             MetadataValue::Str(v) => {
                 match &self.string_metadata_index_writer {
@@ -1063,6 +1129,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1202,6 +1269,7 @@ mod test {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1291,6 +1359,7 @@ mod test {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1388,6 +1457,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1530,6 +1600,7 @@ mod test {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1658,6 +1729,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1773,6 +1845,7 @@ mod test {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1897,6 +1970,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2001,6 +2075,7 @@ mod test {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -2124,6 +2199,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");

@@ -682,6 +682,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     &collection.database_id,
                     &metadata_segment,
                     &self.blockfile_provider,
+                    collection.config.schema.clone(),
                 )
                 .await,
                 ctx,
