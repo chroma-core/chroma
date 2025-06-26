@@ -1467,6 +1467,131 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_splitting_with_custom_blocksize() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let prefix_path = String::from("");
+        let custom_block_size = 100 * 1024 * 1024; // 100 MiB
+        let writer = blockfile_provider
+            .write::<&str, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone())
+                    .max_block_size_bytes(custom_block_size),
+            )
+            .await
+            .unwrap();
+        let id_1 = writer.id();
+
+        let n = 1200;
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = vec![i];
+            writer.set("key", key.as_str(), value).await.unwrap();
+        }
+
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
+        flusher.flush::<&str, Vec<u32>>().await.unwrap();
+
+        let read_options = BlockfileReaderOptions::new(id_1, prefix_path.clone());
+        let reader = blockfile_provider
+            .read::<&str, &[u32]>(read_options)
+            .await
+            .unwrap();
+
+        for i in 0..n {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).await.unwrap().unwrap();
+            assert_eq!(value, [i]);
+        }
+
+        // Sparse index should have 1 block
+        match &reader {
+            crate::BlockfileReader::ArrowBlockfileReader(reader) => {
+                assert_eq!(reader.root.sparse_index.len(), 1);
+                assert!(reader.root.sparse_index.is_valid());
+            }
+            _ => panic!("Unexpected reader type"),
+        }
+
+        // Add 5 new entries to the first block
+        let writer = blockfile_provider
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()).fork(id_1))
+            .await
+            .unwrap();
+        let id_2 = writer.id();
+        for i in 0..5 {
+            let key = format!("{:05}", i);
+            let value = vec![i];
+            writer.set("key", key.as_str(), value).await.unwrap();
+        }
+
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
+        flusher.flush::<&str, Vec<u32>>().await.unwrap();
+
+        let read_options = BlockfileReaderOptions::new(id_2, prefix_path.clone());
+        let reader = blockfile_provider
+            .read::<&str, &[u32]>(read_options)
+            .await
+            .unwrap();
+        for i in 0..5 {
+            let key = format!("{:05}", i);
+            println!("Getting key: {}", key);
+            let value = reader.get("key", &key).await.unwrap().unwrap();
+            assert_eq!(value, [i]);
+        }
+
+        // Sparse index should still have 1 block
+        match &reader {
+            crate::BlockfileReader::ArrowBlockfileReader(reader) => {
+                assert_eq!(reader.root.sparse_index.len(), 1);
+                assert!(reader.root.sparse_index.is_valid());
+            }
+            _ => panic!("Unexpected reader type"),
+        }
+
+        // Add 1200 more entries, still 1 block
+        let writer = blockfile_provider
+            .write::<&str, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()).fork(id_2))
+            .await
+            .unwrap();
+        let id_3 = writer.id();
+        for i in n..n * 2 {
+            let key = format!("{:04}", i);
+            let value = vec![i];
+            writer.set("key", key.as_str(), value).await.unwrap();
+        }
+        let flusher = writer.commit::<&str, Vec<u32>>().await.unwrap();
+        flusher.flush::<&str, Vec<u32>>().await.unwrap();
+
+        let read_options = BlockfileReaderOptions::new(id_3, prefix_path);
+        let reader = blockfile_provider
+            .read::<&str, &[u32]>(read_options)
+            .await
+            .unwrap();
+        for i in n..n * 2 {
+            let key = format!("{:04}", i);
+            let value = reader.get("key", &key).await.unwrap().unwrap();
+            assert_eq!(value, [i]);
+        }
+
+        // Sparse index should have 1 block
+        match &reader {
+            crate::BlockfileReader::ArrowBlockfileReader(reader) => {
+                assert_eq!(reader.root.sparse_index.len(), 1);
+                assert!(reader.root.sparse_index.is_valid());
+            }
+            _ => panic!("Unexpected reader type"),
+        }
+    }
+
+    #[tokio::test]
     async fn test_splitting_boundary() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
@@ -2058,7 +2183,7 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let root_manager = RootManager::new(storage.clone(), root_cache);
-        let block_manager = BlockManager::new(storage.clone(), 8 * 1024 * 1024, block_cache);
+        let block_manager = BlockManager::new(storage.clone(), 16384, block_cache);
 
         // Manually create a v1 blockfile with no counts
         let initial_block = block_manager.create::<&str, String, UnorderedBlockDelta>();

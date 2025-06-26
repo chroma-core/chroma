@@ -21,7 +21,7 @@ use std::{
 use thiserror::Error;
 use uuid::Uuid;
 
-pub(super) const CURRENT_VERSION: Version = Version::V1_1;
+pub(super) const CURRENT_VERSION: Version = Version::V1_2;
 
 // ================
 // Version
@@ -558,8 +558,9 @@ mod test {
         let bytes = root_writer
             .to_bytes::<&str>()
             .expect("To be able to serialize");
+        // Try a different max_block_size_bytes but it should read from the metadata.
         let root_reader =
-            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, max_block_size_bytes)
+            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, 4 * 1024 * 1024)
                 .expect("To be able to deserialize");
 
         // Check that the sparse index is the same
@@ -593,6 +594,112 @@ mod test {
 
         assert_eq!(root_writer.version, root_reader.version);
         assert_eq!(root_writer.id, root_reader.id);
+        assert_eq!(
+            root_writer.max_block_size_bytes,
+            root_reader.max_block_size_bytes
+        );
+    }
+
+    #[test]
+    fn test_to_from_bytes_fork() {
+        let block_ids = [
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        ];
+        let sparse_index = SparseIndexWriter::new(block_ids[0]);
+
+        let bf_id = Uuid::new_v4();
+        let prefix_path = "";
+        let max_block_size_bytes = 8 * 1024 * 1024; // 8 MiB
+        let root_writer = RootWriter::new(
+            CURRENT_VERSION,
+            bf_id,
+            sparse_index,
+            prefix_path.to_string(),
+            max_block_size_bytes,
+        );
+
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "a"), block_ids[1])
+            .expect("No error");
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "b"), block_ids[2])
+            .expect("No error");
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "c"), block_ids[3])
+            .expect("No error");
+
+        root_writer
+            .sparse_index
+            .set_count(block_ids[0], 1)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[1], 2)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[2], 3)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[3], 4)
+            .expect("Set count should succeed");
+
+        let bytes = root_writer
+            .to_bytes::<&str>()
+            .expect("To be able to serialize");
+        // Try a different max_block_size_bytes but it should read from the metadata.
+        let root_reader =
+            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, 4 * 1024 * 1024)
+                .expect("To be able to deserialize");
+        let fork_root_writer = root_reader.fork(Uuid::new_v4());
+
+        // Check that the sparse index is the same
+        assert_eq!(
+            root_writer.sparse_index.len(),
+            fork_root_writer.sparse_index.len()
+        );
+
+        // Check that the block mapping is the same
+        for (key, value) in root_writer.sparse_index.data.lock().forward.iter() {
+            assert_eq!(
+                fork_root_writer
+                    .sparse_index
+                    .data
+                    .lock()
+                    .forward
+                    .get(key)
+                    .unwrap(),
+                value
+            );
+        }
+
+        // Check that counts are the same
+        let writer_data = &root_writer.sparse_index.data.lock();
+        for (key, _) in writer_data.forward.iter() {
+            assert_eq!(
+                fork_root_writer
+                    .sparse_index
+                    .data
+                    .lock()
+                    .counts
+                    .get(key)
+                    .unwrap(),
+                writer_data.counts.get(key).unwrap()
+            );
+        }
+
+        assert_eq!(root_writer.version, fork_root_writer.version);
+        assert_eq!(
+            root_writer.max_block_size_bytes,
+            fork_root_writer.max_block_size_bytes
+        );
     }
 
     #[test]
@@ -614,13 +721,13 @@ mod test {
         let prefix_path = "";
 
         let bf_id = Uuid::new_v4();
-        let max_block_size_bytes = 8 * 1024 * 1024; // 8 MiB
+        let writer_max_block_size_bytes = 8 * 1024 * 1024; // 8 MiB
         let root_writer = RootWriter::new(
             Version::V1,
             bf_id,
             sparse_index,
             prefix_path.to_string(),
-            max_block_size_bytes,
+            writer_max_block_size_bytes,
         );
         root_writer
             .sparse_index
@@ -641,8 +748,9 @@ mod test {
             .to_bytes::<&str>()
             .expect("To be able to serialize");
 
+        let reader_block_size_bytes = 4 * 1024 * 1024; // 4 MiB
         let root_reader =
-            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, max_block_size_bytes)
+            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, reader_block_size_bytes)
                 .expect("To be able to deserialize");
 
         // Check the version is still v1
@@ -661,5 +769,6 @@ mod test {
                 0
             );
         }
+        assert_eq!(root_reader.max_block_size_bytes, reader_block_size_bytes);
     }
 }
