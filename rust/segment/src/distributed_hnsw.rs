@@ -435,6 +435,7 @@ pub mod test {
                 ),
                 embedding_function: None,
                 query_config: None,
+                schema: None,
             },
             ..Default::default()
         };

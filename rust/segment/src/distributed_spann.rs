@@ -657,6 +657,7 @@ mod test {
                 vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
                 embedding_function: None,
                 query_config: None,
+                schema: None,
             },
             metadata: None,
             dimension: None,
@@ -887,6 +888,7 @@ mod test {
                 vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
                 embedding_function: None,
                 query_config: None,
+                schema: None,
             },
             ..Default::default()
         };
