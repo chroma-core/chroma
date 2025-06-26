@@ -278,14 +278,14 @@ fn bench_spann_compaction(c: &mut Criterion) {
                     "Added 9000 records to spann segment in {:?} ms",
                     start_time.elapsed().as_millis()
                 );
-                // println!("Getting recall on 1000 records");
-                // calculate_recall(
-                //     &runtime,
-                //     reader,
-                //     &records[9000..10000],
-                //     &records[0..9000],
-                //     deleted_set,
-                // );
+                println!("Getting recall on 1000 records");
+                calculate_recall(
+                    &runtime,
+                    reader,
+                    &records[9000..10000],
+                    &records[0..9000],
+                    deleted_set,
+                );
             })
         },
     );

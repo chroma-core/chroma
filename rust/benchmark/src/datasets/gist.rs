@@ -23,7 +23,7 @@ impl RecordDataset for GistDataset {
     async fn init() -> Result<Self> {
         // TODO(Sanket): Download file if it doesn't exist.
         // move file from downloads to cached path.
-        let current_path = "/Users/hammad/Downloads/siftsmall/siftsmall_base.fvecs";
+        let current_path = "/Users/sanketkedia/Downloads/siftsmall/siftsmall_base.fvecs";
         let base_file_path = get_or_populate_cached_dataset_file(
             "gist",
             "siftsmall_base.fvecs",
