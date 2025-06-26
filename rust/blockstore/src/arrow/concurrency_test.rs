@@ -27,9 +27,10 @@ mod tests {
             // race condition outside the cache.
             let block_cache = new_cache_for_test();
             let sparse_index_cache = new_cache_for_test();
+            let max_block_size_bytes = 500;
             let blockfile_provider = ArrowBlockfileProvider::new(
                 storage,
-                TEST_MAX_BLOCK_SIZE_BYTES,
+                max_block_size_bytes,
                 block_cache,
                 sparse_index_cache,
             );
@@ -46,6 +47,7 @@ mod tests {
             // Make the max threads the number of cores * 2
             let max_threads = num_cpus::get() * 2;
             let t = shuttle::rand::thread_rng().gen_range(2..max_threads);
+            println!("Writing {} keys with {} threads", n, t);
             let mut join_handles = Vec::with_capacity(t);
             for i in 0..t {
                 let range_start = i * n / t;
