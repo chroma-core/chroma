@@ -1,6 +1,8 @@
+import math
 from typing import Optional, cast, List
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import GetResult, OneOrMany, Include, Where, WhereDocument, ID
+from chromadb.test.constants import MAX_DOCUMENTS
 
 def paginated_get(
     collection: Collection,
@@ -34,7 +36,10 @@ def paginated_get(
     if "data" in include:
         result["data"] = []
 
-    while len(result["ids"]) < total_documents:
+    max_iterations = math.ceil(MAX_DOCUMENTS / limit) # SAFETY(c-gamble): prevents infinite loops
+    current_iteration = 0
+
+    while len(result["ids"]) < total_documents and current_iteration < max_iterations:
         batch = collection.get(
             ids=ids,
             where=where,
@@ -53,5 +58,6 @@ def paginated_get(
                     raise ValueError(f"Unexpected None result[{field}] during pagination.")
                 cast(List, result[field]).extend(batch_field)
         offset += limit
+        current_iteration += 1
 
     return result
