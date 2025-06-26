@@ -16,7 +16,7 @@ use chroma_memberlist::memberlist_provider::{
 };
 use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
-use chroma_types::chroma_proto::{self};
+use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
 use chroma_types::{
     CollectionUuid, ForkLogsResponse, LogRecord, OperationRecord, RecordConversionError,
 };
@@ -617,13 +617,17 @@ impl GrpcLog {
                 }
             };
         };
-
         if let Some(status) = error {
             if combined_response.is_empty() {
                 return Err(status.into());
             }
         }
+        Self::post_process_get_all(combined_response)
+    }
 
+    fn post_process_get_all(
+        combined_response: Vec<GetAllCollectionInfoToCompactResponse>,
+    ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
         let mut all_collections = Vec::new();
         for response in combined_response {
             let collections = response.all_collection_info;
@@ -646,6 +650,14 @@ impl GrpcLog {
                 });
             }
         }
+
+        // NOTE(rescrv):  What we want is to return each collection once.  If there are two of the
+        // same collection, assume that the older offset is correct.  In the event that a writer
+        // migrates from one server to another the dirty log entries will be fractured between two
+        // servers.  To not panic the compactor, we sort by (collection_id, offset) and then dedup.
+        all_collections.sort_by_key(|x| (x.collection_id, x.first_log_offset));
+        all_collections.dedup_by_key(|x| x.collection_id);
+
         Ok(all_collections)
     }
 
@@ -759,6 +771,7 @@ impl GrpcLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chroma_types::chroma_proto::CollectionInfo as ProtoCollectionInfo;
 
     #[test]
     fn client_is_on_alt_log() {
@@ -782,5 +795,33 @@ mod tests {
             CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
             Some("ffffffff-ffff-ffff-ffff-ffffffffffff"),
         ));
+    }
+
+    #[test]
+    fn post_process_get_all_returns_smaller_first_log_offset() {
+        let collection_id = "12345678-1234-1234-1234-123456789abc";
+
+        let response1 = GetAllCollectionInfoToCompactResponse {
+            all_collection_info: vec![ProtoCollectionInfo {
+                collection_id: collection_id.to_string(),
+                first_log_offset: 100,
+                first_log_ts: 1000,
+            }],
+        };
+
+        let response2 = GetAllCollectionInfoToCompactResponse {
+            all_collection_info: vec![ProtoCollectionInfo {
+                collection_id: collection_id.to_string(),
+                first_log_offset: 50,
+                first_log_ts: 2000,
+            }],
+        };
+
+        let combined_response = vec![response1, response2];
+        let result = GrpcLog::post_process_get_all(combined_response).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].first_log_offset, 50);
+        assert_eq!(result[0].collection_id.to_string(), collection_id);
     }
 }

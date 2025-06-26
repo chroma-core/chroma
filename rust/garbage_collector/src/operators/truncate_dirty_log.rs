@@ -80,6 +80,12 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
                 .await
             {
                 Ok(()) => Ok(()),
+                Err(wal3::Error::NoSuchCursor(_)) => {
+                    tracing::warn!(
+                        "dirty log has no cursor; this should not happen in steady state"
+                    );
+                    Ok(())
+                }
                 Err(err) => {
                     tracing::error!("Unable to garbage collect dirty log: {err}");
                     Err(TruncateDirtyLogError::Wal3(err))

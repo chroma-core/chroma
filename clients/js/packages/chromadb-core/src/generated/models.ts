@@ -228,7 +228,7 @@ export namespace Api {
      * @memberof HnswConfiguration
      */
     resize_factor?: number | null;
-    space?: Api.HnswSpace;
+    space?: Api.HnswSpace | null;
     /**
      * @type {number | null}
      * @memberof HnswConfiguration
@@ -317,7 +317,7 @@ export namespace Api {
      * minimum: 0
      */
     search_nprobe?: number | null;
-    space?: Api.HnswSpace;
+    space?: Api.HnswSpace | null;
     /**
      * @type {number | null}
      * @memberof SpannConfiguration
@@ -335,7 +335,7 @@ export namespace Api {
   export interface UpdateCollectionConfiguration {
     embedding_function?: Api.EmbeddingFunctionConfiguration | null;
     hnsw?: Api.UpdateHnswConfiguration | null;
-    spann?: Api.SpannConfiguration | null;
+    spann?: Api.UpdateSpannConfiguration | null;
   }
 
   export interface UpdateCollectionPayload {
@@ -398,6 +398,21 @@ export namespace Api {
      * minimum: 0
      */
     sync_threshold?: number | null;
+  }
+
+  export interface UpdateSpannConfiguration {
+    /**
+     * @type {number | null}
+     * @memberof UpdateSpannConfiguration
+     * minimum: 0
+     */
+    ef_search?: number | null;
+    /**
+     * @type {number | null}
+     * @memberof UpdateSpannConfiguration
+     * minimum: 0
+     */
+    search_nprobe?: number | null;
   }
 
   export interface UpsertCollectionRecordsPayload {
