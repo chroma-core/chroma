@@ -9,6 +9,7 @@ use chroma_types::{Collection, GetUserIdentityResponse};
 use serde::Serialize;
 
 #[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AuthzAction {
     Reset,
     CreateTenant,
@@ -149,7 +150,7 @@ mod tests {
     fn test_serialize_authz_action() {
         let action = AuthzAction::DeleteCollection;
         let json = to_value(action).unwrap();
-        assert_eq!(json, json!("DeleteCollection"));
+        assert_eq!(json, json!("delete_collection"));
     }
 
     #[test]
