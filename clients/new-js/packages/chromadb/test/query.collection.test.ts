@@ -18,7 +18,9 @@ class TestEmbeddingFunction implements EmbeddingFunction {
 describe("query records", () => {
   // connects to the unauthenticated chroma instance started in
   // the global jest setup file.
-  const client = new ChromaClient();
+  const client = new ChromaClient({
+    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+  });
 
   beforeEach(async () => {
     await client.reset();
@@ -262,7 +264,9 @@ describe("query records", () => {
 });
 
 describe("id filtering", () => {
-  const client = new ChromaClient();
+  const client = new ChromaClient({
+    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+  });
 
   beforeEach(async () => {
     await client.reset();

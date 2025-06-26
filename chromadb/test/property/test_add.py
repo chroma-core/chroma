@@ -21,6 +21,32 @@ from chromadb.utils.batch_utils import create_batches
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
 
+@given(
+    collection=collection_st,
+    record_set=strategies.recordsets(collection_st, min_size=1, max_size=5),
+)
+@settings(
+    deadline=None,
+    parent=override_hypothesis_profile(
+        normal=hypothesis.settings(max_examples=500),
+        fast=hypothesis.settings(max_examples=200),
+    ),
+    max_examples=2
+)
+def test_add_miniscule(
+    client: ClientAPI,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+) -> None:
+    if (
+        client.get_settings().chroma_api_impl
+        == "chromadb.api.async_fastapi.AsyncFastAPI"
+    ):
+        pytest.skip(
+            "TODO @jai, come back and debug why CI runners fail with async + sync"
+        )
+    _test_add(client, collection, record_set, True, always_compact=True)
+
 
 # Hypothesis tends to generate smaller values so we explicitly segregate the
 # the tests into tiers, Small, Medium. Hypothesis struggles to generate large
@@ -104,6 +130,7 @@ def _test_add(
     record_set: strategies.RecordSet,
     should_compact: bool,
     batch_ann_accuracy: bool = False,
+    always_compact: bool = False,
 ) -> None:
     create_isolated_database(client)
 
@@ -132,7 +159,7 @@ def _test_add(
     if (
         not NOT_CLUSTER_ONLY
         and should_compact
-        and len(normalized_record_set["ids"]) > 10
+        and (len(normalized_record_set["ids"]) > 10 or always_compact)
     ):
         # Wait for the model to be updated
         wait_for_version_increase(client, collection.name, initial_version)

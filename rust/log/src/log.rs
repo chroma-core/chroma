@@ -161,12 +161,12 @@ impl Log {
     #[tracing::instrument(skip(self), err(Display))]
     pub async fn purge_dirty_for_collection(
         &mut self,
-        collection_id: CollectionUuid,
+        collection_ids: Vec<CollectionUuid>,
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             Log::Sqlite(_) => unimplemented!("not implemented for sqlite"),
             Log::Grpc(log) => Ok(log
-                .purge_dirty_for_collection(collection_id)
+                .purge_dirty_for_collection(collection_ids)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?),
             Log::InMemory(_) => unimplemented!("not implemented for in memory"),

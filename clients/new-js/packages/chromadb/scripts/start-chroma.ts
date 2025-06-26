@@ -1,7 +1,10 @@
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import path from "node:path";
-import { startContainer as startContainerCommon, startChromaServer as startChromaServerCommon } from "./start-chroma-common.js";
+import {
+  startContainer as startContainerCommon,
+  startChromaServer as startChromaServerCommon,
+} from "./start-chroma-common.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

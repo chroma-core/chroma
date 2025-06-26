@@ -1,7 +1,10 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        arrow::{
+            config::TEST_MAX_BLOCK_SIZE_BYTES,
+            provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
+        },
         BlockfileWriterOptions,
     };
     use chroma_cache::new_cache_for_test;
@@ -24,9 +27,10 @@ mod tests {
             // race condition outside the cache.
             let block_cache = new_cache_for_test();
             let sparse_index_cache = new_cache_for_test();
+            let max_block_size_bytes = 500;
             let blockfile_provider = ArrowBlockfileProvider::new(
                 storage,
-                TEST_MAX_BLOCK_SIZE_BYTES,
+                max_block_size_bytes,
                 block_cache,
                 sparse_index_cache,
             );
@@ -43,6 +47,7 @@ mod tests {
             // Make the max threads the number of cores * 2
             let max_threads = num_cpus::get() * 2;
             let t = shuttle::rand::thread_rng().gen_range(2..max_threads);
+            println!("Writing {} keys with {} threads", n, t);
             let mut join_handles = Vec::with_capacity(t);
             for i in 0..t {
                 let range_start = i * n / t;
@@ -72,8 +77,12 @@ mod tests {
                 flusher.flush::<&str, u32>().await.unwrap();
             });
 
+            let read_options = BlockfileReaderOptions::new(id, "".to_string());
             let reader = future::block_on(async {
-                blockfile_provider.read::<&str, u32>(&id).await.unwrap()
+                blockfile_provider
+                    .read::<&str, u32>(read_options)
+                    .await
+                    .unwrap()
             });
             // Read the data back
             for i in 0..n {
@@ -123,7 +132,11 @@ mod tests {
                 // Clear cache.
                 blockfile_provider.clear().await.expect("Clear bf provider");
 
-                blockfile_provider.read::<&str, u32>(&id).await.unwrap()
+                let read_options = BlockfileReaderOptions::new(id, "".to_string());
+                blockfile_provider
+                    .read::<&str, u32>(read_options)
+                    .await
+                    .unwrap()
             });
             // Make the max threads the number of cores * 2
             let max_threads = num_cpus::get() * 2;

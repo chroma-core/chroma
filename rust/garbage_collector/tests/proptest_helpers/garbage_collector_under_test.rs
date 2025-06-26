@@ -1,6 +1,7 @@
 use super::garbage_collector_reference::{CollectionStatus, ReferenceGarbageCollector};
+use super::proptest_types::SegmentIds;
 use crate::define_thread_local_stats;
-use crate::proptest_helpers::proptest_types::{SegmentIds, Transition};
+use crate::proptest_helpers::proptest_types::Transition;
 use chroma_blockstore::RootManager;
 use chroma_cache::nop::NopCache;
 use chroma_config::registry::Registry;
@@ -11,7 +12,7 @@ use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig, SysDb};
 use chroma_system::Orchestrator;
 use chroma_system::{Dispatcher, DispatcherConfig, System};
 use chroma_types::chroma_proto::CollectionVersionFile;
-use chroma_types::{CollectionUuid, Segment, SegmentScope, SegmentType, SegmentUuid};
+use chroma_types::{CollectionUuid, Segment, SegmentScope, SegmentType};
 use chrono::DateTime;
 use futures::StreamExt;
 use garbage_collector_library::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator;
@@ -29,8 +30,6 @@ define_thread_local_stats!(STATS);
 
 pub struct GarbageCollectorUnderTest {
     runtime: Arc<tokio::runtime::Runtime>,
-    tenant: String,
-    database: String,
     sysdb: SysDb,
     storage: Storage,
     root_manager: RootManager,
@@ -83,11 +82,6 @@ impl StateMachineTest for GarbageCollectorUnderTest {
     ) -> Self::SystemUnderTest {
         tracing::debug!("Starting test");
 
-        let tenant_id = Uuid::new_v4();
-        let tenant_name = format!("test_tenant_{}", tenant_id);
-        let database_id = Uuid::new_v4();
-        let database_name = format!("test_database_{}", database_id);
-
         ref_state.runtime.block_on(async {
             let registry = Registry::new();
 
@@ -110,16 +104,18 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                     .unwrap(),
             );
 
-            sysdb.create_tenant(tenant_name.clone()).await.unwrap();
+            sysdb.create_tenant(ref_state.tenant.clone()).await.unwrap();
             sysdb
-                .create_database(database_id, database_name.clone(), tenant_name.clone())
+                .create_database(
+                    ref_state.db_id.0,
+                    ref_state.db_name.clone(),
+                    ref_state.tenant.clone(),
+                )
                 .await
                 .unwrap();
 
             Self {
                 runtime: ref_state.runtime.clone(),
-                tenant: tenant_name,
-                database: database_name,
                 sysdb,
                 storage: storage.clone(),
                 root_manager,
@@ -149,7 +145,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
 
                     let segments = vec![
                         Segment {
-                            id: SegmentUuid::new(),
+                            id: segments.vector.root_segment_id,
                             r#type: SegmentType::HnswDistributed,
                             scope: SegmentScope::VECTOR,
                             collection: collection_id,
@@ -157,7 +153,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             file_path: segments.vector.into(),
                         },
                         Segment {
-                            id: SegmentUuid::new(),
+                            id: segments.metadata.root_segment_id,
                             r#type: SegmentType::BlockfileMetadata,
                             scope: SegmentScope::METADATA,
                             collection: collection_id,
@@ -165,7 +161,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             file_path: segments.metadata.into(),
                         },
                         Segment {
-                            id: SegmentUuid::new(),
+                            id: segments.record.root_segment_id,
                             r#type: SegmentType::BlockfileRecord,
                             scope: SegmentScope::RECORD,
                             collection: collection_id,
@@ -185,8 +181,8 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                     state
                         .sysdb
                         .create_collection(
-                            state.tenant.clone(),
-                            state.database.clone(),
+                            ref_state.tenant.clone(),
+                            ref_state.db_name.clone(),
                             collection_id,
                             format!("Collection {}", collection_id),
                             segments,
@@ -204,8 +200,8 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 ref_state
                     .runtime
                     .block_on(state.sysdb.delete_collection(
-                        state.tenant.clone(),
-                        state.database.clone(),
+                        ref_state.tenant.clone(),
+                        ref_state.db_name.clone(),
                         collection_id,
                         vec![],
                     ))
@@ -220,14 +216,13 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                     .collection_id_to_segment_ids
                     .get(&collection_id)
                     .unwrap();
-
                 ref_state.runtime.block_on(async {
                     next_segments.write_files(&state.storage).await;
 
                     state
                         .sysdb
                         .flush_compaction(
-                            state.tenant.clone(),
+                            ref_state.tenant.clone(),
                             collection_id,
                             0,
                             ref_state.max_version_for_collection(collection_id).unwrap() as i32 - 1,
@@ -263,7 +258,6 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                       ),
                     ))
                     .unwrap();
-
                 state
                     .collection_id_to_segment_ids
                     .insert(new_collection_id, SegmentIds::from(collection_and_segments));
@@ -280,7 +274,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                         async {
                             let collections = state
                                 .sysdb
-                                .get_collections_to_gc(None, None, Some(state.tenant.clone()))
+                                .get_collections_to_gc(None, None, Some(ref_state.tenant.clone()))
                                 .await
                                 .unwrap();
                             tracing::debug!(
@@ -337,7 +331,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             "Graph after transition: \n{}",
             ref_state.get_graphviz_of_graph()
         );
-        tracing::debug!(
+        println!(
             "Collection statuses after transition: {:#?}",
             ref_state.collection_status
         );

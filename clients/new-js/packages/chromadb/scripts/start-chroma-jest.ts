@@ -1,5 +1,8 @@
 import path from "node:path";
-import { startContainer as startContainerCommon, startChromaServer as startChromaServerCommon } from "./start-chroma-common";
+import {
+  startContainer as startContainerCommon,
+  startChromaServer as startChromaServerCommon,
+} from "./start-chroma-common";
 
 // Use path.resolve to get to the project root for Jest/CommonJS environment
 const BUILD_CONTEXT_DIR = path.resolve(__dirname, "../../../../..");
