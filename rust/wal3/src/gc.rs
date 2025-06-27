@@ -185,7 +185,6 @@ impl Garbage {
         prefix: &str,
         existing: &ETag,
     ) -> Result<Option<ETag>, Error> {
-        self.install_new_snapshots(storage, prefix, options).await?;
         match Self::transition(options, storage, prefix, Some(existing), &Self::empty()).await {
             Ok(e_tag) => Ok(e_tag),
             Err(Error::LogContentionFailure) => Ok(None),
