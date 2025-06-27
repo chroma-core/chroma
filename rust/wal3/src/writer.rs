@@ -248,7 +248,8 @@ impl LogWriter {
             let log = Arc::clone(log);
             async move { log.append(messages).await }
         };
-        self.handle_log_contention(once_log_append_many).await
+        self.handle_errors_and_contention(once_log_append_many)
+            .await
     }
 
     // TODO(rescrv):  No option
@@ -289,15 +290,16 @@ impl LogWriter {
             let log = Arc::clone(log);
             async move { log.garbage_collect(&options, keep_at_least).await }
         };
-        self.handle_log_contention(once_log_garbage_collect).await
+        self.handle_errors_and_contention(once_log_garbage_collect)
+            .await
     }
 
-    async fn handle_log_contention<O, F: Future<Output = Result<O, Error>>>(
+    async fn handle_errors_and_contention<O, F: Future<Output = Result<O, Error>>>(
         &self,
         f: impl Fn(&Arc<OnceLogWriter>) -> F,
     ) -> Result<O, Error> {
         for _ in 0..3 {
-            let writer = self.ensure_open().await?;
+            let (writer, epoch) = self.ensure_open().await?;
             match f(&writer).await {
                 Ok(out) => {
                     return Ok(out);
@@ -306,7 +308,9 @@ impl LogWriter {
                     {
                         // SAFETY(rescrv):  Mutex poisoning.
                         let mut inner = self.inner.lock().unwrap();
-                        inner.writer.take();
+                        if inner.epoch == epoch {
+                            inner.writer.take();
+                        }
                     }
                     // Silence this error in favor of the one we got from f.
                     if self.ensure_open().await.is_ok() {
@@ -318,15 +322,23 @@ impl LogWriter {
                 Err(Error::LogContentionFailure) => {
                     // SAFETY(rescrv):  Mutex poisoning.
                     let mut inner = self.inner.lock().unwrap();
-                    inner.writer.take();
+                    if inner.epoch == epoch {
+                        inner.writer.take();
+                    }
                     return Err(Error::LogContentionFailure);
                 }
                 Err(Error::LogContentionRetry) => {
                     // SAFETY(rescrv):  Mutex poisoning.
                     let mut inner = self.inner.lock().unwrap();
-                    inner.writer.take();
+                    if inner.epoch == epoch {
+                        inner.writer.take();
+                    }
                 }
                 Err(err) => {
+                    let mut inner = self.inner.lock().unwrap();
+                    if inner.epoch == epoch {
+                        inner.writer.take();
+                    }
                     return Err(err);
                 }
             }
@@ -334,14 +346,14 @@ impl LogWriter {
         Err(Error::LogContentionFailure)
     }
 
-    async fn ensure_open(&self) -> Result<Arc<OnceLogWriter>, Error> {
+    async fn ensure_open(&self) -> Result<(Arc<OnceLogWriter>, u64), Error> {
         let _guard = self.reopen_protection.lock().await;
         for _ in 0..3 {
             let epoch = {
                 // SAFETY(rescrv):  Mutex poisoning.
                 let inner = self.inner.lock().unwrap();
                 if let Some(writer) = inner.writer.as_ref() {
-                    return Ok(Arc::clone(writer));
+                    return Ok((Arc::clone(writer), inner.epoch));
                 }
                 inner.epoch
             };
@@ -366,7 +378,7 @@ impl LogWriter {
                     writer.shutdown();
                 }
                 inner.writer = Some(Arc::clone(&writer));
-                return Ok(writer);
+                return Ok((writer, inner.epoch));
             }
         }
         Err(Error::LogContentionRetry)
@@ -482,6 +494,8 @@ impl OnceLogWriter {
         if let Some(flusher) = self.flusher.lock().unwrap().take() {
             flusher.abort();
         }
+        self.batch_manager.shutdown();
+        self.manifest_manager.shutdown();
     }
 
     async fn close(mut self: Arc<Self>) -> Result<(), Error> {
