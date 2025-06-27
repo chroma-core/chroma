@@ -23,7 +23,7 @@ async fn main() {
     let mut client = LogServiceClient::new(logservice);
     let _resp = client
         .purge_dirty_for_collection(PurgeDirtyForCollectionRequest {
-            collection_id: collection_id.to_string(),
+            collection_ids: vec![collection_id.to_string()],
         })
         .await
         .expect("purge-dirty-log request should succeed");
