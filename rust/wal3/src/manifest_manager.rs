@@ -215,6 +215,14 @@ impl ManifestManager {
         })
     }
 
+    /// Signal log contention to anyone writing on the manifest.
+    pub fn shutdown(&self) {
+        let mut staging = self.staging.lock().unwrap();
+        for (_, tx) in std::mem::take(&mut staging.fragments) {
+            let _ = tx.send(Some(Error::LogContentionDurable));
+        }
+    }
+
     /// Return the latest stable manifest
     pub fn latest(&self) -> Manifest {
         let staging = self.staging.lock().unwrap();
@@ -324,7 +332,9 @@ impl ManifestManager {
     }
 
     async fn do_work(&self) -> Result<(), Error> {
-        loop {
+        let mut iters = 0;
+        for i in 0..u64::MAX {
+            iters = i + 1;
             let work = {
                 // SAFETY(rescrv):  Mutex poisoning.
                 let mut staging = self.staging.lock().unwrap();
@@ -373,9 +383,13 @@ impl ManifestManager {
                     }
                 }
             } else {
-                break Ok(());
+                break;
             }
         }
+        if iters > 3 {
+            tracing::event!(tracing::Level::INFO, name = "do work iterated", iters =? iters);
+        }
+        Ok(())
     }
 
     pub async fn compute_garbage(

@@ -166,7 +166,7 @@ impl BatchManager {
         let Some((fragment_seq_no, log_position)) =
             state.select_for_write(&self.options, manifest_manager, acc_count)?
         else {
-            // No fragment can be written at this time.
+            // Cannot yet select for write.  Notify will come from the timeout background is on.
             return Ok(None);
         };
         let mut work = std::mem::take(&mut state.enqueued);
@@ -188,6 +188,13 @@ impl BatchManager {
     pub fn finish_write(&self) {
         self.state.lock().unwrap().finish_write();
         self.write_finished.notify_one();
+    }
+
+    pub fn shutdown(&self) {
+        let mut state = self.state.lock().unwrap();
+        for (_, tx) in std::mem::take(&mut state.enqueued) {
+            let _ = tx.send(Err(Error::LogContentionRetry));
+        }
     }
 }
 
