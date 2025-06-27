@@ -1110,10 +1110,10 @@ func TestCatalog_ListCollectionsToGc(t *testing.T) {
 
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("ListCollectionsToGc", &cutoffTimeSecs, &limit, (*string)(nil)).Return(collectionsToGc, nil)
+	mockCollectionDb.On("ListCollectionsToGc", &cutoffTimeSecs, &limit, (*string)(nil), (*uint64)(nil)).Return(collectionsToGc, nil)
 
 	// Execute test
-	result, err := catalog.ListCollectionsToGc(context.Background(), &cutoffTimeSecs, &limit, nil)
+	result, err := catalog.ListCollectionsToGc(context.Background(), &cutoffTimeSecs, &limit, nil, nil)
 
 	// Verify results
 	assert.NoError(t, err)
@@ -1158,10 +1158,10 @@ func TestCatalog_ListCollectionsToGc_NilParameters(t *testing.T) {
 
 	// Setup mock behaviors
 	mockMetaDomain.On("CollectionDb", mock.Anything).Return(mockCollectionDb)
-	mockCollectionDb.On("ListCollectionsToGc", (*uint64)(nil), (*uint64)(nil), (*string)(nil)).Return(collectionsToGc, nil)
+	mockCollectionDb.On("ListCollectionsToGc", (*uint64)(nil), (*uint64)(nil), (*string)(nil), (*uint64)(nil)).Return(collectionsToGc, nil)
 
 	// Execute test with nil parameters
-	result, err := catalog.ListCollectionsToGc(context.Background(), nil, nil, nil)
+	result, err := catalog.ListCollectionsToGc(context.Background(), nil, nil, nil, nil)
 
 	// Verify results
 	assert.NoError(t, err)

@@ -274,7 +274,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                         async {
                             let collections = state
                                 .sysdb
-                                .get_collections_to_gc(None, None, Some(ref_state.tenant.clone()))
+                                .get_collections_to_gc(None, None, Some(ref_state.tenant.clone()), None)
                                 .await
                                 .unwrap();
                             tracing::debug!(

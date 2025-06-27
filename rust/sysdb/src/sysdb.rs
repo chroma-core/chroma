@@ -399,9 +399,13 @@ impl SysDb {
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
         tenant: Option<String>,
+        min_versions_if_alive: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit, tenant).await,
+            SysDb::Grpc(grpc) => {
+                grpc.get_collections_to_gc(cutoff_time, limit, tenant, min_versions_if_alive)
+                    .await
+            }
             SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
@@ -1139,6 +1143,7 @@ impl GrpcSysDb {
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
         tenant: Option<String>,
+        min_versions_if_alive: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
@@ -1146,6 +1151,7 @@ impl GrpcSysDb {
                 cutoff_time: cutoff_time.map(|t| t.into()),
                 limit,
                 tenant_id: tenant,
+                min_versions_if_alive,
             })
             .await;
 
