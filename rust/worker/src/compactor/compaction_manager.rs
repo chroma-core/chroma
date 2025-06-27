@@ -159,6 +159,45 @@ impl CompactionManager {
         }
     }
 
+    #[instrument(name = "CompactionManager::start_compaction_batch", skip(self))]
+    async fn start_compaction_batch(&mut self) {
+        self.process_completions();
+        let compact_awaiter_channel = &self.compact_awaiter_channel;
+        self.scheduler.schedule().await;
+        let jobs_iter = self.scheduler.get_jobs();
+        for job in jobs_iter {
+            let instrumented_span = span!(
+                parent: None,
+                tracing::Level::INFO,
+                "Compacting job",
+                collection_id = ?job.collection_id
+            );
+            instrumented_span.follows_from(Span::current());
+            let future = self
+                .context
+                .clone()
+                .compact(job.collection_id, false)
+                .instrument(instrumented_span);
+            compact_awaiter_channel
+                .send(CompactionTask {
+                    collection_id: job.collection_id,
+                    future: Box::pin(future),
+                })
+                .await
+                .unwrap();
+        }
+    }
+
+    #[instrument(name = "CompactionManager::rebuild_batch", skip(self))]
+    pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
+        let _ = collection_ids
+            .iter()
+            .map(|id| self.context.clone().compact(*id, true))
+            .collect::<FuturesUnordered<_>>()
+            .collect::<Vec<_>>()
+            .await;
+    }
+
     #[instrument(name = "CompactionManager::purge_dirty_log", skip(ctx))]
     pub(crate) async fn purge_dirty_log(&mut self, ctx: &ComponentContext<Self>) {
         let deleted_collection_uuids = self.scheduler.drain_deleted_collections();
@@ -206,45 +245,6 @@ impl CompactionManager {
             completed_collections.push(resp);
         }
         completed_collections
-    }
-
-    #[instrument(name = "CompactionManager::start_compaction_batch", skip(self))]
-    async fn start_compaction_batch(&mut self) {
-        self.process_completions();
-        let compact_awaiter_channel = &self.compact_awaiter_channel;
-        self.scheduler.schedule().await;
-        let jobs_iter = self.scheduler.get_jobs();
-        for job in jobs_iter {
-            let instrumented_span = span!(
-                parent: None,
-                tracing::Level::INFO,
-                "Compacting job",
-                collection_id = ?job.collection_id
-            );
-            instrumented_span.follows_from(Span::current());
-            let future = self
-                .context
-                .clone()
-                .compact(job.collection_id, false)
-                .instrument(instrumented_span);
-            compact_awaiter_channel
-                .send(CompactionTask {
-                    collection_id: job.collection_id,
-                    future: Box::pin(future),
-                })
-                .await
-                .unwrap();
-        }
-    }
-
-    #[instrument(name = "CompactionManager::rebuild_batch", skip(self))]
-    pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
-        let _ = collection_ids
-            .iter()
-            .map(|id| self.context.clone().compact(*id, true))
-            .collect::<FuturesUnordered<_>>()
-            .collect::<Vec<_>>()
-            .await;
     }
 }
 
