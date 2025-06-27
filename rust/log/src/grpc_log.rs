@@ -697,7 +697,9 @@ impl GrpcLog {
             let request = async move {
                 // NOTE(rescrv): This can never fail and the result is to fail open.  Don't
                 // error-check.
+                println!("(Sanket-temp) Trying to acquire permit for purge dirty for collection");
                 let _permit = limiter.acquire().await;
+                println!("(Sanket-temp) Acquired permit for purge dirty for collection");
                 client
                     .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
                         // NOTE(rescrv):  Use the untyped string representation of the collection ID.
