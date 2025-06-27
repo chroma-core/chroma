@@ -134,7 +134,7 @@ impl CompactionManager {
             compact_awaiter_loop(compact_awaiter_rx, completion_tx).await;
         });
         CompactionManager {
-            scheduler: scheduler,
+            scheduler,
             context: CompactionManagerContext {
                 system,
                 log,
@@ -155,7 +155,7 @@ impl CompactionManager {
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
             compact_awaiter_completion_channel: completion_rx,
-            compact_awaiter: compact_awaiter,
+            compact_awaiter,
         }
     }
 
@@ -476,7 +476,7 @@ impl Handler<ScheduledCompactMessage> for CompactionManager {
         // Compactions are kicked off, schedule the next compaction
         ctx.scheduler.schedule(
             ScheduledCompactMessage {},
-            self.context.compaction_interval.clone(),
+            self.context.compaction_interval,
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
         );
