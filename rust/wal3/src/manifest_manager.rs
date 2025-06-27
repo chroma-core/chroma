@@ -215,6 +215,14 @@ impl ManifestManager {
         })
     }
 
+    /// Signal log contention to anyone writing on the manifest.
+    pub fn shutdown(&self) {
+        let mut staging = self.staging.lock().unwrap();
+        for (_, tx) in std::mem::take(&mut staging.fragments) {
+            let _ = tx.send(Some(Error::LogContentionDurable));
+        }
+    }
+
     /// Return the latest stable manifest
     pub fn latest(&self) -> Manifest {
         let staging = self.staging.lock().unwrap();
