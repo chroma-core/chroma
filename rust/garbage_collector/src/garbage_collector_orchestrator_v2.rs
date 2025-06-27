@@ -506,6 +506,7 @@ impl GarbageCollectorOrchestrator {
 
         let task = wrap(
             Box::new(DeleteUnusedLogsOperator {
+                cleanup_mode: self.cleanup_mode,
                 storage: self.storage.clone(),
             }),
             DeleteUnusedLogsInput {
