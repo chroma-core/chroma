@@ -718,6 +718,9 @@ impl OnceLogWriter {
         let paths = garbage
             .prefixed_paths_to_delete(&self.prefix)
             .collect::<Vec<_>>();
+        garbage
+            .install_new_snapshots(&self.storage, &self.prefix, &self.options.throttle_manifest)
+            .await?;
         self.manifest_manager.apply_garbage(garbage.clone()).await?;
         let exp_backoff: ExponentialBackoff = options.throttle.into();
         let start = Instant::now();
