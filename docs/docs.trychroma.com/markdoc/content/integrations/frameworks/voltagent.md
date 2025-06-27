@@ -15,13 +15,65 @@ You can find the complete example code at: [VoltAgent with Chroma Example](https
 
 Create a new VoltAgent project with Chroma integration:
 
-```bash
+{% TabbedUseCaseCodeBlock language="Terminal" %}
+
+{% Tab label="npm" %}
+
+```terminal
 npm create voltagent-app@latest -- --example with-chroma
-cd voltagent-example-with-chroma
+```
+
+{% /Tab %}
+
+{% Tab label="yarn" %}
+
+```terminal
+yarn create voltagent-app --example=with-chroma
+```
+
+{% /Tab %}
+
+{% Tab label="pnpm" %}
+
+```terminal
+pnpm create voltagent-app --example=with-chroma
+```
+
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
+
+This creates a complete VoltAgent + Chroma setup with sample data and two different agent configurations.
+
+Install the dependencies:
+
+{% TabbedUseCaseCodeBlock language="Terminal" %}
+
+{% Tab label="npm" %}
+
+```terminal
 npm install
 ```
 
-This creates a complete VoltAgent + Chroma setup with sample data and two different agent configurations.
+{% /Tab %}
+
+{% Tab label="yarn" %}
+
+```terminal
+yarn install
+```
+
+{% /Tab %}
+
+{% Tab label="pnpm" %}
+
+```terminal
+pnpm install
+```
+
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
 
 Next, you'll need to launch a Chroma server instance. Docker provides the most straightforward approach:
 
