@@ -2,7 +2,7 @@ import type { Config } from "@jest/types";
 
 const config: Config.InitialOptions = {
   preset: "ts-jest",
-  testEnvironment: "node",
+  testEnvironment: "jest-environment-node-single-context",
   clearMocks: true,
   collectCoverage: false,
   testTimeout: 15000,
