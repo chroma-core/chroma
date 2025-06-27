@@ -1,37 +1,22 @@
----
-{
-  "id": "roadmap",
-  "title": "Roadmap",
-  "section": "Overview",
-  "order": 2
-}
----
-
-
 # Roadmap
 
 The goal of this doc is to align *core* and *community* efforts for the project and to share what's in store for this year!
 
-**Sections**
-- What is the core Chroma team working on right now?
-- What will Chroma prioritize over the next 6mo?
-- What areas are great for community contributions?
-
 ## What is the core Chroma team working on right now?
 
-- Standing up that distributed system as a managed service (aka "Hosted Chroma" - [sign up for waitlist](https://trychroma.com/signup)!)
+- Standing up that distributed system as a managed service (aka "Chroma Cloud" - [sign up for early access](https://trychroma.com/signup)!)
 
 ## What did the Chroma team just complete?
 
 Features like:
-- *New* - [Chroma 0.4](https://www.trychroma.com/blog/chroma_0.4.0) - our first production-oriented release
-- A more minimal python-client only build target
-- Google PaLM embedding support
-- OpenAI ChatGPT Retrieval Plugin
+- *New* - [Chroma 1.0.0](https://trychroma.com/project/1.0.0) - a complete rewrite of Chroma in Rust, giving users up to x4 performance boost.
+- A rewrite of our [JS/TS client](https://www.youtube.com/watch?v=Hq3Rk84eGiY), with better DX and many quality of life improvements.
+- [Persistent collection configuration](https://www.youtube.com/watch?v=zQg5peYd7b0) on the server, unlocking many new features. For example, you no longer need to provide your embedding function on every `get_collection`.
+- The new [Chroma CLI](https://www.youtube.com/watch?v=lHassGpmvK8) that lets you browse your collections locally, manage your Chroma Cloud DBs, and more!
 
 ## What will Chroma prioritize over the next 6mo?
 
-**Next Milestone: ☁️ Launch Hosted Chroma**
+**Next Milestone: ☁️ Launch Chroma Cloud**
 
 **Areas we will invest in**
 
@@ -40,7 +25,7 @@ Not an exhaustive list, but these are some of the core team’s biggest prioriti
 - **Workflow**: Building tools for answer questions like: what embedding model should I use? And how should I chunk up my documents?
 - **Visualization**: Building visualization tool to give developers greater intuition embedding spaces
 - **Query Planner**: Building tools to enable per-query and post-query transforms
-- **Developer experience**: Extending Chroma into a CLI
+- **Developer experience**: Adding more features to our CLI
 - **Easier Data Sharing**: Working on formats for serialization and easier data sharing of embedding Collections
 - **Improving recall**: Fine-tuning embedding transforms through human feedback
 - **Analytical horsepower**: Clustering, deduplication, classification and more
@@ -49,7 +34,7 @@ Not an exhaustive list, but these are some of the core team’s biggest prioriti
 
 This is where you have a lot more free reign to contribute (without having to sync with us first)!
 
-If you're unsure about your contribution idea, feel free to chat with us (@chroma) in the `#general` channel in [our Discord](https://discord.gg/rahcMUU5XV)! We'd love to support you however we can.
+If you're unsure about your contribution idea, feel free to chat with us (@chroma) in the `#general` channel on [our Discord](https://discord.gg/rahcMUU5XV)! We'd love to support you however we can.
 
 ### Example Templates
 
@@ -57,7 +42,6 @@ We can always use [more integrations](../../integrations/chroma-integrations) wi
 
 Other great starting points for Chroma:
 - [Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing)
-- [Replit Template](https://replit.com/@swyx/BasicChromaStarter?v=1)
 
 For those integrations we do have, like LangChain and LlamaIndex, we do always want more tutorials, demos, workshops, videos, and podcasts (we've done some pods [on our blog](https://trychroma.com/interviews)).
 
@@ -83,7 +67,7 @@ Chroma does ship with Sentence Transformers by default for embeddings, but we ar
 
 ### Experimental Algorithms
 
-If you have a research background, please consider adding to our `ExperimentalAPI`s. For example:
+If you have a research background, we welcome contributions in the following areas:
 
 - Projections (t-sne, UMAP, the new hotness, the one you just wrote) and Lightweight visualization
 - Clustering (HDBSCAN, PCA)
@@ -92,7 +76,5 @@ If you have a research background, please consider adding to our `ExperimentalAP
 - Fine-tuning manifold with human feedback [eg](https://github.com/openai/openai-cookbook/blob/main/examples/Customizing_embeddings.ipynb)
 - Expanded vector search (MMR, Polytope)
 - Your research
-
-You can find the REST OpenAPI spec at `localhost:8000/openapi.json` when the backend is running.
 
 Please [reach out](https://discord.gg/MMeYNTmh3x) and talk to us before you get too far in your projects so that we can offer technical guidance/align on roadmap.

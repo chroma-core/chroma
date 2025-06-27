@@ -9,7 +9,7 @@
 
 # Getting Started
 
-Chroma is an AI-native open-source vector database. It comes with everything you need to get started built in, and runs on your machine. A [hosted version](https://trychroma.com/signup) is now available for early access!
+Chroma is an AI-native open-source vector database. It comes with everything you need to get started built in, and runs on your machine. A hosted version, [Chroma Cloud](https://trychroma.com/signup) is now available for early access!
 
 ### 1. Install
 
@@ -17,9 +17,27 @@ Chroma is an AI-native open-source vector database. It comes with everything you
 
 {% Tab label="python" %}
 
+{% TabbedUseCaseCodeBlock language="Terminal" %}
+
+{% Tab label="pip" %}
 ```terminal
 pip install chromadb
 ```
+{% /Tab %}
+
+{% Tab label="poetry" %}
+```terminal
+poetry add chromadb
+```
+{% /Tab %}
+
+{% Tab label="uv" %}
+```terminal
+uv pip install chromadb
+```
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
 
 {% /Tab %}
 
@@ -27,31 +45,31 @@ pip install chromadb
 
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
-{% Tab label="yarn" %}
-```terminal
-yarn add chromadb chromadb-default-embed 
-```
-{% /Tab %}
-
 {% Tab label="npm" %}
 ```terminal
-npm install --save chromadb chromadb-default-embed
+npm install chromadb @chroma-core/default-embed
 ```
 {% /Tab %}
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm add chromadb chromadb-default-embed 
+pnpm install chromadb @chroma-core/default-embed
+```
+{% /Tab %}
+
+{% Tab label="yarn" %}
+```terminal
+yarn add chromadb @chroma-core/default-embed
+```
+{% /Tab %}
+
+{% Tab label="bun" %}
+```terminal
+bun add chromadb @chroma-core/default-embed
 ```
 {% /Tab %}
 
 {% /TabbedUseCaseCodeBlock %}
-
-Install chroma via `pip` to easily run the backend server. Here are [instructions](https://pip.pypa.io/en/stable/installation/) for installing and running `pip`. Alternatively, you can also run Chroma in a [Docker](../../production/containers/docker) container.
-
-```terminal
-pip install chromadb
-```
 
 {% /Tab %}
 
@@ -143,11 +161,11 @@ Chroma will store your text and handle embedding and indexing automatically. You
 {% Tab label="python" %}
 ```python
 collection.add(
+    ids=["id1", "id2"],
     documents=[
         "This is a document about pineapple",
         "This is a document about oranges"
-    ],
-    ids=["id1", "id2"]
+    ]
 )
 ```
 {% /Tab %}
@@ -155,11 +173,11 @@ collection.add(
 {% Tab label="typescript" %}
 ```typescript
 await collection.add({
+    ids: ["id1", "id2"],
     documents: [
         "This is a document about pineapple",
         "This is a document about oranges",
-    ],
-    ids: ["id1", "id2"],
+    ]
 });
 ```
 {% /Tab %}
@@ -200,7 +218,7 @@ If `n_results` is not provided, Chroma will return 10 results by default. Here w
 
 ### 6. Inspect Results
 
-From the above query - you can see that our query about `hawaii` is the semantically most similar to the document about `pineapple`.
+From the above - you can see that our query about `hawaii` is semantically most similar to the document about `pineapple`.
 
 {% TabbedCodeBlock %}
 
@@ -246,7 +264,7 @@ From the above query - you can see that our query about `hawaii` is the semantic
 
 ### 7. Try it out yourself
 
-For example - what if we tried querying with `"This is a document about florida"`?
+What if we tried querying with `"This is a document about florida"`? Here is a full example.
 
 {% TabbedCodeBlock %}
 
@@ -310,6 +328,6 @@ console.log(results);
 
 In this guide we used Chroma's [ephemeral client](../run-chroma/ephemeral-client) for simplicity. It starts a Chroma server in-memory, so any data you ingest will be lost when your program terminates. You can use the [persistent client](../run-chroma/persistent-client) or run Chroma in [client-server mode](../run-chroma/client-server) if you need data persistence.
 
-- Learn how to [Deploy Chroma](../../production/deployment) to a server
+- Learn how to [Deploy Chroma](../../guides/deploy/client-server-mode) to a server
 - Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
-- Follow Chroma on [Twitter (@trychroma)](https://twitter.com/trychroma) for updates
+- Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
