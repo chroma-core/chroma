@@ -108,7 +108,7 @@ export const CustomTabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
         defaultValue={children[0].props.label}
         className="flex flex-col mt-2 pb-2"
       >
-        <TabsList className="justify-start bg-transparent dark:bg-transparent rounded-none p-0 h-fit border-b border-gray-300 mb-4 dark:border-gray-700">
+        <TabsList className="justify-start bg-transparent p-0 h-fit dark:bg-transparent rounded-none border-b border-gray-300 dark:border-gray-700">
           {children.map((tab) => (
             <CustomTabsTrigger
               key={`${tab.props.label}-header`}
