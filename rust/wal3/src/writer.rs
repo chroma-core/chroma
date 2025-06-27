@@ -639,58 +639,76 @@ impl OnceLogWriter {
             cutoff
         };
         self.manifest_manager.heartbeat().await?;
-        let garbage = self
-            .manifest_manager
-            // TODO(rescrv):  Evaluate putting a cache in here.
-            .compute_garbage(options, cutoff, &())
-            .await?;
-        let Some(garbage) = garbage else {
-            return Ok(());
-        };
-        let (garbage, e_tag) = match garbage
-            .install(
-                &self.options.throttle_manifest,
-                &self.storage,
-                &self.prefix,
-                existing,
-            )
-            .await
-        {
-            Ok(e_tag) => (garbage, e_tag),
-            Err(Error::LogContentionFailure)
-            | Err(Error::LogContentionRetry)
-            | Err(Error::LogContentionDurable) => {
-                match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
+        let garbage_and_e_tag =
+            match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix).await
+            {
+                Ok(Some((garbage, e_tag))) => Some((garbage, e_tag)),
+                Ok(None) => None,
+                Err(err) => {
+                    return Err(err);
+                }
+            };
+        let (garbage, e_tag) = if let Some((garbage, e_tag)) = garbage_and_e_tag {
+            (garbage, e_tag)
+        } else {
+            let garbage = self
+                .manifest_manager
+                // TODO(rescrv):  Evaluate putting a cache in here.
+                .compute_garbage(options, cutoff, &())
+                .await?;
+            let Some(garbage) = garbage else {
+                return Ok(());
+            };
+            let (garbage, e_tag) = match garbage
+                .install(
+                    &self.options.throttle_manifest,
+                    &self.storage,
+                    &self.prefix,
+                    existing,
+                )
+                .await
+            {
+                Ok(e_tag) => (garbage, e_tag),
+                Err(Error::LogContentionFailure)
+                | Err(Error::LogContentionRetry)
+                | Err(Error::LogContentionDurable) => {
+                    match Garbage::load(
+                        &self.options.throttle_manifest,
+                        &self.storage,
+                        &self.prefix,
+                    )
                     .await
-                {
-                    Ok(Some((garbage, e_tag))) => {
-                        if garbage.is_empty() {
-                            if base {
-                                return Err(Error::LogContentionRetry);
+                    {
+                        Ok(Some((garbage, e_tag))) => {
+                            if garbage.is_empty() {
+                                if base {
+                                    return Err(Error::LogContentionRetry);
+                                } else {
+                                    return Box::pin(self.garbage_collect_recursive(
+                                        options,
+                                        true,
+                                        e_tag.as_ref(),
+                                        keep_at_least,
+                                    ))
+                                    .await;
+                                }
                             } else {
-                                return Box::pin(self.garbage_collect_recursive(
-                                    options,
-                                    true,
-                                    e_tag.as_ref(),
-                                    keep_at_least,
-                                ))
-                                .await;
+                                (garbage, e_tag)
                             }
-                        } else {
-                            (garbage, e_tag)
+                        }
+                        Ok(None) => {
+                            return Err(Error::LogContentionFailure);
+                        }
+                        Err(err) => {
+                            return Err(err);
                         }
                     }
-                    Ok(None) => {
-                        return Err(Error::LogContentionFailure);
-                    }
-                    Err(err) => {
-                        return Err(err);
-                    }
                 }
-            }
-            Err(err) => {
-                return Err(err);
-            }
+                Err(err) => {
+                    return Err(err);
+                }
+            };
+            (garbage, e_tag)
         };
         let Some(e_tag) = e_tag else {
             return Err(Error::GarbageCollection(

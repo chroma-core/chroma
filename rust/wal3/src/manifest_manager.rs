@@ -328,7 +328,24 @@ impl ManifestManager {
             }
             staging.garbage = Some(garbage);
         }
-        self.do_work().await
+        loop {
+            {
+                let staging = self.staging.lock().unwrap();
+                if staging.garbage.is_none() {
+                    break;
+                }
+            }
+            match self.do_work().await {
+                Ok(_) => {}
+                Err(Error::LogContentionRetry)
+                | Err(Error::LogContentionFailure)
+                | Err(Error::LogContentionDurable) => {}
+                Err(err) => {
+                    return Err(err);
+                }
+            };
+        }
+        Ok(())
     }
 
     async fn do_work(&self) -> Result<(), Error> {
