@@ -952,10 +952,12 @@ async fn create_collection(
         Some(c) => Some(InternalCollectionConfiguration::try_from_config(
             c,
             server.config.frontend.default_knn_index,
+            payload_clone.metadata,
         )?),
         None => Some(InternalCollectionConfiguration::try_from_config(
             CollectionConfiguration::default(),
             server.config.frontend.default_knn_index,
+            payload_clone.metadata,
         )?),
     };
 
@@ -1351,7 +1353,7 @@ async fn collection_update(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<UpdateCollectionRecordsPayload>,
+    TracedJson(payload): TracedJson<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
     server.metrics.collection_update.add(
         1,
@@ -1446,7 +1448,7 @@ async fn collection_upsert(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<UpsertCollectionRecordsPayload>,
+    TracedJson(payload): TracedJson<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
     server.metrics.collection_upsert.add(
         1,

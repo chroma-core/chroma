@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any, Optional, Union, Sequence, Dict, Mapping, Generic
 
 from typing_extensions import Self
@@ -297,6 +298,12 @@ class Unspecified:
 T = TypeVar("T")
 OptionalArgument = Union[T, Unspecified]
 
+
+@dataclass
+class CloudClientArg:
+    name: str
+    env_var: str
+    value: Optional[str] = None
 
 __all__ = [
     "Metadata",

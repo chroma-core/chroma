@@ -279,11 +279,15 @@ impl LogWriter {
             .map(|writer| writer.manifest_manager.latest())
     }
 
-    pub async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
+    pub async fn garbage_collect(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<(), Error> {
         let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
             let options = options.clone();
             let log = Arc::clone(log);
-            async move { log.garbage_collect(&options).await }
+            async move { log.garbage_collect(&options, keep_at_least).await }
         };
         self.handle_log_contention(once_log_garbage_collect).await
     }
@@ -377,6 +381,15 @@ impl std::fmt::Debug for LogWriter {
     }
 }
 
+impl Drop for LogWriter {
+    fn drop(&mut self) {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(writer) = inner.writer.as_mut() {
+            writer.shutdown();
+        }
+    }
+}
+
 /////////////////////////////////////////// OnceLogWriter //////////////////////////////////////////
 
 /// OnceLogWriter writes to a log once until contention is discovered.  It must then be thrown away
@@ -441,9 +454,12 @@ impl OnceLogWriter {
                 that.batch_manager.wait_for_writable().await;
                 match that.batch_manager.take_work(&that.manifest_manager) {
                     Ok(Some((fragment_seq_no, log_position, work))) => {
-                        Arc::clone(&that)
-                            .append_batch(fragment_seq_no, log_position, work)
-                            .await;
+                        let _ = tokio::task::spawn(Arc::clone(&that).append_batch(
+                            fragment_seq_no,
+                            log_position,
+                            work,
+                        ))
+                        .await;
                     }
                     Ok(None) => {
                         tokio::time::sleep(that.batch_manager.until_next_time()).await;
@@ -495,7 +511,7 @@ impl OnceLogWriter {
             self.batch_manager.take_work(&self.manifest_manager)?
         {
             let this = Arc::clone(self);
-            this.append_batch(fragment_seq_no, log_position, work).await
+            tokio::task::spawn(this.append_batch(fragment_seq_no, log_position, work));
         }
         let span = tracing::info_span!("wait_for_durability");
         rx.instrument(span).await.map_err(|_| Error::Internal)?
@@ -561,7 +577,12 @@ impl OnceLogWriter {
             log_position,
             messages,
         );
-        let fut2 = self.mark_dirty.mark_dirty(log_position, messages_len);
+        let fut2 = async {
+            match self.mark_dirty.mark_dirty(log_position, messages_len).await {
+                Ok(_) | Err(Error::LogContentionDurable) => Ok(()),
+                Err(err) => Err(err),
+            }
+        };
         let (res1, res2) = futures::future::join(fut1, fut2).await;
         res2?;
         let (path, setsum, num_bytes) = res1?;
@@ -581,8 +602,13 @@ impl OnceLogWriter {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn garbage_collect(&self, options: &GarbageCollectionOptions) -> Result<(), Error> {
-        self.garbage_collect_recursive(options, false, None).await
+    async fn garbage_collect(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<(), Error> {
+        self.garbage_collect_recursive(options, false, None, keep_at_least)
+            .await
     }
 
     async fn garbage_collect_recursive(
@@ -590,8 +616,14 @@ impl OnceLogWriter {
         options: &GarbageCollectionOptions,
         base: bool,
         existing: Option<&ETag>,
+        keep_at_least: Option<LogPosition>,
     ) -> Result<(), Error> {
         let cutoff = self.garbage_collection_cutoff().await?;
+        let cutoff = if let Some(keep_at_least) = keep_at_least {
+            keep_at_least.min(cutoff)
+        } else {
+            cutoff
+        };
         self.manifest_manager.heartbeat().await?;
         let garbage = self
             .manifest_manager
@@ -626,6 +658,7 @@ impl OnceLogWriter {
                                     options,
                                     true,
                                     e_tag.as_ref(),
+                                    keep_at_least,
                                 ))
                                 .await;
                             }
@@ -702,7 +735,7 @@ impl OnceLogWriter {
         let mut collect_up_to = None;
         for cursor_name in cursors.list().await? {
             let witness = cursors.load(&cursor_name).await?;
-            let Some(cursor) = witness.map(|w| w.1) else {
+            let Some(cursor) = witness.map(|w| w.cursor) else {
                 return Err(Error::LogContentionFailure);
             };
             if cursor.position <= collect_up_to.unwrap_or(cursor.position) {

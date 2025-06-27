@@ -694,6 +694,8 @@ pub enum GetCollectionsError {
     CollectionId(#[from] uuid::Error),
     #[error("Could not deserialize database ID")]
     DatabaseId,
+    #[error("Provided limit `{0}` exceeds maximum allowable limit `{1}`")]
+    MaximumLimitExceeded(u32, u32),
 }
 
 impl ChromaError for GetCollectionsError {
@@ -703,6 +705,7 @@ impl ChromaError for GetCollectionsError {
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
             GetCollectionsError::DatabaseId => ErrorCodes::Internal,
+            GetCollectionsError::MaximumLimitExceeded(_, _) => ErrorCodes::InvalidArgument,
         }
     }
 }
