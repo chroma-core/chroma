@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 
+exclude = ["patched/arrow-arith"]
+
 members = [
     "rust/benchmark",
     "rust/blockstore",

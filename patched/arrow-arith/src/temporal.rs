@@ -87,7 +87,7 @@ where
     T: ChronoDateExt + Datelike + Timelike,
 {
     match part {
-        DatePart::Quarter => |d| d.quarter() as i32,
+        DatePart::Quarter => |d| ChronoDateExt::quarter(&d) as i32,
         DatePart::Year => |d| d.year(),
         DatePart::Month => |d| d.month() as i32,
         DatePart::Week => |d| d.iso_week().week() as i32,
