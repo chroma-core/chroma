@@ -12,8 +12,11 @@ use futures::future::try_join_all;
 use thiserror::Error;
 use wal3::{GarbageCollectionOptions, LogPosition, LogWriter, LogWriterOptions};
 
+use crate::types::CleanupMode;
+
 #[derive(Clone, Debug)]
 pub struct DeleteUnusedLogsOperator {
+    pub cleanup_mode: CleanupMode,
     pub storage: Storage,
 }
 
@@ -50,6 +53,13 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
         input: &DeleteUnusedLogsInput,
     ) -> Result<DeleteUnusedLogsOutput, DeleteUnusedLogsError> {
         tracing::info!("Garbage collecting logs: {input:?}");
+        if matches!(
+            self.cleanup_mode,
+            CleanupMode::DryRun | CleanupMode::DryRunV2
+        ) {
+            tracing::info!("Skipping actual log cleanup in dry run");
+            return Ok(());
+        }
         let storage_arc = Arc::new(self.storage.clone());
         if !input.collections_to_garbage_collect.is_empty() {
             let mut log_gc_futures = Vec::with_capacity(input.collections_to_garbage_collect.len());
@@ -83,6 +93,10 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                 });
             }
             try_join_all(log_gc_futures).await?;
+            tracing::info!(
+                "Wal3 gc complete for collections: {:?}",
+                input.collections_to_garbage_collect
+            );
         }
         if !input.collections_to_destroy.is_empty() {
             let mut log_destroy_futures = Vec::with_capacity(input.collections_to_destroy.len());
@@ -103,6 +117,10 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                 })
             }
             try_join_all(log_destroy_futures).await?;
+            tracing::info!(
+                "Wal3 destruction complete for collections: {:?}",
+                input.collections_to_destroy
+            );
         }
 
         Ok(())
