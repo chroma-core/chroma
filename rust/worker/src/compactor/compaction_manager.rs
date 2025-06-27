@@ -462,6 +462,7 @@ impl Handler<TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>> for Compaction
         _ctx: &ComponentContext<CompactionManager>,
     ) {
         if let Err(err) = message.into_inner() {
+            println!("(Sanket-temp) Error when purging dirty log: {err}");
             tracing::error!("Error when purging dirty log: {err}");
         }
     }
