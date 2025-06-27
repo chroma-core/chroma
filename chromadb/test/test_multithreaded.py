@@ -8,13 +8,14 @@ import numpy as np
 from chromadb.api import ClientAPI
 import chromadb.test.property.invariants as invariants
 from chromadb.api.segment import SegmentAPI
+from chromadb.test.constants import MAX_DOCUMENTS
 from chromadb.test.property.strategies import RecordSet
 from chromadb.test.property.strategies import test_hnsw_config
 from chromadb.types import Metadata
 
 
 def generate_data_shape() -> Tuple[int, int]:
-    N = random.randint(10, 10000)
+    N = random.randint(10, MAX_DOCUMENTS)
     D = random.randint(10, 256)
     return (N, D)
 
