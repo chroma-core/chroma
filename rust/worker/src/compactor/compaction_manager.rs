@@ -167,8 +167,8 @@ impl CompactionManager {
             return;
         }
         let purge_dirty_log = PurgeDirtyLog {
-            log_client: self.log.clone(),
-            timeout: Duration::from_secs(self.purge_dirty_log_timeout_seconds),
+            log_client: self.context.log.clone(),
+            timeout: Duration::from_secs(self.context.purge_dirty_log_timeout_seconds),
         };
         let purge_dirty_log_input = PurgeDirtyLogInput {
             collection_uuids: deleted_collection_uuids.clone(),
@@ -178,7 +178,7 @@ impl CompactionManager {
             purge_dirty_log_input,
             ctx.receiver(),
         );
-        let Some(mut dispatcher) = self.dispatcher.clone() else {
+        let Some(mut dispatcher) = self.context.dispatcher.clone() else {
             tracing::error!("Unable to create background task to purge dirty log: Dispatcher is not set for compaction manager");
             return;
         };
@@ -238,7 +238,7 @@ impl CompactionManager {
     }
 
     #[instrument(name = "CompactionManager::rebuild_batch", skip(self))]
-    pub(crate) async fn rebuild_batch(&mut self, collection_ids: Vec<CollectionUuid>) {
+    pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
         let _ = collection_ids
             .iter()
             .map(|id| self.context.clone().compact(*id, true))
