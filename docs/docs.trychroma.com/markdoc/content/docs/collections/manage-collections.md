@@ -299,70 +299,50 @@ await collection.modify({
 
 {% /TabbedCodeBlock %}
 
-----
+## Deleting Collections
 
-{% Tabs %}
+You can delete a collection by name. This action will delete a collection, all of its embeddings, and associated documents and records' metadata.
+
+{% Banner type="warn" %}
+Deleting collections is destructive and not reversible
+{% /Banner %}
+
+{% TabbedCodeBlock %}
 
 {% Tab label="python" %}
-
-The embedding function takes text as input and embeds it. If no embedding function is supplied, Chroma will use [sentence transformer](https://www.sbert.net/index.html) as a default. You can learn more about [embedding functions](../embeddings/embedding-functions), and how to create your own.
-
-When creating collections, you can pass the optional `metadata` argument to add a mapping of metadata key-value pairs to your collections. This can be useful for adding general about the collection like creation time, description of the data stored in the collection, and more.
-
 ```python
-from datetime import datetime
-
-collection = client.create_collection(
-    name="my_collection", 
-    embedding_function=emb_fn,
-    metadata={
-        "description": "my first Chroma collection",
-        "created": str(datetime.now())
-    }  
-)
+collection.delete(name="my-collection")
 ```
-
-The Chroma client allows you to get and delete existing collections by their name. It also offers a `get or create` method to get a collection if it exists, or create it otherwise.
-
-```python
-collection = client.get_collection(name="test") # Get a collection object from an existing collection, by name. Will raise an exception if it's not found.
-collection = client.get_or_create_collection(name="test") # Get a collection object from an existing collection, by name. If it doesn't exist, create it.
-client.delete_collection(name="my_collection") # Delete a collection and all associated embeddings, documents, and metadata. ⚠️ This is destructive and not reversible
-```
-
-Collections have a few useful convenience methods.
-
-* `peek()` - returns a list of the first 10 items in the collection.
-* `count()` - returns the number of items in the collection.
-* `modify()` - rename the collection
-
 {% /Tab %}
 
-{% Tab label="Typescript" %}
-
-You can also provide `getCollections` the embedding function for each collection:
-
+{% Tab label="typescript" %}
 ```typescript
-const [col1, col2] = client.getCollections([
-    { name: 'col1', embeddingFunction: openaiEF },
-    { name: 'col2', embeddingFunction: defaultEF },
-])
+await collection.delete({ name: "my-collection" });
 ```
+{% /Tab %}
 
-You can also delete collections by name using `deleteCollection`:
+{% /TabbedCodeBlock %}
 
-```typescript
-await client.deleteCollection({ name: 'my-collection '});
+## Convenience Methods
+
+Collections also offer a few useful convenience methods:
+* `count` - returns the number of records in the collection.
+* `peek` - returns the first 10 records in the collection.
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+collection.count()
+collection.peek()
 ```
+{% /Tab %}
 
-Collections have a few useful convenience methods.
-
+{% Tab label="typescript" %}
 ```typescript
-await collection.peek();
 await collection.count();
-await collection.modify({ name: "new_name" })
+await collection.peek();
 ```
-
 {% /Tab %}
 
-{% /Tabs %}
+{% /TabbedCodeBlock %}
