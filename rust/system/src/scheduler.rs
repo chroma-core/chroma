@@ -47,6 +47,7 @@ impl Scheduler {
                 _ = cancel.cancelled() => {}
                 _ = tokio::time::sleep(duration) => {
                     let span = span_factory();
+                    println!("(Sanket-temp) Scheduler sending message after duration: {:?}", duration);
                     match sender.send(message, span).await {
                         Ok(_) => {
                         },

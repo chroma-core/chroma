@@ -114,6 +114,7 @@ impl Dispatcher {
                 // This is conceptually what a semaphore is doing, except that it bails if
                 // acquisition fails rather than blocking.
                 let mut witness = self.active_io_tasks.load(Ordering::Relaxed);
+                println!("(Sanket-temp) Current active IO tasks: {}", witness);
                 loop {
                     if witness == 0 {
                         task.abort().await;

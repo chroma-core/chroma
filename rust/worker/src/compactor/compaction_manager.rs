@@ -390,6 +390,7 @@ impl Handler<ScheduledCompactMessage> for CompactionManager {
         let _ = self.compact_batch().await;
         self.purge_dirty_log(ctx).await;
 
+        println!("(Sanket-temp) CompactionManager: Compaction completed. Scheduling next run");
         // Compaction is done, schedule the next compaction
         ctx.scheduler.schedule(
             ScheduledCompactMessage {},
