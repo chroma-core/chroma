@@ -51,12 +51,12 @@ type CollectionAndMetadata struct {
 
 //go:generate mockery --name=ICollectionDb
 type ICollectionDb interface {
-	GetCollections(collectionIDs []string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*CollectionAndMetadata, error)
-	GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*CollectionAndMetadata, error)
+	GetCollections(collectionIDs []string, collectionName *string, tenantID string, databaseID string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*CollectionAndMetadata, error)
+	GetCollectionEntries(id *string, name *string, tenantID string, databaseID string, limit *int32, offset *int32) ([]*CollectionAndMetadata, error)
 	GetCollectionByResourceName(tenantResourceName string, databaseName string, collectionName string) (*CollectionAndMetadata, error)
 	CountCollections(tenantID string, databaseName *string) (uint64, error)
 	DeleteCollectionByID(collectionID string) (int, error)
-	GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*CollectionAndMetadata, error)
+	GetSoftDeletedCollections(collectionID *string, tenantID string, databaseID string, limit int32) ([]*CollectionAndMetadata, error)
 	Insert(in *Collection) error
 	InsertOnConflictDoNothing(in *Collection) (didInsert bool, err error)
 	Update(in *Collection) error

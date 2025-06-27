@@ -92,6 +92,7 @@ func (s *databaseDb) SoftDelete(databaseID string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Table("databases").
 			Where("id = ?", databaseID).
+			Update("name", gorm.Expr("CONCAT('_deleted_', name, '_', id)")).
 			Update("is_deleted", true).
 			Update("updated_at", time.Now()).
 			Error; err != nil {

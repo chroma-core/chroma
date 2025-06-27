@@ -52,22 +52,22 @@ func (s *collectionDb) GetCollectionWithoutMetadata(collectionID *string, databa
 	return collections[0], nil
 }
 
-func (s *collectionDb) GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
+func (s *collectionDb) GetCollectionEntries(id *string, name *string, tenantID string, databaseID string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
 	ids := []string{}
 	if id != nil {
 		ids = append(ids, *id)
 	}
-	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, nil)
+	return s.getCollections(ids, name, tenantID, databaseID, limit, offset, nil)
 }
 
-func (s *collectionDb) GetCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*dbmodel.CollectionAndMetadata, error) {
+func (s *collectionDb) GetCollections(ids []string, name *string, tenantID string, databaseID string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*dbmodel.CollectionAndMetadata, error) {
 	isDeleted := false
 	isDeletedPtr := &isDeleted
 	if includeSoftDeleted {
 		isDeletedPtr = nil
 	}
 
-	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, isDeletedPtr)
+	return s.getCollections(ids, name, tenantID, databaseID, limit, offset, isDeletedPtr)
 }
 
 func (s *collectionDb) GetCollectionByResourceName(tenantResourceName string, databaseName string, collectionName string) (*dbmodel.CollectionAndMetadata, error) {
@@ -80,10 +80,20 @@ func (s *collectionDb) GetCollectionByResourceName(tenantResourceName string, da
 		return nil, err
 	}
 
+	// Get database ID from database name
+	var database dbmodel.Database
+	err = s.db.Table("databases").Where("tenant_id = ? AND name = ?", tenant.ID, databaseName).First(&database).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, common.ErrCollectionNotFound
+		}
+		return nil, err
+	}
+
 	isDeleted := false
 	isDeletedPtr := &isDeleted
 
-	collections, err := s.getCollections(nil, &collectionName, tenant.ID, databaseName, nil, nil, isDeletedPtr)
+	collections, err := s.getCollections(nil, &collectionName, tenant.ID, database.ID, nil, nil, isDeletedPtr)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +148,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	return collections, nil
 }
 
-func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
+func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseID string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	type Result struct {
 		// Collection fields
 		CollectionId               string     `gorm:"column:collection_id"`
@@ -177,8 +187,8 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
-	if databaseName != "" {
-		query = query.Where("databases.name = ?", databaseName)
+	if databaseID != "" {
+		query = query.Where("collections.database_id = ?", databaseID)
 	}
 	if tenantID != "" {
 		query = query.Where("databases.tenant_id = ?", tenantID)
@@ -359,13 +369,13 @@ func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
 	return totalRecordsPostCompaction, nil
 }
 
-func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
+func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseID string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
 	isDeleted := true
 	ids := ([]string)(nil)
 	if collectionID != nil {
 		ids = []string{*collectionID}
 	}
-	return s.getCollections(ids, nil, tenantID, databaseName, &limit, nil, &isDeleted)
+	return s.getCollections(ids, nil, tenantID, databaseID, &limit, nil, &isDeleted)
 }
 
 // NOTE: This is the only method to do a hard delete of a single collection.

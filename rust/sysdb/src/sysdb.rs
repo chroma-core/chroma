@@ -1042,13 +1042,15 @@ impl GrpcSysDb {
     async fn finish_collection_deletion(
         &mut self,
         tenant: String,
-        database: String,
+        database_id: DatabaseUuid,
         collection_id: CollectionUuid,
     ) -> Result<(), DeleteCollectionError> {
+        #[allow(deprecated)] // TODO(@codetheweb): remove database_name
         self.client
             .finish_collection_deletion(chroma_proto::FinishCollectionDeletionRequest {
                 tenant,
-                database,
+                database_name: "".to_string(),
+                database_id: database_id.0.to_string(),
                 id: collection_id.0.to_string(),
             })
             .await

@@ -145,8 +145,9 @@ message CreateCollectionResponse {
 message DeleteCollectionRequest {
   string id = 1;
   string tenant = 2;
-  string database = 3;
+  string database = 3 [deprecated = true];
   repeated string segment_ids = 4;
+  string database_id = 5;
 }
 
 message DeleteCollectionResponse {
@@ -157,7 +158,8 @@ message DeleteCollectionResponse {
 message FinishCollectionDeletionRequest {
   string id = 1;
   string tenant = 2;
-  string database = 3;
+  string database_name = 3 [deprecated = true];
+  string database_id = 4;
 }
 
 message FinishCollectionDeletionResponse {}

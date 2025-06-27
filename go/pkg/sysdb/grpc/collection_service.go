@@ -323,10 +323,42 @@ func (s *Server) DeleteCollection(ctx context.Context, req *coordinatorpb.Delete
 		log.Error("DeleteCollection failed", zap.Error(err), zap.String("collection_id", collectionID))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
+
+	// Get database ID - use the new database_id field if provided, otherwise look up by name
+	var parsedDatabaseID types.UniqueID
+	if req.GetDatabaseId() != "" {
+		databaseID := req.GetDatabaseId()
+		parsedDatabaseID, err = types.ToUniqueID(&databaseID)
+		if err != nil {
+			log.Error("DeleteCollection failed - invalid database ID", zap.Error(err), zap.String("database_id", databaseID))
+			return res, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+	} else if req.GetDatabase() != "" {
+		// Fallback to looking up by name for backward compatibility
+		getDatabase := &model.GetDatabase{
+			Name:   req.GetDatabase(),
+			Tenant: req.GetTenant(),
+		}
+		database, err := s.coordinator.GetDatabase(ctx, getDatabase)
+		if err != nil {
+			log.Error("DeleteCollection failed - database not found", zap.Error(err), zap.String("database", req.GetDatabase()))
+			return res, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
+
+		parsedDatabaseID, err = types.ToUniqueID(&database.ID)
+		if err != nil {
+			log.Error("DeleteCollection failed - invalid database ID", zap.Error(err), zap.String("database_id", database.ID))
+			return res, grpcutils.BuildInternalGrpcError(err.Error())
+		}
+	} else {
+		log.Error("DeleteCollection failed - no database specified")
+		return res, grpcutils.BuildInternalGrpcError("either database_id or database must be specified")
+	}
+
 	deleteCollection := &model.DeleteCollection{
-		ID:           parsedCollectionID,
-		TenantID:     req.GetTenant(),
-		DatabaseName: req.GetDatabase(),
+		ID:         parsedCollectionID,
+		TenantID:   req.GetTenant(),
+		DatabaseID: parsedDatabaseID,
 	}
 	err = s.coordinator.SoftDeleteCollection(ctx, deleteCollection)
 	if err != nil {
@@ -348,10 +380,18 @@ func (s *Server) FinishCollectionDeletion(ctx context.Context, req *coordinatorp
 		log.Error("FinishCollectionDeletion failed", zap.Error(err), zap.String("collection_id", collectionID))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
 	}
+
+	databaseID := req.GetDatabaseId()
+	parsedDatabaseID, err := types.ToUniqueID(&databaseID)
+	if err != nil {
+		log.Error("FinishCollectionDeletion failed - invalid database ID", zap.Error(err), zap.String("database_id", databaseID))
+		return res, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
 	deleteCollection := &model.DeleteCollection{
-		ID:           parsedCollectionID,
-		TenantID:     req.GetTenant(),
-		DatabaseName: req.GetDatabase(),
+		ID:         parsedCollectionID,
+		TenantID:   req.GetTenant(),
+		DatabaseID: parsedDatabaseID,
 	}
 	err = s.coordinator.FinishCollectionDeletion(ctx, deleteCollection)
 	if err != nil {

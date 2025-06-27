@@ -481,10 +481,12 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 
 	// Delete
 	c1 := suite.sampleCollections[0]
+	parsedDatabaseID, err := types.ToUniqueID(&suite.databaseId)
+	suite.NoError(err)
 	deleteCollection := &model.DeleteCollection{
-		ID:           c1.ID,
-		DatabaseName: suite.databaseName,
-		TenantID:     suite.tenantName,
+		ID:         c1.ID,
+		DatabaseID: parsedDatabaseID,
+		TenantID:   suite.tenantName,
 	}
 	err = suite.coordinator.SoftDeleteCollection(ctx, deleteCollection)
 	suite.NoError(err)
@@ -556,9 +558,9 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 
 	// Delete the re-created collection with segments
 	deleteCollection = &model.DeleteCollection{
-		ID:           createCollection.ID,
-		DatabaseName: suite.databaseName,
-		TenantID:     suite.tenantName,
+		ID:         createCollection.ID,
+		DatabaseID: parsedDatabaseID,
+		TenantID:   suite.tenantName,
 	}
 	err = suite.coordinator.SoftDeleteCollection(ctx, deleteCollection)
 	suite.NoError(err)
@@ -602,7 +604,12 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 
 	// Update name
 	coll.Name = "new_name"
-	result, err := suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Name: &coll.Name})
+	result, err := suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{
+		ID:           coll.ID,
+		Name:         &coll.Name,
+		TenantID:     coll.TenantID,
+		DatabaseName: coll.DatabaseName,
+	})
 	suite.NoError(err)
 	suite.Equal(coll.ID, result.ID)
 	suite.Equal(coll.Name, result.Name)
@@ -624,7 +631,12 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	// Update dimension
 	newDimension := int32(128)
 	coll.Dimension = &newDimension
-	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Dimension: coll.Dimension})
+	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{
+		ID:           coll.ID,
+		Dimension:    coll.Dimension,
+		TenantID:     coll.TenantID,
+		DatabaseName: coll.DatabaseName,
+	})
 	suite.NoError(err)
 	suite.Equal(coll.ID, result.ID)
 	suite.Equal(coll.Name, result.Name)
@@ -647,7 +659,12 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	newMetadata := model.NewCollectionMetadata[model.CollectionMetadataValueType]()
 	newMetadata.Add("test_str2", &model.CollectionMetadataValueStringType{Value: "str2"})
 	coll.Metadata = newMetadata
-	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata})
+	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{
+		ID:           coll.ID,
+		Metadata:     coll.Metadata,
+		TenantID:     coll.TenantID,
+		DatabaseName: coll.DatabaseName,
+	})
 	suite.NoError(err)
 	suite.Equal(coll.ID, result.ID)
 	suite.Equal(coll.Name, result.Name)
@@ -668,7 +685,13 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 
 	// Delete all metadata keys
 	coll.Metadata = nil
-	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{ID: coll.ID, Metadata: coll.Metadata, ResetMetadata: true})
+	result, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{
+		ID:            coll.ID,
+		Metadata:      coll.Metadata,
+		ResetMetadata: true,
+		TenantID:      coll.TenantID,
+		DatabaseName:  coll.DatabaseName,
+	})
 	suite.NoError(err)
 	suite.Equal(coll.ID, result.ID)
 	suite.Equal(coll.Name, result.Name)
@@ -754,8 +777,10 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 	suite.NoError(err)
 	newName1 := "new_name_1"
 	_, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{
-		ID:   suite.sampleCollections[1].ID,
-		Name: &newName1,
+		ID:           suite.sampleCollections[1].ID,
+		Name:         &newName1,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
 	})
 	suite.NoError(err)
 	result, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{suite.sampleCollections[1].ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
@@ -765,8 +790,10 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 
 	newName0 := "new_name_0"
 	_, err = suite.coordinator.UpdateCollection(ctx, &model.UpdateCollection{
-		ID:   suite.sampleCollections[0].ID,
-		Name: &newName0,
+		ID:           suite.sampleCollections[0].ID,
+		Name:         &newName0,
+		TenantID:     suite.tenantName,
+		DatabaseName: newDatabaseName,
 	})
 	suite.NoError(err)
 	//suite.Equal(newName0, collection.Name)
@@ -1266,16 +1293,18 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.NoError(err)
 
 	// Hard delete the collection
+	parsedDatabaseID2, err := types.ToUniqueID(&suite.databaseId)
+	suite.NoError(err)
 	err = suite.coordinator.SoftDeleteCollection(ctx, &model.DeleteCollection{
-		ID:           testCollection2.ID,
-		TenantID:     testCollection2.TenantID,
-		DatabaseName: testCollection2.DatabaseName,
+		ID:         testCollection2.ID,
+		TenantID:   testCollection2.TenantID,
+		DatabaseID: parsedDatabaseID2,
 	})
 	suite.NoError(err)
 	err = suite.coordinator.FinishCollectionDeletion(ctx, &model.DeleteCollection{
-		ID:           testCollection2.ID,
-		TenantID:     testCollection2.TenantID,
-		DatabaseName: testCollection2.DatabaseName,
+		ID:         testCollection2.ID,
+		TenantID:   testCollection2.TenantID,
+		DatabaseID: parsedDatabaseID2,
 	})
 	suite.NoError(err)
 
@@ -1304,10 +1333,12 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.NoError(err)
 
 	// Soft delete the collection
+	parsedDatabaseID3, err := types.ToUniqueID(&suite.databaseId)
+	suite.NoError(err)
 	err = suite.coordinator.SoftDeleteCollection(ctx, &model.DeleteCollection{
-		ID:           testCollection.ID,
-		TenantID:     testCollection.TenantID,
-		DatabaseName: testCollection.DatabaseName,
+		ID:         testCollection.ID,
+		TenantID:   testCollection.TenantID,
+		DatabaseID: parsedDatabaseID3,
 	})
 	suite.NoError(err)
 
@@ -1789,10 +1820,12 @@ func (suite *APIsTestSuite) TestGetCollections() {
 	suite.Equal(createCollection.ID, result[0].ID)
 
 	// Soft delete collection
+	parsedDatabaseID4, err := types.ToUniqueID(&suite.databaseId)
+	suite.NoError(err)
 	err = suite.coordinator.SoftDeleteCollection(ctx, &model.DeleteCollection{
-		ID:           createCollection.ID,
-		TenantID:     createCollection.TenantID,
-		DatabaseName: createCollection.DatabaseName,
+		ID:         createCollection.ID,
+		TenantID:   createCollection.TenantID,
+		DatabaseID: parsedDatabaseID4,
 	})
 	suite.NoError(err)
 

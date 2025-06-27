@@ -2,6 +2,7 @@ package grpc
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -161,12 +162,23 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_DeleteDatabase() {
 	suite.NoError(err)
 	suite.Equal(uint64(0), numDeleted)
 
+	// Verify that the database was renamed when soft deleted
+	var databases []*dbmodel.Database
+	suite.NoError(suite.db.Debug().Where("id = ?", databaseId).Find(&databases).Error)
+	suite.Equal(1, len(databases))
+	softDeletedDatabase := databases[0]
+	suite.Equal(true, softDeletedDatabase.IsDeleted)
+	renamedDatabaseNamePrefix := fmt.Sprintf("deleted_%s_", databaseName)
+	suite.Contains(softDeletedDatabase.Name, renamedDatabaseNamePrefix)
+
 	// Hard delete associated collection
+	parsedDatabaseId, err := types.ToUniqueID(&databaseId)
 	suite.NoError(err)
+
 	suite.NoError(suite.catalog.DeleteCollection(context.Background(), &model.DeleteCollection{
-		TenantID:     tenantName,
-		DatabaseName: databaseName,
-		ID:           collectionID,
+		TenantID:   tenantName,
+		DatabaseID: parsedDatabaseId,
+		ID:         collectionID,
 	}, false))
 
 	// Database should now be eligible for hard deletion, but first verify that database is not deleted if cutoff time is prior to soft delete
@@ -180,7 +192,6 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_DeleteDatabase() {
 	suite.Equal(uint64(1), numDeleted)
 
 	// Verify that database is hard deleted
-	var databases []*dbmodel.Database
 	suite.NoError(suite.db.Debug().Where("id = ?", databaseId).Find(&databases).Error)
 	suite.Equal(0, len(databases))
 }
