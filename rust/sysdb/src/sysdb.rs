@@ -22,7 +22,8 @@ use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
+    ForkCollectionError, MaximumLimitExceededError, Segment, SegmentConversionError, SegmentScope,
+    Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -35,6 +36,7 @@ use tower::ServiceBuilder;
 use uuid::{Error, Uuid};
 
 pub const VERSION_FILE_S3_PREFIX: &str = "sysdb/version_files/";
+pub const MAX_LIMIT_VALUE: u32 = 1000; // The maximum size of a result set for a SELECT query.
 
 #[derive(Debug, Clone)]
 pub enum SysDb {
@@ -92,11 +94,26 @@ impl SysDb {
     pub async fn list_databases(
         &mut self,
         tenant_id: String,
-        limit: Option<u32>,
+        mut limit: Option<u32>,
         offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.list_databases(tenant_id, limit, offset).await,
+            SysDb::Grpc(grpc) => {
+                match limit {
+                    Some(provided_limit) => {
+                        if provided_limit > MAX_LIMIT_VALUE {
+                            return Err(ListDatabasesError::InvalidLimit(
+                                MaximumLimitExceededError {
+                                    provided: provided_limit,
+                                    max: MAX_LIMIT_VALUE,
+                                },
+                            ));
+                        }
+                    }
+                    None => limit = Some(MAX_LIMIT_VALUE),
+                }
+                grpc.list_databases(tenant_id, limit, offset).await
+            }
             SysDb::Sqlite(sqlite) => sqlite.list_databases(tenant_id, limit, offset).await,
             SysDb::Test(test) => test.list_databases(tenant_id, limit, offset).await,
         }
@@ -143,18 +160,18 @@ impl SysDb {
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         match self {
             SysDb::Grpc(grpc) => {
-                // TODO(c-gamble): Move this to config
-                let max_get_collections_limit = 100u32;
                 match options.limit {
                     Some(limit) => {
-                        if limit > max_get_collections_limit {
-                            return Err(GetCollectionsError::MaximumLimitExceeded(
-                                limit,
-                                max_get_collections_limit,
+                        if limit > MAX_LIMIT_VALUE {
+                            return Err(GetCollectionsError::InvalidLimit(
+                                MaximumLimitExceededError {
+                                    provided: limit,
+                                    max: MAX_LIMIT_VALUE,
+                                },
                             ));
                         }
                     }
-                    None => options.limit = Some(max_get_collections_limit),
+                    None => options.limit = Some(MAX_LIMIT_VALUE),
                 }
                 grpc.get_collections(options).await
             }
