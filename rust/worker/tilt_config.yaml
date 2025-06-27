@@ -47,8 +47,8 @@ query_service:
         num_worker_threads: 4
         dispatcher_queue_size: 100
         worker_queue_size: 100
-        task_queue_limit: 1000
-        active_io_tasks: 100
+        task_queue_limit: 10000
+        active_io_tasks: 10000
     blockfile_provider:
         arrow:
             block_manager_config:
