@@ -20,6 +20,9 @@ on:
 
 jobs:
   test-rust-bindings:
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
+
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -62,6 +65,8 @@ jobs:
           RUST_BACKTRACE: 1
 
   test-rust-single-node-integration:
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -94,6 +99,9 @@ jobs:
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-rust-thin-client:
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
+
     strategy:
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
@@ -124,7 +132,10 @@ jobs:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-cluster-rust-frontend:
-    if: ${{ contains(inputs.runner, 'ubuntu') }}
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
+    # if: ${{ contains(inputs.runner, 'ubuntu') }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -185,7 +196,9 @@ jobs:
           artifact-name: ${{ steps.compute-artifact-name.outputs.artifact_name }}
 
   merge-cluster-logs:
-    if: ${{ contains(inputs.runner, 'ubuntu') }}
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
+    # if: ${{ contains(inputs.runner, 'ubuntu') }}
     runs-on: blacksmith-4vcpu-ubuntu-2204
     needs: test-cluster-rust-frontend
     steps:
@@ -196,6 +209,9 @@ jobs:
           pattern: cluster_logs_*
 
   test-rust-bindings-stress:
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
+
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -228,6 +244,9 @@ jobs:
           CHROMA_RUST_BINDINGS_TEST_ONLY: "1"
 
   test-python-cli:
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
+
     strategy:
       fail-fast: false
       matrix:
@@ -265,7 +284,13 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-    runs-on: 8core-32gb-windows-latest
+        runner:
+          - 8core-32gb-windows-latest
+          - 16core-64gb-windows-latest
+          - 4core-32gb-windows-latest-arm64
+          - 8core-32gb-windows-latest-arm64
+          - 16core-128gb-windows-latest-arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
