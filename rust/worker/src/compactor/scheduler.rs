@@ -498,6 +498,7 @@ mod tests {
         // Scheduler ignores collection that failed to fetch last compaction time
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_id, collection_uuid_1,);
+        scheduler.complete_collection(collection_uuid_1);
 
         // Add last compaction time for tenant_2
         match sysdb {
@@ -514,6 +515,8 @@ mod tests {
         assert_eq!(jobs.len(), 2);
         assert_eq!(jobs[0].collection_id, collection_uuid_2,);
         assert_eq!(jobs[1].collection_id, collection_uuid_1,);
+        scheduler.complete_collection(collection_uuid_1);
+        scheduler.complete_collection(collection_uuid_2);
 
         // Set disable list.
         std::env::set_var(
@@ -525,6 +528,7 @@ mod tests {
         let jobs = jobs.collect::<Vec<&CompactionJob>>();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_id, collection_uuid_2,);
+        scheduler.complete_collection(collection_uuid_2);
         std::env::set_var(
             "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
             "[]",
@@ -543,6 +547,7 @@ mod tests {
         let jobs = jobs.collect::<Vec<&CompactionJob>>();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_id, collection_uuid_1,);
+        scheduler.complete_collection(collection_uuid_1);
         std::env::set_var(
             "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
             "[]",
