@@ -126,9 +126,13 @@ impl Bindings {
             tenants_to_migrate_immediately_threshold: None,
         };
 
+        println!("constructing frontend with config: {:#?}", frontend_config);
+
         let frontend = runtime.block_on(async {
             Frontend::try_from_config(&(frontend_config, system), &registry).await
         })?;
+
+        println!("constructed frontend");
 
         Ok(Bindings { runtime, frontend })
     }
