@@ -121,6 +121,15 @@ pub enum LogConfig {
     Sqlite(SqliteLogConfig),
 }
 
+impl LogConfig {
+    pub fn tilt_dual_log() -> Self {
+        LogConfig::Grpc(GrpcLogConfig {
+            alt_host: Some("rust-log-service".to_string()),
+            ..Default::default()
+        })
+    }
+}
+
 impl Default for LogConfig {
     fn default() -> Self {
         LogConfig::Grpc(GrpcLogConfig::default())
