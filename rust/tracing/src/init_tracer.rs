@@ -109,10 +109,45 @@ pub fn init_otel_layer(
     global::set_meter_provider(meter_provider);
     tracing_opentelemetry::OpenTelemetryLayer::new(tracer).boxed()
 }
+pub fn init_stdout_single_node() -> Box<dyn Layer<Registry> + Send + Sync> {
+    fmt::layer()
+        .with_writer(std::io::stdout)
+        .pretty()
+        .compact()
+        .with_target(false)
+        .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
+            // NOTE(rescrv):  This is a hack, too.  Not an uppercase hack, just a hack.  This
+            // one's localized to the cache module.  There's not much to do to unify it with
+            // the otel filter because these are different output layers from the tracing.
 
+            // This filter ensures that we don't cache calls for get/insert on stdout, but will
+            // still see the clear call.
+            !(metadata
+                .module_path()
+                .unwrap_or("")
+                .starts_with("chroma_cache")
+                && metadata.name() != "clear")
+        }))
+        .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
+            metadata.module_path().unwrap_or("").starts_with("chroma")
+                || metadata.module_path().unwrap_or("").starts_with("wal3")
+                || metadata.module_path().unwrap_or("").starts_with("worker")
+                || metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("garbage_collector")
+                || metadata
+                    .module_path()
+                    .unwrap_or("")
+                    .starts_with("opentelemetry_sdk")
+        }))
+        .with_filter(tracing_subscriber::filter::LevelFilter::INFO)
+        .boxed()
+}
 pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
     fmt::layer()
         .pretty()
+        .compact()
         .with_target(false)
         .with_filter(tracing_subscriber::filter::FilterFn::new(|metadata| {
             // NOTE(rescrv):  This is a hack, too.  Not an uppercase hack, just a hack.  This
