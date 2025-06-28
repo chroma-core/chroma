@@ -280,6 +280,46 @@ impl LogWriter {
             .map(|writer| writer.manifest_manager.latest())
     }
 
+    pub async fn garbage_collect_phase1(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<bool, Error> {
+        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
+            let options = options.clone();
+            let log = Arc::clone(log);
+            async move { log.garbage_collect_phase1(&options, keep_at_least).await }
+        };
+        self.handle_errors_and_contention(once_log_garbage_collect)
+            .await
+    }
+
+    pub async fn garbage_collect_phase2(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
+            let options = options.clone();
+            let log = Arc::clone(log);
+            async move { log.garbage_collect_phase2(&options).await }
+        };
+        self.handle_errors_and_contention(once_log_garbage_collect)
+            .await
+    }
+
+    pub async fn garbage_collect_phase3(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
+            let options = options.clone();
+            let log = Arc::clone(log);
+            async move { log.garbage_collect_phase3(&options).await }
+        };
+        self.handle_errors_and_contention(once_log_garbage_collect)
+            .await
+    }
+
     pub async fn garbage_collect(
         &self,
         options: &GarbageCollectionOptions,

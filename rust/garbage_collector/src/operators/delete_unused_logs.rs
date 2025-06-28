@@ -5,6 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_log::Log;
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::CollectionUuid;
@@ -18,6 +19,7 @@ use crate::types::CleanupMode;
 pub struct DeleteUnusedLogsOperator {
     pub cleanup_mode: CleanupMode,
     pub storage: Storage,
+    pub logs: Log,
 }
 
 #[derive(Clone, Debug)]
@@ -83,13 +85,23 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             return Err(DeleteUnusedLogsError::Wal3(err))
                         }
                     };
-                    match writer.garbage_collect(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
-                        Ok(()) => Ok(()),
+                    match writer.garbage_collect_phase1(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
+                        Ok(true) => {},
+                        Ok(false) => return Ok(()),
                         Err(err) => {
                             tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
-                            Err(DeleteUnusedLogsError::Wal3(err))
-                        },
-                    }
+                            return Err(DeleteUnusedLogsError::Wal3(err));
+                        }
+                    };
+                    if let Err(err) = writer.garbage_collect_phase2(&GarbageCollectionOptions::default()).await {
+                        tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
+                        return Err(DeleteUnusedLogsError::Wal3(err));
+                    };
+                    if let Err(err) = writer.garbage_collect_phase3(&GarbageCollectionOptions::default()).await {
+                        tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
+                        return Err(DeleteUnusedLogsError::Wal3(err));
+                    };
+                    Ok(())
                 });
             }
             try_join_all(log_gc_futures).await?;
