@@ -65,13 +65,13 @@ impl fmt::Display for Language {
     }
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct DbArgs {
     #[clap(long, hide = true, help = "Flag to use during development")]
     dev: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct CreateArgs {
     #[clap(flatten)]
     db_args: DbArgs,
@@ -79,7 +79,7 @@ pub struct CreateArgs {
     name: Option<String>,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct DeleteArgs {
     #[clap(flatten)]
     db_args: DbArgs,
@@ -94,7 +94,7 @@ pub struct DeleteArgs {
     force: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct ConnectArgs {
     #[clap(flatten)]
     db_args: DbArgs,
@@ -111,13 +111,13 @@ pub struct ConnectArgs {
     env_vars: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Clone)]
 pub struct ListArgs {
     #[clap(flatten)]
     db_args: DbArgs,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 pub enum DbCommand {
     #[command(about = "Generate a connection snippet to a DB")]
     Connect(ConnectArgs),
