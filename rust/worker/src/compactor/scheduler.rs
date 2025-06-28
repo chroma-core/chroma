@@ -269,7 +269,6 @@ impl Scheduler {
                     );
                     return;
                 }
-                self.add_in_progress(record.collection_id);
                 scheduled_collections.push(record);
             }
         }
@@ -279,7 +278,20 @@ impl Scheduler {
             self.policy
                 .determine(filtered_collections, self.max_concurrent_jobs as i32),
         );
-        self.job_queue.truncate(self.max_concurrent_jobs);
+        self.job_queue
+            .truncate(self.max_concurrent_jobs - self.in_progress_jobs.len());
+
+        // At this point, nobody should modify the job queue and every collection
+        // in the job queue will definitely be compacted. It is now safe to add
+        // them to the in-progress set.
+        let job_ids: Vec<_> = self
+            .job_queue
+            .iter()
+            .map(|j| j.collection_id.clone())
+            .collect();
+        for collection_id in job_ids {
+            self.add_in_progress(collection_id);
+        }
     }
 
     fn is_job_in_progress(&mut self, collection_id: &CollectionUuid) -> bool {
