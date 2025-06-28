@@ -545,8 +545,8 @@ impl GrpcLog {
             };
             norm.extend(alt);
         }
-        norm.sort_by_key(|n| n.collection_id);
-        norm.dedup_by_key(|n| n.collection_id);
+        norm.sort_by_key(|x| (x.collection_id, x.first_log_offset));
+        norm.dedup_by_key(|x| x.collection_id);
         Ok(norm)
     }
 
