@@ -732,6 +732,7 @@ mod tests {
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: Some(gc_context),
             metrics: SpannMetrics::default(),
+            pl_block_size: Some(5 * 1024 * 1024),
         };
         let system = System::new();
         let mut manager = CompactionManager::new(
