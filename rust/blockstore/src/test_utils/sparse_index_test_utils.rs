@@ -44,8 +44,16 @@ pub async fn create_test_sparse_index(
     // Set count for the first block
     sparse_index.set_count(block_ids[0], 1)?;
 
+    let max_block_size_bytes = 8 * 1024 * 1024; // 8 MB
+
     // Create and save the sparse index file
-    let root_writer = RootWriter::new(Version::V1_1, root_id, sparse_index, prefix_path);
+    let root_writer = RootWriter::new(
+        Version::V1_2,
+        root_id,
+        sparse_index,
+        prefix_path,
+        max_block_size_bytes,
+    );
     let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
     root_manager.flush::<&str>(&root_writer).await?;
 

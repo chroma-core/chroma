@@ -11,8 +11,8 @@ pub enum BlockfileWriterMutationOrdering {
 pub struct BlockfileWriterOptions {
     pub(crate) mutation_ordering: BlockfileWriterMutationOrdering,
     pub(crate) fork_from: Option<Uuid>,
-    #[allow(dead_code)]
     pub(crate) prefix_path: String,
+    pub(crate) max_block_size_bytes: Option<usize>,
 }
 
 impl BlockfileWriterOptions {
@@ -21,6 +21,7 @@ impl BlockfileWriterOptions {
             prefix_path,
             fork_from: None,
             mutation_ordering: BlockfileWriterMutationOrdering::default(),
+            max_block_size_bytes: None,
         }
     }
 
@@ -46,6 +47,11 @@ impl BlockfileWriterOptions {
     /// Fork from an existing blockfile.
     pub fn fork(mut self, fork: Uuid) -> Self {
         self.fork_from = Some(fork);
+        self
+    }
+
+    pub fn max_block_size_bytes(mut self, size: usize) -> Self {
+        self.max_block_size_bytes = Some(size);
         self
     }
 }
