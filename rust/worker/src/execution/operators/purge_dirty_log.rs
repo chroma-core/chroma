@@ -63,10 +63,6 @@ impl Operator<PurgeDirtyLogInput, PurgeDirtyLogOutput> for PurgeDirtyLog {
         &self,
         input: &PurgeDirtyLogInput,
     ) -> Result<PurgeDirtyLogOutput, PurgeDirtyLogError> {
-        println!(
-            "(Sanket-temp) Inside operator - Purging dirty log for collections: {:?}",
-            input.collection_uuids
-        );
         timeout(
             self.timeout,
             self.log_client
@@ -74,10 +70,6 @@ impl Operator<PurgeDirtyLogInput, PurgeDirtyLogOutput> for PurgeDirtyLog {
                 .purge_dirty_for_collection(input.collection_uuids.clone()),
         )
         .await??;
-        println!(
-            "(Sanket-temp) Inside operator - Returned back from RLS. Purged dirty log for collections: {:?}",
-            input.collection_uuids
-        );
         Ok(())
     }
 }

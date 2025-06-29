@@ -2405,4 +2405,219 @@ mod tests {
         assert_eq!(count_in_index, 3);
         assert_eq!(reader.count().await.unwrap(), 3);
     }
+
+    #[tokio::test]
+    async fn test_v1_1_to_v1_2_migration_partially_new() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        let root_manager = RootManager::new(storage.clone(), root_cache);
+        // 8MiB blocks in V1.1.
+        let max_block_size_bytes = 8 * 1024 * 1024;
+        let block_manager = BlockManager::new(storage.clone(), max_block_size_bytes, block_cache);
+
+        ////////////////////////// STEP 1 //////////////////////////
+
+        // Create two blocks with some data, we will make this conceptually a v1.1 block
+        // Because the block size is 8MiB, these values should fit in their blocks
+        let old_block_delta_1 = block_manager.create::<&str, String, UnorderedBlockDelta>();
+        old_block_delta_1.add("prefix", "a", "value_a".to_string());
+        let old_block_delta_2 = block_manager.create::<&str, String, UnorderedBlockDelta>();
+        old_block_delta_2.add("prefix", "f", "value_b".to_string());
+        let old_block_id_1 = old_block_delta_1.id;
+        let old_block_id_2 = old_block_delta_2.id;
+        let sparse_index = SparseIndexWriter::new(old_block_id_1);
+        sparse_index
+            .add_block(
+                CompositeKey::new("prefix".to_string(), "f"),
+                old_block_delta_2.id,
+            )
+            .unwrap();
+        sparse_index
+            .set_count(old_block_id_1, 1)
+            .expect("Expected to set count");
+        sparse_index
+            .set_count(old_block_id_2, 1)
+            .expect("Expected to set count");
+        let first_write_id = Uuid::new_v4();
+        let prefix_path = "";
+        let old_root_writer = RootWriter::new(
+            Version::V1_1,
+            first_write_id,
+            sparse_index,
+            prefix_path.to_string(),
+            max_block_size_bytes,
+        );
+
+        // Flush the blocks and the root
+        let old_block_1_record_batch = old_block_delta_1.finish::<&str, String>(None);
+        let old_block_1 = Block::from_record_batch(old_block_id_1, old_block_1_record_batch);
+        let old_block_2_record_batch = old_block_delta_2.finish::<&str, String>(None);
+        let old_block_2 = Block::from_record_batch(old_block_id_2, old_block_2_record_batch);
+        block_manager
+            .flush(&old_block_1, prefix_path)
+            .await
+            .unwrap();
+        block_manager
+            .flush(&old_block_2, prefix_path)
+            .await
+            .unwrap();
+        root_manager.flush::<&str>(&old_root_writer).await.unwrap();
+
+        // We now have a v1.1 blockfile with 2 blocks.
+
+        ////////////////////////// STEP 2 //////////////////////////
+
+        // Ensure that a v1.2 compatible reader on a v1.1 blockfile will work as expected
+
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage.clone(),
+            max_block_size_bytes,
+            block_cache,
+            root_cache,
+        );
+
+        let read_options = BlockfileReaderOptions::new(first_write_id, prefix_path.to_string());
+        let reader = blockfile_provider
+            .read::<&str, &str>(read_options)
+            .await
+            .unwrap();
+        let reader = match reader {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader,
+            _ => panic!("Unexpected reader type"),
+        };
+        assert_eq!(reader.get("prefix", "a").await.unwrap(), Some("value_a"));
+        assert_eq!(reader.get("prefix", "f").await.unwrap(), Some("value_b"));
+        assert_eq!(reader.count().await.unwrap(), 2);
+        assert_eq!(reader.root.version, Version::V1_1);
+        assert_eq!(reader.root.max_block_size_bytes, max_block_size_bytes);
+
+        ////////////////////////// STEP 3 //////////////////////////
+        // Test that a v1.2 writer can read a v1.1 blockfile and dirty a block.
+        // We will explicitly try to fork this blockfile with a value for
+        // max_block_size_bytes which is not big enough to fit
+        // in a value. The provider should ignore this supplied param and instead
+        // take the value of max_block_size_bytes from the block manager.
+        // Thus later when we insert a (k, v) bigger than this value
+        // (but smaller than the Block Manager's value) it should succeed.
+
+        // Clear cache so that the blocks and root are deserialized again.
+        blockfile_provider
+            .clear()
+            .await
+            .expect("Expected to clear cache");
+        // Fork with a very small value for max_block_size_bytes.
+        let writer = blockfile_provider
+            .write::<&str, String>(
+                BlockfileWriterOptions::new(prefix_path.to_string())
+                    .fork(first_write_id)
+                    .max_block_size_bytes(10),
+            )
+            .await
+            .unwrap();
+        let second_write_id = writer.id();
+        let writer = match writer {
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => writer,
+            _ => panic!("Unexpected writer type"),
+        };
+        assert_eq!(writer.root.version, Version::V1_1);
+        assert_eq!(writer.root.sparse_index.len(), 2);
+        assert_eq!(writer.root.sparse_index.data.lock().counts.len(), 2);
+        // max_block_size_bytes should be hydrated from the block manager and NOT
+        // from the value passed in the BlockfileWriterOptions.
+        assert_eq!(writer.root.max_block_size_bytes, max_block_size_bytes);
+
+        // Writing a value > 10 bytes should succeed.
+        let more_than_100_bytes_value = "v".repeat(500);
+        writer
+            .set("prefix", "b", more_than_100_bytes_value)
+            .await
+            .unwrap();
+
+        let flusher = writer.commit::<&str, String>().await.unwrap();
+        flusher.flush::<&str, String>().await.unwrap();
+
+        ////////////////////////// STEP 4 //////////////////////////
+
+        // Verify that the root version migration took place
+        // and that all the data is intact.
+        let read_options = BlockfileReaderOptions::new(second_write_id, prefix_path.to_string());
+        let blockfile_reader = blockfile_provider
+            .read::<&str, &str>(read_options)
+            .await
+            .unwrap();
+
+        let reader = match blockfile_reader {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader,
+            _ => panic!("Unexpected reader type"),
+        };
+
+        assert_eq!(reader.root.version, Version::V1_2);
+        assert_eq!(reader.root.sparse_index.len(), 2);
+        assert_eq!(reader.root.max_block_size_bytes, max_block_size_bytes);
+        assert_eq!(reader.count().await.unwrap(), 3);
+
+        ////////////////////////// STEP 5 //////////////////////////
+        // If I create a V1.2 writer for a V1.2 blockfile, it should NOT use the block size of the block manager
+        // but use the value that is persisted in its arrow metadata.
+        // Thus writing a big value should succeed (similar to step 3).
+
+        let block_cache = new_cache_for_test();
+        let root_cache = new_cache_for_test();
+        // Create a block manager with max_block_size_bytes = 10
+        let blockfile_provider =
+            ArrowBlockfileProvider::new(storage.clone(), 10, block_cache, root_cache);
+
+        let writer = blockfile_provider
+            .write::<&str, String>(
+                BlockfileWriterOptions::new(prefix_path.to_string())
+                    .fork(second_write_id)
+                    .max_block_size_bytes(10),
+            )
+            .await
+            .unwrap();
+        let third_write_id = writer.id();
+        let writer = match writer {
+            BlockfileWriter::ArrowUnorderedBlockfileWriter(writer) => writer,
+            _ => panic!("Unexpected writer type"),
+        };
+        assert_eq!(writer.root.version, Version::V1_2);
+        assert_eq!(writer.root.sparse_index.len(), 2);
+        assert_eq!(writer.root.sparse_index.data.lock().counts.len(), 2);
+        // max_block_size_bytes from arrow metadata should be loaded.
+        assert_eq!(writer.root.max_block_size_bytes, max_block_size_bytes);
+
+        // Writing a value > 10 bytes should succeed.
+        let more_than_100_bytes_value = "v".repeat(500);
+        writer
+            .set("prefix", "c", more_than_100_bytes_value)
+            .await
+            .unwrap();
+
+        let flusher = writer.commit::<&str, String>().await.unwrap();
+        flusher.flush::<&str, String>().await.unwrap();
+
+        ////////////////////////// STEP 6 //////////////////////////
+
+        // Verify that the data is correct
+
+        let read_options = BlockfileReaderOptions::new(third_write_id, prefix_path.to_string());
+        let blockfile_reader = blockfile_provider
+            .read::<&str, &str>(read_options)
+            .await
+            .unwrap();
+
+        let reader = match blockfile_reader {
+            BlockfileReader::ArrowBlockfileReader(reader) => reader,
+            _ => panic!("Unexpected reader type"),
+        };
+
+        assert_eq!(reader.root.version, Version::V1_2);
+        assert_eq!(reader.root.sparse_index.len(), 2);
+        assert_eq!(reader.root.max_block_size_bytes, max_block_size_bytes);
+        assert_eq!(reader.count().await.unwrap(), 4);
+    }
 }

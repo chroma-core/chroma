@@ -390,7 +390,6 @@ impl Handler<ScheduledCompactMessage> for CompactionManager {
         let _ = self.compact_batch().await;
         self.purge_dirty_log(ctx).await;
 
-        println!("(Sanket-temp) CompactionManager: Compaction completed. Scheduling next run");
         // Compaction is done, schedule the next compaction
         ctx.scheduler.schedule(
             ScheduledCompactMessage {},
@@ -462,7 +461,6 @@ impl Handler<TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>> for Compaction
         _ctx: &ComponentContext<CompactionManager>,
     ) {
         if let Err(err) = message.into_inner() {
-            println!("(Sanket-temp) Error when purging dirty log: {err}");
             tracing::error!("Error when purging dirty log: {err}");
         }
     }
