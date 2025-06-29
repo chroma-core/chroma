@@ -284,11 +284,7 @@ impl Scheduler {
         // At this point, nobody should modify the job queue and every collection
         // in the job queue will definitely be compacted. It is now safe to add
         // them to the in-progress set.
-        let job_ids: Vec<_> = self
-            .job_queue
-            .iter()
-            .map(|j| j.collection_id.clone())
-            .collect();
+        let job_ids: Vec<_> = self.job_queue.iter().map(|j| j.collection_id).collect();
         for collection_id in job_ids {
             self.add_in_progress(collection_id);
         }
