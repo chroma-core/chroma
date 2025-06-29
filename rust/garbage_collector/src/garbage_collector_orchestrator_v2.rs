@@ -1094,9 +1094,6 @@ mod tests {
     use super::GarbageCollectorOrchestrator;
     use chroma_blockstore::RootManager;
     use chroma_cache::nop::NopCache;
-    use chroma_config::registry::Registry;
-    use chroma_config::Configurable;
-    use chroma_log::config::LogConfig;
     use chroma_log::Log;
     use chroma_storage::test_storage;
     use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
@@ -1116,7 +1113,6 @@ mod tests {
 
         let system = System::new();
         let dispatcher = Dispatcher::new(Default::default());
-        let registry = Registry::new();
         let dispatcher_handle = system.start_component(dispatcher);
         let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
 
@@ -1183,9 +1179,7 @@ mod tests {
             0,
         )
         .unwrap();
-        let logs = Log::try_from_config(&(LogConfig::default(), system.clone()), &registry)
-            .await
-            .unwrap();
+        let logs = Log::InMemory(chroma_log::in_memory_log::InMemoryLog::default());
         let orchestrator = GarbageCollectorOrchestrator::new(
             root_collection_id,
             root_collection.version_file_path.unwrap(),
