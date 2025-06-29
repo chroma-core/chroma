@@ -1190,7 +1190,7 @@ mod tests {
             0,
         )
         .unwrap();
-        let logs = Log::try_from_config(&(LogConfig::tilt_dual_log(), system.clone()), &registry)
+        let logs = Log::try_from_config(&(LogConfig::default(), system.clone()), &registry)
             .await
             .unwrap();
         let orchestrator = GarbageCollectorOrchestrator::new(

@@ -734,7 +734,7 @@ mod tests {
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
             disable_log_gc: false,
-            log: LogConfig::tilt_dual_log(),
+            log: LogConfig::default(),
         };
         let registry = Registry::new();
 
@@ -859,7 +859,7 @@ mod tests {
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
             disable_log_gc: false,
-            log: LogConfig::tilt_dual_log(),
+            log: LogConfig::default(),
         };
         let registry = Registry::new();
 
@@ -1060,7 +1060,7 @@ mod tests {
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
             disable_log_gc: false,
-            log: LogConfig::tilt_dual_log(),
+            log: LogConfig::default(),
         };
         let registry = Registry::new();
 

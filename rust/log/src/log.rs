@@ -253,7 +253,7 @@ impl Log {
         match self {
             Log::Grpc(log) => log.garbage_collect_phase2(collection_id).await,
             Log::Sqlite(_) => Err(GarbageCollectError::Unimplemented),
-            Log::InMemory(_) => Err(GarbageCollectError::Unimplemented),
+            Log::InMemory(_) => Ok(()),
         }
     }
 
@@ -264,7 +264,7 @@ impl Log {
         match self {
             Log::Grpc(log) => log.garbage_collect_phase2_for_dirty_log(ordinal).await,
             Log::Sqlite(_) => Err(GarbageCollectError::Unimplemented),
-            Log::InMemory(_) => Err(GarbageCollectError::Unimplemented),
+            Log::InMemory(_) => Ok(()),
         }
     }
 }
