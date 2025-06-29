@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_log::Log;
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use futures::future::try_join_all;
@@ -11,6 +12,7 @@ use wal3::{GarbageCollectionOptions, LogWriter, LogWriterOptions};
 #[derive(Clone, Debug)]
 pub struct TruncateDirtyLogOperator {
     pub storage: Storage,
+    pub logs: Log,
 }
 
 pub type TruncateDirtyLogInput = ();
@@ -23,6 +25,8 @@ pub enum TruncateDirtyLogError {
     NoLogServiceFound,
     #[error(transparent)]
     Wal3(#[from] wal3::Error),
+    #[error(transparent)]
+    Gc(#[from] chroma_log::GarbageCollectError),
 }
 
 impl ChromaError for TruncateDirtyLogError {
@@ -49,7 +53,7 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
         // It tries to open the dirty log manifest sequentially until the manifest is not found
         // It assumes that all dirty log paths looks like `dirty-rust-log-service-<replica_id>`
         let mut dirty_log_writers = Vec::new();
-        let mut replica_id = 0;
+        let mut replica_id = 0u64;
         loop {
             let dirty_log_prefix = format!("dirty-rust-log-service-{replica_id}");
             match LogWriter::open(
@@ -61,7 +65,7 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
             )
             .await
             {
-                Ok(log_writer) => dirty_log_writers.push(log_writer),
+                Ok(log_writer) => dirty_log_writers.push((log_writer, replica_id)),
                 Err(wal3::Error::UninitializedLog) => break,
                 Err(err) => {
                     tracing::error!("Unable to open dirty log [{dirty_log_prefix}]: {err}");
@@ -74,21 +78,44 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
             tracing::error!("Unable to find any dirty log manifest. Skipping dirty log GC");
             return Err(TruncateDirtyLogError::NoLogServiceFound);
         }
-        try_join_all(dirty_log_writers.into_iter().map(|writer| async move {
-            match writer
-                .garbage_collect(&GarbageCollectionOptions::default(), None)
-                .await
-            {
-                Ok(()) => Ok(()),
-                Err(wal3::Error::NoSuchCursor(_)) => {
-                    tracing::warn!(
-                        "dirty log has no cursor; this should not happen in steady state"
-                    );
-                    Ok(())
-                }
-                Err(err) => {
-                    tracing::error!("Unable to garbage collect dirty log: {err}");
-                    Err(TruncateDirtyLogError::Wal3(err))
+        try_join_all(dirty_log_writers.into_iter().map(|(writer, index)| {
+            let mut logs = self.logs.clone();
+            async move {
+                match writer
+                    .garbage_collect_phase1(&GarbageCollectionOptions::default(), None)
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => return Ok(()),
+                    Err(wal3::Error::NoSuchCursor(_)) => {
+                        tracing::warn!(
+                            "dirty log has no cursor; this should not happen in steady state"
+                        );
+                        return Ok(());
+                    }
+                    Err(err) => {
+                        tracing::error!("Unable to garbage collect dirty log: {err}");
+                        return Err(TruncateDirtyLogError::Wal3(err));
+                    }
+                };
+                logs.garbage_collect_phase2_for_dirty_log(index)
+                    .await
+                    .map_err(TruncateDirtyLogError::Gc)?;
+                match writer
+                    .garbage_collect_phase3(&GarbageCollectionOptions::default())
+                    .await
+                {
+                    Ok(()) => Ok(()),
+                    Err(wal3::Error::NoSuchCursor(_)) => {
+                        tracing::warn!(
+                            "dirty log has no cursor; this should not happen in steady state"
+                        );
+                        Ok(())
+                    }
+                    Err(err) => {
+                        tracing::error!("Unable to garbage collect dirty log: {err}");
+                        Err(TruncateDirtyLogError::Wal3(err))
+                    }
                 }
             }
         }))

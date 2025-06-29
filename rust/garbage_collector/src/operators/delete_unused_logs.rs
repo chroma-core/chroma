@@ -32,6 +32,8 @@ pub type DeleteUnusedLogsOutput = ();
 pub enum DeleteUnusedLogsError {
     #[error(transparent)]
     Wal3(#[from] wal3::Error),
+    #[error(transparent)]
+    Gc(#[from] chroma_log::GarbageCollectError),
 }
 
 impl ChromaError for DeleteUnusedLogsError {
@@ -63,6 +65,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
             for (collection_id, minimum_log_offset_to_keep) in &input.collections_to_garbage_collect
             {
                 let storage_clone = storage_arc.clone();
+                let mut logs = self.logs.clone();
                 log_gc_futures.push(async move {
                     let writer = match LogWriter::open(
                         LogWriterOptions::default(),
@@ -88,9 +91,9 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             return Err(DeleteUnusedLogsError::Wal3(err));
                         }
                     };
-                    if let Err(err) = writer.garbage_collect_phase2(&GarbageCollectionOptions::default()).await {
+                    if let Err(err) = logs.garbage_collect_phase2(*collection_id).await {
                         tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
-                        return Err(DeleteUnusedLogsError::Wal3(err));
+                        return Err(DeleteUnusedLogsError::Gc(err));
                     };
                     if let Err(err) = writer.garbage_collect_phase3(&GarbageCollectionOptions::default()).await {
                         tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");

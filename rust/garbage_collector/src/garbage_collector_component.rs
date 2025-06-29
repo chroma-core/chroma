@@ -218,6 +218,7 @@ impl GarbageCollector {
         let truncate_dirty_log_task = wrap(
             Box::new(TruncateDirtyLogOperator {
                 storage: self.storage.clone(),
+                logs: self.logs.clone(),
             }),
             (),
             ctx.receiver(),

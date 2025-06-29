@@ -6,6 +6,7 @@ use chroma_blockstore::RootManager;
 use chroma_cache::nop::NopCache;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
+use chroma_log::config::LogConfig;
 use chroma_log::Log;
 use chroma_storage::s3::s3_client_for_test_with_bucket_name;
 use chroma_storage::{DeleteOptions, GetOptions, Storage};
@@ -113,6 +114,10 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                     ref_state.db_name.clone(),
                     ref_state.tenant.clone(),
                 )
+                .await
+                .unwrap();
+            let system = System::new();
+            let logs = Log::try_from_config(&(LogConfig::tilt_dual_log(), system), &registry)
                 .await
                 .unwrap();
 
