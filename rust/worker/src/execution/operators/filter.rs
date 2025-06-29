@@ -495,12 +495,6 @@ impl Operator<FilterInput, FilterOutput> for Filter {
     type Error = FilterError;
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
-        if self.query_ids.is_none() && self.where_clause.is_none() {
-            return Ok(FilterOutput {
-                log_offset_ids: SignedRoaringBitmap::full(),
-                compact_offset_ids: SignedRoaringBitmap::full(),
-            });
-        }
         tracing::debug!(
             "[{}]: Num log entries {:?}, metadata segment {:?}, record segment {:?}",
             self.get_name(),
@@ -530,6 +524,16 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             MetadataLogReader::create(&materialized_logs, &record_segment_reader)
                 .await
                 .map_err(FilterError::LogMaterializer)?;
+
+        // Short-circuit if filter is none.
+        if self.query_ids.is_none() && self.where_clause.is_none() {
+            return Ok(FilterOutput {
+                log_offset_ids: SignedRoaringBitmap::full(),
+                compact_offset_ids: SignedRoaringBitmap::full()
+                    & SignedRoaringBitmap::Exclude(metadata_log_reader.updated_offset_ids),
+            });
+        }
+
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
 
         let metadata_segement_reader =
