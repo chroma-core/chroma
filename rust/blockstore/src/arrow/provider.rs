@@ -98,7 +98,7 @@ impl ArrowBlockfileProvider {
             .get::<K>(
                 &options.id,
                 &options.prefix_path,
-                self.block_manager.max_block_size_bytes(),
+                self.block_manager.default_max_block_size_bytes(),
             )
             .await;
         match root {
@@ -165,7 +165,7 @@ impl ArrowBlockfileProvider {
                     &fork_from,
                     new_id,
                     &options.prefix_path,
-                    self.block_manager.max_block_size_bytes(),
+                    self.block_manager.default_max_block_size_bytes(),
                 )
                 .await
                 .map_err(|e| {
@@ -198,7 +198,7 @@ impl ArrowBlockfileProvider {
             let new_id = Uuid::new_v4();
             let max_block_size_bytes = options
                 .max_block_size_bytes
-                .unwrap_or(self.block_manager.max_block_size_bytes());
+                .unwrap_or(self.block_manager.default_max_block_size_bytes());
 
             match options.mutation_ordering {
                 BlockfileWriterMutationOrdering::Ordered => {
@@ -315,20 +315,20 @@ impl ChromaError for ForkError {
 pub struct BlockManager {
     block_cache: Arc<dyn PersistentCache<Uuid, Block>>,
     storage: Storage,
-    max_block_size_bytes: usize,
+    default_max_block_size_bytes: usize,
 }
 
 impl BlockManager {
     pub(super) fn new(
         storage: Storage,
-        max_block_size_bytes: usize,
+        default_max_block_size_bytes: usize,
         block_cache: Box<dyn PersistentCache<Uuid, Block>>,
     ) -> Self {
         let block_cache: Arc<dyn PersistentCache<Uuid, Block>> = block_cache.into();
         Self {
             block_cache,
             storage,
-            max_block_size_bytes,
+            default_max_block_size_bytes,
         }
     }
 
@@ -470,8 +470,8 @@ impl BlockManager {
         Ok(())
     }
 
-    pub(super) fn max_block_size_bytes(&self) -> usize {
-        self.max_block_size_bytes
+    pub(super) fn default_max_block_size_bytes(&self) -> usize {
+        self.default_max_block_size_bytes
     }
 }
 
