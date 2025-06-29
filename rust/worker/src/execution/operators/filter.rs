@@ -495,6 +495,12 @@ impl Operator<FilterInput, FilterOutput> for Filter {
     type Error = FilterError;
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
+        if self.query_ids.is_none() && self.where_clause.is_none() {
+            return Ok(FilterOutput {
+                log_offset_ids: SignedRoaringBitmap::full(),
+                compact_offset_ids: SignedRoaringBitmap::full(),
+            });
+        }
         tracing::debug!(
             "[{}]: Num log entries {:?}, metadata segment {:?}, record segment {:?}",
             self.get_name(),
