@@ -33,6 +33,7 @@ use crate::types::{
 use async_trait::async_trait;
 use chroma_blockstore::RootManager;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_log::Log;
 use chroma_storage::Storage;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::{
@@ -62,6 +63,7 @@ pub struct GarbageCollectorOrchestrator {
     dispatcher: ComponentHandle<Dispatcher>,
     system: System,
     storage: Storage,
+    logs: Log,
     root_manager: RootManager,
     result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
     cleanup_mode: CleanupMode,
@@ -95,6 +97,7 @@ impl GarbageCollectorOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         system: System,
         storage: Storage,
+        logs: Log,
         root_manager: RootManager,
         cleanup_mode: CleanupMode,
         min_versions_to_keep: u32,
@@ -109,6 +112,7 @@ impl GarbageCollectorOrchestrator {
             dispatcher,
             system,
             storage,
+            logs,
             root_manager,
             cleanup_mode,
             result_channel: None,
@@ -508,6 +512,7 @@ impl GarbageCollectorOrchestrator {
             Box::new(DeleteUnusedLogsOperator {
                 cleanup_mode: self.cleanup_mode,
                 storage: self.storage.clone(),
+                logs: self.logs.clone(),
             }),
             DeleteUnusedLogsInput {
                 collections_to_destroy,
@@ -1089,6 +1094,7 @@ mod tests {
     use super::GarbageCollectorOrchestrator;
     use chroma_blockstore::RootManager;
     use chroma_cache::nop::NopCache;
+    use chroma_log::Log;
     use chroma_storage::test_storage;
     use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
     use chroma_system::{Dispatcher, Orchestrator, System};
@@ -1173,6 +1179,7 @@ mod tests {
             0,
         )
         .unwrap();
+        let logs = Log::InMemory(chroma_log::in_memory_log::InMemoryLog::default());
         let orchestrator = GarbageCollectorOrchestrator::new(
             root_collection_id,
             root_collection.version_file_path.unwrap(),
@@ -1183,6 +1190,7 @@ mod tests {
             dispatcher_handle,
             system.clone(),
             storage,
+            logs,
             root_manager,
             crate::types::CleanupMode::Delete,
             1,

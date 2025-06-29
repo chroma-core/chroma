@@ -1,4 +1,5 @@
 use chroma_cache::CacheConfig;
+use chroma_log::config::LogConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
 use chroma_types::CollectionUuid;
@@ -58,6 +59,8 @@ pub(super) struct GarbageCollectorConfig {
     #[serde(default)]
     pub root_cache_config: CacheConfig,
     pub jemalloc_pprof_server_port: Option<u16>,
+    #[serde(default)]
+    pub log: LogConfig,
 }
 
 impl GarbageCollectorConfig {

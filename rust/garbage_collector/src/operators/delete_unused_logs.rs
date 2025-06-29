@@ -5,6 +5,7 @@ use std::{
 
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_log::Log;
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::CollectionUuid;
@@ -18,6 +19,7 @@ use crate::types::CleanupMode;
 pub struct DeleteUnusedLogsOperator {
     pub cleanup_mode: CleanupMode,
     pub storage: Storage,
+    pub logs: Log,
 }
 
 #[derive(Clone, Debug)]
@@ -32,6 +34,8 @@ pub type DeleteUnusedLogsOutput = ();
 pub enum DeleteUnusedLogsError {
     #[error(transparent)]
     Wal3(#[from] wal3::Error),
+    #[error(transparent)]
+    Gc(#[from] chroma_log::GarbageCollectError),
 }
 
 impl ChromaError for DeleteUnusedLogsError {
@@ -66,6 +70,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
             for (collection_id, minimum_log_offset_to_keep) in &input.collections_to_garbage_collect
             {
                 let storage_clone = storage_arc.clone();
+                let mut logs = self.logs.clone();
                 log_gc_futures.push(async move {
                     let writer = match LogWriter::open(
                         LogWriterOptions::default(),
@@ -83,13 +88,23 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             return Err(DeleteUnusedLogsError::Wal3(err))
                         }
                     };
-                    match writer.garbage_collect(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
-                        Ok(()) => Ok(()),
+                    match writer.garbage_collect_phase1(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
+                        Ok(true) => {},
+                        Ok(false) => return Ok(()),
                         Err(err) => {
                             tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
-                            Err(DeleteUnusedLogsError::Wal3(err))
-                        },
-                    }
+                            return Err(DeleteUnusedLogsError::Wal3(err));
+                        }
+                    };
+                    if let Err(err) = logs.garbage_collect_phase2(*collection_id).await {
+                        tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
+                        return Err(DeleteUnusedLogsError::Gc(err));
+                    };
+                    if let Err(err) = writer.garbage_collect_phase3(&GarbageCollectionOptions::default()).await {
+                        tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
+                        return Err(DeleteUnusedLogsError::Wal3(err));
+                    };
+                    Ok(())
                 });
             }
             try_join_all(log_gc_futures).await?;
