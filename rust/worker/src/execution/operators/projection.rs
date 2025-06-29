@@ -14,7 +14,7 @@ use chroma_types::{
 };
 use futures::future::try_join_all;
 use thiserror::Error;
-use tracing::{error, trace, Instrument, Span};
+use tracing::{error, Instrument, Span};
 
 /// The `Projection` operator retrieves record content by offset ids
 ///
@@ -69,8 +69,14 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
     type Error = ProjectionError;
 
     async fn run(&self, input: &ProjectionInput) -> Result<ProjectionOutput, ProjectionError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        if input.offset_ids.is_empty() {
+            return Ok(ProjectionOutput { records: vec![] });
+        }
 
+        tracing::trace!(
+            "Running projection on {} offset ids",
+            input.offset_ids.len()
+        );
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
