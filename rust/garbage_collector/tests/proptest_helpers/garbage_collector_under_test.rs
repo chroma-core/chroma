@@ -117,7 +117,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 .await
                 .unwrap();
             let system = System::new();
-            let logs = Log::try_from_config(&(LogConfig::tilt_dual_log(), system), &registry)
+            let logs = Log::try_from_config(&(LogConfig::default(), system), &registry)
                 .await
                 .unwrap();
 

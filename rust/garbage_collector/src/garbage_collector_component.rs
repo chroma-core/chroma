@@ -732,7 +732,7 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
-            log: LogConfig::tilt_dual_log(),
+            log: LogConfig::default(),
         };
         let registry = Registry::new();
 
@@ -856,7 +856,7 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
-            log: LogConfig::tilt_dual_log(),
+            log: LogConfig::default(),
         };
         let registry = Registry::new();
 
@@ -1056,7 +1056,7 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
-            log: LogConfig::tilt_dual_log(),
+            log: LogConfig::default(),
         };
         let registry = Registry::new();
 
