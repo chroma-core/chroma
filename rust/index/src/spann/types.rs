@@ -18,6 +18,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_tracing::util::Stopwatch;
 use chroma_types::SpannPostingList;
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
+use futures::future;
 use opentelemetry::{global, KeyValue};
 use rand::seq::SliceRandom;
 use thiserror::Error;
@@ -2636,6 +2637,10 @@ impl<'me> SpannIndexReader<'me> {
         })
     }
 
+    fn is_version_outdated(actual_version: u32, doc_version: u32) -> bool {
+        actual_version == 0 || doc_version < actual_version
+    }
+
     async fn is_outdated(
         &self,
         doc_offset_id: u32,
@@ -2654,7 +2659,7 @@ impl<'me> SpannIndexReader<'me> {
                 SpannIndexReaderError::VersionsMapReadError(e)
             })?
             .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
-        Ok(actual_version == 0 || doc_version < actual_version)
+        Ok(Self::is_version_outdated(actual_version, doc_version))
     }
 
     pub async fn fetch_posting_list(
@@ -2671,13 +2676,31 @@ impl<'me> SpannIndexReader<'me> {
             })?
             .ok_or(SpannIndexReaderError::PostingListNotFound)?;
 
+        if res.doc_offset_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Fetch all the versions in parallel.
+        let actual_versions =
+            future::try_join_all(res.doc_offset_ids.iter().map(|offset_id| async {
+                self.versions_map.get("", *offset_id).await.map_err(|e| {
+                    tracing::error!(
+                        "Error getting version for doc offset id {}: {}",
+                        *offset_id,
+                        e
+                    );
+                    SpannIndexReaderError::VersionsMapReadError(e)
+                })
+            }))
+            .await?
+            .into_iter()
+            .collect::<Option<Vec<u32>>>()
+            .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
+
         let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
         let mut unique_ids = HashSet::new();
         for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
-            if self
-                .is_outdated(*doc_offset_id, res.doc_versions[index])
-                .await?
-            {
+            if Self::is_version_outdated(actual_versions[index], res.doc_versions[index]) {
                 continue;
             }
             if unique_ids.contains(doc_offset_id) {
