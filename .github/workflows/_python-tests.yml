@@ -257,8 +257,10 @@ jobs:
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-windows-smoke:
-    # only run windows smoke tests when the runner isn't already windows
-    if: ${{ !contains(inputs.runner, 'windows') }}
+    # only run windows smoke tests when the runner isn't already windows,
+    # also only run the smoke tests on PRs (ie not main and not tags) since
+    # we are already running the full suite on Windows in those cases
+    if: ${{ !contains(inputs.runner, 'windows') && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
     strategy:
       fail-fast: false
       matrix:
