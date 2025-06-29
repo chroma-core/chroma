@@ -337,9 +337,6 @@ impl ManifestManager {
             }
             match self.do_work().await {
                 Ok(_) => {}
-                Err(Error::LogContentionRetry)
-                | Err(Error::LogContentionFailure)
-                | Err(Error::LogContentionDurable) => {}
                 Err(err) => {
                     return Err(err);
                 }
