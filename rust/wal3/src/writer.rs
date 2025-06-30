@@ -665,6 +665,9 @@ impl OnceLogWriter {
     /// Post-condition:
     /// - gc/GARBAGE exists as a non-empty file.
     /// - snapshots created by gc/GARBAGE get created.
+    ///
+    /// Returns Ok(false) if there is no garbage to act upon (e.g., it's already been collected).
+    /// Returns Ok(true) if there is garbage to act upon.
     #[tracing::instrument(skip(self, options))]
     async fn garbage_collect_phase1_compute_garbage(
         &self,
