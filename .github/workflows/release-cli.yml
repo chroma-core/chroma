@@ -51,6 +51,10 @@ jobs:
       fail-fast: false
       matrix:
         runner:
+          - windows-latest
+          - windows-2019
+          - windows-2022
+          - windows-2025
           - 8core-32gb-windows-latest
           - 16core-64gb-windows-latest
           - 32core-128gb-windows-latest
