@@ -1193,6 +1193,7 @@ mod tests {
             root_manager,
             crate::types::CleanupMode::Delete,
             1,
+            false,
         );
         let result = orchestrator.run(system).await;
         assert!(result.is_err());
