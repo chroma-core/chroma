@@ -536,19 +536,18 @@ class CollectionCommon(Generic[ClientT]):
         if embeddable_fields is None:
             embeddable_fields = get_default_embeddable_record_set_fields()
 
-        for field in embeddable_fields:
-            if record_set[field] is not None:  # type: ignore[literal-required]
-                # uris require special handling
-                if field == "uris":
-                    if self._data_loader is None:
-                        raise ValueError(
-                            "You must set a data loader on the collection if loading from URIs."
-                        )
-                    return self._embed(
-                        input=self._data_loader(uris=cast(URIs, record_set[field]))  # type: ignore[literal-required]
-                    )
-                else:
-                    return self._embed(input=record_set[field])  # type: ignore[literal-required]
+        if record_set["documents"] is not None:
+            return self._embed(input=record_set["documents"])
+        elif record_set["images"] is not None:
+            return self._embed(input=record_set["images"])
+        elif record_set["uris"] is not None:
+            if self._data_loader is None:
+                raise ValueError(
+                    "You must set a data loader on the collection if loading from URIs."
+                )
+            return self._embed(
+                input=self._data_loader(uris=cast(URIs, record_set["uris"]))
+            )
         raise ValueError(
             "Record does not contain any non-None fields that can be embedded."
             f"Embeddable Fields: {embeddable_fields}"
@@ -556,13 +555,6 @@ class CollectionCommon(Generic[ClientT]):
         )
 
     def _embed(self, input: Any) -> Embeddings:
-        if self._embedding_function is not None and not isinstance(
-            self._embedding_function, ef.DefaultEmbeddingFunction
-        ):
-            return self._embedding_function(input=input)
-        config_ef = self.configuration.get("embedding_function")
-        if config_ef is not None:
-            return config_ef(input=input)
         if self._embedding_function is None:
             raise ValueError(
                 "You must provide an embedding function to compute embeddings."
