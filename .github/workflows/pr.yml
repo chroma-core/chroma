@@ -1,9 +1,12 @@
 name: PR checks
 on:
   pull_request:
+    types:
+      - edited
     branches:
       - main
       - '**'
+    
 
 jobs:
   # This job detects what changed and determines which tests to run
@@ -205,15 +208,19 @@ jobs:
             helpMessage: "Please tag your PR title. See https://docs.trychroma.com/contributing#contributing-code-and-ideas. You must push new code to this PR for this check to run again."
         - name: Comment explaining failure
           if: failure()
-          uses: actions/github-script@v6
+          uses: marocchino/sticky-pull-request-comment@v2
           with:
-            script: |
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: 'Please tag your PR title with one of: \\[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE\\]. See https://docs.trychroma.com/contributing#contributing-code-and-ideas'
-              })
+            header: pr-title-check
+            message: |
+              :x: Please tag your PR title with one of: `[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE]`.
+              See [Contributing Guidelines](https://docs.trychroma.com/contributing#contributing-code-and-ideas).
+          
+        - name: Delete comment on success
+          if: success()
+          uses: marocchino/sticky-pull-request-comment@v2
+          with:
+            header: pr-title-check
+            delete: true
 
   lint:
     name: Lint
