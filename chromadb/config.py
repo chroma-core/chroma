@@ -23,12 +23,7 @@ except ImportError:
 if not in_pydantic_v2:
     from pydantic import validator  # type: ignore # noqa
 
-# The thin client will have a flag to control which implementations to use
-is_thin_client = False
-try:
-    from chromadb.is_thin_client import is_thin_client  # type: ignore
-except ImportError:
-    is_thin_client = False
+
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +118,8 @@ class Settings(BaseSettings):  # type: ignore
     # ==============
 
     environment: str = ""
+
+    is_thin_client: bool = False
 
     # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
     chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
@@ -370,7 +367,7 @@ class System(Component):
     _instances: Dict[Type[Component], Component]
 
     def __init__(self, settings: Settings):
-        if is_thin_client:
+        if self.settings.is_thin_client:
             # The thin client is a system with only the API component
             if settings["chroma_api_impl"] not in [
                 "chromadb.api.fastapi.FastAPI",
