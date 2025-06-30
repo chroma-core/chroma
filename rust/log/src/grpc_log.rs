@@ -801,27 +801,35 @@ impl GrpcLog {
         ordinal: u64,
     ) -> Result<(), GarbageCollectError> {
         // NOTE(rescrv): Use a raw LogServiceClient so we can open by stateful set ordinal.
-        let endpoint_res = match Endpoint::from_shared(format!("rust-log-service-{ordinal}:50051"))
-        {
+        let endpoint_res = match Endpoint::from_shared(format!(
+            "grpc://rust-log-service-{ordinal}.rust-log-service:50051"
+        )) {
             Ok(endpoint) => endpoint,
-            Err(e) => return Err(GarbageCollectError::Resolution(e.to_string())),
+            Err(e) => {
+                return Err(GarbageCollectError::Resolution(format!(
+                    "could not connect to rust-log-service-{ordinal}:50051: {}",
+                    e
+                )));
+            }
         };
         let endpoint_res = endpoint_res
             .connect_timeout(Duration::from_millis(self.config.connect_timeout_ms))
             .timeout(Duration::from_millis(self.config.request_timeout_ms));
-        let channel = endpoint_res
-            .connect()
-            .await
-            .map_err(|err| GarbageCollectError::Resolution(err.to_string()))?;
+        let channel = endpoint_res.connect().await.map_err(|err| {
+            GarbageCollectError::Resolution(format!(
+                "could not connect to rust-log-service-{ordinal}:50051: {}",
+                err
+            ))
+        })?;
         let channel = ServiceBuilder::new()
             .layer(chroma_tracing::GrpcTraceLayer)
             .service(channel);
         let mut log = LogServiceClient::new(channel);
         log.garbage_collect_phase2(chroma_proto::GarbageCollectPhase2Request {
             log_to_collect: Some(
-                chroma_proto::garbage_collect_phase2_request::LogToCollect::DirtyLog(
-                    "rust-log-service-{ordinal}".to_string(),
-                ),
+                chroma_proto::garbage_collect_phase2_request::LogToCollect::DirtyLog(format!(
+                    "rust-log-service-{ordinal}"
+                )),
             ),
         })
         .await?;

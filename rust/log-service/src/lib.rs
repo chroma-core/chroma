@@ -2004,7 +2004,7 @@ impl LogServer {
                 Some(LogToCollect::DirtyLog(host)) => {
                     if host != self.config.my_member_id {
                         return Err(Status::failed_precondition(
-                            "can only perform gc phase 2 on our own dirty log",
+                            format!("can only perform gc phase 2 on our own dirty log:  I am {}, but was asked for {}", self.config.my_member_id, host),
                         ));
                     }
                     self.dirty_log
