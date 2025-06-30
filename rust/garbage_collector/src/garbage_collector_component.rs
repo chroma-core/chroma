@@ -137,6 +137,7 @@ impl GarbageCollector {
                     self.root_manager.clone(),
                     cleanup_mode,
                     self.config.min_versions_to_keep,
+                    self.config.disable_log_gc,
                 );
 
             let started_at = SystemTime::now();
