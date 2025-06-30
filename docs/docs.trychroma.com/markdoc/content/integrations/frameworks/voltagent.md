@@ -75,38 +75,50 @@ pnpm install
 
 {% /TabbedUseCaseCodeBlock %}
 
-Next, you'll need to launch a Chroma server instance. Docker provides the most straightforward approach:
+Next, you'll need to launch a Chroma server instance.
 
-```bash
-docker run -p 8000:8000 chromadb/chroma
-```
-
-Alternatively, install Chroma via pip and run it locally:
-
-```bash
-pip install chromadb
-chroma run --host 0.0.0.0 --port 8000
+```terminal
+npx chromadb run
 ```
 
 The server will be available at `http://localhost:8000`.
+
+**Note**: For production deployments, you might prefer [Chroma Cloud](https://www.trychroma.com/), a fully managed hosted service. See the Environment Setup section below for cloud configuration.
 
 ## Environment Setup
 
 Create a `.env` file with your configuration:
 
+### Option 1: Local Chroma Server
+
 ```env
 # OpenAI API key for embeddings and LLM
 OPENAI_API_KEY=your-openai-api-key-here
 
-# Chroma server URL
-CHROMA_URL=http://localhost:8000
+# Local Chroma server configuration (optional - defaults shown)
+CHROMA_HOST=localhost
+CHROMA_PORT=8000
 ```
+
+### Option 2: [Chroma Cloud](https://www.trychroma.com/)
+
+```env
+# OpenAI API key for embeddings and LLM
+OPENAI_API_KEY=your-openai-api-key-here
+
+# Chroma Cloud configuration
+CHROMA_API_KEY=your-chroma-cloud-api-key
+CHROMA_TENANT=your-tenant-name
+CHROMA_DATABASE=your-database-name
+```
+
+The code will automatically detect which configuration to use based on the presence of `CHROMA_API_KEY`.
 
 ## Run Your Application
 
 Start your VoltAgent application:
 
-```bash
+```terminal
 npm run dev
 ```
 
@@ -118,6 +130,8 @@ You'll see:
 📚 Two different agents are ready:
   1️⃣ Assistant with Retriever - Automatic semantic search on every interaction
   2️⃣ Assistant with Tools - LLM decides when to search autonomously
+
+💡 Chroma server started easily with npx chromadb run (no Docker/Python needed!)
 
 ══════════════════════════════════════════════════
   VOLTAGENT SERVER STARTED SUCCESSFULLY
@@ -165,13 +179,21 @@ import {
   type BaseMessage,
   type RetrieveOptions,
 } from "@voltagent/core";
-import { ChromaClient } from "chromadb";
+import {
+  ChromaClient,
+  CloudClient,
+  type QueryRowResult,
+  type Metadata,
+} from "chromadb";
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
-// Initialize Chroma client
-const chromaClient = new ChromaClient({
-  path: process.env.CHROMA_URL || "http://localhost:8000",
-});
+// Initialize Chroma client - supports both local and cloud
+const chromaClient = process.env.CHROMA_API_KEY
+  ? new CloudClient() // Uses CHROMA_API_KEY, CHROMA_TENANT, CHROMA_DATABASE env vars
+  : new ChromaClient({
+      host: process.env.CHROMA_HOST || "localhost",
+      port: parseInt(process.env.CHROMA_PORT || "8000"),
+    });
 
 // Configure OpenAI embeddings
 const embeddingFunction = new OpenAIEmbeddingFunction({
@@ -184,7 +206,8 @@ const collectionName = "voltagent-knowledge-base";
 
 **Essential Elements Breakdown**:
 
-- **ChromaClient**: Connects to your Chroma server
+- **ChromaClient/CloudClient**: Connects to your local Chroma server or Chroma Cloud
+- **Automatic Detection**: Uses CloudClient if CHROMA_API_KEY is set, otherwise falls back to local ChromaClient
 - **OpenAIEmbeddingFunction**: Uses OpenAI's embedding models to convert text into vectors
 - **Collection**: A named container for your documents and their embeddings
 
@@ -257,16 +280,19 @@ async function retrieveDocuments(query: string, nResults = 3) {
       nResults,
     });
 
-    if (!results.documents || !results.documents[0]) {
+    // Use the new .rows() method for cleaner data access
+    const rows = results.rows();
+
+    if (!rows || rows.length === 0 || !rows[0]) {
       return [];
     }
 
-    // Format results with metadata
-    return results.documents[0].map((doc, index) => ({
-      content: doc,
-      metadata: results.metadatas?.[0]?.[index] || {},
-      distance: results.distances?.[0]?.[index] || 0,
-      id: results.ids?.[0]?.[index] || `unknown_${index}`,
+    // Format results - rows[0] contains the actual row data
+    return rows[0].map((row: QueryRowResult<Metadata>, index: number) => ({
+      content: row.document || "",
+      metadata: row.metadata || {},
+      distance: results.distances?.[0]?.[index] || 0, // Distance still comes from the original results
+      id: row.id,
     }));
   } catch (error) {
     console.error("Error retrieving documents:", error);
