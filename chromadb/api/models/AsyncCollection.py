@@ -75,7 +75,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             embeddings=add_request["embeddings"],
             metadatas=add_request["metadatas"],
             documents=add_request["documents"],
-            uris=add_request["uris"],
+            uris=add_request["uris"] or add_request["images"],
             tenant=self.tenant,
             database=self.database,
         )
