@@ -90,7 +90,7 @@ impl GarbageCollectorConfig {
         let res = f.extract();
         match res {
             Ok(config) => config,
-            Err(e) => panic!("Error loading config: {}", e),
+            Err(e) => panic!("Error loading config from {path}: {}", e),
         }
     }
 
