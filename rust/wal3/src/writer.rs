@@ -790,10 +790,7 @@ impl OnceLogWriter {
                 "loaded garbage without e_tag".to_string(),
             ));
         };
-        let paths = garbage
-            .prefixed_paths_to_delete(&self.prefix)
-            .collect::<Vec<_>>();
-        for path in paths {
+        for path in garbage.prefixed_paths_to_delete(&self.prefix) {
             loop {
                 match self.storage.delete(&path, DeleteOptions::default()).await {
                     Ok(()) => break,
