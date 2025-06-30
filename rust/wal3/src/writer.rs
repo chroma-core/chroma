@@ -280,6 +280,49 @@ impl LogWriter {
             .map(|writer| writer.manifest_manager.latest())
     }
 
+    pub async fn garbage_collect_phase1_compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<bool, Error> {
+        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
+            let options = options.clone();
+            let log = Arc::clone(log);
+            async move {
+                log.garbage_collect_phase1_compute_garbage(&options, keep_at_least)
+                    .await
+            }
+        };
+        self.handle_errors_and_contention(once_log_garbage_collect)
+            .await
+    }
+
+    pub async fn garbage_collect_phase2_update_manifest(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
+            let options = options.clone();
+            let log = Arc::clone(log);
+            async move { log.garbage_collect_phase2_update_manifest(&options).await }
+        };
+        self.handle_errors_and_contention(once_log_garbage_collect)
+            .await
+    }
+
+    pub async fn garbage_collect_phase3_delete_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
+            let options = options.clone();
+            let log = Arc::clone(log);
+            async move { log.garbage_collect_phase3_delete_garbage(&options).await }
+        };
+        self.handle_errors_and_contention(once_log_garbage_collect)
+            .await
+    }
+
     pub async fn garbage_collect(
         &self,
         options: &GarbageCollectionOptions,
@@ -622,8 +665,11 @@ impl OnceLogWriter {
     /// Post-condition:
     /// - gc/GARBAGE exists as a non-empty file.
     /// - snapshots created by gc/GARBAGE get created.
+    ///
+    /// Returns Ok(false) if there is no garbage to act upon (e.g., it's already been collected).
+    /// Returns Ok(true) if there is garbage to act upon.
     #[tracing::instrument(skip(self, options))]
-    async fn garbage_collect_phase1(
+    async fn garbage_collect_phase1_compute_garbage(
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
@@ -695,7 +741,7 @@ impl OnceLogWriter {
     /// Post-condition:
     /// - contents of gc/GARBAGE are removed from manifest/MANIFEST.
     #[tracing::instrument(skip(self, _options))]
-    async fn garbage_collect_phase2(
+    async fn garbage_collect_phase2_update_manifest(
         &self,
         _options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
@@ -724,7 +770,7 @@ impl OnceLogWriter {
     /// Post-condition:
     /// - gc/GARBAGE and the files it references get deleted.
     #[tracing::instrument(skip(self, options))]
-    async fn garbage_collect_phase3(
+    async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
@@ -786,9 +832,10 @@ impl OnceLogWriter {
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<(), Error> {
-        self.garbage_collect_phase1(options, keep_at_least).await?;
-        self.garbage_collect_phase2(options).await?;
-        self.garbage_collect_phase3(options).await?;
+        self.garbage_collect_phase1_compute_garbage(options, keep_at_least)
+            .await?;
+        self.garbage_collect_phase2_update_manifest(options).await?;
+        self.garbage_collect_phase3_delete_garbage(options).await?;
         Ok(())
     }
 
