@@ -242,15 +242,10 @@ impl Garbage {
         for snap in self.snapshots_to_drop.iter() {
             paths.push(format!("{}/{}", prefix, snap.path_to_snapshot));
         }
-        // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
-        for seq_no in self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0 {
-            paths.push(format!(
-                "{}/{}",
-                prefix,
-                unprefixed_fragment_path(FragmentSeqNo(seq_no))
-            ));
-        }
-        paths.into_iter()
+        paths.into_iter().chain(
+            (self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0)
+                .map(|seq_no| unprefixed_fragment_path(FragmentSeqNo(seq_no))),
+        )
     }
 
     pub async fn install_new_snapshots(
