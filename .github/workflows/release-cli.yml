@@ -7,11 +7,15 @@ on:
         description: "Release name to use (e.g. cli-1.2.3) when dispatching manually"
         required: false
   push:
+    branches:
+      - eculver/ci-smaller-windows-runners
     tags:
       - 'cli_release_[0-9]*.[0-9]*.[0-9]*'
 
 jobs:
   build-linux:
+    # TODO: remove this once we are ready to merge the PR
+    if: false
     name: Build Linux binary
     runs-on: blacksmith-4vcpu-ubuntu-2204
     steps:
@@ -43,7 +47,14 @@ jobs:
 
   build-windows:
     name: Build Windows binary
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - 8core-32gb-windows-latest
+          - 16core-64gb-windows-latest
+          - 32core-128gb-windows-latest
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -67,13 +78,15 @@ jobs:
           # List files in the parent directory for debugging.
           Get-ChildItem -Path ..
 
-      - name: Upload Windows binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: chroma-windows
-          path: chroma-windows.exe
+      # - name: Upload Windows binary artifact
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: chroma-windows
+      #     path: chroma-windows.exe
 
   build-macos:
+    # TODO: remove this once we are ready to merge the PR
+    if: false
     name: Build macOS binaries (Intel & ARM64)
     runs-on: macos-latest
     steps:
@@ -121,6 +134,8 @@ jobs:
           path: chroma-macos-arm64
 
   release:
+    # TODO: remove this once we are ready to merge the PR
+    if: false
     name: Create GitHub Release and Attach Assets
     runs-on: blacksmith-4vcpu-ubuntu-2204
     needs: [ build-linux, build-windows, build-macos ]
