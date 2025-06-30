@@ -95,7 +95,11 @@ impl ArrowBlockfileProvider {
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
         let root = self
             .root_manager
-            .get::<K>(&options.id, &options.prefix_path)
+            .get::<K>(
+                &options.id,
+                &options.prefix_path,
+                self.block_manager.default_max_block_size_bytes(),
+            )
             .await;
         match root {
             Ok(Some(root)) => Ok(BlockfileReader::ArrowBlockfileReader(
@@ -157,7 +161,12 @@ impl ArrowBlockfileProvider {
             let new_id = Uuid::new_v4();
             let new_root = self
                 .root_manager
-                .fork::<K>(&fork_from, new_id, &options.prefix_path)
+                .fork::<K>(
+                    &fork_from,
+                    new_id,
+                    &options.prefix_path,
+                    self.block_manager.default_max_block_size_bytes(),
+                )
                 .await
                 .map_err(|e| {
                     tracing::error!("Error forking root: {:?}", e);
@@ -187,6 +196,9 @@ impl ArrowBlockfileProvider {
             }
         } else {
             let new_id = Uuid::new_v4();
+            let max_block_size_bytes = options
+                .max_block_size_bytes
+                .unwrap_or(self.block_manager.default_max_block_size_bytes());
 
             match options.mutation_ordering {
                 BlockfileWriterMutationOrdering::Ordered => {
@@ -195,6 +207,7 @@ impl ArrowBlockfileProvider {
                         &options.prefix_path,
                         self.block_manager.clone(),
                         self.root_manager.clone(),
+                        max_block_size_bytes,
                     );
 
                     Ok(BlockfileWriter::ArrowOrderedBlockfileWriter(file))
@@ -205,6 +218,7 @@ impl ArrowBlockfileProvider {
                         &options.prefix_path,
                         self.block_manager.clone(),
                         self.root_manager.clone(),
+                        max_block_size_bytes,
                     );
                     Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
                 }
@@ -301,20 +315,20 @@ impl ChromaError for ForkError {
 pub struct BlockManager {
     block_cache: Arc<dyn PersistentCache<Uuid, Block>>,
     storage: Storage,
-    max_block_size_bytes: usize,
+    default_max_block_size_bytes: usize,
 }
 
 impl BlockManager {
     pub(super) fn new(
         storage: Storage,
-        max_block_size_bytes: usize,
+        default_max_block_size_bytes: usize,
         block_cache: Box<dyn PersistentCache<Uuid, Block>>,
     ) -> Self {
         let block_cache: Arc<dyn PersistentCache<Uuid, Block>> = block_cache.into();
         Self {
             block_cache,
             storage,
-            max_block_size_bytes,
+            default_max_block_size_bytes,
         }
     }
 
@@ -456,8 +470,8 @@ impl BlockManager {
         Ok(())
     }
 
-    pub(super) fn max_block_size_bytes(&self) -> usize {
-        self.max_block_size_bytes
+    pub(super) fn default_max_block_size_bytes(&self) -> usize {
+        self.default_max_block_size_bytes
     }
 }
 
@@ -536,6 +550,7 @@ impl RootManager {
         &self,
         id: &Uuid,
         prefix_path: &str,
+        max_block_size_bytes: usize,
     ) -> Result<Option<RootReader>, RootManagerError> {
         let index = self.cache.obtain(*id).await.ok().flatten();
         match index {
@@ -549,7 +564,12 @@ impl RootManager {
                     .get(&key, GetOptions::new(StorageRequestPriority::P0))
                     .await
                 {
-                    Ok(bytes) => match RootReader::from_bytes::<K>(&bytes, prefix_path, *id) {
+                    Ok(bytes) => match RootReader::from_bytes::<K>(
+                        &bytes,
+                        prefix_path,
+                        *id,
+                        max_block_size_bytes,
+                    ) {
                         Ok(root) => {
                             self.cache.insert(*id, root.clone()).await;
                             Ok(Some(root))
@@ -626,10 +646,11 @@ impl RootManager {
         old_id: &Uuid,
         new_id: Uuid,
         prefix_path: &str,
+        max_block_size_bytes: usize,
     ) -> Result<RootWriter, RootManagerError> {
         tracing::info!("Forking root from {:?}", old_id);
         let original = self
-            .get::<K::ReadableKey<'key>>(old_id, prefix_path)
+            .get::<K::ReadableKey<'key>>(old_id, prefix_path, max_block_size_bytes)
             .await?;
         match original {
             Some(original) => {

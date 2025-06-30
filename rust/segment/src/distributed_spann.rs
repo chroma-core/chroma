@@ -94,6 +94,7 @@ impl ChromaError for SpannSegmentWriterError {
 }
 
 impl SpannSegmentWriter {
+    #[allow(clippy::too_many_arguments)]
     pub async fn from_segment(
         collection: &Collection,
         segment: &Segment,
@@ -101,6 +102,7 @@ impl SpannSegmentWriter {
         hnsw_provider: &HnswIndexProvider,
         dimensionality: usize,
         gc_context: GarbageCollectionContext,
+        pl_block_size: usize,
         metrics: SpannMetrics,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
@@ -194,6 +196,7 @@ impl SpannSegmentWriter {
             blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             metrics,
         )
         .await
@@ -665,6 +668,7 @@ mod test {
             ..Default::default()
         };
 
+        let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriter::from_segment(
             &collection,
             &spann_segment,
@@ -672,6 +676,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -758,6 +763,7 @@ mod test {
         )
         .await
         .expect("Error converting config to gc context");
+        let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriter::from_segment(
             &collection,
             &spann_segment,
@@ -765,6 +771,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -890,6 +897,7 @@ mod test {
             ..Default::default()
         };
 
+        let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriter::from_segment(
             &collection,
             &spann_segment,
@@ -897,6 +905,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -1065,6 +1074,7 @@ mod test {
         )
         .await
         .expect("Error converting config to gc context");
+        let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriter::from_segment(
             &collection,
             &spann_segment,
@@ -1072,6 +1082,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -1162,6 +1173,7 @@ mod test {
             ..Default::default()
         };
 
+        let pl_block_size = 5 * 1024 * 1024;
         let spann_writer = SpannSegmentWriter::from_segment(
             &collection,
             &spann_segment,
@@ -1169,6 +1181,7 @@ mod test {
             &hnsw_provider,
             3,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await

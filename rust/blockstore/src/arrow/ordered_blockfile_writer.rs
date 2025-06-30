@@ -68,11 +68,17 @@ impl ArrowOrderedBlockfileWriter {
         prefix_path: &str,
         block_manager: BlockManager,
         root_manager: RootManager,
+        max_block_size_bytes: usize,
     ) -> Self {
         let initial_block = block_manager.create::<K, V, OrderedBlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
-        let root_writer =
-            RootWriter::new(CURRENT_VERSION, id, sparse_index, prefix_path.to_string());
+        let root_writer = RootWriter::new(
+            CURRENT_VERSION,
+            id,
+            sparse_index,
+            prefix_path.to_string(),
+            max_block_size_bytes,
+        );
 
         Self {
             block_manager,
@@ -157,8 +163,8 @@ impl ArrowOrderedBlockfileWriter {
             // 2. During the commit phase, after all deltas have been fully materialized, split if necessary.
             //
             // An alternative would be to create a fresh delta that does not fork from an existing block if we receive a .set() for a key that is not contained in any existing block key range, however this complicates writing logic and potentially increases fragmentation.
-            if delta.get_size::<K, V>() > self.block_manager.max_block_size_bytes() {
-                let split_blocks = delta.split::<K, V>(self.block_manager.max_block_size_bytes());
+            if delta.get_size::<K, V>() > self.root.max_block_size_bytes {
+                let split_blocks = delta.split::<K, V>(self.root.max_block_size_bytes);
                 for (split_key, split_delta) in split_blocks {
                     self.root
                         .sparse_index
@@ -312,7 +318,7 @@ impl ArrowOrderedBlockfileWriter {
             delta.get_size::<K, V>()
         };
 
-        let max_block_size_bytes = self.block_manager.max_block_size_bytes();
+        let max_block_size_bytes = self.root.max_block_size_bytes;
         if current_materialized_delta_size > max_block_size_bytes {
             let (mut current_delta, current_end_key) = inner
                 .current_block_delta
@@ -927,8 +933,14 @@ mod tests {
         let sparse_index = SparseIndexWriter::new(initial_block.id);
         let file_id = Uuid::new_v4();
         let prefix_path = "";
-        let root_writer =
-            RootWriter::new(Version::V1, file_id, sparse_index, prefix_path.to_string());
+        let max_block_size_bytes = 8 * 1024 * 1024; // 8 MB
+        let root_writer = RootWriter::new(
+            Version::V1,
+            file_id,
+            sparse_index,
+            prefix_path.to_string(),
+            max_block_size_bytes,
+        );
 
         let writer = ArrowOrderedBlockfileWriter {
             block_manager,
@@ -957,7 +969,7 @@ mod tests {
 
         // Get the RootReader and verify the counts
         let root_reader = root_manager
-            .get::<&str>(&file_id, prefix_path)
+            .get::<&str>(&file_id, prefix_path, max_block_size_bytes)
             .await
             .unwrap()
             .unwrap();
@@ -1010,11 +1022,13 @@ mod tests {
             .unwrap();
         let first_write_id = Uuid::new_v4();
         let prefix_path = "";
+        let max_block_size_bytes = 8 * 1024 * 1024; // 8 MB
         let old_root_writer = RootWriter::new(
             Version::V1,
             first_write_id,
             sparse_index,
             prefix_path.to_string(),
+            max_block_size_bytes,
         );
 
         // Flush the blocks and the root
@@ -1118,7 +1132,7 @@ mod tests {
             _ => panic!("Unexpected reader type"),
         };
 
-        assert_eq!(reader.root.version, Version::V1_1);
+        assert_eq!(reader.root.version, Version::V1_2);
         assert_eq!(reader.root.sparse_index.len(), 2);
 
         // Manually verify sparse index counts

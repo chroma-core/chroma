@@ -126,7 +126,7 @@ impl Garbage {
         }
     }
 
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -165,7 +165,7 @@ impl Garbage {
         }
     }
 
-    #[tracing::instrument(skip(self, storage), err(Display))]
+    #[tracing::instrument(skip(self, storage))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
@@ -177,7 +177,7 @@ impl Garbage {
         Self::transition(options, storage, prefix, existing, self).await
     }
 
-    #[tracing::instrument(skip(self, storage), err(Display))]
+    #[tracing::instrument(skip(self, storage))]
     pub async fn reset(
         &self,
         options: &ThrottleOptions,
@@ -185,7 +185,6 @@ impl Garbage {
         prefix: &str,
         existing: &ETag,
     ) -> Result<Option<ETag>, Error> {
-        self.install_new_snapshots(storage, prefix, options).await?;
         match Self::transition(options, storage, prefix, Some(existing), &Self::empty()).await {
             Ok(e_tag) => Ok(e_tag),
             Err(Error::LogContentionFailure) => Ok(None),
