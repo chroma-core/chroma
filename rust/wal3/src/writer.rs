@@ -5,7 +5,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{DeleteOptions, ETag, GetOptions, PutOptions, Storage, StorageError};
+use chroma_storage::{DeleteOptions, GetOptions, PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -615,112 +615,138 @@ impl OnceLogWriter {
         Ok(log_position)
     }
 
-    #[tracing::instrument(skip(self))]
-    async fn garbage_collect(
+    /// Perform phase 1 of garbage collection.
+    ///
+    /// Pre-condition:  manifest/MANIFEST exists.
+    ///
+    /// Post-condition:
+    /// - gc/GARBAGE exists as a non-empty file.
+    /// - snapshots created by gc/GARBAGE get created.
+    #[tracing::instrument(skip(self, options))]
+    async fn garbage_collect_phase1(
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
-    ) -> Result<(), Error> {
-        self.garbage_collect_recursive(options, false, None, keep_at_least)
-            .await
-    }
-
-    async fn garbage_collect_recursive(
-        &self,
-        options: &GarbageCollectionOptions,
-        base: bool,
-        existing: Option<&ETag>,
-        keep_at_least: Option<LogPosition>,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
+        self.manifest_manager.heartbeat().await?;
         let cutoff = self.garbage_collection_cutoff().await?;
         let cutoff = if let Some(keep_at_least) = keep_at_least {
             keep_at_least.min(cutoff)
         } else {
             cutoff
         };
-        self.manifest_manager.heartbeat().await?;
-        let garbage_and_e_tag =
-            match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix).await
-            {
-                Ok(Some((garbage, e_tag))) => Some((garbage, e_tag)),
-                Ok(None) => None,
-                Err(err) => {
-                    return Err(err);
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            if attempts > 3 {
+                return Err(Error::LogContentionFailure);
+            }
+            let garbage_and_e_tag =
+                match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
+                    .await
+                {
+                    Ok(Some((garbage, e_tag))) => Some((garbage, e_tag)),
+                    Ok(None) => None,
+                    Err(err) => {
+                        return Err(err);
+                    }
+                };
+            let e_tag = if let Some((garbage, e_tag)) = garbage_and_e_tag {
+                if !garbage.is_empty() {
+                    return Ok(true);
                 }
+                e_tag
+            } else {
+                None
             };
-        let (garbage, e_tag) = if let Some((garbage, e_tag)) = garbage_and_e_tag {
-            (garbage, e_tag)
-        } else {
             let garbage = self
                 .manifest_manager
-                // TODO(rescrv):  Evaluate putting a cache in here.
                 .compute_garbage(options, cutoff, &())
                 .await?;
             let Some(garbage) = garbage else {
-                return Ok(());
+                return Ok(false);
             };
-            let (garbage, e_tag) = match garbage
+            match garbage
                 .install(
                     &self.options.throttle_manifest,
                     &self.storage,
                     &self.prefix,
-                    existing,
+                    e_tag.as_ref(),
                 )
                 .await
             {
-                Ok(e_tag) => (garbage, e_tag),
+                Ok(_) => return Ok(true),
                 Err(Error::LogContentionFailure)
                 | Err(Error::LogContentionRetry)
-                | Err(Error::LogContentionDurable) => {
-                    match Garbage::load(
-                        &self.options.throttle_manifest,
-                        &self.storage,
-                        &self.prefix,
-                    )
-                    .await
-                    {
-                        Ok(Some((garbage, e_tag))) => {
-                            if garbage.is_empty() {
-                                if base {
-                                    return Err(Error::LogContentionRetry);
-                                } else {
-                                    return Box::pin(self.garbage_collect_recursive(
-                                        options,
-                                        true,
-                                        e_tag.as_ref(),
-                                        keep_at_least,
-                                    ))
-                                    .await;
-                                }
-                            } else {
-                                (garbage, e_tag)
-                            }
-                        }
-                        Ok(None) => {
-                            return Err(Error::LogContentionFailure);
-                        }
-                        Err(err) => {
-                            return Err(err);
-                        }
-                    }
-                }
+                | Err(Error::LogContentionDurable) => {}
                 Err(err) => {
                     return Err(err);
                 }
             };
-            (garbage, e_tag)
-        };
-        let Some(e_tag) = e_tag else {
+        }
+    }
+
+    /// Perform phase 2 of grabage collection.
+    ///
+    /// Pre-conditions:
+    /// - manifest/MANIFEST exists.
+    /// - gc/GARBAGE exists.
+    ///
+    /// Post-condition:
+    /// - contents of gc/GARBAGE are removed from manifest/MANIFEST.
+    #[tracing::instrument(skip(self, _options))]
+    async fn garbage_collect_phase2(
+        &self,
+        _options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        let (garbage, _) =
+            match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix).await
+            {
+                Ok(Some((garbage, e_tag))) => (garbage, e_tag),
+                Ok(None) => return Ok(()),
+                Err(err) => {
+                    return Err(err);
+                }
+            };
+        if !garbage.is_empty() {
+            self.manifest_manager.apply_garbage(garbage.clone()).await?;
+        }
+        Ok(())
+    }
+
+    /// Perform phase 3 of garbage collection.
+    ///
+    /// Pre-conditions:
+    /// - manifest/MANIFEST exists
+    /// - gc/GARBAGE exists
+    /// - manifest/MANIFEST does not reference any part of gc/GARBAGE
+    ///
+    /// Post-condition:
+    /// - gc/GARBAGE and the files it references get deleted.
+    #[tracing::instrument(skip(self, options))]
+    async fn garbage_collect_phase3(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        let exp_backoff: ExponentialBackoff = options.throttle.into();
+        let start = Instant::now();
+        let (garbage, e_tag) =
+            match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix).await
+            {
+                Ok(Some((garbage, e_tag))) => (garbage, e_tag),
+                Ok(None) => return Ok(()),
+                Err(err) => {
+                    return Err(err);
+                }
+            };
+        let Some(e_tag) = e_tag.as_ref() else {
             return Err(Error::GarbageCollection(
-                "installed garbage without an ETag".to_string(),
+                "loaded garbage without e_tag".to_string(),
             ));
         };
         let paths = garbage
             .prefixed_paths_to_delete(&self.prefix)
             .collect::<Vec<_>>();
-        self.manifest_manager.apply_garbage(garbage.clone()).await?;
-        let exp_backoff: ExponentialBackoff = options.throttle.into();
-        let start = Instant::now();
         for path in paths {
             loop {
                 match self.storage.delete(&path, DeleteOptions::default()).await {
@@ -748,9 +774,21 @@ impl OnceLogWriter {
                 &self.options.throttle_manifest,
                 &self.storage,
                 &self.prefix,
-                &e_tag,
+                e_tag,
             )
             .await?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn garbage_collect(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<(), Error> {
+        self.garbage_collect_phase1(options, keep_at_least).await?;
+        self.garbage_collect_phase2(options).await?;
+        self.garbage_collect_phase3(options).await?;
         Ok(())
     }
 
