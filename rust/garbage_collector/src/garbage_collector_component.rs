@@ -137,6 +137,7 @@ impl GarbageCollector {
                     self.root_manager.clone(),
                     cleanup_mode,
                     self.config.min_versions_to_keep,
+                    self.config.disable_log_gc,
                 );
 
             let started_at = SystemTime::now();
@@ -722,6 +723,7 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
+            disable_log_gc: false,
         };
         let registry = Registry::new();
 
@@ -844,6 +846,7 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
+            disable_log_gc: false,
         };
         let registry = Registry::new();
 
@@ -1040,6 +1043,7 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
+            disable_log_gc: false,
         };
         let registry = Registry::new();
 

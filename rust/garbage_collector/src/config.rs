@@ -58,6 +58,8 @@ pub(super) struct GarbageCollectorConfig {
     #[serde(default)]
     pub root_cache_config: CacheConfig,
     pub jemalloc_pprof_server_port: Option<u16>,
+    #[serde(default)]
+    pub disable_log_gc: bool,
 }
 
 impl GarbageCollectorConfig {
