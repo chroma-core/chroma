@@ -22,6 +22,10 @@ where
     async fn clear(&self) -> Result<(), CacheError> {
         Ok(())
     }
+
+    async fn obtain(&self, _: K) -> Result<Option<V>, CacheError> {
+        Ok(None)
+    }
 }
 
 impl Debug for NopCache {

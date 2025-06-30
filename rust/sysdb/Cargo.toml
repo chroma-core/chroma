@@ -8,23 +8,26 @@ path = "src/lib.rs"
 
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 futures = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
-tracing-bunyan-formatter = { workspace = true }
-tracing-opentelemetry = { workspace = true }
-tracing-subscriber = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
 tonic = { workspace = true }
 uuid = { workspace = true }
 parking_lot = { workspace = true }
+tower = { workspace = true }
+sqlx = { workspace = true }
+sea-query = { workspace = true }
+sea-query-binder = { workspace = true, features = ["sqlx-sqlite"] }
+chrono = { workspace = true }
+prost = { workspace = true }
+derivative = "2.2.0"
 
 chroma-config = { workspace = true }
-chroma-error = { workspace = true }
+chroma-error = { workspace = true, features = ["tonic", "sqlx"] }
 chroma-types = { workspace = true }
 chroma-tracing = { workspace = true, features = ["grpc"] }
+chroma-sqlite = { workspace = true }
+chroma-storage = { workspace = true }

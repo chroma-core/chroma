@@ -159,7 +159,17 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
 
             let mut item_count = 0;
             let mut iter = storage.iter();
+            let mut last_key: Option<&CompositeKey> = None;
             while let Some((key, value)) = iter.next() {
+                // TODO: we seem to have a concurrency bug somewhere that means inner.storage may not always be ordered (when it's backed by a Vec). This is a temporary check that provides additional debugging information if the bug happens again. This should be removed once we fix the underlying bug.
+                if let Some(last_key) = &last_key {
+                    if key < last_key {
+                        panic!("Keys are not in order. Scanned up to {num_items}. Found {key:?} after {last_key:?}.");
+                    }
+                } else {
+                    last_key = Some(key)
+                }
+
                 num_items += 1;
                 prefix_size += key.prefix.len();
                 key_size += key.key.get_size();

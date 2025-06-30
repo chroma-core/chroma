@@ -15,7 +15,7 @@ This embedding function relies on the `cohere` python package, which you can ins
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
 cohere_ef  = embedding_functions.CohereEmbeddingFunction(api_key="YOUR_API_KEY",  model_name="large")
-cohere_ef(texts=["document1","document2"])
+cohere_ef(input=["document1","document2"])
 ```
 
 {% /Tab %}
@@ -23,9 +23,11 @@ cohere_ef(texts=["document1","document2"])
 {% Tab label="typescript" %}
 
 ```typescript
-import { CohereEmbeddingFunction } from 'chromadb';
+// npm install @chroma-core/cohere
 
-const embedder = new CohereEmbeddingFunction("apiKey")
+import { CohereEmbeddingFunction } from '@chroma-core/cohere';
+
+const embedder = new CohereEmbeddingFunction({ apiKey: "apiKey" })
 
 // use directly
 const embeddings = embedder.generate(["document1","document2"])
@@ -58,7 +60,7 @@ multilingual_texts  = [ 'Hello from Cohere!', 'مرحبًا من كوهير!',
         'Ciao da Cohere!', '您好，来自 Cohere！',
         'कोहिअर से नमस्ते!'  ]
 
-cohere_ef(texts=multilingual_texts)
+cohere_ef(input=multilingual_texts)
 
 ```
 
@@ -86,3 +88,52 @@ const embeddings = embedder.generate(multilingual_texts)
 {% /TabbedCodeBlock %}
 
 For more information on multilingual model you can read [here](https://docs.cohere.ai/docs/multilingual-language-models).
+
+
+### Multimodal model example
+
+{% tabs group="code-lang" hideTabs=true %}
+{% Tab label="python" %}
+
+```python
+
+import os
+from datasets import load_dataset, Image
+
+
+dataset = load_dataset(path="detection-datasets/coco", split="train", streaming=True)
+
+IMAGE_FOLDER = "images"
+N_IMAGES = 5
+
+# Write the images to a folder
+dataset_iter = iter(dataset)
+os.makedirs(IMAGE_FOLDER, exist_ok=True)
+for i in range(N_IMAGES):
+    image = next(dataset_iter)['image']
+    image.save(f"images/{i}.jpg")
+
+
+multimodal_cohere_ef = CohereEmbeddingFunction(
+    model_name="embed-english-v3.0",
+    api_key="YOUR_API_KEY",
+)
+image_loader = ImageLoader()
+
+multimodal_collection = client.create_collection(
+    name="multimodal",
+    embedding_function=multimodal_cohere_ef,
+    data_loader=image_loader)
+
+image_uris = sorted([os.path.join(IMAGE_FOLDER, image_name) for image_name in os.listdir(IMAGE_FOLDER)])
+ids = [str(i) for i in range(len(image_uris))]
+for i in range(len(image_uris)):
+    # max images per add is 1, see cohere docs https://docs.cohere.com/v2/reference/embed#request.body.images
+    multimodal_collection.add(ids=[str(i)], uris=[image_uris[i]])
+
+retrieved = multimodal_collection.query(query_texts=["animals"], include=['data'], n_results=3)
+
+```
+
+{% /Tab %}
+{% /tabs %}

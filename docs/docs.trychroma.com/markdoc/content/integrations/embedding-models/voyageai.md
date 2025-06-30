@@ -15,7 +15,7 @@ This embedding function relies on the `voyageai` python package, which you can i
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
 voyageai_ef  = embedding_functions.VoyageAIEmbeddingFunction(api_key="YOUR_API_KEY",  model_name="voyage-3-large")
-voyageai_ef(texts=["document1","document2"])
+voyageai_ef(input=["document1","document2"])
 ```
 
 {% /Tab %}
@@ -23,9 +23,14 @@ voyageai_ef(texts=["document1","document2"])
 {% Tab label="typescript" %}
 
 ```typescript
-import { VoyageAIEmbeddingFunction } from 'chromadb';
+// npm install @chroma-core/voyageai
 
-const embedder = new VoyageAIEmbeddingFunction("apiKey", "model_name")
+import { VoyageAIEmbeddingFunction } from '@chroma-core/voyageai';
+
+const embedder = new VoyageAIEmbeddingFunction({
+    apiKey: "apiKey", 
+    modelName: "model_name"
+})
 
 // use directly
 const embeddings = embedder.generate(["document1","document2"])
@@ -56,7 +61,7 @@ multilingual_texts  = [ 'Hello from VoyageAI!', 'مرحباً من VoyageAI!!',
         'Ciao da VoyageAI!', '您好，来自 VoyageAI！',
         'कोहिअर से VoyageAI!'  ]
 
-voyageai_ef(texts=multilingual_texts)
+voyageai_ef(input=multilingual_texts)
 
 ```
 

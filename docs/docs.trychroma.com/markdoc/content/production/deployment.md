@@ -42,6 +42,4 @@ Running a server in production requires a few additional steps to ensure the ser
 
 * [Performance](./administration/performance)
 * [Observability](./administration/observability)
-* [Auth](./administration/auth)
 * [Migration](./administration/migration)
-

@@ -23,7 +23,12 @@ from fastapi.routing import APIRoute
 from fastapi import HTTPException, status
 from functools import wraps
 
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    load_update_collection_configuration_from_json,
+    load_create_collection_configuration_from_json,
+    create_collection_configuration_from_legacy_collection_metadata,
+    CreateCollectionConfiguration,
+)
 from pydantic import BaseModel
 from chromadb import __version__ as chromadb_version
 from chromadb.api.types import (
@@ -471,7 +476,9 @@ class FastAPI(Server):
         collection: Optional[str],
     ) -> None:
         return await to_thread.run_sync(
-            self.sync_auth_request, *(headers, action, tenant, database, collection)
+            # NOTE(rescrv, iron will auth):  No need to migrate because this is the utility call.
+            self.sync_auth_request,
+            *(headers, action, tenant, database, collection),
         )
 
     @trace_method(
@@ -550,6 +557,7 @@ class FastAPI(Server):
         ) -> None:
             db = validate_model(CreateDatabase, orjson.loads(raw_body))
 
+            # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 headers,
                 AuthzAction.CREATE_DATABASE,
@@ -577,6 +585,7 @@ class FastAPI(Server):
         database_name: str,
         tenant: str,
     ) -> Database:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.GET_DATABASE,
@@ -602,6 +611,7 @@ class FastAPI(Server):
         database_name: str,
         tenant: str,
     ) -> None:
+        # NOTE(rescrv, iron will auth):  Implemented.
         self.auth_request(
             request.headers,
             AuthzAction.DELETE_DATABASE,
@@ -625,6 +635,7 @@ class FastAPI(Server):
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
             tenant = validate_model(CreateTenant, orjson.loads(raw_body))
 
+            # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
                 AuthzAction.CREATE_TENANT,
@@ -648,6 +659,7 @@ class FastAPI(Server):
         request: Request,
         tenant: str,
     ) -> Tenant:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.GET_TENANT,
@@ -673,6 +685,7 @@ class FastAPI(Server):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[Database]:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.LIST_DATABASES,
@@ -704,6 +717,7 @@ class FastAPI(Server):
         def process_list_collections(
             limit: Optional[int], offset: Optional[int], tenant: str, database_name: str
         ) -> Sequence[CollectionModel]:
+            # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
                 AuthzAction.LIST_COLLECTIONS,
@@ -740,6 +754,7 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
     ) -> int:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.COUNT_COLLECTIONS,
@@ -771,12 +786,21 @@ class FastAPI(Server):
             request: Request, tenant: str, database: str, raw_body: bytes
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
-            configuration = (
-                CollectionConfigurationInternal()
-                if not create.configuration
-                else CollectionConfigurationInternal.from_json(create.configuration)
-            )
+            if not create.configuration:
+                if create.metadata:
+                    configuration = (
+                        create_collection_configuration_from_legacy_collection_metadata(
+                            create.metadata
+                        )
+                    )
+                else:
+                    configuration = None
+            else:
+                configuration = load_create_collection_configuration_from_json(
+                    create.configuration
+                )
 
+            # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
                 AuthzAction.CREATE_COLLECTION,
@@ -819,6 +843,7 @@ class FastAPI(Server):
         database_name: str,
         collection_name: str,
     ) -> CollectionModel:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.GET_COLLECTION,
@@ -853,6 +878,7 @@ class FastAPI(Server):
             request: Request, collection_id: str, raw_body: bytes
         ) -> None:
             update = validate_model(UpdateCollection, orjson.loads(raw_body))
+            # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
                 AuthzAction.UPDATE_COLLECTION,
@@ -860,12 +886,20 @@ class FastAPI(Server):
                 database_name,
                 collection_id,
             )
+            configuration = (
+                None
+                if not update.new_configuration
+                else load_update_collection_configuration_from_json(
+                    update.new_configuration
+                )
+            )
             self._set_request_context(request=request)
             add_attributes_to_current_span({"tenant": tenant})
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                new_configuration=configuration,
                 tenant=tenant,
                 database=database_name,
             )
@@ -886,6 +920,7 @@ class FastAPI(Server):
         tenant: str,
         database_name: str,
     ) -> None:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.DELETE_COLLECTION,
@@ -916,6 +951,7 @@ class FastAPI(Server):
 
             def process_add(request: Request, raw_body: bytes) -> bool:
                 add = validate_model(AddEmbedding, orjson.loads(raw_body))
+                # NOTE(rescrv, iron will auth):  Implemented.
                 self.sync_auth_request(
                     request.headers,
                     AuthzAction.ADD,
@@ -965,6 +1001,7 @@ class FastAPI(Server):
         def process_update(request: Request, raw_body: bytes) -> bool:
             update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
 
+            # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
                 AuthzAction.UPDATE,
@@ -1007,6 +1044,7 @@ class FastAPI(Server):
         def process_upsert(request: Request, raw_body: bytes) -> bool:
             upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
 
+            # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
                 AuthzAction.UPSERT,
@@ -1051,6 +1089,7 @@ class FastAPI(Server):
     ) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
             get = validate_model(GetEmbedding, orjson.loads(raw_body))
+            # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
                 AuthzAction.GET,
@@ -1064,7 +1103,6 @@ class FastAPI(Server):
                 collection_id=_uuid(collection_id),
                 ids=get.ids,
                 where=get.where,
-                sort=get.sort,
                 limit=get.limit,
                 offset=get.offset,
                 where_document=get.where_document,
@@ -1102,6 +1140,7 @@ class FastAPI(Server):
     ) -> None:
         def process_delete(request: Request, raw_body: bytes) -> None:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
+            # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
                 AuthzAction.DELETE,
@@ -1136,6 +1175,7 @@ class FastAPI(Server):
         database_name: str,
         collection_id: str,
     ) -> int:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.COUNT,
@@ -1162,6 +1202,7 @@ class FastAPI(Server):
         self,
         request: Request,
     ) -> bool:
+        # NOTE(rescrv, iron will auth):  Implemented.
         await self.auth_request(
             request.headers,
             AuthzAction.RESET,
@@ -1193,6 +1234,7 @@ class FastAPI(Server):
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = validate_model(QueryEmbedding, orjson.loads(raw_body))
 
+            # NOTE(rescrv, iron will auth):  Implemented.
             self.sync_auth_request(
                 request.headers,
                 AuthzAction.QUERY,
@@ -1410,6 +1452,7 @@ class FastAPI(Server):
         - The user has access to a single tenant and/or single database.
         """
         return await to_thread.run_sync(
+            # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request,
             headers,
             action,
@@ -1418,6 +1461,7 @@ class FastAPI(Server):
             collection,
         )
 
+    # NOTE(rescrv, iron will auth):  v1
     def sync_auth_and_get_tenant_and_database_for_request(
         self,
         headers: Headers,
@@ -1482,6 +1526,7 @@ class FastAPI(Server):
             (
                 maybe_tenant,
                 maybe_database,
+                # NOTE(rescrv, iron will auth):  v1
             ) = self.sync_auth_and_get_tenant_and_database_for_request(
                 headers,
                 AuthzAction.CREATE_DATABASE,
@@ -1546,6 +1591,7 @@ class FastAPI(Server):
         def process_create_tenant(request: Request, raw_body: bytes) -> None:
             tenant = validate_model(CreateTenant, orjson.loads(raw_body))
 
+            # NOTE(rescrv, iron will auth):  v1
             maybe_tenant, _ = self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.CREATE_TENANT,
@@ -1676,14 +1722,17 @@ class FastAPI(Server):
         ) -> CollectionModel:
             create = validate_model(CreateCollection, orjson.loads(raw_body))
             configuration = (
-                CollectionConfigurationInternal()
+                CreateCollectionConfiguration()
                 if not create.configuration
-                else CollectionConfigurationInternal.from_json(create.configuration)
+                else load_create_collection_configuration_from_json(
+                    create.configuration
+                )
             )
 
             (
                 maybe_tenant,
                 maybe_database,
+                # NOTE(rescrv, iron will auth):  v1
             ) = self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.CREATE_COLLECTION,
@@ -1768,6 +1817,7 @@ class FastAPI(Server):
             request: Request, collection_id: str, raw_body: bytes
         ) -> None:
             update = validate_model(UpdateCollection, orjson.loads(raw_body))
+            # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE_COLLECTION,
@@ -1775,10 +1825,18 @@ class FastAPI(Server):
                 None,
                 collection_id,
             )
+            configuration = (
+                None
+                if not update.new_configuration
+                else load_update_collection_configuration_from_json(
+                    update.new_configuration
+                )
+            )
             return self._api._modify(
                 id=_uuid(collection_id),
                 new_name=update.new_name,
                 new_metadata=update.new_metadata,
+                new_configuration=configuration,
             )
 
         await to_thread.run_sync(
@@ -1832,6 +1890,7 @@ class FastAPI(Server):
 
             def process_add(request: Request, raw_body: bytes) -> bool:
                 add = validate_model(AddEmbedding, orjson.loads(raw_body))
+                # NOTE(rescrv, iron will auth):  v1
                 self.sync_auth_and_get_tenant_and_database_for_request(
                     request.headers,
                     AuthzAction.ADD,
@@ -1874,6 +1933,7 @@ class FastAPI(Server):
         def process_update(request: Request, raw_body: bytes) -> bool:
             update = validate_model(UpdateEmbedding, orjson.loads(raw_body))
 
+            # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPDATE,
@@ -1910,6 +1970,7 @@ class FastAPI(Server):
         def process_upsert(request: Request, raw_body: bytes) -> bool:
             upsert = validate_model(AddEmbedding, orjson.loads(raw_body))
 
+            # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.UPSERT,
@@ -1948,6 +2009,7 @@ class FastAPI(Server):
     ) -> GetResult:
         def process_get(request: Request, raw_body: bytes) -> GetResult:
             get = validate_model(GetEmbedding, orjson.loads(raw_body))
+            # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.GET,
@@ -1959,7 +2021,6 @@ class FastAPI(Server):
                 collection_id=_uuid(collection_id),
                 ids=get.ids,
                 where=get.where,
-                sort=get.sort,
                 limit=get.limit,
                 offset=get.offset,
                 where_document=get.where_document,
@@ -1993,6 +2054,7 @@ class FastAPI(Server):
     ) -> None:
         def process_delete(request: Request, raw_body: bytes) -> None:
             delete = validate_model(DeleteEmbedding, orjson.loads(raw_body))
+            # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.DELETE,
@@ -2072,6 +2134,7 @@ class FastAPI(Server):
         def process_query(request: Request, raw_body: bytes) -> QueryResult:
             query = validate_model(QueryEmbedding, orjson.loads(raw_body))
 
+            # NOTE(rescrv, iron will auth):  v1
             self.sync_auth_and_get_tenant_and_database_for_request(
                 request.headers,
                 AuthzAction.QUERY,

@@ -35,7 +35,11 @@ from hypothesis.stateful import (
 )
 from collections import defaultdict
 import chromadb.test.property.invariants as invariants
-from chromadb.test.conftest import is_client_in_process, reset, NOT_CLUSTER_ONLY
+from chromadb.test.conftest import (
+    is_client_in_process,
+    NOT_CLUSTER_ONLY,
+    create_isolated_database,
+)
 import numpy as np
 import uuid
 from chromadb.test.utils.wait_for_version_increase import (
@@ -45,6 +49,9 @@ from chromadb.test.utils.wait_for_version_increase import (
 
 
 traces: DefaultDict[str, int] = defaultdict(lambda: 0)
+
+
+VERSION_INCREASE_WAIT_TIME = 300
 
 
 def trace(key: str) -> None:
@@ -375,7 +382,10 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
                 current_version,
             )
             new_version = wait_for_version_increase(
-                self.client, self.collection.name, current_version, additional_time=240
+                self.client,
+                self.collection.name,
+                current_version,
+                additional_time=VERSION_INCREASE_WAIT_TIME,
             )
             # Everything got compacted.
             self.log_operation_count = 0
@@ -458,6 +468,7 @@ class EmbeddingStateMachine(EmbeddingStateMachineBase):
 
 
 def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
+    create_isolated_database(client)
     caplog.set_level(logging.ERROR)
     run_state_machine_as_test(
         lambda: EmbeddingStateMachine(client),
@@ -469,6 +480,7 @@ def test_embeddings_state(caplog: pytest.LogCaptureFixture, client: ClientAPI) -
 
 
 def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
+    create_isolated_database(client)
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
@@ -522,10 +534,11 @@ def test_add_then_delete_n_minus_1(client: ClientAPI) -> None:
 
 
 def test_embeddings_flake1(client: ClientAPI) -> None:
+    create_isolated_database(client)
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
-            name="fOIBy\n",
+            name="fOIBy",
             metadata={
                 "-7n": False,
                 "92WhVE_": "HtmY",
@@ -1061,6 +1074,7 @@ def test_embeddings_flake1(client: ClientAPI) -> None:
 
 
 def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> None:
+    create_isolated_database(client)
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
@@ -1115,6 +1129,7 @@ def test_update_none(caplog: pytest.LogCaptureFixture, client: ClientAPI) -> Non
 
 
 def test_add_delete_add(client: ClientAPI) -> None:
+    create_isolated_database(client)
     state = EmbeddingStateMachine(client)
     state.initialize(
         collection=strategies.Collection(
@@ -1244,7 +1259,7 @@ def test_add_delete_add(client: ClientAPI) -> None:
 
 
 def test_multi_add(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
     coll = client.create_collection(name="foo")
     coll.add(ids=["a"], embeddings=[[0.0]])  # type: ignore[arg-type]
     assert coll.count() == 1
@@ -1263,7 +1278,7 @@ def test_multi_add(client: ClientAPI) -> None:
 
 
 def test_dup_add(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
     coll = client.create_collection(name="foo")
     with pytest.raises(errors.DuplicateIDError):
         coll.add(ids=["a", "a"], embeddings=[[0.0], [1.1]])  # type: ignore[arg-type]
@@ -1272,13 +1287,14 @@ def test_dup_add(client: ClientAPI) -> None:
 
 
 def test_query_without_add(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
     coll = client.create_collection(name="foo")
     fields: Include = ["documents", "metadatas", "embeddings", "distances"]  # type: ignore[list-item]
     N = np.random.randint(1, 2000)
     K = np.random.randint(1, 100)
+    query_embeddings = np.random.random((N, K)).tolist()
     results = coll.query(
-        query_embeddings=np.random.random((N, K)).tolist(), include=fields
+        query_embeddings=cast(Embeddings, query_embeddings), include=fields
     )
     for field in fields:
         field_results = results[field]  # type: ignore[literal-required]
@@ -1287,7 +1303,7 @@ def test_query_without_add(client: ClientAPI) -> None:
 
 
 def test_get_non_existent(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
     coll = client.create_collection(name="foo")
     result = coll.get(ids=["a"], include=["documents", "metadatas", "embeddings"])  # type: ignore[list-item]
     assert len(result["ids"]) == 0
@@ -1299,7 +1315,7 @@ def test_get_non_existent(client: ClientAPI) -> None:
 # TODO: Use SQL escaping correctly internally
 @pytest.mark.xfail(reason="We don't properly escape SQL internally, causing problems")
 def test_escape_chars_in_ids(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
     id = "\x1f"
     coll = client.create_collection(name="foo")
     coll.add(ids=[id], embeddings=[[0.0]])  # type: ignore[arg-type]
@@ -1309,7 +1325,7 @@ def test_escape_chars_in_ids(client: ClientAPI) -> None:
 
 
 def test_delete_empty_fails(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
     coll = client.create_collection(name="foo")
     with pytest.raises(ValueError):
         coll.delete()
@@ -1331,7 +1347,7 @@ def test_delete_empty_fails(client: ClientAPI) -> None:
     ],
 )
 def test_delete_success(client: ClientAPI, kwargs: Any) -> None:
-    reset(client)
+    create_isolated_database(client)
     coll = client.create_collection(name="foo")
     # Should not raise
     coll.delete(**kwargs)
@@ -1409,21 +1425,23 @@ def test_0dim_embedding_validation() -> None:
 
 
 def test_no_op_compaction(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
     coll = client.create_collection(name="noop")
+    initial_version = get_collection_version(client, coll.name)
     for batch in range(0, 5000, 100):
         coll.delete(ids=[str(i) for i in range(batch, batch + 100)])
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, coll.name, get_collection_version(client, coll.name), 240
+            client, coll.name, initial_version, VERSION_INCREASE_WAIT_TIME
         )
 
 
 def test_add_then_purge(client: ClientAPI) -> None:
-    reset(client)
+    create_isolated_database(client)
     record_count = 5000
     batch_count = 100
     coll = client.create_collection(name="add_then_purge")
+    witness_version = get_collection_version(client, coll.name)
 
     # Add records and wait for compaction
     for batch in range(0, record_count, batch_count):
@@ -1431,20 +1449,21 @@ def test_add_then_purge(client: ClientAPI) -> None:
         record_ids = [str(i) for i in record_id_vals]
         coll.add(
             ids=record_ids, embeddings=[[2 * i, 2 * i + 1] for i in record_id_vals]
-        )  # type: ignore[arg-type]
+        )
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, coll.name, get_collection_version(client, coll.name), 240
+            client, coll.name, witness_version, VERSION_INCREASE_WAIT_TIME
         )
 
     # Purge records and wait for compaction
+    witness_version = get_collection_version(client, coll.name)
     for batch in range(0, record_count, batch_count):
         record_id_vals = [i for i in range(batch, batch + batch_count)]
         record_ids = [str(i) for i in record_id_vals]
         coll.delete(ids=record_ids)
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, coll.name, get_collection_version(client, coll.name), 240
+            client, coll.name, witness_version, VERSION_INCREASE_WAIT_TIME
         )
 
     # There should be no records left
@@ -1452,9 +1471,9 @@ def test_add_then_purge(client: ClientAPI) -> None:
 
 
 def test_encompassing_delete(client: ClientAPI) -> None:
-    reset(client)
-
+    create_isolated_database(client)
     col = client.create_collection("encompassing_delete")
+    initial_version = get_collection_version(client, col.name)
 
     id_start = 0
     # Add and then Delete 6 records
@@ -1467,8 +1486,9 @@ def test_encompassing_delete(client: ClientAPI) -> None:
 
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, col.name, get_collection_version(client, col.name), 240
+            client, col.name, initial_version, VERSION_INCREASE_WAIT_TIME
         )
+    initial_version = get_collection_version(client, col.name)
 
     # Add and then delete and then add 16
     len_to_add = 16
@@ -1481,7 +1501,7 @@ def test_encompassing_delete(client: ClientAPI) -> None:
 
     if not NOT_CLUSTER_ONLY:
         wait_for_version_increase(
-            client, col.name, get_collection_version(client, col.name), 240
+            client, col.name, initial_version, VERSION_INCREASE_WAIT_TIME
         )
 
     # Ensure we can get all

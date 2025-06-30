@@ -7,9 +7,9 @@ const MarkdocPage: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
     <Suspense>
       <AppContextProvider>
-        <div className="w-full max-w-full h-full overflow-y-scroll py-10 pb-40 px-14 pl-20 prose dark:prose-invert xl:pr-[calc((100vw-1256px)/2)]">
-          <div>{children}</div>
-        </div>
+          <div className="pb-40 px-5 lg:px-14 lg:pl-20 outline-none">
+            {children}
+          </div>
       </AppContextProvider>
     </Suspense>
   );

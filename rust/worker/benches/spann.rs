@@ -6,23 +6,28 @@ use chroma_benchmark::{
 };
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
 use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+use chroma_config::{registry::Registry, Configurable};
 use chroma_index::{
+    config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig},
     hnsw_provider::HnswIndexProvider,
     spann::{
-        types::{SpannIndexReader, SpannIndexWriter, SpannPosting},
+        types::{
+            GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannMetrics,
+            SpannPosting,
+        },
         utils::rng_query,
     },
 };
 use chroma_storage::{local::LocalStorage, Storage};
 use chroma_system::Operator;
-use chroma_types::CollectionUuid;
+use chroma_types::{operator::KnnMerge, CollectionUuid, InternalSpannConfiguration};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::StreamExt;
 use rand::seq::SliceRandom;
 use roaring::RoaringBitmap;
 use worker::execution::operators::{
+    knn_merge::KnnMergeInput,
     spann_bf_pl::{SpannBfPlInput, SpannBfPlOperator},
-    spann_knn_merge::{SpannKnnMergeInput, SpannKnnMergeOperator},
 };
 
 fn get_records(runtime: &tokio::runtime::Runtime) -> Vec<(u32, Vec<f32>)> {
@@ -66,33 +71,41 @@ fn add_to_index_and_get_reader<'a>(
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
         let hnsw_cache = new_non_persistent_cache_for_test();
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
             hnsw_cache,
             16,
-            rx,
         );
-        let m = 32;
-        let ef_construction = 100;
-        let ef_search = 100;
         let collection_id = CollectionUuid::new();
-        let distance_function = chroma_distance::DistanceFunction::Euclidean;
         let dimensionality = 128;
-        let writer = SpannIndexWriter::from_id(
+        let params = InternalSpannConfiguration::default();
+        let ef_search = params.ef_search;
+        let gc_context = GarbageCollectionContext::try_from_config(
+            &(
+                PlGarbageCollectionConfig::default(),
+                HnswGarbageCollectionConfig::default(),
+            ),
+            &Registry::default(),
+        )
+        .await
+        .expect("Error converting config to gc context");
+        let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
+        let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,
             None,
             None,
-            Some(m),
-            Some(ef_construction),
-            Some(ef_search),
             &collection_id,
-            distance_function.clone(),
+            prefix_path,
             dimensionality,
             &blockfile_provider,
+            params.clone(),
+            gc_context,
+            pl_block_size,
+            SpannMetrics::default(),
         )
         .await
         .expect("Error creating spann index writer");
@@ -129,11 +142,13 @@ fn add_to_index_and_get_reader<'a>(
                 Some(&paths.hnsw_id),
                 &hnsw_provider,
                 &collection_id,
-                distance_function,
+                params.space.into(),
                 dimensionality,
+                ef_search,
                 Some(&paths.pl_id),
                 Some(&paths.versions_map_id),
                 &blockfile_provider,
+                prefix_path,
             )
             .await
             .expect("Error creating spann index reader"),
@@ -189,10 +204,10 @@ fn calculate_recall<'a>(
                 merge_list.push(bf_output.records);
             }
             // Now merge.
-            let knn_input = SpannKnnMergeInput {
-                records: merge_list,
+            let knn_input = KnnMergeInput {
+                batch_distances: merge_list,
             };
-            let knn_operator = SpannKnnMergeOperator { k: k as u32 };
+            let knn_operator = KnnMerge { fetch: k as u32 };
             let knn_output = knn_operator
                 .run(&knn_input)
                 .await
@@ -223,7 +238,7 @@ fn calculate_recall<'a>(
                 .expect("Error running operator");
             let mut recall = 0;
             for bf_record in bf_output.records.iter() {
-                for spann_record in knn_output.merged_records.iter() {
+                for spann_record in knn_output.distances.iter() {
                     if bf_record.offset_id == spann_record.offset_id {
                         recall += 1;
                     }

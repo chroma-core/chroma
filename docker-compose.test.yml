@@ -9,6 +9,7 @@ services:
       - ANONYMIZED_TELEMETRY=False
       - ALLOW_RESET=True
       - IS_PERSISTENT=True
+      - CHROMA_API_IMPL=chromadb.api.segment.SegmentAPI
     ports:
       - "${CHROMA_PORT:-8000}:8000"
 

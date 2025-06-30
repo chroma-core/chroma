@@ -9,72 +9,77 @@ on:
     
 
 jobs:
-  # GitHub only provides a way to do path filtering at the workflow level rather than the job level.
-  # This allows us to selectively run jobs based on changed paths.
-  paths-filter:
-    name: Get changed paths
-    runs-on: ubuntu-latest
+  # This job detects what changed and determines which tests to run
+  change-detection:
+    name: Detect changes and determine tests
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     outputs:
-      outside-docs: ${{ steps.changes.outputs.outside-docs }}
-      only-docs: ${{ steps.changes.outputs.docs }}
-      helm-changes: ${{ steps.helm-changes.outputs.helm-changes }}
-    steps:
-      - name: Get changed paths
-        id: changes
-        uses: dorny/paths-filter@v3
-        with:
-          predicate-quantifier: 'every'
-          filters: |
-            outside-docs:
-              - '!docs/**'
-            docs:
-              - 'docs/**'
-      - name: Check for Helm changes
-        id: helm-changes
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            helm-changes:
-              - 'k8s/distributed-chroma/**'
-
-  deploy-docs-preview:
-    name: Deploy preview of docs
-    needs: paths-filter
-    if: needs.paths-filter.outputs.only-docs == 'true'
-    runs-on: depot-ubuntu-22.04-small
-    environment:
-      name: Preview
-      url: ${{ steps.deploy.outputs.url }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v3
-        with:
-          node-version: "18.x"
-          registry-url: "https://registry.npmjs.org"
-      - name: Install vercel
-        run: npm install -g vercel
-      - name: Deploy
-        id: deploy
-        run: echo "url=$(vercel deploy --token ${{ secrets.VERCEL_TOKEN }})" >> $GITHUB_OUTPUT
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
-
-  check-helm-version-bump:
-    name: Warn if Helm chart was updated without version bump
-    needs: paths-filter
-    runs-on: ubuntu-latest
-    permissions:
-      pull-requests: write
+      # Component changes
+      docs-only: ${{ steps.determine-tests.outputs.docs-only }}
+      helm-changes: ${{ steps.filter.outputs.helm-changes }}
+      # Test flags as a JSON array
+      tests-to-run: ${{ steps.determine-tests.outputs.tests-to-run }}
+      # Helm version check
+      helm-version-changed: ${{ steps.helm-version.outputs.version_changed }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
-      - name: Detect if version field in Chart.yaml was changed
-        id: detect-version-change
+
+      - name: Filter changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            # documentation changes
+            docs:
+              - 'docs/**'
+            # Outside docs
+            outside-docs:
+              - '!docs/**'
+              - '!**/*.md'
+            # Helm chart changes
+            helm-changes:
+              - 'k8s/distributed-chroma/**'
+            # JavaScript client changes
+            js-client:
+              - 'clients/js/**'
+            # Outside JS client
+            outside-js-client:
+              - '!clients/js/**'
+
+      - name: Determine tests to run
+        id: determine-tests
+        run: |
+          # Initialize an empty array
+          TESTS_TO_RUN="[]"
+
+          # If changes are docs-only (changes in docs but not outside docs)
+          if [[ "${{ steps.filter.outputs.docs }}" == "true" && "${{ steps.filter.outputs.outside-docs }}" == "false" ]]; then
+            echo "Only documentation changes detected, skipping all tests"
+            echo "docs-only=true" >> $GITHUB_OUTPUT
+            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
+            exit 0
+          else
+            echo "docs-only=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Check for JS-only changes (changes in JS but not outside JS)
+          if [[ "${{ steps.filter.outputs.js-client }}" == "true" && "${{ steps.filter.outputs.outside-js-client }}" == "false" ]]; then
+            echo "JavaScript-only changes detected"
+            TESTS_TO_RUN='["js-client"]'
+            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # If we get here, we need to run all tests (core changes)
+          echo "Core changes detected, running all tests"
+          TESTS_TO_RUN='["python", "rust", "js-client", "go"]'
+          echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
+
+      - name: Check Helm version change
+        id: helm-version
+        if: steps.filter.outputs.helm-changes == 'true'
         shell: bash
         run: |
           current=$(git show HEAD:$file | yq ".version")
@@ -92,8 +97,43 @@ jobs:
         env:
           file: k8s/distributed-chroma/Chart.yaml
 
+  deploy-docs-preview:
+    name: Deploy preview of docs
+    needs: change-detection
+    if: needs.change-detection.outputs.docs-only == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    environment:
+      name: Preview
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install vercel
+        run: npm install -g vercel
+      - name: Deploy
+        id: deploy
+        run: echo "url=$(vercel deploy --token ${{ secrets.VERCEL_TOKEN }})" >> $GITHUB_OUTPUT
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
+
+  check-helm-version-bump:
+    name: Warn if Helm chart was updated without version bump
+    needs: change-detection
+    if: needs.change-detection.outputs.helm-changes == 'true'
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
       - name: Comment warning
-        if: ${{ steps.detect-version-change.outputs.version_changed == 'false' && needs.paths-filter.outputs.helm-changes == 'true' }}
+        if: needs.change-detection.outputs.helm-version-changed == 'false'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: helm-chart-version-info
@@ -101,15 +141,22 @@ jobs:
             :warning: The Helm chart was updated without a version bump. Your changes will only be published if the version field in `k8s/distributed-chroma/Chart.yaml` is updated.
 
       - name: Comment success
-        if: ${{ steps.detect-version-change.outputs.version_changed == 'true' && needs.paths-filter.outputs.helm-changes == 'true' }}
+        if: needs.change-detection.outputs.helm-version-changed == 'true'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: helm-chart-version-info
           message: |
             :white_check_mark: The Helm chart's version was changed. Your changes to the chart will be published upon merge to `main`.
 
+  delete-helm-comment:
+    name: Delete Helm chart comment if not changed
+    needs: change-detection
+    if: needs.change-detection.outputs.helm-changes == 'false'
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    permissions:
+      pull-requests: write
+    steps:
       - name: Delete comment (Helm chart was not changed)
-        if:  needs.paths-filter.outputs.helm-changes == 'false'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: helm-chart-version-info
@@ -117,66 +164,67 @@ jobs:
 
   python-tests:
     name: Python tests
-    needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true'
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
     with:
-      property_testing_preset: 'fast'
-      run_rust_frontend_tests: ${{ contains(join(github.event.pull_request.labels.*.name, ','), 'rust-frontend') }}
+      property_testing_preset: 'normal'
 
   python-vulnerability-scan:
     name: Python vulnerability scan
-    needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true'
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-vulnerability-scan.yml
 
   javascript-client-tests:
     name: JavaScript client tests
-    needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true'
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
     uses: ./.github/workflows/_javascript-client-tests.yml
 
   rust-tests:
     name: Rust tests
-    needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true'
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
     uses: ./.github/workflows/_rust-tests.yml
+    secrets: inherit
 
   go-tests:
     name: Go tests
-    needs: paths-filter
-    if: needs.paths-filter.outputs.outside-docs == 'true'
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
     uses: ./.github/workflows/_go-tests.yml
+    secrets: inherit
 
   check-title:
-  name: Check PR Title
-  runs-on: ubuntu-latest
-  steps:
-    - name: Check PR Title
-      uses: Slashgear/action-check-pr-title@v4.3.0
-      with:
-        regexp: '\[(ENH|BUG|DOC|TST|BLD|PERF|TYP|CLN|CHORE|RELEASE|HOTFIX)\].*'
-        helpMessage: "Please tag your PR title. See https://docs.trychroma.com/contributing#contributing-code-and-ideas. You must push new code to this PR for this check to run again."
-
-    - name: Comment explaining failure
-      if: failure()
-      uses: marocchino/sticky-pull-request-comment@v2
-      with:
-        header: pr-title-check
-        message: |
-          :x: Please tag your PR title with one of: `[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE]`.
-          See [Contributing Guidelines](https://docs.trychroma.com/contributing#contributing-code-and-ideas).
-
-    - name: Delete comment on success
-      if: success()
-      uses: marocchino/sticky-pull-request-comment@v2
-      with:
-        header: pr-title-check
-        delete: true
+    name: Check PR Title
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    steps:
+        - name: Check PR Title
+          uses: Slashgear/action-check-pr-title@v4.3.0
+          with:
+            regexp: '\[(ENH|BUG|DOC|TST|BLD|PERF|TYP|CLN|CHORE|RELEASE|HOTFIX)\].*'
+            helpMessage: "Please tag your PR title. See https://docs.trychroma.com/contributing#contributing-code-and-ideas. You must push new code to this PR for this check to run again."
+        - name: Comment explaining failure
+          if: failure()
+          uses: marocchino/sticky-pull-request-comment@v2
+          with:
+            header: pr-title-check
+            message: |
+              :x: Please tag your PR title with one of: `[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE]`.
+              See [Contributing Guidelines](https://docs.trychroma.com/contributing#contributing-code-and-ideas).
+          
+        - name: Delete comment on success
+          if: success()
+          uses: marocchino/sticky-pull-request-comment@v2
+          with:
+            header: pr-title-check
+            delete: true
 
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -185,6 +233,8 @@ jobs:
           python-version: "3.11"
       - name: Setup Rust
         uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
       - name: Run pre-commit
         shell: bash
         run: |
@@ -204,7 +254,6 @@ jobs:
       - name: Cargo fmt check
         shell: bash
         run: cargo fmt -- --check
-        continue-on-error: true
       - name: Clippy
         run: cargo clippy --all-targets --all-features --keep-going -- -D warnings
 
@@ -224,10 +273,12 @@ jobs:
     - go-tests
     - check-title
     - lint
-    runs-on: ubuntu-latest
+    - check-helm-version-bump
+    - delete-helm-comment
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     steps:
     - name: Decide whether the needed jobs succeeded or failed
       uses: re-actors/alls-green@release/v1
       with:
         jobs: ${{ toJSON(needs) }}
-        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests
+        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,go-tests,check-helm-version-bump,delete-helm-comment

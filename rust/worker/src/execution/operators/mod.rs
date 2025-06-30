@@ -3,22 +3,22 @@ pub mod commit_segment_writer;
 pub(super) mod count_records;
 pub mod flush_segment_writer;
 pub mod materialize_logs;
-pub(super) mod partition;
-pub mod prefetch_segment;
 pub(super) mod register;
 pub mod spann_bf_pl;
 pub(super) mod spann_centers_search;
 pub(super) mod spann_fetch_pl;
-pub mod spann_knn_merge;
 
-// Required for benchmark
 pub mod fetch_log;
 pub mod filter;
-pub mod knn;
+pub mod get_collection_and_segments;
 pub mod knn_hnsw;
 pub mod knn_log;
 pub mod knn_merge;
 pub mod knn_projection;
 pub mod limit;
+pub mod partition_log;
 pub mod prefetch_record;
+pub mod prefetch_segment;
 pub mod projection;
+pub mod purge_dirty_log;
+pub mod source_record_segment;

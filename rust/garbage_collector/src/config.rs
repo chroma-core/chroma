@@ -1,25 +1,74 @@
+use chroma_cache::CacheConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
+use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
+
+use crate::types::CleanupMode;
 
 const DEFAULT_CONFIG_PATH: &str = "./garbage_collector_config.yaml";
 
-#[allow(dead_code)]
-#[derive(Debug, serde::Deserialize)]
-// TODO(Sanket):  Remove this dead code annotation.
+fn deserialize_duration_from_seconds<'de, D>(d: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let secs: u64 = serde::Deserialize::deserialize(d)?;
+    Ok(Duration::from_secs(secs))
+}
+
+#[derive(Debug, serde::Deserialize, Clone)]
 pub(super) struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
-    pub(super) cutoff_time_hours: u32,
+    #[serde(
+        rename = "collection_soft_delete_grace_period_seconds",
+        deserialize_with = "deserialize_duration_from_seconds",
+        default = "GarbageCollectorConfig::default_collection_soft_delete_grace_period"
+    )]
+    pub(super) collection_soft_delete_grace_period: Duration,
+    #[serde(
+        rename = "version_relative_cutoff_time_seconds",
+        alias = "relative_cutoff_time_seconds",
+        deserialize_with = "deserialize_duration_from_seconds"
+    )]
+    pub(super) version_cutoff_time: Duration,
     pub(super) max_collections_to_gc: u32,
     pub(super) gc_interval_mins: u32,
-    pub(super) disallow_collections: Vec<String>,
+    #[serde(default = "GarbageCollectorConfig::default_min_versions_to_keep")]
+    pub(super) min_versions_to_keep: u32,
+    #[serde(default = "GarbageCollectorConfig::default_filter_min_versions_if_alive")]
+    pub(super) filter_min_versions_if_alive: Option<u64>,
+    pub(super) disallow_collections: HashSet<CollectionUuid>,
     pub(super) sysdb_config: chroma_sysdb::GrpcSysDbConfig,
     pub(super) dispatcher_config: DispatcherConfig,
     pub(super) storage_config: StorageConfig,
+    #[serde(default)]
+    pub(super) default_mode: CleanupMode,
+    #[serde(default)]
+    pub(super) tenant_mode_overrides: Option<HashMap<String, CleanupMode>>,
+    pub(super) assignment_policy: chroma_config::assignment::config::AssignmentPolicyConfig,
+    pub(super) memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+    pub my_member_id: String,
+    #[serde(default = "GarbageCollectorConfig::default_port")]
+    pub port: u16,
+    #[serde(default)]
+    pub root_cache_config: CacheConfig,
+    pub jemalloc_pprof_server_port: Option<u16>,
 }
 
 impl GarbageCollectorConfig {
+    fn default_min_versions_to_keep() -> u32 {
+        2
+    }
+
+    fn default_filter_min_versions_if_alive() -> Option<u64> {
+        None
+    }
+
     pub(super) fn load() -> Self {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
@@ -27,9 +76,10 @@ impl GarbageCollectorConfig {
     pub(super) fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
-        let mut f = figment::Figment::from(
-            Env::prefixed("CHROMA_GC_").map(|k| k.as_str().replace("__", ".").into()),
-        );
+        let mut f = figment::Figment::from(Env::prefixed("CHROMA_GC_").map(|k| match k {
+            k if k == "my_member_id" => k.into(),
+            k => k.as_str().replace("__", ".").into(),
+        }));
         if std::path::Path::new(path).exists() {
             f = figment::Figment::from(Yaml::file(path)).merge(f);
         }
@@ -38,6 +88,14 @@ impl GarbageCollectorConfig {
             Ok(config) => config,
             Err(e) => panic!("Error loading config: {}", e),
         }
+    }
+
+    fn default_port() -> u16 {
+        50055
+    }
+
+    fn default_collection_soft_delete_grace_period() -> Duration {
+        Duration::from_secs(60 * 60 * 24) // 1 day
     }
 }
 
@@ -52,11 +110,14 @@ mod tests {
         let config = GarbageCollectorConfig::load();
         assert_eq!(config.service_name, "garbage-collector");
         assert_eq!(config.otel_endpoint, "http://otel-collector:4317");
-        assert_eq!(config.cutoff_time_hours, 12);
+        assert_eq!(
+            config.version_cutoff_time,
+            Duration::from_secs(12 * 60 * 60)
+        ); // 12 hours
         assert_eq!(config.max_collections_to_gc, 1000);
         assert_eq!(config.gc_interval_mins, 120);
-        let empty_vec: Vec<String> = vec![];
-        assert_eq!(config.disallow_collections, empty_vec);
+        let empty_set: HashSet<CollectionUuid> = HashSet::new();
+        assert_eq!(config.disallow_collections, empty_set);
         assert_eq!(config.sysdb_config.host, "sysdb.chroma");
         assert_eq!(config.sysdb_config.port, 50051);
         assert_eq!(config.sysdb_config.connect_timeout_ms, 60000);

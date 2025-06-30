@@ -1,7 +1,7 @@
-use frontend::frontend_service_entrypoint;
+use chroma_frontend::frontend_service_entrypoint;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
-    // TODO(hammadb): Implement the frontend service entrypoint
-    frontend_service_entrypoint().await;
+    frontend_service_entrypoint(Arc::new(()) as _, Arc::new(()) as _).await;
 }

@@ -15,7 +15,7 @@
 New to Chroma? Check out the [getting started guide](./getting-started)
 {% /Banner %}
 
-![Chroma Computer](/computer.svg)
+![Chroma Computer](/computer.png)
 
 Chroma gives you everything you need for retrieval:
 
@@ -44,7 +44,7 @@ In JavaScript, use the Chroma JS/TS Client to connect to a Chroma server. Instal
 
 {% Tab label="yarn" %}
 ```terminal
-yarn install chromadb chromadb-default-embed 
+yarn add chromadb chromadb-default-embed
 ```
 {% /Tab %}
 
@@ -56,7 +56,7 @@ npm install --save chromadb chromadb-default-embed
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm install chromadb chromadb-default-embed 
+pnpm install chromadb chromadb-default-embed
 ```
 {% /Tab %}
 
@@ -77,13 +77,15 @@ Continue with the full [getting started guide](./getting-started).
 | Ruby          | [from @mariochavez](https://github.com/mariochavez/chroma)                                                               |
 | Java          | [from @t_azarov](https://github.com/amikos-tech/chromadb-java-client)                                                    |
 | Go            | [from @t_azarov](https://github.com/amikos-tech/chroma-go)                                                               |
-| C#            | [from @microsoft](https://github.com/microsoft/semantic-kernel/tree/main/dotnet/src/Connectors/Connectors.Memory.Chroma) |
+| C#/.NET       | [from @cincuranet, @ssone95, @microsoft](https://github.com/ssone95/ChromaDB.Client)                                     |
 | Rust          | [from @Anush008](https://crates.io/crates/chromadb)                                                                      |
 | Elixir        | [from @3zcurdia](https://hex.pm/packages/chroma/)                                                                        |
 | Dart          | [from @davidmigloz](https://pub.dev/packages/chromadb)                                                                   |
 | PHP           | [from @CodeWithKyrian](https://github.com/CodeWithKyrian/chromadb-php)                                                   |
 | PHP (Laravel) | [from @HelgeSverre](https://github.com/helgeSverre/chromadb)                                                             |
 | Clojure       | [from @levand](https://github.com/levand/clojure-chroma-client)                                                          |
+| R             | [from @cynkra](https://cynkra.github.io/rchroma/)                                                                       |
+| C++           | [from @BlackyDrum](https://github.com/BlackyDrum/chromadb-cpp)                                                           |
 
 
 {% br %}{% /br %}

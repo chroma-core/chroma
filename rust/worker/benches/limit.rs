@@ -1,11 +1,12 @@
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_log::test::{upsert_generator, LoadFromGenerator};
-use chroma_segment::test::TestSegment;
+use chroma_segment::test::TestDistributedSegment;
 use chroma_system::Operator;
+use chroma_types::operator::Limit;
 use chroma_types::{Chunk, SignedRoaringBitmap};
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
-use worker::execution::operators::limit::{LimitInput, LimitOperator};
+use worker::execution::operators::limit::LimitInput;
 
 const FETCH: usize = 100;
 
@@ -14,7 +15,7 @@ fn bench_limit(criterion: &mut Criterion) {
 
     for record_count in [1000, 10000, 100000] {
         let test_segment = runtime.block_on(async {
-            let mut segment = TestSegment::default();
+            let mut segment = TestDistributedSegment::default();
             segment
                 .populate_with_generator(record_count, upsert_generator)
                 .await;
@@ -30,12 +31,12 @@ fn bench_limit(criterion: &mut Criterion) {
         };
 
         for offset in [0, record_count / 2, record_count - FETCH] {
-            let limit_operator = LimitOperator {
+            let limit_operator = Limit {
                 skip: offset as u32,
                 fetch: Some(FETCH as u32),
             };
 
-            let routine = |(op, input): (LimitOperator, LimitInput)| async move {
+            let routine = |(op, input): (Limit, LimitInput)| async move {
                 op.run(&input).await.expect("LimitOperator should not fail");
             };
 

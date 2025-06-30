@@ -2,7 +2,15 @@ var fs = require("fs");
 var path = require("path");
 
 var express = require("express");
+// Default to using the bundled version
 var chroma = require("chromadb");
+
+console.log("Using standard app.js with the bundled chromadb package");
+console.log("To try the different variants, run:");
+console.log("  - pnpm dev:bundled - Uses the bundled chromadb package");
+console.log(
+  "  - pnpm dev:client - Uses the chromadb-client package with peer dependencies",
+);
 
 var app = express();
 app.get("/", async (req, res) => {

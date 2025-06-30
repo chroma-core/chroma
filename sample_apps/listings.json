@@ -1,0 +1,8 @@
+[
+	{
+		"name": "generative_benchmarking",
+		"description": "A toolkit for generating custom benchmarks for evaluating embedding models",
+		"version": "1.0.0",
+		"cli_version": "1.0.0"
+	}
+]

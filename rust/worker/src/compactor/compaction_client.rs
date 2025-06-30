@@ -1,5 +1,5 @@
 use chroma_types::chroma_proto::{
-    compactor_client::CompactorClient, CollectionIds, CompactionRequest,
+    compactor_client::CompactorClient, CollectionIds, CompactRequest, RebuildRequest,
 };
 use clap::{Parser, Subcommand};
 use thiserror::Error;
@@ -31,7 +31,12 @@ pub struct CompactionClient {
 pub enum CompactionCommand {
     /// Trigger a one-off compaction
     Compact {
-        /// Specify Uuids of the collections to compact. If unspecified, no compaction will occur unless --all flag is specified
+        /// Specify Uuids of the collections to compact
+        #[arg(short, long)]
+        id: Vec<Uuid>,
+    },
+    Rebuild {
+        /// Specify Uuids of the collections to rebuild
         #[arg(short, long)]
         id: Vec<Uuid>,
     },
@@ -47,7 +52,20 @@ impl CompactionClient {
             CompactionCommand::Compact { id } => {
                 let mut client = self.grpc_client().await?;
                 let response = client
-                    .compact(CompactionRequest {
+                    .compact(CompactRequest {
+                        ids: Some(CollectionIds {
+                            ids: id.iter().map(ToString::to_string).collect(),
+                        }),
+                    })
+                    .await;
+                if let Err(status) = response {
+                    return Err(CompactionClientError::Compactor(status.to_string()));
+                }
+            }
+            CompactionCommand::Rebuild { id } => {
+                let mut client = self.grpc_client().await?;
+                let response = client
+                    .rebuild(RebuildRequest {
                         ids: Some(CollectionIds {
                             ids: id.iter().map(ToString::to_string).collect(),
                         }),

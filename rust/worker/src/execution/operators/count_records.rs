@@ -81,7 +81,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
             Err(e) => {
                 match *e {
                     RecordSegmentReaderCreationError::UninitializedSegment => {
-                        tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized");
+                        tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized; using {} records from log", input.log_records.len());
                         // This means there no compaction has occured.
                         // So we can just traverse the log records
                         // and count the number of records.
@@ -113,6 +113,10 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                     RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
+                    _ => {
+                        tracing::error!("Unexpected error creating record segment reader: {:?}", e);
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
                 }
             }
         };
@@ -139,7 +143,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                     }
                 }
                 Err(e) => {
-                    println!("Error reading record segment");
+                    tracing::error!("Error reading record segment: {:?}", e);
                     return Err(CountRecordsError::RecordSegmentReadError(e));
                 }
             }
@@ -185,7 +189,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                 res_count += val as i32;
             }
             Err(e) => {
-                println!("Error reading record segment");
+                tracing::error!("Error reading record segment: {:?}", e);
                 return Err(CountRecordsError::RecordSegmentReadError(e));
             }
         };
@@ -206,7 +210,9 @@ mod tests {
         types::materialize_logs,
     };
     use chroma_system::Operator;
-    use chroma_types::{Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid};
+    use chroma_types::{
+        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+    };
     use std::{collections::HashMap, str::FromStr};
     use tracing::{Instrument, Span};
 
@@ -222,11 +228,17 @@ mod tests {
             metadata: None,
             file_path: HashMap::new(),
         };
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &in_memory_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &in_memory_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let data = vec![
                 LogRecord {
                     log_offset: 1,
@@ -284,6 +296,9 @@ mod tests {
                                 panic!("Error creating record segment reader");
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            _ => {
                                 panic!("Error creating record segment reader");
                             }
                         }

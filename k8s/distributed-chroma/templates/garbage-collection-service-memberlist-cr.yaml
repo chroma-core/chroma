@@ -1,0 +1,71 @@
+apiVersion: chroma.cluster/v1
+kind: MemberList
+metadata:
+  name: garbage-collection-service-memberlist
+  namespace: {{ .Values.namespace }}
+spec:
+  members:
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: garbage-collection-service-memberlist-readerwriter
+rules:
+- apiGroups:
+    - chroma.cluster
+  resources:
+    - memberlists
+  verbs:
+    - get
+    - list
+    - watch
+    # TODO: FIX THIS LEAKY PERMISSION
+    - create
+    - update
+    - patch
+    - delete
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: sysdb-garbage-collection-service-memberlist-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: garbage-collection-service-memberlist-readerwriter
+subjects:
+- kind: ServiceAccount
+  name: sysdb-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: garbage-collection-service-garbage-collection-service-memberlist-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: garbage-collection-service-memberlist-readerwriter
+subjects:
+- kind: ServiceAccount
+  name: garbage-collector-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: garbage-collection-service-memberlist-readerwriter-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: garbage-collection-service-memberlist-readerwriter
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: {{ .Values.namespace }}

@@ -36,3 +36,16 @@ impl From<ConversionError> for Status {
         Status::invalid_argument(value.to_string())
     }
 }
+
+#[derive(thiserror::Error, Debug)]
+#[error(transparent)]
+pub enum WrappedSerdeJsonError {
+    #[error(transparent)]
+    SerdeJsonError(#[from] serde_json::Error),
+}
+
+impl ChromaError for WrappedSerdeJsonError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}

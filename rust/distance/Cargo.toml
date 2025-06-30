@@ -15,6 +15,7 @@ harness = false
 thiserror = { workspace = true }
 
 chroma-error = { workspace = true }
+chroma-types = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

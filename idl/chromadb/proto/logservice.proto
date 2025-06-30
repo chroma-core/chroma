@@ -12,10 +12,28 @@ message PushLogsRequest {
 
 message PushLogsResponse {
   int32 record_count = 1;
+  bool log_is_sealed = 2;
+}
+
+message ScoutLogsRequest {
+  string collection_id = 1;
+}
+
+message ScoutLogsResponse {
+  // This field was once used for an ambiguous last_record_offset alternative.
+  reserved 1;
+  // The next record to insert will have this offset.
+  int64 first_uninserted_record_offset = 2;
+  // The oldest record on the log will have this offset.
+  int64 first_uncompacted_record_offset = 3;
+  // Whether the log is sealed.
+  bool is_sealed = 4;
 }
 
 message PullLogsRequest {
   string collection_id = 1;
+  // The offset of the first record to be returned.  This should match
+  // PullLogsResponse.records[0].log_offset.
   int64 start_from_offset = 2;
   int32 batch_size = 3;
   int64 end_timestamp = 4;
@@ -29,6 +47,18 @@ message LogRecord {
 
 message PullLogsResponse {
   repeated LogRecord records = 1;
+}
+
+message ForkLogsRequest {
+  string source_collection_id = 1;
+  string target_collection_id = 2;
+}
+
+message ForkLogsResponse {
+  // The offset of the last record that was compacted.
+  uint64 compaction_offset = 1;
+  // The offset of the last record that was inserted.
+  uint64 enumeration_offset = 2;
 }
 
 message CollectionInfo {
@@ -51,6 +81,7 @@ message GetAllCollectionInfoToCompactResponse {
 
 message UpdateCollectionLogOffsetRequest {
   string collection_id = 1;
+  // The offset of the last record that was compacted.
   int64 log_offset = 2;
 }
 
@@ -58,9 +89,78 @@ message UpdateCollectionLogOffsetResponse {
   // Empty
 }
 
+message PurgeDirtyForCollectionRequest {
+  repeated string collection_ids = 1;
+}
+
+message PurgeDirtyForCollectionResponse {
+  // Empty
+}
+
+message InspectDirtyLogRequest {
+  // Empty
+}
+
+message InspectDirtyLogResponse {
+  repeated string markers = 1;
+}
+
+message SealLogRequest {
+  string collection_id = 1;
+}
+
+message SealLogResponse {
+  // Empty
+}
+
+message MigrateLogRequest {
+  string collection_id = 1;
+}
+
+message MigrateLogResponse {
+  // Empty
+}
+
+message InspectLogStateRequest {
+  string collection_id = 1;
+}
+
+message InspectLogStateResponse {
+  string debug = 1;
+}
+
+message ScrubLogRequest {
+  oneof log_to_scrub {
+    string collection_id = 1;
+    string dirty_log = 2;
+  };
+  uint64 max_bytes_to_read = 3;
+  uint32 max_files_to_read = 4;
+}
+
+message ScrubLogResponse {
+  string calculated_setsum = 1;
+  uint64 bytes_read = 2;
+  repeated string errors = 3;
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
+  rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
   rpc PullLogs(PullLogsRequest) returns (PullLogsResponse) {}
+  rpc ForkLogs(ForkLogsRequest) returns (ForkLogsResponse) {}
   rpc GetAllCollectionInfoToCompact(GetAllCollectionInfoToCompactRequest) returns (GetAllCollectionInfoToCompactResponse) {}
   rpc UpdateCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
+  rpc PurgeDirtyForCollection(PurgeDirtyForCollectionRequest) returns (PurgeDirtyForCollectionResponse) {}
+  // RPC endpoints to expose for operator debuggability.
+  // This endpoint must route to the rust log service.
+  rpc InspectDirtyLog(InspectDirtyLogRequest) returns (InspectDirtyLogResponse) {}
+  // This endpoint must route to the go log service.
+  rpc SealLog(SealLogRequest) returns (SealLogResponse) {}
+  // This endpoint must route to the rust log service.
+  rpc MigrateLog(MigrateLogRequest) returns (MigrateLogResponse) {}
+  // This endpoint can be supported by any log service.
+  rpc InspectLogState(InspectLogStateRequest) returns (InspectLogStateResponse) {}
+  // This endpoint should route to the rust log service.
+  rpc ScrubLog(ScrubLogRequest) returns (ScrubLogResponse) {}
 }

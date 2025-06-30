@@ -21,7 +21,7 @@ Chroma as a project is coordinated by a small team of full-time employees who wo
 
 We work in the sunny Mission District in San Francisco.
 
-Chroma is co-founded by [Jeff Huber](https://twitter.com/jeffreyhuber) (left) and [Anton Troynikov](https://twitter.com/atroyn) (right).
+Chroma was co-founded by [Jeff Huber](https://twitter.com/jeffreyhuber) (left, CEO) and [Anton Troynikov](https://twitter.com/atroyn) (right, now Advisor).
 
 ![](/team.JPG)
 

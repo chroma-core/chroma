@@ -9,25 +9,19 @@ services:
     image: server
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: rust/Dockerfile
+      target: cli
+      # Uncomment below to build in release mode
+      # args:
+      #   RELEASE_MODE: "1"
     volumes:
-      # Be aware that indexed data are located in "/chroma/chroma/"
-      # Default configuration for persist_directory in chromadb/config.py
+      # The default config specifies a persist_directory of /data.
       # Read more about deployments: https://docs.trychroma.com/deployment
-      - chroma-data:/chroma/chroma
-    command: "--workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30"
+      - chroma-data:/data
     environment:
-      - IS_PERSISTENT=TRUE
-      - CHROMA_SERVER_AUTHN_PROVIDER=${CHROMA_SERVER_AUTHN_PROVIDER}
-      - CHROMA_SERVER_AUTHN_CREDENTIALS_FILE=${CHROMA_SERVER_AUTHN_CREDENTIALS_FILE}
-      - CHROMA_SERVER_AUTHN_CREDENTIALS=${CHROMA_SERVER_AUTHN_CREDENTIALS}
-      - CHROMA_AUTH_TOKEN_TRANSPORT_HEADER=${CHROMA_AUTH_TOKEN_TRANSPORT_HEADER}
-      - PERSIST_DIRECTORY=${PERSIST_DIRECTORY:-/chroma/chroma}
-      - CHROMA_OTEL_EXPORTER_ENDPOINT=${CHROMA_OTEL_EXPORTER_ENDPOINT}
-      - CHROMA_OTEL_EXPORTER_HEADERS=${CHROMA_OTEL_EXPORTER_HEADERS}
-      - CHROMA_OTEL_SERVICE_NAME=${CHROMA_OTEL_SERVICE_NAME}
-      - CHROMA_OTEL_GRANULARITY=${CHROMA_OTEL_GRANULARITY}
-      - CHROMA_SERVER_NOFILE=${CHROMA_SERVER_NOFILE}
+      - CHROMA_OPEN_TELEMETRY__ENDPOINT=${CHROMA_OPEN_TELEMETRY__ENDPOINT}
+      - CHROMA_OPEN_TELEMETRY__SERVICE_NAME=${CHROMA_OPEN_TELEMETRY__SERVICE_NAME}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS}
     restart: unless-stopped # possible values are: "no", always", "on-failure", "unless-stopped"
     ports:
       - "8000:8000"

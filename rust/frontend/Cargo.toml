@@ -1,6 +1,6 @@
 [package]
-name = "frontend"
-version = "0.1.0"
+name = "chroma-frontend"
+version = "1.0.0"
 edition = "2021"
 
 [[bin]]
@@ -14,6 +14,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 async-trait = { workspace = true }
 figment = { workspace = true }
+http-body-util = { workspace = true }
+lazy_static.workspace = true
 uuid = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
@@ -21,17 +23,42 @@ thiserror = { workspace = true }
 tower-http = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
-regex = { workspace = true }
+futures = { workspace = true }
 backon = { workspace = true }
-tower = { version = "0.4.13", features = ["discover"] }
-
-chroma-config = { workspace = true }
-chroma-types = { workspace = true }
-chroma-sysdb = { workspace = true }
-chroma-error = { workspace = true }
-chroma-tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tower = { workspace = true }
 mdac = { workspace = true }
+opentelemetry.workspace = true
+validator = { workspace = true }
+rust-embed = { workspace = true }
 chroma-cache = { workspace = true }
+chroma-config = { workspace = true }
+chroma-distance = { workspace = true }
+chroma-error = { workspace = true, features = ["validator", "http"] }
 chroma-log = { workspace = true }
 chroma-memberlist = { workspace = true }
+chroma-segment = { workspace = true }
+chroma-sysdb = { workspace = true }
 chroma-system = { workspace = true }
+chroma-tracing = { workspace = true }
+chroma-types = { workspace = true }
+chroma-sqlite = { workspace = true }
+utoipa = { workspace = true }
+utoipa-axum = { version = "0.2.0", features = ["debug"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+base64 = { workspace = true }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+proptest = { workspace = true }
+proptest-state-machine = { workspace = true }
+chroma-types = { workspace = true, features = ["testing"] }
+tempfile = { workspace = true }
+worker = { workspace = true }
+ndarray = { workspace = true }
+criterion = { workspace = true }
+
+
+[[bench]]
+name="base64"
+harness = false

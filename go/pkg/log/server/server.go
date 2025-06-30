@@ -34,12 +34,36 @@ func (s *logServer) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequ
 		recordsContent = append(recordsContent, data)
 	}
 	var recordCount int64
-	recordCount, err = s.lr.InsertRecords(ctx, collectionID.String(), recordsContent)
+	var isSealed bool
+	recordCount, isSealed, err = s.lr.InsertRecords(ctx, collectionID.String(), recordsContent)
 	if err != nil {
 		return
 	}
 	res = &logservicepb.PushLogsResponse{
 		RecordCount: int32(recordCount),
+		LogIsSealed: isSealed,
+	}
+	return
+}
+
+func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRequest) (res *logservicepb.ScoutLogsResponse, err error) {
+	var collectionID types.UniqueID
+	collectionID, err = types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		return
+	}
+	var start int64
+	var limit int64
+	var isSealed bool
+	start, limit, isSealed, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
+	if err != nil {
+		return
+	}
+	// +1 to convert from the (] bound to a [) bound.
+	res = &logservicepb.ScoutLogsResponse{
+		FirstUncompactedRecordOffset: int64(start + 1),
+		FirstUninsertedRecordOffset:  int64(limit + 1),
+		IsSealed:                     isSealed,
 	}
 	return
 }
@@ -68,6 +92,30 @@ func (s *logServer) PullLogs(ctx context.Context, req *logservicepb.PullLogsRequ
 			LogOffset: records[index].Offset,
 			Record:    record,
 		}
+	}
+	return
+}
+
+func (s *logServer) ForkLogs(ctx context.Context, req *logservicepb.ForkLogsRequest) (res *logservicepb.ForkLogsResponse, err error) {
+	var sourceCollectionID types.UniqueID
+	var targetCollectionID types.UniqueID
+	sourceCollectionID, err = types.ToUniqueID(&req.SourceCollectionId)
+	if err != nil {
+		return
+	}
+	targetCollectionID, err = types.ToUniqueID(&req.TargetCollectionId)
+	if err != nil {
+		return
+	}
+
+	compactionOffset, enumerationOffset, err := s.lr.ForkRecords(ctx, sourceCollectionID.String(), targetCollectionID.String())
+	if err != nil {
+		return
+	}
+
+	res = &logservicepb.ForkLogsResponse{
+		CompactionOffset:  compactionOffset,
+		EnumerationOffset: enumerationOffset,
 	}
 	return
 }
@@ -102,6 +150,36 @@ func (s *logServer) UpdateCollectionLogOffset(ctx context.Context, req *logservi
 		return
 	}
 	res = &logservicepb.UpdateCollectionLogOffsetResponse{}
+	return
+}
+
+func (s *logServer) PurgeDirtyForCollection(ctx context.Context, req *logservicepb.PurgeDirtyForCollectionRequest) (res *logservicepb.PurgeDirtyForCollectionResponse, err error) {
+	return
+}
+
+func (s *logServer) InspectDirtyLog(ctx context.Context, req *logservicepb.InspectDirtyLogRequest) (res *logservicepb.InspectDirtyLogResponse, err error) {
+	return
+}
+
+func (s *logServer) SealLog(ctx context.Context, req *logservicepb.SealLogRequest) (res *logservicepb.SealLogResponse, err error) {
+	var collectionID types.UniqueID
+	collectionID, err = types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		return
+	}
+	err = s.lr.SealCollection(ctx, collectionID.String())
+	return
+}
+
+func (s *logServer) MigrateLog(ctx context.Context, req *logservicepb.MigrateLogRequest) (res *logservicepb.MigrateLogResponse, err error) {
+	return
+}
+
+func (s *logServer) InspectLogState(ctx context.Context, req *logservicepb.InspectLogStateRequest) (res *logservicepb.InspectLogStateResponse, err error) {
+	return
+}
+
+func (s *logServer) ScrubLog(ctx context.Context, req *logservicepb.ScrubLogRequest) (res *logservicepb.ScrubLogResponse, err error) {
 	return
 }
 

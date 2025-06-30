@@ -29,6 +29,11 @@ where
     fn get_type(&self) -> OperatorType {
         OperatorType::Other
     }
+    /// By default operators will log an error event if their sender is dropped when sending the result.
+    /// This is not always desired, e.g. when creating a "fire-and-forget" operator (data prefetching); so this method can be overridden to return false.
+    fn errors_when_sender_dropped(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Error)]
@@ -163,15 +168,25 @@ where
                 {
                     Ok(_) => {}
                     Err(err) => {
-                        tracing::error!(
-                            "Failed to send task result for task {} to reply channel: {}",
-                            self.task_id,
-                            err
-                        );
+                        if self.operator.errors_when_sender_dropped() {
+                            tracing::error!(
+                                "Failed to send task result for task {} to reply channel: {}",
+                                self.task_id,
+                                err
+                            );
+                        } else {
+                            tracing::debug!(
+                                "Failed to send task result for task {} to reply channel: {}",
+                                self.task_id,
+                                err
+                            );
+                        }
                     }
                 }
             }
             Err(panic_value) => {
+                tracing::error!("Task {} panicked: {:?}", self.task_id, panic_value);
+
                 match self
                     .reply_channel
                     .send(
@@ -185,11 +200,13 @@ where
                 {
                     Ok(_) => {}
                     Err(err) => {
-                        tracing::error!(
-                            "Failed to send task result for task {} to reply channel: {}",
-                            self.task_id,
-                            err
-                        );
+                        if self.operator.errors_when_sender_dropped() {
+                            tracing::error!(
+                                "Failed to send task result for task {} to reply channel: {}",
+                                self.task_id,
+                                err
+                            );
+                        }
                     }
                 };
             }
@@ -226,11 +243,19 @@ where
         {
             Ok(_) => {}
             Err(err) => {
-                tracing::error!(
-                    "Failed to send task error for task {} to reply channel: {}",
-                    self.task_id,
-                    err
-                );
+                if self.operator.errors_when_sender_dropped() {
+                    tracing::error!(
+                        "Failed to send task result for task {} to reply channel: {}",
+                        self.task_id,
+                        err
+                    );
+                } else {
+                    tracing::debug!(
+                        "Failed to send task result for task {} to reply channel: {}",
+                        self.task_id,
+                        err
+                    );
+                }
             }
         }
     }
@@ -302,7 +327,7 @@ mod tests {
             1000
         }
 
-        async fn start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             let task = wrap(Box::new(MockOperator {}), (), ctx.receiver());
             self.dispatcher.send(task, None).await.unwrap();
         }
@@ -329,6 +354,7 @@ mod tests {
             task_queue_limit: 1000,
             dispatcher_queue_size: 1000,
             worker_queue_size: 1000,
+            active_io_tasks: 1000,
         });
         let dispatcher_handle = system.start_component(dispatcher);
 

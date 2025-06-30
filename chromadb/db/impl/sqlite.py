@@ -108,7 +108,7 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             self._settings.require("migrations") == "apply"
             and self.config.get_parameter("automatically_purge").value is False
         ):
-            logger.warn(
+            logger.warning(
                 "⚠️ It looks like you upgraded from a version below 0.5.6 and could benefit from vacuuming your database. Run chromadb utils vacuum --help for more information."
             )
 

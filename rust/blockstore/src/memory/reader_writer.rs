@@ -22,6 +22,10 @@ impl MemoryBlockfileFlusher {
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.id
     }
+
+    pub(crate) fn prefix_path(&self) -> &str {
+        ""
+    }
 }
 
 impl MemoryBlockfileWriter {
@@ -101,7 +105,7 @@ impl<
         &'storage self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<impl Iterator<Item = (K, V)> + 'storage, Box<dyn ChromaError>>
+    ) -> Result<impl Iterator<Item = (&'storage str, K, V)> + 'storage, Box<dyn ChromaError>>
     where
         PrefixRange: RangeBounds<&'prefix str>,
         KeyRange: RangeBounds<K>,
@@ -120,7 +124,7 @@ impl<
 
         Ok(values
             .into_iter()
-            .map(|(key, value)| (K::try_from(&key.key).unwrap(), value)))
+            .map(|(key, value)| (key.prefix.as_str(), K::try_from(&key.key).unwrap(), value)))
     }
 
     pub(crate) fn count(&self) -> Result<usize, Box<dyn ChromaError>> {
@@ -308,10 +312,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == "key1" && *value == "value1"));
+            .any(|(_, key, value)| *key == "key1" && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == "key2" && *value == "value2"));
+            .any(|(_, key, value)| *key == "key2" && *value == "value2"));
     }
 
     #[test]
@@ -348,13 +352,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -375,10 +379,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -420,13 +424,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1.0 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2.0 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3.0 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -450,10 +454,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2.0 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3.0 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -487,13 +491,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -512,10 +516,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -549,13 +553,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1.0 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2.0 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3.0 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -574,10 +578,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2.0 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3.0 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -611,13 +615,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -636,10 +640,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2 && *value == "value2"));
     }
 
     #[test]
@@ -673,13 +677,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1.0 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2.0 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3.0 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -698,10 +702,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1.0 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2.0 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2.0 && *value == "value2"));
     }
 
     #[test]
@@ -735,13 +739,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3 && *value == "value3"));
     }
 
     #[test]
@@ -760,10 +764,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2 && *value == "value2"));
     }
 
     #[test]
@@ -797,13 +801,13 @@ mod tests {
         assert_eq!(values.len(), 3);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1.0 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2.0 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2.0 && *value == "value2"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 3.0 && *value == "value3"));
+            .any(|(_, key, value)| *key == 3.0 && *value == "value3"));
     }
 
     #[test]
@@ -822,10 +826,10 @@ mod tests {
         assert_eq!(values.len(), 2);
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 1.0 && *value == "value1"));
+            .any(|(_, key, value)| *key == 1.0 && *value == "value1"));
         assert!(values
             .iter()
-            .any(|(key, value)| *key == 2.0 && *value == "value2"));
+            .any(|(_, key, value)| *key == 2.0 && *value == "value2"));
     }
 
     #[test]

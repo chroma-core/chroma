@@ -1,11 +1,12 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile the protobuf files in the chromadb proto directory.
     let mut proto_paths = vec![
-        "../../idl/chromadb/proto/chroma.proto",
-        "../../idl/chromadb/proto/compactor.proto",
-        "../../idl/chromadb/proto/coordinator.proto",
-        "../../idl/chromadb/proto/logservice.proto",
-        "../../idl/chromadb/proto/query_executor.proto",
+        "idl/chromadb/proto/chroma.proto",
+        "idl/chromadb/proto/compactor.proto",
+        "idl/chromadb/proto/coordinator.proto",
+        "idl/chromadb/proto/logservice.proto",
+        "idl/chromadb/proto/query_executor.proto",
+        "idl/chromadb/proto/garbage_collector.proto",
     ];
 
     // Can't use #[cfg(test)] here because a build for tests is technically a regular debug build, meaning that #[cfg(test)] is useless in build.rs.
@@ -16,12 +17,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let debug_assertions = false;
 
     if debug_assertions {
-        proto_paths.push("../../idl/chromadb/proto/debug.proto");
+        proto_paths.push("idl/chromadb/proto/debug.proto");
     }
 
     tonic_build::configure()
         .emit_rerun_if_changed(true)
-        .compile(&proto_paths, &["../../idl/"])?;
+        .compile(&proto_paths, &["idl/"])?;
 
     Ok(())
 }

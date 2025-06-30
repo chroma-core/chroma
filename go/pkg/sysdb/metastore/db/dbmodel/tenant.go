@@ -13,6 +13,7 @@ type Tenant struct {
 	CreatedAt          time.Time       `gorm:"created_at;type:timestamp;not null;default:current_timestamp"`
 	UpdatedAt          time.Time       `gorm:"updated_at;type:timestamp;not null;default:current_timestamp"`
 	LastCompactionTime int64           `gorm:"last_compaction_time;not null"`
+	ResourceName       *string         `gorm:"resource_name;uniqueIndex:idx_resource_name_unique,where:resource_name is not null"`
 }
 
 func (v Tenant) TableName() string {
@@ -27,4 +28,5 @@ type ITenantDb interface {
 	DeleteAll() error
 	UpdateTenantLastCompactionTime(tenantID string, lastCompactionTime int64) error
 	GetTenantsLastCompactionTime(tenantIDs []string) ([]*Tenant, error)
+	SetTenantResourceName(tenantID string, resourceName string) error
 }

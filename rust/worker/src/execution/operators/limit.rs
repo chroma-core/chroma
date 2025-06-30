@@ -8,17 +8,15 @@ use chroma_segment::{
     types::{materialize_logs, LogMaterializerError},
 };
 use chroma_system::Operator;
-use chroma_types::{Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap};
+use chroma_types::{
+    operator::Limit, Chunk, LogRecord, MaterializedLogOperation, Segment, SignedRoaringBitmap,
+};
 use futures::StreamExt;
 use roaring::RoaringBitmap;
 use thiserror::Error;
-use tracing::{trace, Instrument, Span};
+use tracing::{Instrument, Span};
 
-/// The `LimitOperator` selects a range or records sorted by their offset ids
-///
-/// # Parameters
-/// - `skip`: The number of records to skip in the beginning
-/// - `fetch`: The number of records to fetch after `skip`
+/// The `Limit` operator selects a range or records sorted by their offset ids
 ///
 /// # Inputs
 /// - `logs`: The latest logs of the collection
@@ -32,11 +30,6 @@ use tracing::{trace, Instrument, Span};
 ///
 /// # Usage
 /// It can be used to derive the range of offset ids that should be used by the next operator
-#[derive(Clone, Debug)]
-pub struct LimitOperator {
-    pub skip: u32,
-    pub fetch: Option<u32>,
-}
 
 #[derive(Clone, Debug)]
 pub struct LimitInput {
@@ -184,11 +177,12 @@ impl SeekScanner<'_> {
 }
 
 #[async_trait]
-impl Operator<LimitInput, LimitOutput> for LimitOperator {
+impl Operator<LimitInput, LimitOutput> for Limit {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        tracing::debug!("[{}]: num log entries {:?}, record segment {:?}, log offset ids {:?}, compact ids {:?}", self.get_name(),
+            input.logs.len(), input.record_segment, input.log_offset_ids, input.compact_offset_ids);
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
@@ -280,16 +274,14 @@ impl Operator<LimitInput, LimitOutput> for LimitOperator {
 #[cfg(test)]
 mod tests {
     use chroma_log::test::{upsert_generator, LoadFromGenerator, LogGenerator};
-    use chroma_segment::test::TestSegment;
+    use chroma_segment::test::TestDistributedSegment;
     use chroma_system::Operator;
-    use chroma_types::SignedRoaringBitmap;
+    use chroma_types::{operator::Limit, SignedRoaringBitmap};
     use roaring::RoaringBitmap;
-
-    use crate::execution::operators::limit::LimitOperator;
 
     use super::LimitInput;
 
-    /// The unit tests for `LimitOperator` uses the following test data
+    /// The unit tests for `Limit` operator uses the following test data
     /// It first generates 100 log records and compact them,
     /// then generate 30 log records that overwrite the compacted data
     /// - Log: Upsert [31..=60]
@@ -297,29 +289,34 @@ mod tests {
     async fn setup_limit_input(
         log_offset_ids: SignedRoaringBitmap,
         compact_offset_ids: SignedRoaringBitmap,
-    ) -> LimitInput {
-        let mut test_segment = TestSegment::default();
+    ) -> (TestDistributedSegment, LimitInput) {
+        let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;
-        LimitInput {
-            logs: upsert_generator.generate_chunk(31..=60),
-            blockfile_provider: test_segment.blockfile_provider,
-            record_segment: test_segment.record_segment,
-            log_offset_ids,
-            compact_offset_ids,
-        }
+        let blockfile_provider = test_segment.blockfile_provider.clone();
+        let record_segment = test_segment.record_segment.clone();
+        (
+            test_segment,
+            LimitInput {
+                logs: upsert_generator.generate_chunk(31..=60),
+                blockfile_provider,
+                record_segment,
+                log_offset_ids,
+                compact_offset_ids,
+            },
+        )
     }
 
     #[tokio::test]
     async fn test_trivial_limit() {
-        let limit_input = setup_limit_input(
+        let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::full(),
             SignedRoaringBitmap::Exclude((31..=60).collect()),
         )
         .await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 0,
             fetch: None,
         };
@@ -327,20 +324,20 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(limit_output.offset_ids, (1..=100).collect());
     }
 
     #[tokio::test]
     async fn test_overskip() {
-        let limit_input = setup_limit_input(
+        let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::full(),
             SignedRoaringBitmap::Exclude((31..=60).collect()),
         )
         .await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 100,
             fetch: None,
         };
@@ -348,20 +345,20 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(limit_output.offset_ids, RoaringBitmap::new());
     }
 
     #[tokio::test]
     async fn test_overfetch() {
-        let limit_input = setup_limit_input(
+        let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::full(),
             SignedRoaringBitmap::Exclude((31..=60).collect()),
         )
         .await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 0,
             fetch: Some(1000),
         };
@@ -369,20 +366,20 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(limit_output.offset_ids, (1..=100).collect());
     }
 
     #[tokio::test]
     async fn test_simple_range() {
-        let limit_input = setup_limit_input(
+        let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::full(),
             SignedRoaringBitmap::Exclude((31..=60).collect()),
         )
         .await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 60,
             fetch: Some(30),
         };
@@ -390,20 +387,20 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(limit_output.offset_ids, (61..=90).collect());
     }
 
     #[tokio::test]
     async fn test_complex_limit() {
-        let limit_input = setup_limit_input(
+        let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::Include((31..=60).filter(|offset| offset % 2 == 0).collect()),
             SignedRoaringBitmap::Exclude((21..=80).collect()),
         )
         .await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 30,
             fetch: Some(20),
         };
@@ -411,7 +408,7 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(
             limit_output.offset_ids,
@@ -424,10 +421,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_returns_last_offset() {
-        let limit_input =
+        let (_test_segment, limit_input) =
             setup_limit_input(SignedRoaringBitmap::empty(), SignedRoaringBitmap::full()).await;
 
-        let limit_operator = LimitOperator {
+        let limit_operator = Limit {
             skip: 99,
             fetch: Some(1),
         };
@@ -435,7 +432,7 @@ mod tests {
         let limit_output = limit_operator
             .run(&limit_input)
             .await
-            .expect("LimitOperator should not fail");
+            .expect("Limit should not fail");
 
         assert_eq!(limit_output.offset_ids, (100..=100).collect());
     }

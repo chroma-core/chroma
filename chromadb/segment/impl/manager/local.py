@@ -137,7 +137,9 @@ class LocalSegmentManager(SegmentManager):
         OpenTelemetryGranularity.OPERATION_AND_SEGMENT,
     )
     @override
-    def prepare_segments_for_new_collection(self, collection: Collection) -> Sequence[Segment]:
+    def prepare_segments_for_new_collection(
+        self, collection: Collection
+    ) -> Sequence[Segment]:
         vector_segment = _segment(
             self._vector_segment_type, SegmentScope.VECTOR, collection
         )

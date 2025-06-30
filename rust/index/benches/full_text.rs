@@ -3,6 +3,7 @@ use chroma_benchmark::datasets::types::Record;
 use chroma_benchmark::datasets::{
     ms_marco_queries::MicrosoftMarcoQueriesDataset, scidocs::SciDocsDataset, types::RecordDataset,
 };
+use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::BlockfileWriterOptions;
 use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
 use chroma_cache::UnboundedCacheConfig;
@@ -44,8 +45,11 @@ async fn compact_log_and_get_reader<'a>(
     blockfile_provider: &BlockfileProvider,
     mut chunked_mutations: Vec<Vec<DocumentMutation<'a>>>,
 ) -> Result<FullTextIndexReader<'a>> {
+    let prefix_path = String::from("");
     let postings_blockfile_writer = blockfile_provider
-        .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().ordered_mutations())
+        .write::<u32, Vec<u32>>(
+            BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+        )
         .await
         .unwrap();
     let postings_blockfile_id = postings_blockfile_writer.id();
@@ -62,8 +66,9 @@ async fn compact_log_and_get_reader<'a>(
     let flusher = full_text_index_writer.commit().await.unwrap();
     flusher.flush().await.unwrap();
 
+    let read_options = BlockfileReaderOptions::new(postings_blockfile_id, prefix_path);
     let postings_blockfile_reader = blockfile_provider
-        .read::<u32, &[u32]>(&postings_blockfile_id)
+        .read::<u32, &[u32]>(read_options)
         .await
         .unwrap();
 

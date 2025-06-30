@@ -2,7 +2,8 @@ from concurrent import futures
 from typing import Any, Dict, List, cast
 from uuid import UUID
 from overrides import overrides
-from chromadb.api.configuration import CollectionConfigurationInternal
+import json
+
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component, System
 from chromadb.proto.convert import (
     from_proto_metadata,
@@ -22,6 +23,8 @@ from chromadb.proto.coordinator_pb2 import (
     CreateSegmentResponse,
     CreateTenantRequest,
     CreateTenantResponse,
+    CountCollectionsRequest,
+    CountCollectionsResponse,
     DeleteCollectionRequest,
     DeleteCollectionResponse,
     DeleteSegmentRequest,
@@ -159,7 +162,9 @@ class GrpcMockSysDB(SysDBServicer, Component):
         segment = from_proto_segment(request.segment)
         return self.CreateSegmentHelper(segment, context)
 
-    def CreateSegmentHelper(self, segment: Segment, context: grpc.ServicerContext) -> CreateSegmentResponse:
+    def CreateSegmentHelper(
+        self, segment: Segment, context: grpc.ServicerContext
+    ) -> CreateSegmentResponse:
         if segment["id"].hex in self._segments:
             context.abort(
                 grpc.StatusCode.ALREADY_EXISTS,
@@ -280,22 +285,20 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 f"Collection {collection_name} already exists",
             )
 
-        configuration = CollectionConfigurationInternal.from_json_str(
-            request.configuration_json_str
-        )
+        configuration_json = json.loads(request.configuration_json_str)
 
         id = UUID(hex=request.id)
         new_collection = Collection(
             id=id,
             name=request.name,
-            configuration=configuration,
+            configuration_json=configuration_json,
             metadata=from_proto_metadata(request.metadata),
             dimension=request.dimension,
             database=database,
             tenant=tenant,
             version=0,
         )
-        
+
         # Check that segments are unique and do not already exist
         # Keep a track of the segments that are being added
         segments_added = []
@@ -306,7 +309,10 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 # Remove the already added segment since we need to roll back
                 for s in segments_added:
                     self.DeleteSegment(DeleteSegmentRequest(id=s), context)
-                context.abort(grpc.StatusCode.ALREADY_EXISTS, f"Segment {segment['id']} already exists")
+                context.abort(
+                    grpc.StatusCode.ALREADY_EXISTS,
+                    f"Segment {segment['id']} already exists",
+                )
             self.CreateSegmentHelper(segment, context)
             segments_added.append(segment["id"].hex)
 
@@ -334,7 +340,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
             del collections[collection_id]
             collection_unique_key = f"{tenant}:{database}:{collection_id}"
             segment_ids = self._collection_to_segments[collection_unique_key]
-            if segment_ids: # Delete segments if provided.
+            if segment_ids:  # Delete segments if provided.
                 for segment_id in segment_ids:
                     del self._segments[segment_id]
             return DeleteCollectionResponse()
@@ -373,11 +379,24 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 to_proto_collection(collection) for collection in found_collections
             ]
         )
-    
+
     @overrides(check_signature=False)
-    def GetCollectionSize(self, request: GetCollectionSizeRequest, context: grpc.ServicerContext) -> GetCollectionSizeResponse:        
+    def CountCollections(
+        self, request: CountCollectionsRequest, context: grpc.ServicerContext
+    ) -> CountCollectionsResponse:
+        request = GetCollectionsRequest(
+            tenant=request.tenant,
+            database=request.database,
+        )
+        collections = self.GetCollections(request, context)
+        return CountCollectionsResponse(count=len(collections.collections))
+
+    @overrides(check_signature=False)
+    def GetCollectionSize(
+        self, request: GetCollectionSizeRequest, context: grpc.ServicerContext
+    ) -> GetCollectionSizeResponse:
         return GetCollectionSizeResponse(
-            total_records_post_compaction = 0,
+            total_records_post_compaction=0,
         )
 
     @overrides(check_signature=False)
@@ -393,15 +412,29 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 )
         collection = allCollections.get(request.id, None)
         if collection is None:
-            context.abort(grpc.StatusCode.NOT_FOUND, f"Collection with id {request.id} not found")
-        collection_unique_key = f"{collection.tenant}:{collection.database}:{request.id}"
-        segments = [self._segments[id] for id in self._collection_to_segments[collection_unique_key]]
-        if {segment["scope"] for segment in segments} != {SegmentScope.METADATA, SegmentScope.RECORD, SegmentScope.VECTOR}:
-            context.abort(grpc.StatusCode.INTERNAL, f"Incomplete segments for collection {collection}: {segments}")
-            
+            context.abort(
+                grpc.StatusCode.NOT_FOUND, f"Collection with id {request.id} not found"
+            )
+        collection_unique_key = (
+            f"{collection.tenant}:{collection.database}:{request.id}"
+        )
+        segments = [
+            self._segments[id]
+            for id in self._collection_to_segments[collection_unique_key]
+        ]
+        if {segment["scope"] for segment in segments} != {
+            SegmentScope.METADATA,
+            SegmentScope.RECORD,
+            SegmentScope.VECTOR,
+        }:
+            context.abort(
+                grpc.StatusCode.INTERNAL,
+                f"Incomplete segments for collection {collection}: {segments}",
+            )
+
         return GetCollectionWithSegmentsResponse(
             collection=to_proto_collection(collection),
-            segments=[to_proto_segment(segment) for segment in segments]
+            segments=[to_proto_segment(segment) for segment in segments],
         )
 
     @overrides(check_signature=False)

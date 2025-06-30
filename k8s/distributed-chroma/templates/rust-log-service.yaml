@@ -1,0 +1,125 @@
+{{if .Values.rustLogService.configuration}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rust-log-service-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{  .Values.rustLogService.configuration | indent 4 }}
+{{ end }}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: rust-log-service
+  namespace: {{ .Values.namespace }}
+spec:
+  ports:
+    - name: server-port
+      port: 50051
+      targetPort: 50051
+  clusterIP: None
+  selector:
+    app: rust-log-service
+  type: ClusterIP
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rust-log-service
+  namespace: {{ .Values.namespace }}
+spec:
+  serviceName: rust-log-service
+  replicas: {{ .Values.rustLogService.replicaCount }}
+  selector:
+    matchLabels:
+      app: rust-log-service
+  template:
+    metadata:
+      labels:
+        app: rust-log-service
+        member-type: rust-log-service
+    spec:
+      serviceAccountName: rust-log-service-serviceaccount
+      volumes:
+        {{if .Values.rustLogService.configuration}}
+        - name: rust-log-service-config
+          configMap:
+            name: rust-log-service-config
+        {{ end }}
+        {{if .Values.rustLogService.cache}}
+        - name: rust-log-service-cache
+          hostPath:
+            path: {{ .Values.rustLogService.cache.hostPath }}
+            type: DirectoryOrCreate
+        {{ end }}
+      containers:
+        - name: rust-log-service
+          {{ if .Values.rustLogService.command }}
+          command: {{ .Values.rustLogService.command }}
+          {{ end }}
+          image: "{{ .Values.rustLogService.image.repository }}:{{ .Values.rustLogService.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            grpc:
+              port: 50051
+          volumeMounts:
+            {{if .Values.rustLogService.configuration}}
+            - name: rust-log-service-config
+              mountPath: /config/
+            {{ end }}
+            {{if .Values.rustLogService.cache}}
+            - name: rust-log-service-cache
+              mountPath: {{ .Values.rustLogService.cache.mountPath }}
+            {{ end }}
+          ports:
+            - containerPort: 50051
+          env:
+            - name: CONFIG_PATH
+              value: "/config/config.yaml"
+            - name: CHROMA_LOG_SERVICE__MY_MEMBER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            {{ if .Values.rustLogService.otherEnvConfig }}
+              {{ .Values.rustLogService.otherEnvConfig | nindent 12 }}
+            {{ end }}
+          {{ if .Values.rustLogService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.rustLogService.resources.limits.cpu }}
+              memory: {{ .Values.rustLogService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.rustLogService.resources.requests.cpu }}
+              memory: {{ .Values.rustLogService.resources.requests.memory }}
+          {{ end }}
+      {{if .Values.rustLogService.tolerations}}
+      tolerations:
+        {{ toYaml .Values.rustLogService.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.rustLogService.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.rustLogService.nodeSelector | nindent 8 }}
+      {{ end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: "kubernetes.io/hostname"
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              member-type: rust-log-service
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rust-log-service-serviceaccount
+  namespace: {{ .Values.namespace }}
+
+---

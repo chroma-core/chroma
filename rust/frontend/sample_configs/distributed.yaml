@@ -1,0 +1,50 @@
+# This file is an example of configuring the frontend for
+# distributed chroma. It is used in our Tiltfile as well.
+open_telemetry:
+  service_name: "rust-frontend-service"
+  endpoint: "http://otel-collector:4317"
+sysdb:
+  grpc:
+    host: "sysdb.chroma"
+    port: 50051
+    connect_timeout_ms: 60000
+    request_timeout_ms: 60000
+collections_with_segments_provider:
+  cache:
+    lru:
+      name: "collections_with_segments_cache"
+      capacity: 1000
+  cache_ttl_secs: 60
+  permitted_parallelism: 180
+  cache_invalidation_retry_policy:
+    delay_ms: 0
+    max_retries: 3
+log:
+  grpc:
+    host: "logservice.chroma"
+    port: 50051
+    connect_timeout_ms: 5000
+    request_timeout_ms: 5000
+
+executor:
+  distributed:
+    connections_per_node: 5
+    replication_factor: 2
+    connect_timeout_ms: 5000
+    request_timeout_ms: 5000
+    assignment:
+      rendezvous_hashing:
+        hasher: Murmur3
+    memberlist_provider:
+      custom_resource:
+        kube_namespace: "chroma"
+        memberlist_name: "query-service-memberlist"
+        queue_size: 100
+scorecard_enabled: true
+scorecard:
+  - patterns:
+      - "op:*"
+      - "collection_id:*"
+    score: 100
+enable_span_indexing: true
+default_knn_index: "spann"

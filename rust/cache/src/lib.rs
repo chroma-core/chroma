@@ -8,7 +8,7 @@ use thiserror::Error;
 
 mod async_partitioned_mutex;
 mod foyer;
-mod nop;
+pub mod nop;
 mod unbounded;
 
 use crate::nop::NopCache;
@@ -26,7 +26,7 @@ pub use unbounded::UnboundedCacheConfig;
 pub enum CacheError {
     #[error("Invalid cache config")]
     InvalidCacheConfig(String),
-    #[error("I/O error when serving from cache")]
+    #[error("I/O error when serving from cache {0}")]
     DiskError(#[from] anyhow::Error),
 }
 
@@ -43,7 +43,7 @@ impl ChromaError for CacheError {
 /// "unbounded" is a cache that doesn't evict.
 /// "disk" is a foyer-backed cache that lives on disk.
 /// "memory" is a foyer-backed cache that lives in memory.
-#[derive(Deserialize, Debug, Clone, Serialize)]
+#[derive(Default, Deserialize, Debug, Clone, Serialize)]
 pub enum CacheConfig {
     // case-insensitive
     #[serde(rename = "unbounded")]
@@ -56,6 +56,7 @@ pub enum CacheConfig {
     #[serde(alias = "weighted_lru")]
     Memory(FoyerCacheConfig),
     #[serde(rename = "nop")]
+    #[default]
     Nop,
 }
 
@@ -68,8 +69,14 @@ where
 {
     async fn insert(&self, key: K, value: V);
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError>;
+    // Returns true if the cache contains the key. This method may return a
+    // false-positive.
+    async fn may_contain(&self, key: &K) -> bool {
+        self.get(key).await.map(|v| v.is_some()).unwrap_or(false)
+    }
     async fn remove(&self, key: &K);
     async fn clear(&self) -> Result<(), CacheError>;
+    async fn obtain(&self, key: K) -> Result<Option<V>, CacheError>;
 }
 
 /// A persistent cache extends the traits of a cache to require StorageKey and StorageValue.

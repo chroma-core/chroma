@@ -6,6 +6,7 @@ use crate::memory::reader_writer::MemoryBlockfileReader;
 use crate::memory::storage::Readable;
 use chroma_error::ChromaError;
 use futures::{Stream, StreamExt};
+use std::fmt::Debug;
 use std::ops::RangeBounds;
 
 #[derive(Clone)]
@@ -66,7 +67,9 @@ impl<
         &'referred_data self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> impl Stream<Item = Result<(K, V), Box<dyn ChromaError>>> + 'referred_data + Send
+    ) -> impl Stream<Item = Result<(&'referred_data str, K, V), Box<dyn ChromaError>>>
+           + 'referred_data
+           + Send
     where
         PrefixRange: RangeBounds<&'prefix str> + Clone + Send + 'referred_data,
         KeyRange: RangeBounds<K> + Clone + Send + 'referred_data,
@@ -91,7 +94,7 @@ impl<
         &'referred_data self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(K, V)>, Box<dyn ChromaError>>
+    ) -> Result<Vec<(&'referred_data str, K, V)>, Box<dyn ChromaError>>
     where
         PrefixRange: RangeBounds<&'prefix str> + Clone,
         KeyRange: RangeBounds<K> + Clone,
@@ -113,11 +116,23 @@ impl<
         }
     }
 
-    pub async fn load_blocks_for_keys(&self, prefixes: &[&str], keys: &[K]) {
+    pub async fn load_blocks_for_keys(&self, keys: impl IntoIterator<Item = (String, K)>) {
         match self {
             BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
             BlockfileReader::ArrowBlockfileReader(reader) => {
-                reader.load_blocks_for_keys(prefixes, keys).await
+                reader.load_blocks_for_keys(keys).await
+            }
+        }
+    }
+
+    pub async fn load_blocks_for_prefixes<'prefix>(
+        &self,
+        prefixes: impl IntoIterator<Item = &'prefix str>,
+    ) {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(_reader) => unimplemented!(),
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.load_blocks_for_prefixes(prefixes).await
             }
         }
     }
@@ -130,6 +145,27 @@ impl<
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => Ok(reader.rank(prefix, key)),
             BlockfileReader::ArrowBlockfileReader(reader) => reader.rank(prefix, key).await,
+        }
+    }
+}
+
+impl<
+        'referred_data,
+        K: Key
+            + Into<KeyWrapper>
+            + TryFrom<&'referred_data KeyWrapper, Error = InvalidKeyConversion>
+            + ArrowReadableKey<'referred_data>,
+        V: Value + Readable<'referred_data> + ArrowReadableValue<'referred_data>,
+    > Debug for BlockfileReader<'referred_data, K, V>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(reader) => {
+                write!(f, "MemoryBlockfileReader({})", reader.id())
+            }
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                write!(f, "ArrowBlockfileReader({})", reader.id())
+            }
         }
     }
 }

@@ -23,26 +23,15 @@ We would love to help you think through the design of your system, or if you wou
 
 ## Run Chroma in a Docker Container
 
-You can run a Chroma server in a Docker container, and access it using the `HttpClient`.
+You can run a Chroma server in a Docker container, and access it using the `HttpClient`. We provide images on both [docker.com](https://hub.docker.com/r/chromadb/chroma) and [ghcr.io](https://github.com/chroma-core/chroma/pkgs/container/chroma).
 
-If you are using Chroma in production, please fill out [this form](https://airtable.com/appqd02UuQXCK5AuY/pagr1D0NFQoNpUpNZ/form), and we will add you to a dedicated Slack workspace for supporting production users. We would love to help you think through the design of your system, or if you would be a good fit for our upcoming distributed cloud service.
-
-If you are using a client in a separate container from the one running your Chroma server, you may only need the [thin-client package](../chroma-server/python-thin-client)
-
-You can get the Chroma Docker image from [Docker Hub](https://hub.docker.com/r/chromadb/chroma), or from the [Chroma GitHub Container Registry](https://github.com/chroma-core/chroma/pkgs/container/chroma)
+To start the server, run:
 
 ```terminal
-docker pull chromadb/chroma
-docker run -p 8000:8000 chromadb/chroma
+docker run -v ./chroma-data:/data -p 8000:8000 chromadb/chroma
 ```
 
-You can also build the Docker image yourself from the Dockerfile in the [Chroma GitHub repository](https://github.com/chroma-core/chroma)
-
-```terminal
-git clone https://github.com/chroma-core/chroma.git
-cd chroma
-docker-compose up -d --build
-```
+This starts the server with the default configuration and stores data in `./chroma-data` (in your current working directory).
 
 The Chroma client can then be configured to connect to the server running in the Docker container.
 
@@ -67,236 +56,35 @@ chromaClient.heartbeat()
 
 {% /TabbedCodeBlock %}
 
-## Authentication with Docker
+{% Banner type="tip" %}
 
-By default, the Docker image will run with no authentication. In client/server mode, Chroma supports the following authentication methods:
-* [RFC 7617](https://www.rfc-editor.org/rfc/rfc7617) Basic Auth with `user:password` base64-encoded `Authorization` header.
-* Static auth token in `Authorization: Bearer <token>` or in `X-Chroma-Token: <token>` headers.
+**Client-only package**
 
-You can learn more about authentication with Chroma in the [Auth Guide](../administration/auth).
-
-### Encrypted User:Password Authentication
-
-#### Server Set-Up
-
-##### Generate Server-Side Credentials
-
-{% note type="note" title="Security Practices" %}
-A good security practice is to store the password securely. In the example below we use [bcrypt](https://en.wikipedia.org/wiki/Bcrypt) (currently the only supported hash in Chroma server side auth) to hash the plaintext password.  If you'd like to see support for additional hash functions, feel free to [contribute](../../docs/overview/contributing) new ones!
-{% /note %}
-
-To generate the password hash, run the following command:
-
-```terminal
-docker run --rm --entrypoint htpasswd httpd:2 -Bbn admin admin > server.htpasswd
-```
-
-This creates the bcrypt password hash for the password `admin`, for the `admin` user, and puts it into `server.htpasswd` in your current working directory. It will look like `admin:<password hash>`.
-
-##### Running the Server
-
-Create a `.chroma_env` file, and set in it the following environment variables:
-
-```text
-CHROMA_SERVER_AUTHN_CREDENTIALS=<contents of server.htpasswd>
-CHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.basic_authn.BasicAuthenticationServerProvider
-```
-
-Then, run the Chroma container, and pass it your `.chroma_env` using the `--env-file` flag:
-
-```terminal
-docker run --env-file ./.chroma_env -p 8000:8000 chromadb/chroma
-```
-
-#### Client Set-Up
-
-In your client environment, set the `CHROMA_CLIENT_AUTH_CREDENTIALS` variable to the user:password combination (`admin:admin` in this example):
-
-```terminal
-export CHROMA_CLIENT_AUTH_CREDENTIALS="admin:admin"
-```
-
-{% Tabs %}
-
-{% Tab label="python" %}
-
-Install `python-dotenv`. This will allow us to read the environment variables from `.chroma_env` easily:
-
-```shell
-pip install python-dotenv
-```
-
-We will use Chroma's `Settings` object to define the authentication method on the client.
-
-```python
-import os
-import chromadb
-from chromadb.config import Settings
-from dotenv import load_dotenv
-
-load_dotenv('/path/to/your/.chroma_env')
-
-client = chromadb.HttpClient(
-    host="localhost",
-    port=8000,
-    settings=Settings(
-        chroma_client_auth_provider="chromadb.auth.basic_authn.BasicAuthClientProvider",
-        chroma_client_auth_credentials=os.getenv("CHROMA_CLIENT_AUTH_CREDENTIALS")
-    )
-)
-
-chroma_client.heartbeat()
-```
-
-{% /Tab %}
-
-{% Tab label="typescript" %}
-
-```typescript
-import { ChromaClient } from "chromadb";
-
-const chromaClient = new ChromaClient({
-    path: "http://localhost:8000",
-    auth: {
-        provider: "basic",
-        credentials: process.env.CHROMA_CLIENT_AUTH_CREDENTIALS
-    }
-})
-
-chromaClient.heartbeat()
-```
-
-{% /Tab %}
-
-{% /Tabs %}
-
-### Static API Token Authentication
-
-#### Server Set-Up
-
-{% Banner type="note" %}
-
-**Security Note**
-
-Current implementation of static API token auth supports only ENV based tokens. Tokens must be alphanumeric ASCII strings. Tokens are case-sensitive.
-
+If you're using Python, you may want to use the [client-only package](/production/chroma-server/python-thin-client) for a smaller install size.
 {% /Banner %}
 
-If, for example, you want the static API token to be "test-token", add the following environment variables to your `.chroma_env`. This will set `Authorization: Bearer test-token` as your authentication header.
+## Configuration
 
-```text
-CHROMA_SERVER_AUTHN_CREDENTIALS=test-token
-CHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.token_authn.TokenAuthenticationServerProvider
-```
+Chroma is configured using a YAML file. Check out [this config file](https://github.com/chroma-core/chroma/blob/main/rust/frontend/sample_configs/single_node_full.yaml) detailing all available options.
 
-If instead of the default `Authorization: Bearer <token>` header, you want to use a custom one like `X-Chroma-Token: test-token`, you can set the `CHROMA_AUTH_TOKEN_TRANSPORT_HEADER` environment variable:
-
-```text
-CHROMA_SERVER_AUTHN_CREDENTIALS=test-token
-CHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.token_authn.TokenAuthenticationServerProvider
-CHROMA_AUTH_TOKEN_TRANSPORT_HEADER=X-Chroma-Token
-```
-
-Then, run the Chroma server:
+To use a custom config file, mount it into the container at `/config.yaml` like so:
 
 ```terminal
-docker run --env-file ./.chroma_env -p 8000:8000 chromadb/chroma
+echo "allow_reset: true" > config.yaml # the server will now allow clients to reset its state
+docker run -v ./chroma-data:/data -v ./config.yaml:/config.yaml -p 8000:8000 chromadb/chroma
 ```
-
-To configure multiple tokens and use them for role-based access control (RBAC), use a file like [this](https://github.com/chroma-core/chroma/blob/main/examples/basic_functionality/authz/authz.yaml) and the following environment variables:
-
-```text
-CHROMA_SERVER_AUTHN_CREDENTIALS_FILE=<path_to_authz.yaml>
-CHROMA_SERVER_AUTHZ_CONFIG_FILE=<path_to_authz.yaml>  # Note: these are the same!
-CHROMA_SERVER_AUTHN_PROVIDER=chromadb.auth.token_authn.TokenAuthenticationServerProvider
-CHROMA_SERVER_AUTHZ_PROVIDER=chromadb.auth.simple_rbac_authz.SimpleRBACAuthorizationProvider
-```
-
-In this case, you will have to set up a volume to allow the Chroma Docker container to use your `authz.yaml` file:
-
-```terminal
-docker run --env-file ./.chroma_env -v <path_to_authz.yaml>:/chroma/<authz.yaml> -p 8000:8000 chromadb/chroma
-```
-
-#### Client Set-Up
-
-{% Tabs %}
-
-{% Tab label="python" %}
-
-Install `python-dotenv`. This will allow us to read the environment variables from `.chroma_env` easily:
-
-```shell
-pip install python-dotenv
-```
-
-We will use Chroma's `Settings` object to define the authentication method on the client.
-
-```python
-import os
-import chromadb
-from chromadb.config import Settings
-from dotenv import load_dotenv
-
-load_dotenv('/path/to/your/.chroma_env')
-
-client = chromadb.HttpClient(
-    host="localhost",
-    port=8000,
-    settings=Settings(
-        chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
-        chroma_client_auth_credentials=os.getenv("CHROMA_CLIENT_AUTH_CREDENTIALS")
-    )
-)
-
-chroma_client.heartbeat()
-```
-
-If you are using a custom `CHROMA_AUTH_TOKEN_TRANSPORT_HEADER` (like `X-Chroma-Token`), add it to your `Settings`:
-
-```python
-chroma_auth_token_transport_header=os.getenv("CHROMA_AUTH_TOKEN_TRANSPORT_HEADER")
-```
-
-{% /Tab %}
-
-{% Tab label="typescript" %}
-
-```typescript
-import { ChromaClient } from "chromadb";
-
-const chromaClient = new ChromaClient({
-    path: "http://localhost:8000",
-    auth: {
-        provider: "token",
-        credentials: process.env.CHROMA_CLIENT_AUTH_CREDENTIALS,
-        tokenHeaderType: process.env.CHROMA_AUTH_TOKEN_TRANSPORT_HEADER
-    }
-})
-
-chromaClient.heartbeat()
-```
-
-{% /Tab %}
-
-{% /Tabs %}
 
 ## Observability with Docker
 
-Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only exports OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks.
+Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. OpenTelemetry traces allow you to understand how requests flow through the system and quickly identify bottlenecks. Check out the [observability docs](../administration/observability) for a full explanation of the available parameters.
 
-Tracing is configured with four environment variables:
+Here's an example of how to create an observability stack with Docker Compose. The stack is composed of
 
-- `CHROMA_OTEL_COLLECTION_ENDPOINT`: where to send observability data. Example: `api.honeycomb.com`.
-- `CHROMA_OTEL_SERVICE_NAME`: Service name for OTel traces. Default: `chromadb`.
-- `CHROMA_OTEL_COLLECTION_HEADERS`: Headers to use when sending observability data. Often used to send API and app keys. For example `{"x-honeycomb-team": "abc"}`.
-- `CHROMA_OTEL_GRANULARITY`: A value from the [OpenTelemetryGranularity enum](https://github.com/chroma-core/chroma/tree/main/chromadb/telemetry/opentelemetry/__init__.py). Specifies how detailed tracing should be.
+- a Chroma server
+- [OpenTelemetry Collector](https://github.com/open-telemetry/opentelemetry-collector)
+- [Zipkin](https://zipkin.io/)
 
-Here is an example of how to create an observability stack with Docker-Compose. The stack is composed of a Chroma server, an [OpenTelemetry Collector](https://github.com/open-telemetry/opentelemetry-collector), and [Zipkin](https://zipkin.io/).
-
-Set the values for the observability and [authentication](/deployment/docker#authentication-with-docker) environment variables to suit your needs.
-
-Create the following `otel-collector-config.yaml`:
+First, paste the following into a new file called `otel-collector-config.yaml`:
 
 ```yaml
 receivers:
@@ -320,17 +108,13 @@ service:
 ```
 
 This is the configuration file for the OpenTelemetry Collector:
-* The `recievers` section specifies that the OpenTelemetry protocol (OTLP) will be used to receive data over GRPC and HTTP.
-* `exporters` defines that telemetry data is logged to the console (`debug`), and sent to a `zipkin` server (defined bellow in `docker-compose.yml`).
+* The `receivers` section specifies that the OpenTelemetry protocol (OTLP) will be used to receive data over GRPC and HTTP.
+* `exporters` defines that telemetry data is logged to the console (`debug`), and sent to a `zipkin` server (defined below in `docker-compose.yml`).
 * The `service` section ties everything together, defining a `traces` pipeline receiving data through our `otlp` receiver and exporting data to `zipkin` and via logging.
 
-Create the following `docker-compose.yml`:
+Next, paste the following into a new file called `docker-compose.yml`:
 
 ```yaml
-version: '3.9'
-networks:
-  net:
-
 services:
   zipkin:
     image: openzipkin/zipkin
@@ -338,58 +122,48 @@ services:
       - "9411:9411"
     depends_on: [otel-collector]
     networks:
-      - net
+      - internal
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.111.0
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
       - ${PWD}/otel-collector-config.yaml:/etc/otel-collector-config.yaml
-    ports:
-      - "4317:4317"  # OTLP
-      - "4318:4318"
-      - "55681:55681" # Legacy
     networks:
-      - net
+      - internal
   server:
-    image: ghcr.io/chroma-core/chroma:0.5.13
+    image: chromadb/chroma
     volumes:
-      - index_data:/index_data
+      - chroma_data:/data
     ports:
       - "8000:8000"
     networks:
-      - net
+      - internal
     environment:
-      - CHROMA_SERVER_AUTHN_PROVIDER=${CHROMA_SERVER_AUTHN_PROVIDER}
-      - CHROMA_SERVER_AUTHN_CREDENTIALS_FILE=${CHROMA_SERVER_AUTHN_CREDENTIALS_FILE}
-      - CHROMA_SERVER_AUTHN_CREDENTIALS=${CHROMA_SERVER_AUTHN_CREDENTIALS}
-      - CHROMA_OTEL_COLLECTION_ENDPOINT=http://otel-collector:4317/
-      - CHROMA_OTEL_EXPORTER_HEADERS=${CHROMA_OTEL_EXPORTER_HEADERS:-{}}
-      - CHROMA_OTEL_SERVICE_NAME=${CHROMA_OTEL_SERVICE_NAME:-chroma}
-      - CHROMA_OTEL_GRANULARITY=${CHROMA_OTEL_GRANULARITY:-all}
+      - CHROMA_OPEN_TELEMETRY__ENDPOINT=http://otel-collector:4317/
+      - CHROMA_OPEN_TELEMETRY__SERVICE_NAME=chroma
     depends_on:
       - otel-collector
       - zipkin
 
+networks:
+  internal:
 
 volumes:
-  index_data:
-    driver: local
-  backups:
-    driver: local
+  chroma_data:
 ```
 
-To start the stack, run from the root of the repo:
+To start the stack, run
 
 ```terminal
 docker compose up --build -d
 ```
 
-Once the stack is running, you can access Zipkin at http://localhost:9411 when running locally to see your traces.
+Once the stack is running, you can access Zipkin at [http://localhost:9411](http://localhost:9411) when running locally to see your traces.
 
-{% Banner type="tip" %}
+Zipkin will show an empty view initially as no traces are created during startup. You can call the heartbeat endpoint to quickly create a sample trace:
 
-**Traces**
+```terminal
+curl http://localhost:8000/api/v2/heartbeat
+```
 
-Traces in Zipkin will start appearing after you make a request to Chroma.
-
-{% /Banner %}
+Then, click "Run Query" in Zipkin to see the trace.

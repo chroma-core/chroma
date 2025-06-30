@@ -1,0 +1,39 @@
+name: Trigger deploy
+
+on:
+  workflow_call:
+    inputs:
+      plane:
+        description: 'Plane to deploy (control or data)'
+        required: true
+        type: string
+      ignore-lock:
+        description: 'Ignore lock file'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  deploy:
+    name: Dispatch deploy ${{ inputs.plane }} plane workflow
+    runs-on: blacksmith-4vcpu-ubuntu-2204
+    steps:
+      - name: Dispatch deploy ${{ inputs.plane }} plane
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN}}
+          # we don't expose environment here because we only want to automate deploys to staging
+          # we also don't expose the ref here because we want to use the defaults on the other side (latest, main)
+          script: |
+            const result = await github.rest.actions.createWorkflowDispatch({
+              owner: 'chroma-core',
+              repo: 'hosted-chroma',
+              workflow_id: 'deploy.yaml',
+              ref: 'main',
+              inputs: {
+                'plane': '${{ inputs.plane }}',
+                 environment: 'staging',
+                'ignore-lock': ${{ inputs.ignore-lock }},
+              }
+            })
+            console.log(result)

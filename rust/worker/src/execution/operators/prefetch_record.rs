@@ -6,7 +6,7 @@ use chroma_segment::{
     blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError},
     types::{materialize_logs, LogMaterializerError},
 };
-use chroma_system::Operator;
+use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
 use tracing::{trace, Instrument, Span};
 
@@ -88,5 +88,14 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
             .await;
 
         Ok(())
+    }
+
+    // We don't care if the sender is dropped since this is a prefetch
+    fn errors_when_sender_dropped(&self) -> bool {
+        false
+    }
+
+    fn get_type(&self) -> OperatorType {
+        OperatorType::IO
     }
 }

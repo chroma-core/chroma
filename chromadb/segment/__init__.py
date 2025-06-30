@@ -104,7 +104,9 @@ class SegmentManager(Component):
     segments as required"""
 
     @abstractmethod
-    def prepare_segments_for_new_collection(self, collection: Collection) -> Sequence[Segment]:
+    def prepare_segments_for_new_collection(
+        self, collection: Collection
+    ) -> Sequence[Segment]:
         """Return the segments required for a new collection. Returns only segment data,
         does not persist to the SysDB"""
         pass

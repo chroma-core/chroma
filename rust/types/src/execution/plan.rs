@@ -1,9 +1,15 @@
-use crate::chroma_proto;
-
 use super::{
     error::QueryConversionError,
-    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
+    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan, ScanToProtoError},
 };
+use crate::chroma_proto;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum PlanToProtoError {
+    #[error("Failed to convert scan to proto: {0}")]
+    Scan(#[from] ScanToProtoError),
+}
 
 /// The `Count` plan shoud ouutput the total number of records in the collection
 #[derive(Clone)]
@@ -24,16 +30,18 @@ impl TryFrom<chroma_proto::CountPlan> for Count {
     }
 }
 
-impl From<Count> for chroma_proto::CountPlan {
-    fn from(value: Count) -> Self {
-        Self {
-            scan: Some(value.scan.into()),
-        }
+impl TryFrom<Count> for chroma_proto::CountPlan {
+    type Error = PlanToProtoError;
+
+    fn try_from(value: Count) -> Result<Self, Self::Error> {
+        Ok(Self {
+            scan: Some(value.scan.try_into()?),
+        })
     }
 }
 
 /// The `Get` plan should output records matching the specified filter and limit in the collection
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Get {
     pub scan: Scan,
     pub filter: Filter,
@@ -71,7 +79,7 @@ impl TryFrom<Get> for chroma_proto::GetPlan {
 
     fn try_from(value: Get) -> Result<Self, Self::Error> {
         Ok(Self {
-            scan: Some(value.scan.into()),
+            scan: Some(value.scan.try_into()?),
             filter: Some(value.filter.try_into()?),
             limit: Some(value.limit.into()),
             projection: Some(value.proj.into()),
@@ -80,7 +88,7 @@ impl TryFrom<Get> for chroma_proto::GetPlan {
 }
 
 /// The `Knn` plan should output records nearest to the target embeddings that matches the specified filter
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Knn {
     pub scan: Scan,
     pub filter: Filter,
@@ -118,7 +126,7 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
 
     fn try_from(value: Knn) -> Result<Self, Self::Error> {
         Ok(Self {
-            scan: Some(value.scan.into()),
+            scan: Some(value.scan.try_into()?),
             filter: Some(value.filter.try_into()?),
             knn: Some(value.knn.try_into()?),
             projection: Some(value.proj.into()),

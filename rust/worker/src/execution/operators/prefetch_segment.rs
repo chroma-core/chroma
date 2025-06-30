@@ -5,7 +5,6 @@ use chroma_types::{Segment, SegmentType};
 use futures::{stream::FuturesUnordered, StreamExt};
 use thiserror::Error;
 use tonic::async_trait;
-use uuid::Uuid;
 
 #[derive(Debug, Default)]
 pub struct PrefetchSegmentOperator {}
@@ -67,28 +66,22 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
         &self,
         input: &PrefetchSegmentInput,
     ) -> Result<PrefetchSegmentOutput, PrefetchSegmentError> {
-        if input.segment.r#type != SegmentType::BlockfileMetadata
-            && input.segment.r#type != SegmentType::BlockfileRecord
-        {
+        if !input.segment.prefetch_supported() {
             return Err(PrefetchSegmentError::UnsupportedSegmentType(
                 input.segment.r#type,
             ));
         }
 
-        tracing::info!(
-            "Prefetching segment: {:?} ({:?})",
-            input.segment.r#type,
-            input.segment.id,
-        );
-
         let mut futures = input
             .segment
-            .file_path
-            .values()
-            .flatten()
-            .map(|blockfile_id| async move {
-                let blockfile_id = Uuid::parse_str(blockfile_id)?;
-                let count = input.blockfile_provider.prefetch(&blockfile_id).await?;
+            .filepaths_to_prefetch()
+            .into_iter()
+            .map(|blockfile_path| async move {
+                let (prefix, blockfile_id) = Segment::extract_prefix_and_id(&blockfile_path)?;
+                let count = input
+                    .blockfile_provider
+                    .prefetch(&blockfile_id, prefix)
+                    .await?;
                 Ok::<_, PrefetchSegmentError>(count)
             })
             .collect::<FuturesUnordered<_>>();
@@ -106,25 +99,30 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
     fn get_type(&self) -> OperatorType {
         OperatorType::IO
     }
+
+    // We don't care if the sender is dropped since this is a prefetch
+    fn errors_when_sender_dropped(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_cache::new_cache_for_test;
+    use chroma_blockstore::test_arrow_blockfile_provider;
     use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentWriter};
     use chroma_segment::types::materialize_logs;
-    use chroma_storage::test_storage;
-    use chroma_types::{Chunk, CollectionUuid, LogRecord, Operation, OperationRecord, SegmentUuid};
+    use chroma_types::{
+        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+    };
     use std::collections::HashMap;
     use std::str::FromStr;
 
     #[tokio::test]
     async fn test_loads_blocks_into_cache() {
-        let cache = new_cache_for_test();
-        let blockfile_provider =
-            BlockfileProvider::new_arrow(test_storage(), 1000, cache, new_cache_for_test());
-
+        let (_blockfile_dir, blockfile_provider) = test_arrow_blockfile_provider(1000);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -135,10 +133,14 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let data = vec![
                 LogRecord {
                     log_offset: 1,

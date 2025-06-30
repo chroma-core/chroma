@@ -15,21 +15,21 @@ fn test_config_without_cache_directive() {
                 my_member_id: "query-service-0"
                 my_port: 50051
                 assignment_policy:
-                    RendezvousHashing:
+                    rendezvous_hashing:
                         hasher: Murmur3
                 memberlist_provider:
-                    CustomResource:
+                    custom_resource:
                         kube_namespace: "chroma"
                         memberlist_name: "query-service-memberlist"
                         queue_size: 100
                 sysdb:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
                         request_timeout_ms: 1000
                 storage:
-                    AdmissionControlledS3:
+                    admission_controlled_s3:
                         s3_config:
                             bucket: "chroma"
                             credentials: Minio
@@ -38,10 +38,10 @@ fn test_config_without_cache_directive() {
                             upload_part_size_bytes: 8388608
                             download_part_size_bytes: 8388608
                         rate_limiting_policy:
-                            CountBasedPolicy:
+                            count_based_policy:
                                 max_concurrent_requests: 15
                 log:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
@@ -51,8 +51,9 @@ fn test_config_without_cache_directive() {
                     dispatcher_queue_size: 100
                     worker_queue_size: 100
                     task_queue_limit: 100
+                    active_io_tasks: 1000
                 blockfile_provider:
-                    Arrow:
+                    arrow:
                         block_manager_config:
                             max_block_size_bytes: 16384
                             block_cache_config:
@@ -71,21 +72,21 @@ fn test_config_without_cache_directive() {
                 my_member_id: "compaction-service-0"
                 my_port: 50051
                 assignment_policy:
-                    RendezvousHashing:
+                    rendezvous_hashing:
                         hasher: Murmur3
                 memberlist_provider:
-                    CustomResource:
+                    custom_resource:
                         kube_namespace: "chroma"
                         memberlist_name: "compaction-service-memberlist"
                         queue_size: 100
                 sysdb:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
                         request_timeout_ms: 1000
                 storage:
-                    AdmissionControlledS3:
+                    admission_controlled_s3:
                         s3_config:
                             bucket: "chroma"
                             credentials: Minio
@@ -94,10 +95,10 @@ fn test_config_without_cache_directive() {
                             upload_part_size_bytes: 8388608
                             download_part_size_bytes: 8388608
                         rate_limiting_policy:
-                            CountBasedPolicy:
+                            count_based_policy:
                                 max_concurrent_requests: 15
                 log:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
@@ -107,6 +108,7 @@ fn test_config_without_cache_directive() {
                     dispatcher_queue_size: 100
                     worker_queue_size: 100
                     task_queue_limit: 100
+                    active_io_tasks: 1000
                 compactor:
                     compaction_manager_queue_size: 1000
                     max_concurrent_jobs: 100
@@ -116,7 +118,7 @@ fn test_config_without_cache_directive() {
                     max_partition_size: 5000
                     disabled_collections: []
                 blockfile_provider:
-                    Arrow:
+                    arrow:
                         block_manager_config:
                             max_block_size_bytes: 16384
                             block_cache_config:

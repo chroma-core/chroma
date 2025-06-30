@@ -13,19 +13,19 @@ aws-smithy-types = "1.2"
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 object_store = { version = "0.11", features = ["aws"] }
 
-serde = { workspace = true }
-futures = { workspace = true }
-thiserror = { workspace = true }
 async-trait = { workspace = true }
+futures = { workspace = true }
+rand = { workspace = true}
+serde = { workspace = true }
 tempfile = { workspace = true }
-tracing = { workspace = true }
+thiserror.workspace = true
 tokio = { workspace = true }
-tokio-util = { workspace = true }
-parking_lot = { workspace = true }
+tracing = { workspace = true }
+opentelemetry = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
+chroma-tracing = { workspace = true }
 
 [dev-dependencies]
-"rand" = { workspace = true}
 rand_xorshift = { workspace = true }

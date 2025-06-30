@@ -1,0 +1,42 @@
+[package]
+name = "chroma-log-service"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "log_service"
+path = "src/bin/log.rs"
+
+[dependencies]
+arrow = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+parquet = { workspace = true }
+prost = { workspace = true }
+figment = { workspace = true }
+parking_lot = { workspace = true }
+# Used by tracing
+opentelemetry = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tonic = { workspace = true }
+tonic-health = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+futures = { workspace = true }
+
+chroma-cache = { workspace = true }
+chroma-config = { workspace = true }
+chroma-error = { workspace = true, features = ["sqlx"] }
+chroma-log = { workspace = true }
+chroma-storage = { workspace = true }
+chroma-tracing = { workspace = true, features = ["grpc"] }
+chroma-types = { workspace = true }
+wal3 = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+proptest = { workspace = true }
+chroma-types = { workspace = true, features = ["testing"] }

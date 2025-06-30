@@ -1,3 +1,4 @@
+use chroma_index::config::{HnswGarbageCollectionPolicyConfig, PlGarbageCollectionPolicyConfig};
 use figment::Jail;
 use serial_test::serial;
 use worker::config::RootConfig;
@@ -15,21 +16,21 @@ fn test_config_from_specific_path() {
                 my_member_id: "query-service-0"
                 my_port: 50051
                 assignment_policy:
-                    RendezvousHashing:
+                    rendezvous_hashing:
                         hasher: Murmur3
                 memberlist_provider:
-                    CustomResource:
+                    custom_resource:
                         kube_namespace: "chroma"
                         memberlist_name: "query-service-memberlist"
                         queue_size: 100
                 sysdb:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
                         request_timeout_ms: 1000
                 storage:
-                    AdmissionControlledS3:
+                    admission_controlled_s3:
                         s3_config:
                             bucket: "chroma"
                             credentials: Minio
@@ -38,10 +39,10 @@ fn test_config_from_specific_path() {
                             upload_part_size_bytes: 8388608
                             download_part_size_bytes: 8388608
                         rate_limiting_policy:
-                            CountBasedPolicy:
+                            count_based_policy:
                                 max_concurrent_requests: 15
                 log:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
@@ -51,8 +52,9 @@ fn test_config_from_specific_path() {
                     dispatcher_queue_size: 100
                     worker_queue_size: 100
                     task_queue_limit: 100
+                    active_io_tasks: 1000
                 blockfile_provider:
-                    Arrow:
+                    arrow:
                         block_manager_config:
                             max_block_size_bytes: 16384
                             block_cache_config:
@@ -75,21 +77,21 @@ fn test_config_from_specific_path() {
                 my_member_id: "compaction-service-0"
                 my_port: 50051
                 assignment_policy:
-                    RendezvousHashing:
+                    rendezvous_hashing:
                         hasher: Murmur3
                 memberlist_provider:
-                    CustomResource:
+                    custom_resource:
                         kube_namespace: "chroma"
                         memberlist_name: "compaction-service-memberlist"
                         queue_size: 100
                 sysdb:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
                         request_timeout_ms: 1000
                 storage:
-                    AdmissionControlledS3:
+                    admission_controlled_s3:
                         s3_config:
                             bucket: "chroma"
                             credentials: Minio
@@ -98,10 +100,10 @@ fn test_config_from_specific_path() {
                             upload_part_size_bytes: 8388608
                             download_part_size_bytes: 8388608
                         rate_limiting_policy:
-                            CountBasedPolicy:
+                            count_based_policy:
                                 max_concurrent_requests: 15
                 log:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
@@ -111,6 +113,7 @@ fn test_config_from_specific_path() {
                     dispatcher_queue_size: 100
                     worker_queue_size: 100
                     task_queue_limit: 100
+                    active_io_tasks: 1000
                 compactor:
                     compaction_manager_queue_size: 1000
                     max_concurrent_jobs: 100
@@ -120,7 +123,7 @@ fn test_config_from_specific_path() {
                     max_partition_size: 5000
                     disabled_collections: []
                 blockfile_provider:
-                    Arrow:
+                    arrow:
                         block_manager_config:
                             max_block_size_bytes: 16384
                             block_cache_config:
@@ -136,6 +139,17 @@ fn test_config_from_specific_path() {
                         disk:
                             capacity: 1073741824
                             eviction: lru
+                spann_provider:
+                    pl_garbage_collection:
+                        enabled: true
+                        policy:
+                            random_sample:
+                                sample_size: 0.1
+                    hnsw_garbage_collection:
+                        enabled: true
+                        policy:
+                            delete_percentage:
+                                threshold: 10.0
             "#,
         );
         let config = RootConfig::load_from_path("random_path.yaml");
@@ -147,6 +161,41 @@ fn test_config_from_specific_path() {
             "compaction-service-0"
         );
         assert_eq!(config.compaction_service.my_port, 50051);
+        assert!(
+            config
+                .compaction_service
+                .spann_provider
+                .pl_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .pl_garbage_collection
+            .policy
+        {
+            PlGarbageCollectionPolicyConfig::RandomSample(config) => {
+                assert_eq!(config.sample_size, 0.1);
+            }
+        }
+        assert!(
+            config
+                .compaction_service
+                .spann_provider
+                .hnsw_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .hnsw_garbage_collection
+            .policy
+        {
+            HnswGarbageCollectionPolicyConfig::DeletePercentage(policy) => {
+                assert_eq!(policy.threshold, 10.0);
+            }
+            _ => panic!("Expected DeletePercentage policy"),
+        }
         Ok(())
     });
 }

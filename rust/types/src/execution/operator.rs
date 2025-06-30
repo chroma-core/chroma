@@ -2,8 +2,12 @@ use std::{
     cmp::{Ordering, Reverse},
     collections::BinaryHeap,
 };
+use thiserror::Error;
 
-use crate::{chroma_proto, CollectionAndSegments, CollectionUuid, Metadata, ScalarEncoding, Where};
+use crate::{
+    chroma_proto, logical_size_of_metadata, CollectionAndSegments, CollectionUuid, Metadata,
+    ScalarEncoding, Where,
+};
 
 use super::error::QueryConversionError;
 
@@ -45,18 +49,54 @@ impl TryFrom<chroma_proto::ScanOperator> for Scan {
     }
 }
 
-impl From<Scan> for chroma_proto::ScanOperator {
-    fn from(value: Scan) -> Self {
-        Self {
-            collection: Some(value.collection_and_segments.collection.into()),
+#[derive(Debug, Error)]
+pub enum ScanToProtoError {
+    #[error("Could not convert collection to proto")]
+    CollectionToProto(#[from] crate::CollectionToProtoError),
+}
+
+impl TryFrom<Scan> for chroma_proto::ScanOperator {
+    type Error = ScanToProtoError;
+
+    fn try_from(value: Scan) -> Result<Self, Self::Error> {
+        Ok(Self {
+            collection: Some(value.collection_and_segments.collection.try_into()?),
             knn: Some(value.collection_and_segments.vector_segment.into()),
             metadata: Some(value.collection_and_segments.metadata_segment.into()),
             record: Some(value.collection_and_segments.record_segment.into()),
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CountResult {
+    pub count: u32,
+    pub pulled_log_bytes: u64,
+}
+
+impl CountResult {
+    pub fn size_bytes(&self) -> u64 {
+        size_of_val(&self.count) as u64
+    }
+}
+
+impl From<chroma_proto::CountResult> for CountResult {
+    fn from(value: chroma_proto::CountResult) -> Self {
+        Self {
+            count: value.count,
+            pulled_log_bytes: value.pulled_log_bytes,
         }
     }
 }
 
-pub type CountResult = u32;
+impl From<CountResult> for chroma_proto::CountResult {
+    fn from(value: CountResult) -> Self {
+        Self {
+            count: value.count,
+            pulled_log_bytes: value.pulled_log_bytes,
+        }
+    }
+}
 
 /// The `FetchLog` operator fetches logs from the log service
 ///
@@ -186,7 +226,7 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
 /// # Parameters
 /// - `skip`: The number of records to skip in the beginning
 /// - `fetch`: The number of records to fetch after `skip`
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Limit {
     pub skip: u32,
     pub fetch: Option<u32>,
@@ -237,17 +277,17 @@ impl PartialOrd for RecordDistance {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct KnnOutput {
+    pub distances: Vec<RecordDistance>,
+}
+
 /// The `KnnMerge` operator selects the records nearest to target from the batch vectors of records
-/// which are all sorted by distance in ascending order
+/// which are all sorted by distance in ascending order. If the same record occurs multiple times
+/// only one copy will remain in the final result.
 ///
 /// # Parameters
 /// - `fetch`: The total number of records to fetch
-///
-/// # Inputs
-/// - `batch_distances`: The batch vector of records, each sorted by distance in ascending order
-///
-/// # Outputs
-/// - `distances`: The nearest records in either vectors, sorted by distance in ascending order
 ///
 /// # Usage
 /// It can be used to merge the query results from different operators
@@ -256,23 +296,9 @@ pub struct KnnMerge {
     pub fetch: u32,
 }
 
-#[derive(Debug)]
-pub struct KnnMergeInput {
-    pub batch_distances: Vec<Vec<RecordDistance>>,
-}
-
-#[derive(Debug)]
-pub struct KnnMergeOutput {
-    pub distances: Vec<RecordDistance>,
-}
-
 impl KnnMerge {
-    pub fn merge(&self, input: KnnMergeInput) -> KnnMergeOutput {
-        let mut batch_iters = input
-            .batch_distances
-            .into_iter()
-            .map(Vec::into_iter)
-            .collect::<Vec<_>>();
+    pub fn merge(&self, input: Vec<Vec<RecordDistance>>) -> Vec<RecordDistance> {
+        let mut batch_iters = input.into_iter().map(Vec::into_iter).collect::<Vec<_>>();
 
         // NOTE: `BinaryHeap<_>` is a max-heap, so we use `Reverse` to convert it into a min-heap
         let mut heap_dist = batch_iters
@@ -281,10 +307,16 @@ impl KnnMerge {
             .filter_map(|(idx, itr)| itr.next().map(|rec| Reverse((rec, idx))))
             .collect::<BinaryHeap<_>>();
 
-        let mut distances = Vec::new();
+        let mut distances = Vec::<RecordDistance>::with_capacity(self.fetch as usize);
         while distances.len() < self.fetch as usize {
             if let Some(Reverse((rec, idx))) = heap_dist.pop() {
-                distances.push(rec);
+                if distances.last().is_none()
+                    || distances
+                        .last()
+                        .is_some_and(|last_rec| last_rec.offset_id != rec.offset_id)
+                {
+                    distances.push(rec);
+                }
                 if let Some(next_rec) = batch_iters
                     .get_mut(idx)
                     .expect("Enumerated index should be valid")
@@ -296,7 +328,7 @@ impl KnnMerge {
                 break;
             }
         }
-        KnnMergeOutput { distances }
+        distances
     }
 }
 
@@ -306,7 +338,7 @@ impl KnnMerge {
 /// - `document`: Whether to retrieve document
 /// - `embedding`: Whether to retrieve embedding
 /// - `metadata`: Whether to retrieve metadata
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Projection {
     pub document: bool,
     pub embedding: bool,
@@ -333,13 +365,36 @@ impl From<Projection> for chroma_proto::ProjectionOperator {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProjectionRecord {
     pub id: String,
     pub document: Option<String>,
     pub embedding: Option<Vec<f32>>,
     pub metadata: Option<Metadata>,
 }
+
+impl ProjectionRecord {
+    pub fn size_bytes(&self) -> u64 {
+        (self.id.len()
+            + self
+                .document
+                .as_ref()
+                .map(|doc| doc.len())
+                .unwrap_or_default()
+            + self
+                .embedding
+                .as_ref()
+                .map(|emb| size_of_val(&emb[..]))
+                .unwrap_or_default()
+            + self
+                .metadata
+                .as_ref()
+                .map(logical_size_of_metadata)
+                .unwrap_or_default()) as u64
+    }
+}
+
+impl Eq for ProjectionRecord {}
 
 impl TryFrom<chroma_proto::ProjectionRecord> for ProjectionRecord {
     type Error = QueryConversionError;
@@ -380,31 +435,52 @@ impl TryFrom<ProjectionRecord> for chroma_proto::ProjectionRecord {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectionOutput {
     pub records: Vec<ProjectionRecord>,
 }
 
-impl TryFrom<chroma_proto::GetResult> for ProjectionOutput {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GetResult {
+    pub pulled_log_bytes: u64,
+    pub result: ProjectionOutput,
+}
+
+impl GetResult {
+    pub fn size_bytes(&self) -> u64 {
+        self.result
+            .records
+            .iter()
+            .map(ProjectionRecord::size_bytes)
+            .sum()
+    }
+}
+
+impl TryFrom<chroma_proto::GetResult> for GetResult {
     type Error = QueryConversionError;
 
     fn try_from(value: chroma_proto::GetResult) -> Result<Self, Self::Error> {
         Ok(Self {
-            records: value
-                .records
-                .into_iter()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()?,
+            pulled_log_bytes: value.pulled_log_bytes,
+            result: ProjectionOutput {
+                records: value
+                    .records
+                    .into_iter()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()?,
+            },
         })
     }
 }
 
-impl TryFrom<ProjectionOutput> for chroma_proto::GetResult {
+impl TryFrom<GetResult> for chroma_proto::GetResult {
     type Error = QueryConversionError;
 
-    fn try_from(value: ProjectionOutput) -> Result<Self, Self::Error> {
+    fn try_from(value: GetResult) -> Result<Self, Self::Error> {
         Ok(Self {
+            pulled_log_bytes: value.pulled_log_bytes,
             records: value
+                .result
                 .records
                 .into_iter()
                 .map(TryInto::try_into)
@@ -412,8 +488,6 @@ impl TryFrom<ProjectionOutput> for chroma_proto::GetResult {
         })
     }
 }
-
-pub type GetResult = ProjectionOutput;
 
 /// The `KnnProjection` operator retrieves record content by offset ids
 /// It is based on `ProjectionOperator`, and it attaches the distance
@@ -515,25 +589,51 @@ impl TryFrom<KnnProjectionOutput> for chroma_proto::KnnResult {
     }
 }
 
-pub type KnnBatchResult = Vec<KnnProjectionOutput>;
-
-pub fn from_proto_knn_batch_result(
-    results: chroma_proto::KnnBatchResult,
-) -> Result<KnnBatchResult, QueryConversionError> {
-    results
-        .results
-        .into_iter()
-        .map(TryInto::try_into)
-        .collect::<Result<_, _>>()
+#[derive(Clone, Debug, Default)]
+pub struct KnnBatchResult {
+    pub pulled_log_bytes: u64,
+    pub results: Vec<KnnProjectionOutput>,
 }
 
-pub fn to_proto_knn_batch_result(
-    results: KnnBatchResult,
-) -> Result<chroma_proto::KnnBatchResult, QueryConversionError> {
-    Ok(chroma_proto::KnnBatchResult {
-        results: results
-            .into_iter()
-            .map(TryInto::try_into)
-            .collect::<Result<_, _>>()?,
-    })
+impl KnnBatchResult {
+    pub fn size_bytes(&self) -> u64 {
+        self.results
+            .iter()
+            .flat_map(|res| {
+                res.records
+                    .iter()
+                    .map(|rec| rec.record.size_bytes() + size_of_val(&rec.distance) as u64)
+            })
+            .sum()
+    }
+}
+
+impl TryFrom<chroma_proto::KnnBatchResult> for KnnBatchResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::KnnBatchResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            pulled_log_bytes: value.pulled_log_bytes,
+            results: value
+                .results
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
+impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: KnnBatchResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            pulled_log_bytes: value.pulled_log_bytes,
+            results: value
+                .results
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+        })
+    }
 }

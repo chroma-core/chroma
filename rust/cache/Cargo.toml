@@ -8,27 +8,25 @@ path = "src/lib.rs"
 
 [dependencies]
 clap = { workspace = true }
-foyer = { version = "0.13.1", features = ["opentelemetry_0_27", "tracing"] }
+foyer = { version = "0.15.3", features = ["tracing"] }
+mixtrics = { version = "0.0.4", features = ["opentelemetry_0_27"] }
 anyhow = "1.0"
-opentelemetry = { version = "0.27.0", default-features = false, features = [
-  "trace",
-  "metrics",
-] }
+opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 
 # TODO(rescrv):  Deprecated.  Find a suitable replacement for such things.
 serde_yaml = "0.9"
-
+# NOTE(hammadb): https://github.com/chroma-core/chroma/pull/3809 Do not change this version unless you know the implications.
+ahash = "0.8.11"
 async-trait = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }
-uuid = { workspace = true }
-
-chroma-config = { workspace = true }
 chroma-error = { workspace = true }
-chroma-types = { workspace = true }
+chroma-tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [features]
 default = []

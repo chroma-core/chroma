@@ -4,16 +4,22 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tracing-bunyan-formatter = { workspace = true }
-fastrace = "0.7"
+fastrace = "0.7.8"
 fastrace-opentelemetry = "0.8"
+http = { version = "1", optional = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tonic = { workspace = true }
+tower = { workspace = true, optional = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
-tracing.workspace = true
-tonic.workspace = true
+tracing = { workspace = true }
+uuid = { workspace = true }
+
+chroma-system = { workspace = true }
 
 [features]
-grpc = []
+grpc = ["dep:tower", "dep:http"]

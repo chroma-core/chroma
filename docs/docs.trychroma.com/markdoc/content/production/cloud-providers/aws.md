@@ -138,7 +138,7 @@ aws cloudformation create-stack --stack-name my-chroma-stack --template-url http
 
 Once your EC2 instance is up and running with Chroma, all
 you need to do is configure your `HttpClient` to use the server's IP address and port
-`8000`. Since you are running a Chroma server on AWS, our [thin-client package](../chroma-server/python-thin-client) may be enough for your application.
+`8000`. Since you are running a Chroma server on AWS, our [thin-client package](/production/chroma-server/python-thin-client) may be enough for your application.
 
 {% TabbedCodeBlock %}
 
@@ -185,123 +185,17 @@ unless you've taken a snapshot or otherwise backed it up.
 aws cloudformation delete-stack --stack-name my-chroma-stack
 ```
 
-## Authentication with AWS
-
-By default, the EC2 instance created by our CloudFormation template will run with no authentication. There are many ways to secure your Chroma instance on AWS. In this guide we will use a simple set-up using Chroma's native authentication support.
-
-You can learn more about authentication with Chroma in the [Auth Guide](../administration/auth).
-
-### Static API Token Authentication
-
-#### Customize Chroma's CloudFormation Stack
-
-{% Banner type="note" %}
-
-**Security Note**
-
-Current implementation of static API token auth supports only ENV based tokens. Tokens must be alphanumeric ASCII strings. Tokens are case-sensitive.
-
-{% /Banner %}
-
-If, for example, you want the static API token to be "test-token", pass the following parameters when creating your Chroma stack. This will set `Authorization: Bearer test-token` as your authentication header.
-
-```terminal
-aws cloudformation create-stack --stack-name my-chroma-stack --template-url https://s3.amazonaws.com/public.trychroma.com/cloudformation/latest/chroma.cf.json \
- --parameters ParameterKey=ChromaServerAuthCredentials,ParameterValue="test-token" \
- ParameterKey=ChromaServerAuthProvider,ParameterValue="chromadb.auth.token_authn.TokenAuthenticationServerProvider"
-```
-
-To use `X-Chroma-Token: test-token` type of authentication header you can set the `ChromaAuthTokenTransportHeader` parameter:
-
-```terminal
-aws cloudformation create-stack --stack-name my-chroma-stack --template-url https://s3.amazonaws.com/public.trychroma.com/cloudformation/latest/chroma.cf.json \
- --parameters ParameterKey=ChromaServerAuthCredentials,ParameterValue="test-token" \
- ParameterKey=ChromaServerAuthProvider,ParameterValue="chromadb.auth.token_authn.TokenAuthenticationServerProvider" \
- ParameterKey=ChromaAuthTokenTransportHeader,ParameterValue="X-Chroma-Token"
-```
-
-#### Client Set-Up
-
-Add the `CHROMA_CLIENT_AUTH_CREDENTIALS` environment variable to your local environment, and set it to the token you provided the server (`test-token` in this example):
-
-```terminal
-export CHROMA_CLIENT_AUTH_CREDENTIALS="test-token"
-```
-
-{% Tabs %}
-
-{% Tab label="python" %}
-
-We will use Chroma's `Settings` object to define the authentication method on the client.
-
-```python
-import os
-import chromadb
-from chromadb.config import Settings
-from dotenv import load_dotenv
-
-load_dotenv()
-
-client = chromadb.HttpClient(
-    host="<Your Chroma Instance IP>",
-    port=8000,
-    settings=Settings(
-        chroma_client_auth_provider="chromadb.auth.token_authn.TokenAuthClientProvider",
-        chroma_client_auth_credentials=os.getenv("CHROMA_CLIENT_AUTH_CREDENTIALS")
-    )
-)
-
-client.heartbeat()
-```
-
-If you are using a custom `CHROMA_AUTH_TOKEN_TRANSPORT_HEADER` (like `X-Chroma-Token`), add it to your `Settings`:
-
-```python
-chroma_auth_token_transport_header=os.getenv("CHROMA_AUTH_TOKEN_TRANSPORT_HEADER")
-```
-
-{% /Tab %}
-
-{% Tab label="typescript" %}
-
-```typescript
-import { ChromaClient } from "chromadb";
-
-const chromaClient = new ChromaClient({
-    path: "<Your Chroma Instance IP>",
-    auth: {
-        provider: "token",
-        credentials: process.env.CHROMA_CLIENT_AUTH_CREDENTIALS,
-        tokenHeaderType: process.env.CHROMA_AUTH_TOKEN_TRANSPORT_HEADER
-    }
-})
-
-chromaClient.heartbeat()
-```
-
-{% /Tab %}
-
-{% /Tabs %}
-
 ## Observability with AWS
 
-Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only exports OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks.
+Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only exports OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks. Check out the [observability docs](../administration/observability) for a full explanation of the available parameters.
 
-Tracing is configured with four environment variables:
-
-- `CHROMA_OTEL_COLLECTION_ENDPOINT`: where to send observability data. Example: `api.honeycomb.com`.
-- `CHROMA_OTEL_SERVICE_NAME`: Service name for OTel traces. Default: `chromadb`.
-- `CHROMA_OTEL_COLLECTION_HEADERS`: Headers to use when sending observability data. Often used to send API and app keys. For example `{"x-honeycomb-team": "abc"}`.
-- `CHROMA_OTEL_GRANULARITY`: A value from the [OpenTelemetryGranularity enum](https://github.com/chroma-core/chroma/tree/main/chromadb/telemetry/opentelemetry/__init__.py). Specifies how detailed tracing should be.
-
-To enable tracing on your Chroma server, simply pass your desired values as parameters when creating your Cloudformation stack:
+To enable tracing on your Chroma server, simply pass your desired values as arguments when creating your Cloudformation stack:
 
 ```terminal
 aws cloudformation create-stack --stack-name my-chroma-stack --template-url https://s3.amazonaws.com/public.trychroma.com/cloudformation/latest/chroma.cf.json \
  --parameters ParameterKey=ChromaOtelCollectionEndpoint,ParameterValue="api.honeycomb.com" \
  ParameterKey=ChromaOtelServiceName,ParameterValue="chromadb" \
- ParameterKey=ChromaOtelCollectionHeaders,ParameterValue="{'x-honeycomb-team': 'abc'}" \
- ParameterKey=ChromaOtelGranularity,ParameterValue="all" \
+ ParameterKey=ChromaOtelCollectionHeaders,ParameterValue="{'x-honeycomb-team': 'abc'}"
 ```
 
 ## Troubleshooting

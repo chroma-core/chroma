@@ -1,21 +1,24 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    Chunk, DataRecord, DeletedMetadata, LogRecord, MaterializedLogOperation, Metadata,
-    MetadataDelta, MetadataValue, MetadataValueConversionError, Operation, SegmentUuid,
-    UpdateMetadata, UpdateMetadataValue,
+    logical_size_of_metadata, Chunk, DataRecord, DeletedMetadata, LogRecord,
+    MaterializedLogOperation, Metadata, MetadataDelta, MetadataValue, MetadataValueConversionError,
+    Operation, SegmentUuid, UpdateMetadata, UpdateMetadataValue,
 };
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
+use uuid::Uuid;
 
-use super::distributed_hnsw::DistributedHNSWSegmentWriter;
+use crate::distributed_spann::{SpannSegmentFlusher, SpannSegmentWriter};
+
 use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriter};
 use super::blockfile_record::{
     ApplyMaterializedLogError, RecordSegmentFlusher, RecordSegmentReader,
     RecordSegmentReaderCreationError, RecordSegmentWriter,
 };
+use super::distributed_hnsw::DistributedHNSWSegmentWriter;
 
 // Materializes metadata from update metadata, populating the delete list
 // and upsert list.
@@ -437,6 +440,38 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
             }
         }
         metadata_delta
+    }
+
+    pub fn compute_logical_size_delta_bytes(&self) -> i64 {
+        let old_size = self
+            .get_data_record()
+            .map(|rec| {
+                rec.id.len()
+                    + size_of_val(rec.embedding)
+                    + rec
+                        .metadata
+                        .as_ref()
+                        .map(logical_size_of_metadata)
+                        .unwrap_or_default()
+                    + rec.document.map(|doc| doc.len()).unwrap_or_default()
+            })
+            .unwrap_or_default() as i64;
+        let merged_metadata = self.merged_metadata();
+        let new_size = match self.get_operation() {
+            MaterializedLogOperation::AddNew
+            | MaterializedLogOperation::OverwriteExisting
+            | MaterializedLogOperation::UpdateExisting => {
+                (self.get_user_id().len()
+                    + size_of_val(self.merged_embeddings_ref())
+                    + logical_size_of_metadata(&merged_metadata)
+                    + self
+                        .merged_document_ref()
+                        .map(|doc| doc.len())
+                        .unwrap_or_default()) as i64
+            }
+            _ => 0,
+        };
+        new_size - old_size
     }
 }
 
@@ -861,10 +896,70 @@ pub async fn materialize_logs(
 }
 
 #[derive(Clone, Debug)]
+pub enum VectorSegmentWriter {
+    Hnsw(Box<DistributedHNSWSegmentWriter>),
+    Spann(SpannSegmentWriter),
+}
+
+impl VectorSegmentWriter {
+    pub fn get_id(&self) -> SegmentUuid {
+        match self {
+            VectorSegmentWriter::Hnsw(writer) => writer.id,
+            VectorSegmentWriter::Spann(writer) => writer.id,
+        }
+    }
+
+    pub fn get_name(&self) -> &'static str {
+        match self {
+            VectorSegmentWriter::Hnsw(_) => "DistributedHNSWSegmentWriter",
+            VectorSegmentWriter::Spann(_) => "SpannSegmentWriter",
+        }
+    }
+
+    pub async fn apply_materialized_log_chunk(
+        &self,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &MaterializeLogsResult,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        match self {
+            VectorSegmentWriter::Hnsw(writer) => {
+                writer
+                    .apply_materialized_log_chunk(record_segment_reader, materialized)
+                    .await
+            }
+            VectorSegmentWriter::Spann(writer) => {
+                writer
+                    .apply_materialized_log_chunk(record_segment_reader, materialized)
+                    .await
+            }
+        }
+    }
+
+    pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            VectorSegmentWriter::Hnsw(_) => Ok(()),
+            VectorSegmentWriter::Spann(writer) => writer.garbage_collect().await,
+        }
+    }
+
+    pub async fn commit(self) -> Result<ChromaSegmentFlusher, Box<dyn ChromaError>> {
+        match self {
+            VectorSegmentWriter::Hnsw(writer) => writer.commit().await.map(|w| {
+                ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::Hnsw(Box::new(w)))
+            }),
+            VectorSegmentWriter::Spann(writer) => writer
+                .commit()
+                .await
+                .map(|w| ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::Spann(w))),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum ChromaSegmentWriter<'bf> {
     RecordSegment(RecordSegmentWriter),
     MetadataSegment(MetadataSegmentWriter<'bf>),
-    DistributedHNSWSegment(Box<DistributedHNSWSegmentWriter>),
+    VectorSegment(VectorSegmentWriter),
 }
 
 impl ChromaSegmentWriter<'_> {
@@ -872,7 +967,7 @@ impl ChromaSegmentWriter<'_> {
         match self {
             ChromaSegmentWriter::RecordSegment(writer) => writer.id,
             ChromaSegmentWriter::MetadataSegment(writer) => writer.id,
-            ChromaSegmentWriter::DistributedHNSWSegment(writer) => writer.id,
+            ChromaSegmentWriter::VectorSegment(writer) => writer.get_id(),
         }
     }
 
@@ -880,7 +975,7 @@ impl ChromaSegmentWriter<'_> {
         match self {
             ChromaSegmentWriter::RecordSegment(_) => "RecordSegmentWriter",
             ChromaSegmentWriter::MetadataSegment(_) => "MetadataSegmentWriter",
-            ChromaSegmentWriter::DistributedHNSWSegment(_) => "DistributedHNSWSegmentWriter",
+            ChromaSegmentWriter::VectorSegment(writer) => writer.get_name(),
         }
     }
 
@@ -900,7 +995,7 @@ impl ChromaSegmentWriter<'_> {
                     .apply_materialized_log_chunk(record_segment_reader, materialized)
                     .await
             }
-            ChromaSegmentWriter::DistributedHNSWSegment(writer) => {
+            ChromaSegmentWriter::VectorSegment(writer) => {
                 writer
                     .apply_materialized_log_chunk(record_segment_reader, materialized)
                     .await
@@ -912,7 +1007,7 @@ impl ChromaSegmentWriter<'_> {
         match self {
             ChromaSegmentWriter::RecordSegment(_) => Ok(()),
             ChromaSegmentWriter::MetadataSegment(writer) => writer.finish().await,
-            ChromaSegmentWriter::DistributedHNSWSegment(_) => Ok(()),
+            ChromaSegmentWriter::VectorSegment(writer) => writer.finish().await,
         }
     }
 
@@ -926,27 +1021,40 @@ impl ChromaSegmentWriter<'_> {
                 .commit()
                 .await
                 .map(ChromaSegmentFlusher::MetadataSegment),
-            ChromaSegmentWriter::DistributedHNSWSegment(writer) => writer
-                .commit()
-                .await
-                .map(|w| ChromaSegmentFlusher::DistributedHNSWSegment(Box::new(w))),
+            ChromaSegmentWriter::VectorSegment(writer) => writer.commit().await,
         }
     }
+}
+
+#[derive(Debug)]
+pub enum VectorSegmentFlusher {
+    Hnsw(Box<DistributedHNSWSegmentWriter>),
+    Spann(SpannSegmentFlusher),
 }
 
 #[derive(Debug)]
 pub enum ChromaSegmentFlusher {
     RecordSegment(RecordSegmentFlusher),
     MetadataSegment(MetadataSegmentFlusher),
-    DistributedHNSWSegment(Box<DistributedHNSWSegmentWriter>),
+    VectorSegment(VectorSegmentFlusher),
 }
 
 impl ChromaSegmentFlusher {
+    pub fn flush_key(prefix_path: &str, id: &Uuid) -> String {
+        // For legacy collections, prefix_path will be empty.
+        if prefix_path.is_empty() {
+            return id.to_string();
+        }
+        format!("{}/{}", prefix_path, id)
+    }
     pub fn get_id(&self) -> SegmentUuid {
         match self {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.id,
             ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.id,
-            ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => flusher.id,
+            ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
+                VectorSegmentFlusher::Hnsw(writer) => writer.id,
+                VectorSegmentFlusher::Spann(writer) => writer.id,
+            },
         }
     }
 
@@ -954,7 +1062,10 @@ impl ChromaSegmentFlusher {
         match self {
             ChromaSegmentFlusher::RecordSegment(_) => "RecordSegmentFlusher",
             ChromaSegmentFlusher::MetadataSegment(_) => "MetadataSegmentFlusher",
-            ChromaSegmentFlusher::DistributedHNSWSegment(_) => "DistributedHNSWSegmentFlusher",
+            ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
+                VectorSegmentFlusher::Hnsw(_) => "DistributedHNSWSegmentFlusher",
+                VectorSegmentFlusher::Spann(_) => "SpannSegmentFlusher",
+            },
         }
     }
 
@@ -962,7 +1073,10 @@ impl ChromaSegmentFlusher {
         match self {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.flush().await,
             ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.flush().await,
-            ChromaSegmentFlusher::DistributedHNSWSegment(flusher) => flusher.flush().await,
+            ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
+                VectorSegmentFlusher::Hnsw(flusher) => flusher.flush().await,
+                VectorSegmentFlusher::Spann(flusher) => flusher.flush().await,
+            },
         }
     }
 }
@@ -980,7 +1094,7 @@ mod tests {
     };
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, OperationRecord, SegmentUuid};
+    use chroma_types::{CollectionUuid, DatabaseUuid, OperationRecord, SegmentUuid};
     use std::{collections::HashMap, str::FromStr};
 
     #[tokio::test]
@@ -997,6 +1111,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1016,14 +1132,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1065,6 +1189,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -1158,14 +1285,22 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
@@ -1269,6 +1404,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1288,14 +1425,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1337,6 +1482,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -1421,14 +1569,22 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
@@ -1533,6 +1689,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1552,14 +1710,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1601,6 +1767,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -1705,14 +1874,22 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
@@ -1825,11 +2002,17 @@ mod tests {
             metadata: None,
             file_path: HashMap::new(),
         };
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1884,6 +2067,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -2058,10 +2244,14 @@ mod tests {
         assert_eq!(1, id2_found);
         assert_eq!(1, id3_found);
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await

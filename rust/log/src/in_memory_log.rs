@@ -1,9 +1,10 @@
-use crate::types::{
-    CollectionInfo, GetCollectionsWithNewDataError, PullLogsError, UpdateCollectionLogOffsetError,
-};
-use chroma_types::{CollectionUuid, LogRecord};
 use std::collections::HashMap;
 use std::fmt::Debug;
+
+use chroma_error::ChromaError;
+use chroma_types::{CollectionUuid, LogRecord};
+
+use crate::types::CollectionInfo;
 
 // This is used for testing only, it represents a log record that is stored in memory
 // internal to a mock log implementation
@@ -63,7 +64,7 @@ impl InMemoryLog {
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
-    ) -> Result<Vec<LogRecord>, PullLogsError> {
+    ) -> Vec<LogRecord> {
         let end_timestamp = match end_timestamp {
             Some(end_timestamp) => end_timestamp,
             None => i64::MAX,
@@ -71,7 +72,7 @@ impl InMemoryLog {
 
         let logs = match self.collection_to_log.get(&collection_id) {
             Some(logs) => logs,
-            None => return Ok(Vec::new()),
+            None => return Vec::new(),
         };
         let mut result = Vec::new();
         for i in offset..(offset + batch_size as i64) {
@@ -79,13 +80,13 @@ impl InMemoryLog {
                 result.push(logs[i as usize].record.clone());
             }
         }
-        Ok(result)
+        result
     }
 
     pub(super) async fn get_collections_with_new_data(
         &mut self,
         min_compaction_size: u64,
-    ) -> Result<Vec<CollectionInfo>, GetCollectionsWithNewDataError> {
+    ) -> Vec<CollectionInfo> {
         let mut collections = Vec::new();
         for (collection_id, log_records) in self.collection_to_log.iter() {
             if log_records.is_empty() {
@@ -115,16 +116,34 @@ impl InMemoryLog {
                 first_log_ts: logs[0].log_ts,
             });
         }
-        Ok(collections)
+        collections
     }
 
     pub(super) async fn update_collection_log_offset(
         &mut self,
         collection_id: CollectionUuid,
         new_offset: i64,
-    ) -> Result<(), UpdateCollectionLogOffsetError> {
+    ) {
         self.offsets.insert(collection_id, new_offset);
-        Ok(())
+    }
+
+    pub(super) async fn scout_logs(
+        &mut self,
+        collection_id: CollectionUuid,
+        starting_offset: u64,
+    ) -> Result<u64, Box<dyn ChromaError>> {
+        let answer = self
+            .collection_to_log
+            .get(&collection_id)
+            .iter()
+            .flat_map(|x| x.iter().map(|rec| rec.log_offset + 1).max())
+            .max()
+            .unwrap_or(starting_offset as i64) as u64;
+        if answer >= starting_offset {
+            Ok(answer)
+        } else {
+            Ok(starting_offset)
+        }
     }
 }
 

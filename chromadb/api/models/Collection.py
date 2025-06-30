@@ -1,4 +1,3 @@
-import inspect
 from typing import TYPE_CHECKING, Optional, Union
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
@@ -6,7 +5,6 @@ from chromadb.api.types import (
     URI,
     CollectionMetadata,
     Embedding,
-    IncludeEnum,
     PyEmbedding,
     Include,
     Metadata,
@@ -19,8 +17,8 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     WhereDocument,
-    IncludeEnum,
 )
+from chromadb.api.collection_configuration import UpdateCollectionConfiguration
 
 import logging
 
@@ -106,7 +104,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = [IncludeEnum.metadatas, IncludeEnum.documents],
+        include: Include = ["metadatas", "documents"],
     ) -> GetResult:
         """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
         all embeddings up to limit starting at offset.
@@ -116,7 +114,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
-            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`. Ids are always included. Defaults to `["metadatas", "documents"]`. Optional.
 
         Returns:
@@ -136,13 +134,11 @@ class Collection(CollectionCommon["ServerAPI"]):
             where=get_request["where"],
             where_document=get_request["where_document"],
             include=get_request["include"],
-            sort=None,
             limit=limit,
             offset=offset,
             tenant=self.tenant,
             database=self.database,
         )
-
         return self._transform_get_response(
             response=get_results, include=get_request["include"]
         )
@@ -176,13 +172,14 @@ class Collection(CollectionCommon["ServerAPI"]):
         query_texts: Optional[OneOrMany[Document]] = None,
         query_images: Optional[OneOrMany[Image]] = None,
         query_uris: Optional[OneOrMany[URI]] = None,
+        ids: Optional[OneOrMany[ID]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
         include: Include = [
-            IncludeEnum.metadatas,
-            IncludeEnum.documents,
-            IncludeEnum.distances,
+            "metadatas",
+            "documents",
+            "distances",
         ],
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
@@ -192,9 +189,10 @@ class Collection(CollectionCommon["ServerAPI"]):
             query_texts: The document texts to get the closes neighbors of. Optional.
             query_images: The images to get the closes neighbors of. Optional.
             query_uris: The URIs to be used with data loader. Optional.
+            ids: A subset of ids to search within. Optional.
             n_results: The number of neighbors to return for each query_embedding or query_texts. Optional.
             where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
-            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
 
         Returns:
@@ -213,6 +211,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             query_texts=query_texts,
             query_images=query_images,
             query_uris=query_uris,
+            ids=ids,
             n_results=n_results,
             where=where,
             where_document=where_document,
@@ -221,6 +220,7 @@ class Collection(CollectionCommon["ServerAPI"]):
 
         query_results = self._client._query(
             collection_id=self.id,
+            ids=query_request["ids"],
             query_embeddings=query_request["embeddings"],
             n_results=query_request["n_results"],
             where=query_request["where"],
@@ -235,7 +235,10 @@ class Collection(CollectionCommon["ServerAPI"]):
         )
 
     def modify(
-        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
+        self,
+        name: Optional[str] = None,
+        metadata: Optional[CollectionMetadata] = None,
+        configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         """Modify the collection name or metadata
 
@@ -256,11 +259,38 @@ class Collection(CollectionCommon["ServerAPI"]):
             id=self.id,
             new_name=name,
             new_metadata=metadata,
+            new_configuration=configuration,
             tenant=self.tenant,
             database=self.database,
         )
 
-        self._update_model_after_modify_success(name, metadata)
+        self._update_model_after_modify_success(name, metadata, configuration)
+
+    def fork(
+        self,
+        new_name: str,
+    ) -> "Collection":
+        """Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+
+        Args:
+            new_name: The name of the new collection.
+
+        Returns:
+            Collection: A new collection with the specified name and containing identical data to the current collection.
+        """
+        model = self._client._fork(
+            collection_id=self.id,
+            new_name=new_name,
+            tenant=self.tenant,
+            database=self.database,
+        )
+        return Collection(
+            client=self._client,
+            model=model,
+            embedding_function=self._embedding_function,
+            data_loader=self._data_loader,
+        )
 
     def update(
         self,
@@ -363,7 +393,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         Args:
             ids: The ids of the embeddings to delete
             where: A Where type dict used to filter the delection by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}]}}`. Optional.
-            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{"$contains": "hello"}`. Optional.
 
         Returns:
             None
@@ -383,42 +413,3 @@ class Collection(CollectionCommon["ServerAPI"]):
             tenant=self.tenant,
             database=self.database,
         )
-
-
-class CollectionName(str):
-    """
-    A string wrapper to supply users with indicative message about list_collections only
-    returning collection names, in lieu of Collection object.
-
-    When a user will try to access an attribute on a CollectionName string, the __getattribute__ method
-    of str is invoked first. If a valid str method or property is found, it will be used. Otherwise, the fallback
-    __getattr__ defined here is invoked next. It will error if the requested attribute is a Collection
-    method or property.
-
-    For example:
-    collection_name = client.list_collections()[0] # collection_name = "test"
-
-    collection_name.startsWith("t") # Evaluates to True.
-    # __getattribute__ is invoked first, selecting startsWith from str.
-
-    collection_name.add(ids=[...], documents=[...]) # Raises the error defined below
-    # __getattribute__ is invoked first, not finding a match in str.
-    # __getattr__ from this class is invoked and raises an error
-
-    """
-
-    def __getattr__(self, item):
-        collection_attributes_and_methods = [
-            member
-            for member, _ in inspect.getmembers(Collection)
-            if not member.startswith("_")
-        ]
-
-        if item in collection_attributes_and_methods:
-            raise NotImplementedError(
-                f"In Chroma v0.6.0, list_collections only returns collection names. "
-                f"Use Client.get_collection({str(self)}) to access {item}. "
-                f"See https://docs.trychroma.com/deployment/migration for more information."
-            )
-
-        raise AttributeError(f"'CollectionName' object has no attribute '{item}'")

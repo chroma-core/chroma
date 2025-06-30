@@ -1,5 +1,6 @@
 use super::config::MemberlistProviderConfig;
 use async_trait::async_trait;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{Component, ComponentContext, Handler, ReceiverForMessage, StreamHandler};
@@ -91,6 +92,7 @@ impl ChromaError for CustomResourceMemberlistProviderConfigurationError {
 impl Configurable<MemberlistProviderConfig> for CustomResourceMemberlistProvider {
     async fn try_from_config(
         config: &MemberlistProviderConfig,
+        _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let MemberlistProviderConfig::CustomResource(my_config) = &config;
         let kube_client = match Client::try_default().await {
@@ -154,10 +156,7 @@ impl CustomResourceMemberlistProvider {
             .applied_objects();
         let stream = stream.then(|event| async move {
             match event {
-                Ok(event) => {
-                    tracing::info!("Kube stream event: {:?}", event);
-                    Some(event)
-                }
+                Ok(event) => Some(event),
                 Err(err) => {
                     tracing::error!("Error acquiring memberlist: {}", err);
                     None
@@ -186,7 +185,7 @@ impl Component for CustomResourceMemberlistProvider {
         self.queue_size
     }
 
-    async fn start(&mut self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
+    async fn on_start(&mut self, ctx: &ComponentContext<CustomResourceMemberlistProvider>) {
         self.connect_to_kube_stream(ctx);
     }
 }

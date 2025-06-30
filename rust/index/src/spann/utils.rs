@@ -120,6 +120,8 @@ pub enum KMeansError {
     MaxClusterNotFound,
     #[error("Could not assign a point to a center")]
     PointAssignmentFailed,
+    #[error("Returned 0 points in a cluster")]
+    ZeroPointsInCluster,
 }
 
 impl ChromaError for KMeansError {
@@ -127,6 +129,7 @@ impl ChromaError for KMeansError {
         match self {
             Self::MaxClusterNotFound => ErrorCodes::Internal,
             Self::PointAssignmentFailed => ErrorCodes::Internal,
+            Self::ZeroPointsInCluster => ErrorCodes::Internal,
         }
     }
 }
@@ -535,10 +538,11 @@ pub async fn rng_query(
         let allowed_ids = vec![];
         let disallowed_ids = vec![];
         let (ids, distances) = read_guard
+            .hnsw_index
             .query(normalized_query, k, &allowed_ids, &disallowed_ids)
             .map_err(|_| RngQueryError::HnswSearchError)?;
         for (id, distance) in ids.iter().zip(distances.iter()) {
-            if *distance <= (1_f32 + rng_epsilon) * distances[0] {
+            if !apply_rng_rule || *distance <= (1_f32 + rng_epsilon) * distances[0] {
                 nearby_ids.push(*id);
                 nearby_distances.push(*distance);
             }
@@ -546,6 +550,7 @@ pub async fn rng_query(
         // Get the embeddings also for distance computation.
         for id in nearby_ids.iter() {
             let emb = read_guard
+                .hnsw_index
                 .get(*id)
                 .map_err(|_| RngQueryError::HnswSearchError)?
                 .ok_or(RngQueryError::HnswSearchError)?;

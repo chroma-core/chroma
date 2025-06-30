@@ -20,12 +20,11 @@ tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
-opentelemetry-http = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 
 # Unlikely to be used in the workspace.
-chromadb = { git = "https://github.com/rescrv/chromadb-rs", rev = "630889ccd2f13b7c79489e9e8ec0272377e470af" }
-guacamole = { version = "0.9", default-features = false }
+chromadb = { git = "https://github.com/rescrv/chromadb-rs", rev = "540c3e225e92ecea05039b73b69adf5875385c0e" }
+guacamole = { version = "0.11", default-features = false }
 tower-http = { workspace = true }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { workspace = true, features = ["json"] }
 siphasher = "1.0.1"

@@ -7,22 +7,54 @@ jobs:
   test:
     strategy:
       matrix:
-        platform: [depot-ubuntu-22.04]
+        platform: [blacksmith-8vcpu-ubuntu-2204]
     runs-on: ${{ matrix.platform }}
     env:
       CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup
         uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Build CLI
+        run: cargo build --bin chroma
       - name: Test
-        run: cargo nextest run
+        run: cargo nextest run --profile ci
+  test-long:
+    runs-on: blacksmith-8vcpu-ubuntu-2204
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Test
+        run: cargo nextest run --profile ci_long_running
+
   test-integration:
     strategy:
       matrix:
-        platform: [depot-ubuntu-22.04-16]
+        platform: [blacksmith-16vcpu-ubuntu-2204]
+        nextest_profile: [ci_k8s_integration, ci_k8s_integration_slow]
+        partition: [1, 2]
+        include:
+          - nextest_profile: ci_k8s_integration
+            partition_method: hash
+          - nextest_profile: ci_k8s_integration_slow
+            partition_method: count
     runs-on: ${{ matrix.platform }}
+    name: Integration test ${{ matrix.nextest_profile }} ${{ matrix.partition }}
+    # OIDC token auth for AWS
+    permissions:
+      contents: read
+      id-token: write
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -30,21 +62,51 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup
         uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Set up Docker
+        uses: ./.github/actions/docker
+        with:
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Start services in Tilt
         uses: ./.github/actions/tilt
+      - name: Build CLI
+        run: cargo build --bin chroma
       - name: Run tests
-        run: cargo nextest run --profile k8s_integration
+        run: cargo nextest run --profile ${{ matrix.nextest_profile }} --partition ${{ matrix.partition_method }}:${{ matrix.partition }}/2 --no-tests warn
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
         with:
-          artifact-name: "rust-integration-test"
-
+          artifact-name: "rust-integration-test-${{ matrix.nextest_profile }}-${{ matrix.partition }}"
   test-benches:
     strategy:
       matrix:
-        platform: [depot-ubuntu-22.04-16]
+        platform: [blacksmith-16vcpu-ubuntu-2204]
+        bench-command:
+          - "--bench blockfile_writer -- --sample-size 10"
+          - "--bench distance_metrics"
+          - "--bench filter"
+          - "--bench get"
+          - "--bench limit"
+          - "--bench query"
     runs-on: ${{ matrix.platform }}
+    env:
+      RUST_BACKTRACE: 1
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Run benchmark
+        run: cargo bench ${{ matrix.bench-command }}
+
+  can-build-release:
+    runs-on: blacksmith-16vcpu-ubuntu-2204
     env:
       CARGO_TERM_COLOR: always
     steps:
@@ -52,5 +114,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Setup
         uses: ./.github/actions/rust
-      - name: Test compile
-        run: cargo bench --no-run
+        with:
+          github-token: ${{ github.token }}
+      - name: Build in release mode
+        run: cargo build --release

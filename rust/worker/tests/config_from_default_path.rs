@@ -1,3 +1,4 @@
+use chroma_index::config::{HnswGarbageCollectionPolicyConfig, PlGarbageCollectionPolicyConfig};
 use figment::Jail;
 use serial_test::serial;
 use uuid::Uuid;
@@ -16,21 +17,21 @@ fn test_config_from_default_path() {
                 my_member_id: "query-service-0"
                 my_port: 50051
                 assignment_policy:
-                    RendezvousHashing:
+                    rendezvous_hashing:
                         hasher: Murmur3
                 memberlist_provider:
-                    CustomResource:
+                    custom_resource:
                         kube_namespace: "chroma"
                         memberlist_name: "query-service-memberlist"
                         queue_size: 100
                 sysdb:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
                         request_timeout_ms: 1000
                 storage:
-                    AdmissionControlledS3:
+                    admission_controlled_s3:
                         s3_config:
                             bucket: "chroma"
                             credentials: Minio
@@ -39,10 +40,11 @@ fn test_config_from_default_path() {
                             upload_part_size_bytes: 8388608
                             download_part_size_bytes: 8388608
                         rate_limiting_policy:
-                            CountBasedPolicy:
+                            count_based_policy:
                                 max_concurrent_requests: 15
+                                bandwidth_allocation: [0.9, 0.1]
                 log:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
@@ -52,8 +54,9 @@ fn test_config_from_default_path() {
                     dispatcher_queue_size: 100
                     worker_queue_size: 100
                     task_queue_limit: 100
+                    active_io_tasks: 1000
                 blockfile_provider:
-                    Arrow:
+                    arrow:
                         block_manager_config:
                             max_block_size_bytes: 16384
                             block_cache_config:
@@ -76,21 +79,21 @@ fn test_config_from_default_path() {
                 my_member_id: "compaction-service-0"
                 my_port: 50051
                 assignment_policy:
-                    RendezvousHashing:
+                    rendezvous_hashing:
                         hasher: Murmur3
                 memberlist_provider:
-                    CustomResource:
+                    custom_resource:
                         kube_namespace: "chroma"
                         memberlist_name: "compaction-service-memberlist"
                         queue_size: 100
                 sysdb:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
                         request_timeout_ms: 1000
                 storage:
-                    AdmissionControlledS3:
+                    admission_controlled_s3:
                         s3_config:
                             bucket: "chroma"
                             credentials: Minio
@@ -99,10 +102,10 @@ fn test_config_from_default_path() {
                             upload_part_size_bytes: 8388608
                             download_part_size_bytes: 8388608
                         rate_limiting_policy:
-                            CountBasedPolicy:
+                            count_based_policy:
                                 max_concurrent_requests: 15
                 log:
-                    Grpc:
+                    grpc:
                         host: "localhost"
                         port: 50051
                         connect_timeout_ms: 5000
@@ -112,6 +115,7 @@ fn test_config_from_default_path() {
                     dispatcher_queue_size: 100
                     worker_queue_size: 100
                     task_queue_limit: 100
+                    active_io_tasks: 1000
                 compactor:
                     compaction_manager_queue_size: 1000
                     max_concurrent_jobs: 100
@@ -121,7 +125,7 @@ fn test_config_from_default_path() {
                     max_partition_size: 5000
                     disabled_collections: ["74b3240e-a2b0-43d7-8adb-f55a394964a1", "496db4aa-fbe1-498a-b60b-81ec0fe59792"]
                 blockfile_provider:
-                    Arrow:
+                    arrow:
                         block_manager_config:
                             max_block_size_bytes: 16384
                             block_cache_config:
@@ -137,6 +141,15 @@ fn test_config_from_default_path() {
                         disk:
                             capacity: 8589934592 # 8GB
                             eviction: lru
+                spann_provider:
+                    pl_garbage_collection:
+                        enabled: true
+                        policy:
+                            random_sample:
+                                sample_size: 0.1
+                    hnsw_garbage_collection:
+                        enabled: true
+                        policy: "full_rebuild"
             "#,
         );
         let config = RootConfig::load();
@@ -164,6 +177,67 @@ fn test_config_from_default_path() {
             Uuid::parse_str(&config.compaction_service.compactor.disabled_collections[1]).unwrap(),
             Uuid::parse_str("496db4aa-fbe1-498a-b60b-81ec0fe59792").unwrap()
         );
+        assert!(
+            config
+                .compaction_service
+                .spann_provider
+                .pl_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .pl_garbage_collection
+            .policy
+        {
+            PlGarbageCollectionPolicyConfig::RandomSample(config) => {
+                assert_eq!(config.sample_size, 0.1);
+            }
+        }
+        assert!(
+            config
+                .compaction_service
+                .spann_provider
+                .hnsw_garbage_collection
+                .enabled
+        );
+        match config
+            .compaction_service
+            .spann_provider
+            .hnsw_garbage_collection
+            .policy
+        {
+            HnswGarbageCollectionPolicyConfig::FullRebuild => {}
+            _ => panic!("Expected FullRebuild"),
+        }
+        match config.query_service.storage {
+            chroma_storage::config::StorageConfig::AdmissionControlledS3(config) => {
+                assert_eq!(config.s3_config.bucket, "chroma");
+                match config.rate_limiting_policy {
+                    chroma_storage::config::RateLimitingConfig::CountBasedPolicy(config) => {
+                        assert_eq!(config.max_concurrent_requests, 15);
+                        assert_eq!(config.bandwidth_allocation.len(), 2);
+                        assert_eq!(config.bandwidth_allocation[0], 0.9);
+                        assert_eq!(config.bandwidth_allocation[1], 0.1);
+                    }
+                }
+            }
+            _ => panic!("Expected AdmissionControlledS3 storage config"),
+        }
+        match config.compaction_service.storage {
+            chroma_storage::config::StorageConfig::AdmissionControlledS3(config) => {
+                assert_eq!(config.s3_config.bucket, "chroma");
+                match config.rate_limiting_policy {
+                    chroma_storage::config::RateLimitingConfig::CountBasedPolicy(config) => {
+                        assert_eq!(config.max_concurrent_requests, 15);
+                        assert_eq!(config.bandwidth_allocation.len(), 2);
+                        assert_eq!(config.bandwidth_allocation[0], 0.7);
+                        assert_eq!(config.bandwidth_allocation[1], 0.3);
+                    }
+                }
+            }
+            _ => panic!("Expected AdmissionControlledS3 storage config"),
+        }
         Ok(())
     });
 }

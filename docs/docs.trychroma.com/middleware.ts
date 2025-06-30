@@ -18,6 +18,7 @@ const legacyPathsMapping: Record<string, string> = {
   "/integrations/roboflow": "/integrations/embedding-models/roboflow",
   "/integrations/langchain": "/integrations/frameworks/langchain",
   "/integrations/llamaindex": "/integrations/frameworks/llamaindex",
+  "/integrations/deepeval": "/integrations/frameworks/deepeval",
   "/integrations/braintrust": "/integrations/frameworks/braintrust",
   "/integrations/haystack": "/integrations/frameworks/haystack",
   "/integrations/openllmetry": "/integrations/frameworks/openllmetry",
@@ -33,7 +34,8 @@ const legacyPathsMapping: Record<string, string> = {
   "/deployment/gcp": "/production/cloud-providers/gcp",
   "/deployment/performance": "/production/administration/performance",
   "/deployment/observability": "/production/administration/observability",
-  "/deployment/migration": "/production/administration/migration",
+  "/deployment/migration": "/updates/migration",
+  "/production/administration/migration": "/updates/migration",
   "/deployment/auth": "/production/administration/auth",
   "/telemetry": "/docs/overview/telemetry",
   "/roadmap": "/docs/overview/roadmap",
@@ -45,6 +47,10 @@ const legacyPathsMapping: Record<string, string> = {
   "/reference/js-client": "/reference/js/client",
   "/reference/js-collection": "/reference/js/collection",
   "/reference/cli": "/cli/run",
+  "/troubleshooting": "/docs/overview/troubleshooting",
+  "/updates/troubleshooting": "/docs/overview/troubleshooting",
+  "/updates/migration": "/docs/overview/migration",
+  "/migration": "/docs/overview/migration",
 };
 
 export const middleware = (request: NextRequest) => {

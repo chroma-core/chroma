@@ -29,3 +29,10 @@ def test_with_embedding_dimensions_not_working_with_old_model() -> None:
         Exception, match="This model does not support specifying dimensions"
     ):
         ef(["hello world"])
+
+
+def test_with_incorrect_api_key() -> None:
+    pytest.importorskip("openai", reason="openai not installed")
+    ef = OpenAIEmbeddingFunction(api_key="incorrect_api_key", dimensions=64)
+    with pytest.raises(Exception, match="Incorrect API key provided"):
+        ef(["hello world"])

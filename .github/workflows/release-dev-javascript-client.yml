@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-
 jobs:
   test:
     name: JavaScript client tests
@@ -14,7 +13,7 @@ jobs:
     strategy:
       matrix:
         registry: [ "https://npm.pkg.github.com" ]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     if: ${{ github.ref == 'refs/heads/main' }}
     permissions: write-all
     steps:
@@ -33,40 +32,74 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v3
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
         with:
-          node-version: "16.x"
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
           registry-url: ${{ matrix.registry }}
           check-latest: false
           token: ${{ secrets.GITHUB_TOKEN }}
+          cache: 'pnpm'
+          cache-dependency-path: 'clients/js/pnpm-lock.yaml'
+
       - name: Install dependencies
-        run: npm install
+        run: pnpm install --no-frozen-lockfile
         working-directory: ./clients/js/
-      - name: Dev Version
+
+      - name: Build packages
+        run: pnpm build
+        working-directory: ./clients/js/
+
+      - name: Generate Dev Version
         id: dev-version
         run: |
           set -e
-          # Get current version
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          # Generate a beta tag using commit short sha and run id
+          # Generate a dev tag using commit short sha and run id
           COMMIT_SHA=$(git rev-parse --short HEAD)
           DEV_TAG="dev.${COMMIT_SHA}-${GITHUB_RUN_ID}"
-          # Create full version with beta tag
-          BASE_VERSION=$(echo $CURRENT_VERSION | cut -f1,2 -d.)
-          PATCH_VERSION=$(echo $CURRENT_VERSION | cut -f3 -d.)
-          # bump patch version
-          NEW_PATCH_VERSION=$((PATCH_VERSION + 1))
-          NEW_VERSION="${BASE_VERSION}.${NEW_PATCH_VERSION}-${DEV_TAG}"
-          echo "NEW_VERSION=${NEW_VERSION}" >> "$GITHUB_ENV"
+          echo "DEV_TAG=${DEV_TAG}" >> "$GITHUB_ENV"
+
+          # Update each package's version with dev tag
+          for PKG_DIR in packages/chromadb packages/chromadb-client; do
+            PKG_PATH="./${PKG_DIR}/package.json"
+            # Get current version
+            CURRENT_VERSION=$(node -p "require('${PKG_PATH}').version")
+            # Create full version with dev tag
+            BASE_VERSION=$(echo $CURRENT_VERSION | cut -f1,2 -d.)
+            PATCH_VERSION=$(echo $CURRENT_VERSION | cut -f3 -d.)
+            # bump patch version
+            NEW_PATCH_VERSION=$((PATCH_VERSION + 1))
+            NEW_VERSION="${BASE_VERSION}.${NEW_PATCH_VERSION}-${DEV_TAG}"
+
+            # Update package.json with new version
+            jq --arg version "$NEW_VERSION" '.version = $version' $PKG_PATH > tmp.$$.json && mv tmp.$$.json $PKG_PATH
+            echo "Updated ${PKG_DIR} to version ${NEW_VERSION}"
+          done
         working-directory: ./clients/js/
+
       - name: Update package.json with organization scope
         run: |
           ORG_NAME="@chroma-core"
-          PACKAGE_NAME=$(jq -r '.name' package.json)
-          jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' package.json > tmp.$$.json && mv tmp.$$.json package.json
+          # Update chromadb package
+          CHROMADB_PKG="./packages/chromadb/package.json"
+          PACKAGE_NAME=$(jq -r '.name' $CHROMADB_PKG)
+          jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CHROMADB_PKG > tmp.$$.json && mv tmp.$$.json $CHROMADB_PKG
+
+          # Update chromadb-client package
+          CLIENT_PKG="./packages/chromadb-client/package.json"
+          PACKAGE_NAME=$(jq -r '.name' $CLIENT_PKG)
+          jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CLIENT_PKG > tmp.$$.json && mv tmp.$$.json $CLIENT_PKG
         working-directory: ./clients/js/
-      - name: Test & publish
-        run: npm run $NPM_SCRIPT
+
+      - name: Publish dev packages
+        run: pnpm publish -r --access public --no-git-checks --tag dev
         working-directory: ./clients/js/
         env:
-          NODE_AUTH_TOKEN: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
