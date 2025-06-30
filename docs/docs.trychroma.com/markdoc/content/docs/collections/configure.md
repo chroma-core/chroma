@@ -247,7 +247,7 @@ npm install @chroma-core/openai @chroma-core/cohere
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm install @chroma-core/openai @chroma-core/cohere
+pnpm add @chroma-core/openai @chroma-core/cohere
 ```
 {% /Tab %}
 

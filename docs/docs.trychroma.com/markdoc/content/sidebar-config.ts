@@ -29,7 +29,7 @@ const sidebarConfig: AppSection[] = [
             name: "Getting Started",
           },
           {
-            id: 'architecture',
+            id: "architecture",
             name: "Architecture",
           },
           {
@@ -123,7 +123,11 @@ const sidebarConfig: AppSection[] = [
     name: "Chroma Cloud",
     icon: CloudIcon,
     tag: "",
-    pages: [{ id: "getting-started", name: "Getting Started" }, { id: "pricing", name: "Pricing" }, { id: "quotas-limits", name: "Quotas & Limits" }],
+    pages: [
+      { id: "getting-started", name: "Getting Started" },
+      { id: "pricing", name: "Pricing" },
+      { id: "quotas-limits", name: "Quotas & Limits" },
+    ],
   },
   {
     id: "guides",
@@ -137,9 +141,9 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "building-with-ai", name: "Building With AI" },
           { id: "intro-to-retrieval", name: "Introduction to Retrieval" },
-          { id: "chunking", name: "Chunking" },
-          { id: "embeddings", name: "Embeddings" },
-          { id: "organizing-collections", name: "Organizing Collections" },
+          // { id: "chunking", name: "Chunking" },
+          // { id: "embeddings", name: "Embeddings" },
+          // { id: "organizing-collections", name: "Organizing Collections" },
         ],
       },
       { id: "develop", name: "Develop", generatePages: true },

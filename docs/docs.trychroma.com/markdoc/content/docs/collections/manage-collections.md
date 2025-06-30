@@ -96,7 +96,7 @@ npm install @chroma-core/openai
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm install @chroma-core/openai
+pnpm add @chroma-core/openai
 ```
 {% /Tab %}
 

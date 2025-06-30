@@ -35,10 +35,11 @@ Alternatively, you can supply a list of document-associated `embeddings` directl
 {% Tab label="python" %}
 ```python
 collection.add(
-    documents=["doc1", "doc2", "doc3", ...],
+    ids=["id1", "id2", "id3", ...],
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
+    documents=["doc1", "doc2", "doc3", ...],
     metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
-    ids=["id1", "id2", "id3", ...]
+    
 )
 ```
 {% /Tab %}
@@ -48,15 +49,15 @@ collection.add(
 await collection.add({
     ids: ["id1", "id2", "id3", ...],
     embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
-    metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
     documents: ["lorem ipsum...", "doc2", "doc3", ...],
+    metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
 })
 ```
 {% /Tab %}
 
 {% /TabbedCodeBlock %}
 
-If the supplied `embeddings` are not the same dimension as the collection, an exception will be raised.
+If the supplied `embeddings` are not the same dimension as the embeddings already indexed in the collection, an exception will be raised.
 
 You can also store documents elsewhere, and just supply a list of `embeddings` and `metadata` to Chroma. You can use the `ids` to associate the embeddings with your documents stored elsewhere.
 

@@ -12,7 +12,7 @@ const YouTubeLink: React.FC = () => {
       target="_blank"
       rel="noopener noreferrer"
     >
-      <UIButton className="flex items-center gap-2 p-[0.35rem] text-xs">
+      <UIButton className="flex items-center gap-2 px-[0.4rem] py-[0.4rem] text-xs">
         <YouTubeLogo className="h-[14px] w-[14px] dark:invert" />
       </UIButton>
     </Link>

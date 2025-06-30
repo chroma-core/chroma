@@ -4,7 +4,7 @@
 Multimodal support is currently available only in Python. Javascript/Typescript support coming soon! 
 {% /Banner %}
 
-Chroma supports multimodal collections, i.e. collections which can store, and can be queried by, multiple modalities of data.
+You can create multimodal Chroma collections; these are collections which can store, and can be queried by, multiple modalities of data.
 
 [Try it out in Colab](https://githubtocolab.com/chroma-core/chroma/blob/main/examples/multimodal/multimodal_retrieval.ipynb)
 
@@ -12,7 +12,7 @@ Chroma supports multimodal collections, i.e. collections which can store, and ca
 
 Chroma supports multi-modal embedding functions, which can be used to embed data from multiple modalities into a single embedding space.
 
-Chroma has the OpenCLIP embedding function built in, which supports both text and images.
+Chroma ships with the OpenCLIP embedding function built in, which supports both text and images.
 
 ```python
 from chromadb.utils.embedding_functions import OpenCLIPEmbeddingFunction

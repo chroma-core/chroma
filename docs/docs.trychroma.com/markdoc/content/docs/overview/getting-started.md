@@ -53,7 +53,7 @@ npm install chromadb @chroma-core/default-embed
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm install chromadb @chroma-core/default-embed
+pnpm add chromadb @chroma-core/default-embed
 ```
 {% /Tab %}
 
