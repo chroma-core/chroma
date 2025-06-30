@@ -87,6 +87,8 @@ jobs:
       uses: actions/checkout@v4
     - name: Setup Python (${{ matrix.python }})
       uses: ./.github/actions/python
+      with:
+        python-version: ${{ matrix.python }}
     - name: Setup Rust
       uses: ./.github/actions/rust
       with:
@@ -257,6 +259,8 @@ jobs:
       uses: actions/checkout@v4
     - name: Setup Python (${{ matrix.python }})
       uses: ./.github/actions/python
+      with:
+        python-version: ${{ matrix.python }}
     - name: Setup Rust
       uses: ./.github/actions/rust
       with:
