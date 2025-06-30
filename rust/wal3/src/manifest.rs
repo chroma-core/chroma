@@ -168,7 +168,7 @@ impl Snapshot {
         })
     }
 
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -208,7 +208,7 @@ impl Snapshot {
         }
     }
 
-    #[tracing::instrument(skip(self, storage), err(Display))]
+    #[tracing::instrument(skip(self, storage))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
@@ -639,7 +639,7 @@ impl Manifest {
     }
 
     /// Initialize the log with an empty manifest.
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn initialize(
         options: &LogWriterOptions,
         storage: &Storage,
@@ -661,7 +661,7 @@ impl Manifest {
     }
 
     /// Initialize the log with an empty manifest.
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn initialize_from_manifest(
         _: &LogWriterOptions,
         storage: &Storage,
@@ -683,7 +683,7 @@ impl Manifest {
     }
 
     /// Load the latest manifest from object storage.
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -732,7 +732,7 @@ impl Manifest {
     }
 
     /// Install a manifest to object storage.
-    #[tracing::instrument(skip(self, storage, new), err(Display))]
+    #[tracing::instrument(skip(self, storage, new))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,

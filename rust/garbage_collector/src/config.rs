@@ -1,8 +1,12 @@
 use chroma_cache::CacheConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
+use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use crate::types::CleanupMode;
 
@@ -34,7 +38,11 @@ pub(super) struct GarbageCollectorConfig {
     pub(super) version_cutoff_time: Duration,
     pub(super) max_collections_to_gc: u32,
     pub(super) gc_interval_mins: u32,
-    pub(super) disallow_collections: Vec<String>,
+    #[serde(default = "GarbageCollectorConfig::default_min_versions_to_keep")]
+    pub(super) min_versions_to_keep: u32,
+    #[serde(default = "GarbageCollectorConfig::default_filter_min_versions_if_alive")]
+    pub(super) filter_min_versions_if_alive: Option<u64>,
+    pub(super) disallow_collections: HashSet<CollectionUuid>,
     pub(super) sysdb_config: chroma_sysdb::GrpcSysDbConfig,
     pub(super) dispatcher_config: DispatcherConfig,
     pub(super) storage_config: StorageConfig,
@@ -50,9 +58,19 @@ pub(super) struct GarbageCollectorConfig {
     #[serde(default)]
     pub root_cache_config: CacheConfig,
     pub jemalloc_pprof_server_port: Option<u16>,
+    #[serde(default)]
+    pub disable_log_gc: bool,
 }
 
 impl GarbageCollectorConfig {
+    fn default_min_versions_to_keep() -> u32 {
+        2
+    }
+
+    fn default_filter_min_versions_if_alive() -> Option<u64> {
+        None
+    }
+
     pub(super) fn load() -> Self {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
@@ -100,8 +118,8 @@ mod tests {
         ); // 12 hours
         assert_eq!(config.max_collections_to_gc, 1000);
         assert_eq!(config.gc_interval_mins, 120);
-        let empty_vec: Vec<String> = vec![];
-        assert_eq!(config.disallow_collections, empty_vec);
+        let empty_set: HashSet<CollectionUuid> = HashSet::new();
+        assert_eq!(config.disallow_collections, empty_set);
         assert_eq!(config.sysdb_config.host, "sysdb.chroma");
         assert_eq!(config.sysdb_config.port, 50051);
         assert_eq!(config.sysdb_config.connect_timeout_ms, 60000);

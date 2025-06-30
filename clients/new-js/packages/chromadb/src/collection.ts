@@ -584,7 +584,7 @@ export class CollectionImpl implements Collection {
       chromaClient: this.chromaClient,
       apiClient: this.apiClient,
       name: data.name,
-      id: data.name,
+      id: data.id,
       embeddingFunction: this._embeddingFunction,
       metadata: data.metadata ?? undefined,
       configuration: data.configuration_json,

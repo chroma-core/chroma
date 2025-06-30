@@ -21,7 +21,7 @@ use std::{
 use thiserror::Error;
 use uuid::Uuid;
 
-pub(super) const CURRENT_VERSION: Version = Version::V1_1;
+pub(super) const CURRENT_VERSION: Version = Version::V1_2;
 
 // ================
 // Version
@@ -31,6 +31,7 @@ pub(super) const CURRENT_VERSION: Version = Version::V1_1;
 pub(crate) enum Version {
     V1 = 1,
     V1_1 = 2,
+    V1_2 = 3,
 }
 
 impl Display for Version {
@@ -38,6 +39,7 @@ impl Display for Version {
         match self {
             Version::V1 => write!(f, "v1"),
             Version::V1_1 => write!(f, "v1.1"),
+            Version::V1_2 => write!(f, "v1.2"),
         }
     }
 }
@@ -60,6 +62,7 @@ impl TryFrom<&str> for Version {
         match s {
             "v1" => Ok(Version::V1),
             "v1.1" => Ok(Version::V1_1),
+            "v1.2" => Ok(Version::V1_2),
             _ => Err(VersionError::UnknownVersion(s.to_string())),
         }
     }
@@ -76,6 +79,7 @@ pub struct RootWriter {
     pub(super) id: Uuid,
     pub(super) version: Version,
     pub(super) prefix_path: String,
+    pub(super) max_block_size_bytes: usize,
 }
 
 impl RootWriter {
@@ -84,12 +88,14 @@ impl RootWriter {
         id: Uuid,
         sparse_index: SparseIndexWriter,
         prefix_path: String,
+        max_block_size_bytes: usize,
     ) -> Self {
         Self {
             version,
             sparse_index,
             id,
             prefix_path,
+            max_block_size_bytes,
         }
     }
 
@@ -185,10 +191,18 @@ impl RootWriter {
             data_arrays.push(built_counts);
         }
 
-        let metadata = HashMap::from_iter(vec![
+        let mut metadata = HashMap::from_iter(vec![
             ("version".to_string(), self.version.to_string()),
             ("id".to_string(), self.id.to_string()),
         ]);
+
+        if self.version >= Version::V1_2 {
+            // MIGRATION(06/25/2025 @sanket) -> V1.2 and above, we store the block size bytes in the metadata
+            metadata.insert(
+                "max_block_size_bytes".to_string(),
+                self.max_block_size_bytes.to_string(),
+            );
+        }
 
         let schema = Arc::new(Schema::new_with_metadata(schema_fields, metadata));
 
@@ -236,6 +250,7 @@ pub struct RootReader {
     pub(super) id: Uuid,
     pub(super) version: Version,
     pub(super) prefix_path: String,
+    pub(super) max_block_size_bytes: usize,
 }
 
 impl chroma_cache::Weighted for RootReader {
@@ -260,6 +275,8 @@ pub enum FromBytesError {
     IdMismatch,
     #[error(transparent)]
     VersionError(#[from] VersionError),
+    #[error("Error converting max block size bytes from string to usize")]
+    MaxBlockSizeBytesParseError,
 }
 
 impl ChromaError for FromBytesError {
@@ -272,6 +289,7 @@ impl ChromaError for FromBytesError {
             FromBytesError::NoDataError => chroma_error::ErrorCodes::Internal,
             FromBytesError::IdMismatch => chroma_error::ErrorCodes::InvalidArgument,
             FromBytesError::VersionError(e) => e.code(),
+            FromBytesError::MaxBlockSizeBytesParseError => chroma_error::ErrorCodes::Internal,
         }
     }
 }
@@ -307,6 +325,7 @@ impl RootReader {
         bytes: &[u8],
         prefix_path: &str,
         id: Uuid,
+        default_max_block_size_bytes: usize,
     ) -> Result<Self, FromBytesError> {
         let mut cursor = std::io::Cursor::new(bytes);
         let arrow_reader = arrow::ipc::reader::FileReader::try_new(&mut cursor, None);
@@ -323,6 +342,11 @@ impl RootReader {
         };
 
         let (version, read_id) = Self::version_and_id_from_record_batch(&record_batch, id)?;
+        let max_block_size_bytes = Self::block_size_bytes_from_record_batch(
+            &record_batch,
+            version,
+            default_max_block_size_bytes,
+        )?;
 
         if read_id != id {
             return Err(FromBytesError::IdMismatch);
@@ -384,6 +408,7 @@ impl RootReader {
             sparse_index: sparse_index_reader,
             id,
             prefix_path: prefix_path.to_string(),
+            max_block_size_bytes,
         })
     }
 
@@ -394,6 +419,7 @@ impl RootReader {
             sparse_index: new_sparse_index,
             id: new_id,
             prefix_path: self.prefix_path.clone(),
+            max_block_size_bytes: self.max_block_size_bytes,
         }
     }
 
@@ -412,6 +438,31 @@ impl RootReader {
             // We default to the current version in the absence of metadata for these fields for
             // backwards compatibility
             (None, None) => Ok((Version::V1, default_id)),
+        }
+    }
+
+    fn block_size_bytes_from_record_batch(
+        record_batch: &RecordBatch,
+        version: Version,
+        default_max_block_size_bytes: usize,
+    ) -> Result<usize, FromBytesError> {
+        let metadata = &record_batch.schema_ref().metadata;
+        match metadata.get("max_block_size_bytes") {
+            Some(size_str) => size_str
+                .parse::<usize>()
+                .map_err(|_| FromBytesError::MaxBlockSizeBytesParseError),
+            None => {
+                if version <= Version::V1_1 {
+                    // For versions V1 and V1.1, we do not store the max block size bytes
+                    // in the metadata, so we return the default value.
+                    Ok(default_max_block_size_bytes)
+                } else {
+                    // For version V1.2 and above, we expect the max block size bytes to be present
+                    Err(FromBytesError::MissingMetadata(
+                        "max_block_size_bytes".to_string(),
+                    ))
+                }
+            }
         }
     }
 
@@ -465,11 +516,13 @@ mod test {
 
         let bf_id = Uuid::new_v4();
         let prefix_path = "";
+        let max_block_size_bytes = 8 * 1024 * 1024; // 8 MiB
         let root_writer = RootWriter::new(
             CURRENT_VERSION,
             bf_id,
             sparse_index,
             prefix_path.to_string(),
+            max_block_size_bytes,
         );
 
         root_writer
@@ -505,8 +558,10 @@ mod test {
         let bytes = root_writer
             .to_bytes::<&str>()
             .expect("To be able to serialize");
-        let root_reader = RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id)
-            .expect("To be able to deserialize");
+        // Try a different max_block_size_bytes but it should read from the metadata.
+        let root_reader =
+            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, 4 * 1024 * 1024)
+                .expect("To be able to deserialize");
 
         // Check that the sparse index is the same
         assert_eq!(
@@ -539,6 +594,112 @@ mod test {
 
         assert_eq!(root_writer.version, root_reader.version);
         assert_eq!(root_writer.id, root_reader.id);
+        assert_eq!(
+            root_writer.max_block_size_bytes,
+            root_reader.max_block_size_bytes
+        );
+    }
+
+    #[test]
+    fn test_to_from_bytes_fork() {
+        let block_ids = [
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        ];
+        let sparse_index = SparseIndexWriter::new(block_ids[0]);
+
+        let bf_id = Uuid::new_v4();
+        let prefix_path = "";
+        let max_block_size_bytes = 8 * 1024 * 1024; // 8 MiB
+        let root_writer = RootWriter::new(
+            CURRENT_VERSION,
+            bf_id,
+            sparse_index,
+            prefix_path.to_string(),
+            max_block_size_bytes,
+        );
+
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "a"), block_ids[1])
+            .expect("No error");
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "b"), block_ids[2])
+            .expect("No error");
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "c"), block_ids[3])
+            .expect("No error");
+
+        root_writer
+            .sparse_index
+            .set_count(block_ids[0], 1)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[1], 2)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[2], 3)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[3], 4)
+            .expect("Set count should succeed");
+
+        let bytes = root_writer
+            .to_bytes::<&str>()
+            .expect("To be able to serialize");
+        // Try a different max_block_size_bytes but it should read from the metadata.
+        let root_reader =
+            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, 4 * 1024 * 1024)
+                .expect("To be able to deserialize");
+        let fork_root_writer = root_reader.fork(Uuid::new_v4());
+
+        // Check that the sparse index is the same
+        assert_eq!(
+            root_writer.sparse_index.len(),
+            fork_root_writer.sparse_index.len()
+        );
+
+        // Check that the block mapping is the same
+        for (key, value) in root_writer.sparse_index.data.lock().forward.iter() {
+            assert_eq!(
+                fork_root_writer
+                    .sparse_index
+                    .data
+                    .lock()
+                    .forward
+                    .get(key)
+                    .unwrap(),
+                value
+            );
+        }
+
+        // Check that counts are the same
+        let writer_data = &root_writer.sparse_index.data.lock();
+        for (key, _) in writer_data.forward.iter() {
+            assert_eq!(
+                fork_root_writer
+                    .sparse_index
+                    .data
+                    .lock()
+                    .counts
+                    .get(key)
+                    .unwrap(),
+                writer_data.counts.get(key).unwrap()
+            );
+        }
+
+        assert_eq!(root_writer.version, fork_root_writer.version);
+        assert_eq!(
+            root_writer.max_block_size_bytes,
+            fork_root_writer.max_block_size_bytes
+        );
     }
 
     #[test]
@@ -560,8 +721,14 @@ mod test {
         let prefix_path = "";
 
         let bf_id = Uuid::new_v4();
-        let root_writer =
-            RootWriter::new(Version::V1, bf_id, sparse_index, prefix_path.to_string());
+        let writer_max_block_size_bytes = 8 * 1024 * 1024; // 8 MiB
+        let root_writer = RootWriter::new(
+            Version::V1,
+            bf_id,
+            sparse_index,
+            prefix_path.to_string(),
+            writer_max_block_size_bytes,
+        );
         root_writer
             .sparse_index
             .set_count(block_ids[0], counts[0])
@@ -581,8 +748,10 @@ mod test {
             .to_bytes::<&str>()
             .expect("To be able to serialize");
 
-        let root_reader = RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id)
-            .expect("To be able to deserialize");
+        let reader_block_size_bytes = 4 * 1024 * 1024; // 4 MiB
+        let root_reader =
+            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, reader_block_size_bytes)
+                .expect("To be able to deserialize");
 
         // Check the version is still v1
         assert_eq!(root_reader.version, Version::V1);
@@ -600,5 +769,6 @@ mod test {
                 0
             );
         }
+        assert_eq!(root_reader.max_block_size_bytes, reader_block_size_bytes);
     }
 }

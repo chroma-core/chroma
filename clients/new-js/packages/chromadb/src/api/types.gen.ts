@@ -144,7 +144,7 @@ export type HnswConfiguration = {
   ef_search?: number | null;
   max_neighbors?: number | null;
   resize_factor?: number | null;
-  space?: HnswSpace;
+  space?: null | HnswSpace;
   sync_threshold?: number | null;
 };
 
@@ -188,7 +188,7 @@ export type SpannConfiguration = {
   merge_threshold?: number | null;
   reassign_neighbor_count?: number | null;
   search_nprobe?: number | null;
-  space?: HnswSpace;
+  space?: null | HnswSpace;
   split_threshold?: number | null;
   write_nprobe?: number | null;
 };
@@ -196,7 +196,7 @@ export type SpannConfiguration = {
 export type UpdateCollectionConfiguration = {
   embedding_function?: null | EmbeddingFunctionConfiguration;
   hnsw?: null | UpdateHnswConfiguration;
-  spann?: null | SpannConfiguration;
+  spann?: null | UpdateSpannConfiguration;
 };
 
 export type UpdateCollectionPayload = {
@@ -232,6 +232,11 @@ export type UpdateHnswConfiguration = {
   num_threads?: number | null;
   resize_factor?: number | null;
   sync_threshold?: number | null;
+};
+
+export type UpdateSpannConfiguration = {
+  ef_search?: number | null;
+  search_nprobe?: number | null;
 };
 
 export type UpsertCollectionRecordsPayload = {

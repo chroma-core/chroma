@@ -93,7 +93,7 @@ func (s *collectionDb) GetCollectionByResourceName(tenantResourceName string, da
 	return collections[0], nil
 }
 
-func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*dbmodel.CollectionToGc, error) {
+func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*dbmodel.CollectionToGc, error) {
 	// There are three types of collections:
 	// 1. Regular: a collection created by a normal call to create_collection(). Does not have a root_collection_id or a lineage_file_name.
 	// 2. Root of fork tree: a collection created by a call to create_collection() which was later the source of a fork with fork(). Has a lineage_file_name.
@@ -102,7 +102,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	// For the purposes of this method, we group by fork "trees". A fork tree is a root collection and all its forks (or, in the case of regular collections, a single collection). For every fork tree, we check if at least one collection in the tree meets the GC requirements. If so, we return the root collection of the tree. We ignore forks in the response as the garbage collector will GC forks when run on the root collection.
 
 	sub := s.read_db.Table("collections").
-		Select("COALESCE(NULLIF(root_collection_id, ''), id) AS id, MIN(oldest_version_ts) AS min_oldest_version_ts").
+		Select("COALESCE(NULLIF(root_collection_id, ''), id) AS id, MIN(oldest_version_ts) AS min_oldest_version_ts, MAX(num_versions) AS max_num_versions, BOOL_OR(is_deleted) AS any_deleted").
 		Group("COALESCE(NULLIF(root_collection_id, ''), id)").
 		Where("version_file_name IS NOT NULL").
 		Where("version_file_name != ''")
@@ -122,7 +122,11 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		query = query.Where("oldest_version_ts < ?", cutoffTime)
 	}
 
-	query = query.Order("num_versions DESC")
+	if minVersionsIfAlive != nil {
+		query = query.Where("sub.max_num_versions >= ? OR sub.any_deleted = true", minVersionsIfAlive)
+	}
+
+	query = query.Order("sub.max_num_versions DESC")
 
 	// Apply limit only if provided
 	if limit != nil {

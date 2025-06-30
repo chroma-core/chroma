@@ -91,6 +91,7 @@ fn add_to_index_and_get_reader<'a>(
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -103,6 +104,7 @@ fn add_to_index_and_get_reader<'a>(
             &blockfile_provider,
             params.clone(),
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await

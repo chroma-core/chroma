@@ -11,12 +11,14 @@ use chroma_blockstore::{
     provider::{BlockfileProvider, CreateError, OpenError},
     BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
 };
+use chroma_cache::AysncPartitionedMutex;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_tracing::util::Stopwatch;
 use chroma_types::SpannPostingList;
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
+use futures::future;
 use opentelemetry::{global, KeyValue};
 use rand::seq::SliceRandom;
 use thiserror::Error;
@@ -285,9 +287,8 @@ pub struct SpannIndexWriter {
     hnsw_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     // Posting list of the centroids.
-    // TODO(Sanket): For now the lock is very coarse grained. But this should
-    // be changed in future if perf is not satisfactory.
-    pub posting_list_writer: Arc<tokio::sync::Mutex<BlockfileWriter>>,
+    pub posting_list_writer: BlockfileWriter,
+    pub posting_list_partitioned_mutex: Arc<AysncPartitionedMutex<u32>>,
     pub next_head_id: Arc<AtomicU32>,
     // Version number of each point.
     // TODO(Sanket): Finer grained locking for this map in future if perf is not satisfactory.
@@ -429,7 +430,8 @@ impl SpannIndexWriter {
             cleaned_up_hnsw_index: None,
             hnsw_provider,
             blockfile_provider,
-            posting_list_writer: Arc::new(tokio::sync::Mutex::new(posting_list_writer)),
+            posting_list_writer,
+            posting_list_partitioned_mutex: Arc::new(AysncPartitionedMutex::new(())),
             next_head_id: Arc::new(AtomicU32::new(next_head_id)),
             versions_map: Arc::new(tokio::sync::RwLock::new(versions_map)),
             dimensionality,
@@ -571,8 +573,10 @@ impl SpannIndexWriter {
     async fn create_posting_list(
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
+        pl_block_size: usize,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
-        let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string());
+        let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string())
+            .max_block_size_bytes(pl_block_size);
         bf_options = bf_options.unordered_mutations();
         match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)
@@ -599,6 +603,7 @@ impl SpannIndexWriter {
         blockfile_provider: &BlockfileProvider,
         params: InternalSpannConfiguration,
         gc_context: GarbageCollectionContext,
+        pl_block_size: usize,
         metrics: SpannMetrics,
     ) -> Result<Self, SpannIndexWriterError> {
         let distance_function = DistanceFunction::from(params.space.clone());
@@ -644,7 +649,9 @@ impl SpannIndexWriter {
             Some(posting_list_id) => {
                 Self::fork_postings_list(posting_list_id, blockfile_provider, prefix_path).await?
             }
-            None => Self::create_posting_list(blockfile_provider, prefix_path).await?,
+            None => {
+                Self::create_posting_list(blockfile_provider, prefix_path, pl_block_size).await?
+            }
         };
 
         let max_head_id = match max_head_id_bf_id {
@@ -938,10 +945,10 @@ impl SpannIndexWriter {
         let doc_versions;
         let doc_embeddings;
         {
-            let write_guard = self.posting_list_writer.lock().await;
             // TODO(Sanket): Check if head is deleted, can happen if another concurrent thread
             // deletes it.
-            (doc_offset_ids, doc_versions, doc_embeddings) = write_guard
+            (doc_offset_ids, doc_versions, doc_embeddings) = self
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
                 .await
                 .map_err(|e| {
@@ -1060,7 +1067,7 @@ impl SpannIndexWriter {
         let mut new_head_embeddings = vec![None; 2];
         let clustering_output;
         {
-            let write_guard = self.posting_list_writer.lock().await;
+            let write_guard = self.posting_list_partitioned_mutex.lock(&head_id).await;
             if self.is_head_deleted(head_id as usize).await? {
                 tracing::info!(
                     "Head {} got concurrently deleted for adding point {} at version {}. Reassigning now",
@@ -1082,7 +1089,8 @@ impl SpannIndexWriter {
                 ))
                 .await;
             }
-            let (mut doc_offset_ids, mut doc_versions, mut doc_embeddings) = write_guard
+            let (mut doc_offset_ids, mut doc_versions, mut doc_embeddings) = self
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
                 .await
                 .map_err(|e| {
@@ -1151,7 +1159,7 @@ impl SpannIndexWriter {
                     );
                     return Ok(());
                 }
-                write_guard
+                self.posting_list_writer
                     .set("", head_id, &posting_list)
                     .await
                     .map_err(|e| {
@@ -1221,7 +1229,7 @@ impl SpannIndexWriter {
                     doc_versions: &single_doc_versions,
                     doc_embeddings: &single_doc_embeddings,
                 };
-                write_guard
+                self.posting_list_writer
                     .set("", head_id, &single_posting_list)
                     .await
                     .map_err(|e| {
@@ -1277,7 +1285,7 @@ impl SpannIndexWriter {
                             doc_versions: &new_doc_versions[k],
                             doc_embeddings: &new_posting_lists[k],
                         };
-                        write_guard
+                        self.posting_list_writer
                             .set("", head_id, &posting_list)
                             .await
                             .map_err(|e| {
@@ -1308,7 +1316,7 @@ impl SpannIndexWriter {
                             doc_embeddings: &new_posting_lists[k],
                         };
                         // Insert to postings list.
-                        write_guard
+                        self.posting_list_writer
                             .set("", next_id, &posting_list)
                             .await
                             .map_err(|e| {
@@ -1435,8 +1443,7 @@ impl SpannIndexWriter {
                     doc_versions: &[version],
                     doc_embeddings: embeddings,
                 };
-                let write_guard = self.posting_list_writer.lock().await;
-                write_guard
+                self.posting_list_writer
                     .set("", next_id, &posting_list)
                     .await
                     .map_err(|e| {
@@ -1661,12 +1668,13 @@ impl SpannIndexWriter {
         let mut target_embedding = vec![];
         let mut target_head = 0;
         {
-            let pl_guard = self.posting_list_writer.lock().await;
+            // TODO(Sanket): Add a lock on the head here if this is called concurrently.
             // If head is concurrently deleted then skip.
             if self.is_head_deleted(head_id).await? {
                 return Ok(());
             }
-            (doc_offset_ids, doc_versions, doc_embeddings) = pl_guard
+            (doc_offset_ids, doc_versions, doc_embeddings) = self
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
                 .await
                 .map_err(|e| {
@@ -1685,7 +1693,7 @@ impl SpannIndexWriter {
                     doc_versions: &doc_versions,
                     doc_embeddings: &doc_embeddings,
                 };
-                pl_guard
+                self.posting_list_writer
                     .set("", head_id as u32, &posting_list)
                     .await
                     .map_err(|e| {
@@ -1723,14 +1731,15 @@ impl SpannIndexWriter {
                 if nearest_head_id == head_id {
                     continue;
                 }
-                // TODO(Sanket): If and when the lock is more fine grained, then
+                // TODO(Sanket): If and when GC is concurrent, then
                 // need to acquire a lock on the nearest_head_id here.
                 // TODO(Sanket): Also need to check if the head is deleted concurrently then.
                 let (
                     nearest_head_doc_offset_ids,
                     nearest_head_doc_versions,
                     nearest_head_doc_embeddings,
-                ) = pl_guard
+                ) = self
+                    .posting_list_writer
                     .get_owned::<u32, &SpannPostingList<'_>>("", nearest_head_id as u32)
                     .await
                     .map_err(|e| {
@@ -1769,7 +1778,7 @@ impl SpannIndexWriter {
                     doc_embeddings: &doc_embeddings,
                 };
                 if target_cluster_len > source_cluster_len {
-                    pl_guard
+                    self.posting_list_writer
                         .set("", nearest_head_id as u32, &merged_posting_list)
                         .await
                         .map_err(|e| {
@@ -1793,7 +1802,7 @@ impl SpannIndexWriter {
                         .num_heads_deleted
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 } else {
-                    pl_guard
+                    self.posting_list_writer
                         .set("", head_id as u32, &merged_posting_list)
                         .await
                         .map_err(|e| {
@@ -2212,7 +2221,7 @@ impl SpannIndexWriter {
         )];
         let pl_flusher = {
             let stopwatch = Stopwatch::new(&self.metrics.pl_commit_latency, attribute);
-            let pl_writer_clone = self.posting_list_writer.lock().await.clone();
+            let pl_writer_clone = self.posting_list_writer.clone();
             let pl_flusher = pl_writer_clone
                 .commit::<u32, &SpannPostingList<'_>>()
                 .await
@@ -2628,6 +2637,10 @@ impl<'me> SpannIndexReader<'me> {
         })
     }
 
+    fn is_version_outdated(actual_version: u32, doc_version: u32) -> bool {
+        actual_version == 0 || doc_version < actual_version
+    }
+
     async fn is_outdated(
         &self,
         doc_offset_id: u32,
@@ -2646,7 +2659,7 @@ impl<'me> SpannIndexReader<'me> {
                 SpannIndexReaderError::VersionsMapReadError(e)
             })?
             .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
-        Ok(actual_version == 0 || doc_version < actual_version)
+        Ok(Self::is_version_outdated(actual_version, doc_version))
     }
 
     pub async fn fetch_posting_list(
@@ -2663,13 +2676,31 @@ impl<'me> SpannIndexReader<'me> {
             })?
             .ok_or(SpannIndexReaderError::PostingListNotFound)?;
 
+        if res.doc_offset_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Fetch all the versions in parallel.
+        let actual_versions =
+            future::try_join_all(res.doc_offset_ids.iter().map(|offset_id| async {
+                self.versions_map.get("", *offset_id).await.map_err(|e| {
+                    tracing::error!(
+                        "Error getting version for doc offset id {}: {}",
+                        *offset_id,
+                        e
+                    );
+                    SpannIndexReaderError::VersionsMapReadError(e)
+                })
+            }))
+            .await?
+            .into_iter()
+            .collect::<Option<Vec<u32>>>()
+            .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
+
         let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
         let mut unique_ids = HashSet::new();
         for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
-            if self
-                .is_outdated(*doc_offset_id, res.doc_versions[index])
-                .await?
-            {
+            if Self::is_version_outdated(actual_versions[index], res.doc_versions[index]) {
                 continue;
             }
             if unique_ids.contains(doc_offset_id) {
@@ -2832,6 +2863,7 @@ mod tests {
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2844,6 +2876,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -2887,8 +2920,8 @@ mod tests {
         }
         {
             // Posting list should have 100 points.
-            let pl_read_guard = writer.posting_list_writer.lock().await;
-            let pl = pl_read_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 1)
                 .await
                 .expect("Error getting posting list")
@@ -2918,13 +2951,14 @@ mod tests {
         }
         {
             // Posting list should have 100 points.
-            let pl_read_guard = writer.posting_list_writer.lock().await;
-            let pl1 = pl_read_guard
+            let pl1 = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", emb_1_id)
                 .await
                 .expect("Error getting posting list")
                 .unwrap();
-            let pl2 = pl_read_guard
+            let pl2 = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", emb_2_id)
                 .await
                 .expect("Error getting posting list")
@@ -2978,8 +3012,8 @@ mod tests {
         }
         {
             // Posting list should have 100 points.
-            let pl_read_guard = writer.posting_list_writer.lock().await;
-            let pl = pl_read_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", emb_1_id)
                 .await
                 .expect("Error getting posting list")
@@ -2987,7 +3021,8 @@ mod tests {
             assert_eq!(pl.0.len(), 100);
             assert_eq!(pl.1.len(), 100);
             assert_eq!(pl.2.len(), 200);
-            let pl = pl_read_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", emb_2_id)
                 .await
                 .expect("Error getting posting list")
@@ -3047,6 +3082,7 @@ mod tests {
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3059,6 +3095,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -3076,7 +3113,6 @@ mod tests {
                 .expect("Error adding to hnsw index");
         }
         {
-            let pl_guard = writer.posting_list_writer.lock().await;
             let mut doc_offset_ids = vec![0u32; 100];
             let mut doc_versions = vec![0; 100];
             let mut doc_embeddings = vec![0.0; 200];
@@ -3092,7 +3128,8 @@ mod tests {
                 doc_versions: &doc_versions,
                 doc_embeddings: &doc_embeddings,
             };
-            pl_guard
+            writer
+                .posting_list_writer
                 .set("", 1, &pl)
                 .await
                 .expect("Error writing to posting list");
@@ -3107,7 +3144,8 @@ mod tests {
                 doc_versions: &doc_versions,
                 doc_embeddings: &doc_embeddings,
             };
-            pl_guard
+            writer
+                .posting_list_writer
                 .set("", 2, &pl)
                 .await
                 .expect("Error writing to posting list");
@@ -3146,8 +3184,8 @@ mod tests {
         }
         {
             // The posting lists should not be changed at all.
-            let pl_guard = writer.posting_list_writer.lock().await;
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 1)
                 .await
                 .expect("Error getting posting list")
@@ -3155,7 +3193,8 @@ mod tests {
             assert_eq!(pl.0.len(), 100);
             assert_eq!(pl.1.len(), 100);
             assert_eq!(pl.2.len(), 200);
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 2)
                 .await
                 .expect("Error getting posting list")
@@ -3172,8 +3211,8 @@ mod tests {
         // Expect the posting lists to be 60. Also validate the ids, versions and embeddings
         // individually.
         {
-            let pl_guard = writer.posting_list_writer.lock().await;
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 1)
                 .await
                 .expect("Error getting posting list")
@@ -3187,7 +3226,8 @@ mod tests {
                 assert_eq!(pl.2[(point - 41) * 2], point as f32);
                 assert_eq!(pl.2[(point - 41) * 2 + 1], point as f32);
             }
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 2)
                 .await
                 .expect("Error getting posting list")
@@ -3305,6 +3345,7 @@ mod tests {
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3317,6 +3358,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -3334,7 +3376,6 @@ mod tests {
                 .expect("Error adding to hnsw index");
         }
         {
-            let pl_guard = writer.posting_list_writer.lock().await;
             let mut doc_offset_ids = vec![0u32; 100];
             let mut doc_versions = vec![0; 100];
             let mut doc_embeddings = vec![0.0; 200];
@@ -3350,7 +3391,8 @@ mod tests {
                 doc_versions: &doc_versions,
                 doc_embeddings: &doc_embeddings,
             };
-            pl_guard
+            writer
+                .posting_list_writer
                 .set("", 1, &pl)
                 .await
                 .expect("Error writing to posting list");
@@ -3365,7 +3407,8 @@ mod tests {
                 doc_versions: &doc_versions,
                 doc_embeddings: &doc_embeddings,
             };
-            pl_guard
+            writer
+                .posting_list_writer
                 .set("", 2, &pl)
                 .await
                 .expect("Error writing to posting list");
@@ -3414,8 +3457,8 @@ mod tests {
         }
         {
             // The posting lists should not be changed at all.
-            let pl_guard = writer.posting_list_writer.lock().await;
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 1)
                 .await
                 .expect("Error getting posting list")
@@ -3423,7 +3466,8 @@ mod tests {
             assert_eq!(pl.0.len(), 100);
             assert_eq!(pl.1.len(), 100);
             assert_eq!(pl.2.len(), 200);
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 2)
                 .await
                 .expect("Error getting posting list")
@@ -3477,8 +3521,8 @@ mod tests {
         }
         // Expect the posting lists with id 1 to be 79.
         {
-            let pl_guard = writer.posting_list_writer.lock().await;
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 1)
                 .await
                 .expect("Error getting posting list")
@@ -3529,6 +3573,7 @@ mod tests {
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3541,6 +3586,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -3573,7 +3619,6 @@ mod tests {
         let mut split_doc_embeddings3 = vec![0.0; 100];
         {
             let mut rng = rand::thread_rng();
-            let pl_guard = writer.posting_list_writer.lock().await;
             for i in 1..=50 {
                 // Generate random radius between 0 and 1
                 let r = rng.gen::<f32>().sqrt(); // sqrt for uniform distribution
@@ -3595,7 +3640,8 @@ mod tests {
                 doc_versions: &split_doc_versions1,
                 doc_embeddings: &split_doc_embeddings1,
             };
-            pl_guard
+            writer
+                .posting_list_writer
                 .set("", 1, &posting_list)
                 .await
                 .expect("Error writing to posting list");
@@ -3622,7 +3668,8 @@ mod tests {
                 doc_versions: &split_doc_versions3,
                 doc_embeddings: &split_doc_embeddings3,
             };
-            pl_guard
+            writer
+                .posting_list_writer
                 .set("", 3, &posting_list)
                 .await
                 .expect("Error writing to posting list");
@@ -3648,7 +3695,8 @@ mod tests {
                 doc_versions: &split_doc_versions2,
                 doc_embeddings: &split_doc_embeddings2,
             };
-            pl_guard
+            writer
+                .posting_list_writer
                 .set("", 2, &posting_list)
                 .await
                 .expect("Error writing to posting list");
@@ -3676,9 +3724,9 @@ mod tests {
             .expect("Expected reassign to succeed");
         // See the reassigned points.
         {
-            let pl_guard = writer.posting_list_writer.lock().await;
             // Center 1 should remain unchanged.
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 1)
                 .await
                 .expect("Error getting posting list")
@@ -3696,7 +3744,8 @@ mod tests {
                 );
             }
             // Center 2 should get 50 points, all with version 2 migrating from center 3.
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 2)
                 .await
                 .expect("Error getting posting list")
@@ -3716,7 +3765,8 @@ mod tests {
             // Center 3 should get 100 points. 50 points with version 1 which weere
             // originally in center 3 and 50 points with version 2 which were originally
             // in center 2.
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 3)
                 .await
                 .expect("Error getting posting list")
@@ -3792,6 +3842,7 @@ mod tests {
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3804,6 +3855,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -3836,7 +3888,6 @@ mod tests {
         let mut doc_embeddings3 = vec![0.0; 140];
         {
             let mut rng = rand::thread_rng();
-            let pl_guard = writer.posting_list_writer.lock().await;
             // Insert 70 points within a radius of 1 to center 1.
             for i in 1..=70 {
                 // Generate random radius between 0 and 1
@@ -3893,7 +3944,8 @@ mod tests {
                 doc_versions: &doc_versions1,
                 doc_embeddings: &doc_embeddings1,
             };
-            pl_guard
+            writer
+                .posting_list_writer
                 .set("", 1, &spann_posting_list)
                 .await
                 .expect("Error writing to posting list");
@@ -3902,7 +3954,8 @@ mod tests {
                 doc_versions: &doc_versions2,
                 doc_embeddings: &doc_embeddings2,
             };
-            pl_guard
+            writer
+                .posting_list_writer
                 .set("", 2, &spann_posting_list)
                 .await
                 .expect("Error writing to posting list");
@@ -3911,7 +3964,8 @@ mod tests {
                 doc_versions: &doc_versions3,
                 doc_embeddings: &doc_embeddings3,
             };
-            pl_guard
+            writer
+                .posting_list_writer
                 .set("", 3, &spann_posting_list)
                 .await
                 .expect("Error writing to posting list");
@@ -3935,8 +3989,8 @@ mod tests {
             .expect("Error garbage collecting");
         // check the posting lists.
         {
-            let pl_guard = writer.posting_list_writer.lock().await;
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 1)
                 .await
                 .expect("Error getting posting list")
@@ -3953,7 +4007,8 @@ mod tests {
                     doc_embeddings1[(point - 1) * 2 + 1]
                 );
             }
-            let pl = pl_guard
+            let pl = writer
+                .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 3)
                 .await
                 .expect("Error getting posting list")
@@ -4099,6 +4154,7 @@ mod tests {
             .await
             .expect("Error converting config to gc context");
             let prefix_path = "";
+            let pl_block_size = 5 * 1024 * 1024;
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 None,
@@ -4111,6 +4167,7 @@ mod tests {
                 &blockfile_provider,
                 params,
                 gc_context,
+                pl_block_size,
                 SpannMetrics::default(),
             )
             .await
@@ -4213,6 +4270,7 @@ mod tests {
             .await
             .expect("Error converting config to gc context");
             let prefix_path = "";
+            let pl_block_size = 5 * 1024 * 1024;
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 None,
@@ -4225,6 +4283,7 @@ mod tests {
                 &blockfile_provider,
                 params,
                 gc_context,
+                pl_block_size,
                 SpannMetrics::default(),
             )
             .await
@@ -4351,6 +4410,7 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let pl_block_size = 5 * 1024 * 1024;
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4363,6 +4423,7 @@ mod tests {
                     &blockfile_provider,
                     params.clone(),
                     gc_context.clone(),
+                    pl_block_size,
                     SpannMetrics::default(),
                 )
                 .await
@@ -4492,6 +4553,7 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let pl_block_size = 5 * 1024 * 1024;
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4504,6 +4566,7 @@ mod tests {
                     &blockfile_provider,
                     params.clone(),
                     gc_context.clone(),
+                    pl_block_size,
                     SpannMetrics::default(),
                 )
                 .await
@@ -4654,6 +4717,7 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let pl_block_size = 5 * 1024 * 1024;
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4666,6 +4730,7 @@ mod tests {
                     &blockfile_provider,
                     params.clone(),
                     gc_context.clone(),
+                    pl_block_size,
                     SpannMetrics::default(),
                 )
                 .await
@@ -4770,6 +4835,7 @@ mod tests {
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let pl_block_size = 5 * 1024 * 1024;
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 hnsw_path.as_ref(),
@@ -4782,6 +4848,7 @@ mod tests {
                 &blockfile_provider,
                 params.clone(),
                 gc_context.clone(),
+                pl_block_size,
                 SpannMetrics::default(),
             )
             .await
@@ -4890,6 +4957,7 @@ mod tests {
                 count += 1;
             }
             assert_eq!(results.len(), count);
+            let pl_block_size = 5 * 1024 * 1024;
             // After GC, it should return the same result.
             let mut writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
@@ -4903,6 +4971,7 @@ mod tests {
                 &blockfile_provider,
                 params,
                 gc_context,
+                pl_block_size,
                 SpannMetrics::default(),
             )
             .await
