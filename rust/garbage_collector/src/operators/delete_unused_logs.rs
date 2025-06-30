@@ -83,6 +83,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             return Err(DeleteUnusedLogsError::Wal3(err))
                         }
                     };
+                    // See README.md in wal3 for a description of why this happens in three phases.
                     match writer.garbage_collect_phase1_compute_garbage(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
                         Ok(true) => {},
                         Ok(false) => return Ok(()),
