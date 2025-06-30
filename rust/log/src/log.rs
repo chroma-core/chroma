@@ -3,6 +3,7 @@ use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
 use chroma_error::ChromaError;
+use chroma_memberlist::client_manager::ClientAssignmentError;
 use chroma_types::{
     CollectionUuid, ForkCollectionError, ForkLogsResponse, LogRecord, OperationRecord, ResetError,
     ResetResponse,
@@ -19,6 +20,20 @@ pub struct CollectionRecord {
     pub offset: i64,
     pub collection_version: i32,
     pub collection_logical_size_bytes: u64,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GarbageCollectError {
+    #[error("garbage collect error: {0}")]
+    Status(#[from] tonic::Status),
+    #[error(transparent)]
+    ClientAssignerError(#[from] ClientAssignmentError),
+    #[error("could not connect: {0}")]
+    Resolution(String),
+    #[error("log is not enabled/configured")]
+    NotEnabled,
+    #[error("log implementation not supported")]
+    Unimplemented,
 }
 
 #[derive(Clone, Debug)]
@@ -228,6 +243,28 @@ impl Log {
             Log::Sqlite(_) => true,
             Log::Grpc(log) => log.is_ready(),
             Log::InMemory(_) => true,
+        }
+    }
+
+    pub async fn garbage_collect_phase2(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GarbageCollectError> {
+        match self {
+            Log::Grpc(log) => log.garbage_collect_phase2(collection_id).await,
+            Log::Sqlite(_) => Err(GarbageCollectError::Unimplemented),
+            Log::InMemory(_) => Ok(()),
+        }
+    }
+
+    pub async fn garbage_collect_phase2_for_dirty_log(
+        &mut self,
+        ordinal: u64,
+    ) -> Result<(), GarbageCollectError> {
+        match self {
+            Log::Grpc(log) => log.garbage_collect_phase2_for_dirty_log(ordinal).await,
+            Log::Sqlite(_) => Err(GarbageCollectError::Unimplemented),
+            Log::InMemory(_) => Ok(()),
         }
     }
 }

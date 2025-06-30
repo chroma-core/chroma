@@ -249,7 +249,7 @@ The cursor store is used to inhibit garbage collection.
 The garbage collection dance for the log is driven by a process external to wal3.  It goes something
 like:
 
-Phase 1.
+Phase 1:  Compute garbage
 
 1.  Read all cursors
 2.  Read the manifest
@@ -261,11 +261,11 @@ Phase 1.
     not support if-match on delete, so the garbage file will overwritten with an empty file each
     time GC is done rather than being deleted.
 
-Phase 2.
+Phase 2:  Update manifest
 
 5.  Wait until the writer writes a manifest that does not contain the garbage's fragments.
 
-Phase 3.
+Phase 3:  Delete garbage
 
 6.  Wait a sufficiently long time so that readers cannot see the fragments.
 7.  Delete the contents of the garbage file.
@@ -275,6 +275,10 @@ If this process crashes at any point before 4 is complete, the garbage collector
 taken no stateful action.  If the process crashes after the garbage file is written, step 5 will
 synchronize with the writer to ensure that the garbage file is not deleted until the writer no
 longer references it.
+
+The point of doing this in three phases is to ensure that deleting of garbage happens in just one
+service:  The service calling phase3.  Phases 1 and 2 could technically live together, but were
+separated so as to make the minimal amount of I/O to update the manifest.
 
 ## Timing Assumptions
 
