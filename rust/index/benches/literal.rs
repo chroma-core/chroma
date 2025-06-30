@@ -1,7 +1,7 @@
-use std::fs::{read_dir, File};
-
-use arrow::array::AsArray;
-use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
+use chroma_benchmark::{
+    benchmark::{bench_run, tokio_multi_thread},
+    datasets::rust::TheStackDedupRust,
+};
 use chroma_blockstore::{
     arrow::provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
     provider::BlockfileProvider,
@@ -12,55 +12,148 @@ use chroma_index::fulltext::types::{DocumentMutation, FullTextIndexReader, FullT
 use chroma_storage::{local::LocalStorage, Storage};
 use chroma_types::regex::{literal_expr::NgramLiteralProvider, ChromaRegex};
 use criterion::{criterion_group, criterion_main, Criterion};
-use indicatif::{ParallelProgressIterator, ProgressIterator};
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use tantivy::tokenizer::NgramTokenizer;
 use tempfile::tempdir;
 
 const BLOCK_SIZE: usize = 1 << 23;
-const MAX_CODE_LENGTH: usize = 1 << 12;
 
-const FTS_PATTERNS: &[&str] = &[r"unreachable", r"unsafe", r"use std::collections::HashMap;"];
-const REGEX_PATTERNS: &[&str] = &[
-    r"\.collect::<.+>()",
-    r"(?i)(TODO|FIXME)",
-    r"!\[allow\(clippy::.+\)\]",
+const FTS_PATTERNS: &[&str] = &[
+    r"std::ptr::",
+    r"env_logger::",
+    r"tracing::",
+    r"futures::",
+    r"tokio::",
+    r"async_std::",
+    r"crossbeam::",
+    r"atomic::",
+    r"mpsc::",
+    r"Some(",
+    r"Ok(",
+    r"Err(",
+    r"None",
+    r"unwrap()",
+    r"expect()",
+    r"clone()",
+    r"Box::new",
+    r"Rc::new",
+    r"RefCell::new",
+    r"debug!(",
+    r"error!(",
+    r"warn!(",
+    r"panic!(",
+    r"todo!(",
+    r"join!(",
+    r"select!(",
+    r"unimplemented!(",
+    r"std::mem::transmute",
+    r"std::ffi::",
+    r"thread::sleep",
+    r"std::fs::File::open",
+    r"std::net::TcpListener",
+    r"use serde::",
+    r"use rand::",
+    r"use tokio::",
+    r"use futures::",
+    r"use anyhow::",
+    r"use thiserror::",
+    r"use chrono::",
+    r"serde::Serialize",
+    r"serde::Deserialize",
+    r"regex::Regex::new",
+    r"chrono::DateTime",
+    r"uuid::Uuid::new_v4",
+    r"proc_macro::TokenStream",
+    r"assert_eq!(",
+    r"assert_ne!(",
+    r"#[allow(dead_code)]",
+    r"#[allow(unused)]",
+    r"#[allow(unused_variables)]",
+    r"#[allow(unused_mut)]",
+    r"#[allow",
+    r"#[deny",
+    r"#[warn",
+    r"#[cfg",
+    r"#[feature",
+    r"#[derive(",
+    r"#[proc_macro]",
+    r"#[proc_macro_derive(",
+    r"#[proc_macro_attribute]",
+    r"#[test]",
+    r"#[tokio::test]",
+    r"///",
+    r"//!",
+    r"test_",
+    r"_tmp",
+    r"_old",
 ];
-
-fn collect_rust_code() -> Vec<String> {
-    let files = read_dir("/Users/macronova/Desktop/rust-stack")
-        .expect("Directory should exist")
-        .collect::<Result<Vec<_>, _>>()
-        .expect("Files should be present");
-    let parquet_batches = files
-        .into_iter()
-        .progress()
-        .flat_map(|entry| {
-            ParquetRecordBatchReaderBuilder::try_new(
-                File::open(entry.path()).expect("File should be readable"),
-            )
-            .expect("Parquet file should be present")
-            .build()
-            .expect("Parquet file should be readable")
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .expect("Parquet file should be valid");
-    parquet_batches
-        .into_par_iter()
-        .progress()
-        .flat_map(|batch| {
-            batch
-                .column_by_name("content")
-                .expect("Content column should be present")
-                .as_string::<i32>()
-                .iter()
-                .map(|os| os.unwrap_or_default().to_string())
-                .collect::<Vec<_>>()
-        })
-        .filter(|code| code.len() < MAX_CODE_LENGTH)
-        .collect()
-}
+const REGEX_PATTERNS: &[&str] = &[
+    r"(?m)^\s*fn\s+\w+",
+    r"(?m)^\s*pub\s+fn\s+\w+",
+    r"(?m)^\s*async\s+fn\s+\w+",
+    r"(?m)^\s*pub\s+async\s+fn\s+\w+",
+    r"fn\s+\w+\s*\([^)]*\)\s*->\s*\w+",
+    r"fn\s+\w+\s*\([^)]*Result<[^>]+>",
+    r"fn\s+\w+\s*\([^)]*Option<[^>]+>",
+    r"(\w+)::(\w+)\(",
+    r"\w+\.\w+\(",
+    r"(?m)^\s*struct\s+\w+",
+    r"(?m)^\s*pub\s+struct\s+\w+",
+    r"(?m)^\s*enum\s+\w+",
+    r"(?m)^\s*pub\s+enum\s+\w+",
+    r"(?m)^\s*trait\s+\w+",
+    r"(?m)^\s*pub\s+trait\s+\w+",
+    r"impl\s+(\w+)\s+for\s+(\w+)",
+    r"impl\s+(\w+)",
+    r"impl\s*<.*>\s*\w+",
+    r"\bSelf::\w+\(",
+    r"(?m)^\s*unsafe\s+fn\s+",
+    r"(?m)^\s*unsafe\s+\{",
+    r"\bunsafe\b",
+    r"fn\s+\w+\s*<",
+    r"struct\s+\w+\s*<",
+    r"enum\s+\w+\s*<",
+    r"impl\s*<.*>",
+    r"<[A-Za-z, ]+>",
+    r"\b'\w+\b",
+    r"&'\w+",
+    r"<'\w+>",
+    r"for<'\w+>",
+    r"macro_rules!\s*\w+",
+    r"\w+!\s*\(",
+    r"\blog!\s*\(",
+    r"\bdbg!\s*\(",
+    r"\bprintln!\s*\(",
+    r"\bassert!\s*\(",
+    r"log::\w+\(",
+    r"Result<[^>]+>",
+    r"Option<[^>]+>",
+    r"match\s+\w+\s*\{",
+    r"mod\s+tests\s*\{",
+    r"async\s+fn\s+\w+",
+    r"await\s*;?",
+    r"std::thread::spawn",
+    r"tokio::spawn",
+    r"match\s+.+\s*\{",
+    r"if\s+let\s+Some\(",
+    r"while\s+let\s+Some\(",
+    r"//.*",
+    r"/\*.*?\*/",
+    r"//\s*TODO",
+    r"//\s*FIXME",
+    r"//\s*HACK",
+    r"unsafe\s*\{",
+    r"<'\w+,\s*'\w+>",
+    r"for<'\w+>",
+    r"&'\w+\s*\w+",
+    r"where\s+",
+    r"T:\s*\w+",
+    r"dyn\s+\w+",
+    r"Box<dyn\s+\w+>",
+    r"impl\s+Trait",
+    r"temp\w*",
+    r"foo|bar|baz",
+    r"let\s+mut\s+\w+",
+];
 
 async fn bench_fts_query((reader, pattern): (FullTextIndexReader<'_>, &str)) {
     reader
@@ -78,7 +171,14 @@ async fn bench_literal_expr((reader, pattern): (FullTextIndexReader<'_>, ChromaR
 
 fn bench_literal(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
-    let source_code_chunk = collect_rust_code();
+    let source_code_chunk = runtime.block_on(async {
+        TheStackDedupRust::init()
+            .await
+            .expect("the-stack-dedup-rust dataset should be initializable")
+            .documents()
+            .await
+            .expect("the dataset should contain documents")
+    });
 
     let temp_dir = tempdir().expect("Temporary directory should be creatable");
     let storage = Storage::Local(LocalStorage::new(

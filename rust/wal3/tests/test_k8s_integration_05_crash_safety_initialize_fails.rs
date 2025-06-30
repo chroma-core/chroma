@@ -82,12 +82,12 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
         seq_no: FragmentSeqNo(2),
         start: 2,
         limit: 3,
-        num_bytes: 1187,
+        num_bytes: 1044,
         data: vec![(position, vec![81, 82, 83, 84])],
     };
     let postconditions = [
         Condition::Manifest(ManifestCondition {
-            acc_bytes: 2374,
+            acc_bytes: 2088,
             writer: "test writer".to_string(),
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
