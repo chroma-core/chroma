@@ -65,10 +65,7 @@ from chromadb.utils.embedding_functions.mistral_embedding_function import (
     MistralEmbeddingFunction,
 )
 
-try:
-    from chromadb.is_thin_client import is_thin_client
-except ImportError:
-    is_thin_client = False
+
 
 # Get all the class names for backward compatibility
 _all_classes: Set[str] = {
@@ -104,8 +101,6 @@ def get_builtins() -> Set[str]:
 
 class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(self) -> None:
-        if is_thin_client:
-            return
 
     def __call__(self, input: Documents) -> Embeddings:
         # Delegate to ONNXMiniLM_L6_V2
