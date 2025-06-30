@@ -316,6 +316,7 @@ impl WorkerServer {
                 blockfile_provider: self.blockfile_provider.clone(),
                 garbage_collection_context: None,
                 metrics: SpannMetrics::default(),
+                pl_block_size: None,
             };
             let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
                 .into_iter()

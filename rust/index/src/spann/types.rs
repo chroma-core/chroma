@@ -18,6 +18,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_tracing::util::Stopwatch;
 use chroma_types::SpannPostingList;
 use chroma_types::{CollectionUuid, InternalSpannConfiguration};
+use futures::future;
 use opentelemetry::{global, KeyValue};
 use rand::seq::SliceRandom;
 use thiserror::Error;
@@ -572,8 +573,10 @@ impl SpannIndexWriter {
     async fn create_posting_list(
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
+        pl_block_size: usize,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
-        let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string());
+        let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string())
+            .max_block_size_bytes(pl_block_size);
         bf_options = bf_options.unordered_mutations();
         match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)
@@ -600,6 +603,7 @@ impl SpannIndexWriter {
         blockfile_provider: &BlockfileProvider,
         params: InternalSpannConfiguration,
         gc_context: GarbageCollectionContext,
+        pl_block_size: usize,
         metrics: SpannMetrics,
     ) -> Result<Self, SpannIndexWriterError> {
         let distance_function = DistanceFunction::from(params.space.clone());
@@ -645,7 +649,9 @@ impl SpannIndexWriter {
             Some(posting_list_id) => {
                 Self::fork_postings_list(posting_list_id, blockfile_provider, prefix_path).await?
             }
-            None => Self::create_posting_list(blockfile_provider, prefix_path).await?,
+            None => {
+                Self::create_posting_list(blockfile_provider, prefix_path, pl_block_size).await?
+            }
         };
 
         let max_head_id = match max_head_id_bf_id {
@@ -2631,6 +2637,10 @@ impl<'me> SpannIndexReader<'me> {
         })
     }
 
+    fn is_version_outdated(actual_version: u32, doc_version: u32) -> bool {
+        actual_version == 0 || doc_version < actual_version
+    }
+
     async fn is_outdated(
         &self,
         doc_offset_id: u32,
@@ -2649,7 +2659,7 @@ impl<'me> SpannIndexReader<'me> {
                 SpannIndexReaderError::VersionsMapReadError(e)
             })?
             .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
-        Ok(actual_version == 0 || doc_version < actual_version)
+        Ok(Self::is_version_outdated(actual_version, doc_version))
     }
 
     pub async fn fetch_posting_list(
@@ -2666,13 +2676,31 @@ impl<'me> SpannIndexReader<'me> {
             })?
             .ok_or(SpannIndexReaderError::PostingListNotFound)?;
 
+        if res.doc_offset_ids.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Fetch all the versions in parallel.
+        let actual_versions =
+            future::try_join_all(res.doc_offset_ids.iter().map(|offset_id| async {
+                self.versions_map.get("", *offset_id).await.map_err(|e| {
+                    tracing::error!(
+                        "Error getting version for doc offset id {}: {}",
+                        *offset_id,
+                        e
+                    );
+                    SpannIndexReaderError::VersionsMapReadError(e)
+                })
+            }))
+            .await?
+            .into_iter()
+            .collect::<Option<Vec<u32>>>()
+            .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
+
         let mut posting_lists = Vec::with_capacity(res.doc_offset_ids.len());
         let mut unique_ids = HashSet::new();
         for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
-            if self
-                .is_outdated(*doc_offset_id, res.doc_versions[index])
-                .await?
-            {
+            if Self::is_version_outdated(actual_versions[index], res.doc_versions[index]) {
                 continue;
             }
             if unique_ids.contains(doc_offset_id) {
@@ -2835,6 +2863,7 @@ mod tests {
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -2847,6 +2876,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -3052,6 +3082,7 @@ mod tests {
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3064,6 +3095,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -3313,6 +3345,7 @@ mod tests {
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3325,6 +3358,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -3539,6 +3573,7 @@ mod tests {
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3551,6 +3586,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -3806,6 +3842,7 @@ mod tests {
         .await
         .expect("Error converting config to gc context");
         let prefix_path = "";
+        let pl_block_size = 5 * 1024 * 1024;
         let mut writer = SpannIndexWriter::from_id(
             &hnsw_provider,
             None,
@@ -3818,6 +3855,7 @@ mod tests {
             &blockfile_provider,
             params,
             gc_context,
+            pl_block_size,
             SpannMetrics::default(),
         )
         .await
@@ -4116,6 +4154,7 @@ mod tests {
             .await
             .expect("Error converting config to gc context");
             let prefix_path = "";
+            let pl_block_size = 5 * 1024 * 1024;
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 None,
@@ -4128,6 +4167,7 @@ mod tests {
                 &blockfile_provider,
                 params,
                 gc_context,
+                pl_block_size,
                 SpannMetrics::default(),
             )
             .await
@@ -4230,6 +4270,7 @@ mod tests {
             .await
             .expect("Error converting config to gc context");
             let prefix_path = "";
+            let pl_block_size = 5 * 1024 * 1024;
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 None,
@@ -4242,6 +4283,7 @@ mod tests {
                 &blockfile_provider,
                 params,
                 gc_context,
+                pl_block_size,
                 SpannMetrics::default(),
             )
             .await
@@ -4368,6 +4410,7 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let pl_block_size = 5 * 1024 * 1024;
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4380,6 +4423,7 @@ mod tests {
                     &blockfile_provider,
                     params.clone(),
                     gc_context.clone(),
+                    pl_block_size,
                     SpannMetrics::default(),
                 )
                 .await
@@ -4509,6 +4553,7 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let pl_block_size = 5 * 1024 * 1024;
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4521,6 +4566,7 @@ mod tests {
                     &blockfile_provider,
                     params.clone(),
                     gc_context.clone(),
+                    pl_block_size,
                     SpannMetrics::default(),
                 )
                 .await
@@ -4671,6 +4717,7 @@ mod tests {
                 let blockfile_provider =
                     new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
                 let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+                let pl_block_size = 5 * 1024 * 1024;
                 let writer = SpannIndexWriter::from_id(
                     &hnsw_provider,
                     hnsw_path.as_ref(),
@@ -4683,6 +4730,7 @@ mod tests {
                     &blockfile_provider,
                     params.clone(),
                     gc_context.clone(),
+                    pl_block_size,
                     SpannMetrics::default(),
                 )
                 .await
@@ -4787,6 +4835,7 @@ mod tests {
             let blockfile_provider =
                 new_blockfile_provider_for_tests(max_block_size_bytes, storage.clone());
             let hnsw_provider = new_hnsw_provider_for_tests(storage.clone(), &tmp_dir);
+            let pl_block_size = 5 * 1024 * 1024;
             let writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
                 hnsw_path.as_ref(),
@@ -4799,6 +4848,7 @@ mod tests {
                 &blockfile_provider,
                 params.clone(),
                 gc_context.clone(),
+                pl_block_size,
                 SpannMetrics::default(),
             )
             .await
@@ -4907,6 +4957,7 @@ mod tests {
                 count += 1;
             }
             assert_eq!(results.len(), count);
+            let pl_block_size = 5 * 1024 * 1024;
             // After GC, it should return the same result.
             let mut writer = SpannIndexWriter::from_id(
                 &hnsw_provider,
@@ -4920,6 +4971,7 @@ mod tests {
                 &blockfile_provider,
                 params,
                 gc_context,
+                pl_block_size,
                 SpannMetrics::default(),
             )
             .await

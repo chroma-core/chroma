@@ -34,6 +34,10 @@ fn default_garbage_collection() -> PlGarbageCollectionConfig {
     }
 }
 
+fn default_pl_block_size() -> usize {
+    5 * 1024 * 1024
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub enum PlGarbageCollectionPolicyConfig {
     #[serde(rename = "random_sample")]
@@ -48,6 +52,8 @@ impl Default for PlGarbageCollectionPolicyConfig {
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
 pub struct SpannProviderConfig {
+    #[serde(default = "default_pl_block_size")]
+    pub pl_block_size: usize,
     #[serde(default = "default_garbage_collection")]
     pub pl_garbage_collection: PlGarbageCollectionConfig,
     pub hnsw_garbage_collection: HnswGarbageCollectionConfig,
