@@ -5,8 +5,30 @@ use crate::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fmt;
 use thiserror::Error;
 use utoipa::ToSchema;
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, ToSchema, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ValueType {
+    Int,
+    Float,
+    String,
+    Boolean,
+}
+
+impl fmt::Display for ValueType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ValueType::Int => write!(f, "int"),
+            ValueType::Float => write!(f, "float"),
+            ValueType::String => write!(f, "string"),
+            ValueType::Boolean => write!(f, "boolean"),
+        }
+    }
+}
 
 #[derive(Deserialize, Serialize, Clone, Debug, Copy)]
 pub enum KnnIndex {
@@ -18,6 +40,11 @@ pub enum KnnIndex {
 
 pub fn default_default_knn_index() -> KnnIndex {
     KnnIndex::Hnsw
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, ToSchema)]
+pub struct CollectionSchema {
+    pub metadata_index: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -87,6 +114,7 @@ pub struct InternalCollectionConfiguration {
     pub vector_index: VectorIndexConfiguration,
     pub embedding_function: Option<EmbeddingFunctionConfiguration>,
     pub query_config: Option<serde_json::Value>,
+    pub schema: Option<HashMap<String, HashMap<ValueType, CollectionSchema>>>,
 }
 
 impl InternalCollectionConfiguration {
@@ -98,6 +126,7 @@ impl InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Hnsw(hnsw),
             embedding_function: None,
             query_config: None,
+            schema: None,
         })
     }
 
@@ -106,6 +135,7 @@ impl InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Hnsw(InternalHnswConfiguration::default()),
             embedding_function: None,
             query_config: None,
+            schema: None,
         }
     }
 
@@ -114,6 +144,7 @@ impl InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Spann(InternalSpannConfiguration::default()),
             embedding_function: None,
             query_config: None,
+            schema: None,
         }
     }
 
@@ -156,10 +187,13 @@ impl InternalCollectionConfiguration {
         }
     }
 
-    pub fn update(&mut self, configuration: &UpdateCollectionConfiguration) {
+    pub fn update(
+        &mut self,
+        update_configuration: &UpdateCollectionConfiguration,
+    ) -> Result<(), UpdateCollectionConfigurationToInternalConfigurationError> {
         // Update vector_index if it exists in the update configuration
 
-        if let Some(hnsw_config) = &configuration.hnsw {
+        if let Some(hnsw_config) = &update_configuration.hnsw {
             if let VectorIndexConfiguration::Hnsw(current_config) = &mut self.vector_index {
                 // Update only the non-None fields from the update configuration
                 if let Some(ef_search) = hnsw_config.ef_search {
@@ -182,7 +216,7 @@ impl InternalCollectionConfiguration {
                 }
             }
         }
-        if let Some(spann_config) = &configuration.spann {
+        if let Some(spann_config) = &update_configuration.spann {
             if let VectorIndexConfiguration::Spann(current_config) = &mut self.vector_index {
                 if let Some(search_nprobe) = spann_config.search_nprobe {
                     current_config.search_nprobe = search_nprobe;
@@ -193,12 +227,32 @@ impl InternalCollectionConfiguration {
             }
         }
         // Update embedding_function if it exists in the update configuration
-        if let Some(embedding_function) = &configuration.embedding_function {
+        if let Some(embedding_function) = &update_configuration.embedding_function {
             self.embedding_function = Some(embedding_function.clone());
         }
-        if let Some(query_config) = &configuration.query_config {
+        if let Some(query_config) = &update_configuration.query_config {
             self.query_config = Some(query_config.clone());
         }
+        if let Some(update_schema) = &update_configuration.schema {
+            if let Some(current_schema) = &mut self.schema {
+                for (update_key, update_value) in update_schema {
+                    if let Some(current_value) = current_schema.get_mut(update_key) {
+                        for (update_value_type, update_collection_schema) in update_value {
+                            current_value.insert(
+                                update_value_type.clone(),
+                                update_collection_schema.clone(),
+                            );
+                        }
+                    } else {
+                        current_schema.insert(update_key.clone(), update_value.clone());
+                    }
+                }
+            } else {
+                self.schema = Some(update_schema.clone());
+            }
+        }
+
+        Ok(())
     }
 
     pub fn try_from_config(
@@ -243,6 +297,7 @@ impl InternalCollectionConfiguration {
                             vector_index: VectorIndexConfiguration::Spann(internal_config),
                             embedding_function: value.embedding_function,
                             query_config: value.query_config,
+                            schema: value.schema,
                         })
                     },
                     KnnIndex::Hnsw => {
@@ -251,6 +306,7 @@ impl InternalCollectionConfiguration {
                             vector_index: hnsw.into(),
                             embedding_function: value.embedding_function,
                             query_config: value.query_config,
+                            schema: value.schema,
                         })
                     }
                 }
@@ -273,6 +329,7 @@ impl InternalCollectionConfiguration {
                             vector_index: VectorIndexConfiguration::Hnsw(internal_config),
                             embedding_function: value.embedding_function,
                             query_config: value.query_config,
+                            schema: value.schema,
                         })
                     }
                     KnnIndex::Spann => {
@@ -281,6 +338,7 @@ impl InternalCollectionConfiguration {
                             vector_index: spann.into(),
                             embedding_function: value.embedding_function,
                             query_config: value.query_config,
+                            schema: value.schema,
                         })
                     }
                 }
@@ -294,6 +352,7 @@ impl InternalCollectionConfiguration {
                     vector_index,
                     embedding_function: value.embedding_function,
                     query_config: value.query_config,
+                    schema: value.schema,
                 })
             }
         }
@@ -304,6 +363,8 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
     type Error = CollectionConfigurationToInternalConfigurationError;
 
     fn try_from(value: CollectionConfiguration) -> Result<Self, Self::Error> {
+        // validate the schema
+        validate_schema(&value.schema)?;
         match (value.hnsw, value.spann) {
             (Some(_), Some(_)) => Err(Self::Error::MultipleVectorIndexConfigurations),
             (Some(hnsw), None) => {
@@ -312,6 +373,7 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
                     vector_index: hnsw.into(),
                     embedding_function: value.embedding_function,
                     query_config: value.query_config,
+                    schema: value.schema,
                 })
             }
             (None, Some(spann)) => {
@@ -320,15 +382,30 @@ impl TryFrom<CollectionConfiguration> for InternalCollectionConfiguration {
                     vector_index: spann.into(),
                     embedding_function: value.embedding_function,
                     query_config: value.query_config,
+                    schema: value.schema,
                 })
             }
             (None, None) => Ok(InternalCollectionConfiguration {
                 vector_index: InternalHnswConfiguration::default().into(),
                 embedding_function: value.embedding_function,
                 query_config: value.query_config,
+                schema: value.schema,
             }),
         }
     }
+}
+
+fn validate_schema(
+    schema: &Option<HashMap<String, HashMap<ValueType, CollectionSchema>>>,
+) -> Result<(), CollectionConfigurationToInternalConfigurationError> {
+    // get list of keys, any duplicates are invalid
+    if let Some(schema) = schema {
+        let keys = schema.keys().collect::<Vec<&String>>();
+        if keys.len() != schema.len() {
+            return Err(CollectionConfigurationToInternalConfigurationError::SchemaDuplicateKeys);
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Error)]
@@ -337,6 +414,8 @@ pub enum CollectionConfigurationToInternalConfigurationError {
     MultipleVectorIndexConfigurations,
     #[error("Failed to parse hnsw parameters from segment metadata")]
     HnswParametersFromSegmentError(#[from] HnswParametersFromSegmentError),
+    #[error("Schema duplicate keys")]
+    SchemaDuplicateKeys,
 }
 
 impl ChromaError for CollectionConfigurationToInternalConfigurationError {
@@ -344,6 +423,7 @@ impl ChromaError for CollectionConfigurationToInternalConfigurationError {
         match self {
             Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
             Self::HnswParametersFromSegmentError(_) => ErrorCodes::InvalidArgument,
+            Self::SchemaDuplicateKeys => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -355,6 +435,7 @@ pub struct CollectionConfiguration {
     pub spann: Option<SpannConfiguration>,
     pub embedding_function: Option<EmbeddingFunctionConfiguration>,
     pub query_config: Option<serde_json::Value>,
+    pub schema: Option<HashMap<String, HashMap<ValueType, CollectionSchema>>>,
 }
 
 impl From<InternalCollectionConfiguration> for CollectionConfiguration {
@@ -370,6 +451,7 @@ impl From<InternalCollectionConfiguration> for CollectionConfiguration {
             },
             embedding_function: value.embedding_function,
             query_config: value.query_config,
+            schema: value.schema,
         }
     }
 }
@@ -397,12 +479,15 @@ impl From<UpdateSpannConfiguration> for UpdateVectorIndexConfiguration {
 pub enum UpdateCollectionConfigurationToInternalConfigurationError {
     #[error("Multiple vector index configurations provided")]
     MultipleVectorIndexConfigurations,
+    #[error("Schema value type mismatch: existing: {0}, updated: {1}")]
+    SchemaValueTypeMismatch(ValueType, ValueType),
 }
 
 impl ChromaError for UpdateCollectionConfigurationToInternalConfigurationError {
     fn code(&self) -> ErrorCodes {
         match self {
             Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+            Self::SchemaValueTypeMismatch(_, _) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -414,6 +499,7 @@ pub struct UpdateCollectionConfiguration {
     pub spann: Option<UpdateSpannConfiguration>,
     pub embedding_function: Option<EmbeddingFunctionConfiguration>,
     pub query_config: Option<serde_json::Value>,
+    pub schema: Option<HashMap<String, HashMap<ValueType, CollectionSchema>>>,
 }
 
 #[cfg(test)]
@@ -463,6 +549,7 @@ mod tests {
             }),
             embedding_function: None,
             query_config: None,
+            schema: None,
         };
 
         let overridden_config = config
@@ -492,6 +579,7 @@ mod tests {
             spann: None,
             embedding_function: None,
             query_config: None,
+            schema: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -525,6 +613,7 @@ mod tests {
             spann: None,
             embedding_function: None,
             query_config: None,
+            schema: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -562,6 +651,7 @@ mod tests {
             spann: Some(spann_config.clone()),
             embedding_function: None,
             query_config: None,
+            schema: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -596,6 +686,7 @@ mod tests {
             spann: Some(spann_config.clone()),
             embedding_function: None,
             query_config: None,
+            schema: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -622,6 +713,7 @@ mod tests {
             spann: None,
             embedding_function: None,
             query_config: None,
+            schema: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -647,6 +739,7 @@ mod tests {
             spann: None,
             embedding_function: None,
             query_config: None,
+            schema: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -681,6 +774,7 @@ mod tests {
             spann: None,
             embedding_function: None,
             query_config: None,
+            schema: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
@@ -719,6 +813,7 @@ mod tests {
             spann: None,
             embedding_function: None,
             query_config: None,
+            schema: None,
         };
 
         let internal_config_result = InternalCollectionConfiguration::try_from_config(
