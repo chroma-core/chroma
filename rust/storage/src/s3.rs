@@ -134,7 +134,6 @@ impl S3Storage {
             Err(e) => {
                 match e {
                     SdkError::ServiceError(err) => {
-                        tracing::error!("error: {:?}", err);
                         let inner = err.into_err();
                         match &inner {
                             aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
