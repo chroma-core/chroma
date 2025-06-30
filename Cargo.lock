@@ -9545,6 +9545,7 @@ dependencies = [
  "futures",
  "indicatif",
  "num_cpus",
+ "opentelemetry",
  "parking_lot",
  "proptest",
  "proptest-state-machine",
