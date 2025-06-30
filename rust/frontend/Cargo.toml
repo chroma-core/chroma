@@ -47,6 +47,8 @@ utoipa = { workspace = true }
 utoipa-axum = { version = "0.2.0", features = ["debug"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
 base64 = { workspace = true }
+strum = "0.27.1"
+strum_macros = "0.27.1"
 
 [dev-dependencies]
 reqwest = { workspace = true }
