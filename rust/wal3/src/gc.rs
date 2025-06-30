@@ -11,7 +11,7 @@ use chroma_storage::{
 
 use crate::manifest::unprefixed_snapshot_path;
 use crate::{
-    deserialize_setsum, serialize_setsum, unprefixed_fragment_path, Error, Fragment, FragmentSeqNo,
+    deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment, FragmentSeqNo,
     LogPosition, Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
@@ -238,13 +238,15 @@ impl Garbage {
     }
 
     pub fn prefixed_paths_to_delete(&self, prefix: &str) -> impl Iterator<Item = String> {
+        let prefix = Arc::new(prefix.to_string());
         let mut paths = vec![];
         for snap in self.snapshots_to_drop.iter() {
             paths.push(format!("{}/{}", prefix, snap.path_to_snapshot));
         }
         paths.into_iter().chain(
             (self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0)
-                .map(|seq_no| unprefixed_fragment_path(FragmentSeqNo(seq_no))),
+                .map(move |seq_no| (seq_no, Arc::clone(&prefix)))
+                .map(|(seq_no, prefix)| prefixed_fragment_path(&prefix, FragmentSeqNo(seq_no))),
         )
     }
 
