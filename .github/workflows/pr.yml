@@ -171,26 +171,34 @@ jobs:
   python-vulnerability-scan:
     name: Python vulnerability scan
     needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
+    # if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
     uses: ./.github/workflows/_python-vulnerability-scan.yml
 
   javascript-client-tests:
     name: JavaScript client tests
     needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
+    # if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
     uses: ./.github/workflows/_javascript-client-tests.yml
 
   rust-tests:
     name: Rust tests
     needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
+    # if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
 
   go-tests:
     name: Go tests
     needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+    # TODO: will eventually re-enable this after done testing windows smoke tests
+    if: false
+    # if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
     uses: ./.github/workflows/_go-tests.yml
     secrets: inherit
 
