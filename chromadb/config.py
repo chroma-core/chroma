@@ -367,7 +367,7 @@ class System(Component):
     _instances: Dict[Type[Component], Component]
 
     def __init__(self, settings: Settings):
-        if self.settings.is_thin_client:
+        if settings.is_thin_client:
             # The thin client is a system with only the API component
             if settings["chroma_api_impl"] not in [
                 "chromadb.api.fastapi.FastAPI",
