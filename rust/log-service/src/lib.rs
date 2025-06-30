@@ -1994,9 +1994,11 @@ impl LogServer {
                     )
                     .await
                     .map_err(|err| Status::unknown(err.to_string()))?;
-                    log.garbage_collect_phase2(&GarbageCollectionOptions::default())
-                        .await
-                        .map_err(|err| Status::unknown(err.to_string()))?;
+                    log.garbage_collect_phase2_update_manifest(
+                        &GarbageCollectionOptions::default(),
+                    )
+                    .await
+                    .map_err(|err| Status::unknown(err.to_string()))?;
                     Ok(Response::new(GarbageCollectPhase2Response {}))
                 }
                 Some(LogToCollect::DirtyLog(host)) => {
@@ -2006,7 +2008,9 @@ impl LogServer {
                         ));
                     }
                     self.dirty_log
-                        .garbage_collect_phase2(&GarbageCollectionOptions::default())
+                        .garbage_collect_phase2_update_manifest(
+                            &GarbageCollectionOptions::default(),
+                        )
                         .await
                         .map_err(|err| Status::unknown(err.to_string()))?;
                     Ok(Response::new(GarbageCollectPhase2Response {}))

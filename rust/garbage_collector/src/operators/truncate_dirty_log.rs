@@ -82,7 +82,10 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
             let mut logs = self.logs.clone();
             async move {
                 match writer
-                    .garbage_collect_phase1(&GarbageCollectionOptions::default(), None)
+                    .garbage_collect_phase1_compute_garbage(
+                        &GarbageCollectionOptions::default(),
+                        None,
+                    )
                     .await
                 {
                     Ok(true) => {}
@@ -102,7 +105,7 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
                     .await
                     .map_err(TruncateDirtyLogError::Gc)?;
                 match writer
-                    .garbage_collect_phase3(&GarbageCollectionOptions::default())
+                    .garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default())
                     .await
                 {
                     Ok(()) => Ok(()),

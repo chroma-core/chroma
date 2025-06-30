@@ -83,7 +83,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             return Err(DeleteUnusedLogsError::Wal3(err))
                         }
                     };
-                    match writer.garbage_collect_phase1(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
+                    match writer.garbage_collect_phase1_compute_garbage(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
                         Ok(true) => {},
                         Ok(false) => return Ok(()),
                         Err(err) => {
@@ -95,7 +95,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                         tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
                         return Err(DeleteUnusedLogsError::Gc(err));
                     };
-                    if let Err(err) = writer.garbage_collect_phase3(&GarbageCollectionOptions::default()).await {
+                    if let Err(err) = writer.garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default()).await {
                         tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
                         return Err(DeleteUnusedLogsError::Wal3(err));
                     };
