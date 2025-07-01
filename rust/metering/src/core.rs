@@ -399,6 +399,7 @@ mod tests {
             }
             MeterEvent::CollectionFork(_) => {}
         }
+        println!("hammad");
         assert_eq!(json_event, event);
     }
 }
