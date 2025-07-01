@@ -643,10 +643,13 @@ impl ServiceBasedFrontend {
         });
 
         // TODO: Submit event after the response is sent
-        if let Ok(collection_fork_context) = chroma_metering::close::<CollectionForkContext>() {
-            MeterEvent::CollectionFork(collection_fork_context)
-                .submit()
-                .await;
+        match chroma_metering::close::<CollectionForkContext>() {
+            Ok(collection_fork_context) => {
+                MeterEvent::CollectionFork(collection_fork_context)
+                    .submit()
+                    .await;
+            }
+            Err(e) => tracing::error!("Failed to submit metering event to receiver: {:?}", e),
         }
 
         Ok(collection)
@@ -753,14 +756,20 @@ impl ServiceBasedFrontend {
         chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
 
         // TODO: Submit event after the response is sent
-        if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
-            MeterEvent::CollectionWrite(collection_write_context)
-                .submit()
-                .await;
-        }
-
         match res {
-            Ok(()) => Ok(AddCollectionRecordsResponse {}),
+            Ok(()) => {
+                match chroma_metering::close::<CollectionWriteContext>() {
+                    Ok(collection_write_context) => {
+                        MeterEvent::CollectionWrite(collection_write_context)
+                            .submit()
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                    }
+                }
+                Ok(AddCollectionRecordsResponse {})
+            }
             Err(e) => {
                 if e.code() == ErrorCodes::AlreadyExists {
                     Err(AddCollectionRecordsError::Backoff)
@@ -829,14 +838,20 @@ impl ServiceBasedFrontend {
         chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
 
         // TODO: Submit event after the response is sent
-        if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
-            MeterEvent::CollectionWrite(collection_write_context)
-                .submit()
-                .await;
-        }
-
         match res {
-            Ok(()) => Ok(UpdateCollectionRecordsResponse {}),
+            Ok(()) => {
+                match chroma_metering::close::<CollectionWriteContext>() {
+                    Ok(collection_write_context) => {
+                        MeterEvent::CollectionWrite(collection_write_context)
+                            .submit()
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                    }
+                }
+                Ok(UpdateCollectionRecordsResponse {})
+            }
             Err(e) => {
                 if e.code() == ErrorCodes::AlreadyExists {
                     Err(UpdateCollectionRecordsError::Backoff)
@@ -907,14 +922,20 @@ impl ServiceBasedFrontend {
         chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
 
         // TODO: Submit event after the response is sent
-        if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
-            MeterEvent::CollectionWrite(collection_write_context)
-                .submit()
-                .await;
-        }
-
         match res {
-            Ok(()) => Ok(UpsertCollectionRecordsResponse {}),
+            Ok(()) => {
+                match chroma_metering::close::<CollectionWriteContext>() {
+                    Ok(collection_write_context) => {
+                        MeterEvent::CollectionWrite(collection_write_context)
+                            .submit()
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                    }
+                }
+                Ok(UpsertCollectionRecordsResponse {})
+            }
             Err(e) => {
                 if e.code() == ErrorCodes::AlreadyExists {
                     Err(UpsertCollectionRecordsError::Backoff)
@@ -997,11 +1018,14 @@ impl ServiceBasedFrontend {
                 context.return_bytes(return_bytes);
             });
 
-            if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
-                // Return the read event
-                Some(MeterEvent::CollectionRead(collection_read_context))
-            } else {
-                None
+            match chroma_metering::close::<CollectionReadContext>() {
+                Ok(collection_read_context) => {
+                    Some(MeterEvent::CollectionRead(collection_read_context))
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e);
+                    None
+                }
             }
         } else if let Some(user_ids) = ids {
             records.extend(user_ids.into_iter().map(|id| OperationRecord {
@@ -1016,6 +1040,18 @@ impl ServiceBasedFrontend {
         } else {
             None
         };
+
+        // NOTE(c-gamble): See note above for additional context, but this is a non-standard pattern
+        // and we are only implementing metering for delete in this manner because delete currently
+        // produces two metering events.
+        let collection_write_context_container =
+            chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
+                tenant_id.clone(),
+                database_name.clone(),
+                collection_id.0.to_string(),
+                WriteAction::Delete,
+            ));
+        collection_write_context_container.enter();
 
         if records.is_empty() {
             tracing::debug!("Bailing because no records were found");
@@ -1039,31 +1075,20 @@ impl ServiceBasedFrontend {
             event.submit().await;
         }
 
-        // NOTE(c-gamble): See note above for additional context, but this is a non-standard pattern
-        // and we are only implementing metering for delete in this manner because delete currently
-        // produces two metering events.
-        let collection_write_context_container =
-            chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
-                tenant_id.clone(),
-                database_name.clone(),
-                collection_id.0.to_string(),
-                WriteAction::Delete,
-            ));
-        collection_write_context_container.enter();
-
         // Attach the log size bytes to the write context
         chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
 
         // TODO: Submit event after the response is sent
-        if let Ok(collection_write_context) = chroma_metering::close::<CollectionWriteContext>() {
-            MeterEvent::CollectionWrite(collection_write_context)
-                .submit()
-                .await;
+        match chroma_metering::close::<CollectionWriteContext>() {
+            Ok(collection_write_context) => {
+                MeterEvent::CollectionWrite(collection_write_context)
+                    .submit()
+                    .await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+            }
         }
-
-        // NOTE(c-gamble): This is not strictly necessary but good for hygiene. We can remove it once we consolidate
-        // delete into a single event.
-        collection_write_context_container.exit();
 
         Ok(DeleteCollectionRecordsResponse {})
     }
@@ -1150,10 +1175,15 @@ impl ServiceBasedFrontend {
         });
 
         // TODO: Submit event after the response is sent
-        if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
-            MeterEvent::CollectionRead(collection_read_context)
-                .submit()
-                .await;
+        match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                MeterEvent::CollectionRead(collection_read_context)
+                    .submit()
+                    .await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+            }
         }
 
         Ok(count_result.count)
@@ -1269,10 +1299,15 @@ impl ServiceBasedFrontend {
         });
 
         // TODO: Submit event after the response is sent
-        if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
-            MeterEvent::CollectionRead(collection_read_context)
-                .submit()
-                .await;
+        match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                MeterEvent::CollectionRead(collection_read_context)
+                    .submit()
+                    .await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+            }
         }
 
         Ok((get_result, include).into())
@@ -1392,10 +1427,15 @@ impl ServiceBasedFrontend {
         });
 
         // TODO: Submit event after the response is sent
-        if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
-            MeterEvent::CollectionRead(collection_read_context)
-                .submit()
-                .await;
+        match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                MeterEvent::CollectionRead(collection_read_context)
+                    .submit()
+                    .await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+            }
         }
 
         Ok((query_result, include).into())

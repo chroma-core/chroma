@@ -1,9 +1,6 @@
 use chroma_metering_macros::initialize_metering;
 use serde::{Deserialize, Serialize};
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
+use std::sync::atomic::Ordering;
 
 use crate::types::MeteringAtomicU64;
 
@@ -27,6 +24,7 @@ pub enum WriteAction {
 
 initialize_metering! {
     #[capability]
+    /// The latest logical size of a collection in bytes
     pub trait LatestCollectionLogicalSizeBytes {
         fn latest_collection_logical_size_bytes(&self, latest_collection_logical_size_bytes: u64);
     }
@@ -85,7 +83,7 @@ initialize_metering! {
                 tenant,
                 database,
                 collection_id,
-                latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
+                latest_collection_logical_size_bytes: MeteringAtomicU64::new(0)
             }
         }
     }
@@ -142,12 +140,12 @@ initialize_metering! {
                 database,
                 collection_id,
                 action,
-                fts_query_length: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                metadata_predicate_count: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                query_embedding_count: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                pulled_log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                return_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+                fts_query_length: MeteringAtomicU64::new(0),
+                metadata_predicate_count: MeteringAtomicU64::new(0),
+                query_embedding_count: MeteringAtomicU64::new(0),
+                pulled_log_size_bytes: MeteringAtomicU64::new(0),
+                latest_collection_logical_size_bytes: MeteringAtomicU64::new(0),
+                return_bytes: MeteringAtomicU64::new(0),
             }
         }
     }
@@ -240,7 +238,7 @@ initialize_metering! {
                 database,
                 collection_id,
                 action,
-                log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+                log_size_bytes: MeteringAtomicU64::new(0),
             }
         }
     }
@@ -278,7 +276,7 @@ mod tests {
             database: "test_database".to_string(),
             collection_id: "test_collection".to_string(),
             action: WriteAction::Add,
-            log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(1000))),
+            log_size_bytes: MeteringAtomicU64::new(1000),
         });
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");
         let json_event =
