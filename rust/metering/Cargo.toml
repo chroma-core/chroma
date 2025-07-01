@@ -8,7 +8,6 @@ async-trait = { workspace = true }
 chroma-metering-macros = { workspace = true }
 chroma-system = { workspace = true }
 pin-project = { workspace = true }
-once_cell = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

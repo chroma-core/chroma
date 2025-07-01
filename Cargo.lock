@@ -1725,7 +1725,6 @@ dependencies = [
  "async-trait",
  "chroma-metering-macros",
  "chroma-system",
- "once_cell",
  "pin-project",
  "serde",
  "serde_json",
