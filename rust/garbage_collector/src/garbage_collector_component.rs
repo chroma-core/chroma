@@ -9,11 +9,12 @@ use chroma_config::{
     assignment::assignment_policy::AssignmentPolicy, registry::Registry, Configurable,
 };
 use chroma_error::ChromaError;
+use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
 use chroma_sysdb::{CollectionToGcInfo, SysDb, SysDbConfig};
 use chroma_system::{
-    wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
     TaskResult,
 };
 use chrono::{DateTime, Utc};
@@ -31,8 +32,9 @@ pub(crate) struct GarbageCollector {
     config: GarbageCollectorConfig,
     sysdb_client: SysDb,
     storage: Storage,
+    logs: Log,
     dispatcher: Option<ComponentHandle<Dispatcher>>,
-    system: Option<chroma_system::System>,
+    system: Option<System>,
     assignment_policy: Box<dyn AssignmentPolicy>,
     memberlist: Memberlist,
     root_manager: RootManager,
@@ -64,6 +66,7 @@ impl GarbageCollector {
         config: GarbageCollectorConfig,
         sysdb_client: SysDb,
         storage: Storage,
+        logs: Log,
         assignment_policy: Box<dyn AssignmentPolicy>,
         root_manager: RootManager,
     ) -> Self {
@@ -73,6 +76,7 @@ impl GarbageCollector {
             config,
             sysdb_client,
             storage,
+            logs,
             dispatcher: None,
             system: None,
             assignment_policy,
@@ -134,9 +138,11 @@ impl GarbageCollector {
                     dispatcher.clone(),
                     system.clone(),
                     self.storage.clone(),
+                    self.logs.clone(),
                     self.root_manager.clone(),
                     cleanup_mode,
                     self.config.min_versions_to_keep,
+                    self.config.disable_log_gc,
                 );
 
             let started_at = SystemTime::now();
@@ -212,6 +218,7 @@ impl GarbageCollector {
         let truncate_dirty_log_task = wrap(
             Box::new(TruncateDirtyLogOperator {
                 storage: self.storage.clone(),
+                logs: self.logs.clone(),
             }),
             (),
             ctx.receiver(),
@@ -490,9 +497,9 @@ impl Handler<TaskResult<TruncateDirtyLogOutput, TruncateDirtyLogError>> for Garb
 }
 
 #[async_trait]
-impl Configurable<GarbageCollectorConfig> for GarbageCollector {
+impl Configurable<(GarbageCollectorConfig, System)> for GarbageCollector {
     async fn try_from_config(
-        config: &GarbageCollectorConfig,
+        (config, system): &(GarbageCollectorConfig, System),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let sysdb_config = SysDbConfig::Grpc(config.sysdb_config.clone());
@@ -503,6 +510,8 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment_policy, registry)
                 .await?;
 
+        let logs = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
+
         let root_manager_cache =
             chroma_cache::from_config_persistent(&config.root_cache_config).await?;
         let root_manager = RootManager::new(storage.clone(), root_manager_cache);
@@ -511,6 +520,7 @@ impl Configurable<GarbageCollectorConfig> for GarbageCollector {
             config.clone(),
             sysdb_client,
             storage,
+            logs,
             assignment_policy,
             root_manager,
         ))
@@ -526,6 +536,7 @@ mod tests {
 
     use super::*;
     use crate::helper::ChromaGrpcClients;
+    use chroma_log::config::LogConfig;
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::s3_config_for_localhost_with_bucket_name;
     use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig};
@@ -722,6 +733,8 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
+            disable_log_gc: false,
+            log: LogConfig::default(),
         };
         let registry = Registry::new();
 
@@ -758,15 +771,16 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         // Run garbage collection
-        let mut garbage_collector_component = GarbageCollector::try_from_config(&config, &registry)
-            .await
-            .unwrap();
+        let system = System::new();
+        let mut garbage_collector_component =
+            GarbageCollector::try_from_config(&(config.clone(), system.clone()), &registry)
+                .await
+                .unwrap();
 
         let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config, &registry)
             .await
             .unwrap();
 
-        let system = System::new();
         let dispatcher_handle = system.start_component(dispatcher);
 
         garbage_collector_component.set_dispatcher(dispatcher_handle);
@@ -844,6 +858,8 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
+            disable_log_gc: false,
+            log: LogConfig::default(),
         };
         let registry = Registry::new();
 
@@ -865,16 +881,18 @@ mod tests {
         // Wait 1 second for cutoff time
         tokio::time::sleep(Duration::from_secs(1)).await;
 
+        let system = System::new();
+
         // Run garbage collection
-        let mut garbage_collector_component = GarbageCollector::try_from_config(&config, &registry)
-            .await
-            .unwrap();
+        let mut garbage_collector_component =
+            GarbageCollector::try_from_config(&(config.clone(), system.clone()), &registry)
+                .await
+                .unwrap();
 
         let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config, &registry)
             .await
             .unwrap();
 
-        let system = System::new();
         let dispatcher_handle = system.start_component(dispatcher);
 
         garbage_collector_component.set_dispatcher(dispatcher_handle);
@@ -962,15 +980,16 @@ mod tests {
         registry: &Registry,
         tenant_id: String,
     ) -> GarbageCollectResult {
-        let mut garbage_collector_component = GarbageCollector::try_from_config(config, registry)
-            .await
-            .unwrap();
+        let system = System::new();
+        let mut garbage_collector_component =
+            GarbageCollector::try_from_config(&(config.clone(), system.clone()), registry)
+                .await
+                .unwrap();
 
         let dispatcher = Dispatcher::try_from_config(&config.dispatcher_config, registry)
             .await
             .unwrap();
 
-        let system = System::new();
         let mut dispatcher_handle = system.start_component(dispatcher);
 
         garbage_collector_component.set_dispatcher(dispatcher_handle.clone());
@@ -1040,6 +1059,8 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
+            disable_log_gc: false,
+            log: LogConfig::default(),
         };
         let registry = Registry::new();
 

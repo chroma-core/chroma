@@ -27,6 +27,8 @@ use tonic::transport::Endpoint;
 use tower::ServiceBuilder;
 use uuid::Uuid;
 
+use crate::GarbageCollectError;
+
 //////////////// Errors ////////////////
 
 #[derive(Error, Debug)]
@@ -765,6 +767,73 @@ impl GrpcLog {
         } else {
             true // If no client assigner is configured, we assume it's ready.
         }
+    }
+
+    pub async fn garbage_collect_phase2(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GarbageCollectError> {
+        if let Some(client_assigner) = self.alt_client_assigner.as_mut() {
+            let mut client = client_assigner
+                .clients(&collection_id.to_string())?
+                .drain(..)
+                .next()
+                .ok_or(ClientAssignmentError::NoClientFound(
+                    "Impossible state: no client found for collection".to_string(),
+                ))?;
+            client
+                .garbage_collect_phase2(chroma_proto::GarbageCollectPhase2Request {
+                    log_to_collect: Some(
+                        chroma_proto::garbage_collect_phase2_request::LogToCollect::CollectionId(
+                            collection_id.to_string(),
+                        ),
+                    ),
+                })
+                .await?;
+            Ok(())
+        } else {
+            Err(GarbageCollectError::NotEnabled)
+        }
+    }
+
+    pub async fn garbage_collect_phase2_for_dirty_log(
+        &mut self,
+        ordinal: u64,
+    ) -> Result<(), GarbageCollectError> {
+        // NOTE(rescrv): Use a raw LogServiceClient so we can open by stateful set ordinal.
+        let endpoint_res = match Endpoint::from_shared(format!(
+            "grpc://rust-log-service-{ordinal}.rust-log-service:50051"
+        )) {
+            Ok(endpoint) => endpoint,
+            Err(e) => {
+                return Err(GarbageCollectError::Resolution(format!(
+                    "could not connect to rust-log-service-{ordinal}:50051: {}",
+                    e
+                )));
+            }
+        };
+        let endpoint_res = endpoint_res
+            .connect_timeout(Duration::from_millis(self.config.connect_timeout_ms))
+            .timeout(Duration::from_millis(self.config.request_timeout_ms));
+        let channel = endpoint_res.connect().await.map_err(|err| {
+            GarbageCollectError::Resolution(format!(
+                "could not connect to rust-log-service-{ordinal}:50051: {}",
+                err
+            ))
+        })?;
+        let channel = ServiceBuilder::new()
+            .layer(chroma_tracing::GrpcTraceLayer)
+            .service(channel);
+        let mut log = LogServiceClient::new(channel);
+        log.garbage_collect_phase2(chroma_proto::GarbageCollectPhase2Request {
+            log_to_collect: Some(
+                chroma_proto::garbage_collect_phase2_request::LogToCollect::DirtyLog(format!(
+                    "rust-log-service-{ordinal}"
+                )),
+            ),
+        })
+        .await?;
+        Ok(())
     }
 }
 

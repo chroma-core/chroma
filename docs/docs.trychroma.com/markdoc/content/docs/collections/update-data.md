@@ -9,7 +9,7 @@ Any property of records in a collection can be updated with `.update`:
 collection.update(
     ids=["id1", "id2", "id3", ...],
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
-    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
+    metadatas=[{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
     documents=["doc1", "doc2", "doc3", ...],
 )
 ```
@@ -20,7 +20,7 @@ collection.update(
 await collection.update({
     ids: ["id1", "id2", "id3", ...], 
     embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...], 
-    metadatas: [{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...], 
+    metadatas: [{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...], 
     documents: ["doc1", "doc2", "doc3", ...]
 })
 ```
@@ -41,7 +41,7 @@ Chroma also supports an `upsert` operation, which updates existing items, or add
 collection.upsert(
     ids=["id1", "id2", "id3", ...],
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
-    metadatas=[{"chapter": "3", "verse": "16"}, {"chapter": "3", "verse": "5"}, {"chapter": "29", "verse": "11"}, ...],
+    metadatas=[{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
     documents=["doc1", "doc2", "doc3", ...],
 )
 ```

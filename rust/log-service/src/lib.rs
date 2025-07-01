@@ -17,15 +17,16 @@ use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::chroma_proto::{
-    log_service_client::LogServiceClient, log_service_server::LogService,
-    scrub_log_request::LogToScrub, CollectionInfo, GetAllCollectionInfoToCompactRequest,
-    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
-    InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
-    MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
-    PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PushLogsRequest,
-    PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse, ScrubLogRequest, ScrubLogResponse,
-    SealLogRequest, SealLogResponse, UpdateCollectionLogOffsetRequest,
-    UpdateCollectionLogOffsetResponse,
+    garbage_collect_phase2_request::LogToCollect, log_service_client::LogServiceClient,
+    log_service_server::LogService, scrub_log_request::LogToScrub, CollectionInfo,
+    GarbageCollectPhase2Request, GarbageCollectPhase2Response,
+    GetAllCollectionInfoToCompactRequest, GetAllCollectionInfoToCompactResponse,
+    InspectDirtyLogRequest, InspectDirtyLogResponse, InspectLogStateRequest,
+    InspectLogStateResponse, LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord,
+    PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
+    PurgeDirtyForCollectionResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
+    ScoutLogsResponse, ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
+    UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
@@ -41,8 +42,9 @@ use tonic::{transport::Server, Code, Request, Response, Status};
 use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
-    Cursor, CursorName, CursorStore, CursorStoreOptions, Fragment, Limits, LogPosition, LogReader,
-    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, MarkDirty as MarkDirtyTrait, Witness,
+    Cursor, CursorName, CursorStore, CursorStoreOptions, Fragment, GarbageCollectionOptions,
+    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
+    MarkDirty as MarkDirtyTrait, Witness,
 };
 
 pub mod state_hash_table;
@@ -1960,6 +1962,65 @@ impl LogServer {
         .instrument(span)
         .await
     }
+
+    async fn garbage_collect_phase2(
+        &self,
+        request: Request<GarbageCollectPhase2Request>,
+    ) -> Result<Response<GarbageCollectPhase2Response>, Status> {
+        let span = wrap_span_with_parent_context(
+            tracing::trace_span!("GarbageCollectPhase2",),
+            request.metadata(),
+        );
+        let gc2 = request.into_inner();
+        async move {
+            match gc2.log_to_collect {
+                Some(LogToCollect::CollectionId(x)) => {
+                    let collection_id = Uuid::parse_str(&x)
+                        .map(CollectionUuid)
+                        .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                    let prefix = collection_id.storage_prefix_for_log();
+                    let key = LogKey { collection_id };
+                    let mark_dirty = MarkDirty {
+                        collection_id,
+                        dirty_log: Arc::clone(&self.dirty_log),
+                    };
+                    let handle = self.open_logs.get_or_create_state(key);
+                    let log = get_log_from_handle(
+                        &handle,
+                        &self.config.writer,
+                        &self.storage,
+                        &prefix,
+                        mark_dirty,
+                    )
+                    .await
+                    .map_err(|err| Status::unknown(err.to_string()))?;
+                    log.garbage_collect_phase2_update_manifest(
+                        &GarbageCollectionOptions::default(),
+                    )
+                    .await
+                    .map_err(|err| Status::unknown(err.to_string()))?;
+                    Ok(Response::new(GarbageCollectPhase2Response {}))
+                }
+                Some(LogToCollect::DirtyLog(host)) => {
+                    if host != self.config.my_member_id {
+                        return Err(Status::failed_precondition(
+                            format!("can only perform gc phase 2 on our own dirty log:  I am {}, but was asked for {}", self.config.my_member_id, host),
+                        ));
+                    }
+                    self.dirty_log
+                        .garbage_collect_phase2_update_manifest(
+                            &GarbageCollectionOptions::default(),
+                        )
+                        .await
+                        .map_err(|err| Status::unknown(err.to_string()))?;
+                    Ok(Response::new(GarbageCollectPhase2Response {}))
+                }
+                None => Err(Status::not_found("log not found because it's null")),
+            }
+        }
+        .instrument(span)
+        .await
+    }
 }
 
 struct LogServerWrapper {
@@ -2052,6 +2113,13 @@ impl LogService for LogServerWrapper {
         request: Request<ScrubLogRequest>,
     ) -> Result<Response<ScrubLogResponse>, Status> {
         self.log_server.scrub_log(request).await
+    }
+
+    async fn garbage_collect_phase2(
+        &self,
+        request: Request<GarbageCollectPhase2Request>,
+    ) -> Result<Response<GarbageCollectPhase2Response>, Status> {
+        self.log_server.garbage_collect_phase2(request).await
     }
 }
 

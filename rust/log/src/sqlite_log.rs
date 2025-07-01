@@ -333,29 +333,28 @@ impl SqliteLog {
             })
             .collect::<Result<Vec<(OperationRecord, String)>, SqlitePushLogsError>>()?;
 
-        let mut query_builder = QueryBuilder::new(
-            "INSERT INTO embeddings_queue (topic, id, operation, vector, encoding, metadata) ",
-        );
-        query_builder.push_values(
-            records_and_serialized_metadatas,
-            |mut builder, (record, serialized_metadata)| {
+        let mut tx = self.db.get_conn().begin().await.map_err(WrappedSqlxError)?;
+        for batch in records_and_serialized_metadatas.chunks(self.db.push_logs_batch_size) {
+            let mut query_builder = QueryBuilder::new(
+                "INSERT INTO embeddings_queue (topic, id, operation, vector, encoding, metadata) ",
+            );
+            query_builder.push_values(batch, |mut builder, (record, serialized_metadata)| {
                 builder.push_bind(&topic);
-                builder.push_bind(record.id);
+                builder.push_bind(record.id.clone());
                 builder.push_bind(operation_to_code(record.operation));
                 builder.push_bind::<Option<Vec<u8>>>(
                     record
                         .embedding
+                        .as_ref()
                         .map(|e| bytemuck::cast_slice(e.as_slice()).to_vec()),
                 );
-                builder.push_bind(record.encoding.map(String::from));
-                builder.push_bind::<String>(serialized_metadata);
-            },
-        );
-        let query = query_builder.build();
-        query
-            .execute(self.db.get_conn())
-            .await
-            .map_err(WrappedSqlxError)?;
+                builder.push_bind(record.encoding.clone().map(String::from));
+                builder.push_bind::<String>(serialized_metadata.clone());
+            });
+            let query = query_builder.build();
+            query.execute(&mut *tx).await.map_err(WrappedSqlxError)?;
+        }
+        tx.commit().await.map_err(WrappedSqlxError)?;
 
         if let Some(handle) = self.compactor_handle.get() {
             let backfill_message = BackfillMessage { collection_id };
@@ -631,6 +630,7 @@ mod tests {
                 url: new_test_db_persist_path(),
                 migration_mode: chroma_sqlite::config::MigrationMode::Apply,
                 hash_type: chroma_sqlite::config::MigrationHash::SHA256,
+                ..Default::default()
             },
             &Registry::new(),
         )
