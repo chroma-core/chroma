@@ -46,6 +46,14 @@ message DeleteDatabaseRequest {
 
 message DeleteDatabaseResponse {}
 
+message FinishDatabaseDeletionRequest {
+  google.protobuf.Timestamp cutoff_time = 1;
+}
+
+message FinishDatabaseDeletionResponse {
+  uint64 num_deleted = 1;
+}
+
 message CreateTenantRequest {
   string name = 2; // Names are globally unique
 }
@@ -146,6 +154,14 @@ message DeleteCollectionResponse {
   reserved "status";
 }
 
+message FinishCollectionDeletionRequest {
+  string id = 1;
+  string tenant = 2;
+  string database = 3;
+}
+
+message FinishCollectionDeletionResponse {}
+
 // Request to get a single collection.
 message GetCollectionRequest {
   string id = 1;
@@ -159,6 +175,10 @@ message GetCollectionResponse {
   Collection collection = 1;
 }
 
+message CollectionIdsFilter {
+  repeated string ids = 1;
+}
+
 message GetCollectionsRequest {
   optional string id = 1;
   optional string name = 2;
@@ -166,12 +186,21 @@ message GetCollectionsRequest {
   string database = 5;
   optional int32 limit = 6;
   optional int32 offset = 7;
+  optional CollectionIdsFilter ids_filter = 8;
+  optional bool include_soft_deleted = 9;
 }
 
 message GetCollectionsResponse {
   repeated Collection collections = 1;
   reserved 2;
   reserved "status";
+}
+
+message GetCollectionByResourceNameRequest {
+  string id = 1;
+  string tenant_resource_name = 2;
+  string database = 3;
+  string name = 4;
 }
 
 message CountCollectionsRequest {
@@ -198,6 +227,7 @@ message CheckCollectionsRequest {
 
 message CheckCollectionsResponse {
   repeated bool deleted = 1;
+  repeated int64 log_position = 2;
 }
 
 message UpdateCollectionRequest {
@@ -258,6 +288,13 @@ message GetLastCompactionTimeForTenantResponse {
 message SetLastCompactionTimeForTenantRequest {
   TenantLastCompactionTime tenant_last_compaction_time = 1;
 }
+
+message SetTenantResourceNameRequest {
+  string id = 1;
+  string resource_name = 2;
+}
+
+message SetTenantResourceNameResponse {}
 
 message FlushSegmentCompactionInfo {
   string segment_id = 1;
@@ -431,6 +468,8 @@ message ListCollectionsToGcRequest {
 
   optional string tenant_id = 3;
 
+  optional uint64 min_versions_if_alive = 4;
+
   // Design NOTE: When GC calls DeleteCollectionVersion, sysdb will update the
   // time associated with the oldest version of the collection. This allows
   // sysdb to return the collections that have not been GCed for a long time.
@@ -467,21 +506,41 @@ message DeleteCollectionVersionResponse {
   map<string, bool> collection_id_to_success = 1;
 }
 
+message BatchGetCollectionVersionFilePathsRequest {
+  repeated string collection_ids = 1;
+}
+
+message BatchGetCollectionVersionFilePathsResponse {
+  map<string, string> collection_id_to_version_file_path = 1;
+}
+
+message BatchGetCollectionSoftDeleteStatusRequest {
+  repeated string collection_ids = 1;
+}
+
+message BatchGetCollectionSoftDeleteStatusResponse {
+  map<string, bool> collection_id_to_is_soft_deleted = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
   rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}
   rpc DeleteDatabase(DeleteDatabaseRequest) returns (DeleteDatabaseResponse) {}
+  rpc FinishDatabaseDeletion(FinishDatabaseDeletionRequest) returns (FinishDatabaseDeletionResponse) {}
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
+  rpc SetTenantResourceName(SetTenantResourceNameRequest) returns (SetTenantResourceNameResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}
   rpc DeleteSegment(DeleteSegmentRequest) returns (DeleteSegmentResponse) {}
   rpc GetSegments(GetSegmentsRequest) returns (GetSegmentsResponse) {}
   rpc UpdateSegment(UpdateSegmentRequest) returns (UpdateSegmentResponse) {}
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
+  rpc FinishCollectionDeletion(FinishCollectionDeletionRequest) returns (FinishCollectionDeletionResponse) {}
   rpc GetCollection(GetCollectionRequest) returns (GetCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
+  rpc GetCollectionByResourceName(GetCollectionByResourceNameRequest) returns (GetCollectionResponse) {}
   rpc CountCollections(CountCollectionsRequest) returns (CountCollectionsResponse) {}
   rpc GetCollectionWithSegments(GetCollectionWithSegmentsRequest) returns (GetCollectionWithSegmentsResponse) {}
   rpc CheckCollections(CheckCollectionsRequest) returns (CheckCollectionsResponse) {}
@@ -498,4 +557,6 @@ service SysDB {
   rpc ListCollectionsToGc(ListCollectionsToGcRequest) returns (ListCollectionsToGcResponse) {}
   rpc MarkVersionForDeletion(MarkVersionForDeletionRequest) returns (MarkVersionForDeletionResponse) {}
   rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
+  rpc BatchGetCollectionVersionFilePaths(BatchGetCollectionVersionFilePathsRequest) returns (BatchGetCollectionVersionFilePathsResponse) {}
+  rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
 }

@@ -1,6 +1,6 @@
 use super::test_sysdb::TestSysDb;
 use crate::sqlite::SqliteSysDb;
-use crate::GrpcSysDbConfig;
+use crate::{GetCollectionsOptions, GrpcSysDbConfig};
 use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
@@ -19,9 +19,10 @@ use chroma_types::{
     UpdateCollectionConfiguration, UpdateCollectionError, VectorIndexConfiguration,
 };
 use chroma_types::{
-    Collection, CollectionConversionError, CollectionUuid, CountForksError,
-    FlushCompactionResponse, FlushCompactionResponseConversionError, ForkCollectionError, Segment,
-    SegmentConversionError, SegmentScope, Tenant,
+    BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
+    CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
+    FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
+    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -125,29 +126,40 @@ impl SysDb {
         }
     }
 
+    pub async fn finish_database_deletion(
+        &mut self,
+        cutoff_time: SystemTime,
+    ) -> Result<usize, FinishDatabaseDeletionError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.finish_database_deletion(cutoff_time).await,
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => todo!(),
+        }
+    }
+
     pub async fn get_collections(
         &mut self,
-        collection_id: Option<CollectionUuid>,
-        name: Option<String>,
-        tenant: Option<String>,
-        database: Option<String>,
-        limit: Option<u32>,
-        offset: u32,
+        mut options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.get_collections(collection_id, name, tenant, database, limit, offset)
-                    .await
+                // TODO(c-gamble): Move this to config
+                let max_get_collections_limit = 100u32;
+                match options.limit {
+                    Some(limit) => {
+                        if limit > max_get_collections_limit {
+                            return Err(GetCollectionsError::MaximumLimitExceeded(
+                                limit,
+                                max_get_collections_limit,
+                            ));
+                        }
+                    }
+                    None => options.limit = Some(max_get_collections_limit),
+                }
+                grpc.get_collections(options).await
             }
-            SysDb::Sqlite(sqlite) => {
-                sqlite
-                    .get_collections(collection_id, name, tenant, database, limit, offset)
-                    .await
-            }
-            SysDb::Test(test) => {
-                test.get_collections(collection_id, name, tenant, database)
-                    .await
-            }
+            SysDb::Sqlite(sqlite) => sqlite.get_collections(options).await,
+            SysDb::Test(test) => test.get_collections(options).await,
         }
     }
 
@@ -160,12 +172,20 @@ impl SysDb {
         match self {
             SysDb::Grpc(grpc) => grpc.count_collections(tenant, database).await,
             SysDb::Sqlite(sqlite) => Ok(sqlite
-                .get_collections(None, None, Some(tenant), database, None, 0)
+                .get_collections(GetCollectionsOptions {
+                    tenant: Some(tenant),
+                    database,
+                    ..Default::default()
+                })
                 .await
                 .map_err(|_| CountCollectionsError::Internal)?
                 .len()),
             SysDb::Test(test) => Ok(test
-                .get_collections(None, None, Some(tenant), database)
+                .get_collections(GetCollectionsOptions {
+                    tenant: Some(tenant),
+                    database,
+                    ..Default::default()
+                })
                 .await
                 .map_err(|_| CountCollectionsError::Internal)?
                 .len()),
@@ -257,6 +277,11 @@ impl SysDb {
                     total_records_post_compaction: 0,
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
+                    version_file_path: None,
+                    root_collection_id: None,
+                    lineage_file_path: None,
+                    updated_at: SystemTime::now(),
+                    database_id: DatabaseUuid::new(),
                 };
 
                 test_sysdb.add_collection(collection.clone());
@@ -315,6 +340,24 @@ impl SysDb {
         }
     }
 
+    pub async fn finish_collection_deletion(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+    ) -> Result<(), DeleteCollectionError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.finish_collection_deletion(tenant, database, collection_id)
+                    .await
+            }
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(_) => {
+                todo!()
+            }
+        }
+    }
+
     pub async fn fork_collection(
         &mut self,
         source_collection_id: CollectionUuid,
@@ -356,9 +399,13 @@ impl SysDb {
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
         tenant: Option<String>,
+        min_versions_if_alive: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit, tenant).await,
+            SysDb::Grpc(grpc) => {
+                grpc.get_collections_to_gc(cutoff_time, limit, tenant, min_versions_if_alive)
+                    .await
+            }
             SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
@@ -397,14 +444,48 @@ impl SysDb {
         }
     }
 
+    pub async fn batch_get_collection_version_file_paths(
+        &mut self,
+        collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.batch_get_collection_version_file_paths(collection_ids)
+                    .await
+            }
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(test) => {
+                test.batch_get_collection_version_file_paths(collection_ids)
+                    .await
+            }
+        }
+    }
+
+    pub async fn batch_get_collection_soft_delete_status(
+        &mut self,
+        collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashMap<CollectionUuid, bool>, BatchGetCollectionSoftDeleteStatusError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.batch_get_collection_soft_delete_status(collection_ids)
+                    .await
+            }
+            SysDb::Sqlite(_) => todo!(),
+            SysDb::Test(test) => {
+                test.batch_get_collection_soft_delete_status(collection_ids)
+                    .await
+            }
+        }
+    }
+
     pub async fn get_last_compaction_time(
         &mut self,
-        tanant_ids: Vec<String>,
+        tenant_ids: Vec<String>,
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tanant_ids).await,
+            SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tenant_ids).await,
             SysDb::Sqlite(_) => todo!(),
-            SysDb::Test(test) => test.get_last_compaction_time(tanant_ids).await,
+            SysDb::Test(test) => test.get_last_compaction_time(tenant_ids).await,
         }
     }
 
@@ -750,22 +831,49 @@ impl GrpcSysDb {
         }
     }
 
+    async fn finish_database_deletion(
+        &mut self,
+        cutoff_time: SystemTime,
+    ) -> Result<usize, FinishDatabaseDeletionError> {
+        let req = chroma_proto::FinishDatabaseDeletionRequest {
+            cutoff_time: Some(cutoff_time.into()),
+        };
+
+        let res = self
+            .client
+            .finish_database_deletion(req)
+            .await
+            .map_err(|e| TonicError(e).boxed())?;
+        Ok(res.into_inner().num_deleted as usize)
+    }
+
     async fn get_collections(
         &mut self,
-        collection_id: Option<CollectionUuid>,
-        name: Option<String>,
-        tenant: Option<String>,
-        database: Option<String>,
-        limit: Option<u32>,
-        offset: u32,
+        options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
+        let GetCollectionsOptions {
+            collection_id,
+            collection_ids,
+            include_soft_deleted,
+            name,
+            tenant,
+            database,
+            limit,
+            offset,
+        } = options;
+
         // TODO: move off of status into our own error type
         let collection_id_str = collection_id.map(|id| String::from(id.0));
         let res = self
             .client
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
+                ids_filter: collection_ids.map(|ids| {
+                    let ids = ids.into_iter().map(|id| id.0.to_string()).collect();
+                    chroma_proto::CollectionIdsFilter { ids }
+                }),
                 name,
+                include_soft_deleted: Some(include_soft_deleted),
                 limit: limit.map(|l| l as i32),
                 offset: Some(offset as i32),
                 tenant: tenant.unwrap_or("".to_string()),
@@ -854,6 +962,7 @@ impl GrpcSysDb {
             .await
             .map_err(|err| match err.code() {
                 Code::AlreadyExists => CreateCollectionError::AlreadyExists(name),
+                Code::Aborted => CreateCollectionError::Aborted(err.message().to_string()),
                 _ => CreateCollectionError::Internal(err.into()),
             })?;
 
@@ -922,6 +1031,29 @@ impl GrpcSysDb {
                 database,
                 id: collection_id.0.to_string(),
                 segment_ids: segment_ids.into_iter().map(|id| id.0.to_string()).collect(),
+            })
+            .await
+            .map_err(|e| {
+                if e.code() == Code::NotFound {
+                    DeleteCollectionError::NotFound(collection_id.to_string())
+                } else {
+                    DeleteCollectionError::Internal(e.into())
+                }
+            })?;
+        Ok(())
+    }
+
+    async fn finish_collection_deletion(
+        &mut self,
+        tenant: String,
+        database: String,
+        collection_id: CollectionUuid,
+    ) -> Result<(), DeleteCollectionError> {
+        self.client
+            .finish_collection_deletion(chroma_proto::FinishCollectionDeletionRequest {
+                tenant,
+                database,
+                id: collection_id.0.to_string(),
             })
             .await
             .map_err(|e| {
@@ -1011,6 +1143,7 @@ impl GrpcSysDb {
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
         tenant: Option<String>,
+        min_versions_if_alive: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
@@ -1018,6 +1151,7 @@ impl GrpcSysDb {
                 cutoff_time: cutoff_time.map(|t| t.into()),
                 limit,
                 tenant_id: tenant,
+                min_versions_if_alive,
             })
             .await;
 
@@ -1108,6 +1242,60 @@ impl GrpcSysDb {
                 .ok_or(GetCollectionWithSegmentsError::Field("vector".to_string()))?
                 .try_into()?,
         })
+    }
+
+    async fn batch_get_collection_version_file_paths(
+        &mut self,
+        collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
+        let res = self
+            .client
+            .batch_get_collection_version_file_paths(
+                chroma_proto::BatchGetCollectionVersionFilePathsRequest {
+                    collection_ids: collection_ids
+                        .into_iter()
+                        .map(|id| id.0.to_string())
+                        .collect(),
+                },
+            )
+            .await?;
+        let collection_id_to_path = res.into_inner().collection_id_to_version_file_path;
+        let mut result = HashMap::new();
+        for (key, value) in collection_id_to_path {
+            let collection_id = CollectionUuid(
+                Uuid::try_parse(&key)
+                    .map_err(|err| BatchGetCollectionVersionFilePathsError::Uuid(err, key))?,
+            );
+            result.insert(collection_id, value);
+        }
+        Ok(result)
+    }
+
+    async fn batch_get_collection_soft_delete_status(
+        &mut self,
+        collection_ids: Vec<CollectionUuid>,
+    ) -> Result<HashMap<CollectionUuid, bool>, BatchGetCollectionSoftDeleteStatusError> {
+        let res = self
+            .client
+            .batch_get_collection_soft_delete_status(
+                chroma_proto::BatchGetCollectionSoftDeleteStatusRequest {
+                    collection_ids: collection_ids
+                        .into_iter()
+                        .map(|id| id.0.to_string())
+                        .collect(),
+                },
+            )
+            .await?;
+        let collection_id_to_status = res.into_inner().collection_id_to_is_soft_deleted;
+        let mut result = HashMap::new();
+        for (key, value) in collection_id_to_status {
+            let collection_id = CollectionUuid(
+                Uuid::try_parse(&key)
+                    .map_err(|err| BatchGetCollectionSoftDeleteStatusError::Uuid(err, key))?,
+            );
+            result.insert(collection_id, value);
+        }
+        Ok(result)
     }
 
     async fn get_last_compaction_time(
@@ -1283,14 +1471,14 @@ impl ChromaError for MarkVersionForDeletionError {
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionVersionError {
-    #[error("Failed to delete version")]
+    #[error("Failed to delete version: {0}")]
     FailedToDeleteVersion(#[from] tonic::Status),
 }
 
 impl ChromaError for DeleteCollectionVersionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            DeleteCollectionVersionError::FailedToDeleteVersion(_) => ErrorCodes::Internal,
+            DeleteCollectionVersionError::FailedToDeleteVersion(e) => e.code().into(),
         }
     }
 }

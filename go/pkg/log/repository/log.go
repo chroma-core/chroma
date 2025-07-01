@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	log "github.com/chroma-core/chroma/go/pkg/log/store/db"
@@ -23,7 +24,7 @@ type LogRepository struct {
 	sysDb   sysdb.ISysDB
 }
 
-func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, records [][]byte) (insertCount int64, err error) {
+func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, records [][]byte) (insertCount int64, isSealed bool, err error) {
 	var tx pgx.Tx
 	tx, err = r.conn.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
@@ -66,6 +67,13 @@ func (r *LogRepository) InsertRecords(ctx context.Context, collectionId string, 
 			return
 		}
 	}
+	if collection.IsSealed {
+		insertCount = 0
+		isSealed = true
+		err = nil
+		return
+	}
+	isSealed = false
 	params := make([]log.InsertRecordParams, len(records))
 	for i, record := range records {
 		offset := collection.RecordEnumerationOffsetPosition + int64(i) + 1
@@ -160,7 +168,15 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		}
 	}()
 
-	sourceBounds, err := queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
+	// NOTE(rescrv):  Only sourceInfo.IsSealed should be used on this struct.
+	var sourceInfo log.Collection
+	sourceInfo, err = queriesWithTx.GetCollection(ctx, sourceCollectionID)
+	if err != nil {
+		sourceInfo.IsSealed = false
+	}
+
+	var sourceBounds log.GetBoundsForCollectionRow
+	sourceBounds, err = queriesWithTx.GetBoundsForCollection(ctx, sourceCollectionID)
 	if err != nil {
 		trace_log.Error("Error in getting compaction and enumeration offset for source collection", zap.Error(err), zap.String("collectionId", sourceCollectionID))
 		return
@@ -198,10 +214,19 @@ func (r *LogRepository) ForkRecords(ctx context.Context, sourceCollectionID stri
 		ID:                              targetCollectionID,
 		RecordCompactionOffsetPosition:  int64(compactionOffset),
 		RecordEnumerationOffsetPosition: int64(enumerationOffset),
+		IsSealed:                        sourceInfo.IsSealed,
 	})
 	if err != nil {
 		trace_log.Error("Error in updating offset for target collection", zap.Error(err), zap.String("collectionId", targetCollectionID))
 		return
+	}
+	return
+}
+
+func (r *LogRepository) SealCollection(ctx context.Context, collectionID string) (err error) {
+	_, err = r.queries.SealLog(ctx, collectionID)
+	if err != nil && strings.Contains(err.Error(), "no rows in result set") {
+		_, err = r.queries.SealLogInsert(ctx, collectionID)
 	}
 	return
 }
@@ -214,8 +239,10 @@ func (r *LogRepository) GetAllCollectionInfoToCompact(ctx context.Context, minCo
 	if err != nil {
 		trace_log.Error("Error in getting collections to compact from record_log table", zap.Error(err))
 	}
+	trace_log.Info("GetAllCollectionInfoToCompact", zap.Int64("collections", int64(len(collectionToCompact))))
 	return
 }
+
 func (r *LogRepository) UpdateCollectionCompactionOffsetPosition(ctx context.Context, collectionId string, offsetPosition int64) (err error) {
 	err = r.queries.UpdateCollectionCompactionOffsetPosition(ctx, log.UpdateCollectionCompactionOffsetPositionParams{
 		ID:                             collectionId,
@@ -253,7 +280,7 @@ func (r *LogRepository) GetLastCompactedOffsetForCollection(ctx context.Context,
 // record inserted.  Thus, the range of uncompacted records is the interval (start, limit], which is
 // kind of backwards from how it is elsewhere, so pay attention to comments indicating the bias of
 // the offset.
-func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId string) (start, limit int64, err error) {
+func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId string) (start, limit int64, isSealed bool, err error) {
 	bounds, err := r.queries.GetBoundsForCollection(ctx, collectionId)
 	if err != nil {
 		trace_log.Error("Error in getting minimum and maximum offset for collection", zap.Error(err), zap.String("collectionId", collectionId))
@@ -261,6 +288,7 @@ func (r *LogRepository) GetBoundsForCollection(ctx context.Context, collectionId
 	}
 	start = bounds.RecordCompactionOffsetPosition
 	limit = bounds.RecordEnumerationOffsetPosition
+	isSealed = bounds.IsSealed
 	err = nil
 	return
 }

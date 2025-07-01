@@ -14,6 +14,66 @@ type ICollectionDb struct {
 	mock.Mock
 }
 
+// BatchGetCollectionSoftDeleteStatus provides a mock function with given fields: collectionIDs
+func (_m *ICollectionDb) BatchGetCollectionSoftDeleteStatus(collectionIDs []string) (map[string]bool, error) {
+	ret := _m.Called(collectionIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BatchGetCollectionSoftDeleteStatus")
+	}
+
+	var r0 map[string]bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func([]string) (map[string]bool, error)); ok {
+		return rf(collectionIDs)
+	}
+	if rf, ok := ret.Get(0).(func([]string) map[string]bool); ok {
+		r0 = rf(collectionIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]bool)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func([]string) error); ok {
+		r1 = rf(collectionIDs)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// BatchGetCollectionVersionFilePaths provides a mock function with given fields: collectionIDs
+func (_m *ICollectionDb) BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error) {
+	ret := _m.Called(collectionIDs)
+
+	if len(ret) == 0 {
+		panic("no return value specified for BatchGetCollectionVersionFilePaths")
+	}
+
+	var r0 map[string]string
+	var r1 error
+	if rf, ok := ret.Get(0).(func([]string) (map[string]string, error)); ok {
+		return rf(collectionIDs)
+	}
+	if rf, ok := ret.Get(0).(func([]string) map[string]string); ok {
+		r0 = rf(collectionIDs)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[string]string)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func([]string) error); ok {
+		r1 = rf(collectionIDs)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // CountCollections provides a mock function with given fields: tenantID, databaseName
 func (_m *ICollectionDb) CountCollections(tenantID string, databaseName *string) (uint64, error) {
 	ret := _m.Called(tenantID, databaseName)
@@ -88,6 +148,36 @@ func (_m *ICollectionDb) DeleteCollectionByID(collectionID string) (int, error) 
 	return r0, r1
 }
 
+// GetCollectionByResourceName provides a mock function with given fields: tenantResourceName, databaseName, collectionName
+func (_m *ICollectionDb) GetCollectionByResourceName(tenantResourceName string, databaseName string, collectionName string) (*dbmodel.CollectionAndMetadata, error) {
+	ret := _m.Called(tenantResourceName, databaseName, collectionName)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionByResourceName")
+	}
+
+	var r0 *dbmodel.CollectionAndMetadata
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string, string, string) (*dbmodel.CollectionAndMetadata, error)); ok {
+		return rf(tenantResourceName, databaseName, collectionName)
+	}
+	if rf, ok := ret.Get(0).(func(string, string, string) *dbmodel.CollectionAndMetadata); ok {
+		r0 = rf(tenantResourceName, databaseName, collectionName)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*dbmodel.CollectionAndMetadata)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string, string, string) error); ok {
+		r1 = rf(tenantResourceName, databaseName, collectionName)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // GetCollectionEntries provides a mock function with given fields: id, name, tenantID, databaseName, limit, offset
 func (_m *ICollectionDb) GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
 	ret := _m.Called(id, name, tenantID, databaseName, limit, offset)
@@ -111,36 +201,6 @@ func (_m *ICollectionDb) GetCollectionEntries(id *string, name *string, tenantID
 
 	if rf, ok := ret.Get(1).(func(*string, *string, string, string, *int32, *int32) error); ok {
 		r1 = rf(id, name, tenantID, databaseName, limit, offset)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetCollectionEntry provides a mock function with given fields: collectionID, databaseName
-func (_m *ICollectionDb) GetCollectionEntry(collectionID *string, databaseName *string) (*dbmodel.Collection, error) {
-	ret := _m.Called(collectionID, databaseName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetCollectionEntry")
-	}
-
-	var r0 *dbmodel.Collection
-	var r1 error
-	if rf, ok := ret.Get(0).(func(*string, *string) (*dbmodel.Collection, error)); ok {
-		return rf(collectionID, databaseName)
-	}
-	if rf, ok := ret.Get(0).(func(*string, *string) *dbmodel.Collection); ok {
-		r0 = rf(collectionID, databaseName)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*dbmodel.Collection)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(*string, *string) error); ok {
-		r1 = rf(collectionID, databaseName)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -176,9 +236,39 @@ func (_m *ICollectionDb) GetCollectionSize(collectionID string) (uint64, error) 
 	return r0, r1
 }
 
-// GetCollections provides a mock function with given fields: collectionID, collectionName, tenantID, databaseName, limit, offset
-func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	ret := _m.Called(collectionID, collectionName, tenantID, databaseName, limit, offset)
+// GetCollectionWithoutMetadata provides a mock function with given fields: collectionID, databaseName, softDeletedFlag
+func (_m *ICollectionDb) GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*dbmodel.Collection, error) {
+	ret := _m.Called(collectionID, databaseName, softDeletedFlag)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCollectionWithoutMetadata")
+	}
+
+	var r0 *dbmodel.Collection
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*string, *string, *bool) (*dbmodel.Collection, error)); ok {
+		return rf(collectionID, databaseName, softDeletedFlag)
+	}
+	if rf, ok := ret.Get(0).(func(*string, *string, *bool) *dbmodel.Collection); ok {
+		r0 = rf(collectionID, databaseName, softDeletedFlag)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*dbmodel.Collection)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(*string, *string, *bool) error); ok {
+		r1 = rf(collectionID, databaseName, softDeletedFlag)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// GetCollections provides a mock function with given fields: collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted
+func (_m *ICollectionDb) GetCollections(collectionIDs []string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*dbmodel.CollectionAndMetadata, error) {
+	ret := _m.Called(collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 
 	if len(ret) == 0 {
 		panic("no return value specified for GetCollections")
@@ -186,19 +276,19 @@ func (_m *ICollectionDb) GetCollections(collectionID *string, collectionName *st
 
 	var r0 []*dbmodel.CollectionAndMetadata
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*string, *string, string, string, *int32, *int32) ([]*dbmodel.CollectionAndMetadata, error)); ok {
-		return rf(collectionID, collectionName, tenantID, databaseName, limit, offset)
+	if rf, ok := ret.Get(0).(func([]string, *string, string, string, *int32, *int32, bool) ([]*dbmodel.CollectionAndMetadata, error)); ok {
+		return rf(collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 	}
-	if rf, ok := ret.Get(0).(func(*string, *string, string, string, *int32, *int32) []*dbmodel.CollectionAndMetadata); ok {
-		r0 = rf(collectionID, collectionName, tenantID, databaseName, limit, offset)
+	if rf, ok := ret.Get(0).(func([]string, *string, string, string, *int32, *int32, bool) []*dbmodel.CollectionAndMetadata); ok {
+		r0 = rf(collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*dbmodel.CollectionAndMetadata)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*string, *string, string, string, *int32, *int32) error); ok {
-		r1 = rf(collectionID, collectionName, tenantID, databaseName, limit, offset)
+	if rf, ok := ret.Get(1).(func([]string, *string, string, string, *int32, *int32, bool) error); ok {
+		r1 = rf(collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -254,9 +344,37 @@ func (_m *ICollectionDb) Insert(in *dbmodel.Collection) error {
 	return r0
 }
 
-// ListCollectionsToGc provides a mock function with given fields: cutoffTimeSecs, limit, tenantID
-func (_m *ICollectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*dbmodel.CollectionToGc, error) {
-	ret := _m.Called(cutoffTimeSecs, limit, tenantID)
+// InsertOnConflictDoNothing provides a mock function with given fields: in
+func (_m *ICollectionDb) InsertOnConflictDoNothing(in *dbmodel.Collection) (bool, error) {
+	ret := _m.Called(in)
+
+	if len(ret) == 0 {
+		panic("no return value specified for InsertOnConflictDoNothing")
+	}
+
+	var r0 bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(*dbmodel.Collection) (bool, error)); ok {
+		return rf(in)
+	}
+	if rf, ok := ret.Get(0).(func(*dbmodel.Collection) bool); ok {
+		r0 = rf(in)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	if rf, ok := ret.Get(1).(func(*dbmodel.Collection) error); ok {
+		r1 = rf(in)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// ListCollectionsToGc provides a mock function with given fields: cutoffTimeSecs, limit, tenantID, minVersionsIfAlive
+func (_m *ICollectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*dbmodel.CollectionToGc, error) {
+	ret := _m.Called(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListCollectionsToGc")
@@ -264,19 +382,19 @@ func (_m *ICollectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint
 
 	var r0 []*dbmodel.CollectionToGc
 	var r1 error
-	if rf, ok := ret.Get(0).(func(*uint64, *uint64, *string) ([]*dbmodel.CollectionToGc, error)); ok {
-		return rf(cutoffTimeSecs, limit, tenantID)
+	if rf, ok := ret.Get(0).(func(*uint64, *uint64, *string, *uint64) ([]*dbmodel.CollectionToGc, error)); ok {
+		return rf(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
 	}
-	if rf, ok := ret.Get(0).(func(*uint64, *uint64, *string) []*dbmodel.CollectionToGc); ok {
-		r0 = rf(cutoffTimeSecs, limit, tenantID)
+	if rf, ok := ret.Get(0).(func(*uint64, *uint64, *string, *uint64) []*dbmodel.CollectionToGc); ok {
+		r0 = rf(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*dbmodel.CollectionToGc)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(*uint64, *uint64, *string) error); ok {
-		r1 = rf(cutoffTimeSecs, limit, tenantID)
+	if rf, ok := ret.Get(1).(func(*uint64, *uint64, *string, *uint64) error); ok {
+		r1 = rf(cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -285,21 +403,33 @@ func (_m *ICollectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint
 }
 
 // LockCollection provides a mock function with given fields: collectionID
-func (_m *ICollectionDb) LockCollection(collectionID string) error {
+func (_m *ICollectionDb) LockCollection(collectionID string) (*bool, error) {
 	ret := _m.Called(collectionID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for LockCollection")
 	}
 
-	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
+	var r0 *bool
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) (*bool, error)); ok {
+		return rf(collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(string) *bool); ok {
 		r0 = rf(collectionID)
 	} else {
-		r0 = ret.Error(0)
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*bool)
+		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // Update provides a mock function with given fields: in
@@ -321,7 +451,7 @@ func (_m *ICollectionDb) Update(in *dbmodel.Collection) error {
 }
 
 // UpdateCollectionLineageFilePath provides a mock function with given fields: collectionID, currentLineageFilePath, newLineageFilePath
-func (_m *ICollectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath string, newLineageFilePath string) error {
+func (_m *ICollectionDb) UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath *string, newLineageFilePath string) error {
 	ret := _m.Called(collectionID, currentLineageFilePath, newLineageFilePath)
 
 	if len(ret) == 0 {
@@ -329,7 +459,7 @@ func (_m *ICollectionDb) UpdateCollectionLineageFilePath(collectionID string, cu
 	}
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string, string, string) error); ok {
+	if rf, ok := ret.Get(0).(func(string, *string, string) error); ok {
 		r0 = rf(collectionID, currentLineageFilePath, newLineageFilePath)
 	} else {
 		r0 = ret.Error(0)
@@ -338,9 +468,9 @@ func (_m *ICollectionDb) UpdateCollectionLineageFilePath(collectionID string, cu
 	return r0
 }
 
-// UpdateLogPositionAndVersionInfo provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs
-func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFilePath string, newCollectionVersion int32, newVersionFilePath string, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64) (int64, error) {
-	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+// UpdateLogPositionAndVersionInfo provides a mock function with given fields: collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, numVersions
+func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFilePath string, newCollectionVersion int32, newVersionFilePath string, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, numVersions uint64) (int64, error) {
+	ret := _m.Called(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, numVersions)
 
 	if len(ret) == 0 {
 		panic("no return value specified for UpdateLogPositionAndVersionInfo")
@@ -348,17 +478,17 @@ func (_m *ICollectionDb) UpdateLogPositionAndVersionInfo(collectionID string, lo
 
 	var r0 int64
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64) (int64, error)); ok {
-		return rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64, uint64) (int64, error)); ok {
+		return rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, numVersions)
 	}
-	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64) int64); ok {
-		r0 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+	if rf, ok := ret.Get(0).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64, uint64) int64); ok {
+		r0 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, numVersions)
 	} else {
 		r0 = ret.Get(0).(int64)
 	}
 
-	if rf, ok := ret.Get(1).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64) error); ok {
-		r1 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs)
+	if rf, ok := ret.Get(1).(func(string, int64, int32, string, int32, string, uint64, uint64, uint64, uint64) error); ok {
+		r1 = rf(collectionID, logPosition, currentCollectionVersion, currentVersionFilePath, newCollectionVersion, newVersionFilePath, totalRecordsPostCompaction, sizeBytesPostCompaction, lastCompactionTimeSecs, numVersions)
 	} else {
 		r1 = ret.Error(1)
 	}

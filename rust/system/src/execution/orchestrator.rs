@@ -17,7 +17,14 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     fn dispatcher(&self) -> ComponentHandle<Dispatcher>;
 
     /// Returns a vector of starting tasks that should be run in sequence
-    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage>;
+    async fn initial_tasks(
+        &mut self,
+        _ctx: &ComponentContext<Self>,
+    ) -> Vec<(TaskMessage, Option<Span>)> {
+        vec![]
+    }
+
+    async fn on_start(&mut self, _ctx: &ComponentContext<Self>) {}
 
     fn name() -> &'static str {
         type_name::<Self>()
@@ -38,8 +45,13 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     }
 
     /// Sends a task to the dispatcher and return whether the task is successfully sent
-    async fn send(&mut self, task: TaskMessage, ctx: &ComponentContext<Self>) -> bool {
-        let res = self.dispatcher().send(task, Some(Span::current())).await;
+    async fn send(
+        &mut self,
+        task: TaskMessage,
+        ctx: &ComponentContext<Self>,
+        tracing_context: Option<Span>,
+    ) -> bool {
+        let res = self.dispatcher().send(task, tracing_context).await;
         self.ok_or_terminate(res, ctx).await.is_some()
     }
 
@@ -128,11 +140,13 @@ impl<O: Orchestrator> Component for O {
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-        for task in self.initial_tasks(ctx).await {
-            if !self.send(task, ctx).await {
+        for (task, tracing_context) in self.initial_tasks(ctx).await {
+            if !self.send(task, ctx, tracing_context).await {
                 break;
             }
         }
+
+        self.on_start(ctx).await;
     }
 
     fn on_handler_panic(&mut self, panic_value: Box<dyn std::any::Any + Send>) {

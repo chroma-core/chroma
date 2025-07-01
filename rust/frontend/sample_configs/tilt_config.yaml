@@ -26,7 +26,7 @@ log:
     connect_timeout_ms: 5000
     request_timeout_ms: 60000 # 1 minute
     alt_host: "rust-log-service.chroma"
-    use_alt_host_for_everything: true
+    alt_host_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"
 
 executor:
   distributed:
@@ -56,3 +56,6 @@ circuit_breaker:
   requests: 1000
 enable_span_indexing: true
 default_knn_index: "spann"
+tenants_to_migrate_immediately:
+- "default_tenant"
+tenants_to_migrate_immediately_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"

@@ -138,6 +138,7 @@ func TestConvertCollectionToModel(t *testing.T) {
 	collectionTotalRecordsPostCompaction := uint64(100)
 	collectionSizeBytesPostCompaction := uint64(500000)
 	collectionLastCompactionTimeSecs := uint64(1741037006)
+	dbId := types.NewUniqueID()
 	collectionAndMetadata := &dbmodel.CollectionAndMetadata{
 		Collection: &dbmodel.Collection{
 			ID:                         collectionID.String(),
@@ -147,6 +148,7 @@ func TestConvertCollectionToModel(t *testing.T) {
 			TotalRecordsPostCompaction: collectionTotalRecordsPostCompaction,
 			SizeBytesPostCompaction:    collectionSizeBytesPostCompaction,
 			LastCompactionTimeSecs:     collectionLastCompactionTimeSecs,
+			DatabaseID:                 dbId.String(),
 		},
 		CollectionMetadata: []*dbmodel.CollectionMetadata{},
 	}
@@ -161,4 +163,16 @@ func TestConvertCollectionToModel(t *testing.T) {
 	assert.Equal(t, collectionSizeBytesPostCompaction, modelCollections[0].SizeBytesPostCompaction)
 	assert.Equal(t, collectionLastCompactionTimeSecs, modelCollections[0].LastCompactionTimeSecs)
 	assert.Nil(t, modelCollections[0].Metadata)
+	assert.Equal(t, dbId, modelCollections[0].DatabaseId)
+}
+
+func TestConvertTenantToModel(t *testing.T) {
+	resourceName := "resourceName"
+	tenant := &dbmodel.Tenant{
+		ID:           "tenantID",
+		ResourceName: &resourceName,
+	}
+	modelTenant := convertTenantToModel(tenant)
+	assert.Equal(t, "tenantID", modelTenant.Name)
+	assert.Equal(t, "resourceName", *modelTenant.ResourceName)
 }

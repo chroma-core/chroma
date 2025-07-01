@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao/daotest"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
@@ -84,7 +85,7 @@ func (suite *SegmentDbTestSuite) TestSegmentDb_RegisterFilePath() {
 	// create a collection for testing
 	databaseId := types.NewUniqueID().String()
 	collectionName := "test_segment_register_file_paths"
-	collectionID, err := CreateTestCollection(suite.db, collectionName, 128, databaseId)
+	collectionID, err := CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, 128, databaseId, nil))
 	suite.NoError(err)
 
 	segments, err := suite.segmentDb.GetSegments(types.NilUniqueID(), nil, nil, types.MustParse(collectionID))

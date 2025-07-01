@@ -19,13 +19,19 @@ use tokio::io;
 pub struct SqliteDb {
     conn: SqlitePool,
     migration_hash_type: MigrationHash,
+    pub push_logs_batch_size: usize,
 }
 
 impl SqliteDb {
-    pub(crate) fn new(conn: SqlitePool, migration_hash_type: MigrationHash) -> Self {
+    pub(crate) fn new(
+        conn: SqlitePool,
+        migration_hash_type: MigrationHash,
+        push_logs_batch_size: usize,
+    ) -> Self {
         Self {
             conn,
             migration_hash_type,
+            push_logs_batch_size,
         }
     }
 
@@ -334,6 +340,7 @@ pub mod test_utils {
             url: new_test_db_persist_path(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
+            ..Default::default()
         };
         let registry = Registry::new();
         SqliteDb::try_from_config(&config, &registry)
@@ -360,6 +367,7 @@ mod tests {
             url: new_test_db_persist_path(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
+            ..Default::default()
         };
         let registry = Registry::new();
         let db = SqliteDb::try_from_config(&config, &registry)
@@ -384,6 +392,7 @@ mod tests {
             url: new_test_db_persist_path(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
+            ..Default::default()
         };
         let registry = Registry::new();
         let db = SqliteDb::try_from_config(&config, &registry)
@@ -409,6 +418,7 @@ mod tests {
             url: test_db_path.clone(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
+            ..Default::default()
         };
         let registry = Registry::new();
         let db = SqliteDb::try_from_config(&config, &registry)
@@ -431,6 +441,7 @@ mod tests {
             url: test_db_path,
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Validate,
+            ..Default::default()
         };
         let registry = Registry::new();
         let _ = SqliteDb::try_from_config(&config, &registry)
@@ -445,6 +456,7 @@ mod tests {
             url: test_db_path.clone(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
+            ..Default::default()
         };
         let registry = Registry::new();
         let db = SqliteDb::try_from_config(&config, &registry)
@@ -475,6 +487,7 @@ mod tests {
             url: test_db_path,
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Validate,
+            ..Default::default()
         };
 
         let result = SqliteDb::try_from_config(&config, &registry).await;
@@ -493,6 +506,7 @@ mod tests {
             url: test_db_path.clone(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
+            ..Default::default()
         };
         let db = SqliteDb::try_from_config(&config, &Registry::new())
             .await
@@ -524,6 +538,7 @@ mod tests {
             url: test_db_path,
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Validate,
+            ..Default::default()
         };
 
         let result = SqliteDb::try_from_config(&config, &Registry::new()).await;
@@ -542,6 +557,7 @@ mod tests {
             url: test_db_path.clone(),
             hash_type: MigrationHash::MD5,
             migration_mode: MigrationMode::Apply,
+            ..Default::default()
         };
         let db = SqliteDb::try_from_config(&config, &Registry::new())
             .await

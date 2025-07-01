@@ -8,9 +8,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
-	trace_log "github.com/pingcap/log"
 	"google.golang.org/protobuf/proto"
-	"go.uber.org/zap"
 )
 
 type logServer struct {
@@ -36,12 +34,14 @@ func (s *logServer) PushLogs(ctx context.Context, req *logservicepb.PushLogsRequ
 		recordsContent = append(recordsContent, data)
 	}
 	var recordCount int64
-	recordCount, err = s.lr.InsertRecords(ctx, collectionID.String(), recordsContent)
+	var isSealed bool
+	recordCount, isSealed, err = s.lr.InsertRecords(ctx, collectionID.String(), recordsContent)
 	if err != nil {
 		return
 	}
 	res = &logservicepb.PushLogsResponse{
 		RecordCount: int32(recordCount),
+		LogIsSealed: isSealed,
 	}
 	return
 }
@@ -52,16 +52,19 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 	if err != nil {
 		return
 	}
+	var start int64
 	var limit int64
-	_, limit, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
+	var isSealed bool
+	start, limit, isSealed, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
 	if err != nil {
 		return
 	}
 	// +1 to convert from the (] bound to a [) bound.
 	res = &logservicepb.ScoutLogsResponse{
-		FirstUninsertedRecordOffset: int64(limit + 1),
+		FirstUncompactedRecordOffset: int64(start + 1),
+		FirstUninsertedRecordOffset:  int64(limit + 1),
+		IsSealed:                     isSealed,
 	}
-	trace_log.Info("Scouted Logs", zap.Int64("limit", int64(limit + 1)), zap.String("collectionId", req.CollectionId))
 	return
 }
 
@@ -151,15 +154,38 @@ func (s *logServer) UpdateCollectionLogOffset(ctx context.Context, req *logservi
 }
 
 func (s *logServer) PurgeDirtyForCollection(ctx context.Context, req *logservicepb.PurgeDirtyForCollectionRequest) (res *logservicepb.PurgeDirtyForCollectionResponse, err error) {
-	// no-op for now
 	return
 }
 
 func (s *logServer) InspectDirtyLog(ctx context.Context, req *logservicepb.InspectDirtyLogRequest) (res *logservicepb.InspectDirtyLogResponse, err error) {
-	// no-op for now
 	return
 }
 
+func (s *logServer) SealLog(ctx context.Context, req *logservicepb.SealLogRequest) (res *logservicepb.SealLogResponse, err error) {
+	var collectionID types.UniqueID
+	collectionID, err = types.ToUniqueID(&req.CollectionId)
+	if err != nil {
+		return
+	}
+	err = s.lr.SealCollection(ctx, collectionID.String())
+	return
+}
+
+func (s *logServer) MigrateLog(ctx context.Context, req *logservicepb.MigrateLogRequest) (res *logservicepb.MigrateLogResponse, err error) {
+	return
+}
+
+func (s *logServer) InspectLogState(ctx context.Context, req *logservicepb.InspectLogStateRequest) (res *logservicepb.InspectLogStateResponse, err error) {
+	return
+}
+
+func (s *logServer) ScrubLog(ctx context.Context, req *logservicepb.ScrubLogRequest) (res *logservicepb.ScrubLogResponse, err error) {
+	return
+}
+
+func (s *logServer) GarbageCollectPhase2(ctx context.Context, req *logservicepb.GarbageCollectPhase2Request) (res *logservicepb.GarbageCollectPhase2Response, err error) {
+	return
+}
 
 func NewLogServer(lr *repository.LogRepository) logservicepb.LogServiceServer {
 	return &logServer{

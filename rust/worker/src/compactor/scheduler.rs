@@ -4,7 +4,7 @@ use std::str::FromStr;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_log::{CollectionInfo, CollectionRecord, Log};
 use chroma_memberlist::memberlist_provider::Memberlist;
-use chroma_sysdb::SysDb;
+use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_types::CollectionUuid;
 use figment::providers::Env;
 use figment::Figment;
@@ -26,6 +26,7 @@ pub(crate) struct Scheduler {
     assignment_policy: Box<dyn AssignmentPolicy>,
     oneoff_collections: HashSet<CollectionUuid>,
     disabled_collections: HashSet<CollectionUuid>,
+    deleted_collections: HashSet<CollectionUuid>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -57,6 +58,7 @@ impl Scheduler {
             assignment_policy,
             oneoff_collections: HashSet::new(),
             disabled_collections,
+            deleted_collections: HashSet::new(),
         }
     }
 
@@ -68,6 +70,10 @@ impl Scheduler {
         self.oneoff_collections.iter().cloned().collect()
     }
 
+    pub(crate) fn drain_deleted_collections(&mut self) -> Vec<CollectionUuid> {
+        self.deleted_collections.drain().collect()
+    }
+
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
         let collections = self
             .log
@@ -75,7 +81,10 @@ impl Scheduler {
             .await;
 
         match collections {
-            Ok(collections) => collections,
+            Ok(collections) => {
+                tracing::info!("Collections with new data: {collections:?}");
+                collections
+            }
             Err(e) => {
                 tracing::error!("Error: {:?}", e);
                 Vec::new()
@@ -99,41 +108,39 @@ impl Scheduler {
                 );
                 continue;
             }
-            let collection_id = Some(collection_info.collection_id);
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
-                .get_collections(collection_id, None, None, None, None, 0)
+                .get_collections(GetCollectionsOptions {
+                    collection_id: Some(collection_info.collection_id),
+                    ..Default::default()
+                })
                 .await;
 
             match result {
                 Ok(collection) => {
                     if collection.is_empty() {
-                        tracing::info!(
-                            "Collection not found, purging: {:?}",
-                            collection_info.collection_id
-                        );
-                        if let Err(err) = self
-                            .log
-                            .purge_dirty_for_collection(collection_info.collection_id)
-                            .await
-                        {
-                            tracing::error!(
-                                "Error purging dirty records for collection: {:?}, error: {:?}",
-                                collection_info.collection_id,
-                                err
-                            );
-                        }
+                        self.deleted_collections
+                            .insert(collection_info.collection_id);
                         continue;
                     }
 
                     // TODO: make querying the last compaction time in batch
-                    let log_position_in_collecion = collection[0].log_position;
+                    let log_position_in_collection = collection[0].log_position;
                     let tenant_ids = vec![collection[0].tenant.clone()];
                     let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
 
                     let last_compaction_time = match tenant {
-                        Ok(tenant) => tenant[0].last_compaction_time,
+                        Ok(tenant) => {
+                            if tenant.is_empty() {
+                                tracing::info!(
+                                    "Ignoring collection: {:?}",
+                                    collection_info.collection_id
+                                );
+                                continue;
+                            }
+                            tenant[0].last_compaction_time
+                        }
                         Err(e) => {
                             tracing::error!("Error: {:?}", e);
                             // Ignore this collection id for this compaction iteration
@@ -149,14 +156,17 @@ impl Scheduler {
                     // offset in log is the first offset in the log that has not been compacted. Note that
                     // since the offset is the first offset of log we get from the log service, we should
                     // use this offset to pull data from the log service.
-                    if log_position_in_collecion + 1 < offset {
+                    if log_position_in_collection + 1 < offset {
                         panic!(
-                            "offset in sysdb is less than offset in log, this should not happen!"
+                            "offset in sysdb ({}) is less than offset in log ({}) for {}",
+                            log_position_in_collection + 1,
+                            offset,
+                            collection[0].collection_id,
                         )
                     } else {
                         // The offset in sysdb is the last offset that has been compacted.
                         // We need to start from the next offset.
-                        offset = log_position_in_collecion + 1;
+                        offset = log_position_in_collection + 1;
                     }
 
                     collection_records.push(CollectionRecord {
@@ -495,9 +505,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[should_panic(
-        expected = "offset in sysdb is less than offset in log, this should not happen!"
-    )]
+    #[should_panic(expected = "is less than offset")]
     async fn test_scheduler_panic() {
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {

@@ -6,6 +6,8 @@ import XLogo from "../../public/x-logo.svg";
 const XLink: React.FC = () => {
   return (
     <Link
+      // hide by default on small screens
+      className="hidden sm:block"
       href="https://x.com/trychroma"
       target="_blank"
       rel="noopener noreferrer"

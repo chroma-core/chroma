@@ -29,10 +29,11 @@ use std::{
     ops::{BitAnd, BitOr},
     sync::atomic::AtomicU32,
 };
+use tempfile::TempDir;
 use thiserror::Error;
 
-#[derive(Clone)]
 pub struct TestDistributedSegment {
+    pub temp_dirs: Vec<TempDir>,
     pub blockfile_provider: BlockfileProvider,
     pub hnsw_provider: HnswIndexProvider,
     pub spann_provider: SpannProvider,
@@ -46,10 +47,11 @@ impl TestDistributedSegment {
     pub fn new_with_dimension(dimension: usize) -> Self {
         let collection = Collection::test_collection(dimension as i32);
         let collection_uuid = collection.collection_id;
-        let blockfile_provider = test_arrow_blockfile_provider(2 << 22);
-        let hnsw_provider = test_hnsw_index_provider();
+        let (blockfile_dir, blockfile_provider) = test_arrow_blockfile_provider(2 << 22);
+        let (hnsw_dir, hnsw_provider) = test_hnsw_index_provider();
 
         Self {
+            temp_dirs: vec![blockfile_dir, hnsw_dir],
             blockfile_provider: blockfile_provider.clone(),
             hnsw_provider: hnsw_provider.clone(),
             spann_provider: SpannProvider {
@@ -57,6 +59,7 @@ impl TestDistributedSegment {
                 blockfile_provider,
                 garbage_collection_context: None,
                 metrics: SpannMetrics::default(),
+                pl_block_size: Some(5 * 1024 * 1024),
             },
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
@@ -72,10 +75,14 @@ impl TestDistributedSegment {
                 .await
                 .expect("Should be able to materialize log.");
 
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&self.metadata_segment, &self.blockfile_provider)
-                .await
-                .expect("Should be able to initialize metadata writer.");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &self.collection.tenant,
+            &self.collection.database_id,
+            &self.metadata_segment,
+            &self.blockfile_provider,
+        )
+        .await
+        .expect("Should be able to initialize metadata writer.");
         metadata_writer
             .apply_materialized_log_chunk(&None, &materialized_logs)
             .await
@@ -92,10 +99,14 @@ impl TestDistributedSegment {
             .await
             .expect("Should be able to flush metadata.");
 
-        let record_writer =
-            RecordSegmentWriter::from_segment(&self.record_segment, &self.blockfile_provider)
-                .await
-                .expect("Should be able to initiaize record writer.");
+        let record_writer = RecordSegmentWriter::from_segment(
+            &self.collection.tenant,
+            &self.collection.database_id,
+            &self.record_segment,
+            &self.blockfile_provider,
+        )
+        .await
+        .expect("Should be able to initiaize record writer.");
         record_writer
             .apply_materialized_log_chunk(&None, &materialized_logs)
             .await
@@ -135,13 +146,13 @@ impl TestDistributedSegment {
     }
 }
 
-impl From<TestDistributedSegment> for CollectionAndSegments {
-    fn from(value: TestDistributedSegment) -> Self {
+impl From<&TestDistributedSegment> for CollectionAndSegments {
+    fn from(value: &TestDistributedSegment) -> Self {
         Self {
-            collection: value.collection,
-            metadata_segment: value.metadata_segment,
-            record_segment: value.record_segment,
-            vector_segment: value.vector_segment,
+            collection: value.collection.clone(),
+            metadata_segment: value.metadata_segment.clone(),
+            record_segment: value.record_segment.clone(),
+            vector_segment: value.vector_segment.clone(),
         }
     }
 }
@@ -474,11 +485,9 @@ impl CheckRecord for DocumentExpression {
     fn eval(&self, record: &ProjectionRecord) -> bool {
         let document = record.document.as_ref();
         match self.operator {
-            DocumentOperator::Contains => {
-                document.is_some_and(|doc| doc.contains(&self.pattern.replace("%", "")))
-            }
+            DocumentOperator::Contains => document.is_some_and(|doc| doc.contains(&self.pattern)),
             DocumentOperator::NotContains => {
-                !document.is_some_and(|doc| doc.contains(&self.pattern.replace("%", "")))
+                !document.is_some_and(|doc| doc.contains(&self.pattern))
             }
             DocumentOperator::Regex => {
                 document.is_some_and(|doc| Regex::new(&self.pattern).unwrap().is_match(doc))

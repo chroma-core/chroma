@@ -6,6 +6,7 @@ from chromadb.api import ClientAPI
 from chromadb.test.property import invariants
 from chromadb.api.types import (
     Document,
+    Documents,
     Embedding,
     Embeddings,
     GetResult,
@@ -19,7 +20,6 @@ from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
-import re
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 import numpy as np
 
@@ -94,20 +94,10 @@ def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
     if key == "$contains":
         if not doc:
             return False
-        # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
-        # treat them as wildcards
-        if "%" in expr or "_" in expr:
-            expr = expr.replace("%", ".").replace("_", ".")
-            return re.search(expr, doc) is not None
         return expr in doc
     elif key == "$not_contains":
         if not doc:
             return True
-        # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
-        # treat them as wildcards
-        if "%" in expr or "_" in expr:
-            expr = expr.replace("%", ".").replace("_", ".")
-            return re.search(expr, doc) is None
         return expr not in doc
     else:
         raise ValueError("Unknown operator: {}".format(key))
@@ -566,3 +556,33 @@ def test_query_ids_filter_property(
     # Also check that the number of results is reasonable
     assert len(result_ids) <= n_results
     assert len(result_ids) <= len(filter_ids_set)
+
+
+def test_regex(client: ClientAPI) -> None:
+    """Tests that regex works"""
+
+    reset(client)
+    coll = client.create_collection(name="test")
+
+    test_ids: IDs = ["1", "2", "3"]
+    test_documents: Documents = ["cat", "Cat", "CAT"]
+    test_embeddings: Embeddings = [np.array([1, 1]), np.array([2, 2]), np.array([3, 3])]
+    test_metadatas: Metadatas = [{"test": 10}, {"test": 20}, {"test": 30}]
+
+    coll.add(
+        ids=test_ids,
+        documents=test_documents,
+        embeddings=test_embeddings,
+        metadatas=test_metadatas,
+    )
+
+    res = coll.get(where_document={"$regex": "cat"})
+    assert res["ids"] == ["1"]
+
+    res = coll.get(where_document={"$regex": "(?i)cat"})
+    assert sorted(res["ids"]) == ["1", "2", "3"]
+
+    res = coll.get(
+        where={"test": {"$ne": 10}}, where_document={"$regex": "(?i)c(?-i)at"}  # type: ignore[dict-item]
+    )
+    assert res["ids"] == ["2"]

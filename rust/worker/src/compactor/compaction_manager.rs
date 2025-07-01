@@ -4,6 +4,10 @@ use super::OneOffCompactMessage;
 use super::RebuildMessage;
 use crate::compactor::types::ScheduledCompactMessage;
 use crate::config::CompactionServiceConfig;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogError;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogInput;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogOutput;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use async_trait::async_trait;
@@ -18,8 +22,10 @@ use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
+use chroma_system::wrap;
 use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
+use chroma_system::TaskResult;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
 use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
@@ -38,7 +44,7 @@ use tracing::Span;
 use uuid::Uuid;
 
 pub(crate) struct CompactionManager {
-    system: Option<System>,
+    system: System,
     scheduler: Scheduler,
     // Dependencies
     log: Log,
@@ -58,6 +64,7 @@ pub(crate) struct CompactionManager {
     max_compaction_size: usize,
     max_partition_size: usize,
     fetch_log_batch_size: u32,
+    purge_dirty_log_timeout_seconds: u64,
     on_next_memberlist_signal: Option<oneshot::Sender<()>>,
 }
 
@@ -78,6 +85,7 @@ impl ChromaError for CompactionError {
 impl CompactionManager {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
+        system: System,
         scheduler: Scheduler,
         log: Log,
         sysdb: SysDb,
@@ -91,9 +99,10 @@ impl CompactionManager {
         max_compaction_size: usize,
         max_partition_size: usize,
         fetch_log_batch_size: u32,
+        purge_dirty_log_timeout_seconds: u64,
     ) -> Self {
         CompactionManager {
-            system: None,
+            system,
             scheduler,
             log,
             sysdb,
@@ -109,6 +118,7 @@ impl CompactionManager {
             max_partition_size,
             on_next_memberlist_signal: None,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         }
     }
 
@@ -126,39 +136,31 @@ impl CompactionManager {
             }
         };
 
-        match self.system {
-            Some(ref system) => {
-                let orchestrator = CompactOrchestrator::new(
-                    collection_id,
-                    rebuild,
-                    self.fetch_log_batch_size,
-                    self.max_compaction_size,
-                    self.max_partition_size,
-                    self.log.clone(),
-                    self.sysdb.clone(),
-                    self.blockfile_provider.clone(),
-                    self.hnsw_index_provider.clone(),
-                    self.spann_provider.clone(),
-                    dispatcher,
-                    None,
-                );
+        let orchestrator = CompactOrchestrator::new(
+            collection_id,
+            rebuild,
+            self.fetch_log_batch_size,
+            self.max_compaction_size,
+            self.max_partition_size,
+            self.log.clone(),
+            self.sysdb.clone(),
+            self.blockfile_provider.clone(),
+            self.hnsw_index_provider.clone(),
+            self.spann_provider.clone(),
+            dispatcher,
+            None,
+        );
 
-                match orchestrator.run(system.clone()).await {
-                    Ok(result) => {
-                        tracing::info!("Compaction Job completed: {:?}", result);
-                        return Ok(result);
-                    }
-                    Err(e) => {
-                        tracing::error!("Compaction Job failed: {:?}", e);
-                        return Err(Box::new(e));
-                    }
-                }
+        match orchestrator.run(self.system.clone()).await {
+            Ok(result) => {
+                tracing::info!("Compaction Job completed: {:?}", result);
+                return Ok(result);
             }
-            None => {
-                tracing::error!("No system found");
-                return Err(Box::new(CompactionError::FailedToCompact));
+            Err(e) => {
+                tracing::error!("Compaction Job failed: {:?}", e);
+                return Err(Box::new(e));
             }
-        };
+        }
     }
 
     #[instrument(name = "CompactionManager::compact_batch")]
@@ -194,7 +196,7 @@ impl CompactionManager {
     }
 
     #[instrument(name = "CompactionManager::rebuild_batch")]
-    pub(crate) async fn rebuild_batch(&mut self, collection_ids: Vec<CollectionUuid>) {
+    pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
         let _ = collection_ids
             .iter()
             .map(|id| self.compact(*id, true))
@@ -203,23 +205,56 @@ impl CompactionManager {
             .await;
     }
 
-    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
-        self.dispatcher = Some(dispatcher);
+    #[instrument(name = "CompactionManager::purge_dirty_log", skip(ctx))]
+    pub(crate) async fn purge_dirty_log(&mut self, ctx: &ComponentContext<Self>) {
+        let deleted_collection_uuids = self.scheduler.drain_deleted_collections();
+        if deleted_collection_uuids.is_empty() {
+            tracing::info!("Skipping purge dirty log because there is no deleted collections");
+            return;
+        }
+        let purge_dirty_log = PurgeDirtyLog {
+            log_client: self.log.clone(),
+            timeout: Duration::from_secs(self.purge_dirty_log_timeout_seconds),
+        };
+        let purge_dirty_log_input = PurgeDirtyLogInput {
+            collection_uuids: deleted_collection_uuids.clone(),
+        };
+        let purge_dirty_log_task = wrap(
+            Box::new(purge_dirty_log),
+            purge_dirty_log_input,
+            ctx.receiver(),
+        );
+        let Some(mut dispatcher) = self.dispatcher.clone() else {
+            tracing::error!("Unable to create background task to purge dirty log: Dispatcher is not set for compaction manager");
+            return;
+        };
+        if let Err(err) = dispatcher
+            .send(purge_dirty_log_task, Some(Span::current()))
+            .await
+        {
+            tracing::error!("Unable to create background task to purge dirty log: {err}");
+            return;
+        };
+        tracing::info!(
+            "Purging dirty logs for deleted collections: [{deleted_collection_uuids:?}]",
+        );
     }
 
-    pub(crate) fn set_system(&mut self, system: System) {
-        self.system = Some(system);
+    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
+        self.dispatcher = Some(dispatcher);
     }
 }
 
 #[async_trait]
-impl Configurable<CompactionServiceConfig> for CompactionManager {
+impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
     async fn try_from_config(
-        config: &crate::config::CompactionServiceConfig,
+        config: &(crate::config::CompactionServiceConfig, System),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let (config, system) = config;
         let log_config = &config.log;
-        let log = match Log::try_from_config(log_config, registry).await {
+        let log = match Log::try_from_config(&(log_config.clone(), system.clone()), registry).await
+        {
             Ok(log) => log,
             Err(err) => {
                 return Err(err);
@@ -249,6 +284,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         let max_compaction_size = config.compactor.max_compaction_size;
         let max_partition_size = config.compactor.max_partition_size;
         let fetch_log_batch_size = config.compactor.fetch_log_batch_size;
+        let purge_dirty_log_timeout_seconds = config.compactor.purge_dirty_log_timeout_seconds;
         let mut disabled_collections =
             HashSet::with_capacity(config.compactor.disabled_collections.len());
         for collection_id_str in &config.compactor.disabled_collections {
@@ -293,6 +329,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
         .await?;
 
         Ok(CompactionManager::new(
+            system.clone(),
             scheduler,
             log,
             sysdb,
@@ -306,6 +343,7 @@ impl Configurable<CompactionServiceConfig> for CompactionManager {
             max_compaction_size,
             max_partition_size,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         ))
     }
 }
@@ -350,6 +388,7 @@ impl Handler<ScheduledCompactMessage> for CompactionManager {
     ) {
         tracing::info!("CompactionManager: Performing scheduled compaction");
         let _ = self.compact_batch().await;
+        self.purge_dirty_log(ctx).await;
 
         // Compaction is done, schedule the next compaction
         ctx.scheduler.schedule(
@@ -390,7 +429,11 @@ impl Handler<RebuildMessage> for CompactionManager {
             "Rebuild started for collections: {:?}",
             message.collection_ids
         );
-        self.rebuild_batch(message.collection_ids).await;
+        self.rebuild_batch(&message.collection_ids).await;
+        tracing::info!(
+            "Rebuild completed for collections: {:?}",
+            message.collection_ids
+        );
     }
 }
 
@@ -404,6 +447,21 @@ impl Handler<Memberlist> for CompactionManager {
             if let Err(e) = on_next_memberlist_update.send(()) {
                 tracing::error!("Failed to send on_next_memberlist_update: {:?}", e);
             }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        if let Err(err) = message.into_inner() {
+            tracing::error!("Error when purging dirty log: {err}");
         }
     }
 }
@@ -626,6 +684,7 @@ mod tests {
         let max_compaction_size = 1000;
         let max_partition_size = 1000;
         let fetch_log_batch_size = 100;
+        let purge_dirty_log_timeout_seconds = 60;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
@@ -673,8 +732,11 @@ mod tests {
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: Some(gc_context),
             metrics: SpannMetrics::default(),
+            pl_block_size: Some(5 * 1024 * 1024),
         };
+        let system = System::new();
         let mut manager = CompactionManager::new(
+            system.clone(),
             scheduler,
             log,
             sysdb,
@@ -688,9 +750,9 @@ mod tests {
             max_compaction_size,
             max_partition_size,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         );
 
-        let system = System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 10,
             task_queue_limit: 100,
@@ -700,7 +762,6 @@ mod tests {
         });
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
-        manager.set_system(system);
         let compacted = manager.compact_batch().await;
         assert!(
             (compacted == vec![collection_uuid_1, collection_uuid_2])
@@ -717,11 +778,7 @@ mod tests {
             let metadata = entry.metadata().await.expect("Failed to read metadata");
 
             if metadata.is_dir() {
-                assert!(
-                    path.ends_with("hnsw")
-                        || path.ends_with("block")
-                        || path.ends_with("sparse_index")
-                );
+                assert!(path.ends_with("tenant"));
             } else {
                 panic!("Expected hnsw purge to be successful")
             }

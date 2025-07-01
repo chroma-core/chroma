@@ -37,9 +37,7 @@
 //!    - Input: Version file, versions to delete, unused S3 files
 //!    - Output: Deletion confirmation
 
-use std::fmt::{Debug, Formatter};
-
-use crate::types::CleanupMode;
+use crate::types::{CleanupMode, GarbageCollectorResponse};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
@@ -51,6 +49,8 @@ use chroma_system::{
 use chroma_types::chroma_proto::CollectionVersionFile;
 use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
+use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
@@ -79,8 +79,6 @@ use crate::operators::mark_versions_at_sysdb::{
     MarkVersionsAtSysDbOutput,
 };
 
-use prost::Message;
-
 pub struct GarbageCollectorOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
@@ -89,7 +87,7 @@ pub struct GarbageCollectorOrchestrator {
     dispatcher: ComponentHandle<Dispatcher>,
     storage: Storage,
     result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
-    pending_version_file: Option<CollectionVersionFile>,
+    pending_version_file: Option<Arc<CollectionVersionFile>>,
     pending_versions_to_delete: Option<chroma_types::chroma_proto::VersionListForCollection>,
     pending_epoch_id: Option<i64>,
     num_versions_deleted: u32,
@@ -101,15 +99,6 @@ impl Debug for GarbageCollectorOrchestrator {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GarbageCollector").finish()
     }
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-pub struct GarbageCollectorResponse {
-    pub collection_id: CollectionUuid,
-    pub version_file_path: String,
-    pub num_versions_deleted: u32,
-    pub deletion_list: Vec<String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -195,19 +184,22 @@ impl Orchestrator for GarbageCollectorOrchestrator {
         self.dispatcher.clone()
     }
 
-    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
+    async fn initial_tasks(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+    ) -> Vec<(TaskMessage, Option<Span>)> {
         tracing::info!(
             path = %self.version_file_path,
             "Creating initial fetch version file task"
         );
 
-        vec![wrap(
-            Box::new(FetchVersionFileOperator {}),
-            FetchVersionFileInput {
-                version_file_path: self.version_file_path.clone(),
-                storage: self.storage.clone(),
-            },
-            ctx.receiver(),
+        vec![(
+            wrap(
+                Box::new(FetchVersionFileOperator {}),
+                FetchVersionFileInput::new(self.version_file_path.clone(), self.storage.clone()),
+                ctx.receiver(),
+            ),
+            Some(Span::current()),
         )]
     }
 
@@ -242,34 +234,13 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
 
         // Stage 1: Process fetched version file and initiate version computation
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
-            Some(output) => {
-                tracing::info!(
-                    content_size = output.version_file_content().len(),
-                    "Successfully got version file content"
-                );
-                output
-            }
+            Some(output) => output,
             None => {
                 tracing::error!("Failed to get version file output");
                 return;
             }
         };
-
-        let version_file = match CollectionVersionFile::decode(output.version_file_content()) {
-            Ok(file) => {
-                tracing::info!("Successfully decoded version file");
-                file
-            }
-            Err(e) => {
-                tracing::error!(error = ?e, "Failed to decode version file");
-                let result: Result<FetchVersionFileOutput, GarbageCollectorError> =
-                    Err(GarbageCollectorError::ComputeVersionsToDelete(
-                        ComputeVersionsToDeleteError::ParseError(e),
-                    ));
-                self.ok_or_terminate(result, ctx).await;
-                return;
-            }
-        };
+        let version_file = output.file;
 
         tracing::info!("Creating compute versions task");
         let compute_task = wrap(
@@ -319,9 +290,9 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
             tracing::info!("No versions to delete, terminating garbage collection early");
             let response = GarbageCollectorResponse {
                 collection_id: self.collection_id,
-                version_file_path: self.version_file_path.clone(),
                 num_versions_deleted: 0,
-                deletion_list: Vec::new(),
+                num_files_deleted: 0,
+                ..Default::default()
             };
             tracing::info!(?response, "Garbage collection completed early");
             self.terminate_with_result(Ok(response), ctx).await;
@@ -426,7 +397,6 @@ impl Handler<TaskResult<ComputeUnusedFilesOutput, ComputeUnusedFilesError>>
             )),
             DeleteUnusedFilesInput {
                 unused_s3_files: output.unused_block_ids.into_iter().collect(),
-                epoch_id: 0,
                 hnsw_prefixes_for_deletion: output.unused_hnsw_prefixes,
             },
             ctx.receiver(),
@@ -468,9 +438,9 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
             tracing::info!("Dry run mode, skipping actual deletion");
             let response = GarbageCollectorResponse {
                 collection_id: self.collection_id,
-                version_file_path: self.version_file_path.clone(),
                 num_versions_deleted: 0,
-                deletion_list: Vec::new(),
+                num_files_deleted: 0,
+                ..Default::default()
             };
             self.terminate_with_result(Ok(response), ctx).await;
             return;
@@ -536,10 +506,11 @@ impl Handler<TaskResult<DeleteVersionsAtSysDbOutput, DeleteVersionsAtSysDbError>
             None => return,
         };
 
+        #[expect(deprecated)]
         let response = GarbageCollectorResponse {
             collection_id: self.collection_id,
-            version_file_path: self.version_file_path.clone(),
             num_versions_deleted: self.num_versions_deleted,
+            num_files_deleted: self.deletion_list.len() as u32,
             deletion_list: self.deletion_list.clone(),
         };
 
@@ -553,9 +524,8 @@ mod tests {
     use crate::helper::ChromaGrpcClients;
     use chroma_config::registry::Registry;
     use chroma_config::Configurable;
-    use chroma_storage::config::{
-        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
-    };
+    use chroma_storage::s3_config_for_localhost_with_bucket_name;
+    use chroma_storage::GetOptions;
     use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
     use chroma_system::System;
     use std::str::FromStr;
@@ -652,7 +622,7 @@ mod tests {
     async fn create_test_collection(
         clients: &mut ChromaGrpcClients,
         enable_spann: bool,
-    ) -> (CollectionUuid, String) {
+    ) -> (CollectionUuid, String, Uuid, Uuid) {
         // Create unique identifiers for tenant and database
         let test_uuid = uuid::Uuid::new_v4();
         let tenant_id = format!("test_tenant_{}", test_uuid);
@@ -775,24 +745,39 @@ mod tests {
 
         validate_test_collection(clients, collection_id).await;
 
-        (collection_id, tenant_id)
+        let collection_with_segments = clients
+            .get_collection_with_segments(collection_id.to_string())
+            .await
+            .unwrap();
+        let db_id = collection_with_segments
+            .collection
+            .expect("Expected collection to be found")
+            .database_id
+            .expect("Expected database ID to be present");
+        let db_id = Uuid::from_str(&db_id).expect("Failed to parse database ID");
+
+        let mut segment_id_str = String::from("");
+        for segment in collection_with_segments.segments {
+            if segment.r#type == "urn:chroma:segment/vector/spann"
+                || segment.r#type == "urn:chroma:segment/vector/hnsw-distributed"
+            {
+                segment_id_str = segment.id.clone();
+            }
+        }
+        let segment_id =
+            Uuid::from_str(&segment_id_str).expect("Failed to parse segment ID from collection");
+
+        (collection_id, tenant_id, db_id, segment_id)
     }
 
-    async fn get_hnsw_index_ids(storage: &Storage) -> Vec<Uuid> {
+    async fn get_hnsw_index_ids(storage: &Storage, s3_path: &str) -> Vec<Uuid> {
         storage
-            .list_prefix("hnsw")
+            .list_prefix(s3_path, GetOptions::default())
             .await
             .unwrap()
             .into_iter()
-            .filter(|path| path.contains("hnsw/"))
-            .map(|path| {
-                Uuid::from_str(
-                    path.split("/")
-                        .nth(1) // Get the prefix part after "hnsw/"
-                        .unwrap(),
-                )
-                .unwrap()
-            })
+            .filter(|path| path.contains(&format!("{}/", s3_path)))
+            .map(|path| Uuid::from_str(path.split("/").nth(9).unwrap()).unwrap())
             .collect::<std::collections::HashSet<_>>() // de-dupe
             .into_iter()
             .collect()
@@ -800,15 +785,7 @@ mod tests {
 
     async fn test_k8s_integration_check_end_to_end(use_spann: bool) {
         // Create storage config and storage client
-        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
-            bucket: ObjectStoreBucketConfig {
-                name: "chroma-storage".to_string(),
-                r#type: ObjectStoreType::Minio,
-            },
-            upload_part_size_bytes: 1024 * 1024,   // 1MB
-            download_part_size_bytes: 1024 * 1024, // 1MB
-            max_concurrent_requests: 10,
-        });
+        let storage_config = s3_config_for_localhost_with_bucket_name("chroma-storage").await;
 
         let registry = Registry::new();
         let storage = Storage::try_from_config(&storage_config, &registry)
@@ -816,9 +793,14 @@ mod tests {
             .unwrap();
 
         let mut clients = ChromaGrpcClients::new().await.unwrap();
-        let (collection_id, tenant_id) = create_test_collection(&mut clients, use_spann).await;
+        let (collection_id, tenant_id, db_id, segment_id) =
+            create_test_collection(&mut clients, use_spann).await;
 
-        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
+        let s3_path = format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}/hnsw",
+            tenant_id, db_id, collection_id, segment_id
+        );
+        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage, &s3_path).await;
 
         // Get version count before GC
         let versions_before_gc = clients
@@ -861,7 +843,10 @@ mod tests {
             .unwrap();
 
         // Get collection info for GC from sysdb
-        let collections_to_gc = sysdb.get_collections_to_gc(None, None, None).await.unwrap();
+        let collections_to_gc = sysdb
+            .get_collections_to_gc(None, None, None, None)
+            .await
+            .unwrap();
         let collection_info = collections_to_gc
             .iter()
             .find(|c| c.id == collection_id)
@@ -914,7 +899,7 @@ mod tests {
         );
 
         // Check HNSW indices
-        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage).await;
+        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage, &s3_path).await;
         tracing::info!(
             before = ?hnsw_index_ids_before_gc,
             after = ?hnsw_index_ids_after_gc,
@@ -948,15 +933,7 @@ mod tests {
     #[traced_test]
     async fn test_k8s_integration_soft_delete() {
         // Create storage config and storage client
-        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
-            bucket: ObjectStoreBucketConfig {
-                name: "chroma-storage".to_string(),
-                r#type: ObjectStoreType::Minio,
-            },
-            upload_part_size_bytes: 1024 * 1024,   // 1MB
-            download_part_size_bytes: 1024 * 1024, // 1MB
-            max_concurrent_requests: 10,
-        });
+        let storage_config = s3_config_for_localhost_with_bucket_name("chroma-storage").await;
 
         let registry = Registry::new();
         let storage = Storage::try_from_config(&storage_config, &registry)
@@ -964,7 +941,7 @@ mod tests {
             .unwrap();
 
         let deleted_hnsw_files_before_test: Vec<_> = storage
-            .list_prefix("gc")
+            .list_prefix("gc", GetOptions::default())
             .await
             .unwrap()
             .into_iter()
@@ -972,9 +949,14 @@ mod tests {
             .collect();
 
         let mut clients = ChromaGrpcClients::new().await.unwrap();
-        let (collection_id, tenant_id) = create_test_collection(&mut clients, true).await;
+        let (collection_id, tenant_id, db_id, segment_id) =
+            create_test_collection(&mut clients, true).await;
 
-        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
+        let s3_path = format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}/hnsw",
+            tenant_id, db_id, collection_id, segment_id
+        );
+        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage, &s3_path).await;
 
         // Get version count before GC
         let versions_before_gc = clients
@@ -1017,7 +999,10 @@ mod tests {
             .unwrap();
 
         // Get collection info for GC from sysdb
-        let collections_to_gc = sysdb.get_collections_to_gc(None, None, None).await.unwrap();
+        let collections_to_gc = sysdb
+            .get_collections_to_gc(None, None, None, None)
+            .await
+            .unwrap();
         let collection_info = collections_to_gc
             .iter()
             .find(|c| c.id == collection_id)
@@ -1070,7 +1055,7 @@ mod tests {
         );
 
         // Check HNSW indices
-        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage).await;
+        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage, &s3_path).await;
         tracing::info!(
             before = ?hnsw_index_ids_before_gc,
             after = ?hnsw_index_ids_after_gc,
@@ -1089,7 +1074,7 @@ mod tests {
 
         // Verify that "deleted" files are renamed with the "gc" prefix
         let deleted_hnsw_files: Vec<_> = storage
-            .list_prefix("gc")
+            .list_prefix("gc", GetOptions::default())
             .await
             .unwrap()
             .into_iter()
@@ -1114,15 +1099,7 @@ mod tests {
     #[traced_test]
     async fn test_k8s_integration_dry_run() {
         // Create storage config and storage client
-        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
-            bucket: ObjectStoreBucketConfig {
-                name: "chroma-storage".to_string(),
-                r#type: ObjectStoreType::Minio,
-            },
-            upload_part_size_bytes: 1024 * 1024,   // 1MB
-            download_part_size_bytes: 1024 * 1024, // 1MB
-            max_concurrent_requests: 10,
-        });
+        let storage_config = s3_config_for_localhost_with_bucket_name("chroma-storage").await;
 
         let registry = Registry::new();
         let storage = Storage::try_from_config(&storage_config, &registry)
@@ -1130,9 +1107,14 @@ mod tests {
             .unwrap();
 
         let mut clients = ChromaGrpcClients::new().await.unwrap();
-        let (collection_id, tenant_id) = create_test_collection(&mut clients, true).await;
+        let (collection_id, tenant_id, db_id, segment_id) =
+            create_test_collection(&mut clients, true).await;
 
-        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage).await;
+        let s3_path = format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}/hnsw",
+            tenant_id, db_id, collection_id, segment_id
+        );
+        let hnsw_index_ids_before_gc = get_hnsw_index_ids(&storage, &s3_path).await;
 
         // Get version count before GC
         let versions_before_gc = clients
@@ -1175,7 +1157,10 @@ mod tests {
             .unwrap();
 
         // Get collection info for GC from sysdb
-        let collections_to_gc = sysdb.get_collections_to_gc(None, None, None).await.unwrap();
+        let collections_to_gc = sysdb
+            .get_collections_to_gc(None, None, None, None)
+            .await
+            .unwrap();
         let collection_info = collections_to_gc
             .iter()
             .find(|c| c.id == collection_id)
@@ -1233,7 +1218,7 @@ mod tests {
         );
 
         // Check HNSW indices
-        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage).await;
+        let hnsw_index_ids_after_gc = get_hnsw_index_ids(&storage, &s3_path).await;
         tracing::info!(
             before = ?hnsw_index_ids_before_gc,
             after = ?hnsw_index_ids_after_gc,

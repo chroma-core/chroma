@@ -124,7 +124,7 @@ pub trait LoadFromGenerator<L: LogGenerator> {
 impl<L: LogGenerator + Send + 'static> LoadFromGenerator<L> for TestDistributedSegment {
     async fn populate_with_generator(&mut self, log_count: usize, generator: L) {
         let ids: Vec<_> = (1..=log_count).collect();
-        for chunk in ids.chunks(100) {
+        for chunk in ids.chunks(10_000) {
             self.compact_log(
                 generator.generate_chunk(chunk.iter().copied()),
                 chunk

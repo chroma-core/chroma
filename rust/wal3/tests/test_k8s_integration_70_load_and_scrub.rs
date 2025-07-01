@@ -46,5 +46,5 @@ async fn test_k8s_integration_70_load_and_scrub() {
     )
     .await
     .unwrap();
-    println!("{:?}", log.scrub().await.unwrap());
+    println!("{:?}", log.scrub(wal3::Limits::default()).await.unwrap());
 }

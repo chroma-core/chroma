@@ -21,6 +21,10 @@ fn default_migration_mode() -> MigrationMode {
     MigrationMode::Apply
 }
 
+fn default_push_logs_batch_size() -> usize {
+    999
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct SqliteDBConfig {
@@ -31,6 +35,8 @@ pub struct SqliteDBConfig {
     // The SQLite database URL
     // If unspecified, then the database is in memory only
     pub url: Option<String>,
+    #[serde(default = "default_push_logs_batch_size")]
+    pub push_logs_batch_size: usize,
 }
 
 impl Default for SqliteDBConfig {
@@ -39,6 +45,7 @@ impl Default for SqliteDBConfig {
             hash_type: default_hash_type(),
             migration_mode: default_migration_mode(),
             url: None,
+            push_logs_batch_size: default_push_logs_batch_size(),
         }
     }
 }
@@ -81,6 +88,7 @@ impl SqliteDBConfig {
             hash_type,
             migration_mode,
             url,
+            push_logs_batch_size: default_push_logs_batch_size(),
         }
     }
 }
@@ -104,7 +112,8 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
             // we turn it off
             .pragma("foreign_keys", "OFF")
             .pragma("case_sensitive_like", "ON")
-            .busy_timeout(Duration::from_secs(1000));
+            .busy_timeout(Duration::from_secs(1000))
+            .with_regexp();
         let conn = if let Some(url) = &config.url {
             let path = Path::new(url);
             if let Some(parent) = path.parent() {
@@ -122,7 +131,7 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
                 .await?
         };
 
-        let db = SqliteDb::new(conn, config.hash_type);
+        let db = SqliteDb::new(conn, config.hash_type, config.push_logs_batch_size);
 
         db.initialize_migrations_table().await?;
         match config.migration_mode {
@@ -150,6 +159,7 @@ mod tests {
             url: new_test_db_persist_path(),
             hash_type: MigrationHash::SHA256,
             migration_mode: MigrationMode::Apply,
+            push_logs_batch_size: default_push_logs_batch_size(),
         };
 
         let registry = Registry::new();

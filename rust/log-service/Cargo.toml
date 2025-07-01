@@ -14,34 +14,24 @@ bytes = { workspace = true }
 parquet = { workspace = true }
 prost = { workspace = true }
 figment = { workspace = true }
-setsum = { workspace = true }
+parking_lot = { workspace = true }
 # Used by tracing
 opentelemetry = { workspace = true }
-rand = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
 tonic-health = { workspace = true }
 tracing = { workspace = true }
-# Used by tracing
-tracing-opentelemetry = { workspace = true }
 uuid = { workspace = true }
-tower = { workspace = true }
-sqlx = { workspace = true }
 tokio = { workspace = true }
 serde_json = { workspace = true }
-bytemuck = { workspace = true }
 futures = { workspace = true }
 
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-error = { workspace = true, features = ["sqlx"] }
 chroma-log = { workspace = true }
-chroma-segment = { workspace = true }
-chroma-sqlite = { workspace = true }
 chroma-storage = { workspace = true }
-chroma-sysdb = { workspace = true }
-chroma-system = { workspace = true }
 chroma-tracing = { workspace = true, features = ["grpc"] }
 chroma-types = { workspace = true }
 wal3 = { workspace = true }

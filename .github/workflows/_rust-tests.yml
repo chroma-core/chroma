@@ -7,7 +7,7 @@ jobs:
   test:
     strategy:
       matrix:
-        platform: [blacksmith-4vcpu-ubuntu-2204]
+        platform: [blacksmith-8vcpu-ubuntu-2204]
     runs-on: ${{ matrix.platform }}
     env:
       CARGO_TERM_COLOR: always
@@ -22,18 +22,9 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Test
-        run: cargo nextest run --no-capture --profile ci
-      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
-      # - name: Upload test results
-      #   uses: datadog/junit-upload-github-action@v1
-      #   with:
-      #       api_key: ${{ secrets.DD_API_KEY }}
-      #       site: ${{ vars.DD_SITE }}
-      #       service: chroma
-      #       files: target/nextest/ci/junit.xml
-      #       logs: true
+        run: cargo nextest run --profile ci
   test-long:
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+    runs-on: blacksmith-8vcpu-ubuntu-2204
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
@@ -44,25 +35,22 @@ jobs:
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
-      - name: Build CLI
-        run: cargo build --bin chroma
       - name: Test
-        run: cargo nextest run --no-capture --profile ci_long_running
-      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
-      # - name: Upload test results
-      #   uses: datadog/junit-upload-github-action@v1
-      #   with:
-      #       api_key: ${{ secrets.DD_API_KEY }}
-      #       site: ${{ vars.DD_SITE }}
-      #       service: chroma
-      #       files: target/nextest/ci/junit.xml
-      #       logs: true
+        run: cargo nextest run --profile ci_long_running
 
   test-integration:
     strategy:
       matrix:
         platform: [blacksmith-16vcpu-ubuntu-2204]
+        nextest_profile: [ci_k8s_integration, ci_k8s_integration_slow]
+        partition: [1, 2]
+        include:
+          - nextest_profile: ci_k8s_integration
+            partition_method: hash
+          - nextest_profile: ci_k8s_integration_slow
+            partition_method: count
     runs-on: ${{ matrix.platform }}
+    name: Integration test ${{ matrix.nextest_profile }} ${{ matrix.partition }}
     # OIDC token auth for AWS
     permissions:
       contents: read
@@ -86,21 +74,12 @@ jobs:
       - name: Build CLI
         run: cargo build --bin chroma
       - name: Run tests
-        run: cargo nextest run --profile ci_k8s_integration
-      # TODO(adityamaru): Add Datadog test visibility when running in Chroma's repo.
-      # - name: Upload test results
-      #   uses: datadog/junit-upload-github-action@v1
-      #   with:
-      #       api_key: ${{ secrets.DD_API_KEY }}
-      #       site: ${{ vars.DD_SITE }}
-      #       service: chroma
-      #       files: target/nextest/ci/junit.xml
-      #       logs: true
+        run: cargo nextest run --profile ${{ matrix.nextest_profile }} --partition ${{ matrix.partition_method }}:${{ matrix.partition }}/2 --no-tests warn
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
         with:
-          artifact-name: "rust-integration-test"
+          artifact-name: "rust-integration-test-${{ matrix.nextest_profile }}-${{ matrix.partition }}"
   test-benches:
     strategy:
       matrix:

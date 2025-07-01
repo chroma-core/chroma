@@ -53,11 +53,9 @@ type Config struct {
 	GarbageCollectionServiceMemberlistName string
 	GarbageCollectionServicePodLabel       string
 
-	// Config for soft deletes.
-	SoftDeleteEnabled          bool
-	SoftDeleteCleanupInterval  time.Duration
-	SoftDeleteMaxAge           time.Duration
-	SoftDeleteCleanupBatchSize uint
+	// Log service memberlist config
+	LogServiceMemberlistName string
+	LogServicePodLabel       string
 
 	// Config for testing
 	Testing bool
@@ -74,10 +72,9 @@ type Config struct {
 // convenient for end-to-end property based testing.
 type Server struct {
 	coordinatorpb.UnimplementedSysDBServer
-	coordinator       coordinator.Coordinator
-	grpcServer        grpcutils.GrpcServer
-	healthServer      *health.Server
-	softDeleteCleaner *SoftDeleteCleaner
+	coordinator  coordinator.Coordinator
+	grpcServer   grpcutils.GrpcServer
+	healthServer *health.Server
 }
 
 func New(config Config) (*Server, error) {
@@ -102,24 +99,16 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		healthServer: health.NewServer(),
 	}
 
-	var deleteMode coordinator.DeleteMode
-	if config.SoftDeleteEnabled {
-		deleteMode = coordinator.SoftDelete
-	} else {
-		deleteMode = coordinator.HardDelete
-	}
-
-	s3MetaStore, err := s3metastore.NewS3MetaStore(config.MetaStoreConfig)
+	s3MetaStore, err := s3metastore.NewS3MetaStore(ctx, config.MetaStoreConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	coordinator, err := coordinator.NewCoordinator(ctx, deleteMode, s3MetaStore, config.VersionFileEnabled)
+	coordinator, err := coordinator.NewCoordinator(ctx, s3MetaStore, config.VersionFileEnabled)
 	if err != nil {
 		return nil, err
 	}
 	s.coordinator = *coordinator
-	s.softDeleteCleaner = NewSoftDeleteCleaner(*coordinator, config.SoftDeleteCleanupInterval, config.SoftDeleteMaxAge, config.SoftDeleteCleanupBatchSize)
 	if !config.Testing {
 		namespace := config.KubernetesNamespace
 		// Create memberlist manager for query service
@@ -136,6 +125,15 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 
 		// Create memberlist manager for garbage collection service
 		garbageCollectionMemberlistManager, err := createMemberlistManager(namespace, config.GarbageCollectionServiceMemberlistName, config.GarbageCollectionServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
+		if err != nil {
+			return nil, err
+		}
+
+		// Create memberlist manager for log service
+		logServiceMemberlistManager, err := createMemberlistManager(namespace, config.LogServiceMemberlistName, config.LogServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
+		if err != nil {
+			return nil, err
+		}
 
 		// Start the memberlist manager for query service
 		err = queryMemberlistManager.Start()
@@ -154,8 +152,11 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 			return nil, err
 		}
 
-		log.Info("Starting soft delete cleaner", zap.Duration("cleanup_interval", s.softDeleteCleaner.cleanupInterval), zap.Duration("max_age", s.softDeleteCleaner.maxAge), zap.Uint("limit_per_check", s.softDeleteCleaner.limitPerCheck))
-		s.softDeleteCleaner.Start()
+		// Start the memberlist manager for log service
+		err = logServiceMemberlistManager.Start()
+		if err != nil {
+			return nil, err
+		}
 
 		log.Info("Starting GRPC server")
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {

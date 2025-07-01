@@ -14,6 +14,8 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
+	"github.com/chroma-core/chroma/go/pkg/types"
+	"github.com/google/uuid"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/genproto/googleapis/rpc/code"
@@ -114,6 +116,8 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_TenantLastCompactionTime
 func (suite *TenantDatabaseServiceTestSuite) TestServer_DeleteDatabase() {
 	tenantName := "TestDeleteDatabase"
 	databaseName := "TestDeleteDatabase"
+	// Generate random uuid for db id
+	databaseId := uuid.New().String()
 
 	_, err := suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
 		Name: tenantName,
@@ -124,15 +128,21 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_DeleteDatabase() {
 	_, err = suite.catalog.CreateDatabase(context.Background(), &model.CreateDatabase{
 		Tenant: tenantName,
 		Name:   databaseName,
+		ID:     databaseId,
+		Ts:     time.Now().Unix(),
 	}, time.Now().Unix())
 	suite.NoError(err)
 
+	collectionID := types.NewUniqueID()
 	_, _, err = suite.catalog.CreateCollection(context.Background(), &model.CreateCollection{
+		ID:           collectionID,
 		TenantID:     tenantName,
 		DatabaseName: databaseName,
 		Name:         "TestCollection",
 	}, time.Now().Unix())
 	suite.NoError(err)
+
+	timeBeforeSoftDelete := time.Now()
 
 	err = suite.catalog.DeleteDatabase(context.Background(), &model.DeleteDatabase{
 		Tenant: tenantName,
@@ -140,11 +150,107 @@ func (suite *TenantDatabaseServiceTestSuite) TestServer_DeleteDatabase() {
 	})
 	suite.NoError(err)
 
-	// Check that associated collection was deleted
-	var count int64
+	// Check that associated collection was soft deleted
 	var collections []*dbmodel.Collection
-	suite.NoError(suite.db.Find(&collections).Count(&count).Error)
-	suite.Equal(int64(0), count)
+	suite.NoError(suite.db.Find(&collections).Error)
+	suite.Equal(1, len(collections))
+	suite.Equal(true, collections[0].IsDeleted)
+
+	// Database should not be eligible for hard deletion yet because it still has a (soft deleted) collection
+	numDeleted, err := suite.catalog.FinishDatabaseDeletion(context.Background(), time.Now())
+	suite.NoError(err)
+	suite.Equal(uint64(0), numDeleted)
+
+	// Hard delete associated collection
+	suite.NoError(err)
+	suite.NoError(suite.catalog.DeleteCollection(context.Background(), &model.DeleteCollection{
+		TenantID:     tenantName,
+		DatabaseName: databaseName,
+		ID:           collectionID,
+	}, false))
+
+	// Database should now be eligible for hard deletion, but first verify that database is not deleted if cutoff time is prior to soft delete
+	numDeleted, err = suite.catalog.FinishDatabaseDeletion(context.Background(), timeBeforeSoftDelete)
+	suite.NoError(err)
+	suite.Equal(uint64(0), numDeleted)
+
+	// Hard delete database
+	numDeleted, err = suite.catalog.FinishDatabaseDeletion(context.Background(), time.Now())
+	suite.NoError(err)
+	suite.Equal(uint64(1), numDeleted)
+
+	// Verify that database is hard deleted
+	var databases []*dbmodel.Database
+	suite.NoError(suite.db.Debug().Where("id = ?", databaseId).Find(&databases).Error)
+	suite.Equal(0, len(databases))
+}
+
+func (suite *TenantDatabaseServiceTestSuite) TestServer_SetTenantResourceName() {
+	log.Info("TestServer_SetTenantResourceName")
+	tenantId := "TestSetTenantResourceName"
+	resourceName := "test-resource-name"
+
+	_, err := suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
+		Name: tenantId,
+		Ts:   time.Now().Unix(),
+	}, time.Now().Unix())
+	suite.NoError(err)
+
+	request := &coordinatorpb.SetTenantResourceNameRequest{
+		Id:           tenantId,
+		ResourceName: resourceName,
+	}
+	_, err = suite.s.SetTenantResourceName(context.Background(), request)
+	suite.NoError(err)
+
+	var tenant dbmodel.Tenant
+	err = suite.db.Where("id = ?", tenantId).First(&tenant).Error
+	suite.NoError(err)
+	suite.Equal(resourceName, *tenant.ResourceName)
+
+	err = dao.CleanUpTestTenant(suite.db, tenantId)
+	suite.NoError(err)
+}
+
+func (suite *TenantDatabaseServiceTestSuite) TestServer_GetTenant() {
+	log.Info("TestServer_GetTenant")
+	tenantId := "TestGetTenant"
+	resourceName := "test-resource-name"
+
+	_, err := suite.catalog.CreateTenant(context.Background(), &model.CreateTenant{
+		Name: tenantId,
+		Ts:   time.Now().Unix(),
+	}, time.Now().Unix())
+	suite.NoError(err)
+
+	response, err := suite.s.GetTenant(context.Background(), &coordinatorpb.GetTenantRequest{
+		Name: tenantId,
+	})
+	suite.NoError(err)
+	suite.Equal(tenantId, response.Tenant.Name)
+	suite.Nil(response.Tenant.ResourceName)
+
+	_, err = suite.s.SetTenantResourceName(context.Background(), &coordinatorpb.SetTenantResourceNameRequest{
+		Id:           tenantId,
+		ResourceName: resourceName,
+	})
+	suite.NoError(err)
+
+	response, err = suite.s.GetTenant(context.Background(), &coordinatorpb.GetTenantRequest{
+		Name: tenantId,
+	})
+	suite.NoError(err)
+	suite.Equal(tenantId, response.Tenant.Name)
+	suite.Equal(resourceName, *response.Tenant.ResourceName)
+
+	_, err = suite.s.GetTenant(context.Background(), &coordinatorpb.GetTenantRequest{
+		Name: "NonExistentTenant",
+	})
+	suite.Error(err)
+	suite.Equal(codes.NotFound, status.Code(err))
+
+	err = dao.CleanUpTestTenant(suite.db, tenantId)
+	suite.NoError(err)
 }
 
 func TestTenantDatabaseServiceTestSuite(t *testing.T) {

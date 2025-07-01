@@ -5,9 +5,11 @@ use std::pin::Pin;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 
-use chroma_types::GetUserIdentityResponse;
+use chroma_types::{Collection, GetUserIdentityResponse};
+use serde::Serialize;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AuthzAction {
     Reset,
     CreateTenant,
@@ -62,7 +64,7 @@ impl Display for AuthzAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AuthzResource {
     pub tenant: Option<String>,
     pub database: Option<String>,
@@ -91,6 +93,14 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         resource: AuthzResource,
     ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
 
+    fn authenticate_and_authorize_collection(
+        &self,
+        _headers: &HeaderMap,
+        action: AuthzAction,
+        resource: AuthzResource,
+        _collection: Collection,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
+
     fn get_user_identity(
         &self,
         _headers: &HeaderMap,
@@ -107,6 +117,16 @@ impl AuthenticateAndAuthorize for () {
         Box::pin(ready(Ok::<(), AuthError>(())))
     }
 
+    fn authenticate_and_authorize_collection(
+        &self,
+        _headers: &HeaderMap,
+        _action: AuthzAction,
+        _resource: AuthzResource,
+        _collection: Collection,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
+        Box::pin(ready(Ok::<(), AuthError>(())))
+    }
+
     fn get_user_identity(
         &self,
         _headers: &HeaderMap,
@@ -118,5 +138,56 @@ impl AuthenticateAndAuthorize for () {
                 databases: vec!["default_database".to_string()],
             },
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AuthzAction, AuthzResource};
+    use serde_json::{json, to_value};
+
+    #[test]
+    fn test_serialize_authz_action() {
+        let action = AuthzAction::DeleteCollection;
+        let json = to_value(action).unwrap();
+        assert_eq!(json, json!("delete_collection"));
+    }
+
+    #[test]
+    fn test_serialize_authz_resource_with_all_fields() {
+        let resource = AuthzResource {
+            tenant: Some("my_tenant".to_string()),
+            database: Some("my_db".to_string()),
+            collection: Some("my_collection".to_string()),
+        };
+
+        let json = to_value(&resource).unwrap();
+        assert_eq!(
+            json,
+            json!({
+                "tenant": "my_tenant",
+                "database": "my_db",
+                "collection": "my_collection"
+            })
+        );
+    }
+
+    #[test]
+    fn test_serialize_authz_resource_with_none_fields() {
+        let resource = AuthzResource {
+            tenant: None,
+            database: Some("db_only".to_string()),
+            collection: None,
+        };
+
+        let json = to_value(&resource).unwrap();
+        assert_eq!(
+            json,
+            json!({
+                "tenant": null,
+                "database": "db_only",
+                "collection": null
+            })
+        );
     }
 }

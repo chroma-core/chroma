@@ -272,7 +272,7 @@ List all collections.
 
 **Returns**:
 
-- `Sequence[CollectionName]` - A list of collection names. `CollectionName` is a string.
+- `Sequence[Collection]` - A list of collection objects.
 
 
 **Examples**:

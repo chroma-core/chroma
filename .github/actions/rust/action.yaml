@@ -7,40 +7,27 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Setup Rust
+    - name: Cache Rust toolchain
+      id: cache-rustup
+      uses: actions/cache@v4
+      if: ${{ runner.os != 'windows' }}
+      with:
+        path: ~/.rustup
+        key: toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml') }}
+    - name: Install Rust toolchain
+      if: ${{ steps.cache-rustup.outputs.cache-hit != 'true' }}
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        cache: false
+    - name: Set channel in rust-toolchain.toml as default
       shell: bash
-      # (reads from rust-toolchain.toml)
       run: |
-        rustup --version
-        rustup toolchain install 1.81.0
-        rustup default 1.81.0
-    # Needed for sccache to work on Windows
-    - name: Set default toolchain to rust-toolchain.toml on Windows
-      if: runner.os == 'Windows'
-      shell: pwsh
-      run: |
-        # Read the file content as a single string
-        $toolchainToml = Get-Content .\rust-toolchain.toml -Raw
-
-        # Use regex to match the line 'channel = "<something>"'
-        if ($toolchainToml -match 'channel\s*=\s*"([^"]+)"') {
-          $channel = $matches[1]
-          Write-Host "Setting Rust default channel to: $channel"
-          rustup default $channel
-        } else {
-          Write-Error "Could not parse 'channel' from rust-toolchain.toml"
-          exit 1
-        }
+        rustup default $(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)
     - name: Install Protoc
       uses: arduino/setup-protoc@v3
       with:
         repo-token: ${{ inputs.github-token }}
-    - name: Use sccache
-      uses: mozilla-actions/sccache-action@v0.0.9
-    - name: Enable sccache
-      shell: bash
-      run: |
-        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-        echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+    - name: Set up cache
+      uses: Swatinem/rust-cache@v2
     - name: Setup Nextest
       uses: taiki-e/install-action@nextest

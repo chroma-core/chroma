@@ -20,6 +20,7 @@ pub struct SpannProvider {
     // Option because reader does not need it.
     pub garbage_collection_context: Option<GarbageCollectionContext>,
     pub metrics: SpannMetrics,
+    pub pl_block_size: Option<usize>,
 }
 
 #[async_trait]
@@ -41,6 +42,7 @@ impl Configurable<(HnswIndexProvider, BlockfileProvider, SpannProviderConfig)> f
             blockfile_provider: config.1.clone(),
             garbage_collection_context: Some(garbage_collection_context),
             metrics: SpannMetrics::default(),
+            pl_block_size: Some(config.2.pl_block_size),
         })
     }
 }
@@ -72,6 +74,10 @@ impl SpannProvider {
             .garbage_collection_context
             .as_ref()
             .ok_or(SpannSegmentWriterError::InvalidArgument)?;
+        let pl_block_size = *self
+            .pl_block_size
+            .as_ref()
+            .ok_or(SpannSegmentWriterError::InvalidArgument)?;
         SpannSegmentWriter::from_segment(
             collection,
             segment,
@@ -79,6 +85,7 @@ impl SpannProvider {
             &self.hnsw_provider,
             dimensionality,
             gc_context.clone(),
+            pl_block_size,
             self.metrics.clone(),
         )
         .await

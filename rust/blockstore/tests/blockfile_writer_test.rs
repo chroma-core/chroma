@@ -2,7 +2,7 @@
 
 #[cfg(test)]
 mod tests {
-    use chroma_blockstore::arrow::provider::ArrowBlockfileProvider;
+    use chroma_blockstore::arrow::provider::{ArrowBlockfileProvider, BlockfileReaderOptions};
     use chroma_blockstore::{
         BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
     };
@@ -207,9 +207,10 @@ mod tests {
                 block_cache,
                 sparse_index_cache,
             );
+            let prefix_path = String::from("");
             let writer = block_on(
                 provider.write::<&str, Vec<u32>>(
-                    BlockfileWriterOptions::new()
+                    BlockfileWriterOptions::new(prefix_path)
                         .set_mutation_ordering(ref_state.generated_mutation_ordering),
                 ),
             )
@@ -243,11 +244,11 @@ mod tests {
                     let id = state.writer.id();
                     let flusher = block_on(state.writer.commit::<&str, Vec<u32>>()).unwrap();
                     block_on(flusher.flush::<&str, Vec<u32>>()).unwrap();
-
+                    let prefix_path = String::from("");
                     state.last_blockfile_id = Some(id);
                     state.writer = block_on(
                         state.provider.write::<&str, Vec<u32>>(
-                            BlockfileWriterOptions::new()
+                            BlockfileWriterOptions::new(prefix_path)
                                 .set_mutation_ordering(ref_state.generated_mutation_ordering)
                                 .fork(id),
                         ),
@@ -270,7 +271,8 @@ mod tests {
             let ref_last_commit = ref_state.last_commit.as_ref().unwrap();
             let last_blockfile_id = state.last_blockfile_id.unwrap();
 
-            let reader = block_on(state.provider.read::<&str, &[u32]>(&last_blockfile_id)).unwrap();
+            let read_options = BlockfileReaderOptions::new(last_blockfile_id, "".to_string());
+            let reader = block_on(state.provider.read::<&str, &[u32]>(read_options)).unwrap();
 
             // Check count
             assert_eq!(block_on(reader.count()).unwrap(), ref_last_commit.len());

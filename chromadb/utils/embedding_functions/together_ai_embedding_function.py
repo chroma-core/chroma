@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 import os
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import cast
+import warnings
 
 ENDPOINT = "https://api.together.xyz/v1/embeddings"
 
@@ -38,6 +39,14 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
+
+        if api_key is not None:
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
+            )
+
         self.model_name = model_name
         self.api_key = api_key
         self.api_key_env_var = api_key_env_var

@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
@@ -15,30 +16,18 @@ import (
 	"go.uber.org/zap"
 )
 
-// DeleteMode represents whether to perform a soft or hard delete
-type DeleteMode int
-
-const (
-	// SoftDelete marks records as deleted but keeps them in the database
-	SoftDelete DeleteMode = iota
-	// HardDelete permanently removes records from the database
-	HardDelete
-)
-
 // Coordinator is the top level component.
 // Currently, it only has the system catalog related APIs and will be extended to
 // support other functionalities such as membership managed and propagation.
 type Coordinator struct {
 	ctx         context.Context
 	catalog     Catalog
-	deleteMode  DeleteMode
 	objectStore *s3metastore.S3MetaStore
 }
 
-func NewCoordinator(ctx context.Context, deleteMode DeleteMode, objectStore *s3metastore.S3MetaStore, versionFileEnabled bool) (*Coordinator, error) {
+func NewCoordinator(ctx context.Context, objectStore *s3metastore.S3MetaStore, versionFileEnabled bool) (*Coordinator, error) {
 	s := &Coordinator{
 		ctx:         ctx,
-		deleteMode:  deleteMode,
 		objectStore: objectStore,
 	}
 
@@ -97,7 +86,7 @@ func (s *Coordinator) GetTenant(ctx context.Context, getTenant *model.GetTenant)
 	return tenant, nil
 }
 
-func (s *Coordinator) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.CreateSegment) (*model.Collection, bool, error) {
+func (s *Coordinator) CreateCollectionAndSegments(ctx context.Context, createCollection *model.CreateCollection, createSegments []*model.Segment) (*model.Collection, bool, error) {
 	collection, created, err := s.catalog.CreateCollectionAndSegments(ctx, createCollection, createSegments, createCollection.Ts)
 	if err != nil {
 		return nil, false, err
@@ -118,8 +107,12 @@ func (s *Coordinator) GetCollection(ctx context.Context, collectionID types.Uniq
 	return s.catalog.GetCollection(ctx, collectionID, collectionName, tenantID, databaseName)
 }
 
-func (s *Coordinator) GetCollections(ctx context.Context, collectionID types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*model.Collection, error) {
-	return s.catalog.GetCollections(ctx, collectionID, collectionName, tenantID, databaseName, limit, offset)
+func (s *Coordinator) GetCollections(ctx context.Context, collectionIDs []types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*model.Collection, error) {
+	return s.catalog.GetCollections(ctx, collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
+}
+
+func (s *Coordinator) GetCollectionByResourceName(ctx context.Context, tenantResourceName string, databaseName string, collectionName string) (*model.Collection, error) {
+	return s.catalog.GetCollectionByResourceName(ctx, tenantResourceName, databaseName, collectionName)
 }
 
 func (s *Coordinator) CountCollections(ctx context.Context, tenantID string, databaseName *string) (uint64, error) {
@@ -131,10 +124,10 @@ func (s *Coordinator) GetCollectionSize(ctx context.Context, collectionID types.
 }
 
 func (s *Coordinator) GetCollectionWithSegments(ctx context.Context, collectionID types.UniqueID) (*model.Collection, []*model.Segment, error) {
-	return s.catalog.GetCollectionWithSegments(ctx, collectionID)
+	return s.catalog.GetCollectionWithSegments(ctx, collectionID, false)
 }
 
-func (s *Coordinator) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, error) {
+func (s *Coordinator) CheckCollection(ctx context.Context, collectionID types.UniqueID) (bool, int64, error) {
 	return s.catalog.CheckCollection(ctx, collectionID)
 }
 
@@ -142,14 +135,11 @@ func (s *Coordinator) GetSoftDeletedCollections(ctx context.Context, collectionI
 	return s.catalog.GetSoftDeletedCollections(ctx, collectionID, tenantID, databaseName, limit)
 }
 
-func (s *Coordinator) DeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
-	if s.deleteMode == SoftDelete {
-		return s.catalog.DeleteCollection(ctx, deleteCollection, true)
-	}
-	return s.catalog.DeleteCollection(ctx, deleteCollection, false)
+func (s *Coordinator) SoftDeleteCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
+	return s.catalog.DeleteCollection(ctx, deleteCollection, true)
 }
 
-func (s *Coordinator) CleanupSoftDeletedCollection(ctx context.Context, deleteCollection *model.DeleteCollection) error {
+func (s *Coordinator) FinishCollectionDeletion(ctx context.Context, deleteCollection *model.DeleteCollection) error {
 	return s.catalog.DeleteCollection(ctx, deleteCollection, false)
 }
 
@@ -165,7 +155,7 @@ func (s *Coordinator) CountForks(ctx context.Context, sourceCollectionID types.U
 	return s.catalog.CountForks(ctx, sourceCollectionID)
 }
 
-func (s *Coordinator) CreateSegment(ctx context.Context, segment *model.CreateSegment) error {
+func (s *Coordinator) CreateSegment(ctx context.Context, segment *model.Segment) error {
 	if err := verifyCreateSegment(segment); err != nil {
 		return err
 	}
@@ -212,7 +202,7 @@ func verifyCollectionMetadata(metadata *model.CollectionMetadata[model.Collectio
 	return nil
 }
 
-func verifyCreateSegment(segment *model.CreateSegment) error {
+func verifyCreateSegment(segment *model.Segment) error {
 	if err := verifySegmentMetadata(segment.Metadata); err != nil {
 		return err
 	}
@@ -243,12 +233,18 @@ func (s *Coordinator) GetTenantsLastCompactionTime(ctx context.Context, tenantID
 	return s.catalog.GetTenantsLastCompactionTime(ctx, tenantIDs)
 }
 
+// Note: as of now, this is the only field settable on a tenant, so we have a narrowly scoped operation.
+// If we enable more fields to be settable on a tenant, we should consider adding a more general UpdateTenant API.
+func (s *Coordinator) SetTenantResourceName(ctx context.Context, tenantID string, resourceName string) error {
+	return s.catalog.SetTenantResourceName(ctx, tenantID, resourceName)
+}
+
 func (s *Coordinator) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
 	return s.catalog.FlushCollectionCompaction(ctx, flushCollectionCompaction)
 }
 
-func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*model.CollectionToGc, error) {
-	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit, tenantID)
+func (s *Coordinator) ListCollectionsToGc(ctx context.Context, cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*model.CollectionToGc, error) {
+	return s.catalog.ListCollectionsToGc(ctx, cutoffTimeSecs, limit, tenantID, minVersionsIfAlive)
 }
 
 func (s *Coordinator) ListCollectionVersions(ctx context.Context, collectionID types.UniqueID, tenantID string, maxCount *int64, versionsBefore *int64, versionsAtOrAfter *int64, includeMarkedForDeletion bool) ([]*coordinatorpb.CollectionVersionInfo, error) {
@@ -263,7 +259,22 @@ func (s *Coordinator) DeleteCollectionVersion(ctx context.Context, req *coordina
 	return s.catalog.DeleteCollectionVersion(ctx, req)
 }
 
-// SetDeleteMode sets the delete mode for testing
-func (c *Coordinator) SetDeleteMode(mode DeleteMode) {
-	c.deleteMode = mode
+func (s *Coordinator) BatchGetCollectionVersionFilePaths(ctx context.Context, req *coordinatorpb.BatchGetCollectionVersionFilePathsRequest) (*coordinatorpb.BatchGetCollectionVersionFilePathsResponse, error) {
+	return s.catalog.BatchGetCollectionVersionFilePaths(ctx, req.CollectionIds)
+}
+
+func (s *Coordinator) BatchGetCollectionSoftDeleteStatus(ctx context.Context, req *coordinatorpb.BatchGetCollectionSoftDeleteStatusRequest) (*coordinatorpb.BatchGetCollectionSoftDeleteStatusResponse, error) {
+	return s.catalog.BatchGetCollectionSoftDeleteStatus(ctx, req.CollectionIds)
+}
+
+func (s *Coordinator) FinishDatabaseDeletion(ctx context.Context, req *coordinatorpb.FinishDatabaseDeletionRequest) (*coordinatorpb.FinishDatabaseDeletionResponse, error) {
+	numDeleted, err := s.catalog.FinishDatabaseDeletion(ctx, time.Unix(req.CutoffTime.Seconds, int64(req.CutoffTime.Nanos)))
+	if err != nil {
+		return nil, err
+	}
+
+	res := &coordinatorpb.FinishDatabaseDeletionResponse{
+		NumDeleted: numDeleted,
+	}
+	return res, nil
 }

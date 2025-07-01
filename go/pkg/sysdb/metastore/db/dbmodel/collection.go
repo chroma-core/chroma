@@ -19,8 +19,8 @@ type Collection struct {
 	LogPosition                int64           `gorm:"log_position;default:0"`
 	Version                    int32           `gorm:"version;default:0"`
 	VersionFileName            string          `gorm:"version_file_name"`
-	RootCollectionId           string          `gorm:"column:root_collection_id"`
-	LineageFileName            string          `gorm:"column:lineage_file_name"`
+	RootCollectionId           *string         `gorm:"column:root_collection_id"`
+	LineageFileName            *string         `gorm:"column:lineage_file_name"`
 	TotalRecordsPostCompaction uint64          `gorm:"total_records_post_compaction;default:0"`
 	SizeBytesPostCompaction    uint64          `gorm:"size_bytes_post_compaction;default:0"`
 	LastCompactionTimeSecs     uint64          `gorm:"last_compaction_time_secs;default:0"`
@@ -51,21 +51,25 @@ type CollectionAndMetadata struct {
 
 //go:generate mockery --name=ICollectionDb
 type ICollectionDb interface {
-	GetCollections(collectionID *string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*CollectionAndMetadata, error)
+	GetCollections(collectionIDs []string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*CollectionAndMetadata, error)
 	GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*CollectionAndMetadata, error)
+	GetCollectionByResourceName(tenantResourceName string, databaseName string, collectionName string) (*CollectionAndMetadata, error)
 	CountCollections(tenantID string, databaseName *string) (uint64, error)
 	DeleteCollectionByID(collectionID string) (int, error)
 	GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*CollectionAndMetadata, error)
 	Insert(in *Collection) error
+	InsertOnConflictDoNothing(in *Collection) (didInsert bool, err error)
 	Update(in *Collection) error
 	DeleteAll() error
 	UpdateLogPositionVersionTotalRecordsAndLogicalSize(collectionID string, logPosition int64, currentCollectionVersion int32, totalRecordsPostCompaction uint64, sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, tenant string) (int32, error)
 	UpdateLogPositionAndVersionInfo(collectionID string, logPosition int64, currentCollectionVersion int32, currentVersionFilePath string, newCollectionVersion int32, newVersionFilePath string, totalRecordsPostCompaction uint64,
-		sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64) (int64, error)
-	GetCollectionEntry(collectionID *string, databaseName *string) (*Collection, error)
+		sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, numVersions uint64) (int64, error)
+	GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*Collection, error)
 	GetCollectionSize(collectionID string) (uint64, error)
-	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*CollectionToGc, error)
+	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*CollectionToGc, error)
 	UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error)
-	LockCollection(collectionID string) error
-	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath string, newLineageFilePath string) error
+	LockCollection(collectionID string) (*bool, error)
+	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath *string, newLineageFilePath string) error
+	BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error)
+	BatchGetCollectionSoftDeleteStatus(collectionIDs []string) (map[string]bool, error)
 }

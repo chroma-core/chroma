@@ -9,18 +9,24 @@ mod backoff;
 mod batch_manager;
 mod copy;
 mod cursors;
+mod destroy;
+mod gc;
 mod manifest;
 mod manifest_manager;
 mod reader;
+mod snapshot_cache;
 mod writer;
 
 pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
-pub use manifest::{Manifest, Snapshot, SnapshotPointer};
+pub use destroy::destroy;
+pub use gc::Garbage;
+pub use manifest::{unprefixed_snapshot_path, Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
+pub use snapshot_cache::SnapshotCache;
 pub use writer::{upload_parquet, LogWriter, MarkDirty};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
@@ -37,8 +43,27 @@ pub enum Error {
     AlreadyInitialized,
     #[error("scanned region is garbage collected")]
     GarbageCollected,
-    #[error("log contention fails a write")]
-    LogContention,
+    // NOTE(rescrv):  Durable means the contention occurs only on the manifest.  A manifest-scoped
+    // op may return this case and assume higher ups translate it to failure.  This is hypothetical
+    // and a note to the future because in the code as of this comment the data is always durable
+    // before any manifest contention can happen.
+    //
+    // There are three cases:
+    // - The operation does not need to be retried because it is durable, but we need to internally
+    //   propagate state to correct for the log contention.
+    // - The operation needs to be retried because there was explicit contention writing the
+    //   fragement.  We need to retry, but can return this error to the user.
+    // - The operation is in an ambiguous state and we cannot advise the user either way.  Fail the
+    //   write and let a higher level protocol handle it.
+    //
+    // By observation, manifest contention on the write path is always LogContentionDurable.  If
+    // you change the write path you need to audit where it gets returned.
+    #[error("log contention, but your data is durable")]
+    LogContentionDurable,
+    #[error("log contention, and your operation may be retried")]
+    LogContentionRetry,
+    #[error("log contention, and your data may or may not be durable")]
+    LogContentionFailure,
     #[error("the log is full")]
     LogFull,
     #[error("the log is closed")]
@@ -57,8 +82,12 @@ pub enum Error {
     CorruptFragment(String),
     #[error("corrupt cursor: {0}")]
     CorruptCursor(String),
+    #[error("corrupt garbage: {0}")]
+    CorruptGarbage(String),
     #[error("missing cursor: {0}")]
     NoSuchCursor(String),
+    #[error("garbage collection: {0}")]
+    GarbageCollection(String),
     #[error("scrub error: {0}")]
     ScrubError(#[from] Box<ScrubError>),
     #[error("parquet error: {0}")]
@@ -74,7 +103,9 @@ impl chroma_error::ChromaError for Error {
             Self::UninitializedLog => chroma_error::ErrorCodes::FailedPrecondition,
             Self::AlreadyInitialized => chroma_error::ErrorCodes::AlreadyExists,
             Self::GarbageCollected => chroma_error::ErrorCodes::NotFound,
-            Self::LogContention => chroma_error::ErrorCodes::Aborted,
+            Self::LogContentionDurable => chroma_error::ErrorCodes::Aborted,
+            Self::LogContentionRetry => chroma_error::ErrorCodes::Aborted,
+            Self::LogContentionFailure => chroma_error::ErrorCodes::Aborted,
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
             Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
@@ -84,7 +115,9 @@ impl chroma_error::ChromaError for Error {
             Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptFragment(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptCursor(_) => chroma_error::ErrorCodes::DataLoss,
+            Self::CorruptGarbage(_) => chroma_error::ErrorCodes::DataLoss,
             Self::NoSuchCursor(_) => chroma_error::ErrorCodes::Unknown,
+            Self::GarbageCollection(_) => chroma_error::ErrorCodes::Unknown,
             Self::ScrubError(_) => chroma_error::ErrorCodes::DataLoss,
             Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
             Self::StorageError(storage) => storage.code(),
@@ -98,6 +131,7 @@ impl chroma_error::ChromaError for Error {
 pub struct ScrubSuccess {
     pub calculated_setsum: Setsum,
     pub bytes_read: u64,
+    pub short_read: bool,
 }
 
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////
@@ -149,13 +183,31 @@ pub enum ScrubError {
     },
     #[error("MissingFragment: {reference:?}")]
     MissingFragment { reference: Fragment },
+    #[error("MissingFragmentBySetsumPath: {setsum:?} {path:?}")]
+    MissingFragmentBySetsumPath { setsum: Setsum, path: String },
+    #[error("MissingSnapshotBySetsumPath: {setsum:?} {path:?}")]
+    MissingSnapshotBySetsumPath { setsum: Setsum, path: String },
     #[error("MissingSnapshot: {reference:?}")]
     MissingSnapshot { reference: SnapshotPointer },
+    #[error("Garbage: expected: {0}")]
+    CorruptGarbage(String),
+    #[error("Corrupt snapshot replace")]
+    CorruptSnapshotDrop { lhs: Setsum, rhs: Setsum },
+    #[error("Corrupt snapshot replace")]
+    CorruptSnapshotReplace {
+        old_snapshot_setsum: Setsum,
+        new_snapshot_setsum: Setsum,
+        dropped: Setsum,
+    },
+    #[error("Internal error within scrubbing: {0}")]
+    Internal(String),
     #[error("OverallMismatch: {manifest:?} {observed:?}")]
     OverallMismatch {
         manifest: ScrubSuccess,
         observed: ScrubSuccess,
     },
+    #[error("The given snapshot rolls up to nothing with garbage")]
+    ReplaceDroppedEverything { snapshot: SnapshotPointer },
 }
 
 //////////////////////////////////////////// LogPosition ///////////////////////////////////////////
@@ -394,6 +446,16 @@ impl Default for CursorStoreOptions {
     }
 }
 
+///////////////////////////////////// GarbageCollectionOptions /////////////////////////////////////
+
+/// GarbageCollectionOptions control the behavior of garbage collection.
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct GarbageCollectionOptions {
+    /// Default throttling options for deletes.
+    #[serde(default)]
+    pub throttle: ThrottleOptions,
+}
+
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
 
 /// A FragmentSeqNo is an identifier that corresponds to the the number of fragments that have been
@@ -404,6 +466,8 @@ impl Default for CursorStoreOptions {
 pub struct FragmentSeqNo(pub u64);
 
 impl FragmentSeqNo {
+    const BEGIN: FragmentSeqNo = FragmentSeqNo(1);
+
     /// Returns the successor of this FragmentSeqNo, or None if this FragmentSeqNo is the maximum
     pub fn successor(&self) -> Option<Self> {
         if self.0 == u64::MAX {
@@ -502,6 +566,20 @@ where
 
 ////////////////////////////////////////// Fragment Paths //////////////////////////////////////////
 
+pub fn fragment_prefix() -> String {
+    "log/".to_string()
+}
+
+pub fn prefixed_fragment_path(prefix: &str, fragment_seq_no: FragmentSeqNo) -> String {
+    format!(
+        "{}/{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
+        prefix,
+        fragment_prefix(),
+        fragment_seq_no.bucket(),
+        fragment_seq_no.0,
+    )
+}
+
 pub fn unprefixed_fragment_path(fragment_seq_no: FragmentSeqNo) -> String {
     format!(
         "log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
@@ -516,4 +594,19 @@ pub fn parse_fragment_path(path: &str) -> Option<FragmentSeqNo> {
     let fsn_equals_number = basename.strip_suffix(".parquet")?;
     let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
     u64::from_str_radix(number, 16).ok().map(FragmentSeqNo)
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths() {
+        assert_eq!(
+            "THIS_IS_THE_COLLECTION/log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet",
+            prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentSeqNo(1))
+        );
+    }
 }

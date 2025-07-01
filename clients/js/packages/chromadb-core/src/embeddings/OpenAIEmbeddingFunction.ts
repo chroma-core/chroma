@@ -97,7 +97,7 @@ export class OpenAIEmbeddingFunction implements IEmbeddingFunction {
     openai_model = "text-embedding-ada-002",
     openai_organization_id,
     openai_embedding_dimensions,
-    openai_api_key_env_var = "OPENAI_API_KEY",
+    openai_api_key_env_var = "CHROMA_OPENAI_API_KEY",
   }: {
     openai_api_key?: string;
     openai_model?: string;

@@ -16,6 +16,7 @@ members = [
     "rust/log",
     "rust/log-service",
     "rust/memberlist",
+    "rust/metering-macros",
     "rust/storage",
     "rust/system",
     "rust/sysdb",
@@ -28,7 +29,8 @@ members = [
     "rust/sqlite",
     "rust/cli",
     "rust/wal3",
-    "rust/js_bindings"
+    "rust/js_bindings",
+    "rust/jemalloc-pprof-server"
 ]
 
 [workspace.dependencies]
@@ -43,8 +45,11 @@ figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
 flatbuffers = "24.3.25"
 futures = "0.3"
 futures-core = "0.3"
+http-body-util = "0.1.3"
 lazy_static = { version = "1.4" }
+lexical-core = "1.0"
 num_cpus = "1.16.0"
+once_cell = "1.21.3"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
 opentelemetry-http = { version = "0.27", features = ["reqwest"] }
@@ -67,7 +72,7 @@ tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread"] }
 tokio-util = "0.7.12"
 tonic = "0.12"
 tonic-health = "0.12.3"
-tower = "0.5"
+tower = { version = "0.4.13", features = ["discover"] }
 backon = "1.3.0"
 tracing = { version = "0.1" }
 tracing-bunyan-formatter = "0.3"
@@ -78,7 +83,7 @@ utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uui
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite"] }
 sha2 = "0.10.8"
 md5 = "0.7.0"
-pyo3 = { version = "0.23.3", features = ["abi3-py39"] }
+pyo3 = { version = "0.24.1", features = ["abi3-py39"] }
 http = "1.1.0"
 tower-http = { version = "0.6.2", features = ["trace", "cors"] }
 bytemuck = "1.21.0"
@@ -86,10 +91,13 @@ rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
 hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git" }
-reqwest = { version = "0.12.9",  features = ["rustls-tls-native-roots", "http2"], default-features = false }
+reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots", "http2"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
 humantime = { version = "2.2.0" }
+petgraph = { version = "0.8.1" }
+base64 = "0.22"
+tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
@@ -101,6 +109,7 @@ chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
 chroma-memberlist = { path = "rust/memberlist" }
+chroma-metering-macros = { path = "rust/metering-macros" }
 chroma-segment = { path = "rust/segment" }
 chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
@@ -109,13 +118,14 @@ chroma-tracing = { path = "rust/tracing" }
 chroma-types = { path = "rust/types" }
 chroma-sqlite = { path = "rust/sqlite" }
 chroma-cli = { path = "rust/cli" }
+chroma-jemalloc-pprof-server = { path = "rust/jemalloc-pprof-server" }
 mdac = { path = "rust/mdac" }
 wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }
 
 # Dev dependencies
 bincode = "1.3.3"
-indicatif = "0.17.9"
+indicatif = { version = "0.17.9", features = ["rayon"] }
 proptest = "1.6.0"
 proptest-state-machine = "0.3.1"
 proptest-derive = "0.5.1"
@@ -125,6 +135,11 @@ shuttle = "0.7.1"
 tempfile = "3.14.0"
 itertools = "0.13.0"
 serial_test = "3.2.0"
+zip = "2.3.0"
+
+[profile.dev]
+# Significantly reduces compile times
+split-debuginfo = "unpacked"
 
 [profile.release]
 debug = 2

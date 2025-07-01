@@ -34,6 +34,7 @@ jobs:
             # Outside docs
             outside-docs:
               - '!docs/**'
+              - '!**/*.md'
             # Helm chart changes
             helm-changes:
               - 'k8s/distributed-chroma/**'
@@ -106,7 +107,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: useblacksmith/setup-node@v5
+      - uses: actions/setup-node@v4
         with:
           node-version: "18.x"
           registry-url: "https://registry.npmjs.org"
@@ -193,27 +194,6 @@ jobs:
     uses: ./.github/workflows/_go-tests.yml
     secrets: inherit
 
-  check-title:
-    name: Check PR Title
-    runs-on: blacksmith-4vcpu-ubuntu-2204
-    steps:
-        - name: Check PR Title
-          uses: Slashgear/action-check-pr-title@v4.3.0
-          with:
-            regexp: '\[(ENH|BUG|DOC|TST|BLD|PERF|TYP|CLN|CHORE|RELEASE|HOTFIX)\].*'
-            helpMessage: "Please tag your PR title. See https://docs.trychroma.com/contributing#contributing-code-and-ideas. You must push new code to this PR for this check to run again."
-        - name: Comment explaining failure
-          if: failure()
-          uses: actions/github-script@v6
-          with:
-            script: |
-              github.rest.issues.createComment({
-                issue_number: context.issue.number,
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                body: 'Please tag your PR title with one of: \\[ENH | BUG | DOC | TST | BLD | PERF | TYP | CLN | CHORE\\]. See https://docs.trychroma.com/contributing#contributing-code-and-ideas'
-              })
-
   lint:
     name: Lint
     runs-on: blacksmith-4vcpu-ubuntu-2204
@@ -263,7 +243,6 @@ jobs:
     - javascript-client-tests
     - rust-tests
     - go-tests
-    - check-title
     - lint
     - check-helm-version-bump
     - delete-helm-comment

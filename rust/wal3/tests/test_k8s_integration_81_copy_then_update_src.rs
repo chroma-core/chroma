@@ -49,7 +49,7 @@ async fn test_k8s_integration_81_copy_then_update_src() {
     )
     .await
     .unwrap();
-    let scrubbed_source = reader.scrub().await.unwrap();
+    let scrubbed_source = reader.scrub(wal3::Limits::default()).await.unwrap();
     wal3::copy(
         &storage,
         &LogWriterOptions::default(),
@@ -67,7 +67,7 @@ async fn test_k8s_integration_81_copy_then_update_src() {
     )
     .await
     .unwrap();
-    let scrubbed_target = copied.scrub().await.unwrap();
+    let scrubbed_target = copied.scrub(wal3::Limits::default()).await.unwrap();
     assert_eq!(
         scrubbed_source.calculated_setsum,
         scrubbed_target.calculated_setsum,
@@ -77,13 +77,13 @@ async fn test_k8s_integration_81_copy_then_update_src() {
         .await
         .unwrap();
     // Scrub the new old log.
-    let scrubbed_source2 = reader.scrub().await.unwrap();
+    let scrubbed_source2 = reader.scrub(wal3::Limits::default()).await.unwrap();
     assert_ne!(
         scrubbed_source.calculated_setsum,
         scrubbed_source2.calculated_setsum
     );
     // Scrub the new log.
-    let scrubbed_target2 = copied.scrub().await.unwrap();
+    let scrubbed_target2 = copied.scrub(wal3::Limits::default()).await.unwrap();
     assert_eq!(
         scrubbed_target.calculated_setsum,
         scrubbed_target2.calculated_setsum

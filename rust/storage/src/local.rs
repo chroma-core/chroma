@@ -4,26 +4,52 @@ use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use std::path::Path;
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::{hash::DefaultHasher, path::Path};
+use thiserror::Error;
 
 use crate::{ETag, PutOptions, StorageError};
 
+#[derive(Debug, Error)]
+#[error("Local storage error")]
+pub struct LocalStoraegError;
+
 #[derive(Clone)]
 pub struct LocalStorage {
-    root: String,
+    root: PathBuf,
 }
 
 impl LocalStorage {
     pub fn new(root: &str) -> LocalStorage {
         // Create the local storage with the root path.
         LocalStorage {
-            root: root.to_string(),
+            root: Path::new(root).to_path_buf(),
         }
     }
 
+    fn etag_for_bytes(bytes: &[u8]) -> ETag {
+        let mut hasher = DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        ETag(hasher.finish().to_string())
+    }
+
+    fn path_for_key(&self, key: &str) -> PathBuf {
+        self.root.join(key)
+    }
+
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
-        let file_path = format!("{}/{}", self.root, key);
+        let file_path = self.path_for_key(key);
+        if !file_path.exists() {
+            return Err(StorageError::NotFound {
+                path: file_path
+                    .to_str()
+                    .expect("File path should be valid string")
+                    .to_string(),
+                source: Arc::new(LocalStoraegError),
+            });
+        }
         match std::fs::read(file_path) {
             Ok(bytes_u8) => Ok(Arc::new(bytes_u8)),
             Err(e) => Err(StorageError::Generic {
@@ -34,29 +60,28 @@ impl LocalStorage {
 
     pub async fn get_with_e_tag(
         &self,
-        _: &str,
+        key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        Err(StorageError::NotImplemented)
+        let bytes = self.get(key).await?;
+        let etag = Self::etag_for_bytes(&bytes);
+        Ok((bytes, Some(etag)))
     }
 
     pub async fn put_bytes(
         &self,
         key: &str,
         bytes: &[u8],
-        options: PutOptions,
+        _options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        assert_eq!(
-            options,
-            PutOptions::default(),
-            "local does not support put options"
-        );
-        let path = format!("{}/{}", self.root, key);
-        tracing::debug!("Writing to path: {}", path);
-        // Create the path if it doesn't exist, we unwrap since this should only be used in tests
-        let as_path = std::path::Path::new(&path);
-        let parent = as_path.parent().unwrap();
-        std::fs::create_dir_all(parent).unwrap();
-        let res = std::fs::write(&path, bytes);
+        // TODO: Handle options
+        let file_path = self.path_for_key(key);
+        std::fs::create_dir_all(
+            file_path
+                .parent()
+                .expect("Parent should be present for the file path"),
+        )
+        .unwrap();
+        let res = std::fs::write(&file_path, bytes);
         match res {
             Ok(_) => Ok(None),
             Err(e) => Err(StorageError::Generic {
@@ -81,27 +106,19 @@ impl LocalStorage {
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
-        let path = format!("{}/{}", self.root, key);
-        tracing::info!(path = %path, "Deleting file");
+        let file_path = self.path_for_key(key);
 
-        match std::fs::remove_file(&path) {
-            Ok(_) => {
-                tracing::info!(path = %path, "Successfully deleted file");
-                Ok(())
-            }
-            Err(e) => {
-                tracing::error!(error = %e, path = %path, "Failed to delete file");
-                Err(StorageError::Generic {
-                    source: Arc::new(e),
-                })
-            }
+        match std::fs::remove_file(&file_path) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
         }
     }
 
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
-        let src_path = format!("{}/{}", self.root, src_key);
-        let dst_path = format!("{}/{}", self.root, dst_key);
-        tracing::info!(src = %src_path, dst = %dst_path, "Renaming file");
+        let src_path = self.path_for_key(src_key);
+        let dst_path = self.path_for_key(dst_key);
 
         // Create parent directory for destination if it doesn't exist
         if let Some(parent) = std::path::Path::new(&dst_path).parent() {
@@ -114,21 +131,37 @@ impl LocalStorage {
         }
 
         match std::fs::rename(&src_path, &dst_path) {
-            Ok(_) => {
-                tracing::info!(src = %src_path, dst = %dst_path, "Successfully renamed file");
-                Ok(())
-            }
-            Err(e) => {
-                tracing::error!(error = %e, src = %src_path, dst = %dst_path, "Failed to rename file");
-                Err(StorageError::Generic {
+            Ok(_) => Ok(()),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
+        }
+    }
+
+    pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        let src_path = self.path_for_key(src_key);
+        let dst_path = self.path_for_key(dst_key);
+
+        // Create parent directory for destination if it doesn't exist
+        if let Some(parent) = std::path::Path::new(&dst_path).parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::error!(error = %e, path = %parent.display(), "Failed to create parent directory");
+                return Err(StorageError::Generic {
                     source: Arc::new(e),
-                })
+                });
             }
+        }
+
+        match std::fs::copy(&src_path, &dst_path) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
         }
     }
 
     pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
-        let search_path = Path::new(&self.root).join(prefix);
+        let search_path = self.path_for_key(prefix);
         if !search_path.exists() {
             return Ok(Vec::new());
         }

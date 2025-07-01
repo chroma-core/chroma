@@ -2,7 +2,7 @@ use super::{
     CollectionUuid, Metadata, MetadataValueConversionError, SegmentScope,
     SegmentScopeConversionError,
 };
-use crate::chroma_proto;
+use crate::{chroma_proto, DatabaseUuid};
 use chroma_error::{ChromaError, ErrorCodes};
 use std::{collections::HashMap, str::FromStr};
 use thiserror::Error;
@@ -134,6 +134,24 @@ impl Segment {
             _ => {}
         }
         res
+    }
+
+    pub fn extract_prefix_and_id(path: &str) -> Result<(&str, uuid::Uuid), uuid::Error> {
+        let (prefix, id) = match path.rfind('/') {
+            Some(pos) => (&path[..pos], &path[pos + 1..]),
+            None => ("", path),
+        };
+        match Uuid::try_parse(id) {
+            Ok(uid) => Ok((prefix, uid)),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn construct_prefix_path(&self, tenant: &str, database_id: &DatabaseUuid) -> String {
+        format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}",
+            tenant, database_id, self.collection, self.id
+        )
     }
 }
 
@@ -279,5 +297,51 @@ mod tests {
         let metadata = converted_segment.metadata.unwrap();
         assert_eq!(metadata.len(), 1);
         assert_eq!(metadata.get("foo").unwrap(), &MetadataValue::Int(42));
+    }
+
+    #[test]
+    fn test_segment_construct_prefix_path() {
+        let segment = Segment {
+            id: SegmentUuid(Uuid::nil()),
+            r#type: SegmentType::BlockfileMetadata,
+            scope: SegmentScope::METADATA,
+            collection: CollectionUuid(Uuid::nil()),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let tenant = "test_tenant";
+        let database_id = &DatabaseUuid(Uuid::nil());
+        let prefix_path = segment.construct_prefix_path(tenant, database_id);
+        assert_eq!(
+            prefix_path,
+            "tenant/test_tenant/database/00000000-0000-0000-0000-000000000000/collection/00000000-0000-0000-0000-000000000000/segment/00000000-0000-0000-0000-000000000000"
+        );
+    }
+
+    #[test]
+    fn test_segment_extract_prefix_and_id() {
+        let path = "tenant/test_tenant/database/00000000-0000-0000-0000-000000000000/collection/00000000-0000-0000-0000-000000000000/segment/00000000-0000-0000-0000-000000000000/00000000-0000-0000-0000-000000000001";
+        let (prefix, id) =
+            Segment::extract_prefix_and_id(path).expect("Failed to extract prefix and id");
+        assert_eq!(
+            prefix,
+            "tenant/test_tenant/database/00000000-0000-0000-0000-000000000000/collection/00000000-0000-0000-0000-000000000000/segment/00000000-0000-0000-0000-000000000000"
+        );
+        assert_eq!(
+            id,
+            Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("Cannot happen")
+        );
+    }
+
+    #[test]
+    fn test_segment_extract_prefix_and_id_legacy() {
+        let path = "00000000-0000-0000-0000-000000000001";
+        let (prefix, id) =
+            Segment::extract_prefix_and_id(path).expect("Failed to extract prefix and id");
+        assert_eq!(prefix, "");
+        assert_eq!(
+            id,
+            Uuid::from_str("00000000-0000-0000-0000-000000000001").expect("Cannot happen")
+        );
     }
 }

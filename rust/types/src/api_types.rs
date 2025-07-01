@@ -20,7 +20,6 @@ use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
 use crate::UpdateMetadata;
 use crate::Where;
-use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
@@ -82,7 +81,7 @@ impl ChromaError for GetCollectionWithSegmentsError {
             GetCollectionWithSegmentsError::CollectionConversionError(
                 collection_conversion_error,
             ) => collection_conversion_error.code(),
-            GetCollectionWithSegmentsError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            GetCollectionWithSegmentsError::DuplicateSegment => ErrorCodes::Internal,
             GetCollectionWithSegmentsError::Field(_) => ErrorCodes::FailedPrecondition,
             GetCollectionWithSegmentsError::SegmentConversionError(segment_conversion_error) => {
                 segment_conversion_error.code()
@@ -93,6 +92,40 @@ impl ChromaError for GetCollectionWithSegmentsError {
             }
             GetCollectionWithSegmentsError::NotFound(_) => ErrorCodes::NotFound,
             GetCollectionWithSegmentsError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum BatchGetCollectionVersionFilePathsError {
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] Status),
+    #[error("Could not parse UUID from string {1}: {0}")]
+    Uuid(uuid::Error, String),
+}
+
+impl ChromaError for BatchGetCollectionVersionFilePathsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BatchGetCollectionVersionFilePathsError::Grpc(status) => status.code().into(),
+            BatchGetCollectionVersionFilePathsError::Uuid(_, _) => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum BatchGetCollectionSoftDeleteStatusError {
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] Status),
+    #[error("Could not parse UUID from string {1}: {0}")]
+    Uuid(uuid::Error, String),
+}
+
+impl ChromaError for BatchGetCollectionSoftDeleteStatusError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BatchGetCollectionSoftDeleteStatusError::Grpc(status) => status.code().into(),
+            BatchGetCollectionSoftDeleteStatusError::Uuid(_, _) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -123,6 +156,7 @@ impl ChromaError for ResetError {
 #[derive(Serialize, ToSchema)]
 pub struct ChecklistResponse {
     pub max_batch_size: u32,
+    pub supports_base64_encoding: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -443,6 +477,20 @@ impl ChromaError for DeleteDatabaseError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum FinishDatabaseDeletionError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for FinishDatabaseDeletionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            FinishDatabaseDeletionError::Internal(err) => err.code(),
+        }
+    }
+}
+
 #[non_exhaustive]
 #[derive(Validate, Debug, Serialize, ToSchema)]
 pub struct ListCollectionsRequest {
@@ -593,10 +641,14 @@ pub enum CreateCollectionError {
     Configuration(#[from] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("The operation was aborted, {0}")]
+    Aborted(String),
     #[error("SPANN is still in development. Not allowed to created spann indexes")]
     SpannNotImplemented,
     #[error("HNSW is not supported on this platform")]
     HnswNotSupported,
+    #[error("Failed to parse db id")]
+    DatabaseIdParseError,
 }
 
 impl ChromaError for CreateCollectionError {
@@ -610,8 +662,10 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::Get(err) => err.code(),
             CreateCollectionError::Configuration(_) => ErrorCodes::Internal,
             CreateCollectionError::Internal(err) => err.code(),
+            CreateCollectionError::Aborted(_) => ErrorCodes::Aborted,
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
+            CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
         }
     }
 }
@@ -638,6 +692,10 @@ pub enum GetCollectionsError {
     Configuration(#[from] serde_json::Error),
     #[error("Could not deserialize collection ID")]
     CollectionId(#[from] uuid::Error),
+    #[error("Could not deserialize database ID")]
+    DatabaseId,
+    #[error("Provided limit `{0}` exceeds maximum allowable limit `{1}`")]
+    MaximumLimitExceeded(u32, u32),
 }
 
 impl ChromaError for GetCollectionsError {
@@ -646,6 +704,8 @@ impl ChromaError for GetCollectionsError {
             GetCollectionsError::Internal(err) => err.code(),
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
+            GetCollectionsError::DatabaseId => ErrorCodes::Internal,
+            GetCollectionsError::MaximumLimitExceeded(_, _) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -829,7 +889,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::CollectionConversionError(collection_conversion_error) => {
                 collection_conversion_error.code()
             }
-            ForkCollectionError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::DuplicateSegment => ErrorCodes::Internal,
             ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
             ForkCollectionError::Internal(chroma_error) => chroma_error.code(),
@@ -1669,11 +1729,12 @@ impl ChromaError for QueryError {
 #[derive(Serialize, ToSchema)]
 pub struct HealthCheckResponse {
     pub is_executor_ready: bool,
+    pub is_log_client_ready: bool,
 }
 
 impl HealthCheckResponse {
     pub fn get_status_code(&self) -> tonic::Code {
-        if self.is_executor_ready {
+        if self.is_executor_ready && self.is_log_client_ready {
             tonic::Code::Ok
         } else {
             tonic::Code::Unavailable
@@ -1683,14 +1744,10 @@ impl HealthCheckResponse {
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
-    #[error("Assignment error: {0}")]
-    AssignmentError(#[from] AssignmentError),
     #[error("Error converting: {0}")]
     Conversion(#[from] QueryConversionError),
     #[error("Error converting plan to proto: {0}")]
     PlanToProto(#[from] PlanToProtoError),
-    #[error("Memberlist is empty")]
-    EmptyMemberlist,
     #[error(transparent)]
     Grpc(#[from] Status),
     #[error("Inconsistent data")]
@@ -1699,8 +1756,6 @@ pub enum ExecutorError {
     CollectionMissingHnswConfiguration,
     #[error("Internal error: {0}")]
     Internal(Box<dyn ChromaError>),
-    #[error("No client found for node: {0}")]
-    NoClientFound(String),
     #[error("Error sending backfill request to compactor: {0}")]
     BackfillError(Box<dyn ChromaError>),
 }
@@ -1708,15 +1763,12 @@ pub enum ExecutorError {
 impl ChromaError for ExecutorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ExecutorError::AssignmentError(_) => ErrorCodes::Internal,
             ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
             ExecutorError::PlanToProto(_) => ErrorCodes::Internal,
-            ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
             ExecutorError::Grpc(e) => e.code().into(),
             ExecutorError::InconsistentData => ErrorCodes::Internal,
             ExecutorError::CollectionMissingHnswConfiguration => ErrorCodes::Internal,
             ExecutorError::Internal(e) => e.code(),
-            ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
             ExecutorError::BackfillError(e) => e.code(),
         }
     }

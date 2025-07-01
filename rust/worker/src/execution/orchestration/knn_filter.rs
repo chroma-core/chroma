@@ -11,21 +11,23 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{CollectionAndSegments, HnswParametersFromSegmentError, Segment, SegmentType};
+use chroma_types::{
+    operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, Segment, SegmentType,
+};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
+use tracing::Span;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-    filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
+    filter::{FilterError, FilterInput, FilterOutput},
     knn_hnsw::KnnHnswError,
     knn_log::KnnLogError,
     knn_merge::KnnMergeError,
-    knn_projection::{KnnProjectionError, KnnProjectionOutput},
+    knn_projection::KnnProjectionError,
     spann_bf_pl::SpannBfPlError,
     spann_centers_search::SpannCentersSearchError,
     spann_fetch_pl::SpannFetchPlError,
-    spann_knn_merge::SpannKnnMergeError,
 };
 
 #[derive(Error, Debug)]
@@ -60,8 +62,6 @@ pub enum KnnError {
     SpannFetchPl(#[from] SpannFetchPlError),
     #[error("Error running Spann Head Search Operator: {0}")]
     SpannHeadSearch(#[from] SpannCentersSearchError),
-    #[error("Error running Spann Knn Merge Operator")]
-    SpannKnnMerge(#[from] SpannKnnMergeError),
     #[error("Error creating spann segment reader: {0}")]
     SpannSegmentReaderCreationError(#[from] SpannSegmentReaderError),
     #[error("Invalid distance function")]
@@ -88,7 +88,6 @@ impl ChromaError for KnnError {
             KnnError::SpannBfPl(e) => e.code(),
             KnnError::SpannFetchPl(e) => e.code(),
             KnnError::SpannHeadSearch(e) => e.code(),
-            KnnError::SpannKnnMerge(_) => ErrorCodes::Internal,
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
             KnnError::SpannSegmentReaderCreationError(e) => e.code(),
@@ -173,7 +172,7 @@ pub struct KnnFilterOrchestrator {
     fetched_logs: Option<FetchLogOutput>,
 
     // Pipelined operators
-    filter: FilterOperator,
+    filter: Filter,
 
     // Result channel
     result_channel: Option<Sender<KnnFilterResult>>,
@@ -187,7 +186,7 @@ impl KnnFilterOrchestrator {
         queue: usize,
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
-        filter: FilterOperator,
+        filter: Filter,
     ) -> Self {
         Self {
             blockfile_provider,
@@ -212,8 +211,14 @@ impl Orchestrator for KnnFilterOrchestrator {
         self.dispatcher.clone()
     }
 
-    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
-        vec![wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver())]
+    async fn initial_tasks(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+    ) -> Vec<(TaskMessage, Option<Span>)> {
+        vec![(
+            wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver()),
+            Some(Span::current()),
+        )]
     }
 
     fn queue_size(&self) -> usize {
@@ -257,7 +262,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
             },
             ctx.receiver(),
         );
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 }
 
@@ -365,6 +370,3 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
         self.terminate_with_result(Ok(output), ctx).await;
     }
 }
-
-pub(super) type KnnOutput = KnnProjectionOutput;
-pub(super) type KnnResult = Result<KnnOutput, KnnError>;

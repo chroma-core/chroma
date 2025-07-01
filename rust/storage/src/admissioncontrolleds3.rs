@@ -3,13 +3,14 @@ use crate::{
     s3::S3Storage,
     GetOptions,
 };
-use crate::{ETag, PutOptions, StorageConfigError};
+use crate::{DeleteOptions, ETag, PutOptions, StorageConfigError};
 use async_trait::async_trait;
 use aws_sdk_s3::primitives::{ByteStream, Length};
 use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::{future::Shared, stream, FutureExt, StreamExt};
 use std::{
@@ -143,7 +144,7 @@ impl AdmissionControlledS3Storage {
         }
 
         let part_size = storage.download_part_size_bytes;
-        tracing::info!(
+        tracing::debug!(
             "[AdmissionControlledS3][Parallel fetch] Content length: {}, key ranges: {:?}",
             content_length,
             ranges
@@ -476,6 +477,25 @@ impl AdmissionControlledS3Storage {
         )
         .await
     }
+
+    pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        // Akin to a HEAD request; no AC.
+        self.storage.copy(src_key, dst_key).await
+    }
+
+    pub async fn list_prefix(
+        &self,
+        prefix: &str,
+        options: GetOptions,
+    ) -> Result<Vec<String>, StorageError> {
+        let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+        let _permit = self.rate_limiter.enter(atomic_priority, None).await;
+        self.storage.list_prefix(prefix).await
+    }
+
+    pub async fn delete(&self, prefix: &str, options: DeleteOptions) -> Result<(), StorageError> {
+        self.storage.delete(prefix, options).await
+    }
 }
 
 #[async_trait]
@@ -525,8 +545,29 @@ impl RateLimitPolicy {
 }
 
 #[derive(Debug)]
+pub struct CountBasedPolicyMetrics {
+    // The delay in milliseconds before a request is allowed to proceed.
+    pub nac_delay_ms: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl Default for CountBasedPolicyMetrics {
+    fn default() -> Self {
+        Self {
+            nac_delay_ms: opentelemetry::global::meter("chroma.storage.admission_control")
+                .u64_histogram("nac_delay_ms")
+                .with_description(
+                    "The delay in milliseconds before a request is allowed to proceed.",
+                )
+                .with_unit("ms")
+                .build(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct CountBasedPolicy {
     remaining_tokens: Vec<Semaphore>,
+    metrics: CountBasedPolicyMetrics,
 }
 
 impl CountBasedPolicy {
@@ -537,7 +578,10 @@ impl CountBasedPolicy {
                 (max_allowed_outstanding as f32 * allocation).ceil() as usize,
             ));
         }
-        Self { remaining_tokens }
+        Self {
+            remaining_tokens,
+            metrics: CountBasedPolicyMetrics::default(),
+        }
     }
 
     async fn acquire(
@@ -545,6 +589,7 @@ impl CountBasedPolicy {
         priority: Arc<AtomicUsize>,
         mut channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
+        let _stopwatch = Stopwatch::new(&self.metrics.nac_delay_ms, &[]);
         loop {
             let current_priority = priority.load(Ordering::SeqCst);
             let current_priority: StorageRequestPriority = current_priority.into();

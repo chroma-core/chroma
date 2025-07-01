@@ -8,30 +8,31 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
-use chroma_sysdb::SysDb;
+use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_tracing::meter_event::{MeterEvent, ReadAction, WriteAction};
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    CollectionUuid, CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionError, CreateCollectionRequest,
-    CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantRequest, CreateTenantResponse, DeleteCollectionError,
-    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
-    DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    ForkCollectionError, ForkCollectionRequest, ForkCollectionResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, HeartbeatResponse,
-    Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError,
-    ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord, QueryError,
-    QueryRequest, QueryResponse, ResetError, ResetResponse, Segment, SegmentScope, SegmentType,
-    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
-    UpdateCollectionResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
+    Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
+    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
+    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantRequest, CreateTenantResponse,
+    DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
+    DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError,
+    DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest,
+    ForkCollectionResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
+    HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
+    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -65,9 +66,12 @@ pub struct ServiceBasedFrontend {
     metrics: Arc<Metrics>,
     default_knn_index: KnnIndex,
     retries_builder: ExponentialBuilder,
+    tenants_to_migrate_immediately: HashSet<String>,
+    tenants_to_migrate_immediately_threshold: Option<String>,
 }
 
 impl ServiceBasedFrontend {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         allow_reset: bool,
         sysdb_client: SysDb,
@@ -76,6 +80,8 @@ impl ServiceBasedFrontend {
         executor: Executor,
         max_batch_size: u32,
         default_knn_index: KnnIndex,
+        tenants_to_migrate_immediately: HashSet<String>,
+        tenants_to_migrate_immediately_threshold: Option<String>,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -118,6 +124,8 @@ impl ServiceBasedFrontend {
             metrics,
             default_knn_index,
             retries_builder,
+            tenants_to_migrate_immediately,
+            tenants_to_migrate_immediately_threshold,
         }
     }
 
@@ -137,6 +145,18 @@ impl ServiceBasedFrontend {
 
     pub fn get_supported_segment_types(&self) -> Vec<SegmentType> {
         self.executor.get_supported_segment_types()
+    }
+
+    pub async fn get_cached_collection(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Collection, GetCollectionError> {
+        Ok(self
+            .collections_with_segments_provider
+            .get_collection_with_segments(collection_id)
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
+            .collection)
     }
 
     async fn get_collection_dimension(
@@ -312,14 +332,13 @@ impl ServiceBasedFrontend {
         }: ListCollectionsRequest,
     ) -> Result<ListCollectionsResponse, GetCollectionsError> {
         self.sysdb_client
-            .get_collections(
-                None,
-                None,
-                Some(tenant_id),
-                Some(database_name),
+            .get_collections(GetCollectionsOptions {
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
                 limit,
                 offset,
-            )
+                ..Default::default()
+            })
             .await
     }
 
@@ -348,14 +367,13 @@ impl ServiceBasedFrontend {
     ) -> Result<GetCollectionResponse, GetCollectionError> {
         let mut collections = self
             .sysdb_client
-            .get_collections(
-                None,
-                Some(collection_name.clone()),
-                Some(tenant_id),
-                Some(database_name),
-                None,
-                0,
-            )
+            .get_collections(GetCollectionsOptions {
+                name: Some(collection_name.clone()),
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                limit: Some(1),
+                ..Default::default()
+            })
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         collections
@@ -476,7 +494,7 @@ impl ServiceBasedFrontend {
         let collection = self
             .sysdb_client
             .create_collection(
-                tenant_id,
+                tenant_id.clone(),
                 database_name,
                 collection_id,
                 name,
@@ -492,8 +510,20 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
-
+        if self.tenant_is_on_new_log_by_default(&tenant_id) {
+            if let Err(err) = self.log_client.seal_log(&tenant_id, collection_id).await {
+                tracing::error!("could not seal collection right away: {err}");
+            }
+        }
         Ok(collection)
+    }
+
+    fn tenant_is_on_new_log_by_default(&self, tenant_id: &str) -> bool {
+        self.tenants_to_migrate_immediately.contains(tenant_id)
+            || self
+                .tenants_to_migrate_immediately_threshold
+                .as_ref()
+                .is_some_and(|threshold| tenant_id <= threshold.as_str())
     }
 
     pub async fn update_collection(
@@ -634,7 +664,7 @@ impl ServiceBasedFrontend {
             .when(|e| {
                 matches!(
                     e.code(),
-                    ErrorCodes::FailedPrecondition | ErrorCodes::NotFound | ErrorCodes::Unknown
+                    ErrorCodes::FailedPrecondition | ErrorCodes::Unknown
                 )
             })
             .notify(|_, _| {
@@ -1410,6 +1440,7 @@ impl ServiceBasedFrontend {
     pub async fn healthcheck(&self) -> HealthCheckResponse {
         HealthCheckResponse {
             is_executor_ready: self.executor.is_ready().await,
+            is_log_client_ready: self.log_client.is_ready(),
         }
     }
 }
@@ -1433,7 +1464,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         };
 
         let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
-        let mut log = Log::try_from_config(&config.log, registry).await?;
+        let mut log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
         let max_batch_size = log.get_max_batch_size().await?;
 
         // Create compation manager and pass handle to log service if configured
@@ -1458,6 +1489,13 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
         let executor =
             Executor::try_from_config(&(config.executor.clone(), system.clone()), registry).await?;
 
+        let tenants_to_migrate_immediately = config
+            .tenants_to_migrate_immediately
+            .iter()
+            .cloned()
+            .collect::<HashSet<String>>();
+        let tenants_to_migrate_immediately_threshold =
+            config.tenants_to_migrate_immediately_threshold.clone();
         Ok(ServiceBasedFrontend::new(
             config.allow_reset,
             sysdb,
@@ -1466,6 +1504,8 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             executor,
             max_batch_size,
             config.default_knn_index,
+            tenants_to_migrate_immediately,
+            tenants_to_migrate_immediately_threshold,
         ))
     }
 }
@@ -1477,7 +1517,10 @@ mod tests {
     use chroma_types::Collection;
     use uuid::Uuid;
 
-    use crate::server::CreateCollectionPayload;
+    use crate::{
+        executor::config::{DistributedExecutorConfig, ExecutorConfig},
+        server::CreateCollectionPayload,
+    };
 
     use super::*;
 
@@ -1522,12 +1565,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_k8s_integration_migrate_immediately_criteria() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig {
+            tenants_to_migrate_immediately: vec!["cccccccc-cccc-cccc-cccc-cccccccccccc".to_string()],
+            tenants_to_migrate_immediately_threshold: Some(
+                "66666666-6666-6666-6666-666666666666".to_string(),
+            ),
+            allow_reset: false,
+            sqlitedb: None,
+            segment_manager: None,
+            sysdb: Default::default(),
+            collections_with_segments_provider: Default::default(),
+            log: Default::default(),
+            executor: ExecutorConfig::Distributed(DistributedExecutorConfig {
+                connections_per_node: 128,
+                replication_factor: 2,
+                connect_timeout_ms: 1000,
+                request_timeout_ms: 1000,
+                retry: Default::default(),
+                assignment: Default::default(),
+                memberlist_provider: Default::default(),
+                max_query_service_response_size_bytes: 65536,
+            }),
+            default_knn_index: KnnIndex::Spann,
+        };
+        let frontend = ServiceBasedFrontend::try_from_config(&(config, system), &registry)
+            .await
+            .unwrap();
+        assert!(frontend.tenant_is_on_new_log_by_default("22222222-2222-2222-2222-222222222222"));
+        assert!(frontend.tenant_is_on_new_log_by_default("66666666-6666-6666-6666-666666666666"));
+        assert!(!frontend.tenant_is_on_new_log_by_default("77777777-7777-7777-7777-777777777777"));
+        assert!(frontend.tenant_is_on_new_log_by_default("cccccccc-cccc-cccc-cccc-cccccccccccc"));
+    }
+
+    #[tokio::test]
     async fn test_k8s_integration_default_distributed_segments() {
         // Creating a collection in distributed should result in three segments.
         // TODO: this should use our official Rust HTTP client, once we have one
         let client = reqwest::Client::new();
         let create_response = client
-            .post("http://localhost:3000/api/v2/tenants/default_tenant/databases/default_database/collections")
+            .post("http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections")
             .json(
                 &CreateCollectionPayload { name: Uuid::new_v4().to_string(), configuration: None, metadata: None, get_or_create: false },
             )

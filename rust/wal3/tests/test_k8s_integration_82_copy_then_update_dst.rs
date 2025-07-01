@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
+    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
     SnapshotOptions,
 };
 
@@ -15,7 +15,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
     Manifest::initialize(
         &LogWriterOptions::default(),
         &storage,
-        "test_k8s_integration_80_copy_source",
+        "test_k8s_integration_82_copy_then_update_dst_source",
         "init",
     )
     .await
@@ -29,7 +29,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
             ..LogWriterOptions::default()
         },
         Arc::clone(&storage),
-        "test_k8s_integration_80_copy_source",
+        "test_k8s_integration_82_copy_then_update_dst_source",
         "load and scrub writer",
         (),
     )
@@ -45,17 +45,17 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
     let reader = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_80_copy_source".to_string(),
+        "test_k8s_integration_82_copy_then_update_dst_source".to_string(),
     )
     .await
     .unwrap();
-    let scrubbed_source = reader.scrub().await.unwrap();
+    let scrubbed_source = reader.scrub(Limits::default()).await.unwrap();
     wal3::copy(
         &storage,
         &LogWriterOptions::default(),
         &reader,
         LogPosition::default(),
-        "test_k8s_integration_80_copy_target".to_string(),
+        "test_k8s_integration_82_copy_then_update_dst_target".to_string(),
     )
     .await
     .unwrap();
@@ -63,11 +63,11 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
     let copied = LogReader::open(
         LogReaderOptions::default(),
         Arc::clone(&storage),
-        "test_k8s_integration_80_copy_target".to_string(),
+        "test_k8s_integration_82_copy_then_update_dst_target".to_string(),
     )
     .await
     .unwrap();
-    let scrubbed_target = copied.scrub().await.unwrap();
+    let scrubbed_target = copied.scrub(Limits::default()).await.unwrap();
     assert_eq!(
         scrubbed_source.calculated_setsum,
         scrubbed_target.calculated_setsum,
@@ -82,7 +82,7 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
             ..LogWriterOptions::default()
         },
         Arc::clone(&storage),
-        "test_k8s_integration_80_copy_target",
+        "test_k8s_integration_82_copy_then_update_dst_target",
         "load and scrub writer",
         (),
     )
@@ -92,13 +92,13 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         .await
         .unwrap();
     // Scrub the old log.
-    let scrubbed_source2 = reader.scrub().await.unwrap();
+    let scrubbed_source2 = reader.scrub(Limits::default()).await.unwrap();
     assert_eq!(
         scrubbed_source.calculated_setsum,
         scrubbed_source2.calculated_setsum
     );
     // Scrub the new log.
-    let scrubbed_target2 = copied.scrub().await.unwrap();
+    let scrubbed_target2 = copied.scrub(Limits::default()).await.unwrap();
     assert_ne!(
         scrubbed_target.calculated_setsum,
         scrubbed_target2.calculated_setsum

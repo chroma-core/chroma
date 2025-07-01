@@ -19,7 +19,7 @@ from chromadb.utils.embedding_functions import CloudflareWorkersAIEmbeddingFunct
 os.environ["CHROMA_CLOUDFLARE_API_KEY"] = "<INSERT API KEY HERE>"
 
 ef = CloudflareWorkersAIEmbeddingFunction(
-                account_id="bd4502421ad9c8e8931d02a616e6845a",
+                account_id="<INSERT ACCOUNTID HERE>",
                 model_name="@cf/baai/bge-m3",
             )
 ef(input=["This is my first text to embed", "This is my second document"])
@@ -30,12 +30,14 @@ ef(input=["This is my first text to embed", "This is my second document"])
 {% Tab label="typescript" %}
 
 ```typescript
-import { JinaEmbeddingFunction } from 'chromadb';
+// npm install @chroma-core/cloudflare-worker-ai
 
-process.env.CHROMA_CLOUDFLARE_API_KEY = "<INSERT API KEY HERE>"
+import { CloudflareWorkersAIEmbeddingFunction } from '@chroma-core/cloudflare-worker-ai';
+
+process.env.CLOUDFLARE_API_KEY = "<INSERT API KEY HERE>"
 
 const embedder = new CloudflareWorkersAIEmbeddingFunction({
-    account_id="bd4502421ad9c8e8931d02a616e6845a",
+    account_id="<INSERT ACCOUNT ID HERE>",
     model_name="@cf/baai/bge-m3",
 });
 

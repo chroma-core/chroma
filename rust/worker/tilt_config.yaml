@@ -42,13 +42,13 @@ query_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 60000 # 1 minute
             alt_host: "rust-log-service.chroma"
-            use_alt_host_for_everything: true
+            alt_host_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"
     dispatcher:
         num_worker_threads: 4
-        dispatcher_queue_size: 100
+        dispatcher_queue_size: 1000
         worker_queue_size: 100
-        task_queue_limit: 1000
-        active_io_tasks: 100
+        task_queue_limit: 10000
+        active_io_tasks: 10000
     blockfile_provider:
         arrow:
             block_manager_config:
@@ -122,16 +122,16 @@ compaction_service:
             connect_timeout_ms: 5000
             request_timeout_ms: 60000 # 1 minute
             alt_host: "rust-log-service.chroma"
-            use_alt_host_for_everything: true
+            alt_host_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"
     dispatcher:
         num_worker_threads: 4
-        dispatcher_queue_size: 100
+        dispatcher_queue_size: 1000
         worker_queue_size: 100
-        task_queue_limit: 1000
-        active_io_tasks: 100
+        task_queue_limit: 10000
+        active_io_tasks: 10000
     compactor:
         compaction_manager_queue_size: 1000
-        max_concurrent_jobs: 100
+        max_concurrent_jobs: 50
         compaction_interval_sec: 10
         min_compaction_size: 10
         max_compaction_size: 10000
@@ -159,6 +159,7 @@ compaction_service:
                 capacity: 8192 # 8192 MiB = 8GB
         permitted_parallelism: 180
     spann_provider:
+        pl_block_size: 5242880 # 5MiB
         pl_garbage_collection:
             enabled: true
             policy:
@@ -169,6 +170,8 @@ compaction_service:
             policy: "full_rebuild"
 
 log_service:
+    num_records_before_backpressure: 100000
+    reinsert_threshold: 0
     opentelemetry:
         service_name: "rust-log-service"
         endpoint: "http://otel-collector:4317"
@@ -185,9 +188,19 @@ log_service:
                 count_based_policy:
                     max_concurrent_requests: 500
                     bandwidth_allocation: [1.0]
+    cache:
+        memory:
+          capacity: 100000000 # 100 MB
     writer:
         throttle_fragment:
             batch_interval_us: 100000
             batch_size_bytes: 8388608 # 8MiB
             throughput: 3300
             headroom: 200
+    proxy_to:
+        host: "logservice.chroma"
+        port: 50051
+        connect_timeout_ms: 5000
+        request_timeout_ms: 60000 # 1 minute
+        alt_host: "rust-log-service.chroma"
+        alt_host_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"

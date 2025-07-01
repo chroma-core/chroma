@@ -1,12 +1,15 @@
 package grpc
 
 import (
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func convertCollectionMetadataToModel(collectionMetadata *coordinatorpb.UpdateMetadata) (*model.CollectionMetadata[model.CollectionMetadataValueType], error) {
@@ -39,6 +42,7 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 		return nil
 	}
 
+	dbId := collection.DatabaseId.String()
 	collectionpb := &coordinatorpb.Collection{
 		Id:                         collection.ID.String(),
 		Name:                       collection.Name,
@@ -51,7 +55,20 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 		TotalRecordsPostCompaction: collection.TotalRecordsPostCompaction,
 		SizeBytesPostCompaction:    collection.SizeBytesPostCompaction,
 		LastCompactionTimeSecs:     collection.LastCompactionTimeSecs,
+		VersionFilePath:            &collection.VersionFileName,
+		LineageFilePath:            collection.LineageFileName,
+		UpdatedAt: &timestamppb.Timestamp{
+			Seconds: collection.UpdatedAt,
+			Nanos:   0,
+		},
+		DatabaseId: &dbId,
 	}
+
+	if collection.RootCollectionID != nil {
+		rootCollectionId := collection.RootCollectionID.String()
+		collectionpb.RootCollectionId = &rootCollectionId
+	}
+
 	if collection.Metadata == nil {
 		return collectionpb
 	}
@@ -123,6 +140,7 @@ func convertToCreateCollectionModel(req *coordinatorpb.CreateCollectionRequest) 
 		GetOrCreate:          req.GetGetOrCreate(),
 		TenantID:             req.GetTenant(),
 		DatabaseName:         req.GetDatabase(),
+		Ts:                   time.Now().Unix(),
 	}, nil
 }
 
@@ -216,7 +234,7 @@ func convertSegmentMetadataToProto(segmentMetadata *model.SegmentMetadata[model.
 	return metadatapb
 }
 
-func convertSegmentToModel(segmentpb *coordinatorpb.Segment) (*model.CreateSegment, error) {
+func convertProtoSegment(segmentpb *coordinatorpb.Segment) (*model.Segment, error) {
 	segmentID, err := types.ToUniqueID(&segmentpb.Id)
 	if err != nil {
 		log.Error("segment id format error", zap.String("segment.id", segmentpb.Id))
@@ -236,11 +254,17 @@ func convertSegmentToModel(segmentpb *coordinatorpb.Segment) (*model.CreateSegme
 		return nil, err
 	}
 
-	return &model.CreateSegment{
+	filePaths := make(map[string][]string)
+	for t, paths := range segmentpb.FilePaths {
+		filePaths[t] = paths.Paths
+	}
+
+	return &model.Segment{
 		ID:           segmentID,
 		Type:         segmentpb.Type,
 		Scope:        segmentpb.Scope.String(),
 		CollectionID: collectionID,
 		Metadata:     metadata,
+		FilePaths:    filePaths,
 	}, nil
 }

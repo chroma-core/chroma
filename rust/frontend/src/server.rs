@@ -42,10 +42,15 @@ use uuid::Uuid;
 use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
+    base64_decode::{
+        maybe_decode_embeddings, maybe_decode_update_embeddings, EmbeddingsPayload,
+        UpdateEmbeddingsPayload,
+    },
     config::FrontendServerConfig,
     quota::{Action, QuotaEnforcer, QuotaPayload},
     server_middleware::{always_json_errors_middleware, default_json_content_type_middleware},
     tower_tracing::add_tracing_middleware,
+    traced_json::TracedJson,
     types::errors::{ErrorResponse, ServerError, ValidationError},
     Frontend,
 };
@@ -185,7 +190,8 @@ impl FrontendServer {
         }
     }
 
-    pub async fn run(self) {
+    /// Accepts an optional `ready_tx` channel that emits the bound port when the server is ready.
+    pub async fn run(self, ready_tx: Option<tokio::sync::oneshot::Sender<u16>>) {
         let system = self.system.clone();
 
         let FrontendServerConfig {
@@ -289,20 +295,38 @@ impl FrontendServer {
         if let Some(cors_allow_origins) = cors_allow_origins {
             let origins = cors_allow_origins
                 .into_iter()
-                .map(|origin| origin.parse().unwrap())
+                .map(|origin| {
+                    origin
+                        .parse()
+                        .unwrap_or_else(|_| panic!("Invalid origin: {}", origin))
+                })
                 .collect::<Vec<_>>();
 
-            let cors = CorsLayer::new()
-                .allow_origin(origins)
+            let mut cors_builder = CorsLayer::new()
                 .allow_headers(tower_http::cors::Any)
                 .allow_methods(tower_http::cors::Any);
-            app = app.layer(cors);
+            if origins.len() == 1 && origins[0] == "*" {
+                cors_builder = cors_builder.allow_origin(tower_http::cors::Any);
+            } else {
+                cors_builder = cors_builder.allow_origin(origins);
+            }
+
+            app = app.layer(cors_builder);
         }
 
         // TODO: tracing
         let addr = format!("{}:{}", listen_address, port);
         println!("Listening on {addr}");
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+        let bound_port = listener
+            .local_addr()
+            .expect("Failed to get local address of server")
+            .port();
+        if let Some(ready_tx) = ready_tx {
+            ready_tx
+                .send(bound_port)
+                .expect("Failed to send bound port. Receiver has been dropped.");
+        }
         if circuit_breaker.enabled() {
             let service = AdmissionControlledService::new(circuit_breaker, app);
             axum::serve(listener, service.into_make_service())
@@ -348,6 +372,22 @@ impl FrontendServer {
         Ok(self
             .auth
             .authenticate_and_authorize(headers, action, resource)
+            .await?)
+    }
+
+    // This is used to authenticate API operations that are collection-specific.
+    // We need to send additional collection info to the auth service.
+    async fn authenticate_and_authorize_collection(
+        &mut self,
+        headers: &HeaderMap,
+        action: AuthzAction,
+        resource: AuthzResource,
+        collection_id: CollectionUuid,
+    ) -> Result<(), ServerError> {
+        let collection = self.frontend.get_cached_collection(collection_id).await?;
+        Ok(self
+            .auth
+            .authenticate_and_authorize_collection(headers, action, resource, collection)
             .await?)
     }
 }
@@ -406,6 +446,7 @@ async fn pre_flight_checks(
     server.metrics.pre_flight_checks.add(1, &[]);
     Ok(Json(ChecklistResponse {
         max_batch_size: server.frontend.clone().get_max_batch_size(),
+        supports_base64_encoding: true,
     }))
 }
 
@@ -493,7 +534,7 @@ async fn create_tenant(
     Json(request): Json<CreateTenantPayload>,
 ) -> Result<Json<CreateTenantResponse>, ServerError> {
     server.metrics.create_tenant.add(1, &[]);
-    tracing::info!("Creating tenant [{}]", request.name);
+    tracing::info!(name: "create_tenant", tenant_name = %request.name);
     server
         .authenticate_and_authorize(
             &headers,
@@ -529,7 +570,7 @@ async fn get_tenant(
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetTenantResponse>, ServerError> {
     server.metrics.get_tenant.add(1, &[]);
-    tracing::info!("Getting tenant [{}]", name);
+    tracing::info!(name: "get_tenant", tenant_name = %name);
     server
         .authenticate_and_authorize(
             &headers,
@@ -574,7 +615,7 @@ async fn create_database(
         .metrics
         .create_database
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Creating database [{}] for tenant [{}]", name, tenant);
+    tracing::info!(name: "create_database", tenant_name = %tenant, database_name = %name);
     server
         .authenticate_and_authorize(
             &headers,
@@ -636,7 +677,7 @@ async fn list_databases(
         .metrics
         .list_databases
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Listing database for tenant [{}]", tenant);
+    tracing::info!(name: "list_databases", tenant_name = %tenant);
     server
         .authenticate_and_authorize(
             &headers,
@@ -679,7 +720,7 @@ async fn get_database(
         .metrics
         .get_database
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Getting database [{}] for tenant [{}]", database, tenant);
+    tracing::info!(name: "get_database", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
             &headers,
@@ -722,7 +763,7 @@ async fn delete_database(
         .metrics
         .delete_database
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Deleting database [{}] for tenant [{}]", database, tenant);
+    tracing::info!(name: "delete_database", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
             &headers,
@@ -773,13 +814,7 @@ async fn list_collections(
         .metrics
         .list_collections
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!(
-        "Listing collections in database [{}] for tenant [{}] with limit [{:?}] and offset [{:?}]",
-        database,
-        tenant,
-        limit,
-        offset
-    );
+    tracing::info!(name: "list_collections", tenant_name = %tenant, database_name = %database, limit = ?limit, offset = ?offset);
     server
         .authenticate_and_authorize(
             &headers,
@@ -829,7 +864,7 @@ async fn count_collections(
         .metrics
         .count_collections
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Counting number of collections in database [{database}] for tenant [{tenant}]",);
+    tracing::info!(name: "count_collections", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
             &headers,
@@ -884,7 +919,7 @@ async fn create_collection(
         .metrics
         .create_collection
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!("Creating collection in database [{database}] for tenant [{tenant}]");
+    tracing::info!(name: "create_collection", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
             &headers,
@@ -917,10 +952,12 @@ async fn create_collection(
         Some(c) => Some(InternalCollectionConfiguration::try_from_config(
             c,
             server.config.frontend.default_knn_index,
+            payload_clone.metadata,
         )?),
         None => Some(InternalCollectionConfiguration::try_from_config(
             CollectionConfiguration::default(),
             server.config.frontend.default_knn_index,
+            payload_clone.metadata,
         )?),
     };
 
@@ -962,9 +999,7 @@ async fn get_collection(
         .metrics
         .get_collection
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!(
-        "Getting collection [{collection_name}] in database [{database}] for tenant [{tenant}]"
-    );
+    tracing::info!(name: "get_collection", tenant_name = %tenant, database_name = %database, collection_name = %collection_name);
     server
         .authenticate_and_authorize(
             &headers,
@@ -1020,11 +1055,9 @@ async fn update_collection(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
-    tracing::info!(
-        "Updating collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
-    );
+    tracing::info!(name: "update_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::UpdateCollection,
             AuthzResource {
@@ -1032,6 +1065,7 @@ async fn update_collection(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let api_token = headers
@@ -1092,9 +1126,7 @@ async fn delete_collection(
         .metrics
         .delete_collection
         .add(1, &[KeyValue::new("tenant", tenant.clone())]);
-    tracing::info!(
-        "Deleting collection [{collection_name}] in database [{database}] for tenant [{tenant}]"
-    );
+    tracing::info!(name: "delete_collection", tenant_name = %tenant, database_name = %database);
     server
         .authenticate_and_authorize(
             &headers,
@@ -1152,9 +1184,7 @@ async fn fork_collection(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
-    tracing::info!(
-        "Forking collection [{collection_id}] in database [{database}] for tenant [{tenant}]"
-    );
+    tracing::info!(name: "fork_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
     server
         .authenticate_and_authorize(
             &headers,
@@ -1194,7 +1224,7 @@ async fn fork_collection(
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
 pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
+    embeddings: Option<EmbeddingsPayload>,
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<Metadata>>>,
@@ -1210,7 +1240,7 @@ impl AddCollectionRecordsPayload {
     ) -> Self {
         Self {
             ids,
-            embeddings,
+            embeddings: embeddings.map(EmbeddingsPayload::JsonArrays),
             documents,
             uris,
             metadatas,
@@ -1232,7 +1262,7 @@ async fn collection_add(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<AddCollectionRecordsPayload>,
+    TracedJson(payload): TracedJson<AddCollectionRecordsPayload>,
 ) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
     server.metrics.collection_add.add(
         1,
@@ -1242,7 +1272,7 @@ async fn collection_add(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Add,
             AuthzResource {
@@ -1250,6 +1280,7 @@ async fn collection_add(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1260,7 +1291,9 @@ async fn collection_add(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    if let Some(embeddings) = &payload.embeddings {
+
+    let payload_embeddings: Option<Vec<Vec<f32>>> = maybe_decode_embeddings(payload.embeddings)?;
+    if let Some(embeddings) = payload_embeddings.as_ref() {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
     }
     if let Some(metadatas) = &payload.metadatas {
@@ -1280,12 +1313,13 @@ async fn collection_add(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    tracing::info!(name: "collection_add", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
         tenant,
         database,
         collection_id,
         payload.ids,
-        payload.embeddings,
+        payload_embeddings,
         payload.documents,
         payload.uris,
         payload.metadatas,
@@ -1299,7 +1333,7 @@ async fn collection_add(
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct UpdateCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<Vec<Option<Vec<f32>>>>,
+    embeddings: Option<UpdateEmbeddingsPayload>,
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
@@ -1319,7 +1353,7 @@ async fn collection_update(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<UpdateCollectionRecordsPayload>,
+    TracedJson(payload): TracedJson<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
     server.metrics.collection_update.add(
         1,
@@ -1329,7 +1363,7 @@ async fn collection_update(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Update,
             AuthzResource {
@@ -1337,6 +1371,7 @@ async fn collection_update(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1347,7 +1382,9 @@ async fn collection_update(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::Update, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    if let Some(embeddings) = &payload.embeddings {
+    let payload_embeddings: Option<Vec<Option<Vec<f32>>>> =
+        maybe_decode_update_embeddings(payload.embeddings)?;
+    if let Some(embeddings) = &payload_embeddings {
         quota_payload = quota_payload.with_update_embeddings(embeddings);
     }
     if let Some(metadatas) = &payload.metadatas {
@@ -1366,12 +1403,13 @@ async fn collection_update(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    tracing::info!(name: "collection_update", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
         tenant,
         database,
         collection_id,
         payload.ids,
-        payload.embeddings,
+        payload_embeddings,
         payload.documents,
         payload.uris,
         payload.metadatas,
@@ -1383,7 +1421,7 @@ async fn collection_update(
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct UpsertCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<Vec<Vec<f32>>>,
+    embeddings: Option<EmbeddingsPayload>,
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
@@ -1410,7 +1448,7 @@ async fn collection_upsert(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<UpsertCollectionRecordsPayload>,
+    TracedJson(payload): TracedJson<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
     server.metrics.collection_upsert.add(
         1,
@@ -1420,7 +1458,7 @@ async fn collection_upsert(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Update,
             AuthzResource {
@@ -1428,6 +1466,7 @@ async fn collection_upsert(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1438,7 +1477,8 @@ async fn collection_upsert(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    if let Some(embeddings) = &payload.embeddings {
+    let payload_embeddings: Option<Vec<Vec<f32>>> = maybe_decode_embeddings(payload.embeddings)?;
+    if let Some(embeddings) = payload_embeddings.as_ref() {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
     }
     if let Some(metadatas) = &payload.metadatas {
@@ -1458,12 +1498,13 @@ async fn collection_upsert(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    tracing::info!(name: "collection_upsert", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
         tenant,
         database,
         collection_id,
         payload.ids,
-        payload.embeddings,
+        payload_embeddings,
         payload.documents,
         payload.uris,
         payload.metadatas,
@@ -1510,7 +1551,7 @@ async fn collection_delete(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Delete,
             AuthzResource {
@@ -1518,6 +1559,7 @@ async fn collection_delete(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1540,7 +1582,7 @@ async fn collection_delete(
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ])?;
-
+    tracing::info!(name: "collection_delete", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.as_ref().map_or(0, |ids| ids.len()), has_where = r#where.is_some());
     let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
         tenant,
         database,
@@ -1583,10 +1625,13 @@ async fn collection_count(
         ],
     );
     tracing::info!(
-        "Counting number of records in collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
+        name: "collection_count",
+        tenant = tenant,
+        database = database,
+        collection_id = collection_id
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Count,
             AuthzResource {
@@ -1594,6 +1639,7 @@ async fn collection_count(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let _guard = server.scorecard_request(&[
@@ -1653,7 +1699,7 @@ async fn collection_get(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Get,
             AuthzResource {
@@ -1661,6 +1707,7 @@ async fn collection_get(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1681,14 +1728,18 @@ async fn collection_get(
         quota_payload = quota_payload.with_limit(limit);
     }
     server.quota_enforcer.enforce(&quota_payload).await?;
-    tracing::info!(
-        "Getting records from collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
-    );
     let _guard = server.scorecard_request(&[
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ])?;
+
+    tracing::info!(
+        name: "collection_get",
+        num_ids = payload.ids.as_ref().map_or(0, |ids| ids.len()),
+        include = ?payload.include,
+        has_where = parsed_where.is_some(),
+    );
     let request = GetRequest::try_new(
         tenant,
         database,
@@ -1737,7 +1788,7 @@ async fn collection_query(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    Json(payload): Json<QueryRequestPayload>,
+    TracedJson(payload): TracedJson<QueryRequestPayload>,
 ) -> Result<Json<QueryResponse>, ServerError> {
     server.metrics.collection_query.add(
         1,
@@ -1747,7 +1798,7 @@ async fn collection_query(
         ],
     );
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Query,
             AuthzResource {
@@ -1755,6 +1806,7 @@ async fn collection_query(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let collection_id =
@@ -1779,16 +1831,19 @@ async fn collection_query(
         quota_payload = quota_payload.with_query_ids(ids);
     }
     server.quota_enforcer.enforce(&quota_payload).await?;
-    tracing::info!(
-        "Querying records from collection [{collection_id}] in database [{database}] for tenant [{tenant}]",
-    );
-
     let _guard = server.scorecard_request(&[
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    tracing::info!(
+        name: "collection_query",
+        num_ids = payload.ids.as_ref().map_or(0, |ids| ids.len()),
+        num_embeddings = payload.query_embeddings.len(),
+        include = ?payload.include,
+        has_where = parsed_where.is_some(),
+    );
     let request = QueryRequest::try_new(
         tenant,
         database,
@@ -1873,14 +1928,12 @@ mod tests {
     use chroma_system::System;
     use std::sync::Arc;
 
-    async fn test_server() -> u16 {
+    async fn test_server(mut config: FrontendServerConfig) -> u16 {
         let registry = Registry::new();
         let system = System::new();
 
-        let port = random_port::PortPicker::new().random(true).pick().unwrap();
-
-        let mut config = FrontendServerConfig::single_node_default();
-        config.port = port;
+        // Binding to port 0 will let the OS choose an available port. This avoids port conflicts when running tests in parallel.
+        config.port = 0;
 
         let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
             .await
@@ -1893,38 +1946,23 @@ mod tests {
             Arc::new(()),
             System::new(),
         );
+
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+
         tokio::task::spawn(async move {
-            app.run().await;
+            app.run(Some(ready_tx)).await;
         });
 
-        port
+        // Wait for port
+        ready_rx.await.unwrap()
     }
 
     #[tokio::test]
     async fn test_cors() {
-        let registry = Registry::new();
-        let system = System::new();
-
-        let port = random_port::PortPicker::new().pick().unwrap();
-
         let mut config = FrontendServerConfig::single_node_default();
-        config.port = port;
-        config.cors_allow_origins = Some(vec!["http://localhost:3000".to_string()]);
+        config.cors_allow_origins = Some(vec!["http://localhost:8000".to_string()]);
 
-        let frontend = Frontend::try_from_config(&(config.clone().frontend, system), &registry)
-            .await
-            .unwrap();
-        let app = FrontendServer::new(
-            config,
-            frontend,
-            vec![],
-            Arc::new(()),
-            Arc::new(()),
-            System::new(),
-        );
-        tokio::task::spawn(async move {
-            app.run().await;
-        });
+        let port = test_server(config).await;
 
         let client = reqwest::Client::new();
         let res = client
@@ -1932,14 +1970,43 @@ mod tests {
                 reqwest::Method::OPTIONS,
                 format!("http://localhost:{}/api/v2/heartbeat", port),
             )
-            .header("Origin", "http://localhost:3000")
+            .header("Origin", "http://localhost:8000")
             .send()
             .await
             .unwrap();
         assert_eq!(res.status(), 200);
 
         let allow_origin = res.headers().get("Access-Control-Allow-Origin");
-        assert_eq!(allow_origin.unwrap(), "http://localhost:3000");
+        assert_eq!(allow_origin.unwrap(), "http://localhost:8000");
+
+        let allow_methods = res.headers().get("Access-Control-Allow-Methods");
+        assert_eq!(allow_methods.unwrap(), "*");
+
+        let allow_headers = res.headers().get("Access-Control-Allow-Headers");
+        assert_eq!(allow_headers.unwrap(), "*");
+    }
+
+    #[tokio::test]
+    async fn test_cors_wildcard() {
+        let mut config = FrontendServerConfig::single_node_default();
+        config.cors_allow_origins = Some(vec!["*".to_string()]);
+
+        let port = test_server(config).await;
+
+        let client = reqwest::Client::new();
+        let res = client
+            .request(
+                reqwest::Method::OPTIONS,
+                format!("http://localhost:{}/api/v2/heartbeat", port),
+            )
+            .header("Origin", "http://localhost:8000")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200);
+
+        let allow_origin = res.headers().get("Access-Control-Allow-Origin");
+        assert_eq!(allow_origin.unwrap(), "*");
 
         let allow_methods = res.headers().get("Access-Control-Allow-Methods");
         assert_eq!(allow_methods.unwrap(), "*");
@@ -1950,7 +2017,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_defaults_to_json_content_type() {
-        let port = test_server().await;
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
 
         // We don't send a content-type header
         let client = reqwest::Client::new();
@@ -1966,7 +2033,7 @@ mod tests {
     #[tokio::test]
     async fn test_plaintext_error_conversion() {
         // By default, axum returns plaintext errors for some errors. This asserts that there's middleware to ensure all errors are returned as JSON.
-        let port = test_server().await;
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
 
         let client = reqwest::Client::new();
         let res = client

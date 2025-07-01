@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
     chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Segment,
@@ -5,6 +7,7 @@ use crate::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
+use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -29,9 +32,36 @@ use pyo3::types::PyAnyMethods;
 )]
 pub struct CollectionUuid(pub Uuid);
 
+/// DatabaseUuid is a wrapper around Uuid to provide a type for the database id.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Serialize,
+    ToSchema,
+)]
+pub struct DatabaseUuid(pub Uuid);
+
+impl DatabaseUuid {
+    pub fn new() -> Self {
+        DatabaseUuid(Uuid::new_v4())
+    }
+}
+
 impl CollectionUuid {
     pub fn new() -> Self {
         CollectionUuid(Uuid::new_v4())
+    }
+
+    pub fn storage_prefix_for_log(&self) -> String {
+        format!("logs/{}", self)
     }
 }
 
@@ -43,6 +73,23 @@ impl std::str::FromStr for CollectionUuid {
             Ok(uuid) => Ok(CollectionUuid(uuid)),
             Err(err) => Err(err),
         }
+    }
+}
+
+impl std::str::FromStr for DatabaseUuid {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match Uuid::parse_str(s) {
+            Ok(uuid) => Ok(DatabaseUuid(uuid)),
+            Err(err) => Err(err),
+        }
+    }
+}
+
+impl std::fmt::Display for DatabaseUuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -94,6 +141,16 @@ pub struct Collection {
     pub size_bytes_post_compaction: u64,
     #[serde(skip)]
     pub last_compaction_time_secs: u64,
+    #[serde(skip)]
+    pub version_file_path: Option<String>,
+    #[serde(skip)]
+    pub root_collection_id: Option<CollectionUuid>,
+    #[serde(skip)]
+    pub lineage_file_path: Option<String>,
+    #[serde(skip, default = "SystemTime::now")]
+    pub updated_at: SystemTime,
+    #[serde(skip)]
+    pub database_id: DatabaseUuid,
 }
 
 impl Default for Collection {
@@ -111,6 +168,11 @@ impl Default for Collection {
             total_records_post_compaction: 0,
             size_bytes_post_compaction: 0,
             last_compaction_time_secs: 0,
+            version_file_path: None,
+            root_collection_id: None,
+            lineage_file_path: None,
+            updated_at: SystemTime::now(),
+            database_id: DatabaseUuid::new(),
         }
     }
 }
@@ -172,6 +234,7 @@ impl Collection {
             dimension: Some(dim),
             tenant: "default_tenant".to_string(),
             database: "default_database".to_string(),
+            database_id: DatabaseUuid::new(),
             ..Default::default()
         }
     }
@@ -185,6 +248,8 @@ pub enum CollectionConversionError {
     InvalidUuid,
     #[error(transparent)]
     MetadataValueConversionError(#[from] MetadataValueConversionError),
+    #[error("Missing Database Id")]
+    MissingDatabaseId,
 }
 
 impl ChromaError for CollectionConversionError {
@@ -193,6 +258,7 @@ impl ChromaError for CollectionConversionError {
             CollectionConversionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
             CollectionConversionError::InvalidUuid => ErrorCodes::InvalidArgument,
             CollectionConversionError::MetadataValueConversionError(e) => e.code(),
+            CollectionConversionError::MissingDatabaseId => ErrorCodes::Internal,
         }
     }
 }
@@ -201,17 +267,29 @@ impl TryFrom<chroma_proto::Collection> for Collection {
     type Error = CollectionConversionError;
 
     fn try_from(proto_collection: chroma_proto::Collection) -> Result<Self, Self::Error> {
-        let collection_uuid = match Uuid::try_parse(&proto_collection.id) {
-            Ok(uuid) => uuid,
-            Err(_) => return Err(CollectionConversionError::InvalidUuid),
-        };
-        let collection_id = CollectionUuid(collection_uuid);
+        let collection_id = CollectionUuid::from_str(&proto_collection.id)
+            .map_err(|_| CollectionConversionError::InvalidUuid)?;
         let collection_metadata: Option<Metadata> = match proto_collection.metadata {
             Some(proto_metadata) => match proto_metadata.try_into() {
                 Ok(metadata) => Some(metadata),
                 Err(e) => return Err(CollectionConversionError::MetadataValueConversionError(e)),
             },
             None => None,
+        };
+        // TODO(@codetheweb): this be updated to error with "missing field" once all SysDb deployments are up-to-date
+        let updated_at = match proto_collection.updated_at {
+            Some(updated_at) => {
+                SystemTime::UNIX_EPOCH
+                    + Duration::new(updated_at.seconds as u64, updated_at.nanos as u32)
+            }
+            None => SystemTime::now(),
+        };
+        let database_id = match proto_collection.database_id {
+            Some(db_id) => DatabaseUuid::from_str(&db_id)
+                .map_err(|_| CollectionConversionError::InvalidUuid)?,
+            None => {
+                return Err(CollectionConversionError::MissingDatabaseId);
+            }
         };
         Ok(Collection {
             collection_id,
@@ -226,6 +304,13 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             total_records_post_compaction: proto_collection.total_records_post_compaction,
             size_bytes_post_compaction: proto_collection.size_bytes_post_compaction,
             last_compaction_time_secs: proto_collection.last_compaction_time_secs,
+            version_file_path: proto_collection.version_file_path,
+            root_collection_id: proto_collection
+                .root_collection_id
+                .map(|uuid| CollectionUuid(Uuid::try_parse(&uuid).unwrap())),
+            lineage_file_path: proto_collection.lineage_file_path,
+            updated_at,
+            database_id,
         })
     }
 }
@@ -261,6 +346,11 @@ impl TryFrom<Collection> for chroma_proto::Collection {
             total_records_post_compaction: value.total_records_post_compaction,
             size_bytes_post_compaction: value.size_bytes_post_compaction,
             last_compaction_time_secs: value.last_compaction_time_secs,
+            version_file_path: value.version_file_path,
+            root_collection_id: value.root_collection_id.map(|uuid| uuid.0.to_string()),
+            lineage_file_path: value.lineage_file_path,
+            updated_at: Some(value.updated_at.into()),
+            database_id: Some(value.database_id.0.to_string()),
         })
     }
 }
@@ -306,6 +396,14 @@ mod test {
             total_records_post_compaction: 0,
             size_bytes_post_compaction: 0,
             last_compaction_time_secs: 0,
+            version_file_path: Some("version_file_path".to_string()),
+            root_collection_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
+            lineage_file_path: Some("lineage_file_path".to_string()),
+            updated_at: Some(prost_types::Timestamp {
+                seconds: 1,
+                nanos: 1,
+            }),
+            database_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(
@@ -318,5 +416,33 @@ mod test {
         assert_eq!(converted_collection.tenant, "baz".to_string());
         assert_eq!(converted_collection.database, "qux".to_string());
         assert_eq!(converted_collection.total_records_post_compaction, 0);
+        assert_eq!(converted_collection.size_bytes_post_compaction, 0);
+        assert_eq!(converted_collection.last_compaction_time_secs, 0);
+        assert_eq!(
+            converted_collection.version_file_path,
+            Some("version_file_path".to_string())
+        );
+        assert_eq!(
+            converted_collection.root_collection_id,
+            Some(CollectionUuid(Uuid::nil()))
+        );
+        assert_eq!(
+            converted_collection.lineage_file_path,
+            Some("lineage_file_path".to_string())
+        );
+        assert_eq!(
+            converted_collection.updated_at,
+            SystemTime::UNIX_EPOCH + Duration::new(1, 1)
+        );
+        assert_eq!(converted_collection.database_id, DatabaseUuid(Uuid::nil()));
+    }
+
+    #[test]
+    fn storage_prefix_for_log_format() {
+        let collection_id = Uuid::parse_str("34e72052-5e60-47cb-be88-19a9715b7026")
+            .map(CollectionUuid)
+            .unwrap();
+        let prefix = collection_id.storage_prefix_for_log();
+        assert_eq!("logs/34e72052-5e60-47cb-be88-19a9715b7026", prefix);
     }
 }

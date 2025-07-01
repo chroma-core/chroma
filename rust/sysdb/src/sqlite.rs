@@ -1,4 +1,4 @@
-use crate::SqliteSysDbConfig;
+use crate::{GetCollectionsOptions, SqliteSysDbConfig};
 use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
@@ -9,11 +9,12 @@ use chroma_sqlite::table;
 use chroma_types::{
     Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
     CreateCollectionError, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
-    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
-    ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError,
+    CreateTenantError, CreateTenantResponse, Database, DatabaseUuid, DeleteCollectionError,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
+    GetCollectionsError, GetDatabaseError, GetSegmentsError, GetTenantError, GetTenantResponse,
+    InternalCollectionConfiguration, ListDatabasesError, Metadata, MetadataValue, ResetError,
+    ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionConfiguration,
+    UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -22,6 +23,7 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::Row;
 use std::collections::HashMap;
 use std::str::FromStr;
+use std::time::SystemTime;
 use uuid::Uuid;
 
 //////////////////////// SqliteSysDb ////////////////////////
@@ -288,6 +290,8 @@ impl SqliteSysDb {
                     _ => CreateCollectionError::Internal(e.into()),
                 })?;
         let database_id = database_result.get::<&str, _>(0);
+        let database_uuid = DatabaseUuid::from_str(database_id)
+            .map_err(|_| CreateCollectionError::DatabaseIdParseError)?;
 
         sqlx::query(
             r#"
@@ -338,6 +342,11 @@ impl SqliteSysDb {
             version: 0,
             size_bytes_post_compaction: 0,
             last_compaction_time_secs: 0,
+            version_file_path: None,
+            root_collection_id: None,
+            lineage_file_path: None,
+            updated_at: SystemTime::UNIX_EPOCH,
+            database_id: database_uuid,
         })
     }
 
@@ -474,13 +483,18 @@ impl SqliteSysDb {
 
     pub(crate) async fn get_collections(
         &self,
-        collection_id: Option<CollectionUuid>,
-        name: Option<String>,
-        tenant: Option<String>,
-        database: Option<String>,
-        limit: Option<u32>,
-        offset: u32,
+        options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
+        let GetCollectionsOptions {
+            collection_id,
+            name,
+            tenant,
+            database,
+            limit,
+            offset,
+            ..
+        } = options;
+
         self.get_collections_with_conn(
             self.db.get_conn(),
             collection_id,
@@ -661,6 +675,7 @@ impl SqliteSysDb {
             .column((table::Collections::Table, table::Collections::Dimension))
             .column((table::Databases::Table, table::Databases::TenantId))
             .column((table::Databases::Table, table::Databases::Name))
+            .column((table::Collections::Table, table::Collections::DatabaseId))
             .columns([
                 table::CollectionMetadata::Key,
                 table::CollectionMetadata::StrValue,
@@ -710,6 +725,10 @@ impl SqliteSysDb {
                     }
                     None => InternalCollectionConfiguration::default_hnsw(),
                 };
+                let database_id = match DatabaseUuid::from_str(first_row.get(6)) {
+                    Ok(db_id) => db_id,
+                    Err(_) => return Some(Err(GetCollectionsError::DatabaseId)),
+                };
 
                 Some(Ok(Collection {
                     collection_id,
@@ -724,6 +743,11 @@ impl SqliteSysDb {
                     database: first_row.get(5),
                     size_bytes_post_compaction: 0,
                     last_compaction_time_secs: 0,
+                    version_file_path: None,
+                    root_collection_id: None,
+                    lineage_file_path: None,
+                    updated_at: SystemTime::UNIX_EPOCH,
+                    database_id,
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;
@@ -854,17 +878,64 @@ impl SqliteSysDb {
     where
         for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
     {
-        let deleted_rows = sqlx::query(
+        // Delete embedding metadata for the embedding ids matching the segment ids
+        sqlx::query(
             r#"
-            DELETE FROM collections
-            WHERE id = $1
-            AND database_id = (SELECT id FROM databases WHERE name = $2 AND tenant_id = $3)
-            RETURNING id
-        "#,
+            DELETE FROM embedding_metadata
+            WHERE id IN (
+                SELECT id FROM embeddings
+                WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            )
+            "#,
         )
         .bind(collection_id.to_string())
-        .bind(&database)
-        .bind(&tenant)
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete embeddings fulltext search records
+        sqlx::query(
+            r#"
+            DELETE FROM embedding_fulltext_search
+            WHERE rowid IN (
+                SELECT id FROM embeddings
+                WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            )
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete embeddings
+        sqlx::query(
+            r#"
+            DELETE FROM embeddings
+            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete segment metadata
+        sqlx::query(
+            r#"
+            DELETE FROM segment_metadata
+            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            "#,
+        )
+        .bind(collection_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
+        // Delete max_seq_id records for segments being deleted
+        sqlx::query(
+            r#"
+            DELETE FROM max_seq_id
+            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
+            "#,
+        )
+        .bind(collection_id.to_string())
         .execute(&mut *conn)
         .await?;
 
@@ -878,17 +949,6 @@ impl SqliteSysDb {
             .build_sqlx(sea_query::SqliteQueryBuilder);
 
         sqlx::query_with(&sql, values).execute(&mut *conn).await?;
-
-        // Delete segment metadata
-        sqlx::query(
-            r#"
-            DELETE FROM segment_metadata
-            WHERE segment_id IN (SELECT id FROM segments WHERE collection = $1)
-            "#,
-        )
-        .bind(collection_id.to_string())
-        .execute(&mut *conn)
-        .await?;
 
         // Delete collection metadata
         sqlx::query(
@@ -913,6 +973,20 @@ impl SqliteSysDb {
             &self.log_topic_namespace,
             collection_id,
         ))
+        .execute(&mut *conn)
+        .await?;
+
+        let deleted_rows = sqlx::query(
+            r#"
+            DELETE FROM collections
+            WHERE id = $1
+            AND database_id = (SELECT id FROM databases WHERE name = $2 AND tenant_id = $3)
+            RETURNING id
+        "#,
+        )
+        .bind(collection_id.to_string())
+        .bind(&database)
+        .bind(&tenant)
         .execute(&mut *conn)
         .await?;
 
@@ -1139,7 +1213,10 @@ mod tests {
             .unwrap();
 
         let collections = sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let collection = collections.first().unwrap();
@@ -1291,7 +1368,10 @@ mod tests {
             .unwrap();
 
         let collections = sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let collection = collections.first().unwrap();
@@ -1359,7 +1439,10 @@ mod tests {
 
         // Should no longer exist
         let result = sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         assert_eq!(result.len(), 0);
@@ -1506,7 +1589,10 @@ mod tests {
 
         // Fetching the collection should not error and the config should be the default
         let collections = sysdb
-            .get_collections(Some(collection_id), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_id),
+                ..Default::default()
+            })
             .await
             .unwrap();
         let collection = collections.first().unwrap();

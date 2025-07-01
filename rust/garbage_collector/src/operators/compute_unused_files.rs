@@ -1,16 +1,25 @@
 use async_trait::async_trait;
-use chroma_blockstore::{arrow::provider::RootManagerError, RootManager};
+use chroma_blockstore::{
+    arrow::provider::{BlockManager, RootManagerError},
+    RootManager,
+};
 use chroma_cache::nop::NopCache;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_index::{
+    hnsw_provider::{HnswIndexProvider, FILES},
+    IndexUuid,
+};
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     chroma_proto::{CollectionSegmentInfo, CollectionVersionFile, VersionListForCollection},
-    HNSW_PATH,
+    Segment, HNSW_PATH,
 };
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 use thiserror::Error;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct ComputeUnusedFilesOperator {
@@ -75,7 +84,23 @@ impl ComputeUnusedFilesOperator {
             for (file_type, file_paths) in &segment_compaction_info.file_paths {
                 // For hnsw_index files, just add it without comparing with newer version.
                 if file_type == "hnsw_index" || file_type == HNSW_PATH {
-                    unused_hnsw_prefixes.extend(file_paths.paths.clone());
+                    for file_path in file_paths.paths.iter() {
+                        let (prefix, hnsw_uuid) = Segment::extract_prefix_and_id(file_path)
+                            .map_err(|e| {
+                                tracing::error!(error = %e, "Failed to extract prefix and ID");
+                                ComputeUnusedFilesError::InvalidUuid(e, file_path.to_string())
+                            })?;
+                        for file in FILES.iter() {
+                            let hnsw_prefix =
+                                HnswIndexProvider::format_key(prefix, &IndexUuid(hnsw_uuid), file);
+                            tracing::debug!(
+                                line = line!(),
+                                "ComputeUnusedFilesOperator: unused_hnsw_prefix: {:?}",
+                                hnsw_prefix
+                            );
+                            unused_hnsw_prefixes.push(hnsw_prefix);
+                        }
+                    }
                     continue;
                 }
                 for file_path in &file_paths.paths {
@@ -143,13 +168,13 @@ impl ComputeUnusedFilesOperator {
     ) -> Result<Vec<String>, ComputeUnusedFilesError> {
         let mut s3_files = Vec::new();
 
-        for si_id in si_ids {
-            let uuid = Uuid::parse_str(&si_id).map_err(|e| {
+        for si_path in si_ids {
+            let (prefix, si_id) = Segment::extract_prefix_and_id(&si_path).map_err(|e| {
                 tracing::error!(error = %e, "Failed to parse UUID");
-                ComputeUnusedFilesError::InvalidUuid(e, si_id.clone())
+                ComputeUnusedFilesError::InvalidUuid(e, si_path.to_string())
             })?;
 
-            let block_ids = match self.root_manager.get_all_block_ids(&uuid).await {
+            let block_ids = match self.root_manager.get_all_block_ids(&si_id, prefix).await {
                 Ok(ids) => ids,
                 Err(e) => {
                     tracing::error!(error = %e, "Failed to get block IDs");
@@ -162,8 +187,11 @@ impl ComputeUnusedFilesOperator {
                 si_id,
                 block_ids
             );
-            // TODO(rohitcp): Use const from the crate instead of hardcoding the prefix.
-            s3_files.extend(block_ids.iter().map(|id| format!("block/{}", id)));
+            s3_files.extend(
+                block_ids
+                    .iter()
+                    .map(|id| BlockManager::format_key(prefix, id)),
+            );
         }
         Ok(s3_files)
     }
@@ -171,7 +199,7 @@ impl ComputeUnusedFilesOperator {
 
 #[derive(Clone)]
 pub struct ComputeUnusedFilesInput {
-    pub version_file: CollectionVersionFile,
+    pub version_file: Arc<CollectionVersionFile>,
     pub versions_to_delete: VersionListForCollection,
     pub oldest_version_to_keep: i64,
 }
@@ -239,7 +267,9 @@ impl Operator<ComputeUnusedFilesInput, ComputeUnusedFilesOutput> for ComputeUnus
         // Build a map to version to segment_info
         let mut version_to_segment_info = HashMap::new();
         let version_history = version_file
+            .as_ref()
             .version_history
+            .as_ref()
             .ok_or(ComputeUnusedFilesError::MissingVersionHistory)?;
 
         // Check if version history is empty
@@ -347,7 +377,11 @@ mod tests {
     ) -> Result<Uuid, Box<dyn ChromaError>> {
         // Use the test utility function to create a sparse index
         let root_id = sparse_index_test_utils::create_test_sparse_index(
-            storage, block_ids, None, // Use default "test" prefix
+            storage,
+            Uuid::new_v4(),
+            block_ids,
+            None, // Use default "test" prefix
+            "".to_string(),
         )
         .await?;
 
@@ -384,7 +418,8 @@ mod tests {
 
         // Create version_to_segment_info map
         let mut version_to_segment_info = HashMap::new();
-
+        let hnsw_id = IndexUuid(uuid::Uuid::new_v4());
+        let prefix_path = "";
         // Older version has files 1 and 2
         version_to_segment_info.insert(
             1,
@@ -393,7 +428,7 @@ mod tests {
                     "data".to_string(),
                     vec![uuid1.to_string(), uuid2.to_string()],
                 ),
-                ("hnsw_index".to_string(), vec!["hnsw1".to_string()]),
+                ("hnsw_index".to_string(), vec![hnsw_id.to_string()]),
             ]),
         );
 
@@ -419,18 +454,24 @@ mod tests {
 
         // Check that file1's blocks are marked as unused
         for block_id in block_ids1 {
-            assert!(unused_files.contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(unused_files.contains(&s3_key));
         }
         // Check that file2's blocks are not marked as unused
         for block_id in block_ids2 {
-            assert!(!unused_files.contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(!unused_files.contains(&s3_key));
         }
         // Check that file3's blocks are not marked as unused
         for block_id in block_ids3 {
-            assert!(!unused_files.contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(!unused_files.contains(&s3_key));
         }
-        // Check that hnsw1 is marked as unused
-        assert!(unused_hnsw_prefixes.contains(&"hnsw1".to_string()));
+        // Check that hnsw is marked as unused
+        for file in FILES.iter() {
+            let s3_key = HnswIndexProvider::format_key(prefix_path, &hnsw_id, file);
+            assert!(unused_hnsw_prefixes.contains(&s3_key));
+        }
     }
 
     #[tokio::test]
@@ -460,9 +501,11 @@ mod tests {
         let operator =
             ComputeUnusedFilesOperator::new("test_collection".to_string(), storage.clone(), 2);
 
+        let hnsw_id = IndexUuid(uuid::Uuid::new_v4());
+
         let input = ComputeUnusedFilesInput {
             oldest_version_to_keep: 3,
-            version_file: chroma_proto::CollectionVersionFile {
+            version_file: Arc::new(chroma_proto::CollectionVersionFile {
                 collection_info_immutable: None,
                 version_history: Some(CollectionVersionHistory {
                     versions: vec![
@@ -470,7 +513,7 @@ mod tests {
                             version: 1,
                             segment_info: Some(create_test_segment_info(vec![
                                 ("data".to_string(), vec![uuid1.to_string()]),
-                                ("hnsw_index".to_string(), vec!["hnsw1".to_string()]),
+                                ("hnsw_index".to_string(), vec![hnsw_id.to_string()]),
                             ])),
                             collection_info_mutable: None,
                             created_at_secs: 0,
@@ -517,7 +560,7 @@ mod tests {
                         },
                     ],
                 }),
-            },
+            }),
             versions_to_delete: chroma_proto::VersionListForCollection {
                 versions: vec![1, 2],
                 collection_id: "test_collection".to_string(),
@@ -528,30 +571,31 @@ mod tests {
 
         let result = operator.run(&input).await.unwrap();
 
+        let prefix_path = "";
         // Verify results - check all block IDs from uuid1 and uuid2 are marked unused
         for block_id in block_ids1 {
-            assert!(result
-                .unused_block_ids
-                .contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(result.unused_block_ids.contains(&s3_key));
         }
         for block_id in block_ids2 {
-            assert!(result
-                .unused_block_ids
-                .contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(result.unused_block_ids.contains(&s3_key));
         }
         // Check uuid3's blocks are not marked as unused
         for block_id in block_ids3 {
-            assert!(!result
-                .unused_block_ids
-                .contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(!result.unused_block_ids.contains(&s3_key));
         }
         // Check uuid4's blocks are not marked as unused
         for block_id in block_ids4 {
-            assert!(!result
-                .unused_block_ids
-                .contains(&format!("block/{}", block_id)));
+            let s3_key = BlockManager::format_key(prefix_path, &block_id);
+            assert!(!result.unused_block_ids.contains(&s3_key));
         }
-        assert!(result.unused_hnsw_prefixes.contains(&"hnsw1".to_string()));
+        // Check that hnsw is marked as unused
+        for file in FILES.iter() {
+            let s3_key = HnswIndexProvider::format_key(prefix_path, &hnsw_id, file);
+            assert!(result.unused_hnsw_prefixes.contains(&s3_key));
+        }
     }
 
     #[tokio::test]
@@ -567,12 +611,12 @@ mod tests {
 
         // Create input with missing version info
         let input = ComputeUnusedFilesInput {
-            version_file: chroma_proto::CollectionVersionFile {
+            version_file: Arc::new(chroma_proto::CollectionVersionFile {
                 collection_info_immutable: None,
                 version_history: Some(CollectionVersionHistory {
                     versions: vec![], // Empty version history wrapped in Some
                 }),
-            },
+            }),
             versions_to_delete: chroma_proto::VersionListForCollection {
                 versions: vec![1, 2], // Versions that don't exist in history
                 collection_id: "test_collection".to_string(),
@@ -603,7 +647,7 @@ mod tests {
         );
 
         let input = ComputeUnusedFilesInput {
-            version_file: chroma_proto::CollectionVersionFile {
+            version_file: Arc::new(chroma_proto::CollectionVersionFile {
                 collection_info_immutable: None,
                 version_history: Some(CollectionVersionHistory {
                     versions: vec![
@@ -636,7 +680,7 @@ mod tests {
                         },
                     ],
                 }),
-            },
+            }),
             versions_to_delete: chroma_proto::VersionListForCollection {
                 versions: vec![1, 2], // Try to delete 2 versions
                 collection_id: "test_collection".to_string(),

@@ -22,13 +22,8 @@ parking_lot = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tracing = { workspace = true }
-uuid = { workspace = true }
-
-chroma-config = { workspace = true }
 chroma-error = { workspace = true }
 chroma-tracing = { workspace = true }
-chroma-types = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

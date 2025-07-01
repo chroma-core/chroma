@@ -267,7 +267,7 @@ impl CompactOrchestrator {
         tracing::info!("Sending N Records: {:?}", records.len());
         let input = PartitionInput::new(records, self.max_partition_size);
         let task = wrap(operator, input, ctx.receiver());
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 
     async fn materialize_log(
@@ -299,7 +299,7 @@ impl CompactOrchestrator {
                 next_max_offset_id.clone(),
             );
             let task = wrap(operator, input, ctx.receiver());
-            self.send(task, ctx).await;
+            self.send(task, ctx, Some(Span::current())).await;
         }
     }
 
@@ -450,7 +450,7 @@ impl CompactOrchestrator {
         );
 
         let task = wrap(operator, input, ctx.receiver());
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 
     fn get_segment_writers(&self) -> Result<CompactWriters, CompactionError> {
@@ -526,14 +526,20 @@ impl Orchestrator for CompactOrchestrator {
         self.dispatcher.clone()
     }
 
-    async fn initial_tasks(&mut self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
-        vec![wrap(
-            Box::new(GetCollectionAndSegmentsOperator {
-                sysdb: self.sysdb.clone(),
-                collection_id: self.collection_id,
-            }),
-            (),
-            ctx.receiver(),
+    async fn initial_tasks(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+    ) -> Vec<(TaskMessage, Option<Span>)> {
+        vec![(
+            wrap(
+                Box::new(GetCollectionAndSegmentsOperator {
+                    sysdb: self.sysdb.clone(),
+                    collection_id: self.collection_id,
+                }),
+                (),
+                ctx.receiver(),
+            ),
+            Some(Span::current()),
         )]
     }
 
@@ -638,7 +644,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             None => {
                 // Collection is not yet initialized, there is no need to initialize the writers
                 // Future handlers should return early on empty materialized logs without using writers
-                self.send(log_task, ctx).await;
+                self.send(log_task, ctx, Some(Span::current())).await;
                 return;
             }
         };
@@ -655,7 +661,13 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
 
         let record_writer = match self
             .ok_or_terminate(
-                RecordSegmentWriter::from_segment(&record_segment, &self.blockfile_provider).await,
+                RecordSegmentWriter::from_segment(
+                    &collection.tenant,
+                    &collection.database_id,
+                    &record_segment,
+                    &self.blockfile_provider,
+                )
+                .await,
                 ctx,
             )
             .await
@@ -665,8 +677,13 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
         let metadata_writer = match self
             .ok_or_terminate(
-                MetadataSegmentWriter::from_segment(&metadata_segment, &self.blockfile_provider)
-                    .await,
+                MetadataSegmentWriter::from_segment(
+                    &collection.tenant,
+                    &collection.database_id,
+                    &metadata_segment,
+                    &self.blockfile_provider,
+                )
+                .await,
                 ctx,
             )
             .await
@@ -747,15 +764,19 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             }
         };
         for segment in prefetch_segments {
+            let segment_id = segment.id;
             let prefetch_task = wrap(
                 Box::new(PrefetchSegmentOperator::new()),
                 PrefetchSegmentInput::new(segment, self.blockfile_provider.clone()),
                 ctx.receiver(),
             );
-            self.send(prefetch_task, ctx).await;
+            // Prefetch task is detached from the orchestrator
+            let prefetch_span =
+                tracing::info_span!(parent: None, "Prefetch segment", segment_id = %segment_id);
+            self.send(prefetch_task, ctx, Some(prefetch_span)).await;
         }
 
-        self.send(log_task, ctx).await;
+        self.send(log_task, ctx, Some(Span::current())).await;
     }
 }
 
@@ -1041,18 +1062,14 @@ mod tests {
     use chroma_sysdb::{SysDb, TestSysDb};
     use chroma_system::{Dispatcher, Orchestrator, System};
     use chroma_types::{
+        operator::{Filter, Limit, Projection},
         DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator, Where,
     };
+    use regex::Regex;
 
     use crate::{
         config::RootConfig,
-        execution::{
-            operators::{
-                fetch_log::FetchLogOperator, filter::FilterOperator, limit::LimitOperator,
-                projection::ProjectionOperator,
-            },
-            orchestration::get::GetOrchestrator,
-        },
+        execution::{operators::fetch_log::FetchLogOperator, orchestration::get::GetOrchestrator},
     };
 
     use super::CompactOrchestrator;
@@ -1134,7 +1151,7 @@ mod tests {
             collection_uuid: collection_id,
             tenant: old_cas.collection.tenant.clone(),
         };
-        let filter = FilterOperator {
+        let filter = Filter {
             query_ids: None,
             where_clause: Some(Where::disjunction(vec![
                 Where::Metadata(MetadataExpression {
@@ -1150,11 +1167,11 @@ mod tests {
                 }),
             ])),
         };
-        let limit = LimitOperator {
+        let limit = Limit {
             skip: 0,
             fetch: None,
         };
-        let project = ProjectionOperator {
+        let project = Projection {
             document: true,
             embedding: true,
             metadata: true,
@@ -1173,10 +1190,9 @@ mod tests {
         let old_vals = get_orchestrator
             .run(system.clone())
             .await
-            .expect("Get orchestrator should not fail")
-            .0;
+            .expect("Get orchestrator should not fail");
 
-        assert!(!old_vals.records.is_empty());
+        assert!(!old_vals.result.records.is_empty());
 
         let rebuild_orchestrator = CompactOrchestrator::new(
             collection_id,
@@ -1201,6 +1217,14 @@ mod tests {
 
         let mut expected_new_collection = old_cas.collection.clone();
         expected_new_collection.version += 1;
+
+        let version_suffix_re = Regex::new(r"/\d+$").unwrap();
+
+        expected_new_collection.version_file_path = Some(
+            version_suffix_re
+                .replace(&old_cas.collection.version_file_path.clone().unwrap(), "/2")
+                .to_string(),
+        );
         assert_eq!(new_cas.collection, expected_new_collection);
         assert_eq!(new_cas.metadata_segment.id, old_cas.metadata_segment.id);
         assert_eq!(new_cas.record_segment.id, old_cas.record_segment.id);
@@ -1232,8 +1256,7 @@ mod tests {
         let new_vals = get_orchestrator
             .run(system)
             .await
-            .expect("Get orchestrator should not fail")
-            .0;
+            .expect("Get orchestrator should not fail");
 
         assert_eq!(new_vals, old_vals);
     }

@@ -1,17 +1,62 @@
+"use client";
+
 import React from "react";
 import Image from "next/image";
-import { imageSize } from "image-size";
+import { useTheme } from "next-themes";
+import { useEffect, useState } from "react";
 
-const MarkdocImage: React.FC<{ src: string; alt: string; title?: string }> = ({
-  src,
+interface MarkdocImageProps {
+  lightSrc: string;
+  darkSrc: string;
+  alt: string;
+  title?: string;
+  width?: number;
+  height?: number;
+}
+
+const MarkdocImage: React.FC<MarkdocImageProps> = ({
+  lightSrc,
+  darkSrc,
   alt,
+  title,
+  width = 800,
+  height = 400,
 }) => {
-  try {
-    const { width, height } = imageSize(`public/${src}`);
-    return <Image src={src} alt={alt} width={width} height={height} priority />;
-  } catch (e) {
-    return <div />;
+  const { theme, resolvedTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return (
+      <Image
+        src={lightSrc}
+        alt={alt}
+        title={title}
+        width={width}
+        height={height}
+        priority
+        className="transition-opacity duration-200"
+      />
+    );
   }
+
+  const currentTheme = resolvedTheme || theme;
+  const imageSrc = currentTheme === "dark" ? darkSrc : lightSrc;
+
+  return (
+    <Image
+      src={imageSrc}
+      alt={alt}
+      title={title}
+      width={width}
+      height={height}
+      priority
+      className="transition-opacity duration-200"
+    />
+  );
 };
 
 export default MarkdocImage;
