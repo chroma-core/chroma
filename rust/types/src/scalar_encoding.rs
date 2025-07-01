@@ -70,6 +70,15 @@ impl From<ScalarEncoding> for String {
     }
 }
 
+impl From<&ScalarEncoding> for String {
+    fn from(encoding: &ScalarEncoding) -> String {
+        match encoding {
+            ScalarEncoding::FLOAT32 => "FLOAT32".to_string(),
+            ScalarEncoding::INT32 => "INT32".to_string(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

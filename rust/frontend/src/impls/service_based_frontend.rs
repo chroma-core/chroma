@@ -1477,6 +1477,9 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             sqlite_log
                 .init_compactor_handle(handle.clone())
                 .map_err(|e| e.boxed())?;
+            sqlite_log
+                .init_max_batch_size(max_batch_size)
+                .map_err(|e| e.boxed())?;
             registry.register(handle);
         }
 
