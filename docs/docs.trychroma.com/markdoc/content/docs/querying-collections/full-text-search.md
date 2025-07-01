@@ -16,6 +16,8 @@ collection.get(
 )
 ```
 
+*Note*: Full-text search is case-sensitive.
+
 Here we get all records whose documents matches the regex pattern for an email address:
 
 ```python
