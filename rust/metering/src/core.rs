@@ -1,10 +1,7 @@
 use chroma_metering_macros::initialize_metering;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
+use std::sync::atomic::Ordering;
 
 use crate::types::MeteringAtomicU64;
 
@@ -28,35 +25,42 @@ pub enum WriteAction {
 
 initialize_metering! {
     #[capability]
+    /// The latest logical size of a collection in bytes
     pub trait LatestCollectionLogicalSizeBytes {
         fn latest_collection_logical_size_bytes(&self, latest_collection_logical_size_bytes: u64);
     }
 
+    /// The size of data written to the log in bytes
     #[capability]
     pub trait LogSizeBytes {
         fn log_size_bytes(&self, log_size_bytes: u64);
     }
 
+    /// The number of trigram tokens in a full-text search query
     #[capability]
     pub trait FtsQueryLength {
         fn fts_query_length(&self, fts_query_length: u64);
     }
 
+    /// The number of metadata predicates in a `WHERE` query
     #[capability]
     pub trait MetadataPredicateCount {
         fn metadata_predicate_count(&self, metadata_predicate_count: u64);
     }
 
+    /// The length of the embedded query vector
     #[capability]
     pub trait QueryEmbeddingCount {
         fn query_embedding_count(&self, query_embedding_count: u64);
     }
 
+    /// The size in bytes of data pulled from the log during a get
     #[capability]
     pub trait PulledLogSizeBytes {
         fn pulled_log_size_bytes(&self, pulled_log_size_bytes: u64);
     }
 
+    /// The size in bytes of data returned to the client
     #[capability]
     pub trait ReturnBytes {
         fn return_bytes(&self, return_bytes: u64);
@@ -101,8 +105,8 @@ initialize_metering! {
                 database,
                 collection_id,
                 request_received_at,
-                latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                request_execution_time_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
+                latest_collection_logical_size_bytes: MeteringAtomicU64::new(0),
+                request_execution_time_ms: MeteringAtomicU64::new(0),
             }
         }
     }
@@ -185,13 +189,13 @@ initialize_metering! {
                 collection_id,
                 action,
                 request_received_at,
-                fts_query_length: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                metadata_predicate_count: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                query_embedding_count: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                pulled_log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                latest_collection_logical_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                return_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                request_execution_time_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
+                fts_query_length: MeteringAtomicU64::new(0),
+                metadata_predicate_count: MeteringAtomicU64::new(0),
+                query_embedding_count: MeteringAtomicU64::new(0),
+                pulled_log_size_bytes: MeteringAtomicU64::new(0),
+                latest_collection_logical_size_bytes: MeteringAtomicU64::new(0),
+                return_bytes: MeteringAtomicU64::new(0),
+                request_execution_time_ms: MeteringAtomicU64::new(0)
             }
         }
     }
@@ -309,8 +313,8 @@ initialize_metering! {
                 collection_id,
                 action,
                 request_received_at,
-                log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
-                request_execution_time_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0)))
+                log_size_bytes: MeteringAtomicU64::new(0),
+                request_execution_time_ms: MeteringAtomicU64::new(0)
             }
         }
     }
@@ -366,8 +370,8 @@ mod tests {
             collection_id: "test_collection".to_string(),
             action: WriteAction::Add,
             request_received_at: Utc::now(),
-            log_size_bytes: MeteringAtomicU64(Arc::new(AtomicU64::new(1000))),
-            request_execution_time_ms: MeteringAtomicU64(Arc::new(AtomicU64::new(0))),
+            log_size_bytes: MeteringAtomicU64::new(1000),
+            request_execution_time_ms: MeteringAtomicU64::new(0),
         });
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");
         let json_event =

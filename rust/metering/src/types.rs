@@ -10,6 +10,12 @@ use std::sync::{
 #[derive(Clone)]
 pub struct MeteringAtomicU64(pub Arc<AtomicU64>);
 
+impl MeteringAtomicU64 {
+    pub fn new(value: u64) -> Self {
+        MeteringAtomicU64(Arc::new(AtomicU64::new(value)))
+    }
+}
+
 impl PartialEq for MeteringAtomicU64 {
     fn eq(&self, other: &Self) -> bool {
         self.0.load(Ordering::SeqCst) == other.0.load(Ordering::SeqCst)
