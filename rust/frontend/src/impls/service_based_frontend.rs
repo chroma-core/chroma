@@ -7,7 +7,7 @@ use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_metering::{
-    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable, FinishRequest,
     FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
     MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes, WriteAction,
 };
@@ -40,10 +40,13 @@ use chroma_types::{
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashSet, time::Duration};
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Instant,
+};
 
 use super::utils::to_records;
 
@@ -755,6 +758,7 @@ impl ServiceBasedFrontend {
         // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
             context.log_size_bytes(log_size_bytes);
+            context.finish_request(Instant::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -839,6 +843,7 @@ impl ServiceBasedFrontend {
         // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
             context.log_size_bytes(log_size_bytes);
+            context.finish_request(Instant::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -925,6 +930,7 @@ impl ServiceBasedFrontend {
         // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
             context.log_size_bytes(log_size_bytes);
+            context.finish_request(Instant::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -1301,6 +1307,7 @@ impl ServiceBasedFrontend {
             context.pulled_log_size_bytes(get_result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
+            context.finish_request(Instant::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -1429,6 +1436,7 @@ impl ServiceBasedFrontend {
             context.pulled_log_size_bytes(query_result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
+            context.finish_request(Instant::now());
         });
 
         // TODO: Submit event after the response is sent

@@ -6,7 +6,7 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_metering::{
-    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable, FinishRequest,
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     MeteredFutureExt, ReadAction, StartRequest, WriteAction,
 };
 use chroma_system::System;
@@ -1364,10 +1364,6 @@ async fn collection_add(
         .meter(metering_context_container)
         .await?;
 
-    chroma_metering::with_current(|context| {
-        context.finish_request(Instant::now());
-    });
-
     Ok((StatusCode::CREATED, Json(res)))
 }
 
@@ -1471,17 +1467,13 @@ async fn collection_update(
         payload.metadatas,
     )?;
 
-    let res = server
-        .frontend
-        .update(request)
-        .meter(metering_context_container)
-        .await?;
-
-    chroma_metering::with_current(|context| {
-        context.finish_request(Instant::now());
-    });
-
-    Ok(Json(res))
+    Ok(Json(
+        server
+            .frontend
+            .update(request)
+            .meter(metering_context_container)
+            .await?,
+    ))
 }
 
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
@@ -1591,17 +1583,13 @@ async fn collection_upsert(
         payload.metadatas,
     )?;
 
-    let res = server
-        .frontend
-        .upsert(request)
-        .meter(metering_context_container)
-        .await?;
-
-    chroma_metering::with_current(|context| {
-        context.finish_request(Instant::now());
-    });
-
-    Ok(Json(res))
+    Ok(Json(
+        server
+            .frontend
+            .upsert(request)
+            .meter(metering_context_container)
+            .await?,
+    ))
 }
 
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
@@ -1891,11 +1879,6 @@ async fn collection_get(
         .get(request)
         .meter(metering_context_container)
         .await?;
-
-    chroma_metering::with_current(|context| {
-        context.finish_request(Instant::now());
-    });
-
     Ok(Json(res))
 }
 
@@ -1929,6 +1912,7 @@ pub struct QueryRequestPayload {
         ("offset" = Option<u32>, Query, description = "Offset for pagination")
     )
 )]
+
 async fn collection_query(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
@@ -2020,10 +2004,6 @@ async fn collection_query(
         .query(request)
         .meter(metering_context_container)
         .await?;
-
-    chroma_metering::with_current(|context| {
-        context.finish_request(Instant::now());
-    });
 
     Ok(Json(res))
 }
