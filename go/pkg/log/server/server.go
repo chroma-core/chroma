@@ -183,6 +183,10 @@ func (s *logServer) ScrubLog(ctx context.Context, req *logservicepb.ScrubLogRequ
 	return
 }
 
+func (s *logServer) GarbageCollectPhase2(ctx context.Context, req *logservicepb.GarbageCollectPhase2Request) (res *logservicepb.GarbageCollectPhase2Response, err error) {
+	return
+}
+
 func NewLogServer(lr *repository.LogRepository) logservicepb.LogServiceServer {
 	return &logServer{
 		lr: lr,

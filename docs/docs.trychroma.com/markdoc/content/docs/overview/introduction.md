@@ -37,26 +37,32 @@ In Python, Chroma can run in a python script or as a server. Install Chroma with
 pip install chromadb
 ```
 
-### JavaScript
-In JavaScript, use the Chroma JS/TS Client to connect to a Chroma server. Install Chroma with your favorite package manager:
+### JavaScript/TypeScript
+In JavaScript and TypeScript, use the Chroma JS/TS Client to connect to a Chroma server. Install Chroma with your favorite package manager:
 
 {% TabbedUseCaseCodeBlock language="Terminal" %}
 
-{% Tab label="yarn" %}
-```terminal
-yarn add chromadb chromadb-default-embed
-```
-{% /Tab %}
-
 {% Tab label="npm" %}
 ```terminal
-npm install --save chromadb chromadb-default-embed
+npm install chromadb @chroma-core/default-embed
 ```
 {% /Tab %}
 
 {% Tab label="pnpm" %}
 ```terminal
-pnpm install chromadb chromadb-default-embed
+pnpm add chromadb @chroma-core/default-embed
+```
+{% /Tab %}
+
+{% Tab label="yarn" %}
+```terminal
+yarn add chromadb @chroma-core/default-embed
+```
+{% /Tab %}
+
+{% Tab label="bun" %}
+```terminal
+bun add chromadb @chroma-core/default-embed
 ```
 {% /Tab %}
 
@@ -90,5 +96,5 @@ Continue with the full [getting started guide](./getting-started).
 
 {% br %}{% /br %}
 
-We welcome [contributions](/markdoc/content/docs/overview/contributing.md) for other languages!
+We welcome [contributions](./contributing) for other languages!
 

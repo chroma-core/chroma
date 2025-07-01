@@ -135,3 +135,10 @@ garbageCollector:
         kube_namespace: "chroma"
         memberlist_name: "garbage-collection-service-memberlist"
         queue_size: 100
+    log:
+      grpc:
+        host: "logservice.chroma"
+        port: 50051
+        connect_timeout_ms: 5000
+        request_timeout_ms: 5000
+        alt_host: "rust-log-service.chroma"

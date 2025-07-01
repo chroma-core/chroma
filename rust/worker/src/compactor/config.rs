@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub struct CompactorConfig {
     #[serde(default = "CompactorConfig::default_compaction_manager_queue_size")]
     pub compaction_manager_queue_size: usize,
+    #[serde(default = "CompactorConfig::default_job_expiry_seconds")]
+    pub job_expiry_seconds: u64,
     #[serde(default = "CompactorConfig::default_max_concurrent_jobs")]
     pub max_concurrent_jobs: usize,
     #[serde(default = "CompactorConfig::default_compaction_interval_sec")]
@@ -39,6 +41,10 @@ impl CompactorConfig {
         10
     }
 
+    fn default_job_expiry_seconds() -> u64 {
+        3600
+    }
+
     fn default_max_compaction_size() -> usize {
         10_000
     }
@@ -64,6 +70,7 @@ impl Default for CompactorConfig {
     fn default() -> Self {
         CompactorConfig {
             compaction_manager_queue_size: CompactorConfig::default_compaction_manager_queue_size(),
+            job_expiry_seconds: CompactorConfig::default_job_expiry_seconds(),
             max_concurrent_jobs: CompactorConfig::default_max_concurrent_jobs(),
             compaction_interval_sec: CompactorConfig::default_compaction_interval_sec(),
             min_compaction_size: CompactorConfig::default_min_compaction_size(),

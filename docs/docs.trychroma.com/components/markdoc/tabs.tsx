@@ -89,4 +89,53 @@ export const Tabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
   );
 };
 
+export const CustomTabsTrigger = React.forwardRef<
+  React.ElementRef<typeof UITabsTrigger>,
+  React.ComponentPropsWithoutRef<typeof UITabsTrigger>
+>(({ value, ...props }, ref) => {
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+
+  return <UITabsTrigger ref={triggerRef} value={value} {...props} />;
+});
+CustomTabsTrigger.displayName = "CustomTabsTrigger";
+
+export const CustomTabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
+  children,
+}) => {
+  return (
+    <div className="my-4">
+      <UITabs
+        defaultValue={children[0].props.label}
+        className="flex flex-col mt-2 pb-2"
+      >
+        <TabsList className="justify-start bg-transparent p-0 h-fit dark:bg-transparent rounded-none border-b border-gray-300 dark:border-gray-700">
+          {children.map((tab) => (
+            <CustomTabsTrigger
+              key={`${tab.props.label}-header`}
+              value={tab.props.label}
+              className={cn(
+                tabLabelStyle,
+                "text-sm tracking-normal dark:data-[state=active]:bg-transparent data-[state=active]:border-b data-[state=active]:text-gray-900 dark:data-[state=active]:text-gray-200 data-[state=active]:border-gray-900 dark:data-[state=active]:border-gray-200",
+              )}
+            >
+              {capitalize(tab.props.label)}
+            </CustomTabsTrigger>
+          ))}
+        </TabsList>
+        <div>
+          {children.map((tab) => (
+            <TabsContent
+              key={`${tab.props.label}-content`}
+              value={tab.props.label}
+              className="m-0"
+            >
+              {tab}
+            </TabsContent>
+          ))}
+        </div>
+      </UITabs>
+    </div>
+  );
+};
+
 export default Tab;
