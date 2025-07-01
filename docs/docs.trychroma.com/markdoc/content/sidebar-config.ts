@@ -146,7 +146,7 @@ const sidebarConfig: AppSection[] = [
           // { id: "organizing-collections", name: "Organizing Collections" },
         ],
       },
-      { id: "develop", name: "Develop", generatePages: true },
+      // { id: "develop", name: "Develop", generatePages: true },
       {
         id: "deploy",
         name: "Deploy",

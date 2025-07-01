@@ -75,7 +75,7 @@ collection = client.create_collection(
     name="my_collection",
     embedding_function=OpenAIEmbeddingFunction(
         api_key=os.getenv("OPENAI_API_KEY"),
-        model_name="text-embedding-small-3"
+        model_name="text-embedding-3-small"
     )
 )
 ```
@@ -123,7 +123,7 @@ const collection = await client.createCollection({
     name: "my_collection",
     embeddingFunction: new OpenAIEmbeddingFunction({
         apiKey: procees.env.OPENAI_API_KEY,
-        modelName: "text-embedding-small-3"
+        modelName: "text-embedding-3-small"
     })
 });
 ```
@@ -188,11 +188,11 @@ The `get_or_create_collection` function behaves similarly, but will create the c
 ```python
 collection = client.get_or_create_collection(
     name="my-collection",
-    metadata={ "description": "..." }
-);
+    metadata={"description": "..."}
+)
 ```
 
-The `list_collections` function returns all the collections you have in your Chroma database. The collections will be ordered by creation time from oldest to newest.
+The `list_collections` function returns the collections you have in your Chroma database. The collections will be ordered by creation time from oldest to newest.
 
 ```python
 collections = client.list_collections()

@@ -1,6 +1,6 @@
 # Configuring Chroma Collections
 
-Chroma collections have a `configuration` that determines how their embeddings index is constructed and used. We use default values for these index configurations that should give you great performance for most use-cases out-of-the-box. 
+Chroma collections have a `configuration` that determines how their embeddings index is constructed and used. We use default values for these index configurations that should give you great performance for most use cases out-of-the-box. 
 
 The [embedding function](../embeddings/embedding-functions) you choose to use in your collection also affects its index construction, and is included in the configuration.
 
@@ -201,7 +201,7 @@ from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction, CohereEm
 openai_collection = client.create_collection(
     name="my_openai_collection",
     embedding_function=OpenAIEmbeddingFunction(
-        model_name="text-embedding-small-3"
+        model_name="text-embedding-3-small"
     ),
     configuration={"hnsw": {"space": "cosine"}}
 )
@@ -275,7 +275,7 @@ import { CohereEmbeddingFunction } from "@chroma-core/cohere"
 openAICollection = client.createCollection({
     name: "my_openai_collection",
     embedding_function: new OpenAIEmbeddingFunction({
-        model_name: "text-embedding-small-3"
+        model_name: "text-embedding-3-small"
     }),
     configuration: { hnsw: { space: "cosine" } }
 });

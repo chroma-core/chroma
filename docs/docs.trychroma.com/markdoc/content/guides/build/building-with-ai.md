@@ -42,7 +42,7 @@ def extract_names(text: str) -> list[str]:
     system_prompt = "You are a name extractor. The user will give you text, and you must return a JSON array of names mentioned in the text. Do not include any explanation or formatting."
 
     response = openai.ChatCompletion.create(
-        model="gpt-4",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text}
@@ -67,7 +67,7 @@ export async function extractNames(text: string): Promise<string[]> {
         'You are a name extractor. The user will give you text, and you must return a JSON array of names mentioned in the text. Do not include any explanation or formatting.';
 
     const chatCompletion = await openai.chat.completions.create({
-        model: 'gpt-4',
+        model: 'gpt-4o',
         messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: text },

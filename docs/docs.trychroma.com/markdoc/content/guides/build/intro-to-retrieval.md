@@ -14,13 +14,13 @@ Given a simple prompt
 The AI is likely to return a generic answer, because it doesn't know about your company's specific policies:
 > I'm not a retailer or company that sells toothbrushes - I'm Claude, an AI assistant created by Anthropic. I don't have products or a return policy. If you're looking for information about a toothbrush return policy, you'd need to check with the specific store or company where you purchased or are planning to purchase the toothbrush. Most retailers have their return policies listed on their websites or you can contact their customer service directly.
 
-We can get around this problem, by providing useful information or context for the AI in our prompt. This often called "prompt engineering":
+We can get around this problem, by providing useful information or context for the AI. This often called "context engineering":
 > What is your return policy for tooth brushes? Use the following information for context: Tooth brushes can be returned up to 360 days after purchase if unopened.
 
 Now the AI has the information it needs to answer the user question correctly:
 > Based on the information provided, our return policy for toothbrushes allows returns up to 360 days after purchase, as long as the toothbrush remains unopened and in its original packaging. This gives you nearly a full year to return an unopened toothbrush if needed. Once a toothbrush has been opened, it would not be eligible for return under this policy.
 
-But what happens if we want our AI chatbot to be able to answer questions about shipping, product specifications, troubleshooting, or any other topic? We will have to include our entire knowledge base in every prompt, which leads to several technical problems.
+But what happens if we want our AI chatbot to be able to answer questions about shipping, product specifications, troubleshooting, or any other topic? We will have to include our entire knowledge base in our context, which leads to several technical problems.
 
 **Token Limits:** AI models have maximum input lengths. Even the largest models might not be able to fit an entire company's documentation in a single prompt.
 
@@ -34,12 +34,12 @@ But what happens if we want our AI chatbot to be able to answer questions about 
 
 ## Enter Retrieval
 
-Retrieval solves these fundamental challenges by creating a bridge between AI models and your actual data. Instead of trying to cram everything into prompts, a retrieval system **stores your information** in a searchable format. This allows you to search your knowledge base using natural language, so you can find relevant information to answer the user's question, by providing the retrieval system with the user's question itself.
+Retrieval solves these fundamental challenges by creating a bridge between AI models and your actual data. Instead of trying to cram everything into prompts, a retrieval system **stores your information** in a searchable format. This allows you to search your knowledge base using natural language, so you can find relevant information to answer the user's question, by providing the retrieval system with the user's question itself. This way, you can build context for the model in a strategic manner.
 
 When a retrieval system returns the results from your knowledge base relevant to the user's question, you can use them to provide context for the AI model to help it generate an accurate response.
 
 Here's how a typical retrieval pipeline is built:
-1. **Converting information into searchable formats** - this is done by using **embedding models**. They create mathematical representations of your data, called "embeddings", that capture the meaning of text, not just keywords.
+1. **Converting information into searchable formats** - this is done by using **embedding models**. They create mathematical representations of your data, called "embeddings", that capture the semantic meaning of text, not just keywords.
 2. **Storing these representations** in a retrieval system, optimized for quickly finding similar embeddings for an input query.
 3. **Processing user queries** into embeddings, so they can be used as inputs to your retrieval system.
 4. **Combining the retrieved results** with the original user query to serve to an AI model.
@@ -91,7 +91,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 prompt = f"{user_query}. Use this as context for answering: {context}"
 
 response = openai.ChatCompletion.create(
-    model="gpt-4",
+    model="gpt-4o",
     messages=[
         {"role": "system", "content": "You are a helpful assistant"},
         {"role": "user", "content": prompt}

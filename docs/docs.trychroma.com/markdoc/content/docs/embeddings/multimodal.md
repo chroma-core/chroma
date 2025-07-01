@@ -19,65 +19,57 @@ from chromadb.utils.embedding_functions import OpenCLIPEmbeddingFunction
 embedding_function = OpenCLIPEmbeddingFunction()
 ```
 
-## Data Loaders
+## Adding Multimodal Data and Data Loaders
 
-Chroma supports data loaders, for storing and querying with data stored outside Chroma itself, via URI. Chroma will not store this data, but will instead store the URI, and load the data from the URI when needed.
-
-Chroma has a data loader for loading images from a filesystem built in.
+You can add embedded data of modalities different from text directly to Chroma. For now images are supported:
 
 ```python
-from chromadb.utils.data_loaders import ImageLoader
-data_loader = ImageLoader()
+collection.add(
+    ids=['id1', 'id2', 'id3'],
+    images=[[1.0, 1.1, 2.1, ...], ...] # A list of numpy arrays representing images
+)
 ```
 
-## Multi-modal Collections
+Unlike with text documents, which are stored in Chroma, we will not store your original images, or data of other modalities. Instead, for each of your multimodal records you can specify a URI where the original format is stored, and a **data loader**. For each URI you add, Chroma will use the data loader to retrieve the original data, embed it, and store the embedding.
 
-You can create a multi-modal collection by passing in a multi-modal embedding function. In order to load data from a URI, you must also pass in a data loader.
+For example, Chroma ships with a data loader, `ImageLoader`, for loading images from a local filesystem. We can create a collection set up with the `ImageLoader`:
 
 ```python
 import chromadb
+from chromadb.utils.data_loaders import ImageLoader
+from chromadb.utils.embedding_functions import OpenCLIPEmbeddingFunction
 
 client = chromadb.Client()
+
+data_loader = ImageLoader()
+embedding_function = OpenCLIPEmbeddingFunction()
 
 collection = client.create_collection(
     name='multimodal_collection',
     embedding_function=embedding_function,
-    data_loader=data_loader)
-
-```
-
-### Adding data
-
-You can add data to a multi-modal collection by specifying the data modality. For now, images are supported:
-
-```python
-collection.add(
-    ids=['id1', 'id2', 'id3'],
-    images=[...] # A list of numpy arrays representing images
+    data_loader=data_loader
 )
 ```
 
-Note that Chroma will not store the data for you, and you will have to maintain a mapping from IDs to data yourself.
-
-However, you can use Chroma in combination with data stored elsewhere, by adding it via URI. Note that this requires that you have specified a data loader when creating the collection.
+Now, we can use the `.add` method to add records to this collection. The collection's data loader will grab the images using the URIs, embed them using the `OpenCLIPEmbeddingFunction`, and store the embeddings in Chroma.
 
 ```python
 collection.add(
-    ids=['id1', 'id2', 'id3'],
-    uris=[...] #  A list of strings representing URIs to data
+    ids=["id1", "id2"],
+    uris=["path/to/file/1", "path/to/file/2"]
 )
 ```
 
-Since the embedding function is multi-modal, you can also add text to the same collection:
+If the embedding function you use is multi-modal (like `OpenCLIPEmbeddingFunction`), you can also add text to the same collection:
 
 ```python
 collection.add(
-    ids=['id4', 'id5', 'id6'],
-    documents=["This is a document", "This is another document", "This is a third document"]
+    ids=["id3", "id4"],
+    documents=["This is a document", "This is another document"]
 )
 ```
 
-### Querying
+## Querying
 
 You can query a multi-modal collection with any of the modalities that it supports. For example, you can query with images:
 
@@ -108,13 +100,13 @@ Additionally, if a data loader is set for the collection, and URIs are available
 ```python
 results = collection.query(
     query_images=[...], # # list of numpy arrays representing images
-    includes=['data']
+    include=['data']
 )
 ```
 
-This will automatically call the data loader for any available URIs, and include the data in the results. `uris` are also available as an `includes` field.
+This will automatically call the data loader for any available URIs, and include the data in the results. `uris` are also available as an `include` field.
 
-### Updating
+## Updating
 
 You can update a multi-modal collection by specifying the data modality, in the same way as `add`. For now, images are supported:
 
