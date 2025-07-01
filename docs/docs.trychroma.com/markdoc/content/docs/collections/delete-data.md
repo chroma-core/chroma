@@ -6,6 +6,26 @@ Chroma supports deleting items from a collection by `id` using `.delete`. The em
 Naturally, this is a destructive operation, and cannot be undone.
 {% /Banner %}
 
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+collection.delete(
+    ids=["id1", "id2", "id3",...],
+)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+await collection.delete({
+    ids: ["id1", "id2", "id3",...],
+})
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
 `.delete` also supports the `where` filter. If no `ids` are supplied, it will delete all items in the collection that match the `where` filter.
 
 {% TabbedCodeBlock %}

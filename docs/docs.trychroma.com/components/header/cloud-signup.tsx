@@ -14,7 +14,7 @@ const SignUpLink: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       href={"https://www.trychroma.com/signup"}
       target="_blank"
       rel="noopener noreferrer"
-      className="underline"
+      className="underline underline-offset-4 font-semibold"
     >
       {children}
     </Link>
@@ -62,7 +62,7 @@ const CloudSignUp: React.FC = () => {
                 <span className="font-bold">Chroma Cloud</span> is here.
               </p>
               <p>
-                <SignUpLink>Sign up</SignUpLink> for early access!
+                <SignUpLink>Sign up →</SignUpLink>
               </p>
             </div>
           </div>
