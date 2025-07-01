@@ -865,7 +865,7 @@ impl SpannIndexWriter {
                 .versions_map
                 .get(&doc_offset_id)
                 .ok_or(SpannIndexWriterError::VersionNotFound)?;
-            if doc_version < *current_version {
+            if *current_version == 0 || doc_version < *current_version {
                 tracing::debug!(
                     "Outdated point {} for reassignment version {} current head id {}",
                     doc_offset_id,
