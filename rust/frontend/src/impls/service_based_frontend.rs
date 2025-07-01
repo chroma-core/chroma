@@ -9,8 +9,7 @@ use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
-    MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, RequestCompletedAt, ReturnBytes,
-    WriteAction,
+    MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes, WriteAction,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
@@ -39,7 +38,6 @@ use chroma_types::{
     UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
     Where,
 };
-use chrono::Utc;
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -642,7 +640,6 @@ impl ServiceBasedFrontend {
         // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
-            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -758,7 +755,6 @@ impl ServiceBasedFrontend {
         // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
             context.log_size_bytes(log_size_bytes);
-            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -843,7 +839,6 @@ impl ServiceBasedFrontend {
         // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
             context.log_size_bytes(log_size_bytes);
-            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -930,7 +925,6 @@ impl ServiceBasedFrontend {
         // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
             context.log_size_bytes(log_size_bytes);
-            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -970,12 +964,6 @@ impl ServiceBasedFrontend {
         }: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
         let mut records = Vec::new();
-
-        // NOTE(c-gamble): We are using a non-standard metering pattern in which we create a metering context within a
-        // nested call because we have to emit both a read and write event for delete requests. We need to extract the
-        // request start time from the current context here because our metering library only allows one active metering
-        // context per thread at a time. Eventually, this should be replaced by a single `CollectionDeleteRecordsContext`.
-        let mut maybe_request_received_at = None;
 
         let read_event = if let Some(where_clause) = r#where {
             let collection_and_segments = self
@@ -1034,18 +1022,16 @@ impl ServiceBasedFrontend {
                 context.pulled_log_size_bytes(get_result.pulled_log_bytes);
                 context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
                 context.return_bytes(return_bytes);
-                // NOTE(c-gamble): We skip attaching `request_completed_at` to the read context because the delete
-                // request is technically not complete until the write context is emitted.
             });
 
-            if let Ok(collection_read_context) = chroma_metering::close::<CollectionReadContext>() {
-                // Store the request start time for the subsequent write event
-                maybe_request_received_at = Some(collection_read_context.request_received_at);
-
-                // Return the read event
-                Some(MeterEvent::CollectionRead(collection_read_context))
-            } else {
-                None
+            match chroma_metering::close::<CollectionReadContext>() {
+                Ok(collection_read_context) => {
+                    Some(MeterEvent::CollectionRead(collection_read_context))
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e);
+                    None
+                }
             }
         } else if let Some(user_ids) = ids {
             records.extend(user_ids.into_iter().map(|id| OperationRecord {
@@ -1061,20 +1047,16 @@ impl ServiceBasedFrontend {
             None
         };
 
-        // NOTE(c-gamble): See note above for additional context, but this is a non-standard pattern
-        // and we are only implementing metering for delete in this manner because delete currently
-        // produces two metering events.
+        if let Some(event) = read_event {
+            event.submit().await;
+        }
+
         let collection_write_context_container =
             chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
                 tenant_id.clone(),
                 database_name.clone(),
                 collection_id.0.to_string(),
                 WriteAction::Delete,
-                if let Some(request_received_at) = maybe_request_received_at {
-                    request_received_at
-                } else {
-                    Utc::now()
-                },
             ));
         collection_write_context_container.enter();
 
@@ -1096,16 +1078,9 @@ impl ServiceBasedFrontend {
                 }
             })?;
 
-        if let Some(event) = read_event {
-            event.submit().await;
-        }
-
         // Attach metadata to the write context
         chroma_metering::with_current(|context| {
             context.log_size_bytes(log_size_bytes);
-            // NOTE(c-gamble): We attach the request completion time here because this is when the delete request
-            // has finished executing.
-            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -1202,7 +1177,6 @@ impl ServiceBasedFrontend {
             context.pulled_log_size_bytes(count_result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
-            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -1327,7 +1301,6 @@ impl ServiceBasedFrontend {
             context.pulled_log_size_bytes(get_result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
-            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -1456,7 +1429,6 @@ impl ServiceBasedFrontend {
             context.pulled_log_size_bytes(query_result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
-            context.request_completed_at(Utc::now());
         });
 
         // TODO: Submit event after the response is sent

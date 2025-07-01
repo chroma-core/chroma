@@ -6,8 +6,8 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_metering::{
-    CollectionForkContext, CollectionReadContext, CollectionWriteContext, MeteredFutureExt,
-    ReadAction, WriteAction,
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable, FinishRequest,
+    MeteredFutureExt, ReadAction, StartRequest, WriteAction,
 };
 use chroma_system::System;
 use chroma_types::{
@@ -24,17 +24,16 @@ use chroma_types::{
     UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
-use chrono::Utc;
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use std::{str::FromStr, time::Instant};
 use tokio::{select, signal};
 use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
@@ -1219,7 +1218,6 @@ async fn fork_collection(
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
-            Utc::now(),
         ));
 
     let _guard =
@@ -1340,8 +1338,13 @@ async fn collection_add(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Add,
-            Utc::now(),
         ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
 
     tracing::info!(name: "collection_add", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
@@ -1360,6 +1363,10 @@ async fn collection_add(
         .add(request)
         .meter(metering_context_container)
         .await?;
+
+    chroma_metering::with_current(|context| {
+        context.finish_request(Instant::now());
+    });
 
     Ok((StatusCode::CREATED, Json(res)))
 }
@@ -1444,8 +1451,13 @@ async fn collection_update(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Update,
-            Utc::now(),
         ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
 
     tracing::info!(name: "collection_update", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
@@ -1459,13 +1471,17 @@ async fn collection_update(
         payload.metadatas,
     )?;
 
-    Ok(Json(
-        server
-            .frontend
-            .update(request)
-            .meter(metering_context_container)
-            .await?,
-    ))
+    let res = server
+        .frontend
+        .update(request)
+        .meter(metering_context_container)
+        .await?;
+
+    chroma_metering::with_current(|context| {
+        context.finish_request(Instant::now());
+    });
+
+    Ok(Json(res))
 }
 
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
@@ -1555,8 +1571,13 @@ async fn collection_upsert(
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Upsert,
-            Utc::now(),
         ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
 
     tracing::info!(name: "collection_upsert", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
@@ -1570,13 +1591,17 @@ async fn collection_upsert(
         payload.metadatas,
     )?;
 
-    Ok(Json(
-        server
-            .frontend
-            .upsert(request)
-            .meter(metering_context_container)
-            .await?,
-    ))
+    let res = server
+        .frontend
+        .upsert(request)
+        .meter(metering_context_container)
+        .await?;
+
+    chroma_metering::with_current(|context| {
+        context.finish_request(Instant::now());
+    });
+
+    Ok(Json(res))
 }
 
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
@@ -1657,7 +1682,6 @@ async fn collection_delete(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::GetForDelete,
-            Utc::now(),
         ));
 
     tracing::info!(name: "collection_delete", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.as_ref().map_or(0, |ids| ids.len()), has_where = r#where.is_some());
@@ -1737,7 +1761,6 @@ async fn collection_count(
             database.clone(),
             collection_id.clone(),
             ReadAction::Count,
-            Utc::now(),
         ));
 
     let request = CountRequest::try_new(
@@ -1839,8 +1862,13 @@ async fn collection_get(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Get,
-            Utc::now(),
         ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
 
     tracing::info!(
         name: "collection_get",
@@ -1863,6 +1891,11 @@ async fn collection_get(
         .get(request)
         .meter(metering_context_container)
         .await?;
+
+    chroma_metering::with_current(|context| {
+        context.finish_request(Instant::now());
+    });
+
     Ok(Json(res))
 }
 
@@ -1956,8 +1989,13 @@ async fn collection_query(
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Query,
-            Utc::now(),
         ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
 
     tracing::info!(
         name: "collection_query",
@@ -1982,6 +2020,10 @@ async fn collection_query(
         .query(request)
         .meter(metering_context_container)
         .await?;
+
+    chroma_metering::with_current(|context| {
+        context.finish_request(Instant::now());
+    });
 
     Ok(Json(res))
 }
