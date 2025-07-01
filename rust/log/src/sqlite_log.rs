@@ -49,6 +49,8 @@ pub enum SqlitePushLogsError {
     CompactionError(#[from] CompactionManagerError),
     #[error("Error setting compactor handle")]
     CompactorHandleSetError,
+    #[error("Error setting max batch size")]
+    MaxBatchSizeSetError,
     #[error("Failed to serialize metadata: {0}")]
     InvalidMetadata(#[from] serde_json::Error),
     #[error("Error sending message to compactor")]
@@ -57,6 +59,8 @@ pub enum SqlitePushLogsError {
     PurgeLogSendingFailure(#[from] ChannelError),
     #[error("Query error: {0}")]
     QueryError(#[from] WrappedSqlxError),
+    #[error("Error getting max batch size: {0}")]
+    GetMaxBatchSizeError(#[from] SqliteGetMaxBatchSizeError),
 }
 
 impl ChromaError for SqlitePushLogsError {
@@ -64,10 +68,12 @@ impl ChromaError for SqlitePushLogsError {
         match self {
             SqlitePushLogsError::CompactionError(e) => e.code(),
             SqlitePushLogsError::CompactorHandleSetError => ErrorCodes::FailedPrecondition,
+            SqlitePushLogsError::MaxBatchSizeSetError => ErrorCodes::FailedPrecondition,
             SqlitePushLogsError::InvalidMetadata(_) => ErrorCodes::Internal,
             SqlitePushLogsError::MessageSendingError(e) => e.code(),
             SqlitePushLogsError::QueryError(err) => err.code(),
             SqlitePushLogsError::PurgeLogSendingFailure(e) => e.code(),
+            SqlitePushLogsError::GetMaxBatchSizeError(e) => e.code(),
         }
     }
 }
@@ -75,6 +81,7 @@ impl ChromaError for SqlitePushLogsError {
 const DEFAULT_VAR_OPT: u32 = 32766;
 const PRAGMA_MAX_VAR_OPT: &str = "MAX_VARIABLE_NUMBER";
 const VARIABLE_PER_RECORD: u32 = 6;
+const DEFAULT_MAX_BATCH_SIZE: u32 = 999;
 
 #[derive(Error, Debug)]
 pub enum SqliteGetCollectionsWithNewDataError {
@@ -144,6 +151,7 @@ pub struct SqliteLog {
     tenant_id: String,
     topic_namespace: String,
     compactor_handle: OnceLock<ComponentHandle<LocalCompactionManager>>,
+    max_batch_size: OnceLock<u32>,
 }
 
 impl SqliteLog {
@@ -153,6 +161,7 @@ impl SqliteLog {
             tenant_id,
             topic_namespace,
             compactor_handle: OnceLock::new(),
+            max_batch_size: OnceLock::new(),
         }
     }
 
@@ -163,6 +172,12 @@ impl SqliteLog {
         self.compactor_handle
             .set(compactor_handle)
             .map_err(|_| SqlitePushLogsError::CompactorHandleSetError)
+    }
+
+    pub fn init_max_batch_size(&self, max_batch_size: u32) -> Result<(), SqlitePushLogsError> {
+        self.max_batch_size
+            .set(max_batch_size)
+            .map_err(|_| SqlitePushLogsError::MaxBatchSizeSetError)
     }
 
     pub(super) async fn scout_logs(
@@ -333,14 +348,19 @@ impl SqliteLog {
             })
             .collect::<Result<Vec<(OperationRecord, String)>, SqlitePushLogsError>>()?;
 
+        let max_batch_size = self
+            .max_batch_size
+            .get()
+            .copied()
+            .unwrap_or(DEFAULT_MAX_BATCH_SIZE) as usize;
         let mut tx = self.db.get_conn().begin().await.map_err(WrappedSqlxError)?;
-        for batch in records_and_serialized_metadatas.chunks(self.db.push_logs_batch_size) {
+        for batch in records_and_serialized_metadatas.chunks(max_batch_size) {
             let mut query_builder = QueryBuilder::new(
                 "INSERT INTO embeddings_queue (topic, id, operation, vector, encoding, metadata) ",
             );
             query_builder.push_values(batch, |mut builder, (record, serialized_metadata)| {
                 builder.push_bind(&topic);
-                builder.push_bind(record.id.clone());
+                builder.push_bind(&record.id);
                 builder.push_bind(operation_to_code(record.operation));
                 builder.push_bind::<Option<Vec<u8>>>(
                     record
@@ -348,8 +368,8 @@ impl SqliteLog {
                         .as_ref()
                         .map(|e| bytemuck::cast_slice(e.as_slice()).to_vec()),
                 );
-                builder.push_bind(record.encoding.clone().map(String::from));
-                builder.push_bind::<String>(serialized_metadata.clone());
+                builder.push_bind(record.encoding.as_ref().map(String::from));
+                builder.push_bind(serialized_metadata);
             });
             let query = query_builder.build();
             query.execute(&mut *tx).await.map_err(WrappedSqlxError)?;
@@ -630,7 +650,6 @@ mod tests {
                 url: new_test_db_persist_path(),
                 migration_mode: chroma_sqlite::config::MigrationMode::Apply,
                 hash_type: chroma_sqlite::config::MigrationHash::SHA256,
-                ..Default::default()
             },
             &Registry::new(),
         )

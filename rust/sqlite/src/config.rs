@@ -21,10 +21,6 @@ fn default_migration_mode() -> MigrationMode {
     MigrationMode::Apply
 }
 
-fn default_push_logs_batch_size() -> usize {
-    999
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct SqliteDBConfig {
@@ -35,8 +31,6 @@ pub struct SqliteDBConfig {
     // The SQLite database URL
     // If unspecified, then the database is in memory only
     pub url: Option<String>,
-    #[serde(default = "default_push_logs_batch_size")]
-    pub push_logs_batch_size: usize,
 }
 
 impl Default for SqliteDBConfig {
@@ -45,7 +39,6 @@ impl Default for SqliteDBConfig {
             hash_type: default_hash_type(),
             migration_mode: default_migration_mode(),
             url: None,
-            push_logs_batch_size: default_push_logs_batch_size(),
         }
     }
 }
@@ -88,7 +81,6 @@ impl SqliteDBConfig {
             hash_type,
             migration_mode,
             url,
-            push_logs_batch_size: default_push_logs_batch_size(),
         }
     }
 }
@@ -131,7 +123,7 @@ impl Configurable<SqliteDBConfig, SqliteCreationError> for SqliteDb {
                 .await?
         };
 
-        let db = SqliteDb::new(conn, config.hash_type, config.push_logs_batch_size);
+        let db = SqliteDb::new(conn, config.hash_type);
 
         db.initialize_migrations_table().await?;
         match config.migration_mode {
@@ -159,7 +151,6 @@ mod tests {
             url: new_test_db_persist_path(),
             hash_type: MigrationHash::SHA256,
             migration_mode: MigrationMode::Apply,
-            push_logs_batch_size: default_push_logs_batch_size(),
         };
 
         let registry = Registry::new();
