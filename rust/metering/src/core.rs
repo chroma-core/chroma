@@ -1,10 +1,10 @@
 use chroma_metering_macros::initialize_metering;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::Ordering;
+use std::{sync::atomic::Ordering, time::Instant};
 
-use crate::types::MeteringAtomicU64;
+use crate::types::{MeteringAtomicU64, MeteringInstant};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Hash, Serialize)]
 #[serde(rename_all = "snake_case", tag = "read_action")]
 pub enum ReadAction {
     Count,
@@ -13,7 +13,7 @@ pub enum ReadAction {
     Query,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Hash, Serialize)]
 #[serde(rename_all = "snake_case", tag = "write_action")]
 pub enum WriteAction {
     Add,
@@ -65,16 +65,31 @@ initialize_metering! {
         fn return_bytes(&self, return_bytes: u64);
     }
 
+    /// To be invoked when a request is received by the outermost layer
+    #[capability]
+    pub trait StartRequest {
+        fn start_request(&self, started_at: Instant);
+    }
+
+    /// To be invoked when a request has finished executing and is ready to be sent to the client
+    /// NOTE(c-gamble): See comments in `rust/frontend/src/impls/service_based_frontend.rs` about
+    /// modifying the server's implementation to only mark a request as finished once it has been
+    /// sent to the client.
+    #[capability]
+    pub trait FinishRequest {
+        fn finish_request(&self, finished_at: Instant);
+    }
+
     ////////////////////////////////// collection_fork //////////////////////////////////
     #[context(
         capabilities = [
-            LatestCollectionLogicalSizeBytes
+            LatestCollectionLogicalSizeBytes,
         ],
         handlers = [
-            __handler_collection_fork_latest_collection_logical_size_bytes
+            __handler_collection_fork_latest_collection_logical_size_bytes,
         ]
     )]
-    #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+    #[derive(Clone, Debug, PartialEq, Deserialize, Eq, Serialize)]
     #[serde(rename_all = "snake_case")]
     pub struct CollectionForkContext {
         pub tenant: String,
@@ -84,12 +99,16 @@ initialize_metering! {
     }
 
     impl CollectionForkContext {
-        pub fn new(tenant: String, database: String, collection_id: String) -> Self {
+        pub fn new(
+            tenant: String,
+            database: String,
+            collection_id: String,
+        ) -> Self {
             CollectionForkContext {
                 tenant,
                 database,
                 collection_id,
-                latest_collection_logical_size_bytes: MeteringAtomicU64::new(0)
+                latest_collection_logical_size_bytes: MeteringAtomicU64::new(0),
             }
         }
     }
@@ -113,7 +132,9 @@ initialize_metering! {
             PulledLogSizeBytes,
             LatestCollectionLogicalSizeBytes,
             ReturnBytes,
-            ],
+            StartRequest,
+            FinishRequest,
+        ],
         handlers = [
             __handler_collection_read_fts_query_length,
             __handler_collection_read_metadata_predicate_count,
@@ -121,9 +142,11 @@ initialize_metering! {
             __handler_collection_read_pulled_log_size_bytes,
             __handler_collection_read_latest_collection_logical_size_bytes,
             __handler_collection_read_return_bytes,
+            __handler_collection_read_start_request,
+            __handler_collection_read_finish_request,
         ]
     )]
-    #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+    #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
     #[serde(rename_all = "snake_case")]
     pub struct CollectionReadContext {
         pub tenant: String,
@@ -131,27 +154,37 @@ initialize_metering! {
         pub collection_id: String,
         #[serde(flatten)]
         pub action: ReadAction,
+        #[serde(skip, default = "MeteringInstant::now")]
+        pub request_received_at: MeteringInstant,
         pub fts_query_length: MeteringAtomicU64,
         pub metadata_predicate_count: MeteringAtomicU64,
         pub query_embedding_count: MeteringAtomicU64,
         pub pulled_log_size_bytes: MeteringAtomicU64,
         pub latest_collection_logical_size_bytes: MeteringAtomicU64,
         pub return_bytes: MeteringAtomicU64,
+        pub request_execution_time_ms: MeteringAtomicU64,
     }
 
     impl CollectionReadContext {
-        pub fn new(tenant: String, database: String, collection_id: String, action: ReadAction) -> Self {
+        pub fn new(
+            tenant: String,
+            database: String,
+            collection_id: String,
+            action: ReadAction,
+        ) -> Self {
             CollectionReadContext {
                 tenant,
                 database,
                 collection_id,
                 action,
+                request_received_at: MeteringInstant::now(),
                 fts_query_length: MeteringAtomicU64::new(0),
                 metadata_predicate_count: MeteringAtomicU64::new(0),
                 query_embedding_count: MeteringAtomicU64::new(0),
                 pulled_log_size_bytes: MeteringAtomicU64::new(0),
                 latest_collection_logical_size_bytes: MeteringAtomicU64::new(0),
                 return_bytes: MeteringAtomicU64::new(0),
+                request_execution_time_ms: MeteringAtomicU64::new(0)
             }
         }
     }
@@ -216,17 +249,45 @@ initialize_metering! {
             .store(return_bytes, Ordering::SeqCst);
     }
 
+    /// Handler for [`crate::core::StartRequest`] capability for collection read contexts
+    fn __handler_collection_read_start_request(
+        context: &CollectionReadContext,
+        started_at: Instant,
+    ) {
+        match context.request_received_at.store(started_at) {
+            Ok(()) => {}
+            Err(error) => tracing::error!("Failed to exercise `StartRequest` capability on `CollectionReadContext`: {:?}", error),
+        }
+    }
+
+    /// Handler for [`crate::core::FinishRequest`] capability for collection read contexts
+    fn __handler_collection_read_finish_request(
+        context: &CollectionReadContext,
+        finished_at: Instant,
+    ) {
+        match context.request_received_at.load() {
+            Ok(started_at) => {
+                let duration_ms = finished_at.duration_since(started_at).as_millis() as u64;
+                context.request_execution_time_ms.store(duration_ms, Ordering::SeqCst);
+            }
+            Err(error) => {
+                tracing::error!("Failed to exercise `FinishRequest` capability on `CollectionReadContext`: {:?}", error);
+            }
+        }
+    }
 
     ////////////////////////////////// collection_write //////////////////////////////////
     #[context(
         capabilities = [
-            LogSizeBytes
+            LogSizeBytes,
+            FinishRequest,
             ],
         handlers = [
-            __handler_collection_write_log_size_bytes
+            __handler_collection_write_log_size_bytes,
+            __handler_collection_write_finish_request,
         ]
     )]
-    #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+    #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
     #[serde(rename_all = "snake_case")]
     pub struct CollectionWriteContext {
         pub tenant: String,
@@ -234,17 +295,27 @@ initialize_metering! {
         pub collection_id: String,
         #[serde(flatten)]
         pub action: WriteAction,
+        #[serde(skip, default = "MeteringInstant::now")]
+        pub request_received_at: MeteringInstant,
         pub log_size_bytes: MeteringAtomicU64,
+        pub request_execution_time_ms: MeteringAtomicU64,
     }
 
     impl CollectionWriteContext {
-        pub fn new(tenant: String, database: String, collection_id: String, action: WriteAction) -> Self {
+        pub fn new(
+            tenant: String,
+            database: String,
+            collection_id: String,
+            action: WriteAction,
+        ) -> Self {
             CollectionWriteContext {
                 tenant,
                 database,
                 collection_id,
                 action,
+                request_received_at: MeteringInstant::now(),
                 log_size_bytes: MeteringAtomicU64::new(0),
+                request_execution_time_ms: MeteringAtomicU64::new(0)
             }
         }
     }
@@ -258,9 +329,36 @@ initialize_metering! {
             .log_size_bytes
             .store(log_size_bytes, Ordering::SeqCst);
     }
+
+    /// Handler for [`crate::core::StartRequest`] capability for collection write contexts
+    fn __handler_collection_write_start_request(
+        context: &CollectionWriteContext,
+        started_at: Instant,
+    ) {
+        match context.request_received_at.store(started_at) {
+            Ok(()) => {}
+            Err(error) => tracing::error!("Failed to exercise `StartRequest` capability on `CollectionWriteContext`: {:?}", error),
+        }
+    }
+
+    /// Handler for [`crate::core::FinishRequest`] capability for collection write contexts
+    fn __handler_collection_write_finish_request(
+        context: &CollectionWriteContext,
+        finished_at: Instant,
+    ) {
+        match context.request_received_at.load() {
+            Ok(started_at) => {
+                let duration_ms = finished_at.duration_since(started_at).as_millis() as u64;
+                context.request_execution_time_ms.store(duration_ms, Ordering::SeqCst);
+            }
+            Err(error) => {
+                tracing::error!("Failed to exercise `FinishRequest` capability on `CollectionWriteContext`: {:?}", error);
+            }
+        }
+    }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", tag = "event_name")]
 pub enum MeterEvent {
     CollectionFork(CollectionForkContext),
@@ -271,20 +369,36 @@ pub enum MeterEvent {
 #[cfg(test)]
 mod tests {
     use super::{CollectionWriteContext, MeterEvent, WriteAction};
-    use crate::types::MeteringAtomicU64;
+    use crate::types::{MeteringAtomicU64, MeteringInstant};
 
     #[test]
     fn test_event_serialization() {
+        let request_received_at = MeteringInstant::now();
         let event = MeterEvent::CollectionWrite(CollectionWriteContext {
             tenant: "test_tenant".to_string(),
             database: "test_database".to_string(),
             collection_id: "test_collection".to_string(),
             action: WriteAction::Add,
+            request_received_at: request_received_at.clone(),
             log_size_bytes: MeteringAtomicU64::new(1000),
+            request_execution_time_ms: MeteringAtomicU64::new(0),
         });
         let json_str = serde_json::to_string(&event).expect("The event should be serializable");
-        let json_event =
+        let mut json_event =
             serde_json::from_str::<MeterEvent>(&json_str).expect("Json should be deserializable");
+        // Serde will automatically set the `request_received_at` on deserialization to the current
+        // time because we intentionally ignore it since std::time::Instant is not natively serde-
+        // compatible, and since this field is an intermediate field used to calculate the execution
+        // time. That's why we override the `json_event`'s `request_received_at` here.
+        match &mut json_event {
+            MeterEvent::CollectionRead(read_context) => {
+                read_context.request_received_at = request_received_at
+            }
+            MeterEvent::CollectionWrite(write_context) => {
+                write_context.request_received_at = request_received_at
+            }
+            MeterEvent::CollectionFork(_) => {}
+        }
         assert_eq!(json_event, event);
     }
 }

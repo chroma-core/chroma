@@ -6,8 +6,8 @@ use axum::{
     Json, Router, ServiceExt,
 };
 use chroma_metering::{
-    CollectionForkContext, CollectionReadContext, CollectionWriteContext, MeteredFutureExt,
-    ReadAction, WriteAction,
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
+    MeteredFutureExt, ReadAction, StartRequest, WriteAction,
 };
 use chroma_system::System;
 use chroma_types::{
@@ -29,11 +29,11 @@ use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use std::{str::FromStr, time::Instant};
 use tokio::{select, signal};
 use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
@@ -1340,6 +1340,12 @@ async fn collection_add(
             WriteAction::Add,
         ));
 
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
     tracing::info!(name: "collection_add", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
         tenant,
@@ -1442,6 +1448,12 @@ async fn collection_update(
             collection_id.0.to_string(),
             WriteAction::Update,
         ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
 
     tracing::info!(name: "collection_update", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
@@ -1552,6 +1564,12 @@ async fn collection_upsert(
             collection_id.0.to_string(),
             WriteAction::Upsert,
         ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
 
     tracing::info!(name: "collection_upsert", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
@@ -1834,6 +1852,12 @@ async fn collection_get(
             ReadAction::Get,
         ));
 
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
     tracing::info!(
         name: "collection_get",
         num_ids = payload.ids.as_ref().map_or(0, |ids| ids.len()),
@@ -1888,6 +1912,7 @@ pub struct QueryRequestPayload {
         ("offset" = Option<u32>, Query, description = "Offset for pagination")
     )
 )]
+
 async fn collection_query(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
@@ -1949,6 +1974,12 @@ async fn collection_query(
             collection_id.0.to_string(),
             ReadAction::Query,
         ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
 
     tracing::info!(
         name: "collection_query",

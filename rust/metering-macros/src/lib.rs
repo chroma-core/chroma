@@ -90,6 +90,8 @@ pub fn initialize_metering(raw_token_stream: proc_macro::TokenStream) -> proc_ma
             ReceiverAlreadyInitializedError,
             #[error("Failed to downcast context to provided type")]
             DowncastError,
+            #[error("RwLock poisoned when attempting to read or write")]
+            RwLockPoisonedError,
         }
 
         /// A type alias for a shared, boxed, metering context

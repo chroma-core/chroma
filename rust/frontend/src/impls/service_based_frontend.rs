@@ -7,7 +7,7 @@ use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_metering::{
-    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable, FinishRequest,
     FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
     MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes, WriteAction,
 };
@@ -40,10 +40,13 @@ use chroma_types::{
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashSet, time::Duration};
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Instant,
+};
 
 use super::utils::to_records;
 
@@ -637,9 +640,9 @@ impl ServiceBasedFrontend {
             .set_collection_with_segments(collection_and_segments)
             .await;
 
-        // Attach the collection's latest logical size to the metering context
+        // Attach metadata to the metering context
         chroma_metering::with_current(|context| {
-            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes)
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
         });
 
         // TODO: Submit event after the response is sent
@@ -752,8 +755,11 @@ impl ServiceBasedFrontend {
             .add_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
-        // Attach the log size in bytes to the metering context
-        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+            context.finish_request(Instant::now());
+        });
 
         // TODO: Submit event after the response is sent
         match res {
@@ -834,8 +840,11 @@ impl ServiceBasedFrontend {
             .update_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
-        // Attach the log size in bytes to the metering context
-        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+            context.finish_request(Instant::now());
+        });
 
         // TODO: Submit event after the response is sent
         match res {
@@ -918,8 +927,11 @@ impl ServiceBasedFrontend {
             .upsert_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
-        // Attach the log size in bytes to the metering context
-        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+            context.finish_request(Instant::now());
+        });
 
         // TODO: Submit event after the response is sent
         match res {
@@ -1041,9 +1053,10 @@ impl ServiceBasedFrontend {
             None
         };
 
-        // NOTE(c-gamble): See note above for additional context, but this is a non-standard pattern
-        // and we are only implementing metering for delete in this manner because delete currently
-        // produces two metering events.
+        if let Some(event) = read_event {
+            event.submit().await;
+        }
+
         let collection_write_context_container =
             chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
                 tenant_id.clone(),
@@ -1071,12 +1084,10 @@ impl ServiceBasedFrontend {
                 }
             })?;
 
-        if let Some(event) = read_event {
-            event.submit().await;
-        }
-
-        // Attach the log size bytes to the write context
-        chroma_metering::with_current(|context| context.log_size_bytes(log_size_bytes));
+        // Attach metadata to the write context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+        });
 
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionWriteContext>() {
@@ -1296,6 +1307,7 @@ impl ServiceBasedFrontend {
             context.pulled_log_size_bytes(get_result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
+            context.finish_request(Instant::now());
         });
 
         // TODO: Submit event after the response is sent
@@ -1424,6 +1436,7 @@ impl ServiceBasedFrontend {
             context.pulled_log_size_bytes(query_result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
+            context.finish_request(Instant::now());
         });
 
         // TODO: Submit event after the response is sent
