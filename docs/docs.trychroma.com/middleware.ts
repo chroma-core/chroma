@@ -51,7 +51,7 @@ const legacyPathsMapping: Record<string, string> = {
   "/updates/troubleshooting": "/docs/overview/troubleshooting",
   "/updates/migration": "/docs/overview/migration",
   "/migration": "/docs/overview/migration",
-  "docs/run-chroma/python-http-client": "/guides/deploy/python-thin-client",
+  "/docs/run-chroma/python-http-client": "/guides/deploy/python-thin-client",
   "/docs/collections/create-get-delete": "/docs/collections/manage-collections",
   "/cli/install": "/docs/cli/install",
   "/cli/commands/browse": "/docs/cli/browse",
