@@ -348,6 +348,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(assignment_policy_config, registry)
                 .await?;
+        let job_expiry_seconds = config.compactor.job_expiry_seconds;
         let scheduler = Scheduler::new(
             my_ip,
             log.clone(),
@@ -357,6 +358,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             min_compaction_size,
             assignment_policy,
             disabled_collections,
+            job_expiry_seconds,
         );
 
         let blockfile_provider = BlockfileProvider::try_from_config(
@@ -768,6 +770,7 @@ mod tests {
         let max_partition_size = 1000;
         let fetch_log_batch_size = 100;
         let purge_dirty_log_timeout_seconds = 60;
+        let job_expiry_seconds = 3600;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
@@ -782,6 +785,7 @@ mod tests {
             min_compaction_size,
             assignment_policy,
             HashSet::new(),
+            job_expiry_seconds,
         );
         // Set memberlist
         scheduler.set_memberlist(vec![my_member.clone()]);

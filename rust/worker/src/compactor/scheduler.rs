@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, SystemTime};
 
-const DEFAULT_JOB_EXPIRY_SECONDS: u64 = 3600; // 1 hour
+// Job expiry duration is now configurable through CompactorConfig
 use std::str::FromStr;
 
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
@@ -23,10 +23,10 @@ struct InProgressJob {
 }
 
 impl InProgressJob {
-    fn new(collection_id: CollectionUuid) -> Self {
+    fn new(collection_id: CollectionUuid, job_expiry_seconds: u64) -> Self {
         Self {
             _collection_id: collection_id,
-            expires_at: SystemTime::now() + Duration::from_secs(DEFAULT_JOB_EXPIRY_SECONDS),
+            expires_at: SystemTime::now() + Duration::from_secs(job_expiry_seconds),
         }
     }
 
@@ -49,6 +49,7 @@ pub(crate) struct Scheduler {
     disabled_collections: HashSet<CollectionUuid>,
     deleted_collections: HashSet<CollectionUuid>,
     in_progress_jobs: HashMap<CollectionUuid, InProgressJob>,
+    job_expiry_seconds: u64,
 }
 
 #[derive(Deserialize, Debug)]
@@ -67,6 +68,7 @@ impl Scheduler {
         min_compaction_size: usize,
         assignment_policy: Box<dyn AssignmentPolicy>,
         disabled_collections: HashSet<CollectionUuid>,
+        job_expiry_seconds: u64,
     ) -> Scheduler {
         Scheduler {
             my_member_id: my_ip,
@@ -82,6 +84,7 @@ impl Scheduler {
             disabled_collections,
             deleted_collections: HashSet::new(),
             in_progress_jobs: HashMap::new(),
+            job_expiry_seconds,
         }
     }
 
@@ -306,8 +309,10 @@ impl Scheduler {
     }
 
     fn add_in_progress(&mut self, collection_id: CollectionUuid) {
-        self.in_progress_jobs
-            .insert(collection_id, InProgressJob::new(collection_id));
+        self.in_progress_jobs.insert(
+            collection_id,
+            InProgressJob::new(collection_id, self.job_expiry_seconds),
+        );
     }
 
     pub(crate) fn complete_collection(&mut self, collection_id: CollectionUuid) {
@@ -485,6 +490,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
+            3600, // job_expiry_seconds
         );
         // Scheduler does nothing without memberlist
         scheduler.schedule().await;
@@ -710,6 +716,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
+            3600, // job_expiry_seconds
         );
 
         scheduler.set_memberlist(vec![my_member.clone()]);
