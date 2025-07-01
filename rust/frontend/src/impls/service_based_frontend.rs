@@ -1070,6 +1070,11 @@ impl ServiceBasedFrontend {
                 database_name.clone(),
                 collection_id.0.to_string(),
                 WriteAction::Delete,
+                if let Some(request_received_at) = maybe_request_received_at {
+                    request_received_at
+                } else {
+                    Utc::now()
+                },
             ));
         collection_write_context_container.enter();
 
@@ -1094,23 +1099,6 @@ impl ServiceBasedFrontend {
         if let Some(event) = read_event {
             event.submit().await;
         }
-
-        // NOTE(c-gamble): See note above for additional context, but this is a non-standard pattern
-        // and we are only implementing metering for delete in this manner because delete currently
-        // produces two metering events.
-        let collection_write_context_container =
-            chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
-                tenant_id.clone(),
-                database_name.clone(),
-                collection_id.0.to_string(),
-                WriteAction::Delete,
-                if let Some(request_received_at) = maybe_request_received_at {
-                    request_received_at
-                } else {
-                    Utc::now()
-                },
-            ));
-        collection_write_context_container.enter();
 
         // Attach metadata to the write context
         chroma_metering::with_current(|context| {

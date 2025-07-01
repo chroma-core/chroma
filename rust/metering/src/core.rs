@@ -24,8 +24,8 @@ pub enum WriteAction {
 }
 
 initialize_metering! {
-    #[capability]
     /// The latest logical size of a collection in bytes
+    #[capability]
     pub trait LatestCollectionLogicalSizeBytes {
         fn latest_collection_logical_size_bytes(&self, latest_collection_logical_size_bytes: u64);
     }
@@ -66,8 +66,9 @@ initialize_metering! {
         fn return_bytes(&self, return_bytes: u64);
     }
 
+    /// Marks
     #[capability]
-    pub trait RequestCompletedAt {
+    pub trait FinishRequest {
         fn request_completed_at(&self, completed_at: DateTime<Utc>);
     }
 
@@ -75,7 +76,7 @@ initialize_metering! {
     #[context(
         capabilities = [
             LatestCollectionLogicalSizeBytes,
-            RequestCompletedAt,
+            FinishRequest,
         ],
         handlers = [
             __handler_collection_fork_latest_collection_logical_size_bytes,
@@ -121,7 +122,7 @@ initialize_metering! {
             .store(latest_collection_logical_size_bytes, Ordering::SeqCst);
     }
 
-    /// Handler for [`crate::core::RequestCompletedAt`] capability for collection fork contexts
+    /// Handler for [`crate::core::FinishRequest`] capability for collection fork contexts
     fn __handler_collection_fork_request_completed_at(
         context: &CollectionForkContext,
         completed_at: DateTime<Utc>,
@@ -145,7 +146,7 @@ initialize_metering! {
             PulledLogSizeBytes,
             LatestCollectionLogicalSizeBytes,
             ReturnBytes,
-            RequestCompletedAt,
+            FinishRequest,
             ],
         handlers = [
             __handler_collection_read_fts_query_length,
@@ -260,7 +261,7 @@ initialize_metering! {
             .store(return_bytes, Ordering::SeqCst);
     }
 
-    /// Handler for [`crate::core::RequestCompletedAt`] capability for collection read contexts
+    /// Handler for [`crate::core::FinishRequest`] capability for collection read contexts
     fn __handler_collection_read_request_completed_at(
         context: &CollectionReadContext,
         completed_at: DateTime<Utc>,
@@ -279,7 +280,7 @@ initialize_metering! {
     #[context(
         capabilities = [
             LogSizeBytes,
-            RequestCompletedAt,
+            FinishRequest,
             ],
         handlers = [
             __handler_collection_write_log_size_bytes,
@@ -329,7 +330,7 @@ initialize_metering! {
             .store(log_size_bytes, Ordering::SeqCst);
     }
 
-    /// Handler for [`crate::core::RequestCompletedAt`] capability for collection write contexts
+    /// Handler for [`crate::core::FinishRequest`] capability for collection write contexts
     fn __handler_collection_write_request_completed_at(
         context: &CollectionWriteContext,
         completed_at: DateTime<Utc>,
