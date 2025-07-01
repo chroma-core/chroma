@@ -15,13 +15,39 @@ use crate::{
 };
 use async_trait::async_trait;
 use chroma_cache::{CacheError, PersistentCache};
-use chroma_config::Configurable;
+use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::Storage;
-use std::sync::Arc;
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
+};
+use futures::{stream::FuturesUnordered, StreamExt};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use thiserror::Error;
 use tracing::{Instrument, Span};
 use uuid::Uuid;
+
+#[derive(Error, Debug)]
+pub enum ArrowBlockfileProviderPrefetchError {
+    #[error("Error reading root for blockfile: {0}")]
+    RootManager(#[from] Box<dyn ChromaError>),
+    #[error("Error fetching block: {0}")]
+    BlockManager(#[from] GetError),
+}
+
+impl ChromaError for ArrowBlockfileProviderPrefetchError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ArrowBlockfileProviderPrefetchError::RootManager(e) => e.code(),
+            ArrowBlockfileProviderPrefetchError::BlockManager(e) => e.code(),
+        }
+    }
+}
+
+const PREFETCH_TTL_HOURS: u64 = 8;
 
 /// A BlockFileProvider that creates ArrowBlockfiles (Arrow-backed blockfiles used for production).
 /// For now, it keeps a simple local cache of blockfiles.
@@ -29,6 +55,21 @@ use uuid::Uuid;
 pub struct ArrowBlockfileProvider {
     block_manager: BlockManager,
     root_manager: RootManager,
+}
+
+pub struct BlockfileReaderOptions {
+    id: uuid::Uuid,
+    prefix_path: String,
+}
+
+impl BlockfileReaderOptions {
+    pub fn new(id: Uuid, prefix_path: String) -> Self {
+        BlockfileReaderOptions { id, prefix_path }
+    }
+
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
 }
 
 impl ArrowBlockfileProvider {
@@ -50,9 +91,16 @@ impl ArrowBlockfileProvider {
         V: Value + Readable<'new> + ArrowReadableValue<'new> + 'new,
     >(
         &self,
-        id: &uuid::Uuid,
+        options: BlockfileReaderOptions,
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
-        let root = self.root_manager.get::<K>(id).await;
+        let root = self
+            .root_manager
+            .get::<K>(
+                &options.id,
+                &options.prefix_path,
+                self.block_manager.default_max_block_size_bytes(),
+            )
+            .await;
         match root {
             Ok(Some(root)) => Ok(BlockfileReader::ArrowBlockfileReader(
                 ArrowBlockfileReader::new(self.block_manager.clone(), root),
@@ -60,6 +108,44 @@ impl ArrowBlockfileProvider {
             Ok(None) => Err(Box::new(OpenError::NotFound)),
             Err(e) => Err(Box::new(OpenError::Other(Box::new(e)))),
         }
+    }
+
+    pub async fn prefetch(
+        &self,
+        id: &Uuid,
+        prefix_path: &str,
+    ) -> Result<usize, ArrowBlockfileProviderPrefetchError> {
+        if !self.root_manager.should_prefetch(id) {
+            return Ok(0);
+        }
+        // We call .get_all_block_ids() here instead of just reading the root because reading the root requires a concrete Key type.
+        let block_ids = self
+            .root_manager
+            .get_all_block_ids(id, prefix_path)
+            .await
+            .map_err(|e| ArrowBlockfileProviderPrefetchError::RootManager(Box::new(e)))?;
+
+        let mut futures = FuturesUnordered::new();
+        for block_id in block_ids.iter() {
+            // Don't prefetch if already cached.
+            if !self.block_manager.cached(block_id).await {
+                futures.push(self.block_manager.get(
+                    prefix_path,
+                    block_id,
+                    StorageRequestPriority::P1,
+                ));
+            }
+        }
+        let count = futures.len();
+
+        tracing::info!("Prefetching {} blocks for blockfile ID: {:?}", count, id);
+
+        while let Some(result) = futures.next().await {
+            result?;
+        }
+
+        tracing::info!("Prefetched {} blocks for blockfile ID: {:?}", count, id);
+        Ok(count)
     }
 
     pub async fn write<
@@ -75,7 +161,12 @@ impl ArrowBlockfileProvider {
             let new_id = Uuid::new_v4();
             let new_root = self
                 .root_manager
-                .fork::<K>(&fork_from, new_id)
+                .fork::<K>(
+                    &fork_from,
+                    new_id,
+                    &options.prefix_path,
+                    self.block_manager.default_max_block_size_bytes(),
+                )
                 .await
                 .map_err(|e| {
                     tracing::error!("Error forking root: {:?}", e);
@@ -105,13 +196,18 @@ impl ArrowBlockfileProvider {
             }
         } else {
             let new_id = Uuid::new_v4();
+            let max_block_size_bytes = options
+                .max_block_size_bytes
+                .unwrap_or(self.block_manager.default_max_block_size_bytes());
 
             match options.mutation_ordering {
                 BlockfileWriterMutationOrdering::Ordered => {
                     let file = ArrowOrderedBlockfileWriter::new::<K, V>(
                         new_id,
+                        &options.prefix_path,
                         self.block_manager.clone(),
                         self.root_manager.clone(),
+                        max_block_size_bytes,
                     );
 
                     Ok(BlockfileWriter::ArrowOrderedBlockfileWriter(file))
@@ -119,8 +215,10 @@ impl ArrowBlockfileProvider {
                 BlockfileWriterMutationOrdering::Unordered => {
                     let file = ArrowUnorderedBlockfileWriter::new::<K, V>(
                         new_id,
+                        &options.prefix_path,
                         self.block_manager.clone(),
                         self.root_manager.clone(),
+                        max_block_size_bytes,
                     );
                     Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
                 }
@@ -131,6 +229,7 @@ impl ArrowBlockfileProvider {
     pub async fn clear(&self) -> Result<(), CacheError> {
         self.block_manager.block_cache.clear().await?;
         self.root_manager.cache.clear().await?;
+        self.root_manager.prefetched_roots.lock().clear();
         Ok(())
     }
 }
@@ -139,6 +238,7 @@ impl ArrowBlockfileProvider {
 impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfileProvider {
     async fn try_from_config(
         config: &(ArrowBlockfileProviderConfig, Storage),
+        _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (blockfile_config, storage) = config;
         let block_cache = match chroma_cache::from_config_persistent(
@@ -176,7 +276,7 @@ pub enum GetError {
     #[error(transparent)]
     BlockLoadError(#[from] BlockLoadError),
     #[error(transparent)]
-    StorageGetError(#[from] chroma_storage::GetError),
+    StorageGetError(#[from] chroma_storage::StorageError),
 }
 
 impl ChromaError for GetError {
@@ -212,25 +312,23 @@ impl ChromaError for ForkError {
 /// introduce a more sophisticated cache that can handle tiered eviction and other features. This interface
 /// is a placeholder for that.
 #[derive(Clone)]
-pub(super) struct BlockManager {
+pub struct BlockManager {
     block_cache: Arc<dyn PersistentCache<Uuid, Block>>,
     storage: Storage,
-    max_block_size_bytes: usize,
-    write_mutex: Arc<tokio::sync::Mutex<()>>,
+    default_max_block_size_bytes: usize,
 }
 
 impl BlockManager {
     pub(super) fn new(
         storage: Storage,
-        max_block_size_bytes: usize,
+        default_max_block_size_bytes: usize,
         block_cache: Box<dyn PersistentCache<Uuid, Block>>,
     ) -> Self {
         let block_cache: Arc<dyn PersistentCache<Uuid, Block>> = block_cache.into();
         Self {
             block_cache,
             storage,
-            max_block_size_bytes,
-            write_mutex: Arc::new(tokio::sync::Mutex::new(())),
+            default_max_block_size_bytes,
         }
     }
 
@@ -242,8 +340,11 @@ impl BlockManager {
     pub(super) async fn fork<K: ArrowWriteableKey, V: ArrowWriteableValue, D: Delta>(
         &self,
         block_id: &Uuid,
+        prefix_path: &str,
     ) -> Result<D, ForkError> {
-        let block = self.get(block_id).await;
+        let block = self
+            .get(prefix_path, block_id, StorageRequestPriority::P0)
+            .await;
         let block = match block {
             Ok(Some(block)) => block,
             Ok(None) => {
@@ -276,15 +377,28 @@ impl BlockManager {
             .unwrap_or(false)
     }
 
-    pub(super) async fn get(&self, id: &Uuid) -> Result<Option<Block>, GetError> {
-        let block = self.block_cache.get(id).await.ok().flatten();
+    pub fn format_key(prefix_path: &str, id: &Uuid) -> String {
+        // For legacy collections, prefix_path is empty.
+        if prefix_path.is_empty() {
+            return format!("block/{}", id);
+        }
+        format!("{}/block/{}", prefix_path, id)
+    }
+
+    pub(super) async fn get(
+        &self,
+        prefix_path: &str,
+        id: &Uuid,
+        priority: StorageRequestPriority,
+    ) -> Result<Option<Block>, GetError> {
+        let block = self.block_cache.obtain(*id).await.ok().flatten();
         match block {
             Some(block) => Ok(Some(block)),
             None => async {
-                let key = format!("block/{}", id);
+                let key = Self::format_key(prefix_path, id);
                 let bytes_res = self
                     .storage
-                    .get(&key)
+                    .get(&key, GetOptions::new(priority))
                     .instrument(
                         tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
                     )
@@ -296,20 +410,8 @@ impl BlockManager {
                             deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
                         match block {
                             Ok(block) => {
-                                let _guard = self.write_mutex.lock().await;
-                                match self.block_cache.get(id).await {
-                                    Ok(Some(b)) => {
-                                        Ok(Some(b))
-                                    }
-                                    Ok(None) => {
-                                        self.block_cache.insert(*id, block.clone()).await;
-                                        Ok(Some(block))
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Error getting block from cache {:?}", e);
-                                        Err(GetError::BlockLoadError(e.into()))
-                                    }
-                                }
+                                self.block_cache.insert(*id, block.clone()).await;
+                                Ok(Some(block))
                             }
                             Err(e) => {
                                 tracing::error!(
@@ -330,7 +432,11 @@ impl BlockManager {
         }
     }
 
-    pub(super) async fn flush(&self, block: &Block) -> Result<(), Box<dyn ChromaError>> {
+    pub(super) async fn flush(
+        &self,
+        block: &Block,
+        prefix_path: &str,
+    ) -> Result<(), Box<dyn ChromaError>> {
         let bytes = match block.to_bytes() {
             Ok(bytes) => bytes,
             Err(e) => {
@@ -338,12 +444,19 @@ impl BlockManager {
                 return Err(Box::new(e));
             }
         };
-        let key = format!("block/{}", block.id);
+        let key = Self::format_key(prefix_path, &block.id);
         let block_bytes_len = bytes.len();
-        let res = self.storage.put_bytes(&key, bytes).await;
+        let res = self
+            .storage
+            .put_bytes(
+                &key,
+                bytes,
+                PutOptions::with_priority(StorageRequestPriority::P0),
+            )
+            .await;
         match res {
             Ok(_) => {
-                tracing::info!(
+                tracing::debug!(
                     "Block: {} written to storage ({}B)",
                     block.id,
                     block_bytes_len
@@ -357,8 +470,8 @@ impl BlockManager {
         Ok(())
     }
 
-    pub(super) fn max_block_size_bytes(&self) -> usize {
-        self.max_block_size_bytes
+    pub(super) fn default_max_block_size_bytes(&self) -> usize {
+        self.default_max_block_size_bytes
     }
 }
 
@@ -381,7 +494,7 @@ impl ChromaError for BlockFlushError {
 // ==============
 
 #[derive(Error, Debug)]
-pub(super) enum RootManagerError {
+pub enum RootManagerError {
     #[error("Not found")]
     NotFound,
     #[error(transparent)]
@@ -389,7 +502,7 @@ pub(super) enum RootManagerError {
     #[error(transparent)]
     UUIDParseError(#[from] uuid::Error),
     #[error(transparent)]
-    StorageGetError(#[from] chroma_storage::GetError),
+    StorageGetError(#[from] chroma_storage::StorageError),
     #[error(transparent)]
     FromBytesError(#[from] FromBytesError),
 }
@@ -407,33 +520,56 @@ impl ChromaError for RootManagerError {
 }
 
 #[derive(Clone)]
-pub(super) struct RootManager {
+pub struct RootManager {
     cache: Arc<dyn PersistentCache<Uuid, RootReader>>,
     storage: Storage,
+    // Sparse indexes that have already been prefetched and don't need to be prefetched again.
+    prefetched_roots: Arc<parking_lot::Mutex<HashMap<Uuid, Duration>>>,
+}
+
+impl std::fmt::Debug for RootManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RootManager")
+            .field("cache", &self.cache)
+            .field("storage", &self.storage)
+            .finish()
+    }
 }
 
 impl RootManager {
     pub fn new(storage: Storage, cache: Box<dyn PersistentCache<Uuid, RootReader>>) -> Self {
         let cache: Arc<dyn PersistentCache<Uuid, RootReader>> = cache.into();
-        Self { cache, storage }
+        Self {
+            cache,
+            storage,
+            prefetched_roots: Arc::new(parking_lot::Mutex::new(HashMap::new())),
+        }
     }
 
     pub async fn get<'new, K: ArrowReadableKey<'new> + 'new>(
         &self,
         id: &Uuid,
+        prefix_path: &str,
+        max_block_size_bytes: usize,
     ) -> Result<Option<RootReader>, RootManagerError> {
-        let index = self.cache.get(id).await.ok().flatten();
+        let index = self.cache.obtain(*id).await.ok().flatten();
         match index {
             Some(index) => Ok(Some(index)),
             None => {
                 tracing::info!("Cache miss - fetching root from storage");
-                // TODO(hammadb): For legacy and temporary development purposes, we are reading the file
-                // from a fixed location. The path is sparse_index/ for legacy reasons.
-                // This will be replaced with a full prefix-based storage shortly
-                let key = format!("sparse_index/{}", id);
+                let key = Self::get_storage_key(prefix_path, id);
                 tracing::debug!("Reading root from storage with key: {}", key);
-                match self.storage.get(&key).await {
-                    Ok(bytes) => match RootReader::from_bytes::<K>(&bytes, *id) {
+                match self
+                    .storage
+                    .get(&key, GetOptions::new(StorageRequestPriority::P0))
+                    .await
+                {
+                    Ok(bytes) => match RootReader::from_bytes::<K>(
+                        &bytes,
+                        prefix_path,
+                        *id,
+                        max_block_size_bytes,
+                    ) {
                         Ok(root) => {
                             self.cache.insert(*id, root.clone()).await;
                             Ok(Some(root))
@@ -452,6 +588,27 @@ impl RootManager {
         }
     }
 
+    pub async fn get_all_block_ids(
+        &self,
+        id: &Uuid,
+        prefix_path: &str,
+    ) -> Result<Vec<Uuid>, RootManagerError> {
+        let key = Self::get_storage_key(prefix_path, id);
+        tracing::debug!("Reading root from storage with key: {}", key);
+        match self
+            .storage
+            .get(&key, GetOptions::new(StorageRequestPriority::P0))
+            .await
+        {
+            Ok(bytes) => RootReader::get_all_block_ids_from_bytes(&bytes, *id)
+                .map_err(RootManagerError::FromBytesError),
+            Err(e) => {
+                tracing::error!("Error reading root from storage: {}", e);
+                Err(RootManagerError::StorageGetError(e))
+            }
+        }
+    }
+
     pub async fn flush<'read, K: ArrowWriteableKey + 'read>(
         &self,
         root: &RootWriter,
@@ -463,8 +620,15 @@ impl RootManager {
                 return Err(Box::new(e));
             }
         };
-        let key = format!("sparse_index/{}", root.id);
-        let res = self.storage.put_bytes(&key, bytes).await;
+        let key = Self::get_storage_key(&root.prefix_path, &root.id);
+        let res = self
+            .storage
+            .put_bytes(
+                &key,
+                bytes,
+                PutOptions::with_priority(StorageRequestPriority::P0),
+            )
+            .await;
         match res {
             Ok(_) => {
                 tracing::info!("Root written to storage");
@@ -481,15 +645,62 @@ impl RootManager {
         &self,
         old_id: &Uuid,
         new_id: Uuid,
+        prefix_path: &str,
+        max_block_size_bytes: usize,
     ) -> Result<RootWriter, RootManagerError> {
         tracing::info!("Forking root from {:?}", old_id);
-        let original = self.get::<K::ReadableKey<'key>>(old_id).await?;
+        let original = self
+            .get::<K::ReadableKey<'key>>(old_id, prefix_path, max_block_size_bytes)
+            .await?;
         match original {
             Some(original) => {
                 let forked = original.fork(new_id);
                 Ok(forked)
             }
             None => Err(RootManagerError::NotFound),
+        }
+    }
+
+    pub fn get_storage_key(prefix_path: &str, id: &Uuid) -> String {
+        // For legacy collections, prefix_path is empty.
+        if prefix_path.is_empty() {
+            return format!("sparse_index/{}", id);
+        }
+        format!("{}/root/{}", prefix_path, id)
+    }
+
+    fn should_prefetch(&self, id: &Uuid) -> bool {
+        let mut lock_guard = self.prefetched_roots.lock();
+        let expires_at = lock_guard.get(id);
+        match expires_at {
+            Some(expires_at) => {
+                if SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("Do not deploy before UNIX epoch")
+                    < *expires_at
+                {
+                    false
+                } else {
+                    lock_guard.insert(
+                        *id,
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("Do not deploy before UNIX epoch")
+                            + std::time::Duration::from_secs(PREFETCH_TTL_HOURS * 3600),
+                    );
+                    true
+                }
+            }
+            None => {
+                lock_guard.insert(
+                    *id,
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("Do not deploy before UNIX epoch")
+                        + std::time::Duration::from_secs(PREFETCH_TTL_HOURS * 3600),
+                );
+                true
+            }
         }
     }
 }
@@ -503,7 +714,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_cached() {
-        let manager = BlockManager::new(test_storage(), 100, new_cache_for_test());
+        let (_temp_dir, storage) = test_storage();
+        let manager = BlockManager::new(storage, 100, new_cache_for_test());
         assert!(!manager.cached(&Uuid::new_v4()).await);
 
         let delta = manager.create::<&str, String, UnorderedBlockDelta>();

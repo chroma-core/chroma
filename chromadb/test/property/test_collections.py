@@ -1,6 +1,7 @@
 import pytest
 import logging
 import hypothesis.strategies as st
+from chromadb.test.property.invariants import check_metadata
 import chromadb.test.property.strategies as strategies
 from chromadb.api import ClientAPI
 import chromadb.api.types as types
@@ -14,6 +15,7 @@ from hypothesis.stateful import (
     run_state_machine_as_test,
     MultipleResults,
 )
+import chromadb.test.property.invariants as invariants
 from typing import Any, Dict, Mapping, Optional
 import numpy
 from chromadb.test.property.strategies import hashing_embedding_function
@@ -59,7 +61,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         self.set_model(coll.name, coll.metadata)  # type: ignore[arg-type]
 
         assert c.name == coll.name
-        assert c.metadata == self.model[coll.name]
+        check_metadata(self.model[coll.name], c.metadata)
         return multiple(coll)
 
     @rule(coll=collections)
@@ -67,7 +69,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         if coll.name in self.model:
             c = self.client.get_collection(name=coll.name)
             assert c.name == coll.name
-            assert c.metadata == self.model[coll.name]
+            check_metadata(self.model[coll.name], c.metadata)
         else:
             with pytest.raises(Exception):
                 self.client.get_collection(name=coll.name)
@@ -75,8 +77,9 @@ class CollectionStateMachine(RuleBasedStateMachine):
     @rule(coll=consumes(collections))
     def delete_coll(self, coll: strategies.ExternalCollection) -> None:
         if coll.name in self.model:
-            self.client.delete_collection(name=coll.name)
-            self.delete_from_model(coll.name)
+            with invariants.collection_deleted(self.client, coll.name):
+                self.client.delete_collection(name=coll.name)
+                self.delete_from_model(coll.name)
         else:
             with pytest.raises(Exception):
                 self.client.delete_collection(name=coll.name)
@@ -88,8 +91,8 @@ class CollectionStateMachine(RuleBasedStateMachine):
     def list_collections(self) -> None:
         colls = self.client.list_collections()
         assert len(colls) == len(self.model)
-        for collection_name in colls:
-            assert collection_name in self.model
+        for c in colls:
+            assert c.name in self.model
 
     # @rule for list_collections with limit and offset
     @rule(
@@ -166,7 +169,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
 
         # Check that model and API are in sync
         assert c.name == coll.name
-        assert c.metadata == self.model[coll.name]
+        check_metadata(self.model[coll.name], c.metadata)
         return multiple(coll)
 
     @rule(
@@ -218,7 +221,7 @@ class CollectionStateMachine(RuleBasedStateMachine):
         c = self.client.get_collection(name=coll.name)
 
         assert c.name == coll.name
-        assert c.metadata == self.model[coll.name]
+        check_metadata(self.model[coll.name], c.metadata)
         return multiple(coll)
 
     def set_model(
@@ -255,7 +258,7 @@ def test_previously_failing_one(client: ClientAPI) -> None:
     # pulled from the logs.
     (v1,) = state.get_or_create_coll(  # type: ignore[misc]
         coll=strategies.ExternalCollection(
-            name="jjn2yjLW1zp2T\n",
+            name="jjn2yjLW1zp2T",
             metadata=None,
             embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),  # type: ignore[arg-type]
         ),
@@ -263,7 +266,7 @@ def test_previously_failing_one(client: ClientAPI) -> None:
     )
     (v6,) = state.get_or_create_coll(  # type: ignore[misc]
         coll=strategies.ExternalCollection(
-            name="jjn2yjLW1zp2T\n",
+            name="jjn2yjLW1zp2T",
             metadata=None,
             embedding_function=hashing_embedding_function(dtype=numpy.float32, dim=863),  # type: ignore[arg-type]
         ),
@@ -296,7 +299,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
             "7b": "YS",
             "VYWq4LEMWjCo": True,
         },
-        new_name="OF5F0MzbQg\n",
+        new_name="OF5F0MzbQg",
     )
     state.get_or_create_coll(
         coll=strategies.ExternalCollection(
@@ -322,7 +325,7 @@ def test_previously_failing_two(client: ClientAPI) -> None:
         },
     )
     v17 = state.modify_coll(  # noqa: F841
-        coll=v15, new_metadata={"L35J2S": "K0l026"}, new_name="Ai1\n"
+        coll=v15, new_metadata={"L35J2S": "K0l026"}, new_name="Ai1"
     )
     v18 = state.get_or_create_coll(coll=v13, new_metadata=None)  # noqa: F841
     state.get_or_create_coll(

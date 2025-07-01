@@ -1,11 +1,21 @@
-from typing import Optional, Set, Union, TypeVar, List, Dict, Any, Tuple, cast
+from typing import (
+    Optional,
+    Set,
+    Union,
+    TypeVar,
+    List,
+    Dict,
+    Any,
+    Tuple,
+    cast,
+    Literal,
+    get_args,
+)
 from numpy.typing import NDArray
 import numpy as np
 from typing_extensions import TypedDict, Protocol, runtime_checkable
-from enum import Enum
-from pydantic import Field
 import chromadb.errors as errors
-from chromadb.types import (
+from chromadb.base_types import (
     Metadata,
     UpdateMetadata,
     Vector,
@@ -20,9 +30,20 @@ from chromadb.types import (
 )
 from inspect import signature
 from tenacity import retry
+from abc import abstractmethod
+import pybase64
+from functools import lru_cache
+import struct
+import math
 
 # Re-export types from chromadb.types
-__all__ = ["Metadata", "Where", "WhereDocument", "UpdateCollectionMetadata"]
+__all__ = [
+    "Metadata",
+    "Where",
+    "WhereDocument",
+    "UpdateCollectionMetadata",
+    "UpdateMetadata",
+]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
 OneOrMany = Union[T, List[T]]
@@ -50,6 +71,69 @@ PyEmbeddings = List[PyEmbedding]
 Embedding = Vector
 Embeddings = List[Embedding]
 
+Space = Literal["cosine", "l2", "ip"]
+
+
+@lru_cache
+def _get_struct(vector_length: int) -> struct.Struct:
+    return struct.Struct(f"<{vector_length}f")
+
+
+def _to_f32(value: float) -> float:
+    F32_MAX = np.finfo(np.float32).max
+    F32_MIN = np.finfo(np.float32).min
+    if math.isnan(value):
+        return float("nan")
+    if value > F32_MAX:
+        return float("inf")
+    if value < F32_MIN:
+        return float("-inf")
+    return value
+
+
+def pack_embedding_safely(pyEmbedding: PyEmbedding) -> str:
+    try:
+        return pybase64.b64encode_as_string(  # type: ignore
+            _get_struct(len(pyEmbedding)).pack(*pyEmbedding)
+        )
+    except OverflowError:
+        return pybase64.b64encode_as_string(  # type: ignore
+            _get_struct(len(pyEmbedding)).pack(
+                *[_to_f32(value) for value in pyEmbedding]
+            )
+        )
+
+
+# returns base64 encoded embeddings or None if the embedding is None
+# currently, PyEmbeddings can't have None, but this is to future proof, we want to be able to handle None embeddings
+def optional_embeddings_to_base64_strings(
+    pyEmbeddings: Optional[PyEmbeddings],
+) -> Optional[list[Union[str, None]]]:
+    if pyEmbeddings is None:
+        return None
+    return [
+        pack_embedding_safely(pyEmbedding) if pyEmbedding is not None else None
+        for pyEmbedding in pyEmbeddings
+    ]
+
+
+def optional_base64_strings_to_embeddings(
+    b64_strings: Optional[list[Union[str, None]]],
+) -> Optional[PyEmbeddings]:
+    if b64_strings is None:
+        return None
+
+    embeddings: PyEmbeddings = []
+    for b64_string in b64_strings:
+        if b64_string is None:
+            embeddings.append(None)  # type: ignore
+        else:
+            packed_data = pybase64.b64decode(b64_string)
+            vector_length = len(packed_data) // 4
+            embedding_tuple = _get_struct(vector_length).unpack(packed_data)
+            embeddings.append(list(embedding_tuple))
+    return embeddings
+
 
 def normalize_embeddings(
     target: Optional[Union[OneOrMany[Embedding], OneOrMany[PyEmbedding]]]
@@ -59,7 +143,7 @@ def normalize_embeddings(
 
     if len(target) == 0:
         raise ValueError(
-            f"Expected Embedings to be non-empty list or numpy array, got {target}"
+            f"Expected Embeddings to be non-empty list or numpy array, got {target}"
         )
 
     if isinstance(target, list):
@@ -302,29 +386,18 @@ def _validate_record_set_contains(
 
 Parameter = TypeVar("Parameter", Document, Image, Embedding, Metadata, ID)
 
-
-class IncludeEnum(str, Enum):
-    documents = "documents"
-    embeddings = "embeddings"
-    metadatas = "metadatas"
-    distances = "distances"
-    uris = "uris"
-    data = "data"
-
-
-# This should ust be List[Literal["documents", "embeddings", "metadatas", "distances"]]
-# However, this provokes an incompatibility with the Overrides library and Python 3.7
-Include = List[IncludeEnum]
-IncludeMetadataDocuments = Field(default=["metadatas", "documents"])
-IncludeMetadataDocumentsEmbeddings = Field(
-    default=["metadatas", "documents", "embeddings"]
-)
-IncludeMetadataDocumentsEmbeddingsDistances = Field(
-    default=["metadatas", "documents", "embeddings", "distances"]
-)
-IncludeMetadataDocumentsDistances = Field(
-    default=["metadatas", "documents", "distances"]
-)
+Include = List[
+    Literal["documents", "embeddings", "metadatas", "distances", "uris", "data"]
+]
+IncludeMetadataDocuments: Include = ["metadatas", "documents"]
+IncludeMetadataDocumentsEmbeddings: Include = ["metadatas", "documents", "embeddings"]
+IncludeMetadataDocumentsEmbeddingsDistances: Include = [
+    "metadatas",
+    "documents",
+    "embeddings",
+    "distances",
+]
+IncludeMetadataDocumentsDistances: Include = ["metadatas", "documents", "distances"]
 
 # Re-export types from chromadb.types
 LiteralValue = LiteralValue
@@ -387,6 +460,7 @@ class GetResult(TypedDict):
 
 class QueryRequest(TypedDict):
     embeddings: Embeddings
+    ids: Optional[IDs]
     where: Optional[Where]
     where_document: Optional[WhereDocument]
     include: Include
@@ -452,8 +526,22 @@ class IndexMetadata(TypedDict):
     time_created: float
 
 
+# TODO: make warnings prettier and add link to migration docs
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
+    """
+    A protocol for embedding functions. To implement a new embedding function,
+    you need to implement the following methods at minimum:
+    - __call__
+
+    For future compatibility, it is strongly recommended to also implement:
+    - __init__
+    - name
+    - build_from_config
+    - get_config
+    """
+
+    @abstractmethod
     def __call__(self, input: D) -> Embeddings:
         ...
 
@@ -473,6 +561,115 @@ class EmbeddingFunction(Protocol[D]):
         self, input: D, **retry_kwargs: Dict[str, Any]
     ) -> Embeddings:
         return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """
+        Initialize the embedding function.
+        Pass any arguments that will be needed to build the embedding function
+        config.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
+        """
+        import warnings
+
+        warnings.warn(
+            f"The class {self.__class__.__name__} does not implement __init__. "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    @staticmethod
+    def name() -> str:
+        """
+        Return the name of the embedding function.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
+        """
+        import warnings
+
+        warnings.warn(
+            "The EmbeddingFunction class does not implement name(). "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return NotImplemented
+
+    def default_space(self) -> Space:
+        """
+        Return the default space for the embedding function.
+        """
+        return "l2"
+
+    def supported_spaces(self) -> List[Space]:
+        """
+        Return the supported spaces for the embedding function.
+        """
+        return ["cosine", "l2", "ip"]
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
+        """
+        Build the embedding function from a config, which will be used to
+        deserialize the embedding function.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
+        """
+        import warnings
+
+        warnings.warn(
+            "The EmbeddingFunction class does not implement build_from_config(). "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return NotImplemented
+
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Return the config for the embedding function, which will be used to
+        serialize the embedding function.
+
+        Note: This method is provided for backward compatibility.
+        Future implementations should override this method.
+        """
+        import warnings
+
+        warnings.warn(
+            f"The class {self.__class__.__name__} does not implement get_config(). "
+            "This will be required in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return NotImplemented
+
+    def validate_config_update(
+        self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+    ) -> None:
+        """
+        Validate the update to the config.
+        """
+        return
+
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
+        """
+        Validate the config.
+        """
+        return
+
+    def is_legacy(self) -> bool:
+        if (
+            self.name() is NotImplemented
+            or self.get_config() is NotImplemented
+            or self.build_from_config(self.get_config()) is NotImplemented
+        ):
+            return True
+        return False
 
 
 def validate_embedding_function(
@@ -554,9 +751,11 @@ def validate_metadata(metadata: Metadata) -> Metadata:
                 f"Expected metadata key to be a str, got {key} which is a {type(key).__name__}"
             )
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
-        if not isinstance(value, bool) and not isinstance(value, (str, int, float)):
+        if not isinstance(value, bool) and not isinstance(
+            value, (str, int, float, type(None))
+        ):
             raise ValueError(
-                f"Expected metadata value to be a str, int, float or bool, got {value} which is a {type(value).__name__}"
+                f"Expected metadata value to be a str, int, float, bool, or None, got {value} which is a {type(value).__name__}"
             )
     return metadata
 
@@ -689,9 +888,16 @@ def validate_where_document(where_document: WhereDocument) -> None:
             f"Expected where document to have exactly one operator, got {where_document}"
         )
     for operator, operand in where_document.items():
-        if operator not in ["$contains", "$not_contains", "$and", "$or"]:
+        if operator not in [
+            "$contains",
+            "$not_contains",
+            "$regex",
+            "$not_regex",
+            "$and",
+            "$or",
+        ]:
             raise ValueError(
-                f"Expected where document operator to be one of $contains, $and, $or, got {operator}"
+                f"Expected where document operator to be one of $contains, $not_contains, $regex, $not_regex, $and, $or, got {operator}"
             )
         if operator == "$and" or operator == "$or":
             if not isinstance(operand, list):
@@ -704,14 +910,14 @@ def validate_where_document(where_document: WhereDocument) -> None:
                 )
             for where_document_expression in operand:
                 validate_where_document(where_document_expression)
-        # Value is a $contains operator
+        # Value is $contains/$not_contains/$regex/$not_regex operator
         elif not isinstance(operand, str):
             raise ValueError(
-                f"Expected where document operand value for operator $contains to be a str, got {operand}"
+                f"Expected where document operand value for operator {operator} to be a str, got {operand}"
             )
         elif len(operand) == 0:
             raise ValueError(
-                "Expected where document operand value for operator $contains to be a non-empty str"
+                f"Expected where document operand value for operator {operator} to be a non-empty str"
             )
 
 
@@ -725,9 +931,11 @@ def validate_include(include: Include, dissalowed: Optional[Include] = None) -> 
         if not isinstance(item, str):
             raise ValueError(f"Expected include item to be a str, got {item}")
 
-        if not any(item == e for e in IncludeEnum):
+        # Get the valid items from the Literal type inside the List
+        valid_items = get_args(get_args(Include)[0])
+        if item not in valid_items:
             raise ValueError(
-                f"Expected include item to be one of {', '.join(IncludeEnum)}, got {item}"
+                f"Expected include item to be one of {', '.join(valid_items)}, got {item}"
             )
 
         if dissalowed is not None and any(item == e for e in dissalowed):
@@ -836,7 +1044,8 @@ def validate_batch(
 
 
 def convert_np_embeddings_to_list(embeddings: Embeddings) -> PyEmbeddings:
-    return [embedding.tolist() for embedding in embeddings]
+    # Cast the result to PyEmbeddings to ensure type compatibility
+    return cast(PyEmbeddings, [embedding.tolist() for embedding in embeddings])
 
 
 def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:

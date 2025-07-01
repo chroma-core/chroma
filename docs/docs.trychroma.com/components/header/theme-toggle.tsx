@@ -17,6 +17,16 @@ const ThemeToggle = () => {
     }
   };
 
+  // make the status bar translucent on iOS
+  React.useEffect(() => {
+    if (!document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')) {
+      const meta = document.createElement("meta");
+      meta.name = 'apple-mobile-web-app-status-bar-style';
+      meta.content = 'black-translucent';
+      document.head.appendChild(meta);
+    }
+  }, []);
+
   return (
     <UIButton onClick={toggleTheme} className="p-[0.35rem]">
       <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />

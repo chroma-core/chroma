@@ -4,7 +4,12 @@ from uuid import UUID
 from overrides import override
 import httpx
 from chromadb.api import AdminAPI, ClientAPI, ServerAPI
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    validate_embedding_function_conflict_on_create,
+    validate_embedding_function_conflict_on_get,
+)
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
     CollectionMetadata,
@@ -20,12 +25,14 @@ from chromadb.api.types import (
     Metadatas,
     QueryResult,
     URIs,
+    IncludeMetadataDocuments,
+    IncludeMetadataDocumentsDistances,
 )
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
-from chromadb.api.models.Collection import Collection, CollectionName
+from chromadb.api.models.Collection import Collection
 from chromadb.errors import ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
@@ -118,9 +125,9 @@ class Client(SharedSystemClient, ClientAPI):
     @override
     def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
-    ) -> Sequence[CollectionName]:
+    ) -> Sequence[Collection]:
         return [
-            CollectionName(model.name)
+            Collection(client=self._server, model=model)
             for model in self._server.list_collections(
                 limit, offset, tenant=self.tenant, database=self.database
             )
@@ -136,7 +143,7 @@ class Client(SharedSystemClient, ClientAPI):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -144,6 +151,20 @@ class Client(SharedSystemClient, ClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
+        if configuration is None:
+            configuration = {}
+
+        configuration_ef = configuration.get("embedding_function")
+
+        validate_embedding_function_conflict_on_create(
+            embedding_function, configuration_ef
+        )
+
+        # If ef provided in function params and collection config ef is None,
+        # set the collection config ef to the function params
+        if embedding_function is not None and configuration_ef is None:
+            configuration["embedding_function"] = embedding_function
+
         model = self._server.create_collection(
             name=name,
             metadata=metadata,
@@ -173,6 +194,12 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
+        persisted_ef_config = model.configuration_json.get("embedding_function")
+
+        validate_embedding_function_conflict_on_get(
+            embedding_function, persisted_ef_config
+        )
+
         return Collection(
             client=self._server,
             model=model,
@@ -184,13 +211,24 @@ class Client(SharedSystemClient, ClientAPI):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
+        if configuration is None:
+            configuration = {}
+
+        configuration_ef = configuration.get("embedding_function")
+
+        validate_embedding_function_conflict_on_create(
+            embedding_function, configuration_ef
+        )
+
+        if embedding_function is not None and configuration_ef is None:
+            configuration["embedding_function"] = embedding_function
         model = self._server.get_or_create_collection(
             name=name,
             metadata=metadata,
@@ -198,6 +236,13 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
             configuration=configuration,
         )
+
+        persisted_ef_config = model.configuration_json.get("embedding_function")
+
+        validate_embedding_function_conflict_on_get(
+            embedding_function, persisted_ef_config
+        )
+
         return Collection(
             client=self._server,
             model=model,
@@ -211,6 +256,7 @@ class Client(SharedSystemClient, ClientAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         return self._server._modify(
             id=id,
@@ -218,6 +264,7 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
             new_name=new_name,
             new_metadata=new_metadata,
+            new_configuration=new_configuration,
         )
 
     @override
@@ -321,13 +368,10 @@ class Client(SharedSystemClient, ClientAPI):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocuments,
     ) -> GetResult:
         return self._server._get(
             collection_id=collection_id,
@@ -335,11 +379,8 @@ class Client(SharedSystemClient, ClientAPI):
             database=self.database,
             ids=ids,
             where=where,
-            sort=sort,
             limit=limit,
             offset=offset,
-            page=page,
-            page_size=page_size,
             where_document=where_document,
             include=include,
         )
@@ -365,13 +406,15 @@ class Client(SharedSystemClient, ClientAPI):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocumentsDistances,
     ) -> QueryResult:
         return self._server._query(
             collection_id=collection_id,
+            ids=ids,
             tenant=self.tenant,
             database=self.database,
             query_embeddings=query_embeddings,

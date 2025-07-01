@@ -38,6 +38,12 @@ from chromadb.api.async_client import (
 )
 from chromadb.utils.async_to_sync import async_class_to_sync
 import logging
+import sys
+import numpy as np
+from unittest.mock import MagicMock
+from pytest import MonkeyPatch
+from chromadb.api.types import Documents, Embeddings
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +57,13 @@ if CURRENT_PRESET not in VALID_PRESETS:
 
 hypothesis.settings.register_profile(
     "base",
-    deadline=45000,
+    deadline=90000,
     suppress_health_check=[
         hypothesis.HealthCheck.data_too_large,
         hypothesis.HealthCheck.large_base_example,
         hypothesis.HealthCheck.function_scoped_fixture,
     ],
+    verbosity=hypothesis.Verbosity.verbose,
 )
 
 hypothesis.settings.register_profile(
@@ -374,11 +381,19 @@ def fastapi_ssl() -> Generator[System, None, None]:
     )
 
 
+@pytest.fixture()
 def basic_http_client() -> Generator[System, None, None]:
+    port = 8000
+    host = "localhost"
+
+    if os.getenv("CHROMA_SERVER_HOST"):
+        host = os.getenv("CHROMA_SERVER_HOST", "").split(":")[0]
+        port = int(os.getenv("CHROMA_SERVER_HOST", "").split(":")[1])
+
     settings = Settings(
         chroma_api_impl="chromadb.api.fastapi.FastAPI",
-        chroma_server_http_port=8000,
-        chroma_server_host="localhost",
+        chroma_server_http_port=port,
+        chroma_server_host=host,
         allow_reset=True,
     )
     system = System(settings)
@@ -534,18 +549,36 @@ users:
             yield item
 
 
+@pytest.fixture()
 def integration() -> Generator[System, None, None]:
     """Fixture generator for returning a client configured via environmenet
     variables, intended for externally configured integration tests
     """
-    settings = Settings(allow_reset=True)
+    settings = Settings(
+        allow_reset=True, chroma_api_impl="chromadb.api.fastapi.FastAPI"
+    )
     system = System(settings)
     system.start()
     yield system
     system.stop()
 
 
-def sqlite_fixture() -> Generator[System, None, None]:
+@pytest.fixture()
+def async_integration() -> Generator[System, None, None]:
+    """Fixture generator for returning a client configured via environmenet
+    variables, intended for externally configured integration tests
+    """
+    settings = Settings(
+        allow_reset=True, chroma_api_impl="chromadb.api.async_fastapi.AsyncFastAPI"
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+
+
+@pytest.fixture(scope="function")
+def python_sqlite_ephemeral() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using in-memory Sqlite"""
     settings = Settings(
         chroma_api_impl="chromadb.api.segment.SegmentAPI",
@@ -562,12 +595,8 @@ def sqlite_fixture() -> Generator[System, None, None]:
     system.stop()
 
 
-@pytest.fixture
-def sqlite() -> Generator[System, None, None]:
-    yield from sqlite_fixture()
-
-
-def sqlite_persistent_fixture() -> Generator[System, None, None]:
+@pytest.fixture(scope="function")
+def python_sqlite_persistent() -> Generator[System, None, None]:
     """Fixture generator for segment-based API using persistent Sqlite"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
@@ -598,33 +627,95 @@ def sqlite_persistent_fixture() -> Generator[System, None, None]:
             raise e
 
 
-@pytest.fixture
-def sqlite_persistent() -> Generator[System, None, None]:
-    yield from sqlite_persistent_fixture()
+@pytest.fixture(scope="function")
+def rust_sqlite_ephemeral() -> Generator[System, None, None]:
+    """Fixture generator for system using ephemeral Rust bindings"""
+    settings = Settings(
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        is_persistent=False,
+        allow_reset=True,
+        persist_directory="",
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
 
 
-def system_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
+@pytest.fixture(scope="function")
+def rust_sqlite_persistent() -> Generator[System, None, None]:
+    """Fixture generator for system using Rust bindings"""
+    save_path = tempfile.TemporaryDirectory()
+    settings = Settings(
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
+        chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
+        chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
+        is_persistent=True,
+        allow_reset=True,
+        persist_directory=save_path.name,
+    )
+    system = System(settings)
+    system.start()
+    yield system
+    system.stop()
+
+
+@pytest.fixture(
+    params=["rust_sqlite_ephemeral"]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+    else ["python_sqlite_ephemeral"]
+)
+def sqlite(request: pytest.FixtureRequest) -> Generator[System, None, None]:
+    return request.getfixturevalue(request.param)
+
+
+@pytest.fixture(
+    params=["rust_sqlite_persistent"]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+    else ["python_sqlite_persistent"]
+)
+def sqlite_persistent(request: pytest.FixtureRequest) -> Generator[System, None, None]:
+    return request.getfixturevalue(request.param)
+
+
+def filtered_fixture_names() -> List[str]:
     fixtures = [
-        fastapi,
-        async_fastapi,
-        fastapi_persistent,
-        sqlite_fixture,
-        sqlite_persistent_fixture,
+        "fastapi",
+        "async_fastapi",
+        "fastapi_persistent",
+        "sqlite_fixture",
+        "sqlite_persistent",
     ]
+
     if "CHROMA_INTEGRATION_TEST" in os.environ:
-        fixtures.append(integration)
+        fixtures.append("integration")
+        fixtures.append("async_integration")
     if "CHROMA_INTEGRATION_TEST_ONLY" in os.environ:
-        fixtures = [integration]
+        fixtures = ["integration", "async_integration"]
     if "CHROMA_CLUSTER_TEST_ONLY" in os.environ:
-        fixtures = [basic_http_client]
+        fixtures = ["basic_http_client"]
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        fixtures = ["rust_sqlite_ephemeral", "rust_sqlite_persistent"]
     return fixtures
 
 
-def system_http_server_fixtures() -> List[Callable[[], Generator[System, None, None]]]:
+def filtered_http_server_fixture_names() -> List[str]:
     fixtures = [
         fixture
-        for fixture in system_fixtures()
-        if fixture != sqlite_fixture and fixture != sqlite_persistent_fixture
+        for fixture in filtered_fixture_names()
+        if fixture
+        not in [
+            "python_sqlite_ephemeral",
+            "python_sqlite_persistent",
+            "rust_sqlite_ephemeral",
+            "rust_sqlite_persistent",
+        ]
     ]
     return fixtures
 
@@ -675,16 +766,16 @@ def system_authn_rbac_authz(
     yield from request.param()
 
 
-@pytest.fixture(scope="module", params=system_http_server_fixtures())
+@pytest.fixture(params=filtered_http_server_fixture_names())
 def system_http_server(
     request: pytest.FixtureRequest,
 ) -> Generator[ServerAPI, None, None]:
-    yield from request.param()
+    return request.getfixturevalue(request.param)
 
 
-@pytest.fixture(scope="module", params=system_fixtures())
+@pytest.fixture(scope="function", params=filtered_fixture_names())
 def system(request: pytest.FixtureRequest) -> Generator[ServerAPI, None, None]:
-    yield from request.param()
+    return request.getfixturevalue(request.param)
 
 
 @pytest.fixture(scope="module", params=system_fixtures_ssl())
@@ -747,23 +838,46 @@ class ClientFactories:
         self._created_clients.append(client)
         return client
 
+    def create_client_from_system(self) -> ClientCreator:
+        if (
+            self._system.settings.chroma_api_impl
+            == "chromadb.api.async_fastapi.AsyncFastAPI"
+        ):
+            client = cast(
+                ClientCreator, AsyncClientCreatorSync.from_system_async(self._system)
+            )
+            self._created_clients.append(client)
+            return client
+
+        client = ClientCreator.from_system(self._system)
+        self._created_clients.append(client)
+        return client
+
     def create_admin_client(self, *args: Any, **kwargs: Any) -> AdminClient:
         if (
             self._system.settings.chroma_api_impl
             == "chromadb.api.async_fastapi.AsyncFastAPI"
         ):
-            return cast(AdminClient, AsyncAdminClientSync(*args, **kwargs))
+            client = cast(AdminClient, AsyncAdminClientSync(*args, **kwargs))
+            self._created_clients.append(client)
+            return client
 
-        return AdminClient(*args, **kwargs)
+        client = AdminClient(*args, **kwargs)
+        self._created_clients.append(client)
+        return client
 
     def create_admin_client_from_system(self) -> AdminClient:
         if (
             self._system.settings.chroma_api_impl
             == "chromadb.api.async_fastapi.AsyncFastAPI"
         ):
-            return cast(AdminClient, AsyncAdminClientSync.from_system(self._system))
+            client = cast(AdminClient, AsyncAdminClientSync.from_system(self._system))
+            self._created_clients.append(client)
+            return client
 
-        return AdminClient.from_system(self._system)
+        client = AdminClient.from_system(self._system)
+        self._created_clients.append(client)
+        return client
 
 
 @pytest.fixture(scope="function")
@@ -777,6 +891,18 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
         client = factories._created_clients.pop()
         client.clear_system_cache()
         del client
+
+
+def create_isolated_database(client: ClientAPI) -> None:
+    """Create an isolated database for a test and updates the client to use it."""
+    admin_settings = client.get_settings()
+    if admin_settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
+        admin_settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
+
+    admin = AdminClient(admin_settings)
+    database = "test_" + str(uuid.uuid4())
+    admin.create_database(database)
+    client.set_database(database)
 
 
 @pytest.fixture(scope="function")
@@ -910,7 +1036,7 @@ def is_client_in_process(client: ClientAPI) -> bool:
 
 
 @pytest.fixture(autouse=True)
-def log_tests(request):
+def log_tests(request: pytest.FixtureRequest) -> Generator[None, None, None]:
     """Automatically logs the start and end of each test."""
     test_name = request.node.name
     logger.debug(f"Starting test: {test_name}")
@@ -919,3 +1045,61 @@ def log_tests(request):
     yield
 
     logger.debug(f"Finished test: {test_name}")
+
+
+@pytest.fixture
+def mock_embeddings() -> Callable[[Documents], Embeddings]:
+    """Return mock embeddings for testing"""
+
+    def _mock_embeddings(input: Documents) -> Embeddings:
+        return [np.array([0.1, 0.2, 0.3], dtype=np.float32) for _ in input]
+
+    return _mock_embeddings
+
+
+@pytest.fixture
+def mock_common_deps(monkeypatch: MonkeyPatch) -> MonkeyPatch:
+    """Mock common dependencies"""
+    # Create mock modules
+    mock_modules = {
+        "PIL": MagicMock(),
+        "torch": MagicMock(),
+        "openai": MagicMock(),
+        "cohere": MagicMock(),
+        "sentence_transformers": MagicMock(),
+        "ollama": MagicMock(),
+        "InstructorEmbedding": MagicMock(),
+        "voyageai": MagicMock(),
+        "text2vec": MagicMock(),
+        "open_clip": MagicMock(),
+        "boto3": MagicMock(),
+    }
+
+    # Mock all modules at once using monkeypatch.setitem
+    monkeypatch.setattr(sys, "modules", dict(sys.modules, **mock_modules))
+
+    # Mock submodules and attributes
+    mock_attributes = {
+        "PIL.Image": MagicMock(),
+        "sentence_transformers.SentenceTransformer": MagicMock(),
+        "ollama.Client": MagicMock(),
+        "InstructorEmbedding.INSTRUCTOR": MagicMock(),
+        "voyageai.Client": MagicMock(),
+        "text2vec.SentenceModel": MagicMock(),
+    }
+
+    # Setup OpenCLIP mock with specific behavior
+    mock_model = MagicMock()
+    mock_model.encode_text.return_value = np.array([[0.1, 0.2, 0.3]])
+    mock_model.encode_image.return_value = np.array([[0.1, 0.2, 0.3]])
+    mock_modules["open_clip"].create_model_and_transforms.return_value = (
+        mock_model,
+        MagicMock(),
+        mock_model,
+    )
+
+    # Mock all attributes
+    for path, mock in mock_attributes.items():
+        monkeypatch.setattr(path, mock, raising=False)
+
+    return monkeypatch

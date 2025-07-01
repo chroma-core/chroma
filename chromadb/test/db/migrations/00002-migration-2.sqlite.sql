@@ -1,3 +1,0 @@
-CREATE TABLE table2 (
-    name TEXT PRIMARY KEY
-);

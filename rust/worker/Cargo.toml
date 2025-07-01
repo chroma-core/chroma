@@ -16,21 +16,11 @@ name = "query_service"
 path = "src/bin/query_service.rs"
 
 [dependencies]
-rand = "0.8.5"
-murmur3 = "0.5.2"
-schemars = "0.8.21"
-kube = { version = "0.87.2", features = ["runtime", "derive"] }
-k8s-openapi = { version = "0.20.0", features = ["latest"] }
-tracing-bunyan-formatter = { workspace = true }
-tracing-opentelemetry = { workspace = true }
-tracing-subscriber = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-opentelemetry_sdk = { workspace = true }
-regex = "1.11.1"
+chroma-tracing = { workspace = true }
+regex = { workspace = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
+tikv-jemallocator = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -46,6 +36,7 @@ tracing = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
+tonic-health = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 num_cpus = { workspace = true }
@@ -59,6 +50,8 @@ chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
 chroma-error = { workspace = true }
 chroma-index = { workspace = true }
+chroma-log = { workspace = true }
+chroma-memberlist = { workspace = true }
 chroma-segment = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-system = { workspace = true }
@@ -69,9 +62,8 @@ fastrace = "0.7"
 fastrace-opentelemetry = "0.8"
 
 [dev-dependencies]
-random-port = "0.1.1"
-serial_test = "3.2.0"
-
+random-port = { workspace = true }
+serial_test = { workspace = true }
 criterion = { workspace = true }
 indicatif = { workspace = true }
 proptest = { workspace = true }
@@ -97,6 +89,10 @@ harness = false
 
 [[bench]]
 name = "query"
+harness = false
+
+[[bench]]
+name = "regex"
 harness = false
 
 [[bench]]

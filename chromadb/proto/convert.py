@@ -1,12 +1,15 @@
 from typing import Dict, Optional, Sequence, Tuple, TypedDict, Union, cast
 from uuid import UUID
+import json
 
 import numpy as np
 from numpy.typing import NDArray
 
 import chromadb.proto.chroma_pb2 as chroma_pb
 import chromadb.proto.query_executor_pb2 as query_pb
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    collection_configuration_to_json_str,
+)
 from chromadb.api.types import Embedding, Where, WhereDocument
 from chromadb.execution.expression.operator import (
     KNN,
@@ -60,7 +63,9 @@ def to_proto_vector(vector: Vector, encoding: ScalarEncoding) -> chroma_pb.Vecto
             or {ScalarEncoding.INT32}"
         )
 
-    return chroma_pb.Vector(dimension=vector.size, vector=as_bytes, encoding=proto_encoding)
+    return chroma_pb.Vector(
+        dimension=vector.size, vector=as_bytes, encoding=proto_encoding
+    )
 
 
 def from_proto_vector(vector: chroma_pb.Vector) -> Tuple[Embedding, ScalarEncoding]:
@@ -161,7 +166,10 @@ def from_proto_segment(segment: chroma_pb.Segment) -> Segment:
         metadata=from_proto_metadata(segment.metadata)
         if segment.HasField("metadata")
         else None,
-        file_paths={name: [path for path in paths.paths] for name, paths in segment.file_paths.items()}
+        file_paths={
+            name: [path for path in paths.paths]
+            for name, paths in segment.file_paths.items()
+        },
     )
 
 
@@ -174,7 +182,10 @@ def to_proto_segment(segment: Segment) -> chroma_pb.Segment:
         metadata=None
         if segment["metadata"] is None
         else to_proto_update_metadata(segment["metadata"]),
-        file_paths={name: chroma_pb.FilePaths(paths=paths) for name, paths in segment["file_paths"].items()}
+        file_paths={
+            name: chroma_pb.FilePaths(paths=paths)
+            for name, paths in segment["file_paths"].items()
+        },
     )
 
 
@@ -228,9 +239,7 @@ def from_proto_collection(collection: chroma_pb.Collection) -> Collection:
     return Collection(
         id=UUID(hex=collection.id),
         name=collection.name,
-        configuration=CollectionConfigurationInternal.from_json_str(
-            collection.configuration_json_str
-        ),
+        configuration_json=json.loads(collection.configuration_json_str),
         metadata=from_proto_metadata(collection.metadata)
         if collection.HasField("metadata")
         else None,
@@ -248,7 +257,9 @@ def to_proto_collection(collection: Collection) -> chroma_pb.Collection:
     return chroma_pb.Collection(
         id=collection["id"].hex,
         name=collection["name"],
-        configuration_json_str=collection.get_configuration().to_json_str(),
+        configuration_json_str=collection_configuration_to_json_str(
+            collection.get_configuration()
+        ),
         metadata=None
         if collection["metadata"] is None
         else to_proto_update_metadata(collection["metadata"]),
@@ -581,7 +592,9 @@ def to_proto_scan(scan: Scan) -> query_pb.ScanOperator:
 
 def to_proto_filter(filter: Filter) -> query_pb.FilterOperator:
     return query_pb.FilterOperator(
-        ids=chroma_pb.UserIds(ids=filter.user_ids) if filter.user_ids is not None else None,
+        ids=chroma_pb.UserIds(ids=filter.user_ids)
+        if filter.user_ids is not None
+        else None,
         where=to_proto_where(filter.where) if filter.where else None,
         where_document=to_proto_where_document(filter.where_document)
         if filter.where_document

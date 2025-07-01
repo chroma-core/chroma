@@ -10,14 +10,15 @@ on:
       tag:
         description: 'Tag to release'
         required: true
-
+env:
+  PNPM_CACHE_FOLDER: .cache/pnpm
 jobs:
   release:
     strategy:
       fail-fast: false
       matrix:
         registry: [ "https://registry.npmjs.org", "https://npm.pkg.github.com" ]
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     permissions: write-all
     steps:
     - name: Resolve tag
@@ -48,25 +49,42 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-    - uses: actions/setup-node@v3
+    - name: Install pnpm
+      uses: pnpm/action-setup@v4
       with:
-        node-version: "16.x"
+        version: 9
+        run_install: false
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "18.x"
         registry-url: ${{ matrix.registry }}
         check-latest: false
         token: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
+        cache: 'pnpm'
+        cache-dependency-path: 'clients/js/pnpm-lock.yaml'
     - name: Install dependencies
-      run: npm install
+      run: pnpm install --no-frozen-lockfile
       working-directory: ./clients/js/
-    - name: Update package.json with organization scope
+    - name: Build packages
+      run: pnpm build
+      working-directory: ./clients/js/
+    - name: Update package.json with organization scope for GitHub packages
       if: matrix.registry == 'https://npm.pkg.github.com'
       run: |
-        # needed to publish to GitHub packages only
+        # Update chromadb package
+        CHROMADB_PKG="./packages/chromadb/package.json"
         ORG_NAME="@chroma-core"
-        PACKAGE_NAME=$(jq -r '.name' package.json)
-        jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' package.json > tmp.$$.json && mv tmp.$$.json package.json
+        PACKAGE_NAME=$(jq -r '.name' $CHROMADB_PKG)
+        jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CHROMADB_PKG > tmp.$$.json && mv tmp.$$.json $CHROMADB_PKG
+
+        # Update chromadb-client package
+        CLIENT_PKG="./packages/chromadb-client/package.json"
+        PACKAGE_NAME=$(jq -r '.name' $CLIENT_PKG)
+        jq --arg org "$ORG_NAME" --arg name "$PACKAGE_NAME" '.name = "\($org)/\($name)"' $CLIENT_PKG > tmp.$$.json && mv tmp.$$.json $CLIENT_PKG
       working-directory: ./clients/js/
-    - name: Test & publish
-      run: npm run $NPM_SCRIPT
+    - name: Publish packages
+      run: pnpm publish -r --access public --no-git-checks
       working-directory: ./clients/js/
       env:
         NODE_AUTH_TOKEN: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}

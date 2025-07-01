@@ -1,0 +1,39 @@
+sysdb:
+  flags:
+    version-file-enabled: true
+    s3-endpoint: "http://minio:9000"
+    s3-access-key-id: "minio"
+    s3-secret-access-key: "minio123"
+    s3-force-path-style: true
+    create-bucket-if-not-exists: true
+rustFrontendService:
+  # We have to specify the command, because the Dockerfile uses the CLI since its shared with
+  # single node, so in values.dev we pass the CONFIG_PATH into the chroma run command
+  command: '["chroma", "run", "$(CONFIG_PATH)"]'
+  otherEnvConfig: |
+    - name: CHROMA_ALLOW_RESET
+      value: "true"
+    - name: RUST_BACKTRACE
+      value: 'value: "1"'
+    - name: CONFIG_PATH
+      value: "tilt_config.yaml"
+
+queryService:
+  env:
+    - name: RUST_BACKTRACE
+      value: 'value: "1"'
+    - name: CONFIG_PATH
+      value: 'value: "/tilt_config.yaml"'
+
+compactionService:
+  env:
+    - name: RUST_BACKTRACE
+      value: 'value: "1"'
+    - name: CONFIG_PATH
+      value: 'value: "/tilt_config.yaml"'
+
+rustLogService:
+  replicaCount: 1
+
+garbageCollector:
+  jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"

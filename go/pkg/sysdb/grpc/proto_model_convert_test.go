@@ -51,7 +51,9 @@ func TestConvertCollectionToProto(t *testing.T) {
 
 	// Test case 2: collection is not nil
 	dimention := int32(10)
-	num_records := uint64(0)
+	num_records := uint64(100)
+	size_bytes := uint64(500000)
+	last_compaction_time := uint64(1741037006)
 	collection := &model.Collection{
 		ID:        types.NewUniqueID(),
 		Name:      "test_collection",
@@ -64,6 +66,8 @@ func TestConvertCollectionToProto(t *testing.T) {
 			},
 		},
 		TotalRecordsPostCompaction: num_records,
+		SizeBytesPostCompaction:    size_bytes,
+		LastCompactionTimeSecs:     last_compaction_time,
 	}
 	collectionpb = convertCollectionToProto(collection)
 	assert.NotNil(t, collectionpb)
@@ -74,7 +78,9 @@ func TestConvertCollectionToProto(t *testing.T) {
 	assert.Equal(t, "value1", collectionpb.Metadata.Metadata["key1"].GetStringValue())
 	assert.Equal(t, int64(123), collectionpb.Metadata.Metadata["key2"].GetIntValue())
 	assert.Equal(t, 3.14, collectionpb.Metadata.Metadata["key3"].GetFloatValue())
-	assert.Equal(t, uint64(0), collectionpb.TotalRecordsPostCompaction)
+	assert.Equal(t, num_records, collectionpb.TotalRecordsPostCompaction)
+	assert.Equal(t, size_bytes, collectionpb.SizeBytesPostCompaction)
+	assert.Equal(t, last_compaction_time, collectionpb.LastCompactionTimeSecs)
 }
 
 func TestConvertCollectionMetadataToProto(t *testing.T) {

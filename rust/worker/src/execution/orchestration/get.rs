@@ -1,17 +1,24 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_system::{wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, PanicError, TaskError, TaskMessage, TaskResult};
-use chroma_types::CollectionAndSegments;
+use chroma_system::{
+    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    PanicError, TaskError, TaskMessage, TaskResult,
+};
+use chroma_types::{
+    operator::{Filter, GetResult, Limit, Projection, ProjectionOutput},
+    CollectionAndSegments,
+};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
+use tracing::Span;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-    filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
-    limit::{LimitError, LimitInput, LimitOperator, LimitOutput},
+    filter::{FilterError, FilterInput, FilterOutput},
+    limit::{LimitError, LimitInput, LimitOutput},
     prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
-    projection::{ProjectionError, ProjectionInput, ProjectionOperator, ProjectionOutput},
+    projection::{ProjectionError, ProjectionInput},
 };
 
 #[derive(Error, Debug)]
@@ -30,6 +37,8 @@ pub enum GetError {
     Projection(#[from] ProjectionError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
+    #[error("Operation aborted because resources exhausted")]
+    Aborted,
 }
 
 impl ChromaError for GetError {
@@ -42,6 +51,7 @@ impl ChromaError for GetError {
             GetError::Panic(_) => ErrorCodes::Aborted,
             GetError::Projection(e) => e.code(),
             GetError::Result(_) => ErrorCodes::Internal,
+            GetError::Aborted => ErrorCodes::ResourceExhausted,
         }
     }
 }
@@ -54,13 +64,10 @@ where
         match value {
             TaskError::Panic(e) => e.into(),
             TaskError::TaskFailed(e) => e.into(),
+            TaskError::Aborted => GetError::Aborted,
         }
     }
 }
-
-type GetOutput = ProjectionOutput;
-
-type GetResult = Result<GetOutput, GetError>;
 
 /// The `GetOrchestrator` chains a sequence of operators in sequence to evaluate
 /// a `<collection>.get(...)` query from the user
@@ -125,12 +132,12 @@ pub struct GetOrchestrator {
     fetched_logs: Option<FetchLogOutput>,
 
     // Pipelined operators
-    filter: FilterOperator,
-    limit: LimitOperator,
-    projection: ProjectionOperator,
+    filter: Filter,
+    limit: Limit,
+    projection: Projection,
 
     // Result channel
-    result_channel: Option<Sender<GetResult>>,
+    result_channel: Option<Sender<Result<GetResult, GetError>>>,
 }
 
 impl GetOrchestrator {
@@ -141,9 +148,9 @@ impl GetOrchestrator {
         queue: usize,
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
-        filter: FilterOperator,
-        limit: LimitOperator,
-        projection: ProjectionOperator,
+        filter: Filter,
+        limit: Limit,
+        projection: Projection,
     ) -> Self {
         Self {
             blockfile_provider,
@@ -162,26 +169,32 @@ impl GetOrchestrator {
 
 #[async_trait]
 impl Orchestrator for GetOrchestrator {
-    type Output = GetOutput;
+    type Output = GetResult;
     type Error = GetError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
         self.dispatcher.clone()
     }
 
-    fn initial_tasks(&self, ctx: &ComponentContext<Self>) -> Vec<TaskMessage> {
-        vec![wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver())]
+    async fn initial_tasks(
+        &mut self,
+        ctx: &ComponentContext<Self>,
+    ) -> Vec<(TaskMessage, Option<Span>)> {
+        vec![(
+            wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver()),
+            Some(Span::current()),
+        )]
     }
 
     fn queue_size(&self) -> usize {
         self.queue
     }
 
-    fn set_result_channel(&mut self, sender: Sender<GetResult>) {
+    fn set_result_channel(&mut self, sender: Sender<Result<GetResult, GetError>>) {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<GetResult> {
+    fn take_result_channel(&mut self) -> Sender<Result<GetResult, GetError>> {
         self.result_channel
             .take()
             .expect("The result channel should be set before take")
@@ -197,7 +210,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
         message: TaskResult<FetchLogOutput, FetchLogError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -214,7 +227,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
             },
             ctx.receiver(),
         );
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 }
 
@@ -227,7 +240,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
         message: TaskResult<FilterOutput, FilterError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -246,7 +259,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
             },
             ctx.receiver(),
         );
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 }
 
@@ -259,7 +272,7 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
         message: TaskResult<LimitOutput, LimitError>,
         ctx: &ComponentContext<Self>,
     ) {
-        let output = match self.ok_or_terminate(message.into_inner(), ctx) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
             Some(output) => output,
             None => return,
         };
@@ -282,12 +295,12 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             ctx.receiver(),
         );
 
-        if !self.send(prefetch_task, ctx).await {
+        if !self.send(prefetch_task, ctx, Some(Span::current())).await {
             return;
         }
 
         let task = wrap(Box::new(self.projection.clone()), input, ctx.receiver());
-        self.send(task, ctx).await;
+        self.send(task, ctx, Some(Span::current())).await;
     }
 }
 
@@ -313,6 +326,26 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
         message: TaskResult<ProjectionOutput, ProjectionError>,
         ctx: &ComponentContext<Self>,
     ) {
-        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx);
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        let pulled_log_bytes = self
+            .fetched_logs
+            .as_ref()
+            .expect("FetchLogOperator should have finished already")
+            .iter()
+            .map(|(l, _)| l.size_bytes())
+            .sum();
+
+        self.terminate_with_result(
+            Ok(GetResult {
+                pulled_log_bytes,
+                result: output,
+            }),
+            ctx,
+        )
+        .await;
     }
 }

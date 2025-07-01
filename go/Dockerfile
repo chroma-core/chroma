@@ -28,12 +28,18 @@ RUN make proto
 # Build the Go binaries
 RUN --mount=type=cache,target="/root/.cache/go-build" --mount=type=cache,target="/go/pkg/mod" make build
 
-FROM debian:bookworm-slim AS logservice
+FROM debian:bookworm-slim AS runner
+RUN apt-get update && \
+    apt-get install -y ca-certificates && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+FROM runner AS logservice
 COPY --from=builder /build-dir/go/bin/logservice .
 ENV PATH=$PATH:./
 CMD ["./logservice"]
 
-FROM debian:bookworm-slim AS sysdb
+FROM runner AS sysdb
 COPY --from=builder /build-dir/go/bin/coordinator .
 ENV PATH=$PATH:./
 CMD /bin/bash

@@ -62,6 +62,7 @@ pub trait PersistentIndex<C>: Index<C> {
     fn load(
         path: &str,
         index_config: &IndexConfig,
+        ef_search: usize,
         id: IndexUuid,
     ) -> Result<Self, Box<dyn ChromaError>>
     where

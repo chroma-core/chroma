@@ -1,10 +1,9 @@
+use super::{CacheError, StorageKey, StorageValue, Weighted};
+use parking_lot::RwLock;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
-
-use parking_lot::RwLock;
-
-use super::{CacheError, StorageKey, StorageValue, Weighted};
 
 /// A zero-configuration cache that doesn't evict.
 /// Mostly useful for testing.
@@ -65,6 +64,22 @@ where
     async fn clear(&self) -> Result<(), CacheError> {
         self.cache.write().clear();
         Ok(())
+    }
+
+    async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
+        let read_guard = self.cache.read();
+        let value = read_guard.get(&key);
+        Ok(value.cloned())
+    }
+}
+
+impl<K, V> Debug for UnboundedCache<K, V>
+where
+    K: Clone + Send + Sync + Eq + PartialEq + Hash + 'static,
+    V: Clone + Send + Sync + Clone + Weighted + 'static,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "UnboundedCache")
     }
 }
 

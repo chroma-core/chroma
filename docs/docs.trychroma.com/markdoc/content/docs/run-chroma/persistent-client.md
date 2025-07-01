@@ -51,6 +51,18 @@ import { ChromaClient } from "chromadb";
 const client = new ChromaClient();
 ```
 
+By default, the `ChromaClient` is wired to connect to a Chroma server at `http://localhost:8000`, with `default_tenant` and `default_database`. If you have different settings you can provide them to the `ChromaClient` constructor:
+
+```typescript
+const client = new ChromaClient({
+    ssl: false,
+    host: 'localhost',
+    port: 9000,
+    database: 'my-db',
+    headers: {}
+});
+```
+
 See [Running Chroma in client-server mode](../client-server-mode) for more.
 
 {% /Tab %}

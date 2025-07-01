@@ -35,6 +35,9 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
+          readinessProbe:
+            grpc:
+              port: 50051
           {{ if .Values.logService.resources }}
           resources:
             limits:

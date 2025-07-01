@@ -8,5 +8,5 @@ mod migrations;
 pub(crate) mod ordered_blockfile_writer;
 pub mod provider;
 pub mod root;
-mod sparse_index;
+pub(crate) mod sparse_index;
 pub mod types;

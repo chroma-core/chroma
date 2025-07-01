@@ -1,13 +1,14 @@
-use super::s3::S3GetError;
-use super::GetError;
 use aws_sdk_s3::primitives::ByteStream as AWSS3ByteStream;
 use futures::stream::Stream;
 use std::io::Read;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::io::AsyncRead;
 
-pub type ByteStreamItem = Result<Vec<u8>, GetError>;
+use crate::StorageError;
+
+pub type ByteStreamItem = Result<Vec<u8>, StorageError>;
 
 pub trait ByteStream {
     type Stream: Stream<Item = ByteStreamItem> + Unpin;
@@ -43,7 +44,9 @@ impl Stream for SyncFileStream {
                     Poll::Ready(Some(Ok(data)))
                 }
             }
-            Err(e) => Poll::Ready(Some(Err(GetError::LocalError(e.to_string())))),
+            Err(e) => Poll::Ready(Some(Err(StorageError::Generic {
+                source: Arc::new(e),
+            }))),
         }
     }
 }
@@ -85,7 +88,9 @@ impl Stream for AsyncFileStream {
                     Poll::Ready(Some(Ok(data)))
                 }
             }
-            Poll::Ready(Err(e)) => Poll::Ready(Some(Err(GetError::LocalError(e.to_string())))),
+            Poll::Ready(Err(e)) => Poll::Ready(Some(Err(StorageError::Generic {
+                source: Arc::new(e),
+            }))),
             Poll::Pending => Poll::Pending,
         }
     }
@@ -120,9 +125,9 @@ impl Stream for S3ByteStream {
                 data.extend_from_slice(&chunk);
                 Poll::Ready(Some(Ok(data)))
             }
-            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(GetError::S3Error(
-                S3GetError::ByteStreamError(e.to_string()),
-            )))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(StorageError::Generic {
+                source: Arc::new(e),
+            }))),
             Poll::Ready(None) => Poll::Ready(None),
             Poll::Pending => Poll::Pending,
         }

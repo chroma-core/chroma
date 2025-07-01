@@ -6,6 +6,7 @@ use super::{
     sparse_index::SetCountError,
 };
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -29,6 +30,17 @@ impl ChromaError for MigrationError {
     }
 }
 
+async fn migrate_v1_1_to_v1_2(root: &mut RootWriter) -> Result<(), MigrationError> {
+    // MIGRATION(06/25/2025 @sanket) Update the version to V1_2
+    if root.version == Version::V1_1 {
+        root.version = Version::V1_2;
+        // No additional migration logic needed for V1.1 to V1.2
+        // The writer already has a `max_block_size_bytes` field
+        // that will be persisted as metadata in V1.2
+    }
+    Ok(())
+}
+
 async fn migrate_v1_to_v1_1(
     root: &mut RootWriter,
     block_manager: &BlockManager,
@@ -50,7 +62,9 @@ async fn migrate_v1_to_v1_1(
                 .collect::<Vec<Uuid>>();
         }
         for block_id in block_ids.iter() {
-            let block = block_manager.get(block_id).await;
+            let block = block_manager
+                .get(&root.prefix_path, block_id, StorageRequestPriority::P0)
+                .await;
             match block {
                 Ok(Some(block)) => {
                     match root.sparse_index.set_count(*block_id, block.len() as u32) {
@@ -78,5 +92,6 @@ pub async fn apply_migrations_to_blockfile(
     block_manager: &BlockManager,
     new_block_ids: &HashSet<Uuid>,
 ) -> Result<(), MigrationError> {
-    migrate_v1_to_v1_1(root, block_manager, new_block_ids).await
+    migrate_v1_to_v1_1(root, block_manager, new_block_ids).await?;
+    migrate_v1_1_to_v1_2(root).await
 }

@@ -4,46 +4,28 @@ on:
   workflow_call:
 
 jobs:
-  test:
-    strategy:
-      matrix:
-        platform: [depot-ubuntu-22.04]
-    runs-on: ${{ matrix.platform }}
-    services:
-      postgres:
-        image: postgres
-        env:
-          POSTGRES_USER: chroma
-          POSTGRES_PASSWORD: chroma
-          POSTGRES_DB: chroma
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup
-        uses: ./.github/actions/go
-      - name: Build and test
-        run: make test
-        env:
-          POSTGRES_HOST: localhost
-          POSTGRES_PORT: 5432
-        working-directory: go
-
   cluster-test:
-    runs-on: "depot-ubuntu-22.04-16"
+    runs-on: "blacksmith-16vcpu-ubuntu-2204"
+    # OIDC token auth for AWS
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Setup
         uses: ./.github/actions/go
-      - uses: ./.github/actions/tilt
-      - run: bin/cluster-test.sh bash -c 'cd go && go test -timeout 30s -run ^TestNodeWatcher$ github.com/chroma-core/chroma/go/pkg/memberlist_manager'
+      - name: Set up Docker
+        uses: ./.github/actions/docker
+        with:
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Start Tilt services
+        uses: ./.github/actions/tilt
+      - run: bin/cluster-test.sh bash -c 'cd go && make test'
+        env:
+          # Ryuk cleans up containers and is enabled by default. In CI it causes tests to occasionally flake.
+          TESTCONTAINERS_RYUK_DISABLED: "true"
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs

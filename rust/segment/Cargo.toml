@@ -4,25 +4,38 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-trait = { workspace = true }
 futures = { workspace = true }
+regex = { workspace = true }
 roaring = { workspace = true }
+sea-query = { workspace = true }
+sea-query-binder = { workspace = true, features = ["sqlx-sqlite"] }
 serde = { workspace = true }
+sqlx = { workspace = true }
+serde-pickle = "1.2.0"
 tantivy = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+rayon = { workspace = true }
 
 chroma-blockstore = { workspace = true }
+chroma-cache = { workspace = true }
+chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
 chroma-error = { workspace = true }
 chroma-index = { workspace = true }
+chroma-sqlite = { workspace = true }
 chroma-types = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 shuttle = { workspace = true }
 tokio = { workspace = true }
-tempfile = { workspace = true }
 
 chroma-cache = { workspace = true }
+chroma-log = { workspace = true }
 chroma-storage = { workspace = true }
-
+chroma-types = { workspace = true, features = ["testing"] }

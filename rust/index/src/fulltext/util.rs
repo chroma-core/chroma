@@ -1,3 +1,5 @@
+use thiserror::Error;
+
 /// A token instance is a unique value containing a trigram, an offset ID, and optionally a position within a document.
 /// These three attributes are packed into a single u128 value:
 /// - The trigram is a 63-bit value, packed into the top 64 bits.
@@ -8,15 +10,21 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TokenInstance(u128);
 
-// Unicode characters only use 21 bits, so we can encode a trigram in 21 * 3 = 63 bits (a u64).
+/// Unicode characters only use 21 bits, so we can encode a trigram in 21 * 3 = 63 bits (a u64).
+/// Returns None if the string contains a null terminator.
 #[inline(always)]
-fn pack_trigram(s: &str) -> u64 {
+fn pack_trigram(s: &str) -> Option<u64> {
     let mut u = 0u64;
     for (i, c) in s.chars().take(3).enumerate() {
+        if c == '\0' {
+            return None;
+        }
+
         let shift = (2 - i) * 21;
         u |= (c as u64) << shift;
     }
-    u
+
+    Some(u)
 }
 
 fn encode_utf8_unchecked(c: u32, buf: &mut [u8]) -> usize {
@@ -74,16 +82,29 @@ fn unpack_trigram(u: u64) -> String {
     s
 }
 
+#[derive(Debug, Error)]
+pub enum TokenInstanceEncodeError {
+    #[error("Token contains null terminator")]
+    NullTerminator,
+}
+
 impl TokenInstance {
     pub const MAX: Self = Self(u128::MAX);
 
     #[inline(always)]
-    pub fn encode(token: &str, offset_id: u32, position: Option<u32>) -> Self {
-        TokenInstance(
-            (pack_trigram(token) as u128) << 64
-                | (offset_id as u128) << 32
-                | (position.map(|o| o | (1 << 31)).unwrap_or(0) as u128),
-        )
+    pub fn encode(
+        token: &str,
+        offset_id: u32,
+        position: Option<u32>,
+    ) -> Result<Self, TokenInstanceEncodeError> {
+        match pack_trigram(token) {
+            Some(packed) => Ok(TokenInstance(
+                ((packed as u128) << 64)
+                    | ((offset_id as u128) << 32)
+                    | (position.map(|o| o | (1 << 31)).unwrap_or(0) as u128),
+            )),
+            None => Err(TokenInstanceEncodeError::NullTerminator),
+        }
     }
 
     #[inline(always)]
@@ -121,7 +142,7 @@ mod tests {
     proptest! {
       #[test]
       fn test_pack_unpack_trigram(token in "\\PC{3}", offset_id in 0..u32::MAX, position in proptest::option::of((0..u32::MAX).prop_map(|v| v >> 1))) {
-        let encoded = TokenInstance::encode(&token, offset_id, position);
+        let encoded = TokenInstance::encode(&token, offset_id, position).unwrap();
         let decoded_token = encoded.get_token();
         let decoded_offset_id = encoded.get_offset_id();
         let decoded_position = encoded.get_position();
@@ -133,8 +154,8 @@ mod tests {
 
       #[test]
       fn test_omit_position(token in "\\PC{3}", offset_id in 0..u32::MAX, position1 in proptest::option::of(0..u32::MAX), position2 in proptest::option::of(0..u32::MAX)) {
-        let encoded1 = TokenInstance::encode(&token, offset_id, position1);
-        let encoded2 = TokenInstance::encode(&token, offset_id, position2);
+        let encoded1 = TokenInstance::encode(&token, offset_id, position1).unwrap();
+        let encoded2 = TokenInstance::encode(&token, offset_id, position2).unwrap();
 
         assert_eq!(encoded1.omit_position(), encoded2.omit_position(), "Omitting position should make two token instances equal");
         assert_eq!(encoded1.omit_position().get_token(), encoded1.get_token(), "Omitting position should not change the token");

@@ -29,6 +29,11 @@ where
     fn get_type(&self) -> OperatorType {
         OperatorType::Other
     }
+    /// By default operators will log an error event if their sender is dropped when sending the result.
+    /// This is not always desired, e.g. when creating a "fire-and-forget" operator (data prefetching); so this method can be overridden to return false.
+    fn errors_when_sender_dropped(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Error)]
@@ -37,6 +42,8 @@ pub enum TaskError<Err> {
     Panic(PanicError),
     #[error("Task failed with error: {0:?}")]
     TaskFailed(#[from] Err),
+    #[error("Task was aborted")]
+    Aborted,
 }
 
 impl<Err> ChromaError for TaskError<Err>
@@ -47,6 +54,7 @@ where
         match self {
             TaskError::Panic(_) => ErrorCodes::Internal,
             TaskError::TaskFailed(e) => e.code(),
+            TaskError::Aborted => ErrorCodes::ResourceExhausted,
         }
     }
 }
@@ -70,6 +78,16 @@ impl<Output, Error> TaskResult<Output, Error> {
     }
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TaskState {
+    NotStarted,
+    Running,
+    Aborted,
+    // There is no FinishedState to simplify the implementation.  Adding one requires covering all
+    // cases and makes a diamond state machine.  Having just one valid transition (from NotStarted
+    // to anything else) simplfies the implementation.
+}
+
 /// A task is a wrapper around an operator and its input.
 /// It is a description of a function to be run.
 #[derive(Debug)]
@@ -82,6 +100,7 @@ where
     input: Input,
     reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
     task_id: Uuid,
+    task_state: TaskState,
 }
 
 /// A message type used by the dispatcher to send tasks to worker threads.
@@ -92,10 +111,11 @@ pub type TaskMessage = Box<dyn TaskWrapper>;
 #[async_trait]
 pub trait TaskWrapper: Send + Debug {
     fn get_name(&self) -> &'static str;
-    async fn run(&self);
+    async fn run(&mut self);
     #[allow(dead_code)]
     fn id(&self) -> Uuid;
     fn get_type(&self) -> OperatorType;
+    async fn abort(&mut self);
 }
 
 /// Implement the TaskWrapper trait for every Task. This allows us to
@@ -112,7 +132,15 @@ where
         self.operator.get_name()
     }
 
-    async fn run(&self) {
+    async fn run(&mut self) {
+        if self.task_state != TaskState::NotStarted {
+            tracing::error!(
+                "Task {} is already running or has already finished",
+                self.task_id
+            );
+            return;
+        }
+        self.task_state = TaskState::Running;
         let result = AssertUnwindSafe(self.operator.run(&self.input))
             .catch_unwind()
             .await;
@@ -140,15 +168,25 @@ where
                 {
                     Ok(_) => {}
                     Err(err) => {
-                        tracing::error!(
-                            "Failed to send task result for task {} to reply channel: {}",
-                            self.task_id,
-                            err
-                        );
+                        if self.operator.errors_when_sender_dropped() {
+                            tracing::error!(
+                                "Failed to send task result for task {} to reply channel: {}",
+                                self.task_id,
+                                err
+                            );
+                        } else {
+                            tracing::debug!(
+                                "Failed to send task result for task {} to reply channel: {}",
+                                self.task_id,
+                                err
+                            );
+                        }
                     }
                 }
             }
             Err(panic_value) => {
+                tracing::error!("Task {} panicked: {:?}", self.task_id, panic_value);
+
                 match self
                     .reply_channel
                     .send(
@@ -162,11 +200,13 @@ where
                 {
                     Ok(_) => {}
                     Err(err) => {
-                        tracing::error!(
-                            "Failed to send task result for task {} to reply channel: {}",
-                            self.task_id,
-                            err
-                        );
+                        if self.operator.errors_when_sender_dropped() {
+                            tracing::error!(
+                                "Failed to send task result for task {} to reply channel: {}",
+                                self.task_id,
+                                err
+                            );
+                        }
                     }
                 };
             }
@@ -179,6 +219,45 @@ where
 
     fn get_type(&self) -> OperatorType {
         self.operator.get_type()
+    }
+
+    async fn abort(&mut self) {
+        if self.task_state != TaskState::NotStarted {
+            tracing::error!(
+                "Task {} is already running or has already finished",
+                self.task_id
+            );
+            return;
+        }
+        self.task_state = TaskState::Aborted;
+        match self
+            .reply_channel
+            .send(
+                TaskResult {
+                    result: Err(TaskError::Aborted),
+                    task_id: self.task_id,
+                },
+                None,
+            )
+            .await
+        {
+            Ok(_) => {}
+            Err(err) => {
+                if self.operator.errors_when_sender_dropped() {
+                    tracing::error!(
+                        "Failed to send task result for task {} to reply channel: {}",
+                        self.task_id,
+                        err
+                    );
+                } else {
+                    tracing::debug!(
+                        "Failed to send task result for task {} to reply channel: {}",
+                        self.task_id,
+                        err
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -199,6 +278,7 @@ where
         input,
         reply_channel,
         task_id: id,
+        task_state: TaskState::NotStarted,
     })
 }
 
@@ -211,7 +291,7 @@ mod tests {
 
     use crate::{
         execution::dispatcher::Dispatcher,
-        {Component, ComponentContext, ComponentHandle, Handler, System},
+        DispatcherConfig, {Component, ComponentContext, ComponentHandle, Handler, System},
     };
 
     use super::*;
@@ -247,7 +327,7 @@ mod tests {
             1000
         }
 
-        async fn start(&mut self, ctx: &ComponentContext<Self>) {
+        async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
             let task = wrap(Box::new(MockOperator {}), (), ctx.receiver());
             self.dispatcher.send(task, None).await.unwrap();
         }
@@ -269,7 +349,13 @@ mod tests {
     #[tokio::test]
     async fn task_catches_panic() {
         let system = System::new();
-        let dispatcher = Dispatcher::new(1, 1000, 1000);
+        let dispatcher = Dispatcher::new(DispatcherConfig {
+            num_worker_threads: 1,
+            task_queue_limit: 1000,
+            dispatcher_queue_size: 1000,
+            worker_queue_size: 1000,
+            active_io_tasks: 1000,
+        });
         let dispatcher_handle = system.start_component(dispatcher);
 
         let received_results = Arc::new(Mutex::new(Vec::new()));

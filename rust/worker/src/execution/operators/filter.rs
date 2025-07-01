@@ -14,19 +14,21 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
-    BooleanOperator, Chunk, DirectDocumentComparison, DirectWhereComparison, DocumentOperator,
-    LogRecord, MaterializedLogOperation, MetadataSetValue, MetadataValue, PrimitiveOperator,
-    Segment, SetOperator, SignedRoaringBitmap, Where, WhereChildren, WhereComparison,
+    operator::Filter,
+    regex::{
+        literal_expr::{LiteralExpr, NgramLiteralProvider},
+        ChromaRegex, ChromaRegexError,
+    },
+    BooleanOperator, Chunk, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
+    MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
+    MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where,
 };
+use futures::TryStreamExt;
 use roaring::RoaringBitmap;
 use thiserror::Error;
-use tracing::{trace, Instrument, Span};
+use tracing::{Instrument, Span};
 
-/// The `FilterOperator` filters the collection with specified criteria
-///
-/// # Parameters
-/// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
-/// - `where_clause`: The predicate on individual record
+/// The `Filter` operator filters the collection with specified criteria
 ///
 /// # Inputs
 /// - `logs`: The latest log of the collection
@@ -41,12 +43,6 @@ use tracing::{trace, Instrument, Span};
 ///
 /// # Usage
 /// It can be used to derive the mask of offset ids that should be included or excluded by the next operator
-#[derive(Clone, Debug)]
-pub struct FilterOperator {
-    pub query_ids: Option<Vec<String>>,
-    pub where_clause: Option<Where>,
-}
-
 #[derive(Clone, Debug)]
 pub struct FilterInput {
     pub logs: Chunk<LogRecord>,
@@ -69,10 +65,12 @@ pub enum FilterError {
     LogMaterializer(#[from] LogMaterializerError),
     #[error("Error creating metadata segment reader: {0}")]
     MetadataReader(#[from] MetadataSegmentError),
+    #[error("Error getting record: {0}")]
+    Record(#[from] Box<dyn ChromaError>),
     #[error("Error creating record segment reader: {0}")]
     RecordReader(#[from] RecordSegmentReaderCreationError),
-    #[error("Error getting record: {0}")]
-    GetError(Box<dyn ChromaError>),
+    #[error("Error parsing regular expression: {0}")]
+    Regex(#[from] ChromaRegexError),
 }
 
 impl ChromaError for FilterError {
@@ -81,8 +79,9 @@ impl ChromaError for FilterError {
             FilterError::Index(e) => e.code(),
             FilterError::LogMaterializer(e) => e.code(),
             FilterError::MetadataReader(e) => e.code(),
+            FilterError::Record(e) => e.code(),
             FilterError::RecordReader(e) => e.code(),
-            FilterError::GetError(e) => e.code(),
+            FilterError::Regex(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -181,25 +180,20 @@ impl<'me> MetadataLogReader<'me> {
 }
 
 pub(crate) enum MetadataProvider<'me> {
-    CompactData(&'me MetadataSegmentReader<'me>),
+    CompactData(
+        &'me MetadataSegmentReader<'me>,
+        &'me Option<RecordSegmentReader<'me>>,
+    ),
     Log(&'me MetadataLogReader<'me>),
 }
 
 impl<'me> MetadataProvider<'me> {
-    pub(crate) fn from_metadata_segment_reader(reader: &'me MetadataSegmentReader<'me>) -> Self {
-        Self::CompactData(reader)
-    }
-
-    pub(crate) fn from_metadata_log_reader(reader: &'me MetadataLogReader<'me>) -> Self {
-        Self::Log(reader)
-    }
-
-    pub(crate) async fn filter_by_document(
+    pub(crate) async fn filter_by_document_contains(
         &self,
         query: &str,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader) => {
+            MetadataProvider::CompactData(metadata_segment_reader, _) => {
                 if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
                     Ok(reader
                         .search(query)
@@ -217,6 +211,93 @@ impl<'me> MetadataProvider<'me> {
         }
     }
 
+    pub(crate) async fn filter_by_document_regex(
+        &self,
+        query: &str,
+    ) -> Result<SignedRoaringBitmap, FilterError> {
+        let chroma_regex = ChromaRegex::try_from(query.to_string())?;
+        match self {
+            MetadataProvider::CompactData(metadata_segment_reader, record_segment_reader) => {
+                if let (Some(fti_reader), Some(rec_reader)) = (
+                    metadata_segment_reader.full_text_index_reader.as_ref(),
+                    record_segment_reader,
+                ) {
+                    // The pattern can match empty string and thus match any document
+                    if let Some(0) = chroma_regex.properties().minimum_len() {
+                        return Ok(SignedRoaringBitmap::full());
+                    }
+                    let literal_expr = LiteralExpr::from(chroma_regex.hir().clone());
+                    let approximate_matching_offset_ids = fti_reader
+                        .match_literal_expression(&literal_expr)
+                        .await
+                        .map_err(MetadataIndexError::from)?;
+                    let is_exact_match = chroma_regex.properties().look_set().is_empty()
+                        && fti_reader.can_match_exactly(&literal_expr);
+                    if is_exact_match {
+                        Ok(approximate_matching_offset_ids
+                            .map(SignedRoaringBitmap::Include)
+                            .unwrap_or(SignedRoaringBitmap::full()))
+                    } else {
+                        let regex = chroma_regex.regex()?;
+                        let mut exact_matching_offset_ids = RoaringBitmap::new();
+                        match approximate_matching_offset_ids {
+                            // Perform point lookup for potential matching documents is there is not too many of them
+                            Some(offset_ids)
+                                if offset_ids.len() < rec_reader.count().await? as u64 / 10 =>
+                            {
+                                for id in offset_ids {
+                                    if rec_reader.get_data_for_offset_id(id).await?.is_some_and(
+                                        |rec| rec.document.is_some_and(|doc| regex.is_match(doc)),
+                                    ) {
+                                        exact_matching_offset_ids.insert(id);
+                                    }
+                                }
+                            }
+                            // Perform range scan of all documents
+                            candidate_offsets => {
+                                for (offset, record) in rec_reader
+                                    .get_data_stream(..)
+                                    .await
+                                    .try_collect::<Vec<_>>()
+                                    .await?
+                                {
+                                    if (candidate_offsets.is_none()
+                                        || candidate_offsets
+                                            .as_ref()
+                                            .is_some_and(|offsets| offsets.contains(offset)))
+                                        && record.document.is_some_and(|doc| regex.is_match(doc))
+                                    {
+                                        exact_matching_offset_ids.insert(offset);
+                                    }
+                                }
+                            }
+                        }
+
+                        Ok(SignedRoaringBitmap::Include(exact_matching_offset_ids))
+                    }
+                } else {
+                    Ok(SignedRoaringBitmap::empty())
+                }
+            }
+            MetadataProvider::Log(metadata_log_reader) => {
+                // The pattern can match empty string and thus match any document
+                if let Some(0) = chroma_regex.properties().minimum_len() {
+                    return Ok(SignedRoaringBitmap::full());
+                }
+                let regex = chroma_regex.regex()?;
+                Ok(SignedRoaringBitmap::Include(
+                    metadata_log_reader
+                        .document
+                        .iter()
+                        .filter_map(|(offset_id, document)| {
+                            regex.is_match(document).then_some(offset_id)
+                        })
+                        .collect(),
+                ))
+            }
+        }
+    }
+
     pub(crate) async fn filter_by_metadata(
         &self,
         key: &str,
@@ -224,7 +305,7 @@ impl<'me> MetadataProvider<'me> {
         op: &PrimitiveOperator,
     ) -> Result<RoaringBitmap, FilterError> {
         match self {
-            MetadataProvider::CompactData(metadata_segment_reader) => {
+            MetadataProvider::CompactData(metadata_segment_reader, _) => {
                 let (metadata_index_reader, kw) = match val {
                     MetadataValue::Bool(b) => (
                         metadata_segment_reader.bool_metadata_index_reader.as_ref(),
@@ -278,13 +359,11 @@ impl<'me> RoaringMetadataFilter<'me> for Where {
         metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
         match self {
-            Where::DirectWhereComparison(direct_comparison) => {
-                direct_comparison.eval(metadata_provider).await
-            }
-            Where::DirectWhereDocumentComparison(direct_document_comparison) => {
+            Where::Metadata(direct_comparison) => direct_comparison.eval(metadata_provider).await,
+            Where::Document(direct_document_comparison) => {
                 direct_document_comparison.eval(metadata_provider).await
             }
-            Where::WhereChildren(where_children) => {
+            Where::Composite(where_children) => {
                 // Box::pin is required to avoid infinite size future when recurse in async
                 Box::pin(where_children.eval(metadata_provider)).await
             }
@@ -292,13 +371,13 @@ impl<'me> RoaringMetadataFilter<'me> for Where {
     }
 }
 
-impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
+impl<'me> RoaringMetadataFilter<'me> for MetadataExpression {
     async fn eval(
         &'me self,
         metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
         let result = match &self.comparison {
-            WhereComparison::Primitive(primitive_operator, metadata_value) => {
+            MetadataComparison::Primitive(primitive_operator, metadata_value) => {
                 match primitive_operator {
                     // We convert the inequality check in to an equality check, and then negate the result
                     PrimitiveOperator::NotEqual => SignedRoaringBitmap::Exclude(
@@ -321,7 +400,7 @@ impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
                     ),
                 }
             }
-            WhereComparison::Set(set_operator, metadata_set_value) => {
+            MetadataComparison::Set(set_operator, metadata_set_value) => {
                 let child_values: Vec<_> = match metadata_set_value {
                     MetadataSetValue::Bool(vec) => {
                         vec.iter().map(|b| MetadataValue::Bool(*b)).collect()
@@ -364,22 +443,34 @@ impl<'me> RoaringMetadataFilter<'me> for DirectWhereComparison {
     }
 }
 
-impl<'me> RoaringMetadataFilter<'me> for DirectDocumentComparison {
+impl<'me> RoaringMetadataFilter<'me> for DocumentExpression {
     async fn eval(
         &'me self,
         metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
-        let contain = metadata_provider
-            .filter_by_document(self.document.as_str())
-            .await?;
         match self.operator {
-            DocumentOperator::Contains => Ok(SignedRoaringBitmap::Include(contain)),
-            DocumentOperator::NotContains => Ok(SignedRoaringBitmap::Exclude(contain)),
+            DocumentOperator::Contains => Ok(SignedRoaringBitmap::Include(
+                metadata_provider
+                    .filter_by_document_contains(self.pattern.as_str())
+                    .await?,
+            )),
+            DocumentOperator::NotContains => Ok(SignedRoaringBitmap::Exclude(
+                metadata_provider
+                    .filter_by_document_contains(self.pattern.as_str())
+                    .await?,
+            )),
+            DocumentOperator::Regex => Ok(metadata_provider
+                .filter_by_document_regex(self.pattern.as_str())
+                .await?),
+            DocumentOperator::NotRegex => Ok(metadata_provider
+                .filter_by_document_regex(self.pattern.as_str())
+                .await?
+                .flip()),
         }
     }
 }
 
-impl<'me> RoaringMetadataFilter<'me> for WhereChildren {
+impl<'me> RoaringMetadataFilter<'me> for CompositeExpression {
     async fn eval(
         &'me self,
         metadata_provider: &MetadataProvider<'me>,
@@ -400,11 +491,17 @@ impl<'me> RoaringMetadataFilter<'me> for WhereChildren {
 }
 
 #[async_trait]
-impl Operator<FilterInput, FilterOutput> for FilterOperator {
+impl Operator<FilterInput, FilterOutput> for Filter {
     type Error = FilterError;
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        tracing::debug!(
+            "[{}]: Num log entries {:?}, metadata segment {:?}, record segment {:?}",
+            self.get_name(),
+            input.logs.len(),
+            input.metadata_segment,
+            input.record_segment
+        );
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
@@ -427,14 +524,23 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
             MetadataLogReader::create(&materialized_logs, &record_segment_reader)
                 .await
                 .map_err(FilterError::LogMaterializer)?;
-        let log_metadata_provider =
-            MetadataProvider::from_metadata_log_reader(&metadata_log_reader);
+
+        // Short-circuit if filter is none.
+        if self.query_ids.is_none() && self.where_clause.is_none() {
+            return Ok(FilterOutput {
+                log_offset_ids: SignedRoaringBitmap::full(),
+                compact_offset_ids: SignedRoaringBitmap::full()
+                    & SignedRoaringBitmap::Exclude(metadata_log_reader.updated_offset_ids),
+            });
+        }
+
+        let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
 
         let metadata_segement_reader =
             MetadataSegmentReader::from_segment(&input.metadata_segment, &input.blockfile_provider)
                 .await?;
         let compact_metadata_provider =
-            MetadataProvider::from_metadata_segment_reader(&metadata_segement_reader);
+            MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
 
         // Get offset ids corresponding to user ids
         let (user_allowed_log_offset_ids, user_allowed_compact_offset_ids) =
@@ -460,7 +566,7 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
                                 // document.  Drop it.
                             }
                             Err(e) => {
-                                return Err(FilterError::GetError(e));
+                                return Err(e.into());
                             }
                         };
                     }
@@ -500,43 +606,63 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
 
 #[cfg(test)]
 mod tests {
-    use chroma_segment::test::TestSegment;
+    use std::{collections::HashMap, str::FromStr};
+
+    use chroma_blockstore::{
+        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        provider::BlockfileProvider,
+    };
+    use chroma_cache::new_cache_for_test;
+    use chroma_log::test::{add_delete_generator, int_as_id, LoadFromGenerator, LogGenerator};
+    use chroma_segment::{
+        blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
+        blockfile_record::{
+            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
+        },
+        test::TestDistributedSegment,
+        types::materialize_logs,
+    };
+    use chroma_storage::{local::LocalStorage, Storage};
     use chroma_system::Operator;
     use chroma_types::{
-        BooleanOperator, DirectDocumentComparison, DirectWhereComparison, MetadataSetValue,
-        MetadataValue, PrimitiveOperator, SetOperator, SignedRoaringBitmap, Where, WhereChildren,
-        WhereComparison,
+        operator::Filter, BooleanOperator, Chunk, CollectionUuid, CompositeExpression,
+        DatabaseUuid, DocumentExpression, LogRecord, MetadataComparison, MetadataExpression,
+        MetadataSetValue, MetadataValue, Operation, OperationRecord, PrimitiveOperator,
+        SegmentUuid, SetOperator, SignedRoaringBitmap, Where,
     };
 
-    use crate::{
-        execution::operators::filter::FilterOperator,
-        log::test::{add_delete_generator, int_as_id, LoadFromGenerator, LogGenerator},
-    };
+    use crate::execution::operators::filter::{MetadataLogReader, MetadataProvider};
 
     use super::FilterInput;
 
-    /// The unit tests for `FilterOperator` uses the following test data
+    /// The unit tests for `Filter` operator uses the following test data
     /// It generates 120 log records, where the first 60 is compacted:
     /// - Log: Delete [11..=20], add [51..=100]
     /// - Compacted: Delete [1..=10] deletion, add [11..=50]
-    async fn setup_filter_input() -> FilterInput {
-        let mut test_segment = TestSegment::default();
+    async fn setup_filter_input() -> (TestDistributedSegment, FilterInput) {
+        let mut test_segment = TestDistributedSegment::default();
         test_segment
             .populate_with_generator(60, add_delete_generator)
             .await;
-        FilterInput {
-            logs: add_delete_generator.generate_chunk(61..=120),
-            blockfile_provider: test_segment.blockfile_provider,
-            metadata_segment: test_segment.metadata_segment,
-            record_segment: test_segment.record_segment,
-        }
+        let blockfile_provider = test_segment.blockfile_provider.clone();
+        let metadata_segment = test_segment.metadata_segment.clone();
+        let record_segment = test_segment.record_segment.clone();
+        (
+            test_segment,
+            FilterInput {
+                logs: add_delete_generator.generate_chunk(61..=120),
+                blockfile_provider,
+                metadata_segment,
+                record_segment,
+            },
+        )
     }
 
     #[tokio::test]
     async fn test_trivial_filter() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: None,
         };
@@ -544,7 +670,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(filter_output.log_offset_ids, SignedRoaringBitmap::full());
         assert_eq!(
@@ -555,9 +681,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_user_allowed_ids() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: Some((0..30).map(int_as_id).collect()),
             where_clause: None,
         };
@@ -565,7 +691,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(filter_output.log_offset_ids, SignedRoaringBitmap::empty());
         assert_eq!(
@@ -576,17 +702,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_eq() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_clause = Where::Metadata(MetadataExpression {
             key: "is_even".to_string(),
-            comparison: WhereComparison::Primitive(
+            comparison: MetadataComparison::Primitive(
                 PrimitiveOperator::Equal,
                 MetadataValue::Bool(true),
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -594,7 +720,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -608,17 +734,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_ne() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_clause = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
-            comparison: WhereComparison::Primitive(
+            comparison: MetadataComparison::Primitive(
                 PrimitiveOperator::NotEqual,
                 MetadataValue::Int(0),
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -626,7 +752,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -645,17 +771,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_in() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_clause = Where::Metadata(MetadataExpression {
             key: "is_even".to_string(),
-            comparison: WhereComparison::Set(
+            comparison: MetadataComparison::Set(
                 SetOperator::In,
                 MetadataSetValue::Bool(vec![false, true]),
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -663,7 +789,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -677,14 +803,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_nin() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_clause = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
-            comparison: WhereComparison::Set(SetOperator::NotIn, MetadataSetValue::Int(vec![1, 2])),
+            comparison: MetadataComparison::Set(
+                SetOperator::NotIn,
+                MetadataSetValue::Int(vec![1, 2]),
+            ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -692,7 +821,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -711,17 +840,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_gt() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_clause = Where::Metadata(MetadataExpression {
             key: "id".to_string(),
-            comparison: WhereComparison::Primitive(
+            comparison: MetadataComparison::Primitive(
                 PrimitiveOperator::GreaterThan,
                 MetadataValue::Int(36),
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -729,7 +858,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -743,14 +872,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_contains() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereDocumentComparison(DirectDocumentComparison {
+        let where_clause = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::Contains,
-            document: "<cat>".to_string(),
+            pattern: "<cat>".to_string(),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -758,7 +887,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -772,14 +901,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_not_contains() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let where_clause = Where::DirectWhereDocumentComparison(DirectDocumentComparison {
+        let where_clause = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::NotContains,
-            document: "<dog>".to_string(),
+            pattern: "<dog>".to_string(),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -787,7 +916,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -806,30 +935,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_and() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let where_sub_clause_1 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_1 = Where::Metadata(MetadataExpression {
             key: "id".to_string(),
-            comparison: WhereComparison::Primitive(
+            comparison: MetadataComparison::Primitive(
                 PrimitiveOperator::GreaterThan,
                 MetadataValue::Int(36),
             ),
         });
 
-        let where_sub_clause_2 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_2 = Where::Metadata(MetadataExpression {
             key: "is_even".to_string(),
-            comparison: WhereComparison::Primitive(
+            comparison: MetadataComparison::Primitive(
                 PrimitiveOperator::Equal,
                 MetadataValue::Bool(false),
             ),
         });
 
-        let where_clause = Where::WhereChildren(WhereChildren {
+        let where_clause = Where::Composite(CompositeExpression {
             operator: BooleanOperator::And,
             children: vec![where_sub_clause_1, where_sub_clause_2],
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -837,7 +966,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -851,24 +980,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_or() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let where_sub_clause_1 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_1 = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
-            comparison: WhereComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Int(0)),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Int(0),
+            ),
         });
 
-        let where_sub_clause_2 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_2 = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
-            comparison: WhereComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Int(2)),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Int(2),
+            ),
         });
 
-        let where_clause = Where::WhereChildren(WhereChildren {
+        let where_clause = Where::Composite(CompositeExpression {
             operator: BooleanOperator::Or,
             children: vec![where_sub_clause_1, where_sub_clause_2],
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -876,7 +1011,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -890,38 +1025,41 @@ mod tests {
 
     #[tokio::test]
     async fn test_complex_filter() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let where_sub_clause_1 = Where::DirectWhereDocumentComparison(DirectDocumentComparison {
+        let where_sub_clause_1 = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::NotContains,
-            document: "<dog>".to_string(),
+            pattern: "<dog>".to_string(),
         });
 
-        let where_sub_clause_2 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_2 = Where::Metadata(MetadataExpression {
             key: "id".to_string(),
-            comparison: WhereComparison::Primitive(
+            comparison: MetadataComparison::Primitive(
                 PrimitiveOperator::LessThan,
                 MetadataValue::Int(72),
             ),
         });
 
-        let where_sub_clause_3 = Where::DirectWhereComparison(DirectWhereComparison {
+        let where_sub_clause_3 = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
-            comparison: WhereComparison::Set(SetOperator::NotIn, MetadataSetValue::Int(vec![0, 1])),
+            comparison: MetadataComparison::Set(
+                SetOperator::NotIn,
+                MetadataSetValue::Int(vec![0, 1]),
+            ),
         });
 
-        let where_clause = Where::WhereChildren(WhereChildren {
+        let where_clause = Where::Composite(CompositeExpression {
             operator: BooleanOperator::And,
             children: vec![
                 where_sub_clause_1,
-                Where::WhereChildren(WhereChildren {
+                Where::Composite(CompositeExpression {
                     operator: BooleanOperator::Or,
                     children: vec![where_sub_clause_2, where_sub_clause_3],
                 }),
             ],
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: Some((0..96).map(int_as_id).collect()),
             where_clause: Some(where_clause),
         };
@@ -929,7 +1067,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -943,5 +1081,309 @@ mod tests {
             filter_output.compact_offset_ids,
             SignedRoaringBitmap::Include((21..=50).filter(|offset| offset % 5 != 0).collect())
         );
+    }
+
+    #[tokio::test]
+    async fn test_regex_empty_posting_list() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
+        let mut record_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        {
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let data = vec![
+                LogRecord {
+                    log_offset: 1,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: Some(vec![1.0, 2.0, 3.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: Some(String::from("DEF")),
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "embedding_id_2".to_string(),
+                        embedding: Some(vec![4.0, 5.0, 6.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: Some(String::from("def")),
+                        operation: Operation::Add,
+                    },
+                },
+            ];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let record_segment_reader: Option<RecordSegmentReader> =
+                match RecordSegmentReader::from_segment(&record_segment, &blockfile_provider).await
+                {
+                    Ok(reader) => Some(reader),
+                    Err(e) => {
+                        match *e {
+                            // Uninitialized segment is fine and means that the record
+                            // segment is not yet initialized in storage.
+                            RecordSegmentReaderCreationError::UninitializedSegment => None,
+                            RecordSegmentReaderCreationError::BlockfileOpenError(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
+                            }
+                        }
+                    }
+                };
+            let mat_records = materialize_logs(&record_segment_reader, data, None)
+                .await
+                .expect("Log materialization failed");
+            metadata_writer
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .finish()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .await
+                .expect("Apply materialized log to record segment failed");
+            let record_flusher = segment_writer
+                .commit()
+                .await
+                .expect("Commit for segment writer failed");
+            let metadata_flusher = metadata_writer
+                .commit()
+                .await
+                .expect("Commit for metadata writer failed");
+            record_segment.file_path = record_flusher
+                .flush()
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = metadata_flusher
+                .flush()
+                .await
+                .expect("Flush metadata segment writer failed");
+        }
+        let data = vec![
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "embedding_id_3".to_string(),
+                    embedding: Some(vec![1.0, 2.0, 3.0]),
+                    encoding: None,
+                    metadata: None,
+                    document: Some(String::from("abc")),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "embedding_id_2".to_string(),
+                    embedding: None,
+                    encoding: None,
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                },
+            },
+        ];
+
+        let data: Chunk<LogRecord> = Chunk::new(data.into());
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let some_reader = Some(record_segment_reader);
+        let mat_records = materialize_logs(&some_reader, data, None)
+            .await
+            .expect("Log materialization failed");
+        metadata_writer
+            .apply_materialized_log_chunk(&some_reader, &mat_records)
+            .await
+            .expect("Apply materialized log to metadata segment failed");
+        metadata_writer
+            .finish()
+            .await
+            .expect("Write to blockfiles for metadata writer failed");
+        segment_writer
+            .apply_materialized_log_chunk(&some_reader, &mat_records)
+            .await
+            .expect("Apply materialized log to record segment failed");
+        let record_flusher = segment_writer
+            .commit()
+            .await
+            .expect("Commit for segment writer failed");
+        let metadata_flusher = metadata_writer
+            .commit()
+            .await
+            .expect("Commit for metadata writer failed");
+        record_segment.file_path = record_flusher
+            .flush()
+            .await
+            .expect("Flush record segment writer failed");
+        metadata_segment.file_path = metadata_flusher
+            .flush()
+            .await
+            .expect("Flush metadata segment writer failed");
+        let metadata_segment_reader =
+            MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
+                .await
+                .expect("Metadata segment reader construction failed");
+        let record_segment_reader =
+            RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
+                .await
+                .expect("Reader should be initialized by now");
+        let some_reader = Some(record_segment_reader);
+        let compact_metadata_provider =
+            MetadataProvider::CompactData(&metadata_segment_reader, &some_reader);
+        let res = compact_metadata_provider
+            .filter_by_document_regex("(?i)def")
+            .await
+            .expect("Expected regex to work");
+        assert_eq!(res, SignedRoaringBitmap::Include([1].into()));
+    }
+
+    #[tokio::test]
+    async fn test_regex_short_circuit() {
+        let (_test_segment, filter_input) = setup_filter_input().await;
+
+        let record_segment_reader = match RecordSegmentReader::from_segment(
+            &filter_input.record_segment,
+            &filter_input.blockfile_provider,
+        )
+        .await
+        {
+            Ok(reader) => Ok(Some(reader)),
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Ok(None)
+            }
+            Err(e) => Err(*e),
+        }
+        .unwrap();
+        let cloned_record_segment_reader = record_segment_reader.clone();
+        let materialized_logs = materialize_logs(
+            &cloned_record_segment_reader,
+            filter_input.logs.clone(),
+            None,
+        )
+        .await
+        .unwrap();
+        let metadata_log_reader =
+            MetadataLogReader::create(&materialized_logs, &record_segment_reader)
+                .await
+                .unwrap();
+        let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
+
+        let metadata_segement_reader = MetadataSegmentReader::from_segment(
+            &filter_input.metadata_segment,
+            &filter_input.blockfile_provider,
+        )
+        .await
+        .unwrap();
+        let compact_metadata_provider =
+            MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
+
+        let match_all = r".*";
+        assert_eq!(
+            log_metadata_provider
+                .filter_by_document_regex(match_all)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::full()
+        );
+        assert_eq!(
+            compact_metadata_provider
+                .filter_by_document_regex(match_all)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::full()
+        );
+
+        let selective_match = r"cat|dog";
+        assert!(matches!(
+            log_metadata_provider
+                .filter_by_document_regex(selective_match)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::Include(_)
+        ),);
+        assert!(matches!(
+            compact_metadata_provider
+                .filter_by_document_regex(selective_match)
+                .await
+                .unwrap(),
+            SignedRoaringBitmap::Include(_)
+        ),);
     }
 }

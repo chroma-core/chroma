@@ -5,6 +5,7 @@ option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
 import "chromadb/proto/chroma.proto";
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 
 message CreateDatabaseRequest {
   string id = 1;
@@ -44,6 +45,14 @@ message DeleteDatabaseRequest {
 }
 
 message DeleteDatabaseResponse {}
+
+message FinishDatabaseDeletionRequest {
+  google.protobuf.Timestamp cutoff_time = 1;
+}
+
+message FinishDatabaseDeletionResponse {
+  uint64 num_deleted = 1;
+}
 
 message CreateTenantRequest {
   string name = 2; // Names are globally unique
@@ -145,6 +154,31 @@ message DeleteCollectionResponse {
   reserved "status";
 }
 
+message FinishCollectionDeletionRequest {
+  string id = 1;
+  string tenant = 2;
+  string database = 3;
+}
+
+message FinishCollectionDeletionResponse {}
+
+// Request to get a single collection.
+message GetCollectionRequest {
+  string id = 1;
+  optional string name = 2;
+  optional string tenant = 3;
+  optional string database = 4;
+}
+
+// Response to GetCollectionRequest.
+message GetCollectionResponse {
+  Collection collection = 1;
+}
+
+message CollectionIdsFilter {
+  repeated string ids = 1;
+}
+
 message GetCollectionsRequest {
   optional string id = 1;
   optional string name = 2;
@@ -152,12 +186,30 @@ message GetCollectionsRequest {
   string database = 5;
   optional int32 limit = 6;
   optional int32 offset = 7;
+  optional CollectionIdsFilter ids_filter = 8;
+  optional bool include_soft_deleted = 9;
 }
 
 message GetCollectionsResponse {
   repeated Collection collections = 1;
   reserved 2;
   reserved "status";
+}
+
+message GetCollectionByResourceNameRequest {
+  string id = 1;
+  string tenant_resource_name = 2;
+  string database = 3;
+  string name = 4;
+}
+
+message CountCollectionsRequest {
+  string tenant = 4;
+  optional string database = 5;
+}
+
+message CountCollectionsResponse {
+  uint64 count = 1;
 }
 
 message GetCollectionWithSegmentsRequest {
@@ -175,6 +227,7 @@ message CheckCollectionsRequest {
 
 message CheckCollectionsResponse {
   repeated bool deleted = 1;
+  repeated int64 log_position = 2;
 }
 
 message UpdateCollectionRequest {
@@ -185,11 +238,33 @@ message UpdateCollectionRequest {
     UpdateMetadata metadata = 5;
     bool reset_metadata = 6;
   }
+  optional string configuration_json_str = 7;
 }
 
 message UpdateCollectionResponse {
   reserved 1;
   reserved "status";
+}
+
+message ForkCollectionRequest {
+  string source_collection_id = 1;
+  uint64 source_collection_log_compaction_offset = 2;
+  uint64 source_collection_log_enumeration_offset = 3;
+  string target_collection_id = 4;
+  string target_collection_name = 5;
+}
+
+message ForkCollectionResponse {
+  Collection collection = 1;
+  repeated Segment segments = 2;
+}
+
+message CountForksRequest {
+  string source_collection_id = 1;
+}
+
+message CountForksResponse {
+  uint64 count = 1;
 }
 
 message ResetStateResponse {
@@ -214,6 +289,13 @@ message SetLastCompactionTimeForTenantRequest {
   TenantLastCompactionTime tenant_last_compaction_time = 1;
 }
 
+message SetTenantResourceNameRequest {
+  string id = 1;
+  string resource_name = 2;
+}
+
+message SetTenantResourceNameResponse {}
+
 message FlushSegmentCompactionInfo {
   string segment_id = 1;
   map<string,FilePaths> file_paths = 2;
@@ -226,6 +308,7 @@ message FlushCollectionCompactionRequest {
   int32 collection_version = 4;
   repeated FlushSegmentCompactionInfo segment_compaction_info = 5;
   uint64 total_records_post_compaction = 6;
+  uint64 size_bytes_post_compaction = 7;
 }
 
 message FlushCollectionCompactionResponse {
@@ -283,6 +366,8 @@ message CollectionVersionInfo {
     VERSION_CHANGE_REASON_DATA_COMPACTION = 0;
   }
   VersionChangeReason version_change_reason = 5;
+  string version_file_name = 6;
+  bool marked_for_deletion = 7;
 }
 
 // This is metadata about the Collection that is mutable.
@@ -306,25 +391,11 @@ message CollectionSegmentInfo {
     // GC's {collection,version} selection policy.
 }
 
-// Tuple of collection ID, tenant ID, and version.
-message CollectionVersionTuple {
-    string collection_id = 1;
-    string tenant_id = 2;
-    int64 version = 3;
-}
-
-// Contains information about the lineage of a collection.
-message CollectionLineageInfo {
-    // ID of the collection.
-    string collection_id = 1;
-    // ID of the tenant.
-    string tenant_id = 2;
-    // Whether the collection is a root collection.
-    bool is_root_collection = 3;
-    // An ordered list of descendant collections.
-    // The first element is the root {collection, version}, and the last
-    // element is the direct parent of the current collection.
-    repeated CollectionVersionTuple parent_collections = 4;
+message VersionListForCollection {
+  string tenant_id = 1;
+  string database_id = 2;
+  string collection_id = 3;
+  repeated int64 versions = 4;
 }
 
 // Request to list versions of a collection.
@@ -338,6 +409,7 @@ message ListCollectionVersionsRequest {
   // Only return versions at or after this timestamp.
   // Together with versions_before, this forms an inclusive range.
   optional int64 versions_at_or_after = 5;
+  optional bool include_marked_for_deletion = 6;
 }
 
 // Response to ListCollectionVersionsRequest.
@@ -345,6 +417,16 @@ message ListCollectionVersionsResponse {
   repeated CollectionVersionInfo versions = 1;
   // Whether the list is truncated.
   bool list_is_truncated = 2;
+}
+
+message CollectionLineageFile {
+	repeated CollectionVersionDependency dependencies = 1;
+}
+
+message CollectionVersionDependency {
+	string source_collection_id = 1; // The forked collection
+	uint64 source_collection_version = 2; // The forked collection version
+	string target_collection_id = 3; // The forking collection
 }
 
 // Request to restore a collection.
@@ -369,16 +451,75 @@ message GetCollectionSizeResponse {
   uint64 total_records_post_compaction = 1;
 }
 
-message ListCollectionsToGcRequest {}
+message ListCollectionsToGcRequest {
+  // Return collections that need to be GCed based on this cutoff time.
+  // Currently, sysdb will return all collections that have versions created
+  // before this cutoff time.
+  // SysDb can apply additional logic to return the collections that should
+  // be prioritized for GC.
+  optional google.protobuf.Timestamp cutoff_time = 1;
+
+  // Limit the number of collections that can be returned.
+  // GC will get n number of collections to GC. After GC is done, it will
+  // update the collections such that these collections are not returned again.
+  // This is to ensure that we do not GC the same collections over and over again.
+  // This also allows for a cheap and stateless pagination without using offsets.
+  optional uint64 limit = 2;
+
+  optional string tenant_id = 3;
+
+  optional uint64 min_versions_if_alive = 4;
+
+  // Design NOTE: When GC calls DeleteCollectionVersion, sysdb will update the
+  // time associated with the oldest version of the collection. This allows
+  // sysdb to return the collections that have not been GCed for a long time.
+}
 
 message CollectionToGcInfo {
   string id = 1;
   string name = 2;
   string version_file_path = 3;
+  reserved 4; // used to be "latest_version"
+  string tenant_id = 5;
+  optional string lineage_file_path = 6;
 }
 
 message ListCollectionsToGcResponse {
   repeated CollectionToGcInfo collections = 1;
+}
+
+message MarkVersionForDeletionRequest {
+  int64 epoch_id = 1;
+  repeated VersionListForCollection versions = 2;
+}
+
+message MarkVersionForDeletionResponse {
+  map<string, bool> collection_id_to_success = 1;
+}
+
+message DeleteCollectionVersionRequest {
+  int64 epoch_id = 1;
+  repeated VersionListForCollection versions = 2;
+}
+
+message DeleteCollectionVersionResponse {
+  map<string, bool> collection_id_to_success = 1;
+}
+
+message BatchGetCollectionVersionFilePathsRequest {
+  repeated string collection_ids = 1;
+}
+
+message BatchGetCollectionVersionFilePathsResponse {
+  map<string, string> collection_id_to_version_file_path = 1;
+}
+
+message BatchGetCollectionSoftDeleteStatusRequest {
+  repeated string collection_ids = 1;
+}
+
+message BatchGetCollectionSoftDeleteStatusResponse {
+  map<string, bool> collection_id_to_is_soft_deleted = 1;
 }
 
 service SysDB {
@@ -386,18 +527,26 @@ service SysDB {
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
   rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}
   rpc DeleteDatabase(DeleteDatabaseRequest) returns (DeleteDatabaseResponse) {}
+  rpc FinishDatabaseDeletion(FinishDatabaseDeletionRequest) returns (FinishDatabaseDeletionResponse) {}
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
+  rpc SetTenantResourceName(SetTenantResourceNameRequest) returns (SetTenantResourceNameResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}
   rpc DeleteSegment(DeleteSegmentRequest) returns (DeleteSegmentResponse) {}
   rpc GetSegments(GetSegmentsRequest) returns (GetSegmentsResponse) {}
   rpc UpdateSegment(UpdateSegmentRequest) returns (UpdateSegmentResponse) {}
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
+  rpc FinishCollectionDeletion(FinishCollectionDeletionRequest) returns (FinishCollectionDeletionResponse) {}
+  rpc GetCollection(GetCollectionRequest) returns (GetCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
+  rpc GetCollectionByResourceName(GetCollectionByResourceNameRequest) returns (GetCollectionResponse) {}
+  rpc CountCollections(CountCollectionsRequest) returns (CountCollectionsResponse) {}
   rpc GetCollectionWithSegments(GetCollectionWithSegmentsRequest) returns (GetCollectionWithSegmentsResponse) {}
   rpc CheckCollections(CheckCollectionsRequest) returns (CheckCollectionsResponse) {}
   rpc UpdateCollection(UpdateCollectionRequest) returns (UpdateCollectionResponse) {}
+  rpc ForkCollection(ForkCollectionRequest) returns (ForkCollectionResponse) {}
+  rpc CountForks(CountForksRequest) returns (CountForksResponse) {}
   rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
   rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
   rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}
@@ -406,4 +555,8 @@ service SysDB {
   rpc ListCollectionVersions(ListCollectionVersionsRequest) returns (ListCollectionVersionsResponse) {}
   rpc GetCollectionSize(GetCollectionSizeRequest) returns (GetCollectionSizeResponse) {}
   rpc ListCollectionsToGc(ListCollectionsToGcRequest) returns (ListCollectionsToGcResponse) {}
+  rpc MarkVersionForDeletion(MarkVersionForDeletionRequest) returns (MarkVersionForDeletionResponse) {}
+  rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
+  rpc BatchGetCollectionVersionFilePaths(BatchGetCollectionVersionFilePathsRequest) returns (BatchGetCollectionVersionFilePathsResponse) {}
+  rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
 }

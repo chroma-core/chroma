@@ -1,9 +1,29 @@
-## Demo in node
+# Node Example
 
-1. Make sure a Chroma instance that allows resetting is running locally on port 8000 (e.g `ALLOW_RESET=TRUE chroma run`)
-2. Build the client libraries: `cd .. && pnpm build && cd -`
-3. Install the dependencies (including the local reference to the Chroma JS client): `pnpm install`
-4. Run the node server: `pnpm dev`
-5. visit `localhost:3000`
+This is an example of how to use ChromaDB with Node.js.
 
-The browser should print the result of a document query and you should see more detailed logging in the console.
+## Getting Started
+
+1. Make sure you have Chroma running locally at `http://localhost:8000`
+2. Run `pnpm install` to install dependencies
+3. Run one of the following commands:
+
+- `pnpm dev` - Run the example with the default bundled package
+- `pnpm dev:bundled` - Run the example with the bundled chromadb package
+- `pnpm dev:client` - Run the example with the chromadb-client package (peer dependencies)
+
+## Package Options
+
+This example demonstrates both ChromaDB package options:
+
+1. **chromadb** (Bundled Package): Includes all embedding libraries as dependencies.
+
+   - Good for simple projects or when you want everything included.
+   - Import with: `const chroma = require("chromadb");`
+
+2. **chromadb-client** (Client Package): Uses peer dependencies.
+   - Good for projects that already use specific versions of embedding libraries.
+   - Keeps your dependency tree lean if you only need specific embedding libraries.
+   - Import with: `const chroma = require("chromadb-client");`
+
+Both packages provide identical functionality and API.

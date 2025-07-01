@@ -44,12 +44,6 @@ func init() {
 	Cmd.Flags().IntVar(&conf.DBConfig.MaxOpenConns, "max-open-conns", 10, "MetaTable max open connections")
 	Cmd.Flags().StringVar(&conf.DBConfig.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
 
-	// Soft deletes
-	Cmd.Flags().BoolVar(&conf.SoftDeleteEnabled, "soft-delete-enabled", false, "Enable soft deletes")
-	Cmd.Flags().DurationVar(&conf.SoftDeleteCleanupInterval, "soft-delete-cleanup-interval", 1*time.Minute, "Soft delete cleanup interval")
-	Cmd.Flags().DurationVar(&conf.SoftDeleteMaxAge, "soft-delete-max-age", 72*time.Hour, "Soft delete max age")
-	Cmd.Flags().UintVar(&conf.SoftDeleteCleanupBatchSize, "soft-delete-cleanup-batch-size", 10, "Soft delete cleanup batch size")
-
 	// Memberlist
 	Cmd.Flags().StringVar(&conf.KubernetesNamespace, "kubernetes-namespace", "chroma", "Kubernetes namespace")
 	Cmd.Flags().DurationVar(&conf.ReconcileInterval, "reconcile-interval", 100*time.Millisecond, "Reconcile interval")
@@ -64,8 +58,23 @@ func init() {
 	Cmd.Flags().StringVar(&conf.CompactionServiceMemberlistName, "compaction-memberlist-name", "compaction-service-memberlist", "Compaction memberlist name")
 	Cmd.Flags().StringVar(&conf.CompactionServicePodLabel, "compaction-pod-label", "compaction-service", "Compaction pod label")
 
-	// Block store provider
-	Cmd.Flags().StringVar(&conf.BlockStoreProvider, "block-store-provider", "none", "Block store provider")
+	// Garbage collection service Memberlist
+	Cmd.Flags().StringVar(&conf.GarbageCollectionServiceMemberlistName, "garbage-collection-memberlist-name", "garbage-collection-service-memberlist", "Garbage collection memberlist name")
+	Cmd.Flags().StringVar(&conf.GarbageCollectionServicePodLabel, "garbage-collection-pod-label", "garbage-collection-service", "Garbage collection pod label")
+
+	// Log service Memberlist
+	Cmd.Flags().StringVar(&conf.LogServiceMemberlistName, "log-memberlist-name", "rust-log-service-memberlist", "Log service memberlist name")
+	Cmd.Flags().StringVar(&conf.LogServicePodLabel, "log-pod-label", "rust-log-service", "Log service pod label")
+
+	// S3 config
+	Cmd.Flags().BoolVar(&conf.MetaStoreConfig.CreateBucketIfNotExists, "create-bucket-if-not-exists", false, "Create bucket if not exists")
+	Cmd.Flags().StringVar(&conf.MetaStoreConfig.BucketName, "bucket-name", "chroma-storage", "Bucket name")
+	Cmd.Flags().StringVar(&conf.MetaStoreConfig.Region, "s3-region", "us-east-1", "Region")
+	Cmd.Flags().StringVar(&conf.MetaStoreConfig.Endpoint, "s3-endpoint", "", "S3 endpoint")
+	Cmd.Flags().StringVar(&conf.MetaStoreConfig.AccessKeyID, "s3-access-key-id", "", "S3 access key ID")
+	Cmd.Flags().StringVar(&conf.MetaStoreConfig.SecretAccessKey, "s3-secret-access-key", "", "S3 secret access key")
+	Cmd.Flags().BoolVar(&conf.MetaStoreConfig.ForcePathStyle, "s3-force-path-style", false, "S3 force path style")
+
 	// Version file
 	Cmd.Flags().BoolVar(&conf.VersionFileEnabled, "version-file-enabled", false, "Enable version file")
 }

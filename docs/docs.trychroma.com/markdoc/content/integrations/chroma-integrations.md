@@ -10,19 +10,22 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 {% /special_table %}
 
 |                                                                         | Python | Typescript |
-|-------------------------------------------------------------------------|--|------------|
-| [OpenAI](./embedding-models/openai)                                    | ✓ | ✓          |
-| [Google Gemini](./embedding-models/google-gemini)                       | ✓ | ✓          |
-| [Cohere](./embedding-models/cohere)                                     | ✓ | ✓          |
-| [Hugging Face](./embedding-models/hugging-face)                         | ✓ | -          |
-| [Instructor](./embedding-models/instructor)                             | ✓ | -          |
-| [Hugging Face Embedding Server](./embedding-models/hugging-face-server) | ✓ | ✓          |
-| [Jina AI](./embedding-models/jina-ai)                                   | ✓ | ✓          |
-| [Roboflow](./embedding-models/roboflow)                                      | ✓ | -          |
-| [Ollama Embeddings](./embedding-models/ollama)                               | ✓ | ✓          |
+| ----------------------------------------------------------------------- | ------ | ---------- |
+| [OpenAI](./embedding-models/openai)                                     | ✓      | ✓          |
+| [Google Gemini](./embedding-models/google-gemini)                       | ✓      | ✓          |
+| [Cohere](./embedding-models/cohere)                                     | ✓      | ✓          |
+| [Baseten](./embedding-models/baseten)                                   | ✓      | -          |
+| [Hugging Face](./embedding-models/hugging-face)                         | ✓      | -          |
+| [Instructor](./embedding-models/instructor)                             | ✓      | -          |
+| [Hugging Face Embedding Server](./embedding-models/hugging-face-server) | ✓      | ✓          |
+| [Jina AI](./embedding-models/jina-ai)                                   | ✓      | ✓          |
+| [Roboflow](./embedding-models/roboflow)                                 | ✓      | -          |
+| [Ollama Embeddings](./embedding-models/ollama)                          | ✓      | ✓          |
+| [Cloudflare Workers AI](./embedding-models/cloudflare-workers-ai.md)    | ✓      | ✓          |
+| [Together AI](./embedding-models/together-ai.md)                        | ✓      | ✓          |
+| [Mistral](./embedding-models/mistral.md)                                | ✓      | -          |
 
-
-***
+---
 
 ### Framework Integrations
 
@@ -33,12 +36,14 @@ We welcome pull requests to add new Integrations to the community.
 {% special_table %}
 {% /special_table %}
 
-|                                       | Python | JS           |
-|---------------------------------------|----|--------------|
-| [Langchain](./frameworks/langchain)   | ✓ | ✓            |
-| [LlamaIndex](./frameworks/llamaindex) | ✓ | ✓            |
-| [Braintrust](./frameworks/braintrust) | ✓ | ✓            |
-| [OpenLLMetry](./frameworks/openllmetry) | ✓ | Coming Soon! |
-| [Streamlit](./frameworks/streamlit)   | ✓ | -            |
-| [Haystack](./frameworks/haystack)    | ✓ | -            |
-| [OpenLIT](./frameworks/openlit)     | ✓ | Coming Soon! |
+|                                         | Python | JS           |
+| --------------------------------------- | ------ | ------------ |
+| [DeepEval](./frameworks/deepeval)       | ✓      | -            |
+| [Langchain](./frameworks/langchain)     | ✓      | ✓            |
+| [LlamaIndex](./frameworks/llamaindex)   | ✓      | ✓            |
+| [Braintrust](./frameworks/braintrust)   | ✓      | ✓            |
+| [OpenLLMetry](./frameworks/openllmetry) | ✓      | Coming Soon! |
+| [Streamlit](./frameworks/streamlit)     | ✓      | -            |
+| [Haystack](./frameworks/haystack)       | ✓      | -            |
+| [OpenLIT](./frameworks/openlit)         | ✓      | Coming Soon! |
+| [Anthropic MCP](./frameworks/anthropic-mcp) | ✓ | Coming Soon! |

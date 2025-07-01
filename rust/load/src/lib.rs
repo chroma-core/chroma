@@ -25,12 +25,14 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chromadb::client::{ChromaAuthMethod, ChromaClientOptions, ChromaTokenHeader};
+use chromadb::collection::GetResult;
 use chromadb::ChromaClient;
 use guacamole::combinators::*;
 use guacamole::{Guacamole, Zipf};
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 use opentelemetry::{Key, KeyValue, Value};
+use tokio::sync::Mutex as TokioMutex;
 use tower_http::trace::TraceLayer;
 use tracing::Instrument;
 use uuid::Uuid;
@@ -93,6 +95,8 @@ impl axum::response::IntoResponse for Error {
 
 #[derive(Debug)]
 pub struct Metrics {
+    /// The number of operations performed by chroma-load.
+    num_operations: Counter<u64>,
     /// The number of times an individual workload step was inhibited.  It will not be tracked as
     /// inactive or stepped.
     inhibited: Counter<u64>,
@@ -107,42 +111,98 @@ pub struct Metrics {
     query: Counter<u64>,
     /// The number of times a workload issued an upsert against a data set.
     upsert: Counter<u64>,
+    /// The number of times a workload failed.
+    failed: Counter<u64>,
+    /// The number of times a workload was rate-limited.
+    limited: Counter<u64>,
+    /// The collection is returning no results when it is susposed to return results.
+    no_results: Counter<u64>,
+    /// The latency of get operations.
+    get_latency: opentelemetry::metrics::Histogram<f64>,
+    /// The latency of query operations.
+    query_latency: opentelemetry::metrics::Histogram<f64>,
+}
+
+struct Stopwatch<'a>(
+    &'a opentelemetry::metrics::Histogram<f64>,
+    std::time::Instant,
+    Vec<KeyValue>,
+);
+
+impl<'a> Stopwatch<'a> {
+    fn new(
+        histogram: &'a opentelemetry::metrics::Histogram<f64>,
+        attributes: Vec<KeyValue>,
+    ) -> Self {
+        Self(histogram, std::time::Instant::now(), attributes)
+    }
+}
+
+impl Drop for Stopwatch<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.1.elapsed().as_micros() as f64;
+        self.0.record(elapsed, &self.2);
+    }
+}
+
+///////////////////////////////////////////// ZipfCache ////////////////////////////////////////////
+
+/// Gray's zipf algorithm is a bit slow to initialize, so we cache zipf distributions that we
+/// create with more than 1k cardinality.
+struct ZipfCache {
+    #[allow(clippy::type_complexity)]
+    cache: Mutex<Vec<(u64, f64, Zipf)>>,
+}
+
+static ZIPF_CACHE: ZipfCache = ZipfCache {
+    cache: Mutex::new(vec![]),
+};
+
+impl ZipfCache {
+    // NOTE(rescrv):  I allow this wrong convention because it's the same name as the method on
+    // Zipf.
+    #[allow(clippy::wrong_self_convention)]
+    fn from_theta(&self, cardinality: u64, theta: f64) -> Zipf {
+        let mut cache = ZIPF_CACHE.cache.lock().unwrap();
+        for (n, t, zipf) in cache.iter() {
+            if *n == cardinality && (*t - theta).abs() < 0.0001 {
+                return zipf.clone();
+            }
+        }
+        let zipf = Zipf::from_theta(cardinality, theta);
+        cache.push((cardinality, theta, zipf.clone()));
+        zipf
+    }
+}
+
+////////////////////////////////////////////// Connection /////////////////////////////////////////////
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct Connection {
+    pub url: String,
+    pub api_key: Option<String>,
+    pub database: String,
 }
 
 ////////////////////////////////////////////// client //////////////////////////////////////////////
 
-/// Instantiate a new Chroma client.  This will use the CHROMA_HOST environment variable (or
-/// http://localhost:8000 when unset) as the argument to [client_for_url].
-pub async fn client() -> ChromaClient {
-    let url = std::env::var("CHROMA_HOST").unwrap_or_else(|_| "http://localhost:8000".into());
-    client_for_url(url).await
-}
-
-/// Create a new Chroma client for the given URL.  This will use the CHROMA_TOKEN environment
-/// variable if set, or no authentication if unset.
-pub async fn client_for_url(url: String) -> ChromaClient {
-    if let Ok(auth) = std::env::var("CHROMA_TOKEN") {
-        ChromaClient::new(ChromaClientOptions {
-            url: Some(url),
-            auth: ChromaAuthMethod::TokenAuth {
-                token: auth,
-                header: ChromaTokenHeader::XChromaToken,
-            },
-            database: "hf-tiny-stories".to_string(),
-            connections: 32,
-        })
-        .await
-        .unwrap()
+/// Instantiate a new Chroma client.
+pub async fn client(connection: Connection) -> ChromaClient {
+    let auth = if let Some(api_key) = connection.api_key.clone() {
+        ChromaAuthMethod::TokenAuth {
+            token: api_key,
+            header: ChromaTokenHeader::XChromaToken,
+        }
     } else {
-        ChromaClient::new(ChromaClientOptions {
-            url: Some(url),
-            auth: ChromaAuthMethod::None,
-            database: "hf-tiny-stories".to_string(),
-            connections: 32,
-        })
-        .await
-        .unwrap()
-    }
+        ChromaAuthMethod::None
+    };
+    ChromaClient::new(ChromaClientOptions {
+        url: Some(connection.url.clone()),
+        auth,
+        database: connection.database.clone(),
+    })
+    .await
+    .unwrap()
 }
 
 ////////////////////////////////////////////// DataSet /////////////////////////////////////////////
@@ -164,6 +224,29 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
     /// requesting JSON.
     fn json(&self) -> serde_json::Value;
 
+    /// The number of documents in the data set.
+    fn cardinality(&self) -> usize;
+
+    /// The number of documents in the reference data set.
+    fn reference_cardinality(&self) -> usize {
+        self.cardinality()
+    }
+
+    // Hook to perform initialization of the data set, if necessary.
+    async fn initialize(&self, _: &ChromaClient) -> Result<(), Box<dyn std::error::Error + Send>> {
+        Ok(())
+    }
+
+    /// Get documents by key.  This is used when one workload references another.  Return None to
+    /// indicate the data set does not support referencing by index.
+    async fn get_by_key(
+        &self,
+        _: &ChromaClient,
+        _: &[&str],
+    ) -> Result<Option<GetResult>, Box<dyn std::error::Error + Send>> {
+        Ok(None)
+    }
+
     /// Get documents from the data set.
     ///
     /// The semantics of this call is that it should loosely translate to a non-vector query,
@@ -173,7 +256,7 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         client: &ChromaClient,
         gq: GetQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn std::error::Error + Send>>;
 
     /// Query documents from the data set.
     ///
@@ -184,7 +267,7 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         client: &ChromaClient,
         vq: QueryQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn std::error::Error + Send>>;
 
     /// Upsert documents into the data set.
     ///
@@ -195,7 +278,7 @@ pub trait DataSet: std::fmt::Debug + Send + Sync {
         client: &ChromaClient,
         uq: UpsertQuery,
         guac: &mut Guacamole,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<(), Box<dyn std::error::Error + Send>>;
 }
 
 /////////////////////////////////////////// Distribution ///////////////////////////////////////////
@@ -220,8 +303,8 @@ impl Distribution {
             Distribution::Constant(n) => *n,
             Distribution::Exponential(rate) => poisson(*rate)(guac).ceil() as usize,
             Distribution::Uniform(min, max) => uniform(*min, *max)(guac),
-            Distribution::Zipf(n, alpha) => {
-                let z = Zipf::from_alpha(*n, *alpha);
+            Distribution::Zipf(n, theta) => {
+                let z = ZIPF_CACHE.from_theta(*n, *theta);
                 z.next(guac) as usize
             }
         }
@@ -256,6 +339,18 @@ pub enum Skew {
     /// skewed.  Try 0.9 and add nines for skew.
     #[serde(rename = "zipf")]
     Zipf { theta: f64 },
+}
+
+impl Skew {
+    pub fn sample(&self, guac: &mut Guacamole, cardinality: usize) -> usize {
+        match self {
+            Skew::Uniform => uniform(0, cardinality)(guac),
+            Skew::Zipf { theta } => {
+                let z = ZIPF_CACHE.from_theta(cardinality as u64, *theta);
+                z.next(guac) as usize
+            }
+        }
+    }
 }
 
 impl Eq for Skew {}
@@ -339,8 +434,8 @@ impl WhereMixin {
                 let word = match skew {
                     Skew::Uniform => WORDS[uniform(0, WORDS.len() as u64)(guac) as usize],
                     Skew::Zipf { theta } => {
-                        let z = Zipf::from_alpha(WORDS.len() as u64, *theta);
-                        WORDS[z.next(guac) as usize]
+                        let z = ZIPF_CACHE.from_theta(WORDS.len() as u64, *theta);
+                        WORDS[z.next(guac) as usize % WORDS.len()]
                     }
                 };
                 serde_json::json!({"$contains": word.to_string()})
@@ -423,6 +518,28 @@ pub enum KeySelector {
     Random(Skew),
 }
 
+impl KeySelector {
+    /// Select a key from the distribution.
+    pub fn select(&self, guac: &mut Guacamole, data_set: &dyn DataSet) -> String {
+        let index = match self {
+            KeySelector::Index(i) => *i,
+            KeySelector::Random(skew) => skew.sample(guac, data_set.cardinality()),
+        };
+        format!("{:0>16}", index)
+    }
+
+    /// Select a key from the reference data set distribution.
+    /// Only supports index selection.
+    pub fn select_from_reference(&self, data_set: &dyn DataSet, offset: usize) -> String {
+        let index = match self {
+            KeySelector::Index(i) => *i,
+            _ => panic!("Only index selection is supported for reference data sets"),
+        };
+        let index = (index + offset) % data_set.reference_cardinality();
+        format!("{:0>16}", index)
+    }
+}
+
 //////////////////////////////////////////// UpsertQuery ///////////////////////////////////////////
 
 /// An upsert query specifies an upsert operation in Chroma.
@@ -445,7 +562,7 @@ pub struct UpsertQuery {
 /// The state of a workload.
 #[derive(Clone)]
 pub struct WorkloadState {
-    seq_no: u64,
+    seq_no: Arc<TokioMutex<u64>>,
     guac: Guacamole,
 }
 
@@ -487,7 +604,7 @@ pub enum Workload {
 impl Workload {
     /// A human-readable description of the workload.
     pub fn description(&self) -> String {
-        serde_json::to_string_pretty(self).unwrap()
+        serde_json::to_string(self).unwrap()
     }
 
     /// Resolve named workload references to the actual workloads they reference.
@@ -522,7 +639,8 @@ impl Workload {
         metrics: &Metrics,
         data_set: &dyn DataSet,
         state: &mut WorkloadState,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+        done: &Arc<AtomicBool>,
+    ) -> Result<(), Box<dyn std::error::Error + Send>> {
         match self {
             Workload::Nop => {
                 tracing::info!("nop");
@@ -535,6 +653,13 @@ impl Workload {
                 )))
             }
             Workload::Get(get) => {
+                let _guard = Stopwatch::new(
+                    &metrics.get_latency,
+                    vec![KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(data_set.name()),
+                    )],
+                );
                 metrics.get.add(
                     1,
                     &[KeyValue::new(
@@ -548,6 +673,13 @@ impl Workload {
                     .await
             }
             Workload::Query(query) => {
+                let _guard = Stopwatch::new(
+                    &metrics.query_latency,
+                    vec![KeyValue::new(
+                        Key::from_static_str("data_set"),
+                        Value::from(data_set.name()),
+                    )],
+                );
                 metrics.query.add(
                     1,
                     &[KeyValue::new(
@@ -575,7 +707,8 @@ impl Workload {
                     }
                     if workload.is_active() {
                         if *p >= total {
-                            return Box::pin(workload.step(client, metrics, data_set, state)).await;
+                            return Box::pin(workload.step(client, metrics, data_set, state, done))
+                                .await;
                         }
                         total -= *p;
                     }
@@ -585,9 +718,22 @@ impl Workload {
                 )))
             }
             Workload::Delay { after: _, wrap } => {
-                Box::pin(wrap.step(client, metrics, data_set, state)).await
+                Box::pin(wrap.step(client, metrics, data_set, state, done)).await
             }
             Workload::Load => {
+                let load_start_idx: u64;
+                {
+                    // Get the seq_no, increment it, and immediately drop the lock (to allow for
+                    // concurrent loads)
+                    let mut seq_no = state.seq_no.lock().await;
+                    load_start_idx = *seq_no * 100;
+                    *seq_no += 1;
+                }
+
+                if load_start_idx >= data_set.reference_cardinality() as u64 {
+                    done.store(true, std::sync::atomic::Ordering::Relaxed);
+                    return Ok(());
+                }
                 metrics.upsert.add(
                     1,
                     &[KeyValue::new(
@@ -599,7 +745,7 @@ impl Workload {
                     .upsert(
                         client,
                         UpsertQuery {
-                            key: KeySelector::Index(state.seq_no as usize),
+                            key: KeySelector::Index(load_start_idx as usize),
                             batch_size: 100,
                             // Associativity is the ratio of documents in a cluster to documents
                             // written by the workload.  It is ignored for load.
@@ -626,7 +772,7 @@ impl Workload {
                             batch_size: 100,
                             // Associativity is the ratio of documents in a cluster to documents
                             // written by the workload.  It is ignored for load.
-                            associativity: 0.0,
+                            associativity: 1.0,
                         },
                         &mut state.guac,
                     )
@@ -781,14 +927,15 @@ impl PartialEq for Throughput {
 
 ////////////////////////////////////////// RunningWorkload /////////////////////////////////////////
 
-/// A running workload is a workload that has been bound to a data set at a given throughput.  It
-/// is assigned a name, uuid, and expiration time.
+/// A running workload is a workload that has been bound to a data set and connection at a given
+/// throughput.  It is assigned a name, uuid, and expiration time.
 #[derive(Clone, Debug)]
 pub struct RunningWorkload {
     uuid: Uuid,
     name: String,
     workload: Workload,
     data_set: Arc<dyn DataSet>,
+    connection: Connection,
     expires: chrono::DateTime<chrono::FixedOffset>,
     throughput: Throughput,
 }
@@ -808,6 +955,7 @@ impl From<WorkloadSummary> for Option<RunningWorkload> {
                 name: s.name,
                 workload: s.workload,
                 data_set,
+                connection: s.connection,
                 expires: s.expires,
                 throughput: s.throughput,
             })
@@ -843,6 +991,8 @@ pub struct WorkloadSummary {
     pub workload: Workload,
     /// The data set the workload is bound to.
     pub data_set: serde_json::Value,
+    /// The connection to use.
+    pub connection: Connection,
     /// The expiration time of the workload.
     pub expires: chrono::DateTime<chrono::FixedOffset>,
     /// The throughput of the workload.
@@ -856,6 +1006,7 @@ impl From<RunningWorkload> for WorkloadSummary {
             name: r.name,
             workload: r.workload,
             data_set: r.data_set.json(),
+            connection: r.connection,
             expires: r.expires,
             throughput: r.throughput,
         }
@@ -880,8 +1031,16 @@ pub struct LoadHarness {
 
 impl LoadHarness {
     /// The status of the load harness.
+    /// This returns the list of running workloads with secrets redacted.
     pub fn status(&self) -> Vec<RunningWorkload> {
-        self.running.clone()
+        self.running
+            .iter()
+            .map(|w| {
+                let mut w = w.clone();
+                w.connection.api_key = Some("REDACTED".to_string());
+                w
+            })
+            .collect()
     }
 
     /// Start a workload on the load harness.
@@ -890,6 +1049,7 @@ impl LoadHarness {
         name: String,
         workload: Workload,
         data_set: &Arc<dyn DataSet>,
+        connection: Connection,
         expires: chrono::DateTime<chrono::FixedOffset>,
         throughput: Throughput,
     ) -> Uuid {
@@ -900,6 +1060,7 @@ impl LoadHarness {
             name,
             workload,
             data_set,
+            connection,
             expires,
             throughput,
         });
@@ -934,19 +1095,31 @@ impl LoadService {
     /// Create a new load service from the given data sets and workloads.
     pub fn new(data_sets: Vec<Arc<dyn DataSet>>, workloads: HashMap<String, Workload>) -> Self {
         let meter = global::meter("chroma");
+        let num_operations = meter.u64_counter("num_operations").build();
         let inhibited = meter.u64_counter("inhibited").build();
         let inactive = meter.u64_counter("inactive").build();
         let step = meter.u64_counter("step").build();
         let get = meter.u64_counter("get").build();
         let query = meter.u64_counter("query").build();
         let upsert = meter.u64_counter("upsert").build();
+        let failed = meter.u64_counter("failed").build();
+        let limited = meter.u64_counter("limited").build();
+        let no_results = meter.u64_counter("no_results").build();
+        let get_latency = meter.f64_histogram("get_latency").build();
+        let query_latency = meter.f64_histogram("query_latency").build();
         let metrics = Metrics {
+            num_operations,
             inhibited,
             inactive,
             step,
             get,
             query,
             upsert,
+            failed,
+            limited,
+            no_results,
+            get_latency,
+            query_latency,
         };
         LoadService {
             metrics,
@@ -1017,19 +1190,41 @@ impl LoadService {
     pub fn start(
         &self,
         name: String,
+        workload: Workload,
         data_set: String,
-        mut workload: Workload,
+        connection: Connection,
         expires: chrono::DateTime<chrono::FixedOffset>,
         throughput: Throughput,
     ) -> Result<Uuid, Error> {
         let Some(data_set) = self.data_sets().iter().find(|ds| ds.name() == data_set) else {
             return Err(Error::NotFound("data set not found".to_string()));
         };
+        let data_set = Arc::clone(data_set);
+        self.start_struct(name, workload, data_set, connection, expires, throughput)
+    }
+
+    /// Start a workload on the load service using structs rather than resolving strings.
+    pub fn start_struct(
+        &self,
+        name: String,
+        mut workload: Workload,
+        data_set: Arc<dyn DataSet>,
+        connection: Connection,
+        expires: chrono::DateTime<chrono::FixedOffset>,
+        throughput: Throughput,
+    ) -> Result<Uuid, Error> {
         workload.resolve_by_name(self.workloads())?;
         let res = {
             // SAFETY(rescrv):  Mutex poisoning.
             let mut harness = self.harness.lock().unwrap();
-            Ok(harness.start(name, workload.clone(), data_set, expires, throughput))
+            Ok(harness.start(
+                name,
+                workload.clone(),
+                &data_set,
+                connection,
+                expires,
+                throughput,
+            ))
         };
         self.save_persistent()?;
         res
@@ -1090,13 +1285,11 @@ impl LoadService {
             for declared in declared {
                 if let Entry::Vacant(entry) = running.entry(declared.uuid) {
                     tracing::info!("spawning workload {}", declared.uuid);
-                    let root = tracing::info_span!(parent: None, "workload");
                     let this = Arc::clone(self);
                     let done = Arc::new(AtomicBool::new(false));
                     let done_p = Arc::clone(&done);
                     let inhibit = Arc::clone(&self.inhibit);
                     let task = tokio::task::spawn(async move {
-                        let _enter = root.enter();
                         this.run_one_workload(done, inhibit, declared).await
                     });
                     entry.insert((done_p, task));
@@ -1111,26 +1304,20 @@ impl LoadService {
         inhibit: Arc<AtomicBool>,
         spec: RunningWorkload,
     ) {
-        let client = Arc::new(client().await);
+        let client = Arc::new(client(spec.connection.clone()).await);
         let mut guac = Guacamole::new(spec.expires.timestamp_millis() as u64);
         let mut next_op = Instant::now();
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1000);
-        let _ = tx
-            .send(tokio::spawn(async move { Ok::<(), Error>(()) }))
-            .await;
-        let reaper = tokio::spawn(async move {
-            while let Some(task) = rx.recv().await {
-                if let Err(err) = task.await.unwrap() {
-                    if !format!("{err:?}").contains("429") {
-                        tracing::error!("workload task failed: {err:?}");
-                    }
-                }
-            }
-        });
-        let mut seq_no = 0u64;
+
+        // Initialize the data set.
+        let data_set = Arc::clone(&spec.data_set);
+        if let Err(err) = data_set.initialize(&client).await {
+            tracing::error!("failed to initialize data set: {err:?}");
+            return;
+        }
+
+        let seq_no = Arc::new(TokioMutex::new(0u64));
         let start = Instant::now();
         while !done.load(std::sync::atomic::Ordering::Relaxed) {
-            seq_no += 1;
             let throughput = match spec.throughput {
                 Throughput::Constant(throughput) => throughput,
                 Throughput::Sinusoidal {
@@ -1184,8 +1371,13 @@ impl LoadService {
                 let client = Arc::clone(&client);
                 let data_set = Arc::clone(&spec.data_set);
                 let guac = Guacamole::new(any(&mut guac));
-                let mut state = WorkloadState { seq_no, guac };
+                let mut state = WorkloadState {
+                    seq_no: Arc::clone(&seq_no),
+                    guac,
+                };
+                let done = Arc::clone(&done);
                 let fut = async move {
+                    this.metrics.num_operations.add(1, &[]);
                     this.metrics.step.add(
                         1,
                         &[KeyValue::new(
@@ -1193,16 +1385,49 @@ impl LoadService {
                             Value::from(data_set.name()),
                         )],
                     );
-                    workload
-                        .step(&client, &this.metrics, &*data_set, &mut state)
+                    match workload
+                        .step(&client, &this.metrics, &*data_set, &mut state, &done)
                         .await
                         .map_err(|err| Error::FailWorkload(err.to_string()))
+                    {
+                        Ok(()) => (),
+                        Err(err) => {
+                            if format!("{err:?}").contains("invalid request: No results") {
+                                this.metrics.no_results.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                tracing::warn!("workload step no results: {err:?}");
+                            } else if !format!("{err:?}").contains("429") {
+                                this.metrics.failed.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                tracing::error!("workload step failed: {err:?}");
+                            } else {
+                                this.metrics.limited.add(
+                                    1,
+                                    &[KeyValue::new(
+                                        Key::from_static_str("data_set"),
+                                        Value::from(data_set.name()),
+                                    )],
+                                );
+                                tracing::warn!("workload step rate limited: {err:?}");
+                            }
+                        }
+                    };
                 };
-                tx.send(tokio::spawn(fut)).await.unwrap();
+                let span = tracing::info_span!(parent: None, "step", workload_uuid = %spec.uuid);
+                tokio::spawn(fut.instrument(span));
             }
         }
-        drop(tx);
-        reaper.await.unwrap();
+        tracing::info!("workload done: {}/{}", spec.name, spec.description());
     }
 
     fn load_persistent(&self) -> Result<(), Error> {
@@ -1303,10 +1528,12 @@ This is a load generator service for Chroma.  This API is intended to be self-do
 
 It consists of endpoints, data sets, and workloads.  An endpoint is an exposed HTTP endpoint for
 controlling chroma-load.  A workload specifies a mix of operations to perform.  A data set specifies
-how to perform those operations.
+how to perform those operations against a Chroma collection.
 
 # Endpoints
 GET /           this document, available in "Accept: text/plain" and "Accept: application/json".
+GET /data-sets  a list of data sets, available in "Accept: text/plain" and "Accept: application/json".
+GET /workloads  a list of workloads, available in "Accept: text/plain" and "Accept: application/json".
 POST /start     start a job, requires a JSON body with the following fields:
                 - name: the name of the job; this is a human-readable identifier and can duplicate
                 - data_set: the name of the data set to use; see / for a list of data sets.
@@ -1318,41 +1545,87 @@ POST /stop      stop a job, requires a JSON body with the following fields:
 POST /inhibit   inhibit load generation.
 POST /uninhibit stop inhibiting load generation.
 
-# Data Sets
-        "#
+At a Glance
+-----------
+"#
+            .to_string();
+            if state.load.is_inhibited() {
+                output.push_str("Load generation is inhibited.\n");
+            } else {
+                for running in state.load.status() {
+                    output.push_str(&format!("## {}\n", running.name));
+                    output.push_str(&format!(
+                        "Workload: {}\n",
+                        running.workload.description().trim()
+                    ));
+                    output.push_str(&format!("Data Set: {}\n", running.data_set));
+                    output.push_str(&format!("Expires: {}\n", running.expires));
+                    output.push_str(&format!("Target Throughput: {}\n", running.throughput));
+                }
+                if state.load.status().is_empty() {
+                    output.push_str("No workloads are running.\n");
+                }
+            }
+            output.into_response()
+        }
+        Some(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
+
+async fn data_sets(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
+    match headers.get(ACCEPT).map(|x| x.as_bytes()) {
+        Some(b"application/json") => {
+            let data_sets = state
+                .load
+                .data_sets()
+                .iter()
+                .map(|x| rest::Description::from(&**x))
+                .collect::<Vec<_>>();
+            Json(data_sets).into_response()
+        }
+        Some(b"*/*") | Some(b"text/plain") | None => {
+            let mut output = r#"data sets
+=========
+"#
             .to_string();
             for data_set in state.load.data_sets().iter() {
-                output.push_str(&format!("\n## {}\n", data_set.name()));
-                output.push_str(data_set.description().trim());
-                output.push('\n');
+                output.push_str(&format!(
+                    "{}: {}\n",
+                    data_set.name(),
+                    data_set.description().trim()
+                ));
             }
             if state.load.data_sets().is_empty() {
                 output.push_str("\nNo data sets are available.\n");
             }
+            output.into_response()
+        }
+        Some(_) => StatusCode::BAD_REQUEST.into_response(),
+    }
+}
 
-            output.push_str("\n# Workloads\n");
+async fn workloads(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
+    match headers.get(ACCEPT).map(|x| x.as_bytes()) {
+        Some(b"application/json") => {
+            let workloads = state
+                .load
+                .workloads()
+                .iter()
+                // SAFETY(rescrv): x.1 is always serializable to JSON.
+                .map(|x| serde_json::to_value(x.1).unwrap())
+                .collect::<Vec<_>>();
+            Json(workloads).into_response()
+        }
+        Some(b"*/*") | Some(b"text/plain") | None => {
+            let mut output = r#"workloads
+=========
+"#
+            .to_string();
             for (name, workload) in state.load.workloads().iter() {
-                output.push_str(&format!("\n## {}\n", name));
-                output.push_str(workload.description().trim());
-                output.push('\n');
+                output.push_str(&format!("{}: {}\n", name, workload.description().trim()));
             }
             if state.load.workloads().is_empty() {
                 output.push_str("\nNo workloads are available.\n");
-            }
-            output.push_str("\n# At a Glance\n");
-            if state.load.is_inhibited() {
-                output.push_str("\nLoad generation is inhibited.\n");
-            } else {
-                for running in state.load.status() {
-                    output.push_str(&format!("\n## {}\n", running.name));
-                    output.push_str(&format!("Workload: {:?}\n", running.workload));
-                    output.push_str(&format!("Data Set: {}\n", running.data_set));
-                    output.push_str(&format!("Expires: {}\n", running.expires));
-                    output.push_str(&format!("Throughput: {}\n", running.throughput));
-                }
-                if state.load.status().is_empty() {
-                    output.push_str("\nNo workloads are running.\n");
-                }
             }
             output.into_response()
         }
@@ -1366,14 +1639,41 @@ async fn start(
 ) -> Result<String, Error> {
     let expires = chrono::DateTime::parse_from_rfc3339(&req.expires)
         .map_err(|err| Error::InvalidRequest(format!("could not parse rfc3339: {err:?}")))?;
-    let uuid = state.load.start(
-        req.name,
-        req.data_set,
-        req.workload,
-        expires,
-        req.throughput,
-    )?;
-    Ok(uuid.to_string() + "\n")
+    match (req.data_set, req.custom_data_set) {
+        (Some(_), Some(_)) => Err(Error::InvalidRequest(
+            "provide at most one of data_set and custom_data_set".to_string(),
+        )),
+        (None, None) => Err(Error::InvalidRequest(
+            "provide at least one of data_set and custom_data_set".to_string(),
+        )),
+        (Some(data_set), None) => {
+            let uuid = state.load.start(
+                req.name,
+                req.workload,
+                data_set,
+                req.connection,
+                expires,
+                req.throughput,
+            )?;
+            Ok(uuid.to_string() + "\n")
+        }
+        (None, Some(custom_data_set)) => {
+            let Some(data_set) = data_sets::from_json(&custom_data_set) else {
+                return Err(Error::InvalidRequest(
+                    "custom data set returned nothing".to_string(),
+                ));
+            };
+            let uuid = state.load.start_struct(
+                req.name,
+                req.workload,
+                data_set,
+                req.connection,
+                expires,
+                req.throughput,
+            )?;
+            Ok(uuid.to_string() + "\n")
+        }
+    }
 }
 
 async fn stop(
@@ -1413,6 +1713,8 @@ pub async fn entrypoint() {
     };
     let app = Router::new()
         .route("/", get(readme))
+        .route("/data-sets", get(data_sets))
+        .route("/workloads", get(workloads))
         .route("/start", post(start))
         .route("/stop", post(stop))
         .route("/inhibit", post(inhibit))
@@ -1465,8 +1767,13 @@ mod tests {
         let load = LoadService::default();
         load.start(
             "foo".to_string(),
-            "nop".to_string(),
             Workload::ByName("get-no-filter".to_string()),
+            "nop".to_string(),
+            Connection {
+                url: "http://localhost:8000".to_string(),
+                api_key: None,
+                database: "".to_string(),
+            },
             (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),
             Throughput::Constant(1.0),
         )
@@ -1572,8 +1879,13 @@ mod tests {
             .unwrap();
         load.start(
             "foo".to_string(),
-            "nop".to_string(),
             Workload::ByName("get-no-filter".to_string()),
+            "nop".to_string(),
+            Connection {
+                url: "http://localhost:8000".to_string(),
+                api_key: None,
+                database: "".to_string(),
+            },
             (chrono::Utc::now() + chrono::Duration::seconds(10)).into(),
             Throughput::Constant(1.0),
         )
@@ -1602,5 +1914,22 @@ mod tests {
             assert_eq!(expected, harness.running[0]);
         }
         std::fs::remove_file(TEST_PATH).ok();
+    }
+
+    #[test]
+    fn key_selector() {
+        let key = KeySelector::Index(42);
+        let mut guac = Guacamole::new(0);
+        let data_set = data_sets::from_json(&serde_json::json!({
+            "tiny_stories": {
+                "name": "stories1",
+                "model": data_sets::ALL_MINILM_L6_V2,
+                "size": 100_000,
+            }
+        }));
+        assert_eq!(
+            "0000000000000042",
+            key.select(&mut guac, &*data_set.unwrap())
+        );
     }
 }

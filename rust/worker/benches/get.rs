@@ -2,8 +2,8 @@
 mod load;
 
 use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
-use chroma_config::Configurable;
-use chroma_segment::test::TestSegment;
+use chroma_config::{registry::Registry, Configurable};
+use chroma_segment::test::TestDistributedSegment;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use criterion::{criterion_group, criterion_main, Criterion};
 use load::{
@@ -14,7 +14,7 @@ use load::{
 use worker::{config::RootConfig, execution::orchestration::get::GetOrchestrator};
 
 fn trivial_get(
-    test_segments: TestSegment,
+    test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -32,7 +32,7 @@ fn trivial_get(
 }
 
 fn get_false_filter(
-    test_segments: TestSegment,
+    test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -50,7 +50,7 @@ fn get_false_filter(
 }
 
 fn get_true_filter(
-    test_segments: TestSegment,
+    test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -68,7 +68,7 @@ fn get_true_filter(
 }
 
 fn get_true_filter_limit(
-    test_segments: TestSegment,
+    test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -86,7 +86,7 @@ fn get_true_filter_limit(
 }
 
 fn get_true_filter_limit_projection(
-    test_segments: TestSegment,
+    test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> GetOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
@@ -111,6 +111,7 @@ async fn bench_routine(input: (System, GetOrchestrator, Vec<String>)) {
         .expect("Orchestrator should not fail");
     assert_eq!(
         output
+            .result
             .records
             .into_iter()
             .map(|record| record.id)
@@ -125,9 +126,11 @@ fn bench_get(criterion: &mut Criterion) {
 
     let config = RootConfig::default();
     let system = System::default();
+    let registry = Registry::new();
     let dispatcher = runtime
         .block_on(Dispatcher::try_from_config(
             &config.query_service.dispatcher,
+            &registry,
         ))
         .expect("Should be able to initialize dispatcher");
     let dispatcher_handle = runtime.block_on(async { system.start_component(dispatcher) });
@@ -135,35 +138,35 @@ fn bench_get(criterion: &mut Criterion) {
     let trivial_get_setup = || {
         (
             system.clone(),
-            trivial_get(test_segments.clone(), dispatcher_handle.clone()),
+            trivial_get(&test_segments, dispatcher_handle.clone()),
             (0..100).map(|id| id.to_string()).collect(),
         )
     };
     let get_false_filter_setup = || {
         (
             system.clone(),
-            get_false_filter(test_segments.clone(), dispatcher_handle.clone()),
+            get_false_filter(&test_segments, dispatcher_handle.clone()),
             Vec::new(),
         )
     };
     let get_true_filter_setup = || {
         (
             system.clone(),
-            get_true_filter(test_segments.clone(), dispatcher_handle.clone()),
+            get_true_filter(&test_segments, dispatcher_handle.clone()),
             (0..100).map(|id| id.to_string()).collect(),
         )
     };
     let get_true_filter_limit_setup = || {
         (
             system.clone(),
-            get_true_filter_limit(test_segments.clone(), dispatcher_handle.clone()),
+            get_true_filter_limit(&test_segments, dispatcher_handle.clone()),
             (100..200).map(|id| id.to_string()).collect(),
         )
     };
     let get_true_filter_limit_projection_setup = || {
         (
             system.clone(),
-            get_true_filter_limit_projection(test_segments.clone(), dispatcher_handle.clone()),
+            get_true_filter_limit_projection(&test_segments, dispatcher_handle.clone()),
             (100..200).map(|id| id.to_string()).collect(),
         )
     };

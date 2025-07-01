@@ -37,10 +37,6 @@ Using the `$eq` operator is equivalent to using the `where` filter.
 }
 ```
 
-{% Banner type="note" %}
-Where filters only search embeddings where the key exists. If you search `collection.get(where={"version": {"$ne": 1}})`. Metadata that does not have the key `version` will not be returned.
-{% /Banner %}
-
 #### Using logical operators
 
 You can also use the logical operators `$and` and `$or` to combine multiple filters.
@@ -100,7 +96,7 @@ An `$in` operator will return results where the metadata attribute is part of a 
 }
 ```
 
-An `$nin` operator will return results where the metadata attribute is not part of a provided list:
+An `$nin` operator will return results where the metadata attribute is not part of a provided list (or the attribute's key is not present):
 
 ```json
 {

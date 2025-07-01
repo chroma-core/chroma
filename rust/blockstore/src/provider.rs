@@ -1,3 +1,4 @@
+use crate::arrow::provider::BlockfileReaderOptions;
 use crate::arrow::root::RootReader;
 use crate::BlockfileWriterOptions;
 
@@ -14,6 +15,7 @@ use super::types::BlockfileWriter;
 use super::{BlockfileReader, Key, Value};
 use async_trait::async_trait;
 use chroma_cache::PersistentCache;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
@@ -71,11 +73,15 @@ impl BlockfileProvider {
         V: Value + Readable<'new> + ArrowReadableValue<'new> + Sync + 'new,
     >(
         &self,
-        id: &uuid::Uuid,
+        options: BlockfileReaderOptions,
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.read::<K, V>(id),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.read::<K, V>(id).await,
+            BlockfileProvider::HashMapBlockfileProvider(provider) => {
+                provider.read::<K, V>(options.id())
+            }
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                provider.read::<K, V>(options).await
+            }
         }
     }
 
@@ -95,10 +101,24 @@ impl BlockfileProvider {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(provider) => provider.clear(),
             BlockfileProvider::ArrowBlockfileProvider(provider) => {
-                provider.clear().await.map_err(|e| Box::new(e) as _)?
+                provider.clear().await.map_err(|e| e.boxed())?
             }
         };
         Ok(())
+    }
+
+    pub async fn prefetch(
+        &self,
+        id: &uuid::Uuid,
+        prefix_path: &str,
+    ) -> Result<usize, Box<dyn ChromaError>> {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(_) => unimplemented!(),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider
+                .prefetch(id, prefix_path)
+                .await
+                .map_err(|e| Box::new(e) as _),
+        }
     }
 }
 
@@ -108,15 +128,16 @@ impl BlockfileProvider {
 impl Configurable<(BlockfileProviderConfig, Storage)> for BlockfileProvider {
     async fn try_from_config(
         config: &(BlockfileProviderConfig, Storage),
+        registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (blockfile_config, storage) = config;
         match blockfile_config {
             BlockfileProviderConfig::Arrow(blockfile_config) => {
                 Ok(BlockfileProvider::ArrowBlockfileProvider(
-                    ArrowBlockfileProvider::try_from_config(&(
-                        *blockfile_config.clone(),
-                        storage.clone(),
-                    ))
+                    ArrowBlockfileProvider::try_from_config(
+                        &(*blockfile_config.clone(), storage.clone()),
+                        registry,
+                    )
                     .await?,
                 ))
             }

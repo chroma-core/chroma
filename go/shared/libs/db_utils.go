@@ -8,6 +8,12 @@ import (
 )
 
 func NewPgConnection(ctx context.Context, config *configuration.LogServiceConfiguration) (conn *pgxpool.Pool, err error) {
-	conn, err = pgxpool.New(ctx, config.DATABASE_URL)
+	var conf *pgxpool.Config
+	conf, err = pgxpool.ParseConfig(config.DATABASE_URL)
+	if err != nil {
+	    return
+	}
+	conf.MaxConns = config.MAX_CONNS
+	conn, err = pgxpool.NewWithConfig(ctx, conf)
 	return
 }

@@ -4,7 +4,6 @@ export interface AppPage {
   id: string;
   name: string;
   slug?: string;
-  path?: string;
 }
 
 export interface AppSection {
@@ -17,8 +16,8 @@ export interface AppSection {
   pages?: AppPage[];
   generatePages?: boolean;
   subsections?: AppSection[];
-  comingSoon?: boolean;
-  override?: string;
+  tag?: string;
+  disable?: boolean;
 }
 
 export const getAllPages = (sidebarConfig: AppSection[], sectionId: string) => {
@@ -31,10 +30,10 @@ export const getAllPages = (sidebarConfig: AppSection[], sectionId: string) => {
 
   pages.push(
     ...(section.pages?.map((page) => {
+      const pageSlug = `${section.id}/${page.id}`;
       return {
         ...page,
-        slug: `${section.id}/${page.id}`,
-        path: `./${page.slug}`,
+        slug: pageSlug,
       };
     }) || []),
   );
@@ -42,16 +41,21 @@ export const getAllPages = (sidebarConfig: AppSection[], sectionId: string) => {
   section.subsections?.forEach((subsection) => {
     pages.push(
       ...(subsection.pages?.map((page) => {
+        const pageSlug = `${section.id}/${subsection.id}/${page.id}`;
         return {
           ...page,
-          slug: `${section.id}/${subsection.id}/${page.id}`,
-          path: `../${subsection.id}/${page.id}`,
+          slug: pageSlug,
         };
       }) || []),
     );
   });
 
   return pages;
+};
+
+// Helper function to convert slug to path
+export const slugToPath = (slug: string): string => {
+  return `/${slug}`;
 };
 
 export const getPagePrevNext = (

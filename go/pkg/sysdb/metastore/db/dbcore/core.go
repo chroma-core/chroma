@@ -224,7 +224,7 @@ func GetDBConfigForTesting() DBConfig {
 	dbName := "chroma"
 	dbUsername := "chroma"
 	dbPassword := "chroma"
-	container, _ = postgres2.RunContainer(context.Background(),
+	container, err := postgres2.RunContainer(context.Background(),
 		testcontainers.WithImage("docker.io/postgres:15.2-alpine"),
 		postgres2.WithDatabase(dbName),
 		postgres2.WithUsername(dbUsername),
@@ -234,6 +234,10 @@ func GetDBConfigForTesting() DBConfig {
 				WithOccurrence(2).
 				WithStartupTimeout(5*time.Second)),
 	)
+
+	if err != nil {
+		panic(err)
+	}
 
 	var ports nat.PortMap
 	ports, _ = container.Ports(context.Background())

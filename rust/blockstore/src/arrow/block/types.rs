@@ -203,75 +203,33 @@ impl Block {
         }
     }
 
-    /// Returns the largest index where `prefixes[index] == prefix` or None if the provided prefix does not exist in the block.
-    #[inline]
-    fn find_largest_index_of_prefix<'me, K: ArrowReadableKey<'me>>(
-        &'me self,
-        prefix: &str,
-    ) -> Option<usize> {
-        // By design, will never find an exact match (comparator never evaluates to Equal). This finds the index of the first element that is greater than the prefix. If no element is greater, it returns the length of the array.
-        let result = self
-            .binary_search_by::<K, _>(|(p, _)| match p.cmp(prefix) {
-                Ordering::Less => Ordering::Less,
-                Ordering::Equal => Ordering::Less,
-                Ordering::Greater => Ordering::Greater,
-            })
-            .expect_err("Never returns Ok because the comparator never evaluates to Equal.");
-
-        if result == 0 {
-            // The first element is greater than the target prefix, so the target prefix does not exist in the block. (Or the block is empty.)
-            return None;
-        }
-
-        let prefix_array = self
-            .data
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-
-        // `result` is the first index where the prefix is larger than the input (or the length of the array) so we want one element before this.
-        match prefix_array.value(result - 1).cmp(prefix) {
-            // We're at the end of the array, so the prefix does not exist in the block (all values are less than the prefix)
-            Ordering::Less => None,
-            // The prefix exists
-            Ordering::Equal => Some(result - 1),
-            // This is impossible
-            Ordering::Greater => None,
-        }
-    }
-
-    /// Returns the smallest index where `prefixes[index] == prefix` or None if the provided prefix does not exist in the block.
+    /// Returns the smallest index where `prefixes[index] >= prefix`. If such index does not exist `prefixes.len()` will be returned.
     #[inline]
     fn find_smallest_index_of_prefix<'me, K: ArrowReadableKey<'me>>(
         &'me self,
         prefix: &str,
-    ) -> Option<usize> {
-        let result = self
-            .binary_search_by::<K, _>(|(p, _)| match p.cmp(prefix) {
-                Ordering::Less => Ordering::Less,
-                Ordering::Equal => Ordering::Greater,
-                Ordering::Greater => Ordering::Greater,
-            })
-            .expect_err("Never returns Ok because the comparator never evaluates to Equal.");
+    ) -> usize {
+        self.binary_search_by::<K, _>(|(p, _)| match p.cmp(prefix) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Equal => Ordering::Greater,
+            Ordering::Greater => Ordering::Greater,
+        })
+        .expect_err("Never returns Ok because the comparator never evaluates to Equal.")
+    }
 
-        let prefix_array = self
-            .data
-            .column(0)
-            .as_any()
-            .downcast_ref::<StringArray>()
-            .unwrap();
-
-        if result == self.len() {
-            // The target prefix is greater than all elements in the block.
-            return None;
-        }
-
-        match prefix_array.value(result).cmp(prefix) {
-            Ordering::Greater => None,
-            Ordering::Less => None,
-            Ordering::Equal => Some(result),
-        }
+    /// Returns the smallest index where `prefixes[index] > prefix`. If such index does not exist `prefixes.len()` will be returned.
+    #[inline]
+    fn find_smallest_index_of_next_prefix<'me, K: ArrowReadableKey<'me>>(
+        &'me self,
+        prefix: &str,
+    ) -> usize {
+        // By design, will never find an exact match (comparator never evaluates to Equal). This finds the index of the first element that is greater than the prefix. If no element is greater, it returns the length of the array.
+        self.binary_search_by::<K, _>(|(p, _)| match p.cmp(prefix) {
+            Ordering::Less => Ordering::Less,
+            Ordering::Equal => Ordering::Less,
+            Ordering::Greater => Ordering::Greater,
+        })
+        .expect_err("Never returns Ok because the comparator never evaluates to Equal.")
     }
 
     /// Finds the partition point of the prefix and key.
@@ -347,9 +305,12 @@ impl Block {
     }
 
     /// Get all the values for a given prefix & key range in the block
-    /// ### Panics
-    /// - If the underlying data types are not the same as the types specified in the function signature
-    /// - If at least one end of the prefix range is excluded (currently unsupported)
+    ///
+    /// The prefix and key of the returning value must be contained by the prefix range and key range respectively
+    ///
+    /// ### Example
+    /// If we have block: [(p0, k0, v0), (p0, k1, v1), (p1, k0, v2), (p1, k1, v3), (p2, k1, v4)]
+    /// Then block.get_range(p0..p2, k1..) will return [(p0, k1, v1), (p1, k1, v3)]
     pub fn get_range<
         'prefix,
         'me,
@@ -361,61 +322,92 @@ impl Block {
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> impl Iterator<Item = (K, V)> + 'me
+    ) -> impl Iterator<Item = (&'me str, K, V)> + 'me
     where
         PrefixRange: RangeBounds<&'prefix str>,
         KeyRange: RangeBounds<K>,
     {
-        let start_index = match prefix_range.start_bound() {
-            Bound::Included(prefix) => match key_range.start_bound() {
-                Bound::Included(key) => self.binary_search_prefix_key(prefix, key),
-                Bound::Excluded(key) => {
-                    let index = self.binary_search_prefix_key(prefix, key);
-                    if self.match_prefix_key_at_index(prefix, key, index) {
-                        index + 1
-                    } else {
-                        index
-                    }
-                }
-                Bound::Unbounded => match self.find_smallest_index_of_prefix::<K>(prefix) {
-                    Some(first_index_of_prefix) => first_index_of_prefix,
-                    None => self.len(), // prefix does not exist in the block so we shouldn't return anything
-                },
-            },
-            Bound::Excluded(_) => {
-                unimplemented!("Excluded prefix range is not currently supported")
-            }
-            Bound::Unbounded => 0,
-        };
+        let mut index_ranges = Vec::new();
 
-        let end_index = match prefix_range.end_bound() {
-            Bound::Included(prefix) => match key_range.end_bound() {
-                Bound::Included(key) => {
-                    let index = self.binary_search_prefix_key(prefix, key);
-                    if self.match_prefix_key_at_index(prefix, key, index) {
-                        index + 1
-                    } else {
-                        index
-                    }
-                }
-                Bound::Excluded(key) => self.binary_search_prefix_key::<K>(prefix, key),
-                Bound::Unbounded => match self.find_largest_index_of_prefix::<K>(prefix) {
-                    Some(last_index_of_prefix) => last_index_of_prefix + 1, // (add 1 because end_index is exclusive below)
-                    None => start_index, // prefix does not exist in the block so we shouldn't return anything
-                },
-            },
-            Bound::Excluded(_) => {
-                unimplemented!("Excluded prefix range is not currently supported")
-            }
-            Bound::Unbounded => self.len(),
-        };
+        let prefix_array = self
+            .data
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
 
-        (start_index..end_index).map(move |index| {
+        let prefix_key_val_getter = |index| {
             (
+                prefix_array.value(index),
                 K::get(self.data.column(1), index),
                 V::get(self.data.column(2), index),
             )
-        })
+        };
+
+        let mut cursor_prefix_index = match prefix_range.start_bound() {
+            Bound::Included(prefix) => self.find_smallest_index_of_prefix::<K>(prefix),
+            Bound::Excluded(prefix) => self.find_smallest_index_of_next_prefix::<K>(prefix),
+            Bound::Unbounded => 0,
+        };
+
+        if let (Bound::Unbounded, Bound::Unbounded) =
+            (key_range.start_bound(), key_range.end_bound())
+        {
+            let final_prefix_index = match prefix_range.end_bound() {
+                Bound::Included(prefix) => self.find_smallest_index_of_next_prefix::<K>(prefix),
+                Bound::Excluded(prefix) => self.find_smallest_index_of_prefix::<K>(prefix),
+                Bound::Unbounded => self.len(),
+            };
+            index_ranges.push(cursor_prefix_index..final_prefix_index);
+            return index_ranges
+                .into_iter()
+                .flatten()
+                .map(prefix_key_val_getter);
+        }
+
+        while cursor_prefix_index < self.len() {
+            let cursor_prefix = prefix_array.value(cursor_prefix_index);
+            if !prefix_range.contains(&cursor_prefix) {
+                break;
+            }
+            let next_cursor_prefix_index =
+                self.find_smallest_index_of_next_prefix::<K>(cursor_prefix);
+
+            let cursor_prefix_range_start_index = match key_range.start_bound() {
+                Bound::Included(start_key) => {
+                    self.binary_search_prefix_key(cursor_prefix, start_key)
+                }
+                Bound::Excluded(start_key) => {
+                    let index = self.binary_search_prefix_key(cursor_prefix, start_key);
+                    index + self.match_prefix_key_at_index(cursor_prefix, start_key, index) as usize
+                }
+                Bound::Unbounded => cursor_prefix_index,
+            };
+
+            let cursor_prefix_range_end_index = match key_range.end_bound() {
+                Bound::Included(end_key) => {
+                    let index = self.binary_search_prefix_key(cursor_prefix, end_key);
+                    index + self.match_prefix_key_at_index(cursor_prefix, end_key, index) as usize
+                }
+                Bound::Excluded(end_key) => {
+                    self.binary_search_prefix_key::<K>(cursor_prefix, end_key)
+                }
+                Bound::Unbounded => next_cursor_prefix_index,
+            };
+
+            let cursor_prefix_range =
+                cursor_prefix_range_start_index..cursor_prefix_range_end_index;
+            if !cursor_prefix_range.is_empty() {
+                index_ranges.push(cursor_prefix_range);
+            }
+
+            cursor_prefix_index = next_cursor_prefix_index;
+        }
+
+        index_ranges
+            .into_iter()
+            .flatten()
+            .map(prefix_key_val_getter)
     }
 
     /*

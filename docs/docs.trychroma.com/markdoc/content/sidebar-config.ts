@@ -29,6 +29,14 @@ const sidebarConfig: AppSection[] = [
             name: "Getting Started",
           },
           {
+            id: 'architecture',
+            name: "Architecture",
+          },
+          {
+            id: "data-model",
+            name: "Data Model",
+          },
+          {
             id: "roadmap",
             name: "Roadmap",
           },
@@ -39,6 +47,14 @@ const sidebarConfig: AppSection[] = [
           {
             id: "telemetry",
             name: "Telemetry",
+          },
+          {
+            id: "migration",
+            name: "Migration",
+          },
+          {
+            id: "troubleshooting",
+            name: "Troubleshooting",
           },
           {
             id: "about",
@@ -54,6 +70,7 @@ const sidebarConfig: AppSection[] = [
           { id: "persistent-client", name: "Persistent Client" },
           { id: "client-server", name: "Client-Server Mode" },
           { id: "python-http-client", name: "Python HTTP-Only Client" },
+          { id: "cloud-client", name: "Cloud Client" },
         ],
       },
       {
@@ -73,7 +90,7 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "query-and-get", name: "Query And Get" },
           { id: "metadata-filtering", name: "Metadata Filtering" },
-          { id: "full-text-search", name: "Full Text Search" },
+          { id: "full-text-search", name: "Full Text Search and Regex" },
         ],
       },
       {
@@ -90,7 +107,8 @@ const sidebarConfig: AppSection[] = [
     id: "cloud",
     name: "Chroma Cloud",
     icon: CloudIcon,
-    override: "https://trychroma.com/signup",
+    tag: "",
+    pages: [{ id: "getting-started", name: "Getting Started" }, { id: "pricing", name: "Pricing" }, { id: "quotas-limits", name: "Quotas & Limits" }],
   },
   {
     id: "production",
@@ -126,9 +144,7 @@ const sidebarConfig: AppSection[] = [
         name: "Administration",
         pages: [
           { id: "performance", name: "Performance" },
-          { id: "auth", name: "Auth" },
           { id: "observability", name: "Observability" },
-          { id: "migration", name: "Migration" },
         ],
       },
     ],
@@ -155,11 +171,25 @@ const sidebarConfig: AppSection[] = [
   {
     id: "cli",
     name: "CLI",
-    default: "install-and-run",
+    default: "install",
     icon: SquareTerminalIcon,
-    pages: [
-      { id: "install-and-run", name: "Install and run" },
-      { id: "vacuum", name: "Vacuum" },
+    pages: [{ id: "install", name: "Installing the CLI" }],
+    subsections: [
+      {
+        id: "commands",
+        name: "Commands",
+        pages: [
+          { id: "browse", name: "Browse Collections" },
+          { id: "copy", name: "Copy Collections" },
+          { id: "db", name: "DB Management" },
+          { id: "install", name: "Install Sample Apps" },
+          { id: "login", name: "Login" },
+          { id: "profile", name: "Profile Management" },
+          { id: "run", name: "Run a Chroma Server" },
+          { id: "update", name: "Update the CLI" },
+          { id: "vacuum", name: "Vacuum" },
+        ],
+      },
     ],
   },
   {
@@ -186,12 +216,6 @@ const sidebarConfig: AppSection[] = [
         ],
       },
     ],
-  },
-  {
-    id: "guides-and-examples",
-    name: "Guides & Examples",
-    icon: GraduationCap,
-    comingSoon: true,
   },
 ];
 

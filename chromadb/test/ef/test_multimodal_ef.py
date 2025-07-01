@@ -1,3 +1,4 @@
+import os
 from typing import Generator, cast
 import numpy as np
 import pytest
@@ -11,6 +12,7 @@ from chromadb.api.types import (
 )
 from chromadb.test.property.strategies import hashing_embedding_function
 from chromadb.test.property.invariants import _exact_distances
+from chromadb.config import Settings
 
 
 # A 'standard' multimodal embedding function, which converts inputs to strings
@@ -40,7 +42,15 @@ def random_document() -> Document:
 def multimodal_collection(
     default_ef: EmbeddingFunction[Embeddable] = hashing_multimodal_ef(),
 ) -> Generator[chromadb.Collection, None, None]:
-    client = chromadb.Client()
+    settings = Settings()
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        host = os.environ.get("CHROMA_SERVER_HOST", "localhost")
+        port = int(os.environ.get("CHROMA_SERVER_HTTP_PORT", 0))
+        settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
+        settings.chroma_server_http_port = port
+        settings.chroma_server_host = host
+
+    client = chromadb.Client(settings=settings)
     collection = client.create_collection(
         name="multimodal_collection", embedding_function=default_ef
     )
@@ -84,7 +94,7 @@ def test_multimodal(
 
     # get() should return all the documents and images
     # ids corresponding to images should not have documents
-    get_result = multimodal_collection.get(include=["documents"])  # type: ignore[list-item]
+    get_result = multimodal_collection.get(include=["documents"])
     assert len(get_result["ids"]) == len(document_ids) + len(image_ids)
     for i, id in enumerate(get_result["ids"]):
         assert id in document_ids or id in image_ids
@@ -126,14 +136,14 @@ def test_multimodal(
 
     # Query with images
     query_result = multimodal_collection.query(
-        query_images=[query_image], n_results=n_query_results, include=["documents"]  # type: ignore[list-item]
+        query_images=[query_image], n_results=n_query_results, include=["documents"]
     )
 
     assert query_result["ids"][0] == nearest_image_neighbor_ids
 
     # Query with documents
     query_result = multimodal_collection.query(
-        query_texts=[query_document], n_results=n_query_results, include=["documents"]  # type: ignore[list-item]
+        query_texts=[query_document], n_results=n_query_results, include=["documents"]
     )
 
     assert query_result["ids"][0] == nearest_document_neighbor_ids
@@ -154,6 +164,6 @@ def test_multimodal_update_with_image(
 
     multimodal_collection.update(ids=id, images=image)
 
-    get_result = multimodal_collection.get(ids=id, include=["documents"])  # type: ignore[list-item]
+    get_result = multimodal_collection.get(ids=id, include=["documents"])
     assert get_result["documents"] is not None
     assert get_result["documents"][0] is None

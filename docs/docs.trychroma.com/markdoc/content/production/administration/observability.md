@@ -15,12 +15,11 @@ Chroma currently only exports OpenTelemetry [traces](https://opentelemetry.io/do
 
 ### Configuration
 
-Tracing is configured with four environment variables:
+Tracing is configured with three environment variables:
 
-- `CHROMA_OTEL_COLLECTION_ENDPOINT`: where to send observability data. Example: `api.honeycomb.com`.
-- `CHROMA_OTEL_SERVICE_NAME`: Service name for OTel traces. Default: `chromadb`.
-- `CHROMA_OTEL_COLLECTION_HEADERS`: Headers to use when sending observability data. Often used to send API and app keys. For example `{"x-honeycomb-team": "abc"}`.
-- `CHROMA_OTEL_GRANULARITY`: A value from the [OpenTelemetryGranularity enum](https://github.com/chroma-core/chroma/tree/main/chromadb/telemetry/opentelemetry/__init__.py). Specifies how detailed tracing should be.
+- `CHROMA_OPEN_TELEMETRY__ENDPOINT`: where to send observability data. Example: `api.honeycomb.com`.
+- `CHROMA_OPEN_TELEMETRY__SERVICE_NAME`: Service name for OTel traces. Default: `chromadb`.
+- `OTEL_EXPORTER_OTLP_HEADERS`: Headers to use when sending observability data. Often used to send API and app keys. For example `{"x-honeycomb-team": "abc"}`.
 
 We also have dedicated observability guides for various deployments:
 * [Docker](../containers/docker#observability-with-docker)

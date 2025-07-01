@@ -150,7 +150,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             result = cur.fetchone()
 
             if result:
-                self._max_seq_id = self._db.decode_seq_id(result[0])
+                self._max_seq_id = result[0]
             elif self._index_exists():
                 # Migrate the max_seq_id from the legacy field in the pickled file to the SQLite database
                 q = (
@@ -159,9 +159,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                     .columns("segment_id", "seq_id")
                     .insert(
                         ParameterValue(self._db.uuid_to_db(self._id)),
-                        ParameterValue(
-                            self._db.encode_seq_id(self._persist_data.max_seq_id)
-                        ),
+                        ParameterValue(self._persist_data.max_seq_id),
                     )
                 )
                 sql, params = get_sql(q)
@@ -264,7 +262,7 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
                 .columns("segment_id", "seq_id")
                 .insert(
                     ParameterValue(self._db.uuid_to_db(self._id)),
-                    ParameterValue(self._db.encode_seq_id(self._max_seq_id)),
+                    ParameterValue(self._max_seq_id),
                 )
             )
             sql, params = get_sql(q)

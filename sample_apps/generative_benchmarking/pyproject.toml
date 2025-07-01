@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "generative-benchmarking"
+version = "0.1.0"
+description = "Chroma Generative Benchmarking Notebooks"
+package-mode=false
+
+[tool.poetry.dependencies]
+python = "^3.9.6"
+chromadb = "*"
+pandas = "*"
+numpy = "*"
+tqdm = "*"
+matplotlib = "*"
+datasets = "*"
+sentence-transformers = "*"
+voyageai = "*"
+openai = "*"
+anthropic = "*"
+pytrec_eval = "*"
+notebook = "*"
+dotenv = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -14,6 +14,12 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 	}
 	collections := make([]*model.Collection, 0, len(collectionAndMetadataList))
 	for _, collectionAndMetadata := range collectionAndMetadataList {
+		var rootCollectionID *types.UniqueID
+		if collectionAndMetadata.Collection.RootCollectionId != nil {
+			if id, err := types.Parse(*collectionAndMetadata.Collection.RootCollectionId); err == nil {
+				rootCollectionID = &id
+			}
+		}
 		collection := &model.Collection{
 			ID:                         types.MustParse(collectionAndMetadata.Collection.ID),
 			Name:                       *collectionAndMetadata.Collection.Name,
@@ -25,6 +31,15 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 			LogPosition:                collectionAndMetadata.Collection.LogPosition,
 			Version:                    collectionAndMetadata.Collection.Version,
 			TotalRecordsPostCompaction: collectionAndMetadata.Collection.TotalRecordsPostCompaction,
+			SizeBytesPostCompaction:    collectionAndMetadata.Collection.SizeBytesPostCompaction,
+			LastCompactionTimeSecs:     collectionAndMetadata.Collection.LastCompactionTimeSecs,
+			RootCollectionID:           rootCollectionID,
+			LineageFileName:            collectionAndMetadata.Collection.LineageFileName,
+			IsDeleted:                  collectionAndMetadata.Collection.IsDeleted,
+			VersionFileName:            collectionAndMetadata.Collection.VersionFileName,
+			CreatedAt:                  collectionAndMetadata.Collection.CreatedAt,
+			UpdatedAt:                  collectionAndMetadata.Collection.UpdatedAt.Unix(),
+			DatabaseId:                 types.MustParse(collectionAndMetadata.Collection.DatabaseID),
 		}
 		collection.Metadata = convertCollectionMetadataToModel(collectionAndMetadata.CollectionMetadata)
 		collections = append(collections, collection)
@@ -38,12 +53,13 @@ func convertCollectionToGcToModel(collectionToGc []*dbmodel.CollectionToGc) []*m
 		return nil
 	}
 	collections := make([]*model.CollectionToGc, 0, len(collectionToGc))
-	// TODO(Sanket): Set version file path.
 	for _, collectionInfo := range collectionToGc {
 		collection := model.CollectionToGc{
 			ID:              types.MustParse(collectionInfo.ID),
 			Name:            collectionInfo.Name,
-			VersionFilePath: "",
+			VersionFilePath: collectionInfo.VersionFileName,
+			TenantID:        collectionInfo.TenantID,
+			LineageFilePath: collectionInfo.LineageFileName,
 		}
 		collections = append(collections, &collection)
 	}
@@ -202,7 +218,12 @@ func convertDatabaseToModel(dbDatabase *dbmodel.Database) *model.Database {
 }
 
 func convertTenantToModel(dbTenant *dbmodel.Tenant) *model.Tenant {
+	var resourceName *string
+	if dbTenant.ResourceName != nil {
+		resourceName = dbTenant.ResourceName
+	}
 	return &model.Tenant{
-		Name: dbTenant.ID,
+		Name:         dbTenant.ID,
+		ResourceName: resourceName,
 	}
 }

@@ -18,3 +18,7 @@ body {
     --radius: 0.5rem;
   }
 }
+
+.prose :where(h1):not(:where([class~="not-prose"],[class~="not-prose"] *)) {
+  font-size: 1.5em;
+}

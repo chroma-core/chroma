@@ -4,6 +4,8 @@ package chroma;
 
 option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
 
+import "google/protobuf/timestamp.proto";
+
 // Types here should mirror chromadb/types.py
 enum Operation {
     ADD = 0;
@@ -49,11 +51,21 @@ message Collection {
   string configuration_json_str = 3;
   optional UpdateMetadata metadata = 4;
   optional int32 dimension = 5;
+  // This is the tenant id of the collection.
   string tenant = 6;
+  // This is the database name of the collection.
   string database = 7;
   int64 log_position = 8;
   int32 version = 9;
   uint64 total_records_post_compaction = 10;
+  uint64 size_bytes_post_compaction = 11;
+  uint64 last_compaction_time_secs = 12;
+  optional string version_file_path = 13;
+  optional string root_collection_id = 14;
+  optional string lineage_file_path = 15;
+  google.protobuf.Timestamp updated_at = 16;
+  // This is the database id of the collection.
+  optional string database_id = 17;
 }
 
 message Database {
@@ -64,6 +76,7 @@ message Database {
 
 message Tenant {
     string name = 1;
+    optional string resource_name = 2;
 }
 
 message UpdateMetadataValue {
@@ -151,7 +164,7 @@ message WhereDocument {
 
 // A leaf-node `WhereDocument` clause may compare a document to a single value.
 message DirectWhereDocument {
-    string document = 1;
+    string pattern = 1;
     WhereDocumentOperator operator = 2;
 }
 
@@ -161,6 +174,8 @@ message DirectWhereDocument {
 enum WhereDocumentOperator {
     CONTAINS = 0;
     NOT_CONTAINS = 1;
+    REGEX = 2;
+    NOT_REGEX = 3;
 }
 
 // A branch-node `WhereDocument` node has a list of children.
@@ -173,11 +188,13 @@ message WhereDocumentChildren {
 // `Where` clauses, where each node is exactly one of:
 // - A leaf node representing a direct comparison between a metadata key and a
 //   value or list of values.
+// - A leaf node representing a direct search against document.
 // - An branch node with a list of children and a way to combine them (AND or OR).
 message Where {
     oneof where {
         DirectComparison direct_comparison = 1;
         WhereChildren children = 2;
+        DirectWhereDocument direct_document_comparison = 3;
     }
 }
 

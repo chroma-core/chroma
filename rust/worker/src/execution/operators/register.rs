@@ -1,10 +1,9 @@
+use async_trait::async_trait;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_log::Log;
 use chroma_sysdb::FlushCompactionError;
 use chroma_sysdb::SysDb;
 use chroma_system::Operator;
-use crate::log::log::Log;
-use crate::log::log::UpdateCollectionLogOffsetError;
-use async_trait::async_trait;
-use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
@@ -44,8 +43,9 @@ pub struct RegisterInput {
     collection_version: i32,
     segment_flush_info: Arc<[SegmentFlushInfo]>,
     total_records_post_compaction: u64,
-    sysdb: Box<SysDb>,
-    log: Box<Log>,
+    collection_logical_size_bytes: u64,
+    sysdb: SysDb,
+    log: Log,
 }
 
 impl RegisterInput {
@@ -58,8 +58,9 @@ impl RegisterInput {
         collection_version: i32,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
         total_records_post_compaction: u64,
-        sysdb: Box<SysDb>,
-        log: Box<Log>,
+        collection_logical_size_bytes: u64,
+        sysdb: SysDb,
+        log: Log,
     ) -> Self {
         RegisterInput {
             tenant,
@@ -68,6 +69,7 @@ impl RegisterInput {
             collection_version,
             segment_flush_info,
             total_records_post_compaction,
+            collection_logical_size_bytes,
             sysdb,
             log,
         }
@@ -87,7 +89,7 @@ pub enum RegisterError {
     #[error("Flush compaction error: {0}")]
     FlushCompactionError(#[from] FlushCompactionError),
     #[error("Update log offset error: {0}")]
-    UpdateLogOffsetError(#[from] UpdateCollectionLogOffsetError),
+    UpdateLogOffsetError(#[from] Box<dyn ChromaError>),
 }
 
 impl ChromaError for RegisterError {
@@ -118,6 +120,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
                 input.collection_version,
                 input.segment_flush_info.clone(),
                 input.total_records_post_compaction,
+                input.collection_logical_size_bytes,
             )
             .await;
 
@@ -130,7 +133,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
         };
 
         let result = log
-            .update_collection_log_offset(input.collection_id, input.log_position)
+            .update_collection_log_offset(&input.tenant, input.collection_id, input.log_position)
             .await;
 
         match result {
@@ -145,49 +148,48 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::log::log::InMemoryLog;
-    use chroma_sysdb::TestSysDb;
+    use chroma_log::in_memory_log::InMemoryLog;
+    use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
     use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
     use std::collections::HashMap;
     use std::str::FromStr;
 
     #[tokio::test]
     async fn test_register_operator() {
-        let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
-        let log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let collection_version = 0;
-        let collection_uuid_1 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let tenant_1 = "tenant_1".to_string();
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        let log = Log::InMemory(InMemoryLog::new());
         let total_records_post_compaction: u64 = 5;
+        let size_bytes_post_compaction: u64 = 25000;
+        let last_compaction_time_secs: u64 = 1741037006;
+        let collection_version = 0;
+
+        let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
-            metadata: None,
             dimension: Some(1),
             tenant: tenant_1.clone(),
             database: "database_1".to_string(),
-            log_position: 0,
-            version: collection_version,
             total_records_post_compaction,
+            size_bytes_post_compaction,
+            last_compaction_time_secs,
+            ..Default::default()
         };
+        let collection_uuid_1 = collection_1.collection_id;
 
-        let collection_uuid_2 =
-            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
-            collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
-            metadata: None,
             dimension: Some(1),
             tenant: tenant_2.clone(),
             database: "database_2".to_string(),
-            log_position: 0,
-            version: collection_version,
             total_records_post_compaction,
+            size_bytes_post_compaction,
+            last_compaction_time_secs,
+            ..Default::default()
         };
+        let collection_uuid_2 = collection_2.collection_id;
 
-        match *sysdb {
+        match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_collection(collection_1);
                 sysdb.add_collection(collection_2);
@@ -219,7 +221,7 @@ mod tests {
             metadata: None,
             file_path: file_path_2.clone(),
         };
-        match *sysdb {
+        match sysdb {
             SysDb::Test(ref mut sysdb) => {
                 sysdb.add_segment(segment_1);
                 sysdb.add_segment(segment_2);
@@ -252,6 +254,7 @@ mod tests {
             collection_version,
             segment_flush_info.into(),
             total_records_post_compaction,
+            size_bytes_post_compaction,
             sysdb.clone(),
             log.clone(),
         );
@@ -270,7 +273,10 @@ mod tests {
         );
 
         let collections = sysdb
-            .get_collections(Some(collection_uuid_1), None, None, None)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_uuid_1),
+                ..Default::default()
+            })
             .await;
 
         assert!(collections.is_ok());

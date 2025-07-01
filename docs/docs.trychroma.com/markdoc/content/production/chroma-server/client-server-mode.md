@@ -38,7 +38,7 @@ async def main():
 asyncio.run(main())
 ```
 
-If you intend to deploy your Chroma server, you may want to consider our [thin-client package](./thin-client) for client-side interactions.
+If you intend to deploy your Chroma server, you may want to consider our [thin-client package](/production/chroma-server/python-thin-client) for client-side interactions.
 
 {% /Tab %}
 

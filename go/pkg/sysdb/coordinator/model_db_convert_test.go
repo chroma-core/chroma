@@ -136,6 +136,9 @@ func TestConvertCollectionToModel(t *testing.T) {
 	colllectionConfigurationJsonStr := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
 	collectionDimension := int32(3)
 	collectionTotalRecordsPostCompaction := uint64(100)
+	collectionSizeBytesPostCompaction := uint64(500000)
+	collectionLastCompactionTimeSecs := uint64(1741037006)
+	dbId := types.NewUniqueID()
 	collectionAndMetadata := &dbmodel.CollectionAndMetadata{
 		Collection: &dbmodel.Collection{
 			ID:                         collectionID.String(),
@@ -143,6 +146,9 @@ func TestConvertCollectionToModel(t *testing.T) {
 			ConfigurationJsonStr:       &colllectionConfigurationJsonStr,
 			Dimension:                  &collectionDimension,
 			TotalRecordsPostCompaction: collectionTotalRecordsPostCompaction,
+			SizeBytesPostCompaction:    collectionSizeBytesPostCompaction,
+			LastCompactionTimeSecs:     collectionLastCompactionTimeSecs,
+			DatabaseID:                 dbId.String(),
 		},
 		CollectionMetadata: []*dbmodel.CollectionMetadata{},
 	}
@@ -154,5 +160,19 @@ func TestConvertCollectionToModel(t *testing.T) {
 	assert.Equal(t, colllectionConfigurationJsonStr, modelCollections[0].ConfigurationJsonStr)
 	assert.Equal(t, collectionDimension, *modelCollections[0].Dimension)
 	assert.Equal(t, collectionTotalRecordsPostCompaction, modelCollections[0].TotalRecordsPostCompaction)
+	assert.Equal(t, collectionSizeBytesPostCompaction, modelCollections[0].SizeBytesPostCompaction)
+	assert.Equal(t, collectionLastCompactionTimeSecs, modelCollections[0].LastCompactionTimeSecs)
 	assert.Nil(t, modelCollections[0].Metadata)
+	assert.Equal(t, dbId, modelCollections[0].DatabaseId)
+}
+
+func TestConvertTenantToModel(t *testing.T) {
+	resourceName := "resourceName"
+	tenant := &dbmodel.Tenant{
+		ID:           "tenantID",
+		ResourceName: &resourceName,
+	}
+	modelTenant := convertTenantToModel(tenant)
+	assert.Equal(t, "tenantID", modelTenant.Name)
+	assert.Equal(t, "resourceName", *modelTenant.ResourceName)
 }

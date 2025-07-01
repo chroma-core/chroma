@@ -1,6 +1,8 @@
 package model
 
 import (
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/types"
 )
 
@@ -15,26 +17,41 @@ type Collection struct {
 	Ts                         types.Timestamp
 	LogPosition                int64
 	Version                    int32
+	RootCollectionID           *types.UniqueID
+	LineageFileName            *string
 	UpdatedAt                  types.Timestamp
 	TotalRecordsPostCompaction uint64
+	SizeBytesPostCompaction    uint64 // Note: This represents the size of the records off the log
+	LastCompactionTimeSecs     uint64
+	IsDeleted                  bool
+	VersionFileName            string
+	CreatedAt                  time.Time
+	DatabaseId                 types.UniqueID
 }
 
 type CollectionToGc struct {
 	ID              types.UniqueID
+	TenantID        string
 	Name            string
 	VersionFilePath string
+	LineageFilePath *string
 }
 
 type CreateCollection struct {
-	ID                   types.UniqueID
-	Name                 string
-	ConfigurationJsonStr string
-	Dimension            *int32
-	Metadata             *CollectionMetadata[CollectionMetadataValueType]
-	GetOrCreate          bool
-	TenantID             string
-	DatabaseName         string
-	Ts                   types.Timestamp
+	ID                         types.UniqueID
+	Name                       string
+	ConfigurationJsonStr       string
+	Dimension                  *int32
+	Metadata                   *CollectionMetadata[CollectionMetadataValueType]
+	GetOrCreate                bool
+	TenantID                   string
+	DatabaseName               string
+	Ts                         types.Timestamp
+	LogPosition                int64
+	RootCollectionId           *string
+	TotalRecordsPostCompaction uint64
+	SizeBytesPostCompaction    uint64 // Note: This represents the size of the records off the log
+	LastCompactionTimeSecs     uint64
 }
 
 type DeleteCollection struct {
@@ -45,14 +62,23 @@ type DeleteCollection struct {
 }
 
 type UpdateCollection struct {
-	ID            types.UniqueID
-	Name          *string
-	Dimension     *int32
-	Metadata      *CollectionMetadata[CollectionMetadataValueType]
-	ResetMetadata bool
-	TenantID      string
-	DatabaseName  string
-	Ts            types.Timestamp
+	ID                      types.UniqueID
+	Name                    *string
+	Dimension               *int32
+	Metadata                *CollectionMetadata[CollectionMetadataValueType]
+	ResetMetadata           bool
+	NewConfigurationJsonStr *string
+	TenantID                string
+	DatabaseName            string
+	Ts                      types.Timestamp
+}
+
+type ForkCollection struct {
+	SourceCollectionID                   types.UniqueID
+	SourceCollectionLogCompactionOffset  uint64
+	SourceCollectionLogEnumerationOffset uint64
+	TargetCollectionID                   types.UniqueID
+	TargetCollectionName                 string
 }
 
 type FlushCollectionCompaction struct {
@@ -62,6 +88,7 @@ type FlushCollectionCompaction struct {
 	CurrentCollectionVersion   int32
 	FlushSegmentCompactions    []*FlushSegmentCompaction
 	TotalRecordsPostCompaction uint64
+	SizeBytesPostCompaction    uint64
 }
 
 type FlushCollectionInfo struct {

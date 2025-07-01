@@ -1,6 +1,10 @@
 from tenacity import retry, stop_after_attempt, retry_if_exception, wait_fixed
 from chromadb.api import ServerAPI
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    create_collection_configuration_to_json,
+)
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
@@ -22,7 +26,7 @@ from chromadb.types import Collection as CollectionModel
 from chromadb import __version__
 from chromadb.errors import (
     InvalidDimensionException,
-    InvalidCollectionException,
+    NotFoundError,
     VersionMismatchError,
 )
 from chromadb.api.types import (
@@ -35,7 +39,6 @@ from chromadb.api.types import (
     Where,
     WhereDocument,
     Include,
-    IncludeEnum,
     GetResult,
     QueryResult,
     validate_metadata,
@@ -43,6 +46,8 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
+    IncludeMetadataDocuments,
+    IncludeMetadataDocumentsDistances,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -205,7 +210,7 @@ class SegmentAPI(ServerAPI):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -230,9 +235,9 @@ class SegmentAPI(ServerAPI):
             id=id,
             name=name,
             metadata=metadata,
-            configuration=configuration
-            if configuration is not None
-            else CollectionConfigurationInternal(),  # Use default configuration if none is provided
+            configuration_json=create_collection_configuration_to_json(
+                configuration or CreateCollectionConfiguration()
+            ),
             tenant=tenant,
             database=database,
             dimension=None,
@@ -242,7 +247,7 @@ class SegmentAPI(ServerAPI):
         coll, created = self._sysdb.create_collection(
             id=model.id,
             name=model.name,
-            configuration=model.get_configuration(),
+            configuration=configuration or CreateCollectionConfiguration(),
             segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
@@ -280,7 +285,7 @@ class SegmentAPI(ServerAPI):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -313,7 +318,7 @@ class SegmentAPI(ServerAPI):
         if existing:
             return existing[0]
         else:
-            raise InvalidCollectionException(f"Collection {name} does not exist.")
+            raise NotFoundError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -343,11 +348,7 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        collection_count = len(
-            self._sysdb.get_collections(tenant=tenant, database=database)
-        )
-
-        return collection_count
+        return self._sysdb.count_collections(tenant=tenant, database=database)
 
     @trace_method("SegmentAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
@@ -357,6 +358,7 @@ class SegmentAPI(ServerAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:
@@ -379,12 +381,41 @@ class SegmentAPI(ServerAPI):
 
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
-        if new_name and new_metadata:
+        if new_name and new_metadata and new_configuration:
+            self._sysdb.update_collection(
+                id,
+                name=new_name,
+                metadata=new_metadata,
+                configuration=new_configuration,
+            )
+        elif new_name and new_metadata:
             self._sysdb.update_collection(id, name=new_name, metadata=new_metadata)
+        elif new_name and new_configuration:
+            self._sysdb.update_collection(
+                id, name=new_name, configuration=new_configuration
+            )
+        elif new_metadata and new_configuration:
+            self._sysdb.update_collection(
+                id, metadata=new_metadata, configuration=new_configuration
+            )
         elif new_name:
             self._sysdb.update_collection(id, name=new_name)
         elif new_metadata:
             self._sysdb.update_collection(id, metadata=new_metadata)
+        elif new_configuration:
+            self._sysdb.update_collection(id, configuration=new_configuration)
+
+    @override
+    def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        raise NotImplementedError(
+            "Collection forking is not implemented for SegmentAPI"
+        )
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
@@ -400,10 +431,10 @@ class SegmentAPI(ServerAPI):
         )
 
         if existing:
+            self._manager.delete_segments(existing[0].id)
             self._sysdb.delete_collection(
                 existing[0].id, tenant=tenant, database=database
             )
-            self._manager.delete_segments(existing[0].id)
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
@@ -581,13 +612,10 @@ class SegmentAPI(ServerAPI):
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
-        sort: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocuments,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResult:
@@ -616,13 +644,6 @@ class SegmentAPI(ServerAPI):
             limit=limit,
         )
 
-        if sort is not None:
-            raise NotImplementedError("Sorting is not yet supported")
-
-        if page and page_size:
-            offset = (page - 1) * page_size
-            limit = page_size
-
         ids_amount = len(ids) if ids else 0
         self._product_telemetry_client.capture(
             CollectionGetEvent(
@@ -641,11 +662,11 @@ class SegmentAPI(ServerAPI):
                 Filter(ids, where, where_document),
                 Limit(offset or 0, limit),
                 Projection(
-                    IncludeEnum.documents in include,
-                    IncludeEnum.embeddings in include,
-                    IncludeEnum.metadatas in include,
+                    "documents" in include,
+                    "embeddings" in include,
+                    "metadatas" in include,
                     False,
-                    IncludeEnum.uris in include,
+                    "uris" in include,
                 ),
             )
         )
@@ -766,10 +787,11 @@ class SegmentAPI(ServerAPI):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["documents", "metadatas", "distances"],  # type: ignore[list-item]
+        include: Include = IncludeMetadataDocumentsDistances,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
@@ -782,10 +804,12 @@ class SegmentAPI(ServerAPI):
         )
 
         query_amount = len(query_embeddings)
+        ids_amount = len(ids) if ids else 0
         self._product_telemetry_client.capture(
             CollectionQueryEvent(
                 collection_uuid=str(collection_id),
                 query_amount=query_amount,
+                filtered_ids_amount=ids_amount,
                 n_results=n_results,
                 with_metadata_filter=query_amount if where is not None else 0,
                 with_document_filter=query_amount if where_document is not None else 0,
@@ -821,11 +845,11 @@ class SegmentAPI(ServerAPI):
                 KNN(query_embeddings, n_results),
                 Filter(None, where, where_document),
                 Projection(
-                    IncludeEnum.documents in include,
-                    IncludeEnum.embeddings in include,
-                    IncludeEnum.metadatas in include,
-                    IncludeEnum.distances in include,
-                    IncludeEnum.uris in include,
+                    "documents" in include,
+                    "embeddings" in include,
+                    "metadatas" in include,
+                    "distances" in include,
+                    "uris" in include,
                 ),
             )
         )
@@ -905,9 +929,7 @@ class SegmentAPI(ServerAPI):
     def _get_collection(self, collection_id: UUID) -> t.Collection:
         collections = self._sysdb.get_collections(id=collection_id)
         if not collections or len(collections) == 0:
-            raise InvalidCollectionException(
-                f"Collection {collection_id} does not exist."
-            )
+            raise NotFoundError(f"Collection {collection_id} does not exist.")
         return collections[0]
 
     @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.OPERATION)

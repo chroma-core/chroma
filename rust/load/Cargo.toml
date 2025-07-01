@@ -12,6 +12,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 uuid = { workspace = true }
+axum = { workspace = true }
 
 tracing = { workspace = true }
 tracing-bunyan-formatter = { workspace = true }
@@ -19,13 +20,11 @@ tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
-opentelemetry-http = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 
 # Unlikely to be used in the workspace.
-axum = "0.7"
-chromadb = { git = "https://github.com/rescrv/chromadb-rs", rev = "7b46aab7366f009388f014929a92785c94134d61" }
-guacamole = { version = "0.9", default-features = false }
-tower-http = { version = "0.6.2", features = ["trace"] }
-reqwest = { version = "0.12", features = ["json"] }
+chromadb = { git = "https://github.com/rescrv/chromadb-rs", rev = "540c3e225e92ecea05039b73b69adf5875385c0e" }
+guacamole = { version = "0.11", default-features = false }
+tower-http = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
 siphasher = "1.0.1"

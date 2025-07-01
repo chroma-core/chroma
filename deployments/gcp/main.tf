@@ -23,7 +23,7 @@ variable "machine_type" {
 
 variable "chroma_version" {
   description = "Chroma version to install"
-  default     = "0.6.3"
+  default     = "1.0.14"
 }
 
 variable "chroma_server_auth_credentials" {
@@ -117,13 +117,9 @@ resource "google_compute_instance" "chroma_instance" {
   sed -i "s/CHROMA_VERSION/${var.chroma_version}/g" /home/$USER/docker-compose.yml
 
   # Create .env file
-  echo "CHROMA_SERVER_AUTHN_CREDENTIALS=${var.chroma_server_auth_credentials}" >> /home/$USER/.env
-  echo "CHROMA_SERVER_AUTHN_PROVIDER=${var.chroma_server_auth_provider}" >> /home/$USER/.env
-  echo "CHROMA_AUTH_TOKEN_TRANSPORT_HEADER=${var.chroma_auth_token_transport_header}" >> /home/$USER/.env
-  echo "CHROMA_OTEL_COLLECTION_ENDPOINT=${var.chroma_otel_collection_endpoint}" >> /home/$USER/.env
-  echo "CHROMA_OTEL_SERVICE_NAME=${var.chroma_otel_service_name}" >> /home/$USER/.env
-  echo "CHROMA_OTEL_COLLECTION_HEADERS=${var.chroma_otel_collection_headers}" >> /home/$USER/.env
-  echo "CHROMA_OTEL_GRANULARITY=${var.chroma_otel_granularity}" >> /home/$USER/.env
+  echo "CHROMA_OPEN_TELEMETRY__ENDPOINT=${var.chroma_otel_collection_endpoint}" >> /home/$USER/.env
+  echo "CHROMA_OPEN_TELEMETRY__SERVICE_NAME=${var.chroma_otel_service_name}" >> /home/$USER/.env
+  echo "OTEL_EXPORTER_OTLP_HEADERS=${var.chroma_otel_collection_headers}" >> /home/$USER/.env
 
   chown $USER:$USER /home/$USER/.env /home/$USER/docker-compose.yml
   cd /home/$USER

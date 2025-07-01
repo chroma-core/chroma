@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: local:postgres
+          image: chroma-postgres
           env:
             - name: POSTGRES_MULTIPLE_DATABASES
               value: "sysdb,log"

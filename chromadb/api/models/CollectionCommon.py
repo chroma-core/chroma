@@ -28,7 +28,6 @@ from chromadb.api.types import (
     Embeddings,
     FilterSet,
     GetRequest,
-    IncludeEnum,
     PyEmbedding,
     Embeddable,
     GetResult,
@@ -58,6 +57,12 @@ from chromadb.api.types import (
     validate_record_set_contains_any,
     validate_record_set_for_embedding,
     validate_filter_set,
+)
+from chromadb.api.collection_configuration import (
+    UpdateCollectionConfiguration,
+    overwrite_collection_configuration,
+    load_collection_configuration_from_json,
+    CollectionConfiguration,
 )
 
 # TODO: We should rename the types in chromadb.types to be Models where
@@ -90,7 +95,10 @@ def validation_context(name: str) -> Callable[[Callable[..., T]], Callable[..., 
                 return func(self, *args, **kwargs)
             except Exception as e:
                 msg = f"{str(e)} in {name}."
-                raise type(e)(msg).with_traceback(e.__traceback__)
+                # add the rest of the args to the error message if they exist
+                e.args = (msg,) + e.args[1:] if e.args else ()
+                # raise the same error that was caught with the modified message
+                raise
 
         return wrapper
 
@@ -133,6 +141,10 @@ class CollectionCommon(Generic[ClientT]):
     @property
     def name(self) -> str:
         return self._model.name
+
+    @property
+    def configuration(self) -> CollectionConfiguration:
+        return load_collection_configuration_from_json(self._model.configuration_json)
 
     @property
     def configuration_json(self) -> Dict[str, Any]:
@@ -239,9 +251,9 @@ class CollectionCommon(Generic[ClientT]):
             validate_ids(ids=unpacked_ids)
 
         validate_filter_set(filter_set=filters)
-        validate_include(include=include, dissalowed=[IncludeEnum.distances])
+        validate_include(include=include, dissalowed=["distances"])
 
-        if IncludeEnum.data in include and self._data_loader is None:
+        if "data" in include and self._data_loader is None:
             raise ValueError(
                 "You must set a data loader on the collection if loading from URIs."
             )
@@ -249,8 +261,8 @@ class CollectionCommon(Generic[ClientT]):
         # Prepare
         request_include = include
         # We need to include uris in the result from the API to load datas
-        if IncludeEnum.data in include and IncludeEnum.uris not in include:
-            request_include.append(IncludeEnum.uris)
+        if "data" in include and "uris" not in include:
+            request_include.append("uris")
 
         return GetRequest(
             ids=unpacked_ids,
@@ -271,6 +283,7 @@ class CollectionCommon(Generic[ClientT]):
         query_texts: Optional[OneOrMany[Document]],
         query_images: Optional[OneOrMany[Image]],
         query_uris: Optional[OneOrMany[URI]],
+        ids: Optional[OneOrMany[ID]],
         n_results: int,
         where: Optional[Where],
         where_document: Optional[WhereDocument],
@@ -283,6 +296,8 @@ class CollectionCommon(Generic[ClientT]):
             images=query_images,
             uris=query_uris,
         )
+
+        filter_ids = maybe_cast_one_to_many(ids)
 
         filters = FilterSet(
             where=where,
@@ -308,10 +323,11 @@ class CollectionCommon(Generic[ClientT]):
         # We need to manually include uris in the result from the API to load datas
         request_include = include
         if "data" in request_include and "uris" not in request_include:
-            request_include.append(IncludeEnum.uris)
+            request_include.append("uris")
 
         return QueryRequest(
             embeddings=request_embeddings,
+            ids=filter_ids,
             where=request_where,
             where_document=request_where_document,
             include=request_include,
@@ -498,12 +514,21 @@ class CollectionCommon(Generic[ClientT]):
                 )
 
     def _update_model_after_modify_success(
-        self, name: Optional[str], metadata: Optional[CollectionMetadata]
+        self,
+        name: Optional[str],
+        metadata: Optional[CollectionMetadata],
+        configuration: Optional[UpdateCollectionConfiguration],
     ) -> None:
         if name:
             self._model["name"] = name
         if metadata:
             self._model["metadata"] = metadata
+        if configuration:
+            self._model.set_configuration(
+                overwrite_collection_configuration(
+                    self._model.get_configuration(), configuration
+                )
+            )
 
     def _embed_record_set(
         self, record_set: BaseRecordSet, embeddable_fields: Optional[Set[str]] = None
@@ -531,6 +556,13 @@ class CollectionCommon(Generic[ClientT]):
         )
 
     def _embed(self, input: Any) -> Embeddings:
+        if self._embedding_function is not None and not isinstance(
+            self._embedding_function, ef.DefaultEmbeddingFunction
+        ):
+            return self._embedding_function(input=input)
+        config_ef = self.configuration.get("embedding_function")
+        if config_ef is not None:
+            return config_ef(input=input)
         if self._embedding_function is None:
             raise ValueError(
                 "You must provide an embedding function to compute embeddings."

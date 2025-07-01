@@ -14,15 +14,6 @@ type Segment struct {
 	FilePaths    map[string][]string
 }
 
-type CreateSegment struct {
-	ID           types.UniqueID
-	Type         string
-	Scope        string
-	CollectionID types.UniqueID
-	Metadata     *SegmentMetadata[SegmentMetadataValueType]
-	Ts           types.Timestamp
-}
-
 type UpdateSegment struct {
 	ID            types.UniqueID
 	ResetTopic    bool

@@ -185,7 +185,7 @@ class ConfigurationInternal(JSONSerializable["ConfigurationInternal"]):
             raise ValueError(
                 f"Unable to decode configuration from JSON string: {json_str}"
             )
-        return cls.from_json(config_json)
+        return cls.from_json(config_json) if config_json else cls()
 
     @override
     def to_json(self) -> Dict[str, Any]:

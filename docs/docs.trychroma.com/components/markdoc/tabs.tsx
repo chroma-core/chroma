@@ -47,7 +47,7 @@ export const Tabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
 }) => {
   const { language } = useContext(AppContext);
   return (
-    <div className="my-4 p-2 px-3 border-[1px] border-dashed border-gray-300 dark:border-gray-700">
+    <div className="my-4">
       <UITabs
         defaultValue={children[0].props.label}
         value={language}
@@ -60,7 +60,7 @@ export const Tabs: React.FC<{ children: ReactElement<TabProps>[] }> = ({
               value={tab.props.label}
               className={cn(
                 tabLabelStyle,
-                "text-sm font-mono tracking-normal dark:data-[state=active]:bg-transparent data-[state=active]:border-b data-[state=active]:text-gray-900 dark:data-[state=active]:text-gray-200 data-[state=active]:border-gray-900 dark:data-[state=active]:border-gray-200",
+                "text-sm tracking-normal dark:data-[state=active]:bg-transparent data-[state=active]:border-b data-[state=active]:text-gray-900 dark:data-[state=active]:text-gray-200 data-[state=active]:border-gray-900 dark:data-[state=active]:border-gray-200",
               )}
             >
               {capitalize(tab.props.label)}
