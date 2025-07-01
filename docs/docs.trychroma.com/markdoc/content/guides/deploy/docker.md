@@ -4,7 +4,7 @@
 
 **Chroma Cloud**
 
-Chroma Cloud, our fully managed hosted service is here. [Sign up here](https://trychroma.com/signup) for early access.
+Chroma Cloud, our fully managed hosted service is here. [Sign up for free](https://trychroma.com/signup).
 
 {% /Banner %}
 

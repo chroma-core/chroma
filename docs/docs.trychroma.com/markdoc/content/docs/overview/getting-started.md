@@ -9,7 +9,9 @@
 
 # Getting Started
 
-Chroma is an AI-native open-source vector database. It comes with everything you need to get started built in, and runs on your machine. A hosted version, [Chroma Cloud](https://trychroma.com/signup) is now available for early access!
+Chroma is an AI-native open-source vector database. It comes with everything you need to get started built-in, and runs on your machine.
+
+For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
 
 ### 1. Install
 
@@ -93,7 +95,7 @@ Run the Chroma backend:
 
 {% Tab label="CLI" %}
 ```terminal
-chroma run --path ./getting-started 
+chroma run --path ./getting-started
 ```
 {% /Tab %}
 
@@ -244,13 +246,13 @@ From the above - you can see that our query about `hawaii` is semantically most 
 {
     documents: [
         [
-            'This is a document about pineapple', 
+            'This is a document about pineapple',
             'This is a document about oranges'
         ]
-    ], 
+    ],
     ids: [
         ['id1', 'id2']
-    ], 
+    ],
     distances: [[1.0404009819030762, 1.243080496788025]],
     uris: null,
     data: null,

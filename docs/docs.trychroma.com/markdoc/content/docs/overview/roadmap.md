@@ -4,7 +4,7 @@ The goal of this doc is to align *core* and *community* efforts for the project 
 
 ## What is the core Chroma team working on right now?
 
-- Standing up that distributed system as a managed service (aka "Chroma Cloud" - [sign up for early access](https://trychroma.com/signup)!)
+- Extending the search and retrieval capabilities for [Chroma Cloud](https://trychroma.com/signup). [Email us your feedback and ideas](mailto:support@trychroma.com).
 
 ## What did the Chroma team just complete?
 
