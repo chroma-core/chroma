@@ -24,7 +24,6 @@ pub enum WriteAction {
 
 initialize_metering! {
     #[capability]
-    /// The latest logical size of a collection in bytes
     pub trait LatestCollectionLogicalSizeBytes {
         fn latest_collection_logical_size_bytes(&self, latest_collection_logical_size_bytes: u64);
     }
