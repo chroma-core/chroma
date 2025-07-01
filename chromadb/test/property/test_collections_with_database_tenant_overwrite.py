@@ -185,6 +185,7 @@ def test_repeat_failure(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.ERROR)
+    # test
 
     singleton_client, root_client, client_factories = _singleton_and_root_clients()
 
