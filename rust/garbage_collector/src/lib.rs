@@ -111,12 +111,13 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     // Start a background task to periodically check for garbage.
     // Garbage collector is a component that gets notified every
     // gc_interval_mins to check for garbage.
-    let mut garbage_collector_component = GarbageCollector::try_from_config(&config, &registry)
-        .await
-        .map_err(|e| {
-            error!("Failed to create garbage collector component: {:?}", e);
-            e
-        })?;
+    let mut garbage_collector_component =
+        GarbageCollector::try_from_config(&(config, system.clone()), &registry)
+            .await
+            .map_err(|e| {
+                error!("Failed to create garbage collector component: {:?}", e);
+                e
+            })?;
 
     garbage_collector_component.set_dispatcher(dispatcher_handle.clone());
     garbage_collector_component.set_system(system.clone());

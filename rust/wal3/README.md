@@ -249,21 +249,36 @@ The cursor store is used to inhibit garbage collection.
 The garbage collection dance for the log is driven by a process external to wal3.  It goes something
 like:
 
+Phase 1:  Compute garbage
+
 1.  Read all cursors
 2.  Read the manifest
-3.  Read all cursors again; if changed, goto 1.
-4.  Select the minimum timestamp across all cursors as the garbage collection cutoff.
-5.  Write a list of snapshots and fragments that hold data strictly less than the cutoff to a file
-    named `garbage/GARBAGE`.  There can be only one gc in progress at a time, so gc is kicked off by
-    running put-if-not-exist on `garbage/GARBAGE`.
-6.  Wait until the writer writes a manifest that does not contain the garbage's fragments.
-7.  Wait a sufficiently long time so that readers cannot see the fragments.
-8.  Slow-delete the contents of the garbage file.
+3.  Select the minimum timestamp across all cursors as the garbage collection cutoff, optionally
+    taking an even lower garbage collection cutoff as an argument.
+4.  Write a list of snapshots and fragments that hold data strictly less than the cutoff to a file
+    named `gc/GARBAGE`.  There can be only one gc in progress at a time, so gc is kicked off by
+    running transitioning the `gc/GARBAGE` from an empty file to a file with content.  AWS S3 does
+    not support if-match on delete, so the garbage file will overwritten with an empty file each
+    time GC is done rather than being deleted.
 
-If this process crashes at any point before 5 is complete, the garbage collector has effectively
-taken no stateful action.  If the process crashes after the garbage file is written, step 6 will
+Phase 2:  Update manifest
+
+5.  Wait until the writer writes a manifest that does not contain the garbage's fragments.
+
+Phase 3:  Delete garbage
+
+6.  Wait a sufficiently long time so that readers cannot see the fragments.
+7.  Delete the contents of the garbage file.
+8.  Transition the garbage file to empty.
+
+If this process crashes at any point before 4 is complete, the garbage collector has effectively
+taken no stateful action.  If the process crashes after the garbage file is written, step 5 will
 synchronize with the writer to ensure that the garbage file is not deleted until the writer no
 longer references it.
+
+The point of doing this in three phases is to ensure that deleting of garbage happens in just one
+service:  The service calling phase3.  Phases 1 and 2 could technically live together, but were
+separated so as to make the minimal amount of I/O to update the manifest.
 
 ## Timing Assumptions
 
@@ -287,7 +302,7 @@ guarantee system safety.  Therefore:
   offset and writing the cursor for more than the garbage collection interval, the cursor will
   reference garbage collected data.  The reader will fail.
 
-This garbage collection interval is step 7 in the garbage collection dance above.
+This garbage collection interval is step 6 in the garbage collection dance above.
 
 ## Zero-Action Recovery
 
@@ -319,17 +334,16 @@ Garbage collection is a separate process that runs in the background:
 0.  Read all cursors and the all manifests.
 1.  From the cursors, select the minimum timestamp time across all cursors as the garbage collection
     cutoff.
-2.  Write a list of fragments that hold data strictly less than the cutoff.
-3.  Run a verifier that checks the list of fragments to delete.
-4.  Write a new manifest to the log, using the normal write protocol.  This will fail any other
-    writer, but they will retry and succeed.
-5.  Verify that the files listed in 3 are still safe to delete _and are no longer referenced_.
-6.  Delete the files that were affirmatively verified.
+2.  Write the `gc/GARBAGE` file with list of fragments and snapshots to delete.
+3.  Call into the primary writer service to request that it write a new manifest to the log, using
+    the normal write protocol.  This will fail prevent a failure due to log contention.
+4.  Verify that the files listed in 3 _are no longer referenced_.
+5.  Delete the files that were affirmatively verified.
 
 The big idea is to use positive, affirmative signals to delete files.  There's a slight step of
 synchronization between writer and garbage collector; an alternative design to consider would be to
 have the garbage collector stomp on a manifest and let the writer pick up the pieces, but that
-requires strictly more computer work to recover.
+requires strictly more computer work to recover and leads to a sub-par experience.
 
 # Non-Obvious Design Considerations
 
@@ -440,8 +454,8 @@ the log when compacting.
 
 ## Snapshotting of the Log
 
-There is no data file stored in S3 that is ever mutated or overwritten in a correctly-functioning wal3
-instance.
+There is no data/fragment file stored in S3 that is ever mutated or overwritten in a
+correctly-functioning wal3 instance.
 
 We can make use of this structural sharing to allow cheap snapshots of the entire log that simply
 incur garbage collection costs.  These snapshots can be used to enable applications to do long-lived
@@ -516,9 +530,7 @@ they are eligible for garbage collection because:
 2.  The file is not referenced transitively by any cursor.
 
 A second pass, called a verifier, reads the output of the first pass and complains loudly if sanity
-checks don't pass.  For example, if garbage collection would collect more than X% of the log it may
-make sense to raise an alarm rather than go ahead deleting more than X% of the data.  Similarly, the
-verifier checks that the setsums of the new log balance.
+checks don't pass.  For example, the verifier checks that the setsums of the new log balance.
 
 ## Faulty Object Storage
 

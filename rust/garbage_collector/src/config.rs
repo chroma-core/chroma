@@ -1,4 +1,5 @@
 use chroma_cache::CacheConfig;
+use chroma_log::config::LogConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
 use chroma_types::CollectionUuid;
@@ -60,6 +61,7 @@ pub(super) struct GarbageCollectorConfig {
     pub jemalloc_pprof_server_port: Option<u16>,
     #[serde(default)]
     pub disable_log_gc: bool,
+    pub log: LogConfig,
 }
 
 impl GarbageCollectorConfig {
@@ -88,7 +90,7 @@ impl GarbageCollectorConfig {
         let res = f.extract();
         match res {
             Ok(config) => config,
-            Err(e) => panic!("Error loading config: {}", e),
+            Err(e) => panic!("Error loading config from {path}: {}", e),
         }
     }
 
