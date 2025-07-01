@@ -2,22 +2,9 @@
 
 {% Banner type="tip" %}
 
-**Hosted Chroma**
+**Chroma Cloud**
 
 Chroma Cloud, our fully managed hosted service is here. [Sign up here](https://trychroma.com/signup) for early access.
-
-{% /Banner %}
-
-{% Banner type="tip" %}
-
-If you are using Chroma in production, please fill out [this form](https://airtable.com/appqd02UuQXCK5AuY/pagr1D0NFQoNpUpNZ/form), and we will add you to a dedicated Slack workspace for supporting production users.
-This is the best place to
-
-1. Get support with building with Chroma in prod.
-2. Stay up-to-date with exciting new features.
-3. Get swag!
-
-We would love to help you think through the design of your system, or if you would be a good fit for our upcoming distributed cloud service.
 
 {% /Banner %}
 
@@ -37,17 +24,6 @@ which means it won't fit on the 1gb instances provided as part of the
 AWS Free Tier. This template uses a [`t3.small`](https://aws.amazon.com/ec2/instance-types/t3/#Product%20Details) EC2 instance, which
 costs about two cents an hour, or $15 for a full month, and gives you 2GiB of memory. If you follow these
 instructions, AWS will bill you accordingly.
-
-{% /Banner %}
-
-{% Banner type="warn" %}
-
-In this guide we show you how to secure your endpoint using [Chroma's
-native authentication support](./aws#authentication-with-aws). Alternatively, you can put it behind
-[AWS API Gateway](https://aws.amazon.com/api-gateway/) or add your own
-authenticating proxy. This basic stack doesn't support any kind of authentication;
-anyone who knows your server IP will be able to add and query for
-embeddings.
 
 {% /Banner %}
 
@@ -136,13 +112,12 @@ aws cloudformation create-stack --stack-name my-chroma-stack --template-url http
 
 ### Step 4: Chroma Client Set-Up
 
-Once your EC2 instance is up and running with Chroma, all
-you need to do is configure your `HttpClient` to use the server's IP address and port
-`8000`. Since you are running a Chroma server on AWS, our [thin-client package](/production/chroma-server/python-thin-client) may be enough for your application.
-
-{% TabbedCodeBlock %}
+{% Tabs %}
 
 {% Tab label="python" %}
+Once your EC2 instance is up and running with Chroma, all
+you need to do is configure your `HttpClient` to use the server's IP address and port
+`8000`. Since you are running a Chroma server on AWS, our [thin-client package](./python-thin-client) may be enough for your application.
 
 ```python
 import chromadb
@@ -153,24 +128,25 @@ chroma_client = chromadb.HttpClient(
 )
 chroma_client.heartbeat()
 ```
-
 {% /Tab %}
 
 {% Tab label="typescript" %}
+Once your EC2 instance is up and running with Chroma, all
+you need to do is configure your `ChromaClient` to use the server's IP address and port
+`8000`.
 
 ```typescript
 import { ChromaClient } from "chromadb";
 
 const chromaClient = new ChromaClient({
-    path: "<Your Chroma instance IP>",
+    host: "<Your Chroma instance IP>",
     port: 8000
 })
 chromaClient.heartbeat()
 ```
-
 {% /Tab %}
 
-{% /TabbedCodeBlock %}
+{% /Tabs %}
 
 ### Step 5: Clean Up (optional).
 

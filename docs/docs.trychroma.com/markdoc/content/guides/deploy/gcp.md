@@ -2,22 +2,9 @@
 
 {% Banner type="tip" %}
 
-**Hosted Chroma**
+**Chroma Cloud**
 
 Chroma Cloud, our fully managed hosted service is here. [Sign up here](https://trychroma.com/signup) for early access.
-
-{% /Banner %}
-
-{% Banner type="tip" %}
-
-If you are using Chroma in production, please fill out [this form](https://airtable.com/appqd02UuQXCK5AuY/pagr1D0NFQoNpUpNZ/form), and we will add you to a dedicated Slack workspace for supporting production users.
-This is the best place to
-
-1. Get support with building with Chroma in prod.
-2. Stay up-to-date with exciting new features.
-3. Get swag!
-
-We would love to help you think through the design of your system, or if you would be a good fit for our upcoming distributed cloud service.
 
 {% /Banner %}
 
@@ -123,14 +110,12 @@ terraform output -raw chroma_instance_ip
 ```
 
 ### Step 5: Chroma Client Set-Up
-
-Once your Compute Engine instance is up and running with Chroma, all
-you need to do is configure your `HttpClient` to use the server's IP address and port
-`8000`. Since you are running a Chroma server on GCP, our [thin-client package](/production/chroma-server/python-thin-client) may be enough for your application.
-
-{% TabbedCodeBlock %}
+{% Tabs %}
 
 {% Tab label="python" %}
+Once your Compute Engine instance is up and running with Chroma, all
+you need to do is configure your `HttpClient` to use the server's IP address and port
+`8000`. Since you are running a Chroma server on Azure, our [thin-client package](./python-thin-client) may be enough for your application.
 
 ```python
 import chromadb
@@ -141,24 +126,25 @@ chroma_client = chromadb.HttpClient(
 )
 chroma_client.heartbeat()
 ```
-
 {% /Tab %}
 
 {% Tab label="typescript" %}
+Once your Compute Engine instance is up and running with Chroma, all
+you need to do is configure your `ChromaClient` to use the server's IP address and port
+`8000`.
 
 ```typescript
 import { ChromaClient } from "chromadb";
 
 const chromaClient = new ChromaClient({
-    path: "<Your Chroma instance IP>",
+    host: "<Your Chroma instance IP>",
     port: 8000
 })
 chromaClient.heartbeat()
 ```
-
 {% /Tab %}
 
-{% /TabbedCodeBlock %}
+{% /Tabs %}
 
 ### Step 5: Clean Up (optional).
 

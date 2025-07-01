@@ -48,13 +48,43 @@ Here's how a typical retrieval pipeline is built:
 
 ### Step 1: Embed our Knowledge Base and Store it in a Chroma Collection
 
+{% Tabs %}
+
+{% Tab label="python" %}
+
+Install Chroma:
+
+{% TabbedUseCaseCodeBlock language="Terminal" %}
+
+{% Tab label="pip" %}
+```terminal
+pip install chromadb
+```
+{% /Tab %}
+
+{% Tab label="poetry" %}
+```terminal
+poetry add chromadb
+```
+{% /Tab %}
+
+{% Tab label="uv" %}
+```terminal
+uv pip install chromadb
+```
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
+
 Chroma embeds and stores information in a single operation.
 
 ```python
 import chromadb
 
 client = chromadb.Client()
-customer_support_collection = client.create_collection(name="customer support")
+customer_support_collection = client.create_collection(
+    name="customer support"
+)
 
 customer_support_collection.add(
    ids=["1", "2", "3"],
@@ -66,22 +96,116 @@ customer_support_collection.add(
 )
 ```
 
+{% /Tab %}
+
+{% Tab label="typescript" %}
+
+Install Chroma:
+
+{% TabbedUseCaseCodeBlock language="Terminal" %}
+
+{% Tab label="npm" %}
+```terminal
+npm install chromadb @chroma-core/default-embed
+```
+{% /Tab %}
+
+{% Tab label="pnpm" %}
+```terminal
+pnpm add chromadb @chroma-core/default-embed
+```
+{% /Tab %}
+
+{% Tab label="yarn" %}
+```terminal
+yarn add chromadb @chroma-core/default-embed
+```
+{% /Tab %}
+
+{% Tab label="bun" %}
+```terminal
+bun add chromadb @chroma-core/default-embed
+```
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
+
+Run a Chroma server locally:
+
+```terminal
+chroma run
+```
+
+Chroma embeds and stores information in a single operation.
+
+```typescript
+import { ChromaClient } from "chromadb";
+
+const client = new ChromaClient();
+const customer_support_collection = await client.createCollection({
+    name: "customer support"
+});
+
+await customer_support_collection.add({
+    ids: ["1", "2", "3"],
+    documents: [
+        "Toothbrushes can be returned up to 360 days after purchase if unopened.",
+        "Shipping is free of charge for all orders.",
+        "Shipping normally takes 2-3 business days"
+    ]
+})
+```
+
+{% /Tab %}
+
+{% /Tabs %}
+
+
 ### Step 2: Process the User's Query
 
 Similarly, Chroma handles the embedding of queries for you out-of-the-box.
 
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
 ```python
 user_query = "What is your return policy for tooth brushes?"
 
-context = customer_support_collection.query(queryTexts=[user_query], n_results=1)['documents'][0]
+context = customer_support_collection.query(
+    queryTexts=[user_query],
+    n_results=1
+)['documents'][0]
 
 print(context) # Toothbrushes can be returned up to 360 days after purchase if unopened.
 ```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+const user_query = "What is your return policy for tooth brushes?";
+
+const context = (await customer_support_collection.query({
+    queryTexts: [user_query],
+    n_results: 1
+})).documents[0];
+
+console.log(context); // Toothbrushes can be returned up to 360 days after purchase if unopened.
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
 
 ### Step 3: Generate the AI Response
 
-With the result from Chroma, we can build the correct context for an AI model. Here we use the OpenAI API:
+With the result from Chroma, we can build the correct context for an AI model.
 
+{% CustomTabs %}
+
+{% Tab label="OpenAI" %}
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
 ```python
 import os
 import openai
@@ -98,3 +222,83 @@ response = openai.ChatCompletion.create(
     ]
 )
 ```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+
+
+const prompt = `${userQuery}. Use this as context for answering: ${context}`;
+
+const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      { role: "system", content: "You are a helpful assistant" },
+      { role: "user", content: prompt },
+    ],
+});
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+{% /Tab %}
+
+{% Tab label="Anthropic" %}
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+import os
+import anthropic
+
+client = anthropic.Anthropic(
+    api_key=os.getenv("ANTHROPIC_API_KEY")
+)
+
+prompt = f"{user_query}. Use this as context for answering: {context}"
+
+response = client.messages.create(
+    model="claude-sonnet-4-20250514",
+    max_tokens=1024,
+    messages=[
+        {"role": "user", "content": prompt}
+    ]
+)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+import Anthropic from '@anthropic-ai/sdk';
+
+const client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+const prompt = `${userQuery}. Use this as context for answering: ${context}`;
+
+const response = await client.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 1024,
+    messages: [
+        {
+            role: 'user',
+            content: prompt,
+        },
+    ],
+});
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+{% /Tab %}
+
+{% /CustomTabs %}

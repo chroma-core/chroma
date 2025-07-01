@@ -2,27 +2,17 @@
 
 {% Banner type="tip" %}
 
-**Hosted Chroma**
+**Chroma Cloud**
 
 Chroma Cloud, our fully managed hosted service is here. [Sign up here](https://trychroma.com/signup) for early access.
 
 {% /Banner %}
 
-{% Banner type="tip" %}
-
-If you are using Chroma in production, please fill out [this form](https://airtable.com/appqd02UuQXCK5AuY/pagr1D0NFQoNpUpNZ/form), and we will add you to a dedicated Slack workspace for supporting production users.
-This is the best place to
-
-1. Get support with building with Chroma in prod.
-2. Stay up-to-date with exciting new features.
-3. Get swag!
-
-We would love to help you think through the design of your system, or if you would be a good fit for our upcoming distributed cloud service.
-
-{% /Banner %}
-
 ## Run Chroma in a Docker Container
 
+{% Tabs %}
+
+{% Tab label="python" %}
 You can run a Chroma server in a Docker container, and access it using the `HttpClient`. We provide images on both [docker.com](https://hub.docker.com/r/chromadb/chroma) and [ghcr.io](https://github.com/chroma-core/chroma/pkgs/container/chroma).
 
 To start the server, run:
@@ -35,26 +25,12 @@ This starts the server with the default configuration and stores data in `./chro
 
 The Chroma client can then be configured to connect to the server running in the Docker container.
 
-{% TabbedCodeBlock %}
-
-{% Tab label="python" %}
 ```python
 import chromadb
+
 chroma_client = chromadb.HttpClient(host='localhost', port=8000)
 chroma_client.heartbeat()
 ```
-{% /Tab %}
-
-{% Tab label="typescript" %}
-```typescript
-import { ChromaClient } from "chromadb";
-
-const chromaClient = new ChromaClient({ path: "http://localhost:8000" })
-chromaClient.heartbeat()
-```
-{% /Tab %}
-
-{% /TabbedCodeBlock %}
 
 {% Banner type="tip" %}
 
@@ -62,6 +38,33 @@ chromaClient.heartbeat()
 
 If you're using Python, you may want to use the [client-only package](/production/chroma-server/python-thin-client) for a smaller install size.
 {% /Banner %}
+{% /Tab %}
+
+{% Tab label="typescript" %}
+You can run a Chroma server in a Docker container, and access it using the `ChromaClient`. We provide images on both [docker.com](https://hub.docker.com/r/chromadb/chroma) and [ghcr.io](https://github.com/chroma-core/chroma/pkgs/container/chroma).
+
+To start the server, run:
+
+```terminal
+docker run -v ./chroma-data:/data -p 8000:8000 chromadb/chroma
+```
+
+This starts the server with the default configuration and stores data in `./chroma-data` (in your current working directory).
+
+The Chroma client can then be configured to connect to the server running in the Docker container.
+
+```typescript
+import { ChromaClient } from "chromadb";
+
+const chromaClient = new ChromaClient({
+    host: "localhost",
+    port: 8000
+});
+chromaClient.heartbeat()
+```
+{% /Tab %}
+
+{% /Tabs %}
 
 ## Configuration
 

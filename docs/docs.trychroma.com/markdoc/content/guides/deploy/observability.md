@@ -22,10 +22,10 @@ Tracing is configured with three environment variables:
 - `OTEL_EXPORTER_OTLP_HEADERS`: Headers to use when sending observability data. Often used to send API and app keys. For example `{"x-honeycomb-team": "abc"}`.
 
 We also have dedicated observability guides for various deployments:
-* [Docker](../containers/docker#observability-with-docker)
-* [AWS](../cloud-providers/aws#observability-with-AWS)
-* [GCP](../cloud-providers/gcp#observability-with-GCP)
-* [Azure](../cloud-providers/azure#observability-with-Azure)
+* [Docker](./docker#observability-with-docker)
+* [AWS](./aws#observability-with-AWS)
+* [GCP](./gcp#observability-with-GCP)
+* [Azure](./azure#observability-with-Azure)
 
 ## Client (SDK) Observability
 

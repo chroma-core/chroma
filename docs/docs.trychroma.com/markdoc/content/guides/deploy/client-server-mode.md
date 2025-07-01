@@ -1,18 +1,17 @@
 # Running Chroma in Client-Server Mode
 
+{% Tabs %}
+
+{% Tab label="python" %}
 Chroma can also be configured to run in client/server mode. In this mode, the Chroma client connects to a Chroma server running in a separate process.
 
-This means that you can deploy single-node Chroma to a [Docker container](../containers/docker), or a machine hosted by a cloud provider like [AWS](../cloud-providers/aws), [GCP](../cloud-providers/gcp), [Azure](../cloud-providers/azure), and others. Then, you can access your Chroma server from your application using our `HttpClient` (or `ChromaClient` for JS/TS users).
+This means that you can deploy single-node Chroma to a [Docker container](./docker), or a machine hosted by a cloud provider like [AWS](./aws), [GCP](./gcp), [Azure](./azure), and others. Then, you can access your Chroma server from your application using our `HttpClient`.
 
 You can quickly experiment locally with Chroma in client/server mode by using our CLI:
 
 ```terminal
 chroma run --path /db_path
 ```
-
-{% Tabs %}
-
-{% Tab label="python" %}
 
 Then use the Chroma `HttpClient` to connect to the server:
 
@@ -43,18 +42,23 @@ If you intend to deploy your Chroma server, you may want to consider our [thin-c
 {% /Tab %}
 
 {% Tab label="typescript" %}
+Chroma can also be configured to run in client/server mode. In this mode, the Chroma client connects to a Chroma server running in a separate process.
 
-Then instantiate a new `ChromaClient`. The default is to connect to a Chroma server running on localhost.
+This means that you can deploy single-node Chroma to a [Docker container](./docker), or a machine hosted by a cloud provider like [AWS](./aws), [GCP](./gcp), [Azure](./azure), and others. Then, you can access your Chroma server from your application using our `ChromaClient`.
+
+You can quickly experiment locally with Chroma in client/server mode by using our CLI:
+
+```terminal
+chroma run --path /db_path
+```
+
+Then connect to the Chroma server from your program:
 
 ```typescript
-// CJS
-const { ChromaClient } = require("chromadb");
-// ESM
 import { ChromaClient } from "chromadb";
 
 const client = new ChromaClient();
 ```
-
 {% /Tab %}
 
 {% /Tabs %}
