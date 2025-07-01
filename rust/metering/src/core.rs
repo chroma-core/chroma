@@ -24,35 +24,42 @@ pub enum WriteAction {
 
 initialize_metering! {
     #[capability]
+    /// The latest logical size of a collection in bytes
     pub trait LatestCollectionLogicalSizeBytes {
         fn latest_collection_logical_size_bytes(&self, latest_collection_logical_size_bytes: u64);
     }
 
+    /// The size of data written to the log in bytes
     #[capability]
     pub trait LogSizeBytes {
         fn log_size_bytes(&self, log_size_bytes: u64);
     }
 
+    /// The number of trigram tokens in a full-text search query
     #[capability]
     pub trait FtsQueryLength {
         fn fts_query_length(&self, fts_query_length: u64);
     }
 
+    /// The number of metadata predicates in a `WHERE` query
     #[capability]
     pub trait MetadataPredicateCount {
         fn metadata_predicate_count(&self, metadata_predicate_count: u64);
     }
 
+    /// The length of the embedded query vector
     #[capability]
     pub trait QueryEmbeddingCount {
         fn query_embedding_count(&self, query_embedding_count: u64);
     }
 
+    /// The size in bytes of data pulled from the log during a get
     #[capability]
     pub trait PulledLogSizeBytes {
         fn pulled_log_size_bytes(&self, pulled_log_size_bytes: u64);
     }
 
+    /// The size in bytes of data returned to the client
     #[capability]
     pub trait ReturnBytes {
         fn return_bytes(&self, return_bytes: u64);
