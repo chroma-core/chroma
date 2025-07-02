@@ -163,11 +163,11 @@ def normalize_embeddings(
     elif isinstance(target, np.ndarray):
         # A single embedding as a numpy array
         if target.ndim == 1:
-            return cast(Embeddings, [target])
+            return [target]
         # 2-D numpy array (comes out of embedding models)
         # TODO: Enforce this at the embedding function level
         if target.ndim == 2:
-            return list(target)
+            return [np.array(embedding) for embedding in target]
 
     raise ValueError(
         f"Expected embeddings to be a list of floats or ints, a list of lists, a numpy array, or a list of numpy arrays, got {target}"

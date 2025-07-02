@@ -5,8 +5,8 @@ from chromadb.api.types import QueryResult, GetResult
 
 
 def _transform_embeddings(
-    embeddings: Optional[List[np.ndarray]],  # type: ignore
-) -> Optional[Union[List[List[float]], List[np.ndarray]]]:  # type: ignore
+    embeddings: Optional[Union[List[List[float]], List[np.ndarray]]],
+) -> Optional[Union[List[List[float]], List[np.ndarray]]]:
     """
     Transform embeddings from numpy arrays to lists of floats.
     This is a shared helper function to avoid duplicating the transformation logic.

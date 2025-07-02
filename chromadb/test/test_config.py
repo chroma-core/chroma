@@ -185,7 +185,7 @@ def test_runtime_dependencies() -> None:
     assert data.starts == []
 
     # Constructs dependencies and starts them in the correct order
-    ComponentZ(system)
+    system.instance(ComponentZ)
     assert data.starts == ["D", "C"]
     system.stop()
     assert data.stops == ["C", "D"]

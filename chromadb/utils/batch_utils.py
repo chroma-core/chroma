@@ -24,11 +24,9 @@ def create_batches(
             _batches.append(
                 (  # type: ignore
                     ids[i : i + api.get_max_batch_size()],
-                    embeddings[i : i + api.get_max_batch_size()]
-                    if embeddings
-                    else None,
-                    metadatas[i : i + api.get_max_batch_size()] if metadatas else None,
-                    documents[i : i + api.get_max_batch_size()] if documents else None,
+                    embeddings[i : i + api.get_max_batch_size()] if embeddings is not None else None,
+                    metadatas[i : i + api.get_max_batch_size()] if metadatas is not None else None,
+                    documents[i : i + api.get_max_batch_size()] if documents is not None else None,
                 )
             )
     else:

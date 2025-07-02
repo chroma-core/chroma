@@ -978,14 +978,16 @@ def _records(
         if documents:
             document = documents[i]
             if metadata:
-                metadata = {**metadata, "chroma:document": document}
+                metadata = metadata.copy()
+                metadata["chroma:document"] = document
             else:
                 metadata = {"chroma:document": document}
 
         if uris:
             uri = uris[i]
             if metadata:
-                metadata = {**metadata, "chroma:uri": uri}
+                metadata = metadata.copy()
+                metadata["chroma:uri"] = uri
             else:
                 metadata = {"chroma:uri": uri}
 
