@@ -107,6 +107,9 @@ garbageCollector:
     requests:
       cpu: '100m'
       memory: '128Mi'
+  cache:
+    hostPath: '/local/cache/chroma-garbage-collector'
+    mountPath: '/cache/'
   configuration: |
     service_name: "garbage-collector"
     otel_endpoint: "http://otel-collector:4317"
