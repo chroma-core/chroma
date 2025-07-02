@@ -1390,7 +1390,7 @@ mod tests {
         match &reader {
             crate::BlockfileReader::ArrowBlockfileReader(reader) => {
                 assert_eq!(reader.root.sparse_index.len(), 3);
-                assert!(reader.root.sparse_index.is_valid());
+                assert!(reader.is_valid().await);
             }
             _ => panic!("Unexpected reader type"),
         }
@@ -1425,8 +1425,8 @@ mod tests {
         // Sparse index should still have 3 blocks
         match &reader {
             crate::BlockfileReader::ArrowBlockfileReader(reader) => {
+                assert!(reader.is_valid().await);
                 assert_eq!(reader.root.sparse_index.len(), 3);
-                assert!(reader.root.sparse_index.is_valid());
             }
             _ => panic!("Unexpected reader type"),
         }
@@ -1460,7 +1460,7 @@ mod tests {
         match &reader {
             crate::BlockfileReader::ArrowBlockfileReader(reader) => {
                 assert_eq!(reader.root.sparse_index.len(), 6);
-                assert!(reader.root.sparse_index.is_valid());
+                assert!(reader.is_valid().await);
             }
             _ => panic!("Unexpected reader type"),
         }
