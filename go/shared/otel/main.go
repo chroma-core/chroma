@@ -118,8 +118,10 @@ func decodeMetadataValue(md metadata.MD, key string) string {
 }
 
 type TracingConfig struct {
-	Endpoint string
-	Service  string
+	Service       string
+	TraceEndpoint string
+	// optional, defaults to TraceEndpoint
+	MetricEndpoint string
 }
 
 func InitTracing(ctx context.Context, config *TracingConfig) (err error) {
@@ -128,7 +130,7 @@ func InitTracing(ctx context.Context, config *TracingConfig) (err error) {
 		ctx,
 		otlptracegrpc.NewClient(
 			otlptracegrpc.WithInsecure(),
-			otlptracegrpc.WithEndpoint(config.Endpoint),
+			otlptracegrpc.WithEndpoint(config.TraceEndpoint),
 			otlptracegrpc.WithDialOption(),
 		),
 	)
@@ -148,7 +150,15 @@ func InitTracing(ctx context.Context, config *TracingConfig) (err error) {
 	otel.SetTracerProvider(tp)
 
 	var metricExporter *otlpmetricgrpc.Exporter
-	metricExporter, err = otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithInsecure(), otlpmetricgrpc.WithEndpoint(config.Endpoint))
+
+	var metricEndpoint string
+	if config.MetricEndpoint != "" {
+		metricEndpoint = config.MetricEndpoint
+	} else {
+		metricEndpoint = config.TraceEndpoint
+	}
+
+	metricExporter, err = otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithInsecure(), otlpmetricgrpc.WithEndpoint(metricEndpoint))
 	if err != nil {
 		return
 	}
