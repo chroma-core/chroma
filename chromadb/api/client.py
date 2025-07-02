@@ -124,12 +124,15 @@ class Client(SharedSystemClient, ClientAPI):
 
     @override
     def list_collections(
-        self, limit: Optional[int] = None, offset: Optional[int] = None
+        self,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         return [
             Collection(client=self._server, model=model)
             for model in self._server.list_collections(
-                limit, offset, tenant=self.tenant, database=self.database
+                where, limit, offset, tenant=self.tenant, database=self.database
             )
         ]
 

@@ -343,11 +343,13 @@ class ClientAPI(BaseAPI, ABC):
     @abstractmethod
     def list_collections(
         self,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         """List all collections.
         Args:
+            where: Conditional filtering on collection metadata. Defaults to None.
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
 
@@ -576,6 +578,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @abstractmethod
     def list_collections(
         self,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,

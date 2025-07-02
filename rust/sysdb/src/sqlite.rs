@@ -5,18 +5,20 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
 use chroma_sqlite::helpers::{delete_metadata, get_embeddings_queue_topic_name, update_metadata};
-use chroma_sqlite::table;
+use chroma_sqlite::table::{self, CollectionMetadata};
 use chroma_types::{
-    Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
-    CreateCollectionError, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantResponse, Database, DatabaseUuid, DeleteCollectionError,
-    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
-    GetCollectionsError, GetDatabaseError, GetSegmentsError, GetTenantError, GetTenantResponse,
-    InternalCollectionConfiguration, ListDatabasesError, Metadata, MetadataValue, ResetError,
-    ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionConfiguration,
-    UpdateCollectionError,
+    BooleanOperator, Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
+    CompositeExpression, CreateCollectionError, CreateCollectionResponse, CreateDatabaseError,
+    CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database, DatabaseUuid,
+    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse,
+    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetSegmentsError,
+    GetTenantError, GetTenantResponse, InternalCollectionConfiguration, ListDatabasesError,
+    Metadata, MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue,
+    PrimitiveOperator, ResetError, ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    SetOperator, UpdateCollectionConfiguration, UpdateCollectionError, Where,
 };
 use futures::TryStreamExt;
+use sea_query::{Expr, ExprTrait, Query, SimpleExpr};
 use sea_query_binder::SqlxBinder;
 use sqlx::error::ErrorKind;
 use sqlx::sqlite::SqliteRow;
@@ -25,6 +27,139 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::SystemTime;
 use uuid::Uuid;
+
+trait IntoSqliteExprForCollectionMetadata {
+    fn eval(&self) -> SimpleExpr;
+}
+
+impl IntoSqliteExprForCollectionMetadata for MetadataExpression {
+    fn eval(&self) -> SimpleExpr {
+        let key_col = Expr::col((CollectionMetadata::Table, CollectionMetadata::Key));
+        let key_cond = key_col
+            .clone()
+            .eq(self.key.to_string())
+            .and(key_col.is_not_null());
+        match &self.comparison {
+            MetadataComparison::Primitive(op, val) => {
+                let (col, sval) = match val {
+                    MetadataValue::Bool(b) => (CollectionMetadata::BoolValue, Expr::val(*b)),
+                    MetadataValue::Int(i) => (CollectionMetadata::IntValue, Expr::val(*i)),
+                    MetadataValue::Float(f) => (CollectionMetadata::FloatValue, Expr::val(*f)),
+                    MetadataValue::Str(s) => (CollectionMetadata::StrValue, Expr::val(s)),
+                };
+                let scol = Expr::col((CollectionMetadata::Table, col));
+                let mut subq = Query::select()
+                    .column(CollectionMetadata::CollectionId)
+                    .from(CollectionMetadata::Table)
+                    .and_where(key_cond.clone())
+                    .to_owned();
+
+                match op {
+                    PrimitiveOperator::Equal => {
+                        subq.and_where(scol.eq(sval));
+                        Expr::col((CollectionMetadata::Table, CollectionMetadata::CollectionId))
+                            .in_subquery(subq)
+                    }
+                    PrimitiveOperator::NotEqual => {
+                        subq.and_where(scol.eq(sval));
+                        Expr::col((CollectionMetadata::Table, CollectionMetadata::CollectionId))
+                            .not_in_subquery(subq)
+                    }
+                    PrimitiveOperator::GreaterThan => {
+                        subq.and_where(scol.gt(sval));
+                        Expr::col((CollectionMetadata::Table, CollectionMetadata::CollectionId))
+                            .in_subquery(subq)
+                    }
+                    PrimitiveOperator::GreaterThanOrEqual => {
+                        subq.and_where(scol.gte(sval));
+                        Expr::col((CollectionMetadata::Table, CollectionMetadata::CollectionId))
+                            .in_subquery(subq)
+                    }
+                    PrimitiveOperator::LessThan => {
+                        subq.and_where(scol.lt(sval));
+                        Expr::col((CollectionMetadata::Table, CollectionMetadata::CollectionId))
+                            .in_subquery(subq)
+                    }
+                    PrimitiveOperator::LessThanOrEqual => {
+                        subq.and_where(scol.lte(sval));
+                        Expr::col((CollectionMetadata::Table, CollectionMetadata::CollectionId))
+                            .in_subquery(subq)
+                    }
+                }
+            }
+            MetadataComparison::Set(op, val) => {
+                let (col, svals) = match val {
+                    MetadataSetValue::Bool(bs) => (
+                        CollectionMetadata::BoolValue,
+                        bs.iter().cloned().map(Expr::val).collect::<Vec<_>>(),
+                    ),
+                    MetadataSetValue::Int(is) => (
+                        CollectionMetadata::IntValue,
+                        is.iter().cloned().map(Expr::val).collect::<Vec<_>>(),
+                    ),
+                    MetadataSetValue::Float(fs) => (
+                        CollectionMetadata::FloatValue,
+                        fs.iter().cloned().map(Expr::val).collect::<Vec<_>>(),
+                    ),
+                    MetadataSetValue::Str(ss) => (
+                        CollectionMetadata::StrValue,
+                        ss.iter().cloned().map(Expr::val).collect::<Vec<_>>(),
+                    ),
+                };
+                let scol = Expr::col((CollectionMetadata::Table, col));
+                let subq = Query::select()
+                    .column(CollectionMetadata::CollectionId)
+                    .from(CollectionMetadata::Table)
+                    .and_where(key_cond.clone())
+                    .and_where(scol.is_in(svals))
+                    .to_owned();
+                match op {
+                    SetOperator::In => {
+                        Expr::col((CollectionMetadata::Table, CollectionMetadata::CollectionId))
+                            .in_subquery(subq)
+                    }
+                    SetOperator::NotIn => {
+                        Expr::col((CollectionMetadata::Table, CollectionMetadata::CollectionId))
+                            .not_in_subquery(subq)
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl IntoSqliteExprForCollectionMetadata for Where {
+    fn eval(&self) -> SimpleExpr {
+        match self {
+            Where::Metadata(expr) => expr.eval(),
+            Where::Composite(expr) => expr.eval(),
+            Where::Document(_) => {
+                panic!("Document expression not supported for collection metadata")
+            }
+        }
+    }
+}
+
+impl IntoSqliteExprForCollectionMetadata for CompositeExpression {
+    fn eval(&self) -> SimpleExpr {
+        match self.operator {
+            BooleanOperator::And => {
+                let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(true)));
+                for child in &self.children {
+                    expr = Expr::expr(expr).and(child.eval());
+                }
+                expr
+            }
+            BooleanOperator::Or => {
+                let mut expr = SimpleExpr::Value(sea_query::Value::Bool(Some(false)));
+                for child in &self.children {
+                    expr = Expr::expr(expr).or(child.eval());
+                }
+                expr
+            }
+        }
+    }
+}
 
 //////////////////////// SqliteSysDb ////////////////////////
 
@@ -123,6 +258,7 @@ impl SqliteSysDb {
                 Some(database_name.clone()),
                 None,
                 0,
+                None,
             )
             .await
             .map_err(|e| e.boxed())?;
@@ -264,6 +400,7 @@ impl SqliteSysDb {
                 Some(database.clone()),
                 None,
                 0,
+                None,
             )
             .await
             .map_err(CreateCollectionError::Get)?;
@@ -368,7 +505,16 @@ impl SqliteSysDb {
         let mut configuration_json_str = None;
         if let Some(configuration) = configuration {
             let collections = self
-                .get_collections_with_conn(&mut *tx, Some(collection_id), None, None, None, None, 0)
+                .get_collections_with_conn(
+                    &mut *tx,
+                    Some(collection_id),
+                    None,
+                    None,
+                    None,
+                    None,
+                    0,
+                    None,
+                )
                 .await;
             let collections = collections.unwrap();
             let collection = collections.into_iter().next().unwrap();
@@ -492,6 +638,7 @@ impl SqliteSysDb {
             database,
             limit,
             offset,
+            r#where,
             ..
         } = options;
 
@@ -503,6 +650,7 @@ impl SqliteSysDb {
             database,
             limit,
             offset,
+            r#where,
         )
         .await
     }
@@ -560,6 +708,7 @@ impl SqliteSysDb {
                 None,
                 None,
                 0,
+                None,
             )
             .await
             .map_err(|e| e.boxed())?;
@@ -610,6 +759,7 @@ impl SqliteSysDb {
         database: Option<String>,
         limit: Option<u32>,
         offset: u32,
+        r#where: Option<Where>,
     ) -> Result<Vec<Collection>, GetCollectionsError>
     where
         C: sqlx::Executor<'a, Database = sqlx::Sqlite>,
@@ -663,6 +813,11 @@ impl SqliteSysDb {
                     table::CollectionMetadata::CollectionId,
                 ))
                 .equals((table::Collections::Table, table::Collections::Id)),
+            )
+            .cond_where(
+                r#where
+                    .map(|whr| whr.eval())
+                    .unwrap_or(sea_query::Expr::val(true).into()),
             )
             .inner_join(
                 table::Databases::Table,

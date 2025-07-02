@@ -335,6 +335,7 @@ impl ServiceBasedFrontend {
             database_name,
             limit,
             offset,
+            r#where,
             ..
         }: ListCollectionsRequest,
     ) -> Result<ListCollectionsResponse, GetCollectionsError> {
@@ -344,6 +345,7 @@ impl ServiceBasedFrontend {
                 database: Some(database_name.clone()),
                 limit,
                 offset,
+                r#where,
                 ..Default::default()
             })
             .await

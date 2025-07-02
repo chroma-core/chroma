@@ -117,6 +117,35 @@ class CollectionStateMachine(RuleBasedStateMachine):
         else:
             assert len(colls) == limit
 
+    # @rule()
+    # def list_collections_with_where_filter(self) -> None:
+    #     if not self.model:
+    #         return
+    #     key_values = []
+    #     for name, metadata in self.model.items():
+    #         if metadata is not None:
+    #             for k, v in metadata.items():
+    #                 key_values.append((k, v))
+    #     if not key_values:
+    #         return
+    #     key, value = key_values[0]
+    #     expected = [
+    #         name
+    #         for name, metadata in self.model.items()
+    #         if metadata is not None and key in metadata and metadata[key] == value
+    #     ]
+    #     filtered = self.client.list_collections(
+    #         where={key: {"$eq": value}}  # type:ignore
+    #     )
+    #     filtered_names = [c.name for c in filtered]
+    #     for c in filtered:
+    #         assert (
+    #             c.metadata is not None
+    #             and key in c.metadata
+    #             and c.metadata[key] == value
+    #         )
+    #     assert sorted(filtered_names) == sorted(expected)
+
     @rule(
         target=collections,
         new_metadata=st.one_of(st.none(), strategies.collection_metadata),

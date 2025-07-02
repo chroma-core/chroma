@@ -860,6 +860,7 @@ impl GrpcSysDb {
             database,
             limit,
             offset,
+            r#where,
         } = options;
 
         // TODO: move off of status into our own error type
@@ -878,6 +879,14 @@ impl GrpcSysDb {
                 offset: Some(offset as i32),
                 tenant: tenant.unwrap_or("".to_string()),
                 database: database.unwrap_or("".to_string()),
+                r#where: match r#where {
+                    Some(where_clause) => Some(
+                        where_clause
+                            .try_into()
+                            .map_err(|e| GetCollectionsError::Internal(Box::new(e)))?,
+                    ),
+                    None => None,
+                },
             })
             .await;
 

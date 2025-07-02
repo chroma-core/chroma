@@ -162,6 +162,7 @@ impl TestSysDb {
             database,
             limit: _,
             offset: _,
+            r#where: _,
         } = options;
 
         let inner = self.inner.lock();

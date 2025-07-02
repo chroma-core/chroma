@@ -325,6 +325,7 @@ class SegmentAPI(ServerAPI):
     @rate_limit
     def list_collections(
         self,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,

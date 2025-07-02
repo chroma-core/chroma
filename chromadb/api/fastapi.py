@@ -17,6 +17,7 @@ from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
+import json
 
 from chromadb.api.types import (
     Documents,
@@ -205,12 +206,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def list_collections(
         self,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
         """Returns a list of all collections"""
+        where_str = json.dumps(where) if where else None
         json_collections = self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections",
@@ -218,6 +221,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
                 {
                     "limit": limit,
                     "offset": offset,
+                    "where": where_str,
                 }
             ),
         )

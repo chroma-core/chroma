@@ -479,6 +479,12 @@ pub enum WhereConversionError {
     Trace(String, Box<Self>),
 }
 
+impl ChromaError for WhereConversionError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
+
 impl WhereConversionError {
     pub fn cause(msg: impl ToString) -> Self {
         Self::Cause(msg.to_string())

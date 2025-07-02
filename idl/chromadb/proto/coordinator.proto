@@ -188,6 +188,7 @@ message GetCollectionsRequest {
   optional int32 offset = 7;
   optional CollectionIdsFilter ids_filter = 8;
   optional bool include_soft_deleted = 9;
+  optional Where where = 10;
 }
 
 message GetCollectionsResponse {

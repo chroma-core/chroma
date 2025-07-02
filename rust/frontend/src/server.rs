@@ -11,19 +11,19 @@ use chroma_metering::{
 };
 use chroma_system::System;
 use chroma_types::{
-    AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
-    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
-    CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    parse_where, AddCollectionRecordsResponse, ChecklistResponse, Collection,
+    CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest,
+    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionRequest,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
     GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
     InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
     UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateMetadata, UpsertCollectionRecordsResponse,
+    UpdateMetadata, UpsertCollectionRecordsResponse, WhereValidationError,
 };
-use chroma_types::{ForkCollectionResponse, RawWhereFields};
+use chroma_types::{ForkCollectionResponse, RawWhereFields, Where};
 use mdac::{Rule, Scorecard, ScorecardTicket};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
@@ -790,6 +790,7 @@ struct ListCollectionsParams {
     limit: Option<u32>,
     #[serde(default)]
     offset: u32,
+    r#where: Option<String>,
 }
 
 /// Lists all collections in the specified database.
@@ -811,7 +812,11 @@ struct ListCollectionsParams {
 async fn list_collections(
     headers: HeaderMap,
     Path((tenant, database)): Path<(String, String)>,
-    Query(ListCollectionsParams { limit, offset }): Query<ListCollectionsParams>,
+    Query(ListCollectionsParams {
+        limit,
+        offset,
+        r#where,
+    }): Query<ListCollectionsParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<ListCollectionsResponse>, ServerError> {
     server
@@ -841,7 +846,16 @@ async fn list_collections(
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server
         .scorecard_request(&["op:list_collections", format!("tenant:{}", tenant).as_str()])?;
-    let request = ListCollectionsRequest::try_new(tenant, database, limit, offset)?;
+
+    let parsed_where: Option<Where> = match r#where {
+        Some(r#where) => {
+            let value = serde_json::from_str(r#where.as_str())
+                .map_err(|_| WhereValidationError::WhereClause)?;
+            parse_where(&value).ok()
+        }
+        None => None,
+    };
+    let request = ListCollectionsRequest::try_new(tenant, database, limit, offset, parsed_where)?;
     Ok(Json(server.frontend.list_collections(request).await?))
 }
 

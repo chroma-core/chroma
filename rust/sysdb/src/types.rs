@@ -1,4 +1,4 @@
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, Where};
 
 #[derive(Default, Debug)]
 pub struct GetCollectionsOptions {
@@ -10,4 +10,5 @@ pub struct GetCollectionsOptions {
     pub database: Option<String>,
     pub limit: Option<u32>,
     pub offset: u32,
+    pub r#where: Option<Where>,
 }
