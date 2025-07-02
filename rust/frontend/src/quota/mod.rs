@@ -387,7 +387,9 @@ impl ChromaError for QuotaEnforcerError {
             QuotaEnforcerError::ApiKeyMissing => chroma_error::ErrorCodes::InvalidArgument,
             QuotaEnforcerError::Unauthorized => chroma_error::ErrorCodes::PermissionDenied,
             QuotaEnforcerError::InitializationFailed => chroma_error::ErrorCodes::Internal,
-            QuotaEnforcerError::GenericQuotaError(_) => chroma_error::ErrorCodes::ResourceExhausted,
+            QuotaEnforcerError::GenericQuotaError(_) => {
+                chroma_error::ErrorCodes::UnprocessableEntity
+            }
         }
     }
 }
