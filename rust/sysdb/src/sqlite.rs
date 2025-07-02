@@ -14,6 +14,7 @@ use chroma_types::{
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
     ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
     SegmentType, SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError,
+    UpdateTenantError, UpdateTenantResponse,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -225,7 +226,18 @@ impl SqliteSysDb {
                 sqlx::Error::RowNotFound => GetTenantError::NotFound(name.to_string()),
                 _ => GetTenantError::Internal(e.into()),
             })
-            .map(|row| GetTenantResponse { name: row.get(0) })
+            .map(|row| GetTenantResponse {
+                name: row.get(0),
+                resource_name: None,
+            })
+    }
+
+    pub(crate) async fn update_tenant(
+        &self,
+        _tenant_id: String,
+        _resource_name: String,
+    ) -> Result<UpdateTenantResponse, UpdateTenantError> {
+        Ok(UpdateTenantResponse {})
     }
 
     ////////////////////////// Collection Methods ////////////////////////
@@ -1115,6 +1127,31 @@ mod tests {
         // Get tenant
         let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
         assert_eq!(tenant.name, "new_tenant");
+    }
+
+    #[tokio::test]
+    async fn test_update_tenant() {
+        let db = get_new_sqlite_db().await;
+        let sysdb = SqliteSysDb::new(db, "default".to_string(), "default".to_string());
+
+        // Create tenant
+        sysdb.create_tenant("new_tenant".to_string()).await.unwrap();
+
+        // Get tenant
+        let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
+        assert_eq!(tenant.name, "new_tenant");
+        assert_eq!(tenant.resource_name, None);
+
+        // Update tenant
+        sysdb
+            .update_tenant("new_tenant".to_string(), "new_resource_name".to_string())
+            .await
+            .unwrap();
+
+        // Get tenant
+        let tenant = sysdb.get_tenant("new_tenant").await.unwrap();
+        assert_eq!(tenant.name, "new_tenant");
+        assert_eq!(tenant.resource_name, None);
     }
 
     #[tokio::test]
