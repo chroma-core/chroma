@@ -107,8 +107,8 @@ func (s *Coordinator) GetCollection(ctx context.Context, collectionID types.Uniq
 	return s.catalog.GetCollection(ctx, collectionID, collectionName, tenantID, databaseName)
 }
 
-func (s *Coordinator) GetCollections(ctx context.Context, collectionIDs []types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*model.Collection, error) {
-	return s.catalog.GetCollections(ctx, collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
+func (s *Coordinator) GetCollections(ctx context.Context, collectionIDs []types.UniqueID, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool, where *coordinatorpb.Where) ([]*model.Collection, error) {
+	return s.catalog.GetCollections(ctx, collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted, where)
 }
 
 func (s *Coordinator) GetCollectionByResourceName(ctx context.Context, tenantResourceName string, databaseName string, collectionName string) (*model.Collection, error) {

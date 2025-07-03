@@ -3,6 +3,7 @@
 package mocks
 
 import (
+	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	dbmodel "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	mock "github.com/stretchr/testify/mock"
 
@@ -267,7 +268,7 @@ func (_m *ICollectionDb) GetCollectionWithoutMetadata(collectionID *string, data
 }
 
 // GetCollections provides a mock function with given fields: collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted
-func (_m *ICollectionDb) GetCollections(collectionIDs []string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*dbmodel.CollectionAndMetadata, error) {
+func (_m *ICollectionDb) GetCollections(collectionIDs []string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool, where *coordinatorpb.Where) ([]*dbmodel.CollectionAndMetadata, error) {
 	ret := _m.Called(collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
 
 	if len(ret) == 0 {

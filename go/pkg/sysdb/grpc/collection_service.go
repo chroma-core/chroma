@@ -164,7 +164,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	databaseName := req.Database
 	limit := req.Limit
 	offset := req.Offset
-	// where := req.Where
+	where := req.Where
 
 	res := &coordinatorpb.GetCollectionsResponse{}
 
@@ -200,7 +200,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 		includeSoftDeleted = *req.IncludeSoftDeleted
 	}
 
-	collections, err := s.coordinator.GetCollections(ctx, collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted)
+	collections, err := s.coordinator.GetCollections(ctx, collectionIDs, collectionName, tenantID, databaseName, limit, offset, includeSoftDeleted, where)
 	if err != nil {
 		log.Error("GetCollections failed. ", zap.Error(err), zap.Stringp("collection_id", collectionID), zap.Stringp("collection_name", collectionName))
 		return res, grpcutils.BuildInternalGrpcError(err.Error())
