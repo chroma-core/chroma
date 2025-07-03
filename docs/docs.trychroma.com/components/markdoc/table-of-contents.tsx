@@ -96,8 +96,6 @@ const TableOfContents: React.FC<{ ast: Node }> = ({ ast }) => {
               break;
           }
 
-          console.log(item);
-
           return (
             <div key={item.id} className={`mt-1 ${padding}`}>
               <a
