@@ -60,7 +60,10 @@ const ScrollableContent: React.FC<{
   }, [pathname, pagesIndex]);
 
   return (
-    <div ref={scrollRef} className="flex flex-col flex-grow pb-10 pr-5">
+    <div
+      ref={scrollRef}
+      className="flex flex-col h-full pb-10 pt-5 px-5 overflow-y-auto"
+    >
       <div className="flex flex-col gap-5">{children}</div>
     </div>
   );
