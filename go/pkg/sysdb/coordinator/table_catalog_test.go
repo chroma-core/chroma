@@ -122,10 +122,10 @@ func TestCatalog_GetCollections(t *testing.T) {
 	// mock the get collections method
 	mockMetaDomain.On("CollectionDb", context.Background()).Return(&mocks.ICollectionDb{})
 	var n *int32
-	mockMetaDomain.CollectionDb(context.Background()).(*mocks.ICollectionDb).On("GetCollections", []string{*types.FromUniqueID(collectionID)}, &collectionName, common.DefaultTenant, common.DefaultDatabase, n, n, false).Return(collectionAndMetadataList, nil)
+	mockMetaDomain.CollectionDb(context.Background()).(*mocks.ICollectionDb).On("GetCollections", []string{*types.FromUniqueID(collectionID)}, &collectionName, common.DefaultTenant, common.DefaultDatabase, n, n, false, nil).Return(collectionAndMetadataList, nil)
 
 	// call the GetCollections method
-	collections, err := catalog.GetCollections(context.Background(), []types.UniqueID{collectionID}, &collectionName, defaultTenant, defaultDatabase, nil, nil, false)
+	collections, err := catalog.GetCollections(context.Background(), []types.UniqueID{collectionID}, &collectionName, defaultTenant, defaultDatabase, nil, nil, false, nil)
 
 	// assert that the method returned no error
 	assert.NoError(t, err)
