@@ -1,6 +1,6 @@
 use crate::{
-    config::FrontendConfig, executor::Executor, types::errors::ValidationError,
-    CollectionsWithSegmentsProvider,
+    config::FrontendConfig, executor::Executor, impls::utils::ensure_limit,
+    types::errors::ValidationError, CollectionsWithSegmentsProvider,
 };
 use backon::{ExponentialBuilder, Retryable};
 use chroma_config::{registry, Configurable};
@@ -298,7 +298,11 @@ impl ServiceBasedFrontend {
         }: ListDatabasesRequest,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         self.sysdb_client
-            .list_databases(tenant_id, limit, offset)
+            .list_databases(
+                tenant_id,
+                ensure_limit::<ListDatabasesError>(limit)?,
+                offset,
+            )
             .await
     }
 
@@ -342,7 +346,7 @@ impl ServiceBasedFrontend {
             .get_collections(GetCollectionsOptions {
                 tenant: Some(tenant_id.clone()),
                 database: Some(database_name.clone()),
-                limit,
+                limit: ensure_limit::<GetCollectionsError>(limit)?,
                 offset,
                 ..Default::default()
             })
@@ -1286,7 +1290,7 @@ impl ServiceBasedFrontend {
                 },
                 limit: Limit {
                     skip: offset,
-                    fetch: limit,
+                    fetch: ensure_limit::<QueryError>(limit)?,
                 },
                 proj: Projection {
                     document: include.0.contains(&Include::Document),
