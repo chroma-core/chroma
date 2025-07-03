@@ -25,7 +25,6 @@ use tokio::{
     select,
     sync::{Semaphore, SemaphorePermit, TryAcquireError},
 };
-use tracing::{Instrument, Span};
 
 use crate::StorageError;
 
@@ -211,10 +210,7 @@ impl AdmissionControlledS3Storage {
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         // Acquire permit.
         let _permit = rate_limiter.enter(priority, channel_receiver).await;
-        storage
-            .get_with_e_tag(&key)
-            .instrument(tracing::trace_span!(parent: Span::current(), "S3 get"))
-            .await
+        storage.get_with_e_tag(&key).await
         // Permit gets dropped here due to RAII.
     }
 
