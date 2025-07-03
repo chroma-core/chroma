@@ -33,7 +33,7 @@ from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.config import Settings, System
 from chromadb.config import DEFAULT_TENANT, DEFAULT_DATABASE
 from chromadb.api.models.Collection import Collection
-from chromadb.errors import ChromaError
+from chromadb.errors import ChromaAuthError, ChromaError
 from chromadb.types import Database, Tenant, Where, WhereDocument
 import chromadb.utils.embedding_functions as ef
 
@@ -58,13 +58,15 @@ class Client(SharedSystemClient, ClientAPI):
     # region Initialization
     def __init__(
         self,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
+        tenant: Optional[str] = DEFAULT_TENANT,
+        database: Optional[str] = DEFAULT_DATABASE,
         settings: Settings = Settings(),
     ) -> None:
         super().__init__(settings=settings)
-        self.tenant = tenant
-        self.database = database
+        if tenant is not None:
+            self.tenant = tenant
+        if database is not None:
+            self.database = database
 
         # Get the root system component we want to interact with
         self._server = self._system.instance(ServerAPI)
@@ -77,6 +79,13 @@ class Client(SharedSystemClient, ClientAPI):
             user_provided_tenant=tenant,
             user_provided_database=database,
         )
+        
+        # this should not happen unless types are invalidated
+        if maybe_tenant is None and tenant is None:
+            raise ChromaAuthError("Could not determine a tenant from the current authentication method. Please provide a tenant.")
+        if maybe_database is None and database is None:
+            raise ChromaAuthError("Could not determine a database name from the current authentication method. Please provide a database name.")
+        
         if maybe_tenant:
             self.tenant = maybe_tenant
         if maybe_database:
@@ -455,7 +464,9 @@ class Client(SharedSystemClient, ClientAPI):
         self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
 
-    def _validate_tenant_database(self, tenant: str, database: str) -> None:
+    def _validate_tenant_database(
+        self, tenant: str, database: str
+    ) -> None:
         try:
             self._admin_client.get_tenant(name=tenant)
         except httpx.ConnectError:
