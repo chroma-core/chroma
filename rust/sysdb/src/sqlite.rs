@@ -1362,6 +1362,7 @@ mod tests {
                     }),
                     spann: None,
                     embedding_function: None,
+                    query_config: None,
                 }),
             )
             .await

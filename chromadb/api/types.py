@@ -672,6 +672,16 @@ class EmbeddingFunction(Protocol[D]):
         return False
 
 
+class QueryConfig:
+    @abstractmethod
+    def name(self) -> str:
+        return NotImplemented
+
+    @abstractmethod
+    def get_config(self) -> Dict[str, Any]:
+        return NotImplemented
+
+
 def validate_embedding_function(
     embedding_function: EmbeddingFunction[Embeddable],
 ) -> None:

@@ -1,6 +1,13 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.api.types import (
+    Embeddings,
+    Documents,
+    EmbeddingFunction,
+    Space,
+    QueryConfig,
+)
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any, Union, Optional
+from typing_extensions import override
 import os
 import numpy as np
 import warnings
@@ -206,3 +213,17 @@ class JinaEmbeddingFunction(EmbeddingFunction[Documents]):
             ValidationError: If the configuration does not match the schema
         """
         validate_config_schema(config, "jina")
+
+
+class JinaQueryConfig(QueryConfig):
+    def __init__(self, task: Optional[str] = None):
+        self.task = task
+
+    @override
+    def name(self) -> str:
+        return "jina"
+
+    def get_config(self) -> Dict[str, Any]:
+        return {
+            "task": self.task,
+        }
