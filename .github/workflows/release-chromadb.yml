@@ -57,7 +57,7 @@ jobs:
       # and we usually don't see failures that are isolated to a specific version
       python_versions: '["3.12"]'
       property_testing_preset: 'normal'
-      runner: '16core-64gb-windows-latest'
+      runner: '8core-64gb-windows-latest'
 
   javascript-client-tests:
     name: JavaScript client tests

@@ -265,7 +265,7 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-    runs-on: 16core-64gb-windows-latest
+    runs-on: 8core-32gb-windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4

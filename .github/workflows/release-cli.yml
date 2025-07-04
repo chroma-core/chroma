@@ -43,7 +43,7 @@ jobs:
 
   build-windows:
     name: Build Windows binary
-    runs-on: windows-latest
+    runs-on: 8core-32gb-windows-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
