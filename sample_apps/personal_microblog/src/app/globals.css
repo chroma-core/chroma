@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #FAF9F5;
+  --background-secondary: #f3f2ee;
+  --foreground: #111827;
+  --foreground-secondary: #6b7280;
+  --accent: #176dd5;
+  --accent-secondary: #DBE9FE;
+  --radius: 0.5rem;
+}
+
+body {
+  font-family: var(--font-ui);
+  border-color: black;
+}
