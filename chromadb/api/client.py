@@ -3,7 +3,7 @@ from uuid import UUID
 
 from overrides import override
 import httpx
-from chromadb.api import AdminAPI, ClientAPI, ServerAPI
+from chromadb.api import AdminAPI, ClientAPI, ServerAPI, AdminCloudAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
@@ -61,6 +61,9 @@ class Client(SharedSystemClient, ClientAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
         settings: Settings = Settings(),
+        *,
+        is_cloud: bool = False,
+        user_supplied_db: bool = True,
     ) -> None:
         super().__init__(settings=settings)
         self.tenant = tenant
@@ -75,8 +78,10 @@ class Client(SharedSystemClient, ClientAPI):
             user_identity,
             overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
             user_provided_tenant=tenant,
-            user_provided_database=database,
+            user_provided_database=database if user_supplied_db else None,
         )
+        if is_cloud and not maybe_database:
+            raise ValueError("Could not get database. Please provide a database name.")
         if maybe_tenant:
             self.tenant = maybe_tenant
         if maybe_database:
@@ -455,7 +460,9 @@ class Client(SharedSystemClient, ClientAPI):
         self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
 
-    def _validate_tenant_database(self, tenant: str, database: str) -> None:
+    def _validate_tenant_database(
+        self, tenant: str, database: str, is_cloud: bool = False
+    ) -> None:
         try:
             self._admin_client.get_tenant(name=tenant)
         except httpx.ConnectError:
@@ -522,6 +529,62 @@ class AdminClient(SharedSystemClient, AdminAPI):
         cls,
         system: System,
     ) -> "AdminClient":
+        SharedSystemClient._populate_data_from_system(system)
+        instance = cls(settings=system.settings)
+        return instance
+
+
+class AdminCloudClient(SharedSystemClient, AdminCloudAPI):
+    _server: ServerAPI
+    tenant: str
+
+    def __init__(self, settings: Settings = Settings()) -> None:
+        super().__init__(settings)
+        self._server = self._system.instance(ServerAPI)
+
+        user_identity = self._server.get_user_identity()
+
+        maybe_tenant, _ = maybe_set_tenant_and_database(
+            user_identity,
+            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+            user_provided_tenant=None,
+            user_provided_database=None,
+        )
+        if maybe_tenant:
+            self.tenant = maybe_tenant
+        else:
+            raise ValueError("Could not get tenant from user identity")
+
+    @override
+    def create_database(self, name: str) -> None:
+        return self._server.create_database(name=name, tenant=self.tenant)
+
+    @override
+    def get_database(self, name: str) -> Database:
+        return self._server.get_database(name=name, tenant=self.tenant)
+
+    @override
+    def delete_database(self, name: str) -> None:
+        return self._server.delete_database(name=name, tenant=self.tenant)
+
+    @override
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> Sequence[Database]:
+        return self._server.list_databases(limit, offset, tenant=self.tenant)
+
+    @override
+    def get_tenant(self, name: str) -> Tenant:
+        return self._server.get_tenant(name=name)
+
+    @classmethod
+    @override
+    def from_system(
+        cls,
+        system: System,
+    ) -> "AdminCloudClient":
         SharedSystemClient._populate_data_from_system(system)
         instance = cls(settings=system.settings)
         return instance
