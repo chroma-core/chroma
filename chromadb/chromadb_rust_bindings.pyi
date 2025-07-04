@@ -86,6 +86,7 @@ class Bindings:
     ) -> int: ...
     def list_collections(
         self,
+        where: Optional[str] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
