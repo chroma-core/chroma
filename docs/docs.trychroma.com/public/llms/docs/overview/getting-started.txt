@@ -13,156 +13,113 @@ Chroma is an AI-native open-source vector database. It comes with everything you
 
 For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
 
-{% Video link="https://www.youtube.com/embed/yvsmkx-Jaj0" title="Getting Started Video" / %}
-
 ### 1. Install
 
-{% Tabs %}
+### python
 
-{% Tab label="python" %}
-
-{% TabbedUseCaseCodeBlock language="Terminal" %}
-
-{% Tab label="pip" %}
 ```terminal
 pip install chromadb
 ```
-{% /Tab %}
 
-{% Tab label="poetry" %}
+### poetry
+
 ```terminal
 poetry add chromadb
 ```
-{% /Tab %}
 
-{% Tab label="uv" %}
+### uv
+
 ```terminal
 uv pip install chromadb
 ```
-{% /Tab %}
 
-{% /TabbedUseCaseCodeBlock %}
+### typescript
 
-{% /Tab %}
-
-{% Tab label="typescript" %}
-
-{% TabbedUseCaseCodeBlock language="Terminal" %}
-
-{% Tab label="npm" %}
 ```terminal
 npm install chromadb @chroma-core/default-embed
 ```
-{% /Tab %}
 
-{% Tab label="pnpm" %}
+### pnpm
+
 ```terminal
 pnpm add chromadb @chroma-core/default-embed
 ```
-{% /Tab %}
 
-{% Tab label="yarn" %}
+### yarn
+
 ```terminal
 yarn add chromadb @chroma-core/default-embed
 ```
-{% /Tab %}
 
-{% Tab label="bun" %}
+### bun
+
 ```terminal
 bun add chromadb @chroma-core/default-embed
 ```
-{% /Tab %}
-
-{% /TabbedUseCaseCodeBlock %}
-
-{% /Tab %}
-
-{% /Tabs %}
 
 ### 2. Create a Chroma Client
 
-{% Tabs %}
+### python
 
-{% Tab label="python" %}
 ```python
 import chromadb
 chroma_client = chromadb.Client()
 ```
-{% /Tab %}
-{% Tab label="typescript" %}
+### typescript
 
 Run the Chroma backend:
 
-{% TabbedUseCaseCodeBlock language="Terminal" %}
-
-{% Tab label="CLI" %}
 ```terminal
 chroma run --path ./getting-started
 ```
-{% /Tab %}
 
-{% Tab label="Docker" %}
+### Docker
+
 ```terminal
 docker pull chromadb/chroma
 docker run -p 8000:8000 chromadb/chroma
 ```
-{% /Tab %}
-
-{% /TabbedUseCaseCodeBlock %}
 
 Then create a client which connects to it:
 
-{% TabbedUseCaseCodeBlock language="typescript" %}
+### ESM
 
-{% Tab label="ESM" %}
 ```typescript
 import { ChromaClient } from "chromadb";
 const client = new ChromaClient();
 ```
-{% /Tab %}
 
-{% Tab label="CJS" %}
+### CJS
+
 ```typescript
 const { ChromaClient } = require("chromadb");
 const client = new ChromaClient();
 ```
-{% /Tab %}
-
-{% /TabbedUseCaseCodeBlock %}
-
-{% /Tab %}
-
-{% /Tabs %}
 
 ### 3. Create a collection
 
 Collections are where you'll store your embeddings, documents, and any additional metadata. Collections index your embeddings and documents, and enable efficient retrieval and filtering. You can create a collection with a name:
 
-{% TabbedCodeBlock %}
+### python
 
-{% Tab label="python" %}
 ```python
 collection = chroma_client.create_collection(name="my_collection")
 ```
-{% /Tab %}
 
-{% Tab label="typescript" %}
+### typescript
+
 ```typescript
 const collection = await client.createCollection({
   name: "my_collection",
 });
 ```
-{% /Tab %}
-
-{% /TabbedCodeBlock %}
 
 ### 4. Add some text documents to the collection
 
 Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model. You must provide unique string IDs for your documents.
 
-{% TabbedCodeBlock %}
+### python
 
-{% Tab label="python" %}
 ```python
 collection.add(
     ids=["id1", "id2"],
@@ -172,9 +129,9 @@ collection.add(
     ]
 )
 ```
-{% /Tab %}
 
-{% Tab label="typescript" %}
+### typescript
+
 ```typescript
 await collection.add({
     ids: ["id1", "id2"],
@@ -184,17 +141,13 @@ await collection.add({
     ]
 });
 ```
-{% /Tab %}
-
-{% /TabbedCodeBlock %}
 
 ### 5. Query the collection
 
 You can query the collection with a list of query texts, and Chroma will return the `n` most similar results. It's that easy!
 
-{% TabbedCodeBlock %}
+### python
 
-{% Tab label="python" %}
 ```python
 results = collection.query(
     query_texts=["This is a query document about hawaii"], # Chroma will embed this for you
@@ -203,9 +156,8 @@ results = collection.query(
 print(results)
 ```
 
-{% /Tab %}
+### typescript
 
-{% Tab label="typescript" %}
 ```typescript
 const results = await collection.query({
     queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
@@ -214,9 +166,6 @@ const results = await collection.query({
 
 console.log(results);
 ```
-{% /Tab %}
-
-{% /TabbedCodeBlock %}
 
 If `n_results` is not provided, Chroma will return 10 results by default. Here we only added 2 documents, so we set `n_results=2`.
 
@@ -224,9 +173,8 @@ If `n_results` is not provided, Chroma will return 10 results by default. Here w
 
 From the above - you can see that our query about `hawaii` is semantically most similar to the document about `pineapple`.
 
-{% TabbedCodeBlock %}
+### python
 
-{% Tab label="python" %}
 ```python
 {
   'documents': [[
@@ -241,9 +189,9 @@ From the above - you can see that our query about `hawaii` is semantically most 
   'embeddings': None,
 }
 ```
-{% /Tab %}
 
-{% Tab label="typescript" %}
+### typescript
+
 ```typescript
 {
     documents: [
@@ -262,17 +210,13 @@ From the above - you can see that our query about `hawaii` is semantically most 
     embeddings: null
 }
 ```
-{% /Tab %}
-
-{% /TabbedCodeBlock %}
 
 ### 7. Try it out yourself
 
 What if we tried querying with `"This is a document about florida"`? Here is a full example.
 
-{% TabbedCodeBlock %}
+### python
 
-{% Tab label="python" %}
 ```python
 import chromadb
 chroma_client = chromadb.Client()
@@ -296,9 +240,9 @@ results = collection.query(
 
 print(results)
 ```
-{% /Tab %}
 
-{% Tab label="typescript" %}
+### typescript
+
 ```typescript
 import { ChromaClient } from "chromadb";
 const client = new ChromaClient();
@@ -324,9 +268,6 @@ const results = await collection.query({
 
 console.log(results);
 ```
-{% /Tab %}
-
-{% /TabbedCodeBlock %}
 
 ## Next steps
 

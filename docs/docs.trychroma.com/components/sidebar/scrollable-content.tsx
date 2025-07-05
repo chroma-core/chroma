@@ -11,6 +11,7 @@ const ScrollableContent: React.FC<{
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const handleScroll = () => {
+    console.log(scrollRef.current);
     if (scrollRef.current) {
       sessionStorage.setItem(
         "sidebarScrollPosition",
@@ -61,7 +62,7 @@ const ScrollableContent: React.FC<{
   return (
     <div
       ref={scrollRef}
-      className="flex flex-col flex-grow pb-10 pr-5"
+      className="flex flex-col h-full pb-10 pt-5 px-5 overflow-y-auto"
     >
       <div className="flex flex-col gap-5">{children}</div>
     </div>

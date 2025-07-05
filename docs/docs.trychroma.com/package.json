@@ -6,7 +6,8 @@
     "start": "next start",
     "index": "node scripts/indexContent.mjs",
     "gen-js": "sh scripts/jsDocs.sh",
-    "gen-python": "sh scripts/pythonDocs.sh"
+    "gen-python": "sh scripts/pythonDocs.sh",
+    "generate-llm-txts": "npx tsx scripts/generate-llms-txts.ts"
   },
   "dependencies": {
     "@docsearch/react": "^3.8.0",
@@ -40,6 +41,7 @@
     "lucide-react": "^0.464.0",
     "next": "^14.2.13",
     "next-themes": "^0.3.0",
+    "openai": "^5.8.2",
     "posthog-js": "^1.200.1",
     "prismjs": "^1.29.0",
     "react": "^18.3.1",
@@ -65,6 +67,7 @@
     "postcss": "^8.4.35",
     "prettier": "^3.4.1",
     "tailwindcss": "^3.4.1",
+    "tsx": "^4.20.3",
     "typedoc": "^0.24.7",
     "typedoc-plugin-markdown": "^3.15.3",
     "typescript": "latest"

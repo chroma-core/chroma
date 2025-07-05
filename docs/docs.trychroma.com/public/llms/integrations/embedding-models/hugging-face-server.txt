@@ -1,0 +1,71 @@
+---
+id: hugging-face-server
+name: 'Hugging Face Server'
+---
+
+# Hugging Face Server
+
+Chroma provides a convenient wrapper for HuggingFace Text Embedding Server, a standalone server that provides text embeddings via a REST API. You can read more about it [**here**](https://github.com/huggingface/text-embeddings-inference).
+
+## Setting Up The Server
+
+To run the embedding server locally you can run the following command from the root of the Chroma repository. The docker compose command will run Chroma and the embedding server together.
+
+```terminal
+docker compose -f examples/server_side_embeddings/huggingface/docker-compose.yml up -d
+```
+
+or
+
+```terminal
+docker run -p 8001:80 -d -rm --name huggingface-embedding-server ghcr.io/huggingface/text-embeddings-inference:cpu-0.3.0 --model-id BAAI/bge-small-en-v1.5 --revision -main
+```
+
+The above docker command will run the server with the `BAAI/bge-small-en-v1.5` model. You can find more information about running the server in docker [**here**](https://github.com/huggingface/text-embeddings-inference#docker).
+
+## Usage
+
+### python
+
+```python
+from chromadb.utils.embedding_functions import HuggingFaceEmbeddingServer
+huggingface_ef = HuggingFaceEmbeddingServer(url="http://localhost:8001/embed")
+```
+
+### typescript
+
+```typescript
+// npm install @chroma-core/huggingface-server
+
+import { HuggingFaceEmbeddingServerFunction } from '@chroma-core/huggingface-server';
+
+const embedder = new HuggingFaceEmbeddingServerFunction({ url: "http://localhost:8001/embed" })
+
+// use directly
+const embeddings = embedder.generate(["document1","document2"])
+
+// pass documents to query for .add and .query
+let collection = await client.createCollection({name: "name", embeddingFunction: embedder})
+collection = await client.getCollection({name: "name", embeddingFunction: embedder})
+```
+
+The embedding model is configured on the server side. Check the docker-compose file in `examples/server_side_embeddings/huggingface/docker-compose.yml` for an example of how to configure the server.
+
+## Authentication
+
+The embedding server can be configured to only allow usage with API keys. 
+You can use authentication in the chroma clients:
+
+### python
+
+```python
+from chromadb.utils.embedding_functions import HuggingFaceEmbeddingServer
+huggingface_ef = HuggingFaceEmbeddingServer(url="http://localhost:8001/embed", api_key="your secret key")
+```
+
+### typescript
+
+```typescript
+import  {HuggingFaceEmbeddingServerFunction} from 'chromadb';
+const embedder = new HuggingFaceEmbeddingServerFunction({ url: "http://localhost:8001/embed", apiKey: "your secret key" })
+```
