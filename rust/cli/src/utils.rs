@@ -110,6 +110,10 @@ pub enum UtilsError {
     NotChromaPath,
     #[error("Quota Error: {0}")]
     Quota(String),
+    #[error("Failed to write to console")]
+    ConsoleWriteFailed,
+    #[error("Failed to start the Chroma CLI")]
+    Runtime,
 }
 
 #[derive(Parser, Debug, Clone)]

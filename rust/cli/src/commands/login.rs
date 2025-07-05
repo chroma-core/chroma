@@ -18,7 +18,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::time::sleep;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 pub struct LoginArgs {
     #[clap(long, help = "Profile name to associate with auth credentials")]
     profile: Option<String>,
