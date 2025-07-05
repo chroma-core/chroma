@@ -39,6 +39,9 @@ from chromadb.api.types import (
 # TODO(hammadb): Unify imports across types vs root __init__.py
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb_rust_bindings
+import logging
+
+logging.getLogger().setLevel(logging.INFO)
 
 
 from typing import Optional, Sequence
@@ -83,6 +86,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def start(self) -> None:
+        print("python: starting RustBindingsAPI", flush=True)
         # Construct the SqliteConfig
         # TOOD: We should add a "config converter"
         if self._system.settings.require("is_persistent"):
@@ -115,6 +119,7 @@ class RustBindingsAPI(ServerAPI):
             persist_path=persist_path,
             hnsw_cache_size=self.hnsw_cache_size,
         )
+        print("python: RustBindingsAPI started", flush=True)
 
     @override
     def stop(self) -> None:
