@@ -6,23 +6,13 @@ The [embedding function](../embeddings/embedding-functions) you choose to use in
 
 When you create a collection, you can customize these index configuration values for different data, accuracy and performance requirements. Some query-time configurations can also be customized after the collection's creation using the `.modify` function. 
 
-{% CustomTabs %}
-
-{% Tab label="Single Node" %}
+### Single Node
 
 ## HNSW Index Configuration
 
 In Single Node Chroma collections, we use an HNSW (Hierarchical Navigable Small World) index to perform approximate nearest neighbor (ANN) search.
 
-{% Accordion %}
-
-{% AccordionItem label="What is an HNSW index?" %}
-
 An HNSW (Hierarchical Navigable Small World) index is a graph-based data structure designed for efficient approximate nearest neighbor search in high-dimensional vector spaces. It works by constructing a multi-layered graph where each layer contains a subset of the data points, with higher layers being sparser and serving as "highways" for faster navigation. The algorithm builds connections between nearby points at each layer, creating "small-world" properties that allow for efficient search complexity. During search, the algorithm starts at the top layer and navigates toward the query point in the embedding space, then moves down through successive layers, refining the search at each level until it finds the final nearest neighbors.
-
-{% /AccordionItem %}
-
-{% /Accordion %}
 
 The HNSW index parameters include:
 
@@ -30,13 +20,11 @@ The HNSW index parameters include:
 
 | Distance          | parameter |                                                                                                                                                   Equation |                                                                          Intuition                                                                          |
 | ----------------- | :-------: |-----------------------------------------------------------------------------------------------------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------------------------------------------------------------------:|
-| Squared L2        |   `l2`    |                                                                                                {% Latex %} d =  \\sum\\left(A_i-B_i\\right)^2 {% /Latex %} |                       measures absolute geometric distance between vectors, making it suitable when you want true spatial proximity.                        |
-| Inner product     |   `ip`    |                                                                                     {% Latex %} d = 1.0 - \\sum\\left(A_i \\times B_i\\right) {% /Latex %} |             focuses on vector alignment and magnitude, often used for recommendation systems where larger values indicate stronger preferences              |
-| Cosine similarity | `cosine`  | {% Latex %} d = 1.0 - \\frac{\\sum\\left(A_i \\times B_i\\right)}{\\sqrt{\\sum\\left(A_i^2\\right)} \\cdot \\sqrt{\\sum\\left(B_i^2\\right)}} {% /Latex %} | measures only the angle between vectors (ignoring magnitude), making it ideal for text embeddings or cases where you care about direction rather than scale |
+| Squared L2        |   `l2`    |                                                                                                 d =  \\sum\\left(A_i-B_i\\right)^2  |                       measures absolute geometric distance between vectors, making it suitable when you want true spatial proximity.                        |
+| Inner product     |   `ip`    |                                                                                      d = 1.0 - \\sum\\left(A_i \\times B_i\\right)  |             focuses on vector alignment and magnitude, often used for recommendation systems where larger values indicate stronger preferences              |
+| Cosine similarity | `cosine`  |  d = 1.0 - \\frac{\\sum\\left(A_i \\times B_i\\right)}{\\sqrt{\\sum\\left(A_i^2\\right)} \\cdot \\sqrt{\\sum\\left(B_i^2\\right)}}  | measures only the angle between vectors (ignoring magnitude), making it ideal for text embeddings or cases where you care about direction rather than scale |
 
-{% Banner type="note" %}
 You should make sure that the `space` you choose is supported by your collection's embedding function. Every Chroma embedding function specifies its default space and a list of supported spaces.
-{% /Banner %}
 
 * `ef_construction` determines the size of the candidate list used to select neighbors during index creation. A higher value improves index quality at the cost of more memory and time, while a lower value speeds up construction with reduced accuracy. The default value is `100`.
 * `ef_search` determines the size of the dynamic candidate list used while searching for the nearest neighbors. A higher value improves recall and accuracy by exploring more potential neighbors but increases query time and computational cost, while a lower value results in faster but less accurate searches. The default value is `100`. This field can be modified after creation.
@@ -48,9 +36,6 @@ You should make sure that the `space` you choose is supported by your collection
 
 For example, here we create a collection with customized values for `space` and `ef_construction`:
 
-{% TabbedCodeBlock %}
-
-{% Tab label="python" %}
 ```python
 collection = client.create_collection(
     name="my-collection",
@@ -63,9 +48,9 @@ collection = client.create_collection(
     }
 )
 ```
-{% /Tab %}
 
-{% Tab label="typescript" %}
+### typescript
+
 ```typescript
 collection = await client.createCollection({
     name: "my-collection",
@@ -78,9 +63,6 @@ collection = await client.createCollection({
     }
 })
 ```
-{% /Tab %}
-
-{% /TabbedCodeBlock %}
 
 ### Fine-Tuning HNSW Parameters
 
@@ -109,30 +91,15 @@ we set up two Chroma collections:
 ```
 In this example, when querying with the test embedding (`id=1`), the first collection failed to find the embedding itself, despite it being in the collection (where it should have appeared as a result with a distance of `0.0`). The second collection, while slightly slower, successfully found the query embedding itself (shown by the `0.0` distance) and returned closer neighbors overall, demonstrating better accuracy at the cost of performance.
 
-
-{% /Tab %}
-
-{% Tab label="Distributed and Chroma Cloud" %}
+### Distributed and Chroma Cloud
 
 ## SPANN Index Configuration
 
 In Distributed Chroma and Chroma Cloud collections, we use a SPANN (Spacial Approximate Nearest Neighbors) index to perform approximate nearest neighbor (ANN) search.
 
-{% Video link="https://www.youtube.com/embed/1QdwYWd3S1g" title="SPANN Video" / %}
-
-{% Accordion %}
-
-{% AccordionItem label="What is a SPANN index?" %}
-
 A SPANN index is a data structure used to efficiently find approximate nearest neighbors in large sets of high-dimensional vectors. It works by dividing the set into broad clusters (so we can ignore most of the data during search) and then building efficient, smaller indexes within each cluster for fast local lookups. This two-level approach helps reduce both memory use and search time, making it practical to search billions of vectors stored even on hard drives or separate machines in a distributed system.
 
-{% /AccordionItem %}
-
-{% /Accordion %}
-
-{% Banner type="note" %}
 We currently don't allow customization or modification of SPANN configuration. If you set these values they will be ignored by the server.
-{% /Banner %}
 
 The SPANN index parameters include:
 
@@ -140,9 +107,9 @@ The SPANN index parameters include:
 
 | Distance          | parameter |                                                                                                                                                   Equation |                                                                          Intuition                                                                          |
 | ----------------- | :-------: |-----------------------------------------------------------------------------------------------------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------------------------------------------------------------------:|
-| Squared L2        |   `l2`    |                                                                                                {% Latex %} d =  \\sum\\left(A_i-B_i\\right)^2 {% /Latex %} |                       measures absolute geometric distance between vectors, making it suitable when you want true spatial proximity.                        |
-| Inner product     |   `ip`    |                                                                                     {% Latex %} d = 1.0 - \\sum\\left(A_i \\times B_i\\right) {% /Latex %} |             focuses on vector alignment and magnitude, often used for recommendation systems where larger values indicate stronger preferences              |
-| Cosine similarity | `cosine`  | {% Latex %} d = 1.0 - \\frac{\\sum\\left(A_i \\times B_i\\right)}{\\sqrt{\\sum\\left(A_i^2\\right)} \\cdot \\sqrt{\\sum\\left(B_i^2\\right)}} {% /Latex %} | measures only the angle between vectors (ignoring magnitude), making it ideal for text embeddings or cases where you care about direction rather than scale |
+| Squared L2        |   `l2`    |                                                                                                 d =  \\sum\\left(A_i-B_i\\right)^2  |                       measures absolute geometric distance between vectors, making it suitable when you want true spatial proximity.                        |
+| Inner product     |   `ip`    |                                                                                      d = 1.0 - \\sum\\left(A_i \\times B_i\\right)  |             focuses on vector alignment and magnitude, often used for recommendation systems where larger values indicate stronger preferences              |
+| Cosine similarity | `cosine`  |  d = 1.0 - \\frac{\\sum\\left(A_i \\times B_i\\right)}{\\sqrt{\\sum\\left(A_i^2\\right)} \\cdot \\sqrt{\\sum\\left(B_i^2\\right)}}  | measures only the angle between vectors (ignoring magnitude), making it ideal for text embeddings or cases where you care about direction rather than scale |
 
 * `search_nprobe` is the number of centers that are probed for a query. The higher the value the more accurate the result will be. The query response time also increases as `search_nprobe` increases. Recommended values are 64/128. We don't allow setting a value higher than 128 today. The default value is 64. 
 * `write_nprobe` is the same as `search_nprobe` but for the index construction phase. It is the number of centers searched when appending or reassigning a point. It has the same limits as `search_nprobe`. The default value is 64. 
@@ -151,43 +118,31 @@ The SPANN index parameters include:
 * `max_neighbors` defines the maximum number of neighbors for a node. The default value is 64. 
 * `reassign_neighbor_count` is the number of closest neighboring clusters of a split cluster whose points are considered for reassignment. The default value is 64.
 
-{% /Tab %}
-
-{% /CustomTabs %}
-
 ## Embedding Function Configuration
 
 The embedding function you choose when creating a collection, along with the parameters you instantiate it with, is persisted in the collection's configuration. This allows us to reconstruct it correctly when you use collection across different clients. 
 
 You can set your embedding function as an argument to the "create" methods, or directly in the configuration:
 
-{% Tabs %}
-
-{% Tab label="python" %}
+### python
 
 Install the `openai` and `cohere` packages:
 
-{% TabbedUseCaseCodeBlock language="Terminal" %}
-
-{% Tab label="pip" %}
 ```terminal
 pip install openai cohere
 ```
-{% /Tab %}
 
-{% Tab label="poetry" %}
+### poetry
+
 ```terminal
 poetry add openai cohere
 ```
-{% /Tab %}
 
-{% Tab label="uv" %}
+### uv
+
 ```terminal
 uv pip install openai cohere
 ```
-{% /Tab %}
-
-{% /TabbedUseCaseCodeBlock %}
 
 Creating collections with embedding function and custom configuration:
 
@@ -229,39 +184,31 @@ cohere_ef = CohereEmbeddingFunction(
 )
 ```
 
-{% /Tab %}
-
-{% Tab label="typescript" %}
+### typescript
 
 Install the `@chroma-core/openai` and `@chroma-core/cohere` packages:
 
-{% TabbedUseCaseCodeBlock language="Terminal" %}
-
-{% Tab label="npm" %}
 ```terminal
 npm install @chroma-core/openai @chroma-core/cohere
 ```
-{% /Tab %}
 
-{% Tab label="pnpm" %}
+### pnpm
+
 ```terminal
 pnpm add @chroma-core/openai @chroma-core/cohere
 ```
-{% /Tab %}
 
-{% Tab label="yarn" %}
+### yarn
+
 ```terminal
 yarn add @chroma-core/openai @chroma-core/cohere
 ```
-{% /Tab %}
 
-{% Tab label="bun" %}
+### bun
+
 ```terminal
 bun add @chroma-core/openai @chroma-core/cohere
 ```
-{% /Tab %}
-
-{% /TabbedUseCaseCodeBlock %}
 
 Creating collections with embedding function and custom configuration:
 
@@ -302,7 +249,3 @@ cohere_ef = CohereEmbeddingFunction({
     truncate: "NONE",
 })
 ```
-
-{% /Tab %}
-
-{% /Tabs %}

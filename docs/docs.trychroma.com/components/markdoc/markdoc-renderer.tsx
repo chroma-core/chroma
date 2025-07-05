@@ -12,15 +12,18 @@ import { getAllPages, getPagePrevNext } from "@/lib/content";
 import sidebarConfig from "@/markdoc/content/sidebar-config";
 import PageNav from "@/components/markdoc/page-nav";
 import TableOfContents from "@/components/markdoc/table-of-contents";
+import AskAI from "@/components/markdoc/ask-ai";
 
 const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
   const filePath = `${path.join(process.cwd(), "markdoc", "content", ...slug)}.md`;
+  const txtFilePath = `${path.join(process.cwd(), "public", "llms", ...slug)}.txt`;
 
-  if (!fs.existsSync(filePath)) {
+  if (!fs.existsSync(filePath) || !fs.existsSync(txtFilePath)) {
     notFound();
   }
 
   const source = fs.readFileSync(filePath, "utf-8");
+  const txtContent = fs.readFileSync(txtFilePath, "utf-8");
 
   const ast = Markdoc.parse(source);
 
@@ -39,7 +42,7 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
 
   return (
     <MarkdocPage>
-      <div className="flex max-w-6xl 2xl:max-w-7xl mx-auto">
+      <div className="relative flex max-w-6xl 2xl:max-w-7xl mx-auto">
         <div className="min-w-0 py-10 relative md:pr-10 marker:text-black dark:marker:text-gray-200 grow max-w-6xl w-full grow-4 prose dark:prose-invert ">
           <SidebarToggle path={slug} />
           {output}
@@ -60,7 +63,13 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
             <Link href={GitHubLink}>Edit this page on GitHub</Link>
           </div>
         </div>
-        <TableOfContents ast={ast} />
+        <div className="absolute top-9 right-0 xl:hidden">
+          <AskAI content={txtContent} />
+        </div>
+        <div className="sticky top-0 h-full py-5 space-y-4 hidden xl:block w-[250px]">
+          <AskAI content={txtContent} />
+          <TableOfContents ast={ast} />
+        </div>
       </div>
     </MarkdocPage>
   );

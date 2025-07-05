@@ -64,7 +64,7 @@ const extractToc = (ast: Node) => {
 const TableOfContents: React.FC<{ ast: Node }> = ({ ast }) => {
   const toc = extractToc(ast);
   return (
-    <div className="sticky top-0 h-full py-5 overflow-y-auto ml-5 hidden xl:block w-[200px]">
+    <div className="overflow-y-auto">
       <div className="flex flex-row items-center font-bold">
         <TextIcon className="h-5 w-5 pr-1" />
         On this page
