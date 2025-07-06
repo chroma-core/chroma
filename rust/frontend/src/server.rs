@@ -1310,6 +1310,10 @@ async fn collection_add(
     let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
 
+    if payload.embeddings.is_none() {
+        return Err(ValidationError::MissingEmbeddings.into());
+    }
+
     let payload_embeddings: Option<Vec<Vec<f32>>> = maybe_decode_embeddings(payload.embeddings)?;
     if let Some(embeddings) = payload_embeddings.as_ref() {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
