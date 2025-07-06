@@ -62,7 +62,7 @@ const AskAI: React.FC<{ content: string }> = ({ content }) => {
             <div className="flex flex-col gap-1.5">
               <div className="flex items-center gap-1">
                 <div className="flex items-center justify-center w-[22px]">
-                  <ClaudeLogo className="w-[18px] h-[18px] dark:invert" />
+                  <ClaudeLogo className="w-[17px] h-[17px]" />
                 </div>
                 <p>Open in Claude</p>
               </div>
