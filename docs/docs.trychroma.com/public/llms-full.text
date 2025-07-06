@@ -1780,15 +1780,6 @@ collection.update(
 
 Note that a given entry with a specific ID can only have one associated modality at a time. Updates will over-write the existing modality, so for example, an entry which originally has corresponding text and updated with an image, will no longer have that text after an update with images.
 
----
-{
-  "id": "about",
-  "title": "About",
-  "section": "Overview",
-  "order": 4
-}
----
-
 # About
 
 {% Banner type="tip" title="We are hiring" %}
@@ -2006,14 +1997,6 @@ Each database contains multiple collections, and each collection name must be un
 ### Tenants
 
 At the top level of the model is the **tenant**, which represents a single user, team, or account. Tenants provide complete isolation. No data or metadata, is shared across tenants. All access control, quota enforcement, and billing are scoped to the tenant level.
----
-{
-  "id": "getting-started",
-  "title": "Getting Started",
-  "section": "Overview",
-  "order": 1
-}
----
 
 # Getting Started
 

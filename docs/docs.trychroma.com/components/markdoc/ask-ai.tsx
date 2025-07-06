@@ -13,7 +13,8 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import OpenAILogo from "../../public/openai-logo.svg";
 import ClaudeLogo from "../../public/claude-logo.svg";
-import { Clipboard } from "lucide-react";
+import { ChevronDown, Clipboard } from "lucide-react";
+import UIButton from "@/components/ui/ui-button";
 
 const prompt = (page: string) => {
   const path = `https://docs.trychroma.com/llms${page}.txt`;
@@ -30,13 +31,13 @@ const AskAI: React.FC<{ content: string }> = ({ content }) => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
+        <UIButton
           variant="outline"
           className="flex gap-4 pl-4 pr-2 items-center justify-between focus-visible:outline-none"
         >
-          <p className="font-mono">Ask this Page</p>
-          <ChevronUpDownIcon className="w-5 h-5" />
-        </Button>
+          <p>Ask this Page</p>
+          <ChevronDown className="w-4 h-4" />
+        </UIButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-[230px]" align="end">
         <DropdownMenuItem className="flex w-full">

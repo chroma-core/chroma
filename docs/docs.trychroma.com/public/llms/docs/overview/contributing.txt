@@ -1,12 +1,3 @@
----
-{
-  "id": "contributing",
-  "title": "Contributing",
-  "section": "Overview",
-  "order": 3
-}
----
-
 # Contributing
 
 We welcome all contributions, bug reports, bug fixes, documentation improvements, enhancements, and ideas.

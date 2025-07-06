@@ -1,12 +1,3 @@
----
-{
-  "id": "getting-started",
-  "title": "Getting Started",
-  "section": "Overview",
-  "order": 1
-}
----
-
 # Getting Started
 
 Chroma is an AI-native open-source vector database. It comes with everything you need to get started built-in, and runs on your machine.
