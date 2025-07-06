@@ -43,6 +43,9 @@ func TestNodeWatcher(t *testing.T) {
 				},
 			},
 		},
+		Spec: v1.PodSpec{
+			NodeName: "test-node-0",
+		},
 	}, metav1.CreateOptions{})
 
 	// Get the status of the node
@@ -52,7 +55,7 @@ func TestNodeWatcher(t *testing.T) {
 			t.Fatalf("Error getting node status: %v", err)
 		}
 
-		return reflect.DeepEqual(memberlist, Memberlist{Member{id: "test-pod-0"}})
+		return reflect.DeepEqual(memberlist, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}})
 	}, 10, 1*time.Second)
 	if !ok {
 		t.Fatalf("Node status did not update after adding a pod")
@@ -83,7 +86,7 @@ func TestNodeWatcher(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Error getting node status: %v", err)
 		}
-		return reflect.DeepEqual(memberlist, Memberlist{Member{id: "test-pod-0"}})
+		return reflect.DeepEqual(memberlist, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}})
 	}, 10, 1*time.Second)
 	if !ok {
 		t.Fatalf("Node status did not update after adding a not ready pod")
@@ -93,8 +96,8 @@ func TestNodeWatcher(t *testing.T) {
 func TestMemberlistStore(t *testing.T) {
 	memberlistName := "test-memberlist"
 	namespace := "chroma"
-	memberlist := &Memberlist{}
-	cr_memberlist := memberlistToCr(memberlist, namespace, memberlistName, "0")
+	memberlist := Memberlist{}
+	cr_memberlist := memberlist.toCr(namespace, memberlistName, "0")
 
 	// Following the assumptions of the real system, we initialize the CR with no members.
 	dynamicClient := fake.NewSimpleDynamicClient(runtime.NewScheme(), cr_memberlist)
@@ -105,21 +108,21 @@ func TestMemberlistStore(t *testing.T) {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
 	// assert the memberlist is empty
-	assert.Equal(t, Memberlist{}, *memberlist)
+	assert.Equal(t, Memberlist{}, memberlist)
 
 	// Add a member to the memberlist
-	memberlist_store.UpdateMemberlist(context.Background(), &Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}, "0")
+	memberlist_store.UpdateMemberlist(context.Background(), Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}, "0")
 	memberlist, _, err = memberlist_store.GetMemberlist(context.Background())
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
 	// assert the memberlist has the correct members
-	if !memberlistSame(*memberlist, Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}) {
+	if !memberlistSame(memberlist, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}) {
 		t.Fatalf("Memberlist did not update after adding a member")
 	}
 }
 
-func createFakePod(memberId string, podIp string, clientset kubernetes.Interface) {
+func createFakePod(memberId string, podIp string, node string, clientset kubernetes.Interface) {
 	clientset.CoreV1().Pods("chroma").Create(context.Background(), &v1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      memberId,
@@ -137,6 +140,9 @@ func createFakePod(memberId string, podIp string, clientset kubernetes.Interface
 				},
 			},
 		},
+		Spec: v1.PodSpec{
+			NodeName: node,
+		},
 	}, metav1.CreateOptions{})
 }
 
@@ -150,8 +156,8 @@ func deleteFakePod(name string, clientset kubernetes.Interface) {
 func TestMemberlistManager(t *testing.T) {
 	memberlist_name := "test-memberlist"
 	namespace := "chroma"
-	initialMemberlist := &Memberlist{}
-	initialCrMemberlist := memberlistToCr(initialMemberlist, namespace, memberlist_name, "0")
+	initialMemberlist := Memberlist{}
+	initialCrMemberlist := initialMemberlist.toCr(namespace, memberlist_name, "0")
 
 	// Create a fake kubernetes client
 	clientset, err := utils.GetTestKubenertesInterface()
@@ -180,22 +186,22 @@ func TestMemberlistManager(t *testing.T) {
 	}
 
 	// Add a ready pod
-	createFakePod("test-pod-0", "10.0.0.49", clientset)
+	createFakePod("test-pod-0", "10.0.0.49", "test-node-0", clientset)
 
 	// Get the memberlist
 	ok := retryUntilCondition(func() bool {
-		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0"}})
+		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.49", node: "test-node-0"}})
 	}, 30, 1*time.Second)
 	if !ok {
 		t.Fatalf("Memberlist did not update after adding a pod")
 	}
 
 	// Add another ready pod
-	createFakePod("test-pod-1", "10.0.0.50", clientset)
+	createFakePod("test-pod-1", "10.0.0.50", "test-node-1", clientset)
 
 	// Get the memberlist
 	ok = retryUntilCondition(func() bool {
-		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}})
+		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-0", ip: "10.0.0.49", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.50", node: "test-node-1"}})
 	}, 30, 1*time.Second)
 	if !ok {
 		t.Fatalf("Memberlist did not update after adding a pod")
@@ -206,7 +212,7 @@ func TestMemberlistManager(t *testing.T) {
 
 	// Get the memberlist
 	ok = retryUntilCondition(func() bool {
-		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-1"}})
+		return getMemberlistAndCompare(t, memberlistStore, Memberlist{Member{id: "test-pod-1", ip: "10.0.0.50", node: "test-node-1"}})
 	}, 30, 1*time.Second)
 	if !ok {
 		t.Fatalf("Memberlist did not update after deleting a pod")
@@ -217,25 +223,42 @@ func TestMemberlistSame(t *testing.T) {
 	memberlist := Memberlist{}
 	assert.True(t, memberlistSame(memberlist, memberlist))
 
-	newMemberlist := Memberlist{Member{id: "test-pod-0"}}
+	newMemberlist := Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}}
 	assert.False(t, memberlistSame(memberlist, newMemberlist))
 	assert.False(t, memberlistSame(newMemberlist, memberlist))
 	assert.True(t, memberlistSame(newMemberlist, newMemberlist))
 
-	memberlist = Memberlist{Member{id: "test-pod-1"}}
+	memberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
 	assert.False(t, memberlistSame(newMemberlist, memberlist))
 	assert.False(t, memberlistSame(memberlist, newMemberlist))
 	assert.True(t, memberlistSame(memberlist, memberlist))
 
-	memberlist = Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}
-	newMemberlist = Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}
+	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
+	newMemberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
 	assert.True(t, memberlistSame(memberlist, newMemberlist))
 	assert.True(t, memberlistSame(newMemberlist, memberlist))
 
-	memberlist = Memberlist{Member{id: "test-pod-0"}, Member{id: "test-pod-1"}}
-	newMemberlist = Memberlist{Member{id: "test-pod-1"}, Member{id: "test-pod-0"}}
+	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
+	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}}
 	assert.True(t, memberlistSame(memberlist, newMemberlist))
 	assert.True(t, memberlistSame(newMemberlist, memberlist))
+
+	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.2", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
+	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}}
+	assert.False(t, memberlistSame(memberlist, newMemberlist))
+	assert.False(t, memberlistSame(newMemberlist, memberlist))
+
+	// Just one ip wrong
+	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.2", node: "test-node-0"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
+	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}}
+	assert.False(t, memberlistSame(memberlist, newMemberlist))
+	assert.False(t, memberlistSame(newMemberlist, memberlist))
+
+	// Just one node wrong
+	memberlist = Memberlist{Member{id: "test-pod-0", ip: "10.0.0.2", node: "test-node-2"}, Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}}
+	newMemberlist = Memberlist{Member{id: "test-pod-1", ip: "10.0.0.2", node: "test-node-1"}, Member{id: "test-pod-0", ip: "10.0.0.1", node: "test-node-0"}}
+	assert.False(t, memberlistSame(memberlist, newMemberlist))
+	assert.False(t, memberlistSame(newMemberlist, memberlist))
 }
 
 func retryUntilCondition(f func() bool, retry_count int, retry_interval time.Duration) bool {
@@ -253,5 +276,5 @@ func getMemberlistAndCompare(t *testing.T, memberlistStore IMemberlistStore, exp
 	if err != nil {
 		t.Fatalf("Error getting memberlist: %v", err)
 	}
-	return memberlistSame(*memberlist, expected_memberlist)
+	return memberlistSame(memberlist, expected_memberlist)
 }

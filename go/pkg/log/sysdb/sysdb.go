@@ -13,7 +13,8 @@ import (
 )
 
 type ISysDB interface {
-	CheckCollection(ctx context.Context, collectionId string) (bool, error)
+	// Returns true if collection exists, false otherwise.
+	CheckCollections(ctx context.Context, collectionIds []string) ([]bool, error)
 	AddCollection(ctx context.Context, collectionId string) error
 }
 
@@ -46,21 +47,19 @@ func NewSysDB(conn string) *SysDB {
 	}
 }
 
-func (s *SysDB) CheckCollection(ctx context.Context, collectionId string) (bool, error) {
-	// TODO: make this check a batch API
-	request := &coordinatorpb.GetCollectionsRequest{
-		Id: &collectionId,
-	}
-	response, err := s.client.GetCollections(ctx, request)
+func (s *SysDB) CheckCollections(ctx context.Context, collectionIds []string) ([]bool, error) {
+	request := &coordinatorpb.CheckCollectionsRequest{}
+	request.CollectionIds = append(request.CollectionIds, collectionIds...)
+
+	response, err := s.client.CheckCollections(ctx, request)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	for _, collection := range response.Collections {
-		if collection.Id == collectionId {
-			return true, nil
-		}
+	result := make([]bool, len(response.Deleted))
+	for i, deleted := range response.Deleted {
+		result[i] = !deleted
 	}
-	return false, nil
+	return result, nil
 }
 
 func (s *SysDB) AddCollection(ctx context.Context, collectionId string) error {

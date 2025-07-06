@@ -49,6 +49,12 @@ type defaultGrpcServer struct {
 func newDefaultGrpcProvider(name string, grpcConfig *GrpcConfig, registerFunc func(grpc.ServiceRegistrar)) (GrpcServer, error) {
 	var opts []grpc.ServerOption
 	opts = append(opts, grpc.MaxRecvMsgSize(maxGrpcFrameSize))
+	if grpcConfig.NumStreamWorkers > 0 {
+		opts = append(opts, grpc.NumStreamWorkers(grpcConfig.NumStreamWorkers))
+	}
+	if grpcConfig.MaxConcurrentStreams > 0 {
+		opts = append(opts, grpc.MaxConcurrentStreams(grpcConfig.MaxConcurrentStreams))
+	}
 	if grpcConfig.MTLSEnabled() {
 		cert, err := tls.LoadX509KeyPair(grpcConfig.CertPath, grpcConfig.KeyPath)
 		if err != nil {

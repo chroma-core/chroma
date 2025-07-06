@@ -1,6 +1,6 @@
-use std::hash::Hash;
-
 use super::{CacheError, StorageKey, StorageValue, Weighted};
+use std::fmt::Debug;
+use std::hash::Hash;
 
 /// A zero-configuration cache that doesn't evict.
 pub struct NopCache;
@@ -21,6 +21,16 @@ where
 
     async fn clear(&self) -> Result<(), CacheError> {
         Ok(())
+    }
+
+    async fn obtain(&self, _: K) -> Result<Option<V>, CacheError> {
+        Ok(None)
+    }
+}
+
+impl Debug for NopCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NopCache")
     }
 }
 

@@ -1,9 +1,11 @@
+use chroma_config::assignment;
+use chroma_sysdb::SysDbConfig;
 use figment::providers::{Env, Format, Yaml};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Debug)]
 /// # Description
 /// The RootConfig for all chroma services this is a YAML file that
 /// is shared between all services, and secondarily, fields can be
@@ -12,10 +14,12 @@ const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 /// variables take precedence over values in the YAML file.
 /// By default, it is read from the current working directory,
 /// with the filename chroma_config.yaml.
-pub(crate) struct RootConfig {
+pub struct RootConfig {
     // The root config object wraps the worker config object so that
     // we can share the same config file between multiple services.
+    #[serde(default)]
     pub query_service: QueryServiceConfig,
+    #[serde(default)]
     pub compaction_service: CompactionServiceConfig,
 }
 
@@ -34,7 +38,7 @@ impl RootConfig {
     /// The default location is the current working directory, with the filename chroma_config.yaml.
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
     /// Values in the envionment variables take precedence over values in the YAML file.
-    pub(crate) fn load() -> Self {
+    pub fn load() -> Self {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
 
@@ -53,9 +57,15 @@ impl RootConfig {
     /// # Notes
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
     /// Values in the envionment variables take precedence over values in the YAML file.
-    pub(crate) fn load_from_path(path: &str) -> Self {
+    // NOTE:  Copied to ../load/src/config.rs.
+    pub fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
+        eprintln!("loading config from {path}");
+        eprintln!(
+            "{}",
+            std::fs::read_to_string(path).unwrap_or("<ERROR>".to_string())
+        );
         let mut f = figment::Figment::from(Env::prefixed("CHROMA_").map(|k| match k {
             k if k == "my_member_id" => k.into(),
             k => k.as_str().replace("__", ".").into(),
@@ -77,7 +87,13 @@ impl RootConfig {
     }
 }
 
-#[derive(Deserialize)]
+impl Default for RootConfig {
+    fn default() -> Self {
+        Self::load()
+    }
+}
+
+#[derive(Default, Deserialize, Serialize)]
 /// # Description
 /// The primary config for the worker service.
 /// ## Description of parameters
@@ -88,25 +104,62 @@ impl RootConfig {
 /// For example, to set my_ip, you would set CHROMA_WORKER__MY_IP.
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
-pub(crate) struct QueryServiceConfig {
-    pub(crate) service_name: String,
-    pub(crate) otel_endpoint: String,
+#[derive(Debug)]
+pub struct QueryServiceConfig {
+    #[serde(default = "QueryServiceConfig::default_service_name")]
+    pub service_name: String,
+    #[serde(default = "QueryServiceConfig::default_otel_endpoint")]
+    pub otel_endpoint: String,
     #[allow(dead_code)]
-    pub(crate) my_member_id: String,
-    pub(crate) my_port: u16,
+    #[serde(default = "QueryServiceConfig::default_my_member_id")]
+    pub my_member_id: String,
+    #[serde(default = "QueryServiceConfig::default_my_port")]
+    pub my_port: u16,
     #[allow(dead_code)]
-    pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
+    #[serde(default)]
+    pub assignment_policy: assignment::config::AssignmentPolicyConfig,
     #[allow(dead_code)]
-    pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
-    pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
-    pub(crate) storage: chroma_storage::config::StorageConfig,
-    pub(crate) log: crate::log::config::LogConfig,
-    pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
-    pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
-    pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,
+    #[serde(default)]
+    pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+    #[serde(default)]
+    pub sysdb: SysDbConfig,
+    #[serde(default)]
+    pub storage: chroma_storage::config::StorageConfig,
+    #[serde(default)]
+    pub log: chroma_log::config::LogConfig,
+    #[serde(default)]
+    pub dispatcher: chroma_system::DispatcherConfig,
+    #[serde(default)]
+    pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
+    #[serde(default)]
+    pub hnsw_provider: chroma_index::config::HnswProviderConfig,
+    #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
+    pub fetch_log_batch_size: u32,
 }
 
-#[derive(Deserialize)]
+impl QueryServiceConfig {
+    fn default_service_name() -> String {
+        "query-service".to_string()
+    }
+
+    fn default_otel_endpoint() -> String {
+        "http://otel-collector:4317".to_string()
+    }
+
+    fn default_my_member_id() -> String {
+        "query-service-0".to_string()
+    }
+
+    fn default_my_port() -> u16 {
+        50051
+    }
+
+    fn default_fetch_log_batch_size() -> u32 {
+        100
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 /// # Description
 /// The primary config for the compaction service.
 /// ## Description of parameters
@@ -117,791 +170,52 @@ pub(crate) struct QueryServiceConfig {
 /// For example, to set my_ip, you would set CHROMA_COMPACTOR__MY_IP.
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
-pub(crate) struct CompactionServiceConfig {
-    pub(crate) service_name: String,
-    pub(crate) otel_endpoint: String,
-    pub(crate) my_member_id: String,
+pub struct CompactionServiceConfig {
+    #[serde(default = "CompactionServiceConfig::default_service_name")]
+    pub service_name: String,
+    #[serde(default = "CompactionServiceConfig::default_otel_endpoint")]
+    pub otel_endpoint: String,
+    #[serde(default = "CompactionServiceConfig::default_my_member_id")]
+    pub my_member_id: String,
     #[allow(dead_code)]
-    pub(crate) my_port: u16,
-    pub(crate) assignment_policy: crate::assignment::config::AssignmentPolicyConfig,
-    pub(crate) memberlist_provider: crate::memberlist::config::MemberlistProviderConfig,
-    pub(crate) sysdb: crate::sysdb::config::SysDbConfig,
-    pub(crate) storage: chroma_storage::config::StorageConfig,
-    pub(crate) log: crate::log::config::LogConfig,
-    pub(crate) dispatcher: crate::execution::config::DispatcherConfig,
-    pub(crate) compactor: crate::compactor::config::CompactorConfig,
-    pub(crate) blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
-    pub(crate) hnsw_provider: chroma_index::config::HnswProviderConfig,
+    #[serde(default = "CompactionServiceConfig::default_my_port")]
+    pub my_port: u16,
+    #[serde(default)]
+    pub assignment_policy: assignment::config::AssignmentPolicyConfig,
+    #[serde(default)]
+    pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+    #[serde(default)]
+    pub sysdb: SysDbConfig,
+    #[serde(default)]
+    pub storage: chroma_storage::config::StorageConfig,
+    #[serde(default)]
+    pub log: chroma_log::config::LogConfig,
+    #[serde(default)]
+    pub dispatcher: chroma_system::DispatcherConfig,
+    #[serde(default)]
+    pub compactor: crate::compactor::config::CompactorConfig,
+    #[serde(default)]
+    pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
+    #[serde(default)]
+    pub hnsw_provider: chroma_index::config::HnswProviderConfig,
+    #[serde(default)]
+    pub spann_provider: chroma_index::config::SpannProviderConfig,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use figment::Jail;
-    use serial_test::serial;
-
-    #[test]
-    #[serial]
-    fn test_config_from_default_path() {
-        Jail::expect_with(|jail| {
-            let _ = jail.create_file(
-                "chroma_config.yaml",
-                r#"
-                query_service:
-                    service_name: "query-service"
-                    otel_endpoint: "http://jaeger:4317"
-                    my_member_id: "query-service-0"
-                    my_port: 50051
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                    memberlist_provider:
-                        CustomResource:
-                            kube_namespace: "chroma"
-                            memberlist_name: "query-service-memberlist"
-                            queue_size: 100
-                    sysdb:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    storage:
-                        AdmissionControlledS3:
-                            s3_config:
-                                bucket: "chroma"
-                                credentials: Minio
-                                connect_timeout_ms: 5000
-                                request_timeout_ms: 1000
-                                upload_part_size_bytes: 8388608
-                                download_part_size_bytes: 8388608
-                            rate_limiting_policy:
-                                CountBasedPolicy:
-                                    max_concurrent_requests: 15
-                    log:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    dispatcher:
-                        num_worker_threads: 4
-                        dispatcher_queue_size: 100
-                        worker_queue_size: 100
-                    blockfile_provider:
-                        Arrow:
-                            block_manager_config:
-                                max_block_size_bytes: 16384
-                                block_cache_config:
-                                    memory:
-                                        capacity: 1000
-                            sparse_index_manager_config:
-                                sparse_index_cache_config:
-                                    memory:
-                                        capacity: 1000
-                    hnsw_provider:
-                        hnsw_temporary_path: "~/tmp"
-                        hnsw_cache_config:
-                            disk:
-                                capacity: 8589934592 # 8GB
-                                eviction: lru
-
-                compaction_service:
-                    service_name: "compaction-service"
-                    otel_endpoint: "http://jaeger:4317"
-                    my_member_id: "compaction-service-0"
-                    my_port: 50051
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                    memberlist_provider:
-                        CustomResource:
-                            kube_namespace: "chroma"
-                            memberlist_name: "compaction-service-memberlist"
-                            queue_size: 100
-                    sysdb:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    storage:
-                        AdmissionControlledS3:
-                            s3_config:
-                                bucket: "chroma"
-                                credentials: Minio
-                                connect_timeout_ms: 5000
-                                request_timeout_ms: 1000
-                                upload_part_size_bytes: 8388608
-                                download_part_size_bytes: 8388608
-                            rate_limiting_policy:
-                                CountBasedPolicy:
-                                    max_concurrent_requests: 15
-                    log:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    dispatcher:
-                        num_worker_threads: 4
-                        dispatcher_queue_size: 100
-                        worker_queue_size: 100
-                    compactor:
-                        compaction_manager_queue_size: 1000
-                        max_concurrent_jobs: 100
-                        compaction_interval_sec: 60
-                        min_compaction_size: 10
-                        max_compaction_size: 10000
-                        max_partition_size: 5000
-                    blockfile_provider:
-                        Arrow:
-                            block_manager_config:
-                                max_block_size_bytes: 16384
-                                block_cache_config:
-                                    memory:
-                                        capacity: 1000
-                            sparse_index_manager_config:
-                                sparse_index_cache_config:
-                                    memory:
-                                        capacity: 1000
-                    hnsw_provider:
-                        hnsw_temporary_path: "~/tmp"
-                        hnsw_cache_config:
-                            disk:
-                                capacity: 8589934592 # 8GB
-                                eviction: lru
-                "#,
-            );
-            let config = RootConfig::load();
-            assert_eq!(config.query_service.my_member_id, "query-service-0");
-            assert_eq!(config.query_service.my_port, 50051);
-
-            assert_eq!(
-                config.compaction_service.my_member_id,
-                "compaction-service-0"
-            );
-            assert_eq!(config.compaction_service.my_port, 50051);
-            Ok(())
-        });
+impl CompactionServiceConfig {
+    fn default_service_name() -> String {
+        "compaction-service".to_string()
     }
 
-    #[test]
-    #[serial]
-    fn test_config_from_specific_path() {
-        Jail::expect_with(|jail| {
-            let _ = jail.create_file(
-                "random_path.yaml",
-                r#"
-                query_service:
-                    service_name: "query-service"
-                    otel_endpoint: "http://jaeger:4317"
-                    my_member_id: "query-service-0"
-                    my_port: 50051
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                    memberlist_provider:
-                        CustomResource:
-                            kube_namespace: "chroma"
-                            memberlist_name: "query-service-memberlist"
-                            queue_size: 100
-                    sysdb:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    storage:
-                        AdmissionControlledS3:
-                            s3_config:
-                                bucket: "chroma"
-                                credentials: Minio
-                                connect_timeout_ms: 5000
-                                request_timeout_ms: 1000
-                                upload_part_size_bytes: 8388608
-                                download_part_size_bytes: 8388608
-                            rate_limiting_policy:
-                                CountBasedPolicy:
-                                    max_concurrent_requests: 15
-                    log:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    dispatcher:
-                        num_worker_threads: 4
-                        dispatcher_queue_size: 100
-                        worker_queue_size: 100
-                    blockfile_provider:
-                        Arrow:
-                            block_manager_config:
-                                max_block_size_bytes: 16384
-                                block_cache_config:
-                                    memory:
-                                        capacity: 1000
-                            sparse_index_manager_config:
-                                sparse_index_cache_config:
-                                    memory:
-                                        capacity: 1000
-                    hnsw_provider:
-                        hnsw_temporary_path: "~/tmp"
-                        hnsw_cache_config:
-                            disk:
-                                capacity: 1073741824
-                                eviction: lru
-
-                compaction_service:
-                    service_name: "compaction-service"
-                    otel_endpoint: "http://jaeger:4317"
-                    my_member_id: "compaction-service-0"
-                    my_port: 50051
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                    memberlist_provider:
-                        CustomResource:
-                            kube_namespace: "chroma"
-                            memberlist_name: "compaction-service-memberlist"
-                            queue_size: 100
-                    sysdb:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    storage:
-                        AdmissionControlledS3:
-                            s3_config:
-                                bucket: "chroma"
-                                credentials: Minio
-                                connect_timeout_ms: 5000
-                                request_timeout_ms: 1000
-                                upload_part_size_bytes: 8388608
-                                download_part_size_bytes: 8388608
-                            rate_limiting_policy:
-                                CountBasedPolicy:
-                                    max_concurrent_requests: 15
-                    log:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    dispatcher:
-                        num_worker_threads: 4
-                        dispatcher_queue_size: 100
-                        worker_queue_size: 100
-                    compactor:
-                        compaction_manager_queue_size: 1000
-                        max_concurrent_jobs: 100
-                        compaction_interval_sec: 60
-                        min_compaction_size: 10
-                        max_compaction_size: 10000
-                        max_partition_size: 5000
-                    blockfile_provider:
-                        Arrow:
-                            block_manager_config:
-                                max_block_size_bytes: 16384
-                                block_cache_config:
-                                    memory:
-                                        capacity: 1000
-                            sparse_index_manager_config:
-                                sparse_index_cache_config:
-                                    memory:
-                                        capacity: 1000
-                    hnsw_provider:
-                        hnsw_temporary_path: "~/tmp"
-                        hnsw_cache_config:
-                            disk:
-                                capacity: 1073741824
-                                eviction: lru
-                "#,
-            );
-            let config = RootConfig::load_from_path("random_path.yaml");
-            assert_eq!(config.query_service.my_member_id, "query-service-0");
-            assert_eq!(config.query_service.my_port, 50051);
-
-            assert_eq!(
-                config.compaction_service.my_member_id,
-                "compaction-service-0"
-            );
-            assert_eq!(config.compaction_service.my_port, 50051);
-            Ok(())
-        });
+    fn default_otel_endpoint() -> String {
+        "http://otel-collector:4317".to_string()
     }
 
-    #[test]
-    #[should_panic]
-    #[serial]
-    fn test_config_missing_required_field() {
-        Jail::expect_with(|jail| {
-            let _ = jail.create_file(
-                "chroma_config.yaml",
-                r#"
-                query_service:
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                "#,
-            );
-            let _ = RootConfig::load();
-            Ok(())
-        });
+    fn default_my_member_id() -> String {
+        "compaction-service-0".to_string()
     }
 
-    #[test]
-    fn test_missing_default_field() {
-        Jail::expect_with(|jail| {
-            let _ = jail.create_file(
-                "chroma_config.yaml",
-                r#"
-                query_service:
-                    service_name: "query-service"
-                    otel_endpoint: "http://jaeger:4317"
-                    my_member_id: "query-service-0"
-                    my_port: 50051
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                    memberlist_provider:
-                        CustomResource:
-                            kube_namespace: "chroma"
-                            memberlist_name: "query-service-memberlist"
-                            queue_size: 100
-                    sysdb:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    storage:
-                        AdmissionControlledS3:
-                            s3_config:
-                                bucket: "chroma"
-                                credentials: Minio
-                                connect_timeout_ms: 5000
-                                request_timeout_ms: 1000
-                                upload_part_size_bytes: 8388608
-                                download_part_size_bytes: 8388608
-                            rate_limiting_policy:
-                                CountBasedPolicy:
-                                    max_concurrent_requests: 15
-                    log:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    dispatcher:
-                        num_worker_threads: 4
-                        dispatcher_queue_size: 100
-                        worker_queue_size: 100
-                    blockfile_provider:
-                        Arrow:
-                            block_manager_config:
-                                max_block_size_bytes: 16384
-                                block_cache_config:
-                                    memory:
-                                        capacity: 1000
-                            sparse_index_manager_config:
-                                sparse_index_cache_config:
-                                    memory:
-                                        capacity: 1000
-                    hnsw_provider:
-                        hnsw_temporary_path: "~/tmp"
-                        hnsw_cache_config:
-                            disk:
-                                capacity: 1073741824
-                                eviction: lru
-
-                compaction_service:
-                    service_name: "compaction-service"
-                    otel_endpoint: "http://jaeger:4317"
-                    my_member_id: "compaction-service-0"
-                    my_port: 50051
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                    memberlist_provider:
-                        CustomResource:
-                            kube_namespace: "chroma"
-                            memberlist_name: "compaction-service-memberlist"
-                            queue_size: 100
-                    sysdb:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    storage:
-                        AdmissionControlledS3:
-                            s3_config:
-                                bucket: "chroma"
-                                credentials: Minio
-                                connect_timeout_ms: 5000
-                                request_timeout_ms: 1000
-                                upload_part_size_bytes: 8388608
-                                download_part_size_bytes: 8388608
-                            rate_limiting_policy:
-                                CountBasedPolicy:
-                                    max_concurrent_requests: 15
-                    log:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    dispatcher:
-                        num_worker_threads: 4
-                        dispatcher_queue_size: 100
-                        worker_queue_size: 100
-                    compactor:
-                        compaction_manager_queue_size: 1000
-                        max_concurrent_jobs: 100
-                        compaction_interval_sec: 60
-                        min_compaction_size: 10
-                        max_compaction_size: 10000
-                        max_partition_size: 5000
-                    blockfile_provider:
-                        Arrow:
-                            block_manager_config:
-                                max_block_size_bytes: 16384
-                                block_cache_config:
-                                    memory:
-                                        capacity: 1000
-                            sparse_index_manager_config:
-                                sparse_index_cache_config:
-                                    memory:
-                                        capacity: 1000
-                    hnsw_provider:
-                        hnsw_temporary_path: "~/tmp"
-                        hnsw_cache_config:
-                            disk:
-                                capacity: 1073741824
-                                eviction: lru
-                "#,
-            );
-            let config = RootConfig::load();
-            assert_eq!(config.query_service.my_member_id, "query-service-0");
-            assert_eq!(
-                config.compaction_service.my_member_id,
-                "compaction-service-0"
-            );
-            Ok(())
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn test_config_with_env_override() {
-        Jail::expect_with(|jail| {
-            jail.set_env("CHROMA_QUERY_SERVICE__MY_MEMBER_ID", "query-service-0");
-            jail.set_env("CHROMA_QUERY_SERVICE__MY_PORT", 50051);
-            jail.set_env(
-                "CHROMA_COMPACTION_SERVICE__MY_MEMBER_ID",
-                "compaction-service-0",
-            );
-            jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
-            jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
-            jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
-            jail.set_env(
-                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__upload_part_size_bytes",
-                format!("{}", 1024 * 1024 * 8),
-            );
-            jail.set_env(
-                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__download_part_size_bytes",
-                format!("{}", 1024 * 1024 * 8),
-            );
-            jail.set_env(
-                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__CONNECT_TIMEOUT_MS",
-                5000,
-            );
-            jail.set_env(
-                "CHROMA_COMPACTION_SERVICE__STORAGE__S3__REQUEST_TIMEOUT_MS",
-                1000,
-            );
-            let _ = jail.create_file(
-                "chroma_config.yaml",
-                r#"
-                query_service:
-                    service_name: "query-service"
-                    otel_endpoint: "http://jaeger:4317"
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                    memberlist_provider:
-                        CustomResource:
-                            kube_namespace: "chroma"
-                            memberlist_name: "query-service-memberlist"
-                            queue_size: 100
-                    sysdb:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    storage:
-                        AdmissionControlledS3:
-                            s3_config:
-                                bucket: "chroma"
-                                credentials: Minio
-                                connect_timeout_ms: 5000
-                                request_timeout_ms: 1000
-                                upload_part_size_bytes: 8388608
-                                download_part_size_bytes: 8388608
-                            rate_limiting_policy:
-                                CountBasedPolicy:
-                                    max_concurrent_requests: 15
-                    log:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    dispatcher:
-                        num_worker_threads: 4
-                        dispatcher_queue_size: 100
-                        worker_queue_size: 100
-                    blockfile_provider:
-                        Arrow:
-                            block_manager_config:
-                                max_block_size_bytes: 16384
-                                block_cache_config:
-                                    memory:
-                                        capacity: 1000
-                            sparse_index_manager_config:
-                                sparse_index_cache_config:
-                                    memory:
-                                        capacity: 1000
-                    hnsw_provider:
-                        hnsw_temporary_path: "~/tmp"
-                        hnsw_cache_config:
-                            memory:
-                                capacity: 1073741824
-
-                compaction_service:
-                    service_name: "compaction-service"
-                    otel_endpoint: "http://jaeger:4317"
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                    memberlist_provider:
-                        CustomResource:
-                            kube_namespace: "chroma"
-                            memberlist_name: "compaction-service-memberlist"
-                            queue_size: 100
-                    sysdb:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    log:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    dispatcher:
-                        num_worker_threads: 4
-                        dispatcher_queue_size: 100
-                        worker_queue_size: 100
-                    compactor:
-                        compaction_manager_queue_size: 1000
-                        max_concurrent_jobs: 100
-                        compaction_interval_sec: 60
-                        min_compaction_size: 10
-                        max_compaction_size: 10000
-                        max_partition_size: 5000
-                    blockfile_provider:
-                        Arrow:
-                            block_manager_config:
-                                max_block_size_bytes: 16384
-                                block_cache_config:
-                                    memory:
-                                        capacity: 1000
-                            sparse_index_manager_config:
-                                sparse_index_cache_config:
-                                    memory:
-                                        capacity: 1000
-                    hnsw_provider:
-                        hnsw_temporary_path: "~/tmp"
-                        hnsw_cache_config:
-                            disk:
-                                capacity: 1073741824
-                                eviction: lru
-                "#,
-            );
-            let config = RootConfig::load();
-            assert_eq!(config.query_service.my_member_id, "query-service-0");
-            assert_eq!(config.query_service.my_port, 50051);
-            assert_eq!(
-                config.compaction_service.my_member_id,
-                "compaction-service-0"
-            );
-            assert_eq!(config.compaction_service.my_port, 50051);
-            match &config.compaction_service.storage {
-                chroma_storage::config::StorageConfig::S3(s) => {
-                    assert_eq!(s.bucket, "buckets!");
-                    assert_eq!(
-                        s.credentials,
-                        chroma_storage::config::S3CredentialsConfig::AWS
-                    );
-                    assert_eq!(s.connect_timeout_ms, 5000);
-                    assert_eq!(s.request_timeout_ms, 1000);
-                    assert_eq!(s.upload_part_size_bytes, 1024 * 1024 * 8);
-                    assert_eq!(s.download_part_size_bytes, 1024 * 1024 * 8);
-                }
-                _ => panic!("Invalid storage config"),
-            }
-            Ok(())
-        });
-    }
-
-    #[test]
-    #[serial]
-    fn test_default_config_path() {
-        // Sanity check that root config loads from default path correctly
-        let _ = RootConfig::load();
-    }
-
-    #[test]
-    #[serial]
-    fn test_config_without_cache_directive() {
-        Jail::expect_with(|jail| {
-            let _ = jail.create_file(
-                "random_path.yaml",
-                r#"
-                query_service:
-                    service_name: "query-service"
-                    otel_endpoint: "http://jaeger:4317"
-                    my_member_id: "query-service-0"
-                    my_port: 50051
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                    memberlist_provider:
-                        CustomResource:
-                            kube_namespace: "chroma"
-                            memberlist_name: "query-service-memberlist"
-                            queue_size: 100
-                    sysdb:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    storage:
-                        AdmissionControlledS3:
-                            s3_config:
-                                bucket: "chroma"
-                                credentials: Minio
-                                connect_timeout_ms: 5000
-                                request_timeout_ms: 1000
-                                upload_part_size_bytes: 8388608
-                                download_part_size_bytes: 8388608
-                            rate_limiting_policy:
-                                CountBasedPolicy:
-                                    max_concurrent_requests: 15
-                    log:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    dispatcher:
-                        num_worker_threads: 4
-                        dispatcher_queue_size: 100
-                        worker_queue_size: 100
-                    blockfile_provider:
-                        Arrow:
-                            block_manager_config:
-                                max_block_size_bytes: 16384
-                                block_cache_config:
-                                    nop
-                            sparse_index_manager_config:
-                                sparse_index_cache_config:
-                                    nop
-                    hnsw_provider:
-                        hnsw_temporary_path: "~/tmp"
-                        hnsw_cache_config:
-                            nop
-
-                compaction_service:
-                    service_name: "compaction-service"
-                    otel_endpoint: "http://jaeger:4317"
-                    my_member_id: "compaction-service-0"
-                    my_port: 50051
-                    assignment_policy:
-                        RendezvousHashing:
-                            hasher: Murmur3
-                    memberlist_provider:
-                        CustomResource:
-                            kube_namespace: "chroma"
-                            memberlist_name: "compaction-service-memberlist"
-                            queue_size: 100
-                    sysdb:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    storage:
-                        AdmissionControlledS3:
-                            s3_config:
-                                bucket: "chroma"
-                                credentials: Minio
-                                connect_timeout_ms: 5000
-                                request_timeout_ms: 1000
-                                upload_part_size_bytes: 8388608
-                                download_part_size_bytes: 8388608
-                            rate_limiting_policy:
-                                CountBasedPolicy:
-                                    max_concurrent_requests: 15
-                    log:
-                        Grpc:
-                            host: "localhost"
-                            port: 50051
-                            connect_timeout_ms: 5000
-                            request_timeout_ms: 1000
-                    dispatcher:
-                        num_worker_threads: 4
-                        dispatcher_queue_size: 100
-                        worker_queue_size: 100
-                    compactor:
-                        compaction_manager_queue_size: 1000
-                        max_concurrent_jobs: 100
-                        compaction_interval_sec: 60
-                        min_compaction_size: 10
-                        max_compaction_size: 10000
-                        max_partition_size: 5000
-                    blockfile_provider:
-                        Arrow:
-                            block_manager_config:
-                                max_block_size_bytes: 16384
-                                block_cache_config:
-                                    nop
-                            sparse_index_manager_config:
-                                sparse_index_cache_config:
-                                    nop
-                    hnsw_provider:
-                        hnsw_temporary_path: "~/tmp"
-                        hnsw_cache_config:
-                            nop
-                "#,
-            );
-            let config = RootConfig::load_from_path("random_path.yaml");
-            assert_eq!(config.query_service.my_member_id, "query-service-0");
-            assert_eq!(config.query_service.my_port, 50051);
-
-            assert_eq!(
-                config.compaction_service.my_member_id,
-                "compaction-service-0"
-            );
-            assert_eq!(config.compaction_service.my_port, 50051);
-            Ok(())
-        });
+    fn default_my_port() -> u16 {
+        50051
     }
 }

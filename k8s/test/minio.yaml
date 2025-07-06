@@ -23,6 +23,7 @@ spec:
           args:
             - server
             - /storage
+            - "--console-address=:9005" # Fixed port for MinIO Console
           env:
             - name: MINIO_ACCESS_KEY
               value: "minio"

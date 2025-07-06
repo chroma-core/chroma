@@ -1,0 +1,22 @@
+{
+  "name": "chromadb-js-bindings-win32-arm64-msvc",
+  "version": "1.0.1",
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "chromadb-js-bindings.win32-arm64-msvc.node",
+  "files": [
+    "chromadb-js-bindings.win32-arm64-msvc.node"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">= 10"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chroma-core/chroma"
+  }
+}

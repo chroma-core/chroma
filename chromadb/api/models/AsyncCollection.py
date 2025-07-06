@@ -1,9 +1,4 @@
-from typing import (
-    TYPE_CHECKING,
-    Optional,
-    Union,
-)
-import numpy as np
+from typing import TYPE_CHECKING, Optional, Union
 
 from chromadb.api.types import (
     URI,
@@ -24,6 +19,7 @@ from chromadb.api.types import (
 )
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
+from chromadb.api.collection_configuration import UpdateCollectionConfiguration
 
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
@@ -64,17 +60,25 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ValueError: If you provide an id that already exists
 
         """
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-        ) = self._validate_and_prepare_embedding_set(
-            ids, embeddings, metadatas, documents, images, uris
+        add_request = self._validate_and_prepare_add_request(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            images=images,
+            uris=uris,
         )
 
-        await self._client._add(ids, self.id, embeddings, metadatas, documents, uris)
+        await self._client._add(
+            collection_id=self.id,
+            ids=add_request["ids"],
+            embeddings=add_request["embeddings"],
+            metadatas=add_request["metadatas"],
+            documents=add_request["documents"],
+            uris=add_request["uris"],
+            tenant=self.tenant,
+            database=self.database,
+        )
 
     async def count(self) -> int:
         """The total number of embeddings added to the database
@@ -83,7 +87,11 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             int: The total number of embeddings added to the database
 
         """
-        return await self._client._count(collection_id=self.id)
+        return await self._client._count(
+            collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
+        )
 
     async def get(
         self,
@@ -99,35 +107,38 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         Args:
             ids: The ids of the embeddings to get. Optional.
-            where: A Where type dict used to filter results by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
+            where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
             limit: The number of documents to return. Optional.
             offset: The offset to start returning results from. Useful for paging results with limit. Optional.
-            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`. Ids are always included. Defaults to `["metadatas", "documents"]`. Optional.
 
         Returns:
             GetResult: A GetResult object containing the results.
 
         """
-        (
-            valid_ids,
-            valid_where,
-            valid_where_document,
-            valid_include,
-        ) = self._validate_and_prepare_get_request(ids, where, where_document, include)
-
-        get_results = await self._client._get(
-            self.id,
-            valid_ids,
-            valid_where,
-            None,
-            limit,
-            offset,
-            where_document=valid_where_document,
-            include=valid_include,
+        get_request = self._validate_and_prepare_get_request(
+            ids=ids,
+            where=where,
+            where_document=where_document,
+            include=include,
         )
 
-        return self._transform_get_response(get_results, valid_include)
+        get_results = await self._client._get(
+            collection_id=self.id,
+            ids=get_request["ids"],
+            where=get_request["where"],
+            where_document=get_request["where_document"],
+            include=get_request["include"],
+            limit=limit,
+            offset=offset,
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+        return self._transform_get_response(
+            response=get_results, include=get_request["include"]
+        )
 
     async def peek(self, limit: int = 10) -> GetResult:
         """Get the first few results in the database up to limit
@@ -138,23 +149,35 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             GetResult: A GetResult object containing the results.
         """
-        return self._transform_peek_response(await self._client._peek(self.id, limit))
+        return self._transform_peek_response(
+            await self._client._peek(
+                collection_id=self.id,
+                n=limit,
+                tenant=self.tenant,
+                database=self.database,
+            )
+        )
 
     async def query(
         self,
         query_embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
         query_images: Optional[OneOrMany[Image]] = None,
         query_uris: Optional[OneOrMany[URI]] = None,
+        ids: Optional[OneOrMany[ID]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = [
+            "metadatas",
+            "documents",
+            "distances",
+        ],
     ) -> QueryResult:
         """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
 
@@ -162,9 +185,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             query_embeddings: The embeddings to get the closes neighbors of. Optional.
             query_texts: The document texts to get the closes neighbors of. Optional.
             query_images: The images to get the closes neighbors of. Optional.
+            ids: A subset of ids to search within. Optional.
             n_results: The number of neighbors to return for each query_embedding or query_texts. Optional.
-            where: A Where type dict used to filter results by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
-            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
+            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
             include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
 
         Returns:
@@ -178,35 +202,39 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         """
 
-        (
-            valid_query_embeddings,
-            valid_n_results,
-            valid_where,
-            valid_where_document,
-        ) = self._validate_and_prepare_query_request(
-            query_embeddings,
-            query_texts,
-            query_images,
-            query_uris,
-            n_results,
-            where,
-            where_document,
-            include,
+        query_request = self._validate_and_prepare_query_request(
+            query_embeddings=query_embeddings,
+            query_texts=query_texts,
+            query_images=query_images,
+            query_uris=query_uris,
+            ids=ids,
+            n_results=n_results,
+            where=where,
+            where_document=where_document,
+            include=include,
         )
 
         query_results = await self._client._query(
             collection_id=self.id,
-            query_embeddings=valid_query_embeddings,
-            n_results=valid_n_results,
-            where=valid_where,
-            where_document=valid_where_document,
-            include=include,
+            ids=query_request["ids"],
+            query_embeddings=query_request["embeddings"],
+            n_results=query_request["n_results"],
+            where=query_request["where"],
+            where_document=query_request["where_document"],
+            include=query_request["include"],
+            tenant=self.tenant,
+            database=self.database,
         )
 
-        return self._transform_query_response(query_results, include)
+        return self._transform_query_response(
+            response=query_results, include=query_request["include"]
+        )
 
     async def modify(
-        self, name: Optional[str] = None, metadata: Optional[CollectionMetadata] = None
+        self,
+        name: Optional[str] = None,
+        metadata: Optional[CollectionMetadata] = None,
+        configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         """Modify the collection name or metadata
 
@@ -223,9 +251,42 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         # Note there is a race condition here where the metadata can be updated
         # but another thread sees the cached local metadata.
         # TODO: fixme
-        await self._client._modify(id=self.id, new_name=name, new_metadata=metadata)
+        await self._client._modify(
+            id=self.id,
+            new_name=name,
+            new_metadata=metadata,
+            new_configuration=configuration,
+            tenant=self.tenant,
+            database=self.database,
+        )
 
-        self._update_model_after_modify_success(name, metadata)
+        self._update_model_after_modify_success(name, metadata, configuration)
+
+    async def fork(
+        self,
+        new_name: str,
+    ) -> "AsyncCollection":
+        """Fork the current collection under a new name. The returning collection should contain identical data to the current collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+
+        Args:
+            new_name: The name of the new collection.
+
+        Returns:
+            Collection: A new collection with the specified name and containing identical data to the current collection.
+        """
+        model = await self._client._fork(
+            collection_id=self.id,
+            new_name=new_name,
+            tenant=self.tenant,
+            database=self.database,
+        )
+        return AsyncCollection(
+            client=self._client,
+            model=model,
+            embedding_function=self._embedding_function,
+            data_loader=self._data_loader,
+        )
 
     async def update(
         self,
@@ -233,7 +294,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
@@ -252,17 +313,25 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-        ) = self._validate_and_prepare_update_request(
-            ids, embeddings, metadatas, documents, images, uris
+        update_request = self._validate_and_prepare_update_request(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            images=images,
+            uris=uris,
         )
 
-        await self._client._update(self.id, ids, embeddings, metadatas, documents, uris)
+        await self._client._update(
+            collection_id=self.id,
+            ids=update_request["ids"],
+            embeddings=update_request["embeddings"],
+            metadatas=update_request["metadatas"],
+            documents=update_request["documents"],
+            uris=update_request["uris"],
+            tenant=self.tenant,
+            database=self.database,
+        )
 
     async def upsert(
         self,
@@ -270,7 +339,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         embeddings: Optional[
             Union[
                 OneOrMany[Embedding],
-                OneOrMany[np.ndarray],
+                OneOrMany[PyEmbedding],
             ]
         ] = None,
         metadatas: Optional[OneOrMany[Metadata]] = None,
@@ -289,23 +358,24 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        (
-            ids,
-            embeddings,
-            metadatas,
-            documents,
-            uris,
-        ) = self._validate_and_prepare_upsert_request(
-            ids, embeddings, metadatas, documents, images, uris
-        )
-
-        await self._client._upsert(
-            collection_id=self.id,
+        upsert_request = self._validate_and_prepare_upsert_request(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
+            images=images,
             uris=uris,
+        )
+
+        await self._client._upsert(
+            collection_id=self.id,
+            ids=upsert_request["ids"],
+            embeddings=upsert_request["embeddings"],
+            metadatas=upsert_request["metadatas"],
+            documents=upsert_request["documents"],
+            uris=upsert_request["uris"],
+            tenant=self.tenant,
+            database=self.database,
         )
 
     async def delete(
@@ -318,8 +388,8 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         Args:
             ids: The ids of the embeddings to delete
-            where: A Where type dict used to filter the delection by. E.g. `{"$and": ["color" : "red", "price": {"$gte": 4.20}]}`. Optional.
-            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{$contains: {"text": "hello"}}`. Optional.
+            where: A Where type dict used to filter the delection by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
+            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{"$contains": "hello"}`. Optional.
 
         Returns:
             None
@@ -327,8 +397,15 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Raises:
             ValueError: If you don't provide either ids, where, or where_document
         """
-        (ids, where, where_document) = self._validate_and_prepare_delete_request(
+        delete_request = self._validate_and_prepare_delete_request(
             ids, where, where_document
         )
 
-        await self._client._delete(self.id, ids, where, where_document)
+        await self._client._delete(
+            collection_id=self.id,
+            ids=delete_request["ids"],
+            where=delete_request["where"],
+            where_document=delete_request["where_document"],
+            tenant=self.tenant,
+            database=self.database,
+        )

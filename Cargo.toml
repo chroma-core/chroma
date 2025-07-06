@@ -2,61 +2,154 @@
 resolver = "2"
 
 members = [
-   "rust/blockstore",
-   "rust/cache",
-   "rust/chroma",
-   "rust/config",
-   "rust/distance",
-   "rust/error",
-   "rust/index",
-   "rust/storage",
-   "rust/types",
-   "rust/worker",
-   "rust/test",
+    "rust/benchmark",
+    "rust/blockstore",
+    "rust/cache",
+    "rust/chroma",
+    "rust/config",
+    "rust/distance",
+    "rust/error",
+    "rust/frontend",
+    "rust/garbage_collector",
+    "rust/index",
+    "rust/load",
+    "rust/log",
+    "rust/log-service",
+    "rust/memberlist",
+    "rust/metering-macros",
+    "rust/metering",
+    "rust/storage",
+    "rust/system",
+    "rust/sysdb",
+    "rust/types",
+    "rust/worker",
+    "rust/segment",
+    "rust/python_bindings",
+    "rust/mdac",
+    "rust/tracing",
+    "rust/sqlite",
+    "rust/cli",
+    "rust/wal3",
+    "rust/js_bindings",
+    "rust/jemalloc-pprof-server"
 ]
 
 [workspace.dependencies]
-serde = { version = "1.0.193", features = ["derive"] }
-serde_json = "1.0.108"
-arrow = "52.0.0"
-thiserror = "1.0.50"
-uuid = { version = "1.6.1", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
-async-trait = "0.1.74"
-roaring = "0.10.3"
-futures = "0.3"
-parking_lot = { version = "0.12.1", features = ["serde"] }
-tracing = "0.1"
-tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }
-tokio-util = "0.7.10"
-tonic = "0.10"
-prost = "0.12"
-prost-types = "0.12"
-num_cpus = "1.16.0"
-flatbuffers = "24.3.25"
-tantivy = "0.21.1"
+arrow = "52.2.0"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["macros"] }
+bytes = "1.10"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
 criterion = { version = "0.5", features = ["async_tokio"] }
+figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
+flatbuffers = "24.3.25"
+futures = "0.3"
+futures-core = "0.3"
+http-body-util = "0.1.3"
+lazy_static = { version = "1.4" }
+lexical-core = "1.0"
+num_cpus = "1.16.0"
+once_cell = "1.21.3"
+opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
+opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
+opentelemetry-http = { version = "0.27", features = ["reqwest"] }
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+parking_lot = { version = "0.12.3", features = ["serde"] }
+parquet = "52"
+pin-project = "1.1.10"
+prost = "0.13"
+prost-types = "0.13.5"
+regex = "1.11.1"
+regex-syntax = "0.8.5"
+roaring = "0.10.6"
+sea-query = "0.32"
+sea-query-binder = "0.7"
+serde = { version = "1.0.215", features = ["derive"] }
+serde_json = "1.0.133"
+setsum = "0.7"
+tantivy = "0.22.0"
+thiserror = "1.0.69"
+tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread"] }
+tokio-util = "0.7.12"
+tonic = "0.12"
+tonic-health = "0.12.3"
+tower = { version = "0.4.13", features = ["discover"] }
+backon = "1.3.0"
+tracing = { version = "0.1" }
+tracing-bunyan-formatter = "0.3"
+tracing-opentelemetry = "0.28.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
+utoipa = { version = "5.0.0", features = ["macros", "axum_extras", "debug", "uuid"] }
+sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite"] }
+sha2 = "0.10.8"
+md5 = "0.7.0"
+pyo3 = { version = "0.24.1", features = ["abi3-py39"] }
+http = "1.1.0"
+tower-http = { version = "0.6.2", features = ["trace", "cors"] }
+bytemuck = "1.21.0"
+rayon = "1.10.0"
+validator = { version = "0.19", features = ["derive"] }
+rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
+hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git" }
+reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots", "http2"], default-features = false }
+random-port = "0.1.1"
+ndarray = { version = "0.16.1", features = ["approx"] }
+humantime = { version = "2.2.0" }
+petgraph = { version = "0.8.1" }
+base64 = "0.22"
+tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
 
+chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
-chroma-error = { path = "rust/error" }
-chroma-config = { path = "rust/config" }
-chroma-storage = { path = "rust/storage" }
 chroma-cache = { path = "rust/cache" }
-chroma-types = { path = "rust/types" }
-chroma-index = { path = "rust/index" }
+chroma-config = { path = "rust/config" }
 chroma-distance = { path = "rust/distance" }
-chroma-test = { path = "rust/test" }
+chroma-error = { path = "rust/error" }
+chroma-frontend = { path = "rust/frontend" }
+chroma-index = { path = "rust/index" }
+chroma-log = { path = "rust/log" }
+chroma-memberlist = { path = "rust/memberlist" }
+chroma-metering-macros = { path = "rust/metering-macros" }
+chroma-metering = { path = "rust/metering" }
+chroma-segment = { path = "rust/segment" }
+chroma-storage = { path = "rust/storage" }
+chroma-system = { path = "rust/system" }
+chroma-sysdb = { path = "rust/sysdb" }
+chroma-tracing = { path = "rust/tracing" }
+chroma-types = { path = "rust/types" }
+chroma-sqlite = { path = "rust/sqlite" }
+chroma-cli = { path = "rust/cli" }
+chroma-jemalloc-pprof-server = { path = "rust/jemalloc-pprof-server" }
+mdac = { path = "rust/mdac" }
+wal3 = { path = "rust/wal3" }
 worker = { path = "rust/worker" }
 
 # Dev dependencies
 bincode = "1.3.3"
-indicatif = "0.17.8"
-proptest = "1.4.0"
-proptest-state-machine = "0.1.0"
+indicatif = { version = "0.17.9", features = ["rayon"] }
+proptest = "1.6.0"
+proptest-state-machine = "0.3.1"
+proptest-derive = "0.5.1"
 rand = "0.8.5"
 rand_xorshift = "0.3.0"
-rayon = "1.8.0"
 shuttle = "0.7.1"
-tempfile = "3.8.1"
+tempfile = "3.14.0"
+itertools = "0.13.0"
+serial_test = "3.2.0"
+zip = "2.3.0"
+
+[profile.dev]
+# Significantly reduces compile times
+split-debuginfo = "unpacked"
 
 [profile.release]
 debug = 2
+lto = "thin"
+
+[profile.test.package.proptest]
+opt-level = 3
+
+[profile.test.package.rand_chacha]
+opt-level = 3

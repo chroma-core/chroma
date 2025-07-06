@@ -7,7 +7,7 @@ import (
 
 const environmentVariable = "CHROMA_KUBERNETES_INTEGRATION"
 
-// ShouldRunTests checks if the tests should be run based on an environment variable.
+// ShouldRunIntegrationTests checks if the tests should be run based on an environment variable.
 func ShouldRunIntegrationTests() bool {
 	// Get the environment variable.
 	envVarValue := os.Getenv(environmentVariable)

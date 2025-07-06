@@ -4,32 +4,23 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "query_service"
-path = "src/bin/query_service.rs"
+name = "compaction_client"
+path = "src/bin/compaction_client.rs"
 
 [[bin]]
 name = "compaction_service"
 path = "src/bin/compaction_service.rs"
 
+[[bin]]
+name = "query_service"
+path = "src/bin/query_service.rs"
+
 [dependencies]
-rand = "0.8.5"
-murmur3 = "0.5.2"
-schemars = "0.8.16"
-kube = { version = "0.87.1", features = ["runtime", "derive"] }
-k8s-openapi = { version = "0.20.0", features = ["latest"] }
-tracing-bunyan-formatter = "0.3.3"
-tracing-opentelemetry = "0.19.0"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-opentelemetry = { version = "0.19.0", default-features = false, features = [
-  "trace",
-  "rt-tokio",
-] }
-opentelemetry-otlp = "0.12.0"
-regex = "1.10.5"
-figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
+chroma-tracing = { workspace = true }
+regex = { workspace = true }
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
-tikv-jemallocator = "0.6"
+tikv-jemallocator = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -38,41 +29,72 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 async-trait = { workspace = true }
 roaring = { workspace = true }
+figment = { workspace = true }
 futures = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tonic = { workspace = true }
+tonic-health = { workspace = true }
 prost = { workspace = true }
 prost-types = { workspace = true }
 num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
 tantivy = { workspace = true }
+clap = { workspace = true }
 
 chroma-blockstore = { workspace = true }
-chroma-error = { workspace = true }
-chroma-config = { workspace = true }
-chroma-storage = { workspace = true }
-chroma-types = { workspace = true }
 chroma-cache = { workspace = true }
-chroma-index = { workspace = true }
+chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
+chroma-error = { workspace = true }
+chroma-index = { workspace = true }
+chroma-log = { workspace = true }
+chroma-memberlist = { workspace = true }
+chroma-segment = { workspace = true }
+chroma-storage = { workspace = true }
+chroma-system = { workspace = true }
+chroma-sysdb = { workspace = true }
+chroma-types = { workspace = true }
+
+fastrace = "0.7"
+fastrace-opentelemetry = "0.8"
 
 [dev-dependencies]
-random-port = "0.1.1"
-serial_test = "3.1.1"
-
+random-port = { workspace = true }
+serial_test = { workspace = true }
+criterion = { workspace = true }
+indicatif = { workspace = true }
+proptest = { workspace = true }
+proptest-state-machine = { workspace = true }
+shuttle = { workspace = true }
 rand = { workspace = true }
 rand_xorshift = { workspace = true }
 tempfile = { workspace = true }
-shuttle = { workspace = true }
-proptest = { workspace = true }
-proptest-state-machine = { workspace = true }
-criterion = { workspace = true }
 
-chroma-test = { workspace = true }
+chroma-benchmark = { workspace = true }
 
 [[bench]]
-name = "metadata_filtering"
+name = "filter"
+harness = false
+
+[[bench]]
+name = "get"
+harness = false
+
+[[bench]]
+name = "limit"
+harness = false
+
+[[bench]]
+name = "query"
+harness = false
+
+[[bench]]
+name = "regex"
+harness = false
+
+[[bench]]
+name = "spann"
 harness = false

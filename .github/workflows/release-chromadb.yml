@@ -7,14 +7,9 @@ on:
     branches:
       - main
 
-env:
-  GHCR_IMAGE_NAME: "ghcr.io/chroma-core/chroma"
-  DOCKERHUB_IMAGE_NAME: "chromadb/chroma"
-  PLATFORMS: linux/amd64,linux/arm64 #linux/riscv64, linux/arm/v7
-
 jobs:
   check-tag:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     outputs:
       tag_matches: ${{ steps.check-tag.outputs.tag_matches }}
     steps:
@@ -29,29 +24,40 @@ jobs:
           fi
 
   get-version:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.8'
+          python-version: '3.9'
       - name: Install setuptools_scm
         run: python -m pip install setuptools_scm
       - name: Get Release Version
         id: version
         run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
 
-  python-tests:
+  python-tests-linux:
     uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
     with:
-      python_versions: '["3.8", "3.9", "3.10", "3.11", "3.12"]'
+      python_versions: '["3.9", "3.10", "3.11", "3.12"]'
       property_testing_preset: 'normal'
+
+  python-tests-windows:
+    uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
+    with:
+      # we only run windows tests on 3.12 because windows runners are expensive
+      # and we usually don't see failures that are isolated to a specific version
+      python_versions: '["3.12"]'
+      property_testing_preset: 'normal'
+      runner: '16core-64gb-windows-latest'
 
   javascript-client-tests:
     name: JavaScript client tests
@@ -60,101 +66,60 @@ jobs:
   rust-tests:
     name: Rust tests
     uses: ./.github/workflows/_rust-tests.yml
+    secrets: inherit
 
   go-tests:
     name: Go tests
     uses: ./.github/workflows/_go-tests.yml
+    secrets: inherit
 
   release-docker:
     name: Publish to DockerHub and GHCR
-    runs-on: ubuntu-latest
     needs:
       - check-tag
       - get-version
-      - python-tests
+      - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - name: Set up Docker
-        uses: ./.github/actions/docker
-        with:
-          ghcr-username: ${{ github.actor }}
-          ghcr-password: ${{ secrets.GITHUB_TOKEN }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push prerelease Docker image
-        if: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
-        uses: docker/build-push-action@v3.2.0
-        with:
-          context: .
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          tags: "${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version}},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}"
-      - name: Build and push release Docker image
-        if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
-        uses: docker/build-push-action@v3.2.0
-        with:
-          context: .
-          platforms: ${{ env.PLATFORMS }}
-          push: true
-          tags: "${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }},${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }},${{ env.GHCR_IMAGE_NAME }}:latest,${{ env.DOCKERHUB_IMAGE_NAME }}:latest"
+    uses: ./.github/workflows/_build_release_container.yml
+    secrets: inherit
+    with:
+      tag: ${{ needs.get-version.outputs.version }}
+      tag_as_latest: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
+      push: true
 
   release-pypi:
     name: Publish to PyPI
-    runs-on: ubuntu-latest
     needs:
       - check-tag
       - get-version
-      - python-tests
+      - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - name: Setup Python
-        uses: ./.github/actions/python
-        with:
-          python-version: '3.10'
-      - name: Build Client
-        run: python -m build
-      - name: Test Client Package
-        run: bin/test-package/test-package.sh dist/*.tar.gz
-      - name: Upload as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: "built-chromadb-package"
-          path: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
-      - name: Publish to Test PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-          repository-url: https://test.pypi.org/legacy/
-      - name: Publish to PyPI
-        if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
+    uses: ./.github/workflows/_build_release_pypi.yml
+    secrets: inherit
+    with:
+      publish_to_test_pypi: true
+      publish_to_pypi: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
+      version: ${{ needs.get-version.outputs.version }}
 
   release-thin-pypi:
     name: Publish thin client to PyPI
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     needs:
       - check-tag
-      - python-tests
+      - python-tests-linux
+      - python-tests-windows
       - javascript-client-tests
       - rust-tests
       - go-tests
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Set up Python
@@ -182,7 +147,7 @@ jobs:
 
   release-github:
     name: Make GitHub release
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     needs:
       - check-tag
       - get-version
@@ -191,19 +156,19 @@ jobs:
       - release-thin-pypi
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: built-chromadb-package
+          pattern: wheels-*
           path: dist
       - name: Get current date
         id: builddate
         run: echo "builddate=$(date +'%Y-%m-%dT%H:%M')" >> $GITHUB_OUTPUT
       - name: Release Tagged Version
-        uses: ncipollo/release-action@v1.11.1
+        uses: ncipollo/release-action@v1.14.0
         if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
         with:
           body: |
@@ -213,8 +178,9 @@ jobs:
             PIP Package: `chroma-${{needs.get-version.outputs.version}}.tar.gz`
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
-          artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
-          prerelease: true
+          artifacts: "dist/*"
+          prerelease: false
+          makeLatest: true
           generateReleaseNotes: true
       - name: Update Tag
         uses: richardsimko/update-tag@v1.0.5
@@ -236,48 +202,42 @@ jobs:
             PIP Package: `chroma-${{needs.get-version.outputs.version}}.tar.gz`
             Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
             DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
-          artifacts: "dist/chromadb-${{needs.get-version.outputs.version}}.tar.gz"
+          artifacts: "dist/*"
           allowUpdates: true
           removeArtifacts: true
-          prerelease: ${{ needs.check-tag.outputs.tag_matches != 'true' }}
-          makeLatest: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
+          prerelease: true
 
-  release-cloudformation:
-    name: Release CloudFormation
-    runs-on: ubuntu-latest
-    needs: release-github  # Ensure it runs after the GitHub release
-    if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}  # Only run if tag matches
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+  release-hosted-control-plane:
+    name: Release to Chroma Cloud control plane
+    # depends on release-github because it updates the tag to latest, which is what will get deployed
+    needs:
+      - release-github
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      plane: control
+    secrets: inherit
 
-      - name: Set Version
-        run: |
-          sed -i "s/LATEST_VERSION/${{ needs.get-version.outputs.version }}/g" ./deployments/aws/chroma.cf.json
-          cat ./deployments/aws/chroma.cf.json  # Optional: output the modified file for verification
-
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          role-to-assume: arn:aws:iam::369178033109:role/github-action-generate-cf-template
-          aws-region: us-east-1
-
-      - name: Upload CloudFormation Template to S3
-        run: |
-          aws s3 cp ./deployments/aws/chroma.cf.json s3://public.trychroma.com/cloudformation/latest/chroma.cf.json --acl public-read
-
+  release-hosted-data-plane:
+    name: Release to Chroma Cloud data plane
+    # depends on release-github because it updates the tag to latest, which is what will get deployed
+    needs:
+      - release-github
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      plane: data
+    secrets: inherit
 
   release-docs:
     name: Deploy docs to Vercel
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-4vcpu-ubuntu-2204
     needs:
       - check-tag
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v3
+      - uses: actions/setup-node@v4
         with:
           node-version: "18.x"
           registry-url: "https://registry.npmjs.org"

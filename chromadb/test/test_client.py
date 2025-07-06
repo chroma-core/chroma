@@ -7,10 +7,13 @@ from chromadb.api import ClientAPI
 import chromadb.server.fastapi
 import pytest
 import tempfile
+import os
 
 
 @pytest.fixture
 def ephemeral_api() -> Generator[ClientAPI, None, None]:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
     client = chromadb.EphemeralClient()
     yield client
     client.clear_system_cache()
@@ -18,6 +21,8 @@ def ephemeral_api() -> Generator[ClientAPI, None, None]:
 
 @pytest.fixture
 def persistent_api() -> Generator[ClientAPI, None, None]:
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
     client = chromadb.PersistentClient(
         path=tempfile.gettempdir() + "/test_server",
     )
@@ -34,22 +39,28 @@ def http_api_factory(
 ) -> Generator[HttpAPIFactory, None, None]:
     if request.param == "sync_client":
         with patch("chromadb.api.client.Client._validate_tenant_database"):
-            yield chromadb.HttpClient
+            with patch("chromadb.api.client.Client.get_user_identity"):
+                yield chromadb.HttpClient
     else:
         with patch("chromadb.api.async_client.AsyncClient._validate_tenant_database"):
+            with patch("chromadb.api.async_client.AsyncClient.get_user_identity"):
 
-            def factory(*args: Any, **kwargs: Any) -> Any:
-                cls = asyncio.get_event_loop().run_until_complete(
-                    chromadb.AsyncHttpClient(*args, **kwargs)
-                )
-                return cls
+                def factory(*args: Any, **kwargs: Any) -> Any:
+                    cls = asyncio.get_event_loop().run_until_complete(
+                        chromadb.AsyncHttpClient(*args, **kwargs)
+                    )
+                    return cls
 
-            yield cast(HttpAPIFactory, factory)
+                yield cast(HttpAPIFactory, factory)
 
 
 @pytest.fixture()
 def http_api(http_api_factory: HttpAPIFactory) -> Generator[ClientAPI, None, None]:
-    client = http_api_factory()
+    if os.environ.get("CHROMA_SERVER_HTTP_PORT") is not None:
+        port = int(os.environ.get("CHROMA_SERVER_HTTP_PORT"))  # type: ignore
+        client = http_api_factory(port=port)
+    else:
+        client = http_api_factory()
     yield client
     client.clear_system_cache()
 

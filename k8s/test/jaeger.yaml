@@ -17,8 +17,18 @@ spec:
         - name: jaeger
           image: jaegertracing/all-in-one:1.56
           env:
-            - name: COLLECTOR_OTLP_ENABLED
-              value: "true"
+            # Use Badger storage instead of in-memory to avoid OOM issues
+            - name: SPAN_STORAGE_TYPE
+              value: "badger"
+            # "false" means store data on disk rather than memory
+            - name: BADGER_EPHEMERAL
+              value: "false"
+            # Where the Badger keys/data files go on disk
+            - name: BADGER_DIRECTORY_KEY
+              value: "/badger/key"
+            - name: BADGER_DIRECTORY_VALUE
+              value: "/badger/data"
+
           ports:
             - containerPort: 16686
               name: ui-port
@@ -27,9 +37,20 @@ spec:
             - containerPort: 4318
               name: http-port
           resources:
+            requests:
+              memory: "512Mi"
             limits:
               memory: "2Gi"
 
+          volumeMounts:
+            - name: badger-volume
+              mountPath: "/badger"
+
+      volumes:
+        # emptyDir is ephemeral storage: data will be wiped
+        # when the pod is restarted.
+        - name: badger-volume
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

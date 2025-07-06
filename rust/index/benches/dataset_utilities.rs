@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use chroma_test::datasets::types::{FrozenQuerySubset, QueryDataset, RecordDataset};
+use chroma_benchmark::datasets::types::{FrozenQuerySubset, QueryDataset, RecordDataset};
 use futures::TryFutureExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 

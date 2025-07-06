@@ -1,15 +1,16 @@
-use super::ConversionError;
-use crate::chroma_proto::{
-    FilePaths, FlushCollectionCompactionResponse, FlushSegmentCompactionInfo,
+use super::{CollectionUuid, ConversionError};
+use crate::{
+    chroma_proto::{FilePaths, FlushCollectionCompactionResponse, FlushSegmentCompactionInfo},
+    SegmentUuid,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SegmentFlushInfo {
-    pub segment_id: Uuid,
+    pub segment_id: SegmentUuid,
     pub file_paths: HashMap<String, Vec<String>>,
 }
 
@@ -39,13 +40,17 @@ pub enum SegmentFlushInfoConversionError {
 
 #[derive(Debug)]
 pub struct FlushCompactionResponse {
-    pub collection_id: Uuid,
+    pub collection_id: CollectionUuid,
     pub collection_version: i32,
     pub last_compaction_time: i64,
 }
 
 impl FlushCompactionResponse {
-    pub fn new(collection_id: Uuid, collection_version: i32, last_compaction_time: i64) -> Self {
+    pub fn new(
+        collection_id: CollectionUuid,
+        collection_version: i32,
+        last_compaction_time: i64,
+    ) -> Self {
         FlushCompactionResponse {
             collection_id,
             collection_version,
@@ -61,7 +66,7 @@ impl TryFrom<FlushCollectionCompactionResponse> for FlushCompactionResponse {
         let id = Uuid::parse_str(&value.collection_id)
             .map_err(|_| FlushCompactionResponseConversionError::InvalidUuid)?;
         Ok(FlushCompactionResponse {
-            collection_id: id,
+            collection_id: CollectionUuid(id),
             collection_version: value.collection_version,
             last_compaction_time: value.last_compaction_time,
         })

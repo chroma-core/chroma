@@ -1,8 +1,9 @@
 from concurrent import futures
-from typing import Any, Dict, cast
+from typing import Any, Dict, List, cast
 from uuid import UUID
 from overrides import overrides
-from chromadb.api.configuration import CollectionConfigurationInternal
+import json
+
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Component, System
 from chromadb.proto.convert import (
     from_proto_metadata,
@@ -22,12 +23,18 @@ from chromadb.proto.coordinator_pb2 import (
     CreateSegmentResponse,
     CreateTenantRequest,
     CreateTenantResponse,
+    CountCollectionsRequest,
+    CountCollectionsResponse,
     DeleteCollectionRequest,
     DeleteCollectionResponse,
     DeleteSegmentRequest,
     DeleteSegmentResponse,
     GetCollectionsRequest,
     GetCollectionsResponse,
+    GetCollectionSizeRequest,
+    GetCollectionSizeResponse,
+    GetCollectionWithSegmentsRequest,
+    GetCollectionWithSegmentsResponse,
     GetDatabaseRequest,
     GetDatabaseResponse,
     GetSegmentsRequest,
@@ -46,7 +53,7 @@ from chromadb.proto.coordinator_pb2_grpc import (
 )
 import grpc
 from google.protobuf.empty_pb2 import Empty
-from chromadb.types import Collection, Metadata, Segment
+from chromadb.types import Collection, Metadata, Segment, SegmentScope
 
 
 class GrpcMockSysDB(SysDBServicer, Component):
@@ -56,6 +63,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
     _server: grpc.Server
     _server_port: int
     _segments: Dict[str, Segment] = {}
+    _collection_to_segments: Dict[str, List[str]] = {}
     _tenants_to_databases_to_collections: Dict[
         str, Dict[str, Dict[str, Collection]]
     ] = {}
@@ -96,18 +104,14 @@ class GrpcMockSysDB(SysDBServicer, Component):
         tenant = request.tenant
         database = request.name
         if tenant not in self._tenants_to_databases_to_collections:
-            return CreateDatabaseResponse(
-                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
-            )
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Tenant {tenant} not found")
         if database in self._tenants_to_databases_to_collections[tenant]:
-            return CreateDatabaseResponse(
-                status=proto.Status(
-                    code=409, reason=f"Database {database} already exists"
-                )
+            context.abort(
+                grpc.StatusCode.ALREADY_EXISTS, f"Database {database} already exists"
             )
         self._tenants_to_databases_to_collections[tenant][database] = {}
         self._tenants_to_database_to_id[tenant][database] = UUID(hex=request.id)
-        return CreateDatabaseResponse(status=proto.Status(code=200))
+        return CreateDatabaseResponse()
 
     @overrides(check_signature=False)
     def GetDatabase(
@@ -116,16 +120,11 @@ class GrpcMockSysDB(SysDBServicer, Component):
         tenant = request.tenant
         database = request.name
         if tenant not in self._tenants_to_databases_to_collections:
-            return GetDatabaseResponse(
-                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
-            )
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Tenant {tenant} not found")
         if database not in self._tenants_to_databases_to_collections[tenant]:
-            return GetDatabaseResponse(
-                status=proto.Status(code=404, reason=f"Database {database} not found")
-            )
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Database {database} not found")
         id = self._tenants_to_database_to_id[tenant][database]
         return GetDatabaseResponse(
-            status=proto.Status(code=200),
             database=proto.Database(id=id.hex, name=database, tenant=tenant),
         )
 
@@ -135,12 +134,12 @@ class GrpcMockSysDB(SysDBServicer, Component):
     ) -> CreateTenantResponse:
         tenant = request.name
         if tenant in self._tenants_to_databases_to_collections:
-            return CreateTenantResponse(
-                status=proto.Status(code=409, reason=f"Tenant {tenant} already exists")
+            context.abort(
+                grpc.StatusCode.ALREADY_EXISTS, f"Tenant {tenant} already exists"
             )
         self._tenants_to_databases_to_collections[tenant] = {}
         self._tenants_to_database_to_id[tenant] = {}
-        return CreateTenantResponse(status=proto.Status(code=200))
+        return CreateTenantResponse()
 
     @overrides(check_signature=False)
     def GetTenant(
@@ -148,11 +147,8 @@ class GrpcMockSysDB(SysDBServicer, Component):
     ) -> GetTenantResponse:
         tenant = request.name
         if tenant not in self._tenants_to_databases_to_collections:
-            return GetTenantResponse(
-                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
-            )
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Tenant {tenant} not found")
         return GetTenantResponse(
-            status=proto.Status(code=200),
             tenant=proto.Tenant(name=tenant),
         )
 
@@ -164,16 +160,18 @@ class GrpcMockSysDB(SysDBServicer, Component):
         self, request: CreateSegmentRequest, context: grpc.ServicerContext
     ) -> CreateSegmentResponse:
         segment = from_proto_segment(request.segment)
+        return self.CreateSegmentHelper(segment, context)
+
+    def CreateSegmentHelper(
+        self, segment: Segment, context: grpc.ServicerContext
+    ) -> CreateSegmentResponse:
         if segment["id"].hex in self._segments:
-            return CreateSegmentResponse(
-                status=proto.Status(
-                    code=409, reason=f"Segment {segment['id']} already exists"
-                )
+            context.abort(
+                grpc.StatusCode.ALREADY_EXISTS,
+                f"Segment {segment['id']} already exists",
             )
         self._segments[segment["id"].hex] = segment
-        return CreateSegmentResponse(
-            status=proto.Status(code=200)
-        )  # TODO: how are these codes used? Need to determine the standards for the code and reason.
+        return CreateSegmentResponse()
 
     @overrides(check_signature=False)
     def DeleteSegment(
@@ -182,12 +180,10 @@ class GrpcMockSysDB(SysDBServicer, Component):
         id_to_delete = request.id
         if id_to_delete in self._segments:
             del self._segments[id_to_delete]
-            return DeleteSegmentResponse(status=proto.Status(code=200))
+            return DeleteSegmentResponse()
         else:
-            return DeleteSegmentResponse(
-                status=proto.Status(
-                    code=404, reason=f"Segment {id_to_delete} not found"
-                )
+            context.abort(
+                grpc.StatusCode.NOT_FOUND, f"Segment {id_to_delete} not found"
             )
 
     @overrides(check_signature=False)
@@ -224,10 +220,8 @@ class GrpcMockSysDB(SysDBServicer, Component):
     ) -> UpdateSegmentResponse:
         id_to_update = UUID(request.id)
         if id_to_update.hex not in self._segments:
-            return UpdateSegmentResponse(
-                status=proto.Status(
-                    code=404, reason=f"Segment {id_to_update} not found"
-                )
+            context.abort(
+                grpc.StatusCode.NOT_FOUND, f"Segment {id_to_update} not found"
             )
         else:
             segment = self._segments[id_to_update.hex]
@@ -238,7 +232,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 self._merge_metadata(target, request.metadata)
             if request.HasField("reset_metadata") and request.reset_metadata:
                 segment["metadata"] = {}
-            return UpdateSegmentResponse(status=proto.Status(code=200))
+            return UpdateSegmentResponse()
 
     @overrides(check_signature=False)
     def CreateCollection(
@@ -248,13 +242,9 @@ class GrpcMockSysDB(SysDBServicer, Component):
         tenant = request.tenant
         database = request.database
         if tenant not in self._tenants_to_databases_to_collections:
-            return CreateCollectionResponse(
-                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
-            )
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Tenant {tenant} not found")
         if database not in self._tenants_to_databases_to_collections[tenant]:
-            return CreateCollectionResponse(
-                status=proto.Status(code=404, reason=f"Database {database} not found")
-            )
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Database {database} not found")
 
         # Check if the collection already exists globally by id
         for (
@@ -267,20 +257,16 @@ class GrpcMockSysDB(SysDBServicer, Component):
                         search_tenant != request.tenant
                         or search_database != request.database
                     ):
-                        return CreateCollectionResponse(
-                            status=proto.Status(
-                                code=409,
-                                reason=f"Collection {request.id} already exists in tenant {search_tenant} database {search_database}",
-                            )
+                        context.abort(
+                            grpc.StatusCode.ALREADY_EXISTS,
+                            f"Collection {request.id} already exists in tenant {search_tenant} database {search_database}",
                         )
                     elif not request.get_or_create:
                         # If the id exists for this tenant and database, and we are not doing a get_or_create, then
-                        # we should return a 409
-                        return CreateCollectionResponse(
-                            status=proto.Status(
-                                code=409,
-                                reason=f"Collection {request.id} already exists in tenant {search_tenant} database {search_database}",
-                            )
+                        # we should return an already exists error
+                        context.abort(
+                            grpc.StatusCode.ALREADY_EXISTS,
+                            f"Collection {request.id} already exists in tenant {search_tenant} database {search_database}",
                         )
 
         # Check if the collection already exists in this database by name
@@ -291,34 +277,49 @@ class GrpcMockSysDB(SysDBServicer, Component):
             if request.get_or_create:
                 existing_collection = matches[0]
                 return CreateCollectionResponse(
-                    status=proto.Status(code=200),
                     collection=to_proto_collection(existing_collection),
                     created=False,
                 )
-            return CreateCollectionResponse(
-                status=proto.Status(
-                    code=409, reason=f"Collection {request.name} already exists"
-                )
+            context.abort(
+                grpc.StatusCode.ALREADY_EXISTS,
+                f"Collection {collection_name} already exists",
             )
 
-        configuration = CollectionConfigurationInternal.from_json_str(
-            request.configuration_json_str
-        )
+        configuration_json = json.loads(request.configuration_json_str)
 
         id = UUID(hex=request.id)
         new_collection = Collection(
             id=id,
             name=request.name,
-            configuration=configuration,
+            configuration_json=configuration_json,
             metadata=from_proto_metadata(request.metadata),
             dimension=request.dimension,
             database=database,
             tenant=tenant,
             version=0,
         )
+
+        # Check that segments are unique and do not already exist
+        # Keep a track of the segments that are being added
+        segments_added = []
+        # Create segments for the collection
+        for segment_proto in request.segments:
+            segment = from_proto_segment(segment_proto)
+            if segment["id"].hex in self._segments:
+                # Remove the already added segment since we need to roll back
+                for s in segments_added:
+                    self.DeleteSegment(DeleteSegmentRequest(id=s), context)
+                context.abort(
+                    grpc.StatusCode.ALREADY_EXISTS,
+                    f"Segment {segment['id']} already exists",
+                )
+            self.CreateSegmentHelper(segment, context)
+            segments_added.append(segment["id"].hex)
+
         collections[request.id] = new_collection
+        collection_unique_key = f"{tenant}:{database}:{request.id}"
+        self._collection_to_segments[collection_unique_key] = segments_added
         return CreateCollectionResponse(
-            status=proto.Status(code=200),
             collection=to_proto_collection(new_collection),
             created=True,
         )
@@ -331,22 +332,21 @@ class GrpcMockSysDB(SysDBServicer, Component):
         tenant = request.tenant
         database = request.database
         if tenant not in self._tenants_to_databases_to_collections:
-            return DeleteCollectionResponse(
-                status=proto.Status(code=404, reason=f"Tenant {tenant} not found")
-            )
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Tenant {tenant} not found")
         if database not in self._tenants_to_databases_to_collections[tenant]:
-            return DeleteCollectionResponse(
-                status=proto.Status(code=404, reason=f"Database {database} not found")
-            )
+            context.abort(grpc.StatusCode.NOT_FOUND, f"Database {database} not found")
         collections = self._tenants_to_databases_to_collections[tenant][database]
         if collection_id in collections:
             del collections[collection_id]
-            return DeleteCollectionResponse(status=proto.Status(code=200))
+            collection_unique_key = f"{tenant}:{database}:{collection_id}"
+            segment_ids = self._collection_to_segments[collection_unique_key]
+            if segment_ids:  # Delete segments if provided.
+                for segment_id in segment_ids:
+                    del self._segments[segment_id]
+            return DeleteCollectionResponse()
         else:
-            return DeleteCollectionResponse(
-                status=proto.Status(
-                    code=404, reason=f"Collection {collection_id} not found"
-                )
+            context.abort(
+                grpc.StatusCode.NOT_FOUND, f"Collection {collection_id} not found"
             )
 
     @overrides(check_signature=False)
@@ -381,6 +381,63 @@ class GrpcMockSysDB(SysDBServicer, Component):
         )
 
     @overrides(check_signature=False)
+    def CountCollections(
+        self, request: CountCollectionsRequest, context: grpc.ServicerContext
+    ) -> CountCollectionsResponse:
+        request = GetCollectionsRequest(
+            tenant=request.tenant,
+            database=request.database,
+        )
+        collections = self.GetCollections(request, context)
+        return CountCollectionsResponse(count=len(collections.collections))
+
+    @overrides(check_signature=False)
+    def GetCollectionSize(
+        self, request: GetCollectionSizeRequest, context: grpc.ServicerContext
+    ) -> GetCollectionSizeResponse:
+        return GetCollectionSizeResponse(
+            total_records_post_compaction=0,
+        )
+
+    @overrides(check_signature=False)
+    def GetCollectionWithSegments(
+        self, request: GetCollectionWithSegmentsRequest, context: grpc.ServicerContext
+    ) -> GetCollectionWithSegmentsResponse:
+        allCollections = {}
+        for tenant, databases in self._tenants_to_databases_to_collections.items():
+            for database, collections in databases.items():
+                allCollections.update(collections)
+                print(
+                    f"Tenant: {tenant}, Database: {database}, Collections: {collections}"
+                )
+        collection = allCollections.get(request.id, None)
+        if collection is None:
+            context.abort(
+                grpc.StatusCode.NOT_FOUND, f"Collection with id {request.id} not found"
+            )
+        collection_unique_key = (
+            f"{collection.tenant}:{collection.database}:{request.id}"
+        )
+        segments = [
+            self._segments[id]
+            for id in self._collection_to_segments[collection_unique_key]
+        ]
+        if {segment["scope"] for segment in segments} != {
+            SegmentScope.METADATA,
+            SegmentScope.RECORD,
+            SegmentScope.VECTOR,
+        }:
+            context.abort(
+                grpc.StatusCode.INTERNAL,
+                f"Incomplete segments for collection {collection}: {segments}",
+            )
+
+        return GetCollectionWithSegmentsResponse(
+            collection=to_proto_collection(collection),
+            segments=[to_proto_segment(segment) for segment in segments],
+        )
+
+    @overrides(check_signature=False)
     def UpdateCollection(
         self, request: UpdateCollectionRequest, context: grpc.ServicerContext
     ) -> UpdateCollectionResponse:
@@ -393,10 +450,8 @@ class GrpcMockSysDB(SysDBServicer, Component):
                     collections = maybe_collections
 
         if id_to_update.hex not in collections:
-            return UpdateCollectionResponse(
-                status=proto.Status(
-                    code=404, reason=f"Collection {id_to_update} not found"
-                )
+            context.abort(
+                grpc.StatusCode.NOT_FOUND, f"Collection {id_to_update} not found"
             )
         else:
             collection = collections[id_to_update.hex]
@@ -422,14 +477,14 @@ class GrpcMockSysDB(SysDBServicer, Component):
                 if request.reset_metadata:
                     collection["metadata"] = {}
 
-            return UpdateCollectionResponse(status=proto.Status(code=200))
+            return UpdateCollectionResponse()
 
     @overrides(check_signature=False)
     def ResetState(
         self, request: Empty, context: grpc.ServicerContext
     ) -> ResetStateResponse:
         self.reset_state()
-        return ResetStateResponse(status=proto.Status(code=200))
+        return ResetStateResponse()
 
     def _merge_metadata(self, target: Metadata, source: proto.UpdateMetadata) -> None:
         target_metadata = cast(Dict[str, Any], target)

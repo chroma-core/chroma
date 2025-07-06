@@ -1,3 +1,1 @@
-mod panic;
-
-pub(crate) use panic::*;
+pub(crate) mod convert;

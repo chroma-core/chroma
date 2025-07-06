@@ -3,7 +3,7 @@ use crate::chroma_proto;
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Operation {
     Add,
     Update,
@@ -11,7 +11,7 @@ pub enum Operation {
     Delete,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MaterializedLogOperation {
     // Set when the record is initially read from the segment
     // before it is processed based on state of the log.

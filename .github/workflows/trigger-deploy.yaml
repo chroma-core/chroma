@@ -1,0 +1,27 @@
+name: Trigger deploy
+run-name: Trigger deploy from ${{ github.ref_name }}
+
+on:
+  push:
+    branches:
+      # main is not included here because it is handled by the release-chromadb.yaml workflow
+      # production deploys (release branches) are also not here because they are currently
+      # meant to be handled manually.
+      - rc/**-**-**
+
+jobs:
+  deploy-control-plane:
+    name: Dispatch deploy control plane workflow
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      plane: control
+      ignore-lock: true
+    secrets: inherit
+
+  deploy-data-plane:
+    name: Dispatch deploy data plane workflow
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      plane: data
+      ignore-lock: true
+    secrets: inherit

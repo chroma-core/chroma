@@ -31,6 +31,22 @@ func BuildInternalGrpcError(msg string) error {
 	return status.Error(codes.Internal, msg)
 }
 
+func BuildFailedPreconditionGrpcError(msg string) error {
+	return status.Error(codes.FailedPrecondition, msg)
+}
+
+func BuildAlreadyExistsGrpcError(msg string) error {
+	return status.Error(codes.AlreadyExists, msg)
+}
+
+func BuildNotFoundGrpcError(msg string) error {
+	return status.Error(codes.NotFound, msg)
+}
+
+func BuildAbortedGrpcError(msg string) error {
+	return status.Error(codes.Aborted, msg)
+}
+
 func BuildErrorForUUID(ID types.UniqueID, name string, err error) error {
 	if err != nil || ID == types.NilUniqueID() {
 		log.Error(name+"id format error", zap.String(name+".id", ID.String()))

@@ -2,8 +2,16 @@ import httpx
 from typing import Optional, Sequence
 from uuid import UUID
 from overrides import override
+
+from chromadb.auth import UserIdentity
+from chromadb.auth.utils import maybe_set_tenant_and_database
 from chromadb.api import AsyncAdminAPI, AsyncClientAPI, AsyncServerAPI
-from chromadb.api.configuration import CollectionConfiguration
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    validate_embedding_function_conflict_on_create,
+    validate_embedding_function_conflict_on_get,
+)
 from chromadb.api.models.AsyncCollection import AsyncCollection
 from chromadb.api.shared_system_client import SharedSystemClient
 from chromadb.api.types import (
@@ -16,6 +24,8 @@ from chromadb.api.types import (
     GetResult,
     IDs,
     Include,
+    IncludeMetadataDocuments,
+    IncludeMetadataDocumentsDistances,
     Loadable,
     Metadatas,
     QueryResult,
@@ -55,14 +65,28 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         # Create an admin client for verifying that databases and tenants exist
         self = cls(settings=settings)
         SharedSystemClient._populate_data_from_system(self._system)
-        self._admin_client = AsyncAdminClient.from_system(self._system)
-        await self._validate_tenant_database(tenant=tenant, database=database)
 
         self.tenant = tenant
         self.database = database
 
         # Get the root system component we want to interact with
         self._server = self._system.instance(AsyncServerAPI)
+
+        user_identity = await self.get_user_identity()
+
+        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
+            user_identity,
+            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+            user_provided_tenant=tenant,
+            user_provided_database=database,
+        )
+        if maybe_tenant:
+            self.tenant = maybe_tenant
+        if maybe_database:
+            self.database = maybe_database
+
+        self._admin_client = AsyncAdminClient.from_system(self._system)
+        await self._validate_tenant_database(tenant=self.tenant, database=self.database)
 
         self._submit_client_start_event()
 
@@ -89,6 +113,10 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         raise NotImplementedError(
             "AsyncClient cannot be created synchronously. Use .from_system_async() instead."
         )
+
+    @override
+    async def get_user_identity(self) -> UserIdentity:
+        return await self._server.get_user_identity()
 
     @override
     async def set_tenant(self, tenant: str, database: str = DEFAULT_DATABASE) -> None:
@@ -136,13 +164,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         models = await self._server.list_collections(
             limit, offset, tenant=self.tenant, database=self.database
         )
-        return [
-            AsyncCollection(
-                client=self._server,
-                model=model,
-            )
-            for model in models
-        ]
+        return [AsyncCollection(client=self._server, model=model) for model in models]
 
     @override
     async def count_collections(self) -> int:
@@ -154,7 +176,7 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -162,6 +184,20 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> AsyncCollection:
+        if configuration is None:
+            configuration = {}
+
+        configuration_ef = configuration.get("embedding_function")
+
+        validate_embedding_function_conflict_on_create(
+            embedding_function, configuration_ef
+        )
+
+        # If ef provided in function params and collection config ef is None,
+        # set the collection config ef to the function params
+        if embedding_function is not None and configuration_ef is None:
+            configuration["embedding_function"] = embedding_function
+
         model = await self._server.create_collection(
             name=name,
             configuration=configuration,
@@ -181,18 +217,22 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_collection(
         self,
         name: str,
-        id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
         model = await self._server.get_collection(
-            id=id,
             name=name,
             tenant=self.tenant,
             database=self.database,
         )
+        persisted_ef_config = model.configuration_json.get("embedding_function")
+
+        validate_embedding_function_conflict_on_get(
+            embedding_function, persisted_ef_config
+        )
+
         return AsyncCollection(
             client=self._server,
             model=model,
@@ -204,13 +244,24 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
     async def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> AsyncCollection:
+        if configuration is None:
+            configuration = {}
+
+        configuration_ef = configuration.get("embedding_function")
+
+        validate_embedding_function_conflict_on_create(
+            embedding_function, configuration_ef
+        )
+
+        if embedding_function is not None and configuration_ef is None:
+            configuration["embedding_function"] = embedding_function
         model = await self._server.get_or_create_collection(
             name=name,
             configuration=configuration,
@@ -218,6 +269,13 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
+
+        persisted_ef_config = model.configuration_json.get("embedding_function")
+
+        validate_embedding_function_conflict_on_get(
+            embedding_function, persisted_ef_config
+        )
+
         return AsyncCollection(
             client=self._server,
             model=model,
@@ -231,11 +289,15 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         return await self._server._modify(
             id=id,
             new_name=new_name,
             new_metadata=new_metadata,
+            new_configuration=new_configuration,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -270,6 +332,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -289,6 +353,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -308,6 +374,8 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
             metadatas=metadatas,
             documents=documents,
             uris=uris,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -328,40 +396,38 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
-        sort: Optional[str] = None,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
     ) -> GetResult:
         return await self._server._get(
             collection_id=collection_id,
             ids=ids,
             where=where,
-            sort=sort,
             limit=limit,
             offset=offset,
-            page=page,
-            page_size=page_size,
             where_document=where_document,
             include=include,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     async def _delete(
         self,
         collection_id: UUID,
         ids: Optional[IDs],
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
-    ) -> IDs:
-        return await self._server._delete(
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ) -> None:
+        await self._server._delete(
             collection_id=collection_id,
             ids=ids,
             where=where,
             where_document=where_document,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -369,18 +435,22 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
-        include: Include = ["embeddings", "metadatas", "documents", "distances"],  # type: ignore[list-item]
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocumentsDistances,
     ) -> QueryResult:
         return await self._server._query(
             collection_id=collection_id,
             query_embeddings=query_embeddings,
+            ids=ids,
             n_results=n_results,
             where=where,
             where_document=where_document,
             include=include,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     @override
@@ -416,6 +486,21 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
     @override
     async def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
         return await self._server.get_database(name=name, tenant=tenant)
+
+    @override
+    async def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        return await self._server.delete_database(name=name, tenant=tenant)
+
+    @override
+    async def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        return await self._server.list_databases(
+            limit=limit, offset=offset, tenant=tenant
+        )
 
     @override
     async def create_tenant(self, name: str) -> None:

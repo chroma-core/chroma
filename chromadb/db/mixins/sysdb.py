@@ -1,26 +1,18 @@
-import json
+import logging
+import sys
 from typing import Optional, Sequence, Any, Tuple, cast, Dict, Union, Set
 from uuid import UUID
 from overrides import override
 from pypika import Table, Column
 from itertools import groupby
 
-from chromadb.api.configuration import (
-    CollectionConfigurationInternal,
-    ConfigurationParameter,
-    HNSWConfigurationInternal,
-    InvalidConfigurationError,
-)
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, System
-from chromadb.db.base import (
-    Cursor,
-    SqlDB,
-    ParameterValue,
-    get_sql,
+from chromadb.db.base import Cursor, SqlDB, ParameterValue, get_sql
+from chromadb.db.system import SysDB
+from chromadb.errors import (
+    NotFoundError,
     UniqueConstraintError,
 )
-from chromadb.db.system import SysDB
-from chromadb.errors import NotFoundError
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -29,6 +21,7 @@ from chromadb.telemetry.opentelemetry import (
 )
 from chromadb.ingest import Producer
 from chromadb.types import (
+    CollectionAndSegments,
     Database,
     OptionalArgument,
     Segment,
@@ -39,6 +32,20 @@ from chromadb.types import (
     Unspecified,
     UpdateMetadata,
 )
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    create_collection_configuration_to_json_str,
+    load_collection_configuration_from_json_str,
+    CollectionConfiguration,
+    create_collection_configuration_to_json,
+    collection_configuration_to_json,
+    collection_configuration_to_json_str,
+    overwrite_collection_configuration,
+    update_collection_configuration_from_legacy_update_metadata,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class SqlSysDB(SqlDB, SysDB):
@@ -114,6 +121,66 @@ class SqlSysDB(SqlDB, SysDB):
             )
 
     @override
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        with self.tx() as cur:
+            databases = Table("databases")
+            q = (
+                self.querybuilder()
+                .from_(databases)
+                .where(databases.name == ParameterValue(name))
+                .where(databases.tenant_id == ParameterValue(tenant))
+                .delete()
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            sql = sql + " RETURNING id"
+            result = cur.execute(sql, params).fetchone()
+            if not result:
+                raise NotFoundError(f"Database {name} not found for tenant {tenant}")
+
+            # As of 01/09/2025, cascading deletes don't work because foreign keys are not enabled.
+            # See https://github.com/chroma-core/chroma/issues/3456.
+            collections = Table("collections")
+            q = (
+                self.querybuilder()
+                .from_(collections)
+                .where(collections.database_id == ParameterValue(result[0]))
+                .delete()
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            cur.execute(sql, params)
+
+    @override
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        with self.tx() as cur:
+            databases = Table("databases")
+            q = (
+                self.querybuilder()
+                .from_(databases)
+                .select(databases.id, databases.name)
+                .where(databases.tenant_id == ParameterValue(tenant))
+                .offset(offset)
+                .limit(
+                    sys.maxsize if limit is None else limit
+                )  # SQLite requires that a limit is provided to use offset
+                .orderby(databases.created_at)
+            )
+            sql, params = get_sql(q, self.parameter_format())
+            rows = cur.execute(sql, params).fetchall()
+            return [
+                Database(
+                    id=cast(UUID, self.uuid_from_db(row[0])),
+                    name=row[1],
+                    tenant=tenant,
+                )
+                for row in rows
+            ]
+
+    @override
     def create_tenant(self, name: str) -> None:
         with self.tx() as cur:
             tenants = Table("tenants")
@@ -145,8 +212,9 @@ class SqlSysDB(SqlDB, SysDB):
                 raise NotFoundError(f"Tenant {name} not found")
             return Tenant(name=name)
 
-    @override
-    def create_segment(self, segment: Segment) -> None:
+    # Create a segment using the passed cursor, so that the other changes
+    # can be in the same transaction.
+    def create_segment_with_tx(self, cur: Cursor, segment: Segment) -> None:
         add_attributes_to_current_span(
             {
                 "segment_id": str(segment["id"]),
@@ -155,33 +223,36 @@ class SqlSysDB(SqlDB, SysDB):
                 "collection": str(segment["collection"]),
             }
         )
-        with self.tx() as cur:
-            segments = Table("segments")
-            insert_segment = (
-                self.querybuilder()
-                .into(segments)
-                .columns(
-                    segments.id,
-                    segments.type,
-                    segments.scope,
-                    segments.collection,
-                )
-                .insert(
-                    ParameterValue(self.uuid_to_db(segment["id"])),
-                    ParameterValue(segment["type"]),
-                    ParameterValue(segment["scope"].value),
-                    ParameterValue(self.uuid_to_db(segment["collection"])),
-                )
+
+        segments = Table("segments")
+        insert_segment = (
+            self.querybuilder()
+            .into(segments)
+            .columns(
+                segments.id,
+                segments.type,
+                segments.scope,
+                segments.collection,
             )
-            sql, params = get_sql(insert_segment, self.parameter_format())
+            .insert(
+                ParameterValue(self.uuid_to_db(segment["id"])),
+                ParameterValue(segment["type"]),
+                ParameterValue(segment["scope"].value),
+                ParameterValue(self.uuid_to_db(segment["collection"])),
+            )
+        )
+        sql, params = get_sql(insert_segment, self.parameter_format())
+        try:
+            cur.execute(sql, params)
+        except self.unique_constraint_error() as e:
+            raise UniqueConstraintError(
+                f"Segment {segment['id']} already exists"
+            ) from e
+
+        # Insert segment metadata if it exists
+        metadata_t = Table("segment_metadata")
+        if segment["metadata"]:
             try:
-                cur.execute(sql, params)
-            except self.unique_constraint_error() as e:
-                raise UniqueConstraintError(
-                    f"Segment {segment['id']} already exists"
-                ) from e
-            metadata_t = Table("segment_metadata")
-            if segment["metadata"]:
                 self._insert_metadata(
                     cur,
                     metadata_t,
@@ -189,6 +260,16 @@ class SqlSysDB(SqlDB, SysDB):
                     segment["id"],
                     segment["metadata"],
                 )
+            except Exception as e:
+                logger.error(f"Error inserting segment metadata: {e}")
+                raise
+
+    # TODO(rohit): Investigate and remove this method completely.
+    @trace_method("SqlSysDB.create_segment", OpenTelemetryGranularity.ALL)
+    @override
+    def create_segment(self, segment: Segment) -> None:
+        with self.tx() as cur:
+            self.create_segment_with_tx(cur, segment)
 
     @trace_method("SqlSysDB.create_collection", OpenTelemetryGranularity.ALL)
     @override
@@ -196,7 +277,8 @@ class SqlSysDB(SqlDB, SysDB):
         self,
         id: UUID,
         name: str,
-        configuration: CollectionConfigurationInternal,
+        configuration: CreateCollectionConfiguration,
+        segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
@@ -229,7 +311,7 @@ class SqlSysDB(SqlDB, SysDB):
         collection = Collection(
             id=id,
             name=name,
-            configuration=configuration,
+            configuration_json=create_collection_configuration_to_json(configuration),
             metadata=metadata,
             dimension=dimension,
             tenant=tenant,
@@ -254,7 +336,9 @@ class SqlSysDB(SqlDB, SysDB):
                 .insert(
                     ParameterValue(self.uuid_to_db(collection["id"])),
                     ParameterValue(collection["name"]),
-                    ParameterValue(configuration.to_json_str()),
+                    ParameterValue(
+                        create_collection_configuration_to_json_str(configuration)
+                    ),
                     ParameterValue(collection["dimension"]),
                     # Get the database id for the database with the given name and tenant
                     self.querybuilder()
@@ -280,6 +364,10 @@ class SqlSysDB(SqlDB, SysDB):
                     collection.id,
                     collection["metadata"],
                 )
+
+            for segment in segments:
+                self.create_segment_with_tx(cur, segment)
+
         return collection, True
 
     @trace_method("SqlSysDB.get_segments", OpenTelemetryGranularity.ALL)
@@ -349,6 +437,7 @@ class SqlSysDB(SqlDB, SysDB):
                         scope=scope,
                         collection=collection,
                         metadata=metadata,
+                        file_paths={},
                     )
                 )
 
@@ -435,8 +524,8 @@ class SqlSysDB(SqlDB, SysDB):
                 metadata = self._metadata_from_rows(rows)
                 dimension = int(rows[0][3]) if rows[0][3] else None
                 if rows[0][2] is not None:
-                    configuration = self._load_config_from_json_str_and_migrate(
-                        str(collection_id), rows[0][2]
+                    configuration = load_collection_configuration_from_json_str(
+                        rows[0][2]
                     )
                 else:
                     # 07/2024: This is a legacy case where we don't have a collection
@@ -451,7 +540,9 @@ class SqlSysDB(SqlDB, SysDB):
                     Collection(
                         id=cast(UUID, id),
                         name=name,
-                        configuration=configuration,
+                        configuration_json=collection_configuration_to_json(
+                            configuration
+                        ),
                         metadata=metadata,
                         dimension=dimension,
                         tenant=str(rows[0][5]),
@@ -469,6 +560,18 @@ class SqlSysDB(SqlDB, SysDB):
                 collections = collections[offset:]
 
             return collections
+
+    @override
+    def get_collection_with_segments(
+        self, collection_id: UUID
+    ) -> CollectionAndSegments:
+        collections = self.get_collections(id=collection_id)
+        if len(collections) == 0:
+            raise NotFoundError(f"Collection {collection_id} does not exist.")
+        return CollectionAndSegments(
+            collection=collections[0],
+            segments=self.get_segments(collection=collection_id),
+        )
 
     @trace_method("SqlSysDB.delete_segment", OpenTelemetryGranularity.ALL)
     @override
@@ -493,6 +596,19 @@ class SqlSysDB(SqlDB, SysDB):
             result = cur.execute(sql, params).fetchone()
             if not result:
                 raise NotFoundError(f"Segment {id} not found")
+
+    # Used by delete_collection to delete all segments for a collection along with
+    # the collection itself in a single transaction.
+    def delete_segments_for_collection(self, cur: Cursor, collection: UUID) -> None:
+        segments_t = Table("segments")
+        q = (
+            self.querybuilder()
+            .from_(segments_t)
+            .where(segments_t.collection == ParameterValue(self.uuid_to_db(collection)))
+            .delete()
+        )
+        sql, params = get_sql(q, self.parameter_format())
+        cur.execute(sql, params)
 
     @trace_method("SqlSysDB.delete_collection", OpenTelemetryGranularity.ALL)
     @override
@@ -532,6 +648,9 @@ class SqlSysDB(SqlDB, SysDB):
             result = cur.execute(sql, params).fetchone()
             if not result:
                 raise NotFoundError(f"Collection {id} not found")
+            # Delete segments.
+            self.delete_segments_for_collection(cur, id)
+
         self._producer.delete_log(result[0])
 
     @trace_method("SqlSysDB.update_segment", OpenTelemetryGranularity.ALL)
@@ -592,6 +711,9 @@ class SqlSysDB(SqlDB, SysDB):
         name: OptionalArgument[str] = Unspecified(),
         dimension: OptionalArgument[Optional[int]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
+        configuration: OptionalArgument[
+            Optional[UpdateCollectionConfiguration]
+        ] = Unspecified(),
     ) -> None:
         add_attributes_to_current_span(
             {
@@ -646,6 +768,53 @@ class SqlSysDB(SqlDB, SysDB):
                         metadata,
                         set(metadata.keys()),
                     )
+
+            if configuration != Unspecified():
+                update_configuration = cast(
+                    UpdateCollectionConfiguration, configuration
+                )
+                self._update_config_json_str(cur, update_configuration, id)
+            else:
+                if metadata != Unspecified():
+                    metadata = cast(UpdateMetadata, metadata)
+                    if metadata is not None:
+                        update_configuration = (
+                            update_collection_configuration_from_legacy_update_metadata(
+                                metadata
+                            )
+                        )
+                        self._update_config_json_str(cur, update_configuration, id)
+
+    def _update_config_json_str(
+        self, cur: Cursor, update_configuration: UpdateCollectionConfiguration, id: UUID
+    ) -> None:
+        collections_t = Table("collections")
+        q = (
+            self.querybuilder()
+            .from_(collections_t)
+            .select(collections_t.config_json_str)
+            .where(collections_t.id == ParameterValue(self.uuid_to_db(id)))
+        )
+        sql, params = get_sql(q, self.parameter_format())
+        row = cur.execute(sql, params).fetchone()
+        if not row:
+            raise NotFoundError(f"Collection {id} not found")
+        config_json_str = row[0]
+        existing_config = load_collection_configuration_from_json_str(config_json_str)
+        new_config = overwrite_collection_configuration(
+            existing_config, update_configuration
+        )
+        q = (
+            self.querybuilder()
+            .update(collections_t)
+            .set(
+                collections_t.config_json_str,
+                ParameterValue(collection_configuration_to_json_str(new_config)),
+            )
+            .where(collections_t.id == ParameterValue(self.uuid_to_db(id)))
+        )
+        sql, params = get_sql(q, self.parameter_format())
+        cur.execute(sql, params)
 
     @trace_method("SqlSysDB._metadata_from_rows", OpenTelemetryGranularity.ALL)
     def _metadata_from_rows(
@@ -759,82 +928,21 @@ class SqlSysDB(SqlDB, SysDB):
         if sql:
             cur.execute(sql, params)
 
-    def _load_config_from_json_str_and_migrate(
-        self, collection_id: str, json_str: str
-    ) -> CollectionConfigurationInternal:
-        try:
-            config_json = json.loads(json_str)
-        except json.JSONDecodeError:
-            raise ValueError(
-                f"Unable to decode configuration from JSON string: {json_str}"
-            )
-
-        try:
-            return CollectionConfigurationInternal.from_json_str(json_str)
-        except InvalidConfigurationError as error:
-            # 07/17/2024: the initial migration from the legacy metadata-based config to the new sysdb-based config had a bug where the batch_size and sync_threshold were swapped. Along with this migration, a validator was added to HNSWConfigurationInternal to ensure that batch_size <= sync_threshold.
-            hnsw_configuration = config_json.get("hnsw_configuration")
-            if hnsw_configuration:
-                batch_size = hnsw_configuration.get("batch_size")
-                sync_threshold = hnsw_configuration.get("sync_threshold")
-
-                if batch_size and sync_threshold and batch_size > sync_threshold:
-                    # Allow new defaults to be set
-                    hnsw_configuration = {
-                        k: v
-                        for k, v in hnsw_configuration.items()
-                        if k not in ["batch_size", "sync_threshold"]
-                    }
-                    config_json.update({"hnsw_configuration": hnsw_configuration})
-
-                    configuration = CollectionConfigurationInternal.from_json(
-                        config_json
-                    )
-
-                    collections_t = Table("collections")
-                    q = (
-                        self.querybuilder()
-                        .update(collections_t)
-                        .set(
-                            collections_t.config_json_str,
-                            ParameterValue(configuration.to_json_str()),
-                        )
-                        .where(collections_t.id == ParameterValue(collection_id))
-                    )
-                    sql, params = get_sql(q, self.parameter_format())
-                    with self.tx() as cur:
-                        cur.execute(sql, params)
-
-                    return configuration
-
-            raise error
-
     def _insert_config_from_legacy_params(
         self, collection_id: Any, metadata: Optional[Metadata]
-    ) -> CollectionConfigurationInternal:
+    ) -> CollectionConfiguration:
         """Insert the configuration from legacy metadata params into the collections table, and return the configuration object."""
 
         # This is a legacy case where we don't have configuration stored in the database
         # This is non-destructive, we don't delete or overwrite any keys in the metadata
-        from chromadb.segment.impl.vector.hnsw_params import PersistentHnswParams
 
         collections_t = Table("collections")
 
-        # Get any existing HNSW params from the metadata (works regardless whether metadata has persistent params)
-        hnsw_metadata_params = PersistentHnswParams.extract(metadata or {})
-
-        hnsw_configuration = HNSWConfigurationInternal.from_legacy_params(
-            hnsw_metadata_params  # type: ignore[arg-type]
-        )
-        configuration = CollectionConfigurationInternal(
-            parameters=[
-                ConfigurationParameter(
-                    name="hnsw_configuration", value=hnsw_configuration
-                )
-            ]
-        )
+        create_collection_config = CreateCollectionConfiguration()
         # Write the configuration into the database
-        configuration_json_str = configuration.to_json_str()
+        configuration_json_str = create_collection_configuration_to_json_str(
+            create_collection_config
+        )
         q = (
             self.querybuilder()
             .update(collections_t)
@@ -847,4 +955,23 @@ class SqlSysDB(SqlDB, SysDB):
         sql, params = get_sql(q, self.parameter_format())
         with self.tx() as cur:
             cur.execute(sql, params)
-        return configuration
+        return load_collection_configuration_from_json_str(configuration_json_str)
+
+    @override
+    def get_collection_size(self, id: UUID) -> int:
+        raise NotImplementedError
+
+    @override
+    def count_collections(
+        self,
+        tenant: str = DEFAULT_TENANT,
+        database: Optional[str] = None,
+    ) -> int:
+        """Gets the number of collections for the (tenant, database) combination."""
+        # TODO(Sanket): Implement this efficiently using a count query.
+        # Note, the underlying get_collections api always requires a database
+        # to be specified. In the sysdb implementation in go code, it does not
+        # filter on database if it is set to "". This is a bad API and
+        # should be fixed. For now, we will replicate the behavior.
+        request_database: str = "" if database is None or database == "" else database
+        return len(self.get_collections(tenant=tenant, database=request_database))

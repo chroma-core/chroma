@@ -108,8 +108,8 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
             self._settings.require("migrations") == "apply"
             and self.config.get_parameter("automatically_purge").value is False
         ):
-            logger.warn(
-                "⚠️ It looks like you upgraded from a version below 0.6 and could benefit from vacuuming your database. Run chromadb utils vacuum --help for more information."
+            logger.warning(
+                "⚠️ It looks like you upgraded from a version below 0.5.6 and could benefit from vacuuming your database. Run chromadb utils vacuum --help for more information."
             )
 
     @trace_method("SqliteDB.stop", OpenTelemetryGranularity.ALL)

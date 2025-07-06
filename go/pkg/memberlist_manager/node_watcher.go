@@ -75,7 +75,7 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
-				log.Info("Kubernetes Pod Added", zap.String("key", key), zap.Any("pod name", objPod.Name))
+				log.Debug("Kubernetes Pod Added", zap.String("key", key), zap.Any("pod name", objPod.Name))
 				name := objPod.Name
 				w.notify(name)
 			} else {
@@ -89,7 +89,7 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
-				log.Info("Kubernetes Pod Updated", zap.String("key", key), zap.String("pod name", objPod.Name))
+				log.Debug("Kubernetes Pod Updated", zap.String("key", key), zap.String("pod name", objPod.Name))
 				name := objPod.Name
 				w.notify(name)
 			} else {
@@ -103,7 +103,7 @@ func (w *KubernetesWatcher) Start() error {
 				log.Error("Error while asserting object to pod")
 			}
 			if err == nil {
-				log.Info("Kubernetes Pod Deleted", zap.String("pod name", objPod.Name))
+				log.Debug("Kubernetes Pod Deleted", zap.String("pod name", objPod.Name))
 				name := objPod.Name
 				// The contract for GetStatus is that if the ip is not in this map, then it returns NotReady
 				w.notify(name)
@@ -160,18 +160,17 @@ func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
 	if err != nil {
 		return nil, err
 	}
-	memberlist := Memberlist{}
+	memberlist := make(Memberlist, 0, len(pods))
 	for _, pod := range pods {
-		conditions := pod.Status.Conditions
-		for _, condition := range conditions {
-			if condition.Type == v1.PodReady && condition.Status == v1.ConditionTrue {
-				member := Member{
-					id: pod.Name,
+		for _, condition := range pod.Status.Conditions {
+			if condition.Type == v1.PodReady {
+				if condition.Status == v1.ConditionTrue {
+					memberlist = append(memberlist, Member{pod.Name, pod.Status.PodIP, pod.Spec.NodeName})
 				}
-				memberlist = append(memberlist, member)
+				break
 			}
 		}
 	}
-	log.Info("ListReadyMembers", zap.Any("memberlist", memberlist))
+	log.Debug("ListReadyMembers", zap.Any("memberlist", memberlist))
 	return memberlist, nil
 }

@@ -1,4 +1,4 @@
-from typing import Optional, Sequence, TypeVar, Type
+from typing import Optional, Sequence, TypeVar
 from abc import abstractmethod
 from chromadb.types import (
     Collection,
@@ -104,7 +104,9 @@ class SegmentManager(Component):
     segments as required"""
 
     @abstractmethod
-    def create_segments(self, collection: Collection) -> Sequence[Segment]:
+    def prepare_segments_for_new_collection(
+        self, collection: Collection
+    ) -> Sequence[Segment]:
         """Return the segments required for a new collection. Returns only segment data,
         does not persist to the SysDB"""
         pass
@@ -113,18 +115,6 @@ class SegmentManager(Component):
     def delete_segments(self, collection_id: UUID) -> Sequence[UUID]:
         """Delete any local state for all the segments associated with a collection, and
         returns a sequence of their IDs. Does not update the SysDB."""
-        pass
-
-    # Future Note: To support time travel, add optional parameters to this method to
-    # retrieve Segment instances that are bounded to events from a specific range of
-    # time
-    @abstractmethod
-    def get_segment(self, collection_id: UUID, type: Type[S]) -> S:
-        """Return the segment that should be used for servicing queries to a collection.
-        Implementations should cache appropriately; clients are intended to call this
-        method repeatedly rather than storing the result (thereby giving this
-        implementation full control over which segment impls are in or out of memory at
-        a given time.)"""
         pass
 
     @abstractmethod

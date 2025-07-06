@@ -7,4 +7,14 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
-tonic = { workspace = true }
+tonic = { workspace = true, optional = true }
+sqlx = { workspace = true, optional = true }
+validator = { workspace = true, optional = true }
+thiserror = { workspace = true }
+http = { workspace = true, optional = true }
+
+[features]
+tonic = ["dep:tonic"]
+sqlx = ["dep:sqlx"]
+validator = ["dep:validator"]
+http = ["dep:http"]

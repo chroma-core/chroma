@@ -16,27 +16,22 @@
     "ChromaVersion": {
       "Description": "Chroma version to install",
       "Type": "String",
-      "Default": "LATEST_VERSION"
+      "Default": "1.0.15"
     },
-    "ChromaServerAuthCredentials": {
-      "Description": "Chroma authentication credentials",
+    "ChromaOtelCollectionEndpoint": {
+      "Description": "Chroma OTEL endpoint",
       "Type": "String",
       "Default": ""
     },
-    "ChromaServerAuthProvider" : {
-      "Description": "Chroma authentication provider",
-      "Type": "String",
-      "Default": "",
-      "AllowedValues": [
-        "",
-        "chromadb.auth.token_authn.TokenAuthenticationServerProvider",
-        "chromadb.auth.basic_authn.BasicAuthenticationServerProvider"
-      ]
-    },
-    "ChromaAuthTokenTransportHeader": {
-      "Description": "Chroma authentication custom token header",
+    "ChromaOtelServiceName": {
+      "Description": "Chroma OTEL service name",
       "Type": "String",
       "Default": ""
+    },
+    "ChromaOtelCollectionHeaders": {
+      "Description": "Chroma OTEL headers",
+      "Type": "String",
+      "Default": "{}"
     }
   },
   "Conditions": {
@@ -91,13 +86,13 @@
                 "chown ec2-user:ec2-user /home/ec2-user/docker-compose.yml\n",
                 "# Create .env file\n",
                 {
-                  "Fn::Sub": "echo 'CHROMA_SERVER_AUTHN_CREDENTIALS=${ChromaServerAuthCredentials}' >> /home/ec2-user/.env\n"
+                  "Fn::Sub": "echo 'CHROMA_OPEN_TELEMETRY__ENDPOINT=${ChromaOtelCollectionEndpoint}' >> /home/ec2-user/.env\n"
                 },
                 {
-                  "Fn::Sub": "echo 'CHROMA_SERVER_AUTHN_PROVIDER=${ChromaServerAuthProvider}' >> /home/ec2-user/.env\n"
+                  "Fn::Sub": "echo 'CHROMA_OPEN_TELEMETRY__SERVICE_NAME=${ChromaOtelServiceName}' >> /home/ec2-user/.env\n"
                 },
                 {
-                  "Fn::Sub": "echo 'CHROMA_AUTH_TOKEN_TRANSPORT_HEADER=${ChromaAuthTokenTransportHeader}' >> /home/ec2-user/.env\n"
+                  "Fn::Sub": "echo 'OTEL_EXPORTER_OTLP_HEADERS=${ChromaOtelCollectionHeaders}' >> /home/ec2-user/.env\n"
                 },
                 "chown ec2-user:ec2-user /home/ec2-user/.env\n",
                 "cd /home/ec2-user\n",

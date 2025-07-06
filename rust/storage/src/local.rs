@@ -1,110 +1,198 @@
-use super::stream::ByteStream;
-use super::stream::ByteStreamItem;
-use super::{config::StorageConfig, s3::StorageConfigError};
-use crate::GetError;
+use super::config::StorageConfig;
+use super::StorageConfigError;
 use async_trait::async_trait;
+use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
-use futures::Stream;
-use futures::StreamExt;
+use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::Instrument;
-use tracing::Span;
+use std::{hash::DefaultHasher, path::Path};
+use thiserror::Error;
+
+use crate::{ETag, PutOptions, StorageError};
+
+#[derive(Debug, Error)]
+#[error("Local storage error")]
+pub struct LocalStoraegError;
 
 #[derive(Clone)]
 pub struct LocalStorage {
-    root: String,
+    root: PathBuf,
 }
 
 impl LocalStorage {
     pub fn new(root: &str) -> LocalStorage {
         // Create the local storage with the root path.
         LocalStorage {
-            root: root.to_string(),
+            root: Path::new(root).to_path_buf(),
         }
     }
 
-    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, String> {
-        let mut stream = self
-            .get_stream(key)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Local Storage get"))
-            .await?;
-        let read_block_span =
-            tracing::trace_span!(parent: Span::current(), "Local storage read bytes to end");
-        let buf = read_block_span
-            .in_scope(|| async {
-                let mut buf: Vec<u8> = Vec::new();
-                while let Some(res) = stream.next().await {
-                    match res {
-                        Ok(chunk) => {
-                            buf.extend(chunk);
-                        }
-                        Err(err) => {
-                            tracing::error!("Error reading from storage: {}", err);
-                            match err {
-                                GetError::LocalError(e) => {
-                                    return Err(e);
-                                }
-                                _ => unreachable!(),
-                            }
-                        }
-                    }
-                }
-                tracing::info!("Read {:?} bytes from local storage", buf.len());
-                Ok(Some(buf))
-            })
-            .await?;
+    fn etag_for_bytes(bytes: &[u8]) -> ETag {
+        let mut hasher = DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        ETag(hasher.finish().to_string())
+    }
 
-        match buf {
-            Some(buf) => Ok(Arc::new(buf)),
-            None => {
-                // Buffer is empty. Nothing interesting to do.
-                Ok(Arc::new(vec![]))
-            }
+    fn path_for_key(&self, key: &str) -> PathBuf {
+        self.root.join(key)
+    }
+
+    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
+        let file_path = self.path_for_key(key);
+        if !file_path.exists() {
+            return Err(StorageError::NotFound {
+                path: file_path
+                    .to_str()
+                    .expect("File path should be valid string")
+                    .to_string(),
+                source: Arc::new(LocalStoraegError),
+            });
+        }
+        match std::fs::read(file_path) {
+            Ok(bytes_u8) => Ok(Arc::new(bytes_u8)),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
         }
     }
 
-    pub(super) async fn get_stream(
+    pub async fn get_with_e_tag(
         &self,
         key: &str,
-    ) -> Result<Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>, String> {
-        let file_path = format!("{}/{}", self.root, key);
-        tracing::debug!("Reading from path: {}", file_path);
-        match std::fs::File::open(file_path) {
-            Ok(file) => {
-                let stream = file.byte_stream();
-                Ok(Box::new(stream))
-            }
-            Err(e) => Err::<_, String>(e.to_string()),
-        }
+    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        let bytes = self.get(key).await?;
+        let etag = Self::etag_for_bytes(&bytes);
+        Ok((bytes, Some(etag)))
     }
 
-    pub async fn put_bytes(&self, key: &str, bytes: &[u8]) -> Result<(), String> {
-        let path = format!("{}/{}", self.root, key);
-        tracing::debug!("Writing to path: {}", path);
-        // Create the path if it doesn't exist, we unwrap since this should only be used in tests
-        let as_path = std::path::Path::new(&path);
-        let parent = as_path.parent().unwrap();
-        std::fs::create_dir_all(parent).unwrap();
-        let res = std::fs::write(&path, bytes);
+    pub async fn put_bytes(
+        &self,
+        key: &str,
+        bytes: &[u8],
+        _options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError> {
+        // TODO: Handle options
+        let file_path = self.path_for_key(key);
+        std::fs::create_dir_all(
+            file_path
+                .parent()
+                .expect("Parent should be present for the file path"),
+        )
+        .unwrap();
+        let res = std::fs::write(&file_path, bytes);
         match res {
-            Ok(_) => Ok(()),
-            Err(e) => Err::<(), String>(e.to_string()),
+            Ok(_) => Ok(None),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
         }
     }
 
-    pub async fn put_file(&self, key: &str, path: &str) -> Result<(), String> {
+    pub async fn put_file(
+        &self,
+        key: &str,
+        path: &str,
+        options: PutOptions,
+    ) -> Result<Option<ETag>, StorageError> {
         let file = std::fs::read(path);
         match file {
-            Ok(bytes_u8) => self.put_bytes(key, &bytes_u8).await,
-            Err(e) => Err::<(), String>(e.to_string()),
+            Ok(bytes_u8) => self.put_bytes(key, &bytes_u8, options).await,
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
         }
+    }
+
+    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
+        let file_path = self.path_for_key(key);
+
+        match std::fs::remove_file(&file_path) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
+        }
+    }
+
+    pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        let src_path = self.path_for_key(src_key);
+        let dst_path = self.path_for_key(dst_key);
+
+        // Create parent directory for destination if it doesn't exist
+        if let Some(parent) = std::path::Path::new(&dst_path).parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::error!(error = %e, path = %parent.display(), "Failed to create parent directory");
+                return Err(StorageError::Generic {
+                    source: Arc::new(e),
+                });
+            }
+        }
+
+        match std::fs::rename(&src_path, &dst_path) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
+        }
+    }
+
+    pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        let src_path = self.path_for_key(src_key);
+        let dst_path = self.path_for_key(dst_key);
+
+        // Create parent directory for destination if it doesn't exist
+        if let Some(parent) = std::path::Path::new(&dst_path).parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::error!(error = %e, path = %parent.display(), "Failed to create parent directory");
+                return Err(StorageError::Generic {
+                    source: Arc::new(e),
+                });
+            }
+        }
+
+        match std::fs::copy(&src_path, &dst_path) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
+        }
+    }
+
+    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
+        let search_path = self.path_for_key(prefix);
+        if !search_path.exists() {
+            return Ok(Vec::new());
+        }
+        let entries = std::fs::read_dir(search_path).map_err(|e| StorageError::Generic {
+            source: Arc::new(e),
+        })?;
+        entries
+            .into_iter()
+            .map(|e| {
+                e.map_err(|e| StorageError::Generic {
+                    source: Arc::new(e),
+                })
+                .and_then(|e| {
+                    e.file_name()
+                        .to_str()
+                        .map(|s| s.to_string())
+                        .ok_or(StorageError::Message {
+                            message: "Unable to convert path to string".to_string(),
+                        })
+                })
+            })
+            .collect()
     }
 }
 
 #[async_trait]
 impl Configurable<StorageConfig> for LocalStorage {
-    async fn try_from_config(config: &StorageConfig) -> Result<Self, Box<dyn ChromaError>> {
+    async fn try_from_config(
+        config: &StorageConfig,
+        _registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
         match &config {
             StorageConfig::Local(local_config) => {
                 let storage = LocalStorage::new(&local_config.root);

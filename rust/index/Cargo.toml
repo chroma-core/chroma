@@ -12,6 +12,7 @@ thiserror = { workspace = true }
 uuid = { workspace = true }
 parking_lot = { workspace = true }
 arrow = { workspace = true }
+parquet = { workspace = true }
 serde = { workspace = true }
 tantivy = { workspace = true }
 tokio = { workspace = true }
@@ -19,6 +20,7 @@ tracing = { workspace = true }
 roaring = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
+tempfile = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
@@ -26,20 +28,26 @@ chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-storage = { workspace = true }
+chroma-tracing = { workspace = true }
 chroma-distance = { workspace = true }
+itertools = { workspace = true }
+hnswlib = { workspace = true }
+opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 rayon = { workspace = true }
 criterion = { workspace = true }
-chroma-test = { workspace = true }
-indicatif = "0.17.8"
-anyhow = "1.0.89"
-
-
-[build-dependencies]
-cc = "1.0"
+chroma-benchmark = { workspace = true }
+proptest = { workspace = true }
+indicatif = { workspace = true }
+anyhow = "1.0.93"
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { workspace = true }
 
 [[bench]]
 name = "full_text"
+harness = false
+
+[[bench]]
+name = "literal"
 harness = false

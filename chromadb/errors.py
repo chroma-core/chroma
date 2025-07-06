@@ -27,13 +27,6 @@ class InvalidDimensionException(ChromaError):
         return "InvalidDimension"
 
 
-class InvalidCollectionException(ChromaError):
-    @classmethod
-    @overrides
-    def name(cls) -> str:
-        return "InvalidCollection"
-
-
 class IDAlreadyExistsError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -114,6 +107,17 @@ class NotFoundError(ChromaError):
         return "NotFoundError"
 
 
+class UniqueConstraintError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 409
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "UniqueConstraintError"
+
+
 class BatchSizeExceededError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -136,6 +140,17 @@ class VersionMismatchError(ChromaError):
         return "VersionMismatchError"
 
 
+class InternalError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 500
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "InternalError"
+
+
 class RateLimitError(ChromaError):
     @overrides
     def code(self) -> int:
@@ -147,9 +162,20 @@ class RateLimitError(ChromaError):
         return "RateLimitError"
 
 
+class QuotaError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 400
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "QuotaError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
-    "InvalidCollection": InvalidCollectionException,
+    "InvalidArgumentError": InvalidArgumentError,
     "IDAlreadyExists": IDAlreadyExistsError,
     "DuplicateID": DuplicateIDError,
     "InvalidUUID": InvalidUUIDError,
@@ -159,4 +185,10 @@ error_types: Dict[str, Type[ChromaError]] = {
     "BatchSizeExceededError": BatchSizeExceededError,
     "VersionMismatchError": VersionMismatchError,
     "RateLimitError": RateLimitError,
+    "AuthError": ChromaAuthError,
+    "UniqueConstraintError": UniqueConstraintError,
+    "QuotaError": QuotaError,
+    "InternalError": InternalError,
+    # Catch-all for any other errors
+    "ChromaError": ChromaError,
 }

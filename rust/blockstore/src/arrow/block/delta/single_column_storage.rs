@@ -1,35 +1,51 @@
-use super::{single_column_size_tracker::SingleColumnSizeTracker, BlockKeyArrowBuilder};
+use super::{
+    builder_storage::{BTreeBuilderStorage, BuilderStorage, VecBuilderStorage},
+    single_column_size_tracker::SingleColumnSizeTracker,
+    BlockKeyArrowBuilder,
+};
 use crate::{
     arrow::types::{ArrowWriteableKey, ArrowWriteableValue},
     key::{CompositeKey, KeyWrapper},
-    Value,
+    BlockfileWriterMutationOrdering,
 };
-use arrow::{
-    array::{
-        Array, BinaryBuilder, ListBuilder, RecordBatch, StringBuilder, UInt32Array, UInt32Builder,
-    },
-    datatypes::Field,
-    util::bit_util,
-};
+use arrow::util::bit_util;
+use arrow::{array::Array, datatypes::Schema};
 use parking_lot::RwLock;
-use roaring::RoaringBitmap;
-use std::{collections::BTreeMap, sync::Arc};
+use std::sync::Arc;
+use std::{collections::HashMap, vec};
 
 #[derive(Clone)]
 pub struct SingleColumnStorage<T: ArrowWriteableValue> {
     inner: Arc<RwLock<Inner<T>>>,
 }
 
-struct Inner<T> {
-    storage: BTreeMap<CompositeKey, T>,
+struct Inner<V: ArrowWriteableValue> {
+    storage: BuilderStorage<V>,
     size_tracker: SingleColumnSizeTracker,
 }
 
-impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
-    pub(in crate::arrow) fn new() -> Self {
+impl<V: ArrowWriteableValue> std::fmt::Debug for Inner<V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Inner")
+            .field("size_tracker", &self.size_tracker)
+            .finish()
+    }
+}
+
+impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumnStorage<V> {
+    pub(in crate::arrow) fn new(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> Self {
+        let storage = match mutation_ordering_hint {
+            BlockfileWriterMutationOrdering::Unordered => {
+                BuilderStorage::BTreeBuilderStorage(BTreeBuilderStorage::default())
+            }
+            BlockfileWriterMutationOrdering::Ordered => {
+                BuilderStorage::VecBuilderStorage(VecBuilderStorage::default())
+            }
+        };
+
         Self {
             inner: Arc::new(RwLock::new(Inner {
-                storage: BTreeMap::new(),
+                storage,
                 size_tracker: SingleColumnSizeTracker::new(),
             })),
         }
@@ -45,11 +61,6 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         inner.size_tracker.get_key_size()
     }
 
-    pub(super) fn get_value_size(&self) -> usize {
-        let inner = self.inner.read();
-        inner.size_tracker.get_value_size()
-    }
-
     pub(super) fn len(&self) -> usize {
         let inner = self.inner.read();
         inner.storage.len()
@@ -57,7 +68,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
 
     pub fn get_min_key(&self) -> Option<CompositeKey> {
         let inner = self.inner.read();
-        inner.storage.keys().next().cloned()
+        inner.storage.min_key().cloned()
     }
 
     pub(super) fn get_size<K: ArrowWriteableKey>(&self) -> usize {
@@ -73,8 +84,8 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         let prefix_offset_bytes = bit_util::round_upto_multiple_of_64((self.len() + 1) * 4);
         let key_offset_bytes: usize = K::offset_size(self.len());
 
-        let value_offset_bytes = T::offset_size(self.len());
-        let value_validity_bytes = T::validity_size(self.len());
+        let value_offset_bytes = V::offset_size(self.len());
+        let value_validity_bytes = V::validity_size(self.len());
 
         prefix_size
             + key_size
@@ -85,7 +96,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
             + value_validity_bytes
     }
 
-    pub fn add(&self, prefix: &str, key: KeyWrapper, value: T) {
+    pub fn add(&self, prefix: &str, key: KeyWrapper, value: V) {
         let mut inner = self.inner.write();
         let key_len = key.get_size();
 
@@ -94,27 +105,30 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
             key,
         };
 
-        if inner.storage.contains_key(&composite_key) {
+        if let Some(old_value) = inner.storage.delete(&composite_key) {
             // subtract the old value size
             // unwrap is safe here because we just checked if the key exists
-            let old_value_size = inner.storage.remove(&composite_key).unwrap().get_size();
+            let old_value_size = old_value.get_size();
             inner.size_tracker.subtract_value_size(old_value_size);
             inner.size_tracker.subtract_key_size(key_len);
             inner.size_tracker.subtract_prefix_size(prefix.len());
+            inner.size_tracker.decrement_item_count();
         }
+
         let value_size = value.get_size();
 
-        inner.storage.insert(composite_key, value);
+        inner.storage.add(composite_key, value);
         inner.size_tracker.add_prefix_size(prefix.len());
         inner.size_tracker.add_key_size(key_len);
         inner.size_tracker.add_value_size(value_size);
+        inner.size_tracker.increment_item_count();
     }
 
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {
         let mut inner = self.inner.write();
         let maybe_removed_prefix_len = prefix.len();
         let maybe_removed_key_len = key.get_size();
-        let maybe_removed_value = inner.storage.remove(&CompositeKey {
+        let maybe_removed_value = inner.storage.delete(&CompositeKey {
             prefix: prefix.to_string(),
             key,
         });
@@ -125,13 +139,15 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
                 .subtract_prefix_size(maybe_removed_prefix_len);
             inner.size_tracker.subtract_key_size(maybe_removed_key_len);
             inner.size_tracker.subtract_value_size(value.get_size());
+            inner.size_tracker.decrement_item_count();
         }
     }
 
     pub(super) fn split<K: ArrowWriteableKey>(
         &self,
         split_size: usize,
-    ) -> (CompositeKey, SingleColumnStorage<T>) {
+    ) -> (CompositeKey, SingleColumnStorage<V>) {
+        let mut num_items = 0;
         let mut prefix_size = 0;
         let mut key_size = 0;
         let mut value_size = 0;
@@ -143,7 +159,18 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
 
             let mut item_count = 0;
             let mut iter = storage.iter();
+            let mut last_key: Option<&CompositeKey> = None;
             while let Some((key, value)) = iter.next() {
+                // TODO: we seem to have a concurrency bug somewhere that means inner.storage may not always be ordered (when it's backed by a Vec). This is a temporary check that provides additional debugging information if the bug happens again. This should be removed once we fix the underlying bug.
+                if let Some(last_key) = &last_key {
+                    if key < last_key {
+                        panic!("Keys are not in order. Scanned up to {num_items}. Found {key:?} after {last_key:?}.");
+                    }
+                } else {
+                    last_key = Some(key)
+                }
+
+                num_items += 1;
                 prefix_size += key.prefix.len();
                 key_size += key.key.get_size();
                 value_size += value.get_size();
@@ -155,7 +182,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
                 let value_offset_bytes = bit_util::round_upto_multiple_of_64((item_count + 1) * 4);
 
                 // validitiy sizing
-                let value_validity_bytes = T::validity_size(item_count);
+                let value_validity_bytes = V::validity_size(item_count);
 
                 let total_size = bit_util::round_upto_multiple_of_64(prefix_size)
                     + bit_util::round_upto_multiple_of_64(key_size)
@@ -183,6 +210,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
 
         let mut inner = self.inner.write();
 
+        let total_num_items = inner.size_tracker.get_num_items();
         let total_prefix_size = inner.size_tracker.get_prefix_size();
         let total_key_size = inner.size_tracker.get_key_size();
         let total_value_size = inner.size_tracker.get_value_size();
@@ -195,6 +223,9 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
         inner
             .size_tracker
             .subtract_value_size(total_value_size - value_size);
+        inner
+            .size_tracker
+            .subtract_item_count(total_num_items - num_items);
 
         match split_key {
             None => panic!("A storage should have at least one element to be split."),
@@ -206,6 +237,7 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
                         inner: Arc::new(RwLock::new(Inner {
                             storage: new_delta,
                             size_tracker: SingleColumnSizeTracker::with_values(
+                                total_num_items - num_items,
                                 total_prefix_size - prefix_size,
                                 total_key_size - key_size,
                                 total_value_size - value_size,
@@ -216,189 +248,43 @@ impl<T: ArrowWriteableValue> SingleColumnStorage<T> {
             }
         }
     }
-}
 
-impl SingleColumnStorage<String> {
     pub(super) fn into_arrow(
         self,
-        key_builder: BlockKeyArrowBuilder,
-    ) -> Result<RecordBatch, arrow::error::ArrowError> {
-        // Build key and value.
-        let mut key_builder = key_builder;
-        let item_capacity = self.len();
-        let mut value_builder;
-        if item_capacity == 0 {
-            value_builder = StringBuilder::new();
-        } else {
-            value_builder = StringBuilder::with_capacity(item_capacity, self.get_value_size());
+        mut key_builder: BlockKeyArrowBuilder,
+        metadata: Option<HashMap<String, String>>,
+    ) -> (Arc<Schema>, Vec<Arc<dyn Array>>) {
+        let inner = Arc::try_unwrap(self.inner)
+            .expect(
+                "Invariant violation: SingleColumnStorage inner should have only one reference.",
+            )
+            .into_inner();
+
+        let mut value_builder = V::get_arrow_builder(inner.size_tracker.clone());
+
+        let storage = inner.storage;
+        for (key, value) in storage.into_iter() {
+            key_builder.add_key(key);
+            V::append(V::prepare(value), &mut value_builder);
         }
-        match Arc::try_unwrap(self.inner) {
-            Ok(inner) => {
-                let storage = inner.into_inner().storage;
-                for (key, value) in storage.into_iter() {
-                    key_builder.add_key(key);
-                    value_builder.append_value(value);
-                }
-            }
-            Err(_) => {
-                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
-            }
-        }
-        // Build arrow key with fields.
+
         let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
-        // Build arrow value with fields.
-        let value_field = Field::new("value", arrow::datatypes::DataType::Utf8, false);
-        let value_arr = value_builder.finish();
-        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-            prefix_field,
-            key_field,
-            value_field,
-        ]));
-        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
+        let (value_field, value_arr) = V::finish(value_builder, &inner.size_tracker);
+        let schema = arrow::datatypes::Schema::new(vec![prefix_field, key_field, value_field]);
+
+        if let Some(metadata) = metadata {
+            let schema = schema.with_metadata(metadata);
+            return (schema.into(), vec![prefix_arr, key_arr, value_arr]);
+        }
+
+        (schema.into(), vec![prefix_arr, key_arr, value_arr])
     }
-}
 
-impl SingleColumnStorage<Vec<u32>> {
-    pub(super) fn into_arrow(
-        self,
-        key_builder: BlockKeyArrowBuilder,
-    ) -> Result<RecordBatch, arrow::error::ArrowError> {
-        // Build key and value.
-        let mut key_builder = key_builder;
-        let item_capacity = self.len();
-        let mut value_builder;
-        match Arc::try_unwrap(self.inner) {
-            Ok(inner) => {
-                let storage = inner.into_inner().storage;
-                let total_value_count = storage.iter().fold(0, |acc, (_, value)| acc + value.len());
-                if item_capacity == 0 {
-                    value_builder = ListBuilder::new(UInt32Builder::new());
-                } else {
-                    value_builder = ListBuilder::with_capacity(
-                        UInt32Builder::with_capacity(total_value_count),
-                        item_capacity,
-                    );
-                }
-                for (key, value) in storage.into_iter() {
-                    key_builder.add_key(key);
-                    value_builder.append_value(&UInt32Array::from(value));
-                }
-            }
-            Err(_) => {
-                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
-            }
-        }
-        // Build arrow key and value with fields.
-        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
-
-        let value_field = Field::new(
-            "value",
-            arrow::datatypes::DataType::List(Arc::new(Field::new(
-                "item",
-                arrow::datatypes::DataType::UInt32,
-                true,
-            ))),
-            true,
-        );
-        let value_arr = value_builder.finish();
-        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-            prefix_field,
-            key_field,
-            value_field,
-        ]));
-        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
-    }
-}
-
-impl SingleColumnStorage<u32> {
-    pub(super) fn into_arrow(
-        self,
-        key_builder: BlockKeyArrowBuilder,
-    ) -> Result<RecordBatch, arrow::error::ArrowError> {
-        // Build key and value.
-        let mut key_builder = key_builder;
-        let mut value_builder;
-        match Arc::try_unwrap(self.inner) {
-            Ok(inner) => {
-                let storage = inner.into_inner().storage;
-                let item_capacity = storage.len();
-                if item_capacity == 0 {
-                    value_builder = UInt32Builder::new();
-                } else {
-                    value_builder = UInt32Builder::with_capacity(item_capacity);
-                }
-                for (key, value) in storage.into_iter() {
-                    key_builder.add_key(key);
-                    value_builder.append_value(value);
-                }
-            }
-            Err(_) => {
-                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
-            }
-        }
-        // Build arrow key with fields.
-        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
-        let value_field = Field::new("value", arrow::datatypes::DataType::UInt32, false);
-        let value_arr = value_builder.finish();
-        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-            prefix_field,
-            key_field,
-            value_field,
-        ]));
-        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
-    }
-}
-
-impl SingleColumnStorage<RoaringBitmap> {
-    pub(super) fn into_arrow(
-        self,
-        key_builder: BlockKeyArrowBuilder,
-    ) -> Result<RecordBatch, arrow::error::ArrowError> {
-        // Build key.
-        let mut key_builder = key_builder;
-        let item_capacity = self.len();
-        let mut value_builder;
-        match Arc::try_unwrap(self.inner) {
-            Ok(inner) => {
-                let storage = inner.into_inner().storage;
-                let total_value_count = storage
-                    .iter()
-                    .fold(0, |acc, (_, value)| acc + value.get_size());
-                if item_capacity == 0 {
-                    value_builder = BinaryBuilder::new();
-                } else {
-                    value_builder = BinaryBuilder::with_capacity(item_capacity, total_value_count);
-                }
-                for (key, value) in storage.into_iter() {
-                    key_builder.add_key(key);
-                    let mut serialized = Vec::with_capacity(value.serialized_size());
-                    let res = value.serialize_into(&mut serialized);
-                    // TODO: proper error handling
-                    let serialized = match res {
-                        Ok(_) => serialized,
-                        Err(e) => panic!("Failed to serialize RoaringBitmap: {}", e),
-                    };
-                    value_builder.append_value(serialized);
-                }
-            }
-            Err(_) => {
-                panic!("Invariant violation: SingleColumnStorage inner should have only one reference.");
-            }
-        }
-        // Build arrow key with fields.
-        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
-
-        let value_field = Field::new("value", arrow::datatypes::DataType::Binary, true);
-        let value_arr = value_builder.finish();
-        let value_arr = (&value_arr as &dyn Array).slice(0, value_arr.len());
-        let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-            prefix_field,
-            key_field,
-            value_field,
-        ]));
-        RecordBatch::try_new(schema, vec![prefix_arr, key_arr, value_arr])
+    pub fn get_owned_value(&self, prefix: &str, key: KeyWrapper) -> Option<V::PreparedValue> {
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+        self.inner.read().storage.get(&composite_key)
     }
 }

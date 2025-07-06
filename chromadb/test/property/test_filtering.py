@@ -1,10 +1,12 @@
 from typing import Any, Dict, List, Optional, cast
-from hypothesis import given, settings, HealthCheck
+import uuid
+from hypothesis import example, given, settings, HealthCheck
 import pytest
 from chromadb.api import ClientAPI
 from chromadb.test.property import invariants
 from chromadb.api.types import (
     Document,
+    Documents,
     Embedding,
     Embeddings,
     GetResult,
@@ -18,8 +20,6 @@ from chromadb.test.conftest import reset, NOT_CLUSTER_ONLY
 import chromadb.test.property.strategies as strategies
 import hypothesis.strategies as st
 import logging
-import random
-import re
 from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
 import numpy as np
 
@@ -94,20 +94,10 @@ def _filter_where_doc_clause(clause: WhereDocument, doc: Document) -> bool:
     if key == "$contains":
         if not doc:
             return False
-        # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
-        # treat them as wildcards
-        if "%" in expr or "_" in expr:
-            expr = expr.replace("%", ".").replace("_", ".")
-            return re.search(expr, doc) is not None
         return expr in doc
     elif key == "$not_contains":
         if not doc:
             return True
-        # SQLite FTS handles % and _ as word boundaries that are ignored so we need to
-        # treat them as wildcards
-        if "%" in expr or "_" in expr:
-            expr = expr.replace("%", ".").replace("_", ".")
-            return re.search(expr, doc) is None
         return expr not in doc
     else:
         raise ValueError("Unknown operator: {}".format(key))
@@ -120,7 +110,9 @@ EMPTY_STRING: str = ""
 def _filter_embedding_set(
     record_set: strategies.RecordSet, filter: strategies.Filter
 ) -> IDs:
-    """Return IDs from the embedding set that match the given filter object"""
+    """Return IDs from the embedding set that match the given filter object
+    If none match, return an empty list
+    """
 
     normalized_record_set = invariants.wrap_all(record_set)
     ids = set(normalized_record_set["ids"])
@@ -228,6 +220,37 @@ def test_filterable_metadata_get(
     offset=st.integers(min_value=0, max_value=10),
     should_compact=st.booleans(),
 )
+# Repro of a former off-by-one error in distributed Chroma. Fixed in https://github.com/chroma-core/chroma/pull/3489.
+@example(
+    collection=strategies.Collection(
+        name="test",
+        metadata={"test": "test"},
+        embedding_function=None,
+        id=uuid.uuid4(),
+        dimension=2,
+        dtype="float32",
+        known_metadata_keys={},
+        known_document_keywords=[],
+    ),
+    record_set=strategies.RecordSet(
+        ids=[str(i) for i in range(11)],
+        embeddings=[np.random.rand(2).tolist() for _ in range(11)],
+        metadatas=[{"test": "test"} for _ in range(11)],
+        documents=None,
+    ),
+    filters=[
+        strategies.Filter(
+            {
+                "where_document": {"$not_contains": "foo"},
+                "ids": None,
+                "where": None,
+            }
+        )
+    ],
+    limit=10,
+    offset=10,
+    should_compact=True,
+)
 def test_filterable_metadata_get_limit_offset(
     caplog,
     client: ClientAPI,
@@ -264,15 +287,15 @@ def test_filterable_metadata_get_limit_offset(
         filter["offset"] = offset
         result_ids = coll.get(**filter)["ids"]
         expected_ids = _filter_embedding_set(record_set, filter)
-        offset_id_order = {
-            id: index for index, id in enumerate(coll.get(ids=expected_ids)["ids"])
-        }
-        assert (
-            result_ids
-            == sorted(expected_ids, key=lambda id: offset_id_order[id])[
-                offset : offset + limit
-            ]
-        )
+        if len(expected_ids) > 0:
+            collection_ids = coll.get(ids=expected_ids)["ids"]
+            offset_id_order = {id: index for index, id in enumerate(collection_ids)}
+            assert (
+                result_ids
+                == sorted(expected_ids, key=lambda id: offset_id_order[id])[
+                    offset : offset + limit
+                ]
+            )
 
 
 @settings(
@@ -291,6 +314,7 @@ def test_filterable_metadata_get_limit_offset(
         min_size=1,
     ),
     should_compact=st.booleans(),
+    data=st.data(),
 )
 def test_filterable_metadata_query(
     caplog: pytest.LogCaptureFixture,
@@ -299,6 +323,7 @@ def test_filterable_metadata_query(
     record_set: strategies.RecordSet,
     filters: List[strategies.Filter],
     should_compact: bool,
+    data: st.DataObject,
 ) -> None:
     caplog.set_level(logging.ERROR)
 
@@ -321,19 +346,21 @@ def test_filterable_metadata_query(
             wait_for_version_increase(client, collection.name, initial_version)  # type: ignore
 
     total_count = len(normalized_record_set["ids"])
-    # Pick a random vector
+    # Pick a random vector using Hypothesis data
     random_query: Embedding
+
+    query_index = data.draw(st.integers(min_value=0, max_value=total_count - 1))
     if collection.has_embeddings:
         assert normalized_record_set["embeddings"] is not None
         assert all(isinstance(e, list) for e in normalized_record_set["embeddings"])
-        random_query = normalized_record_set["embeddings"][
-            random.randint(0, total_count - 1)
-        ]
+        # Use data.draw to select index
+        random_query = normalized_record_set["embeddings"][query_index]
     else:
         assert isinstance(normalized_record_set["documents"], list)
         assert collection.embedding_function is not None
+        # Use data.draw to select index
         random_query = collection.embedding_function(
-            [normalized_record_set["documents"][random.randint(0, total_count - 1)]]
+            [normalized_record_set["documents"][query_index]]
         )[0]
     for filter in filters:
         result_ids = set(
@@ -368,7 +395,7 @@ def test_empty_filter(client: ClientAPI) -> None:
         query_embeddings=test_query_embedding,
         where={"q": {"$eq": 4}},  # type: ignore[dict-item]
         n_results=3,
-        include=["embeddings", "distances", "metadatas"],  # type: ignore[list-item]
+        include=["embeddings", "distances", "metadatas"],
     )
     assert res["ids"] == [[]]
     if res["embeddings"] is not None:
@@ -425,9 +452,137 @@ def test_get_empty(client: ClientAPI) -> None:
 
     coll.add(ids=test_ids, embeddings=test_embeddings, metadatas=test_metadatas)
 
-    res = coll.get(ids=["nope"], include=["embeddings", "metadatas", "documents"])  # type: ignore[list-item]
+    res = coll.get(ids=["nope"], include=["embeddings", "metadatas", "documents"])
     check_empty_res(res)
     res = coll.get(
-        include=["embeddings", "metadatas", "documents"], where={"test": 100}  # type: ignore[list-item]
+        include=["embeddings", "metadatas", "documents"], where={"test": 100}
     )
     check_empty_res(res)
+
+
+@settings(
+    deadline=90000,
+    suppress_health_check=[
+        HealthCheck.function_scoped_fixture,
+        HealthCheck.large_base_example,
+    ],
+)
+@given(
+    collection=collection_st,
+    record_set=recordset_st,
+    n_results_st=st.integers(min_value=1, max_value=100),
+    should_compact=st.booleans(),
+    data=st.data(),
+)
+def test_query_ids_filter_property(
+    caplog: pytest.LogCaptureFixture,
+    client: ClientAPI,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+    n_results_st: int,
+    should_compact: bool,
+    data: st.DataObject,
+) -> None:
+    """Property test for querying with only the ids filter."""
+    if (
+        client.get_settings().chroma_api_impl
+        == "chromadb.api.async_fastapi.AsyncFastAPI"
+    ):
+        pytest.skip(
+            "Skipping test for async client due to potential resource/timeout issues"
+        )
+    caplog.set_level(logging.ERROR)
+    reset(client)
+    coll = client.create_collection(
+        name=collection.name,
+        metadata=collection.metadata,  # type: ignore
+        embedding_function=collection.embedding_function,
+    )
+    initial_version = coll.get_model()["version"]
+    normalized_record_set = invariants.wrap_all(record_set)
+
+    if len(normalized_record_set["ids"]) == 0:
+        # Cannot add empty record set
+        return
+
+    coll.add(**record_set)  # type: ignore[arg-type]
+
+    if not NOT_CLUSTER_ONLY:
+        if should_compact and len(normalized_record_set["ids"]) > 10:
+            wait_for_version_increase(client, collection.name, initial_version)  # type: ignore
+
+    total_count = len(normalized_record_set["ids"])
+    n_results = min(n_results_st, total_count)
+
+    # Generate a random subset of ids to filter on using Hypothesis data
+    ids_to_query = data.draw(
+        st.lists(
+            st.sampled_from(normalized_record_set["ids"]),
+            min_size=0,
+            max_size=total_count,
+            unique=True,
+        )
+    )
+
+    # Pick a random query vector using Hypothesis data
+    random_query: Embedding
+    query_index = data.draw(st.integers(min_value=0, max_value=total_count - 1))
+    if collection.has_embeddings:
+        assert normalized_record_set["embeddings"] is not None
+        assert all(isinstance(e, list) for e in normalized_record_set["embeddings"])
+        # Use data.draw to select index
+        random_query = normalized_record_set["embeddings"][query_index]
+    else:
+        assert isinstance(normalized_record_set["documents"], list)
+        assert collection.embedding_function is not None
+        # Use data.draw to select index
+        random_query = collection.embedding_function(
+            [normalized_record_set["documents"][query_index]]
+        )[0]
+
+    # Perform the query with only the ids filter
+    result = coll.query(
+        query_embeddings=[random_query],
+        ids=ids_to_query,
+        n_results=n_results,
+    )
+
+    result_ids = set(result["ids"][0])
+    filter_ids_set = set(ids_to_query)
+
+    # The core assertion: all returned IDs must be within the filter set
+    assert result_ids.issubset(filter_ids_set)
+
+    # Also check that the number of results is reasonable
+    assert len(result_ids) <= n_results
+    assert len(result_ids) <= len(filter_ids_set)
+
+
+def test_regex(client: ClientAPI) -> None:
+    """Tests that regex works"""
+
+    reset(client)
+    coll = client.create_collection(name="test")
+
+    test_ids: IDs = ["1", "2", "3"]
+    test_documents: Documents = ["cat", "Cat", "CAT"]
+    test_embeddings: Embeddings = [np.array([1, 1]), np.array([2, 2]), np.array([3, 3])]
+    test_metadatas: Metadatas = [{"test": 10}, {"test": 20}, {"test": 30}]
+
+    coll.add(
+        ids=test_ids,
+        documents=test_documents,
+        embeddings=test_embeddings,
+        metadatas=test_metadatas,
+    )
+
+    res = coll.get(where_document={"$regex": "cat"})
+    assert res["ids"] == ["1"]
+
+    res = coll.get(where_document={"$regex": "(?i)cat"})
+    assert sorted(res["ids"]) == ["1", "2", "3"]
+
+    res = coll.get(
+        where={"test": {"$ne": 10}}, where_document={"$regex": "(?i)c(?-i)at"}  # type: ignore[dict-item]
+    )
+    assert res["ids"] == ["2"]

@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package chroma;
+
+message CollectionIds {
+  repeated string ids = 1;
+}
+
+message CompactRequest {
+  CollectionIds ids = 1;
+}
+
+message CompactResponse {
+  // Empty
+}
+
+message RebuildRequest {
+  CollectionIds ids = 1;
+}
+
+message RebuildResponse {
+  // Empty
+}
+
+service Compactor {
+  rpc Compact(CompactRequest) returns (CompactResponse) {}
+  rpc Rebuild(RebuildRequest) returns (RebuildResponse) {}
+}

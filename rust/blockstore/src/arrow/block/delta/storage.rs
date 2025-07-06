@@ -1,4 +1,7 @@
-use super::{data_record::DataRecordStorage, single_column_storage::SingleColumnStorage};
+use super::{
+    data_record::DataRecordStorage, single_column_storage::SingleColumnStorage,
+    spann_posting_list_delta::SpannPostingListDelta,
+};
 use crate::{
     arrow::types::ArrowWriteableKey,
     key::{CompositeKey, KeyWrapper},
@@ -11,8 +14,8 @@ use arrow::{
 };
 use roaring::RoaringBitmap;
 use std::{
-    fmt,
-    fmt::{Debug, Formatter},
+    collections::HashMap,
+    fmt::{self, Debug, Formatter},
 };
 
 #[derive(Clone)]
@@ -22,6 +25,7 @@ pub enum BlockStorage {
     UInt32(SingleColumnStorage<u32>),
     RoaringBitmap(SingleColumnStorage<RoaringBitmap>),
     DataRecord(DataRecordStorage),
+    SpannPostingListDelta(SpannPostingListDelta),
 }
 
 impl Debug for BlockStorage {
@@ -32,6 +36,9 @@ impl Debug for BlockStorage {
             BlockStorage::UInt32(_) => f.debug_struct("UInt32").finish(),
             BlockStorage::RoaringBitmap(_) => f.debug_struct("RoaringBitmap").finish(),
             BlockStorage::DataRecord(_) => f.debug_struct("DataRecord").finish(),
+            BlockStorage::SpannPostingListDelta(_) => {
+                f.debug_struct("SpannPostingListDelta").finish()
+            }
         }
     }
 }
@@ -44,7 +51,7 @@ pub enum BlockKeyArrowBuilder {
 }
 
 impl BlockKeyArrowBuilder {
-    pub(super) fn add_key(&mut self, key: CompositeKey) {
+    pub(crate) fn add_key(&mut self, key: CompositeKey) {
         match key.key {
             KeyWrapper::String(value) => {
                 let builder = match self {
@@ -151,6 +158,7 @@ impl BlockStorage {
             BlockStorage::DataRecord(builder) => builder.get_prefix_size(),
             BlockStorage::VecUInt32(builder) => builder.get_prefix_size(),
             BlockStorage::RoaringBitmap(builder) => builder.get_prefix_size(),
+            BlockStorage::SpannPostingListDelta(builder) => builder.get_prefix_size(),
         }
     }
 
@@ -161,6 +169,7 @@ impl BlockStorage {
             BlockStorage::DataRecord(builder) => builder.get_key_size(),
             BlockStorage::VecUInt32(builder) => builder.get_key_size(),
             BlockStorage::RoaringBitmap(builder) => builder.get_key_size(),
+            BlockStorage::SpannPostingListDelta(builder) => builder.get_key_size(),
         }
     }
 
@@ -171,6 +180,7 @@ impl BlockStorage {
             BlockStorage::DataRecord(builder) => builder.get_min_key(),
             BlockStorage::VecUInt32(builder) => builder.get_min_key(),
             BlockStorage::RoaringBitmap(builder) => builder.get_min_key(),
+            BlockStorage::SpannPostingListDelta(builder) => builder.get_min_key(),
         }
     }
 
@@ -182,6 +192,7 @@ impl BlockStorage {
             BlockStorage::DataRecord(builder) => builder.get_size::<K>(),
             BlockStorage::VecUInt32(builder) => builder.get_size::<K>(),
             BlockStorage::RoaringBitmap(builder) => builder.get_size::<K>(),
+            BlockStorage::SpannPostingListDelta(builder) => builder.get_size::<K>(),
         }
     }
 
@@ -207,6 +218,10 @@ impl BlockStorage {
                 let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::RoaringBitmap(storage))
             }
+            BlockStorage::SpannPostingListDelta(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::SpannPostingListDelta(storage))
+            }
         }
     }
 
@@ -217,20 +232,26 @@ impl BlockStorage {
             BlockStorage::DataRecord(builder) => builder.len(),
             BlockStorage::VecUInt32(builder) => builder.len(),
             BlockStorage::RoaringBitmap(builder) => builder.len(),
+            BlockStorage::SpannPostingListDelta(builder) => builder.len(),
         }
     }
 
-    pub fn into_record_batch<K: ArrowWriteableKey>(self) -> RecordBatch {
+    pub fn into_record_batch<K: ArrowWriteableKey>(
+        self,
+        metadata: Option<HashMap<String, String>>,
+    ) -> RecordBatch {
         let key_builder =
             K::get_arrow_builder(self.len(), self.get_prefix_size(), self.get_key_size());
         match self {
             BlockStorage::String(builder) => {
                 // TODO: handle error
-                builder.into_arrow(key_builder).unwrap()
+                let (schema, columns) = builder.into_arrow(key_builder, metadata);
+                RecordBatch::try_new(schema, columns).unwrap()
             }
             BlockStorage::UInt32(builder) => {
                 // TODO: handle error
-                builder.into_arrow(key_builder).unwrap()
+                let (schema, columns) = builder.into_arrow(key_builder, metadata);
+                RecordBatch::try_new(schema, columns).unwrap()
             }
             BlockStorage::DataRecord(builder) => {
                 // TODO: handle error
@@ -238,9 +259,15 @@ impl BlockStorage {
             }
             BlockStorage::VecUInt32(builder) => {
                 // TODO: handle error
-                builder.into_arrow(key_builder).unwrap()
+                let (schema, columns) = builder.into_arrow(key_builder, metadata);
+                RecordBatch::try_new(schema, columns).unwrap()
             }
             BlockStorage::RoaringBitmap(builder) => {
+                // TODO: handle error
+                let (schema, columns) = builder.into_arrow(key_builder, metadata);
+                RecordBatch::try_new(schema, columns).unwrap()
+            }
+            BlockStorage::SpannPostingListDelta(builder) => {
                 // TODO: handle error
                 builder.into_arrow(key_builder).unwrap()
             }

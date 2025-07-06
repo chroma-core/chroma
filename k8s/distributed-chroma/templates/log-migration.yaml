@@ -4,7 +4,7 @@ metadata:
   name: logservice-migration-{{ .Values.logServiceMigration.image.tag }}
   namespace: {{ .Values.namespace }}
   annotations:
-  {{ range .Values.sysdbMigration.annotations }}
+  {{ range .Values.logServiceMigration.annotations }}
     {{ .name }}: {{ .value }}
   {{ end }}
 spec:

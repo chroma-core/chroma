@@ -1,9 +1,9 @@
-import logging
-from typing import Mapping, Optional, cast
-
-from chromadb.api.types import Documents, EmbeddingFunction, Embeddings
-
-logger = logging.getLogger(__name__)
+from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from typing import List, Dict, Any, Optional
+import os
+import numpy as np
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
+import warnings
 
 
 class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
@@ -16,16 +16,18 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         api_type: Optional[str] = None,
         api_version: Optional[str] = None,
         deployment_id: Optional[str] = None,
-        default_headers: Optional[Mapping[str, str]] = None,
+        default_headers: Optional[Dict[str, str]] = None,
+        dimensions: Optional[int] = None,
+        api_key_env_var: str = "CHROMA_OPENAI_API_KEY",
     ):
         """
         Initialize the OpenAIEmbeddingFunction.
         Args:
-            api_key (str, optional): Your API key for the OpenAI API. If not
-                provided, it will raise an error to provide an OpenAI API key.
-            organization_id(str, optional): The OpenAI organization ID if applicable
+            api_key_env_var (str, optional): Environment variable name that contains your API key for the OpenAI API.
+                Defaults to "CHROMA_OPENAI_API_KEY".
             model_name (str, optional): The name of the model to use for text
                 embeddings. Defaults to "text-embedding-ada-002".
+            organization_id(str, optional): The OpenAI organization ID if applicable
             api_base (str, optional): The base path for the API. If not provided,
                 it will use the base path for the OpenAI API. This can be used to
                 point to a different deployment, such as an Azure deployment.
@@ -36,8 +38,10 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 it will use the api version for the OpenAI API. This can be used to
                 point to a different deployment, such as an Azure deployment.
             deployment_id (str, optional): Deployment ID for Azure OpenAI.
-            default_headers (Mapping, optional): A mapping of default headers to be sent with each API request.
-
+            default_headers (Dict[str, str], optional): A mapping of default headers to be sent with each API request.
+            dimensions (int, optional): The number of dimensions for the embeddings.
+                Only supported for `text-embedding-3` or later models from OpenAI.
+                https://platform.openai.com/docs/api-reference/embeddings/create#embeddings-create-dimensions
         """
         try:
             import openai
@@ -47,92 +51,154 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         if api_key is not None:
-            openai.api_key = api_key
-        # If the api key is still not set, raise an error
-        elif openai.api_key is None:
-            raise ValueError(
-                "Please provide an OpenAI API key. You can get one at https://platform.openai.com/account/api-keys"
+            warnings.warn(
+                "Direct api_key configuration will not be persisted. "
+                "Please use environment variables via api_key_env_var for persistent storage.",
+                DeprecationWarning,
             )
 
-        if api_base is not None:
-            openai.api_base = api_base
+        self.api_key_env_var = api_key_env_var
+        self.api_key = api_key or os.getenv(api_key_env_var)
+        if not self.api_key:
+            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 
-        if api_version is not None:
-            openai.api_version = api_version
+        self.model_name = model_name
+        self.organization_id = organization_id
+        self.api_base = api_base
+        self.api_type = api_type
+        self.api_version = api_version
+        self.deployment_id = deployment_id
+        self.default_headers = default_headers
+        self.dimensions = dimensions
 
-        self._api_type = api_type
-        if api_type is not None:
-            openai.api_type = api_type
+        # Initialize the OpenAI client
+        client_params: Dict[str, Any] = {"api_key": self.api_key}
 
-        if organization_id is not None:
-            openai.organization = organization_id
+        if self.organization_id is not None:
+            client_params["organization"] = self.organization_id
+        if self.api_base is not None:
+            client_params["base_url"] = self.api_base
+        if self.default_headers is not None:
+            client_params["default_headers"] = self.default_headers
 
-        self._v1 = openai.__version__.startswith("1.")
-        if self._v1:
-            if api_type == "azure":
-                self._client = openai.AzureOpenAI(
-                    api_key=api_key,
-                    api_version=api_version,
-                    azure_endpoint=api_base,
-                    default_headers=default_headers,
-                ).embeddings
-            else:
-                self._client = openai.OpenAI(
-                    api_key=api_key, base_url=api_base, default_headers=default_headers
-                ).embeddings
-        else:
-            self._client = openai.Embedding
-        self._model_name = model_name
-        self._deployment_id = deployment_id
+        self.client = openai.OpenAI(**client_params)
+
+        # For Azure OpenAI
+        if self.api_type == "azure":
+            if self.api_version is None:
+                raise ValueError("api_version must be specified for Azure OpenAI")
+            if self.deployment_id is None:
+                raise ValueError("deployment_id must be specified for Azure OpenAI")
+            if self.api_base is None:
+                raise ValueError("api_base must be specified for Azure OpenAI")
+
+            from openai import AzureOpenAI
+
+            self.client = AzureOpenAI(
+                api_key=self.api_key,
+                api_version=self.api_version,
+                azure_endpoint=self.api_base,
+                azure_deployment=self.deployment_id,
+                default_headers=self.default_headers,
+            )
 
     def __call__(self, input: Documents) -> Embeddings:
         """
-        Generate the embeddings for the given `input`.
+        Generate embeddings for the given documents.
+        Args:
+            input: Documents to generate embeddings for.
+        Returns:
+            Embeddings for the documents.
+        """
+        # Handle batching
+        if not input:
+            return []
 
-        # About ignoring types
-        We are not enforcing the openai library, therefore, `mypy` has hard times trying
-        to figure out what the types are for `self._client.create()` which throws an
-        error when trying to sort the list. If, eventually we include the `openai` lib
-        we can remove the type ignore tag.
+        # Prepare embedding parameters
+        embedding_params: Dict[str, Any] = {
+            "model": self.model_name,
+            "input": input,
+        }
+
+        if self.dimensions is not None and "text-embedding-3" in self.model_name:
+            embedding_params["dimensions"] = self.dimensions
+
+        # Get embeddings
+        response = self.client.embeddings.create(**embedding_params)
+
+        # Extract embeddings from response
+        return [np.array(data.embedding, dtype=np.float32) for data in response.data]
+
+    @staticmethod
+    def name() -> str:
+        return "openai"
+
+    def default_space(self) -> Space:
+        # OpenAI embeddings work best with cosine similarity
+        return "cosine"
+
+    def supported_spaces(self) -> List[Space]:
+        return ["cosine", "l2", "ip"]
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+        # Extract parameters from config
+        api_key_env_var = config.get("api_key_env_var")
+        model_name = config.get("model_name")
+        organization_id = config.get("organization_id")
+        api_base = config.get("api_base")
+        api_type = config.get("api_type")
+        api_version = config.get("api_version")
+        deployment_id = config.get("deployment_id")
+        default_headers = config.get("default_headers")
+        dimensions = config.get("dimensions")
+
+        if api_key_env_var is None or model_name is None:
+            assert False, "This code should not be reached"
+
+        # Create and return the embedding function
+        return OpenAIEmbeddingFunction(
+            api_key_env_var=api_key_env_var,
+            model_name=model_name,
+            organization_id=organization_id,
+            api_base=api_base,
+            api_type=api_type,
+            api_version=api_version,
+            deployment_id=deployment_id,
+            default_headers=default_headers,
+            dimensions=dimensions,
+        )
+
+    def get_config(self) -> Dict[str, Any]:
+        return {
+            "api_key_env_var": self.api_key_env_var,
+            "model_name": self.model_name,
+            "organization_id": self.organization_id,
+            "api_base": self.api_base,
+            "api_type": self.api_type,
+            "api_version": self.api_version,
+            "deployment_id": self.deployment_id,
+            "default_headers": self.default_headers,
+            "dimensions": self.dimensions,
+        }
+
+    def validate_config_update(
+        self, old_config: Dict[str, Any], new_config: Dict[str, Any]
+    ) -> None:
+        if "model_name" in new_config:
+            raise ValueError(
+                "The model name cannot be changed after the embedding function has been initialized."
+            )
+
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
+        """
+        Validate the configuration using the JSON schema.
 
         Args:
-            input (Documents): A list of texts to get embeddings for.
+            config: Configuration to validate
 
-        Returns:
-            Embeddings: The embeddings for the given input sorted by index
+        Raises:
+            ValidationError: If the configuration does not match the schema
         """
-        # replace newlines, which can negatively affect performance.
-        input = [t.replace("\n", " ") for t in input]
-
-        # Call the OpenAI Embedding API
-        if self._v1:
-            embeddings = self._client.create(
-                input=input, model=self._deployment_id or self._model_name
-            ).data
-
-            # Sort resulting embeddings by index
-            sorted_embeddings = sorted(
-                embeddings, key=lambda e: e.index  # type: ignore
-            )
-
-            # Return just the embeddings
-            return cast(Embeddings, [result.embedding for result in sorted_embeddings])
-        else:
-            if self._api_type == "azure":
-                embeddings = self._client.create(
-                    input=input, engine=self._deployment_id or self._model_name
-                )["data"]
-            else:
-                embeddings = self._client.create(input=input, model=self._model_name)[
-                    "data"
-                ]
-
-            # Sort resulting embeddings by index
-            sorted_embeddings = sorted(
-                embeddings, key=lambda e: e["index"]  # type: ignore
-            )
-
-            # Return just the embeddings
-            return cast(
-                Embeddings, [result["embedding"] for result in sorted_embeddings]
-            )
+        validate_config_schema(config, "openai")

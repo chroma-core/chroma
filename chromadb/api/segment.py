@@ -1,11 +1,19 @@
 from tenacity import retry, stop_after_attempt, retry_if_exception, wait_fixed
 from chromadb.api import ServerAPI
-from chromadb.api.configuration import CollectionConfigurationInternal
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
+    create_collection_configuration_to_json,
+)
+from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.db.system import SysDB
-from chromadb.quota import QuotaEnforcer
+from chromadb.quota import QuotaEnforcer, Action
 from chromadb.rate_limit import RateLimitEnforcer
-from chromadb.segment import SegmentManager, MetadataReader, VectorReader
+from chromadb.segment import SegmentManager
+from chromadb.execution.executor.abstract import Executor
+from chromadb.execution.expression.operator import Scan, Filter, Limit, KNN, Projection
+from chromadb.execution.expression.plan import CountPlan, GetPlan, KNNPlan
 from chromadb.telemetry.opentelemetry import (
     add_attributes_to_current_span,
     OpenTelemetryClient,
@@ -18,16 +26,13 @@ from chromadb.types import Collection as CollectionModel
 from chromadb import __version__
 from chromadb.errors import (
     InvalidDimensionException,
-    InvalidCollectionException,
+    NotFoundError,
     VersionMismatchError,
 )
 from chromadb.api.types import (
-    URI,
     CollectionMetadata,
-    Document,
     IDs,
     Embeddings,
-    Embedding,
     Metadatas,
     Documents,
     URIs,
@@ -41,6 +46,8 @@ from chromadb.api.types import (
     validate_where,
     validate_where_document,
     validate_batch,
+    IncludeMetadataDocuments,
+    IncludeMetadataDocumentsDistances,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -57,8 +64,6 @@ from typing import (
     Sequence,
     Generator,
     List,
-    cast,
-    Set,
     Any,
     Callable,
     TypeVar,
@@ -111,18 +116,21 @@ class SegmentAPI(ServerAPI):
     _settings: Settings
     _sysdb: SysDB
     _manager: SegmentManager
+    _executor: Executor
     _producer: Producer
     _product_telemetry_client: ProductTelemetryClient
     _opentelemetry_client: OpenTelemetryClient
     _tenant_id: str
     _topic_ns: str
+    _rate_limit_enforcer: RateLimitEnforcer
 
     def __init__(self, system: System):
         super().__init__(system)
         self._settings = system.settings
         self._sysdb = self.require(SysDB)
         self._manager = self.require(SegmentManager)
-        self._quota = self.require(QuotaEnforcer)
+        self._executor = self.require(Executor)
+        self._quota_enforcer = self.require(QuotaEnforcer)
         self._product_telemetry_client = self.require(ProductTelemetryClient)
         self._opentelemetry_client = self.require(OpenTelemetryClient)
         self._producer = self.require(Producer)
@@ -138,6 +146,12 @@ class SegmentAPI(ServerAPI):
         if len(name) < 3:
             raise ValueError("Database name must be at least 3 characters long")
 
+        self._quota_enforcer.enforce(
+            action=Action.CREATE_DATABASE,
+            tenant=tenant,
+            name=name,
+        )
+
         self._sysdb.create_database(
             id=uuid4(),
             name=name,
@@ -149,6 +163,21 @@ class SegmentAPI(ServerAPI):
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> t.Database:
         return self._sysdb.get_database(name=name, tenant=tenant)
 
+    @trace_method("SegmentAPI.delete_database", OpenTelemetryGranularity.OPERATION)
+    @override
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        self._sysdb.delete_database(name=name, tenant=tenant)
+
+    @trace_method("SegmentAPI.list_databases", OpenTelemetryGranularity.OPERATION)
+    @override
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[t.Database]:
+        return self._sysdb.list_databases(limit=limit, offset=offset, tenant=tenant)
+
     @trace_method("SegmentAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def create_tenant(self, name: str) -> None:
@@ -157,6 +186,14 @@ class SegmentAPI(ServerAPI):
 
         self._sysdb.create_tenant(
             name=name,
+        )
+
+    @override
+    def get_user_identity(self) -> UserIdentity:
+        return UserIdentity(
+            user_id="",
+            tenant=DEFAULT_TENANT,
+            databases=[DEFAULT_DATABASE],
         )
 
     @trace_method("SegmentAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
@@ -169,10 +206,11 @@ class SegmentAPI(ServerAPI):
     # causes the system to somehow convert all values to strings.
     @trace_method("SegmentAPI.create_collection", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -184,24 +222,33 @@ class SegmentAPI(ServerAPI):
         # TODO: remove backwards compatibility in naming requirements
         check_index_name(name)
 
+        self._quota_enforcer.enforce(
+            action=Action.CREATE_COLLECTION,
+            tenant=tenant,
+            name=name,
+            metadata=metadata,
+        )
+
         id = uuid4()
 
         model = CollectionModel(
             id=id,
             name=name,
             metadata=metadata,
-            configuration=configuration
-            if configuration is not None
-            else CollectionConfigurationInternal(),  # Use default configuration if none is provided
+            configuration_json=create_collection_configuration_to_json(
+                configuration or CreateCollectionConfiguration()
+            ),
             tenant=tenant,
             database=database,
             dimension=None,
         )
+
         # TODO: Let sysdb create the collection directly from the model
         coll, created = self._sysdb.create_collection(
             id=model.id,
             name=model.name,
-            configuration=model.get_configuration(),
+            configuration=configuration or CreateCollectionConfiguration(),
+            segments=[],  # Passing empty till backend changes are deployed.
             metadata=model.metadata,
             dimension=None,  # This is lazily populated on the first add
             get_or_create=get_or_create,
@@ -209,9 +256,8 @@ class SegmentAPI(ServerAPI):
             database=database,
         )
 
-        # TODO: wrap sysdb call in try except and log error if it fails
         if created:
-            segments = self._manager.create_segments(coll)
+            segments = self._manager.prepare_segments_for_new_collection(coll)
             for segment in segments:
                 self._sysdb.create_segment(segment)
         else:
@@ -235,10 +281,11 @@ class SegmentAPI(ServerAPI):
         "SegmentAPI.get_or_create_collection", OpenTelemetryGranularity.OPERATION
     )
     @override
+    @rate_limit
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -257,26 +304,25 @@ class SegmentAPI(ServerAPI):
     # causes the system to somehow convert all values to strings
     @trace_method("SegmentAPI.get_collection", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def get_collection(
         self,
         name: Optional[str] = None,
-        id: Optional[UUID] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        if id is None and name is None or (id is not None and name is not None):
-            raise ValueError("Name or id must be specified, but not both")
         existing = self._sysdb.get_collections(
-            id=id, name=name, tenant=tenant, database=database
+            name=name, tenant=tenant, database=database
         )
 
         if existing:
             return existing[0]
         else:
-            raise InvalidCollectionException(f"Collection {name} does not exist.")
+            raise NotFoundError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def list_collections(
         self,
         limit: Optional[int] = None,
@@ -284,30 +330,37 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
+        self._quota_enforcer.enforce(
+            action=Action.LIST_COLLECTIONS,
+            tenant=tenant,
+            limit=limit,
+        )
+
         return self._sysdb.get_collections(
             limit=limit, offset=offset, tenant=tenant, database=database
         )
 
     @trace_method("SegmentAPI.count_collections", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def count_collections(
         self,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        collection_count = len(
-            self._sysdb.get_collections(tenant=tenant, database=database)
-        )
-
-        return collection_count
+        return self._sysdb.count_collections(tenant=tenant, database=database)
 
     @trace_method("SegmentAPI._modify", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def _modify(
         self,
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         if new_name:
             # backwards compatibility in naming requirements (for now)
@@ -319,17 +372,54 @@ class SegmentAPI(ServerAPI):
         # Ensure the collection exists
         _ = self._get_collection(id)
 
+        self._quota_enforcer.enforce(
+            action=Action.UPDATE_COLLECTION,
+            tenant=tenant,
+            name=new_name,
+            metadata=new_metadata,
+        )
+
         # TODO eventually we'll want to use OptionalArgument and Unspecified in the
         # signature of `_modify` but not changing the API right now.
-        if new_name and new_metadata:
+        if new_name and new_metadata and new_configuration:
+            self._sysdb.update_collection(
+                id,
+                name=new_name,
+                metadata=new_metadata,
+                configuration=new_configuration,
+            )
+        elif new_name and new_metadata:
             self._sysdb.update_collection(id, name=new_name, metadata=new_metadata)
+        elif new_name and new_configuration:
+            self._sysdb.update_collection(
+                id, name=new_name, configuration=new_configuration
+            )
+        elif new_metadata and new_configuration:
+            self._sysdb.update_collection(
+                id, metadata=new_metadata, configuration=new_configuration
+            )
         elif new_name:
             self._sysdb.update_collection(id, name=new_name)
         elif new_metadata:
             self._sysdb.update_collection(id, metadata=new_metadata)
+        elif new_configuration:
+            self._sysdb.update_collection(id, configuration=new_configuration)
+
+    @override
+    def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        raise NotImplementedError(
+            "Collection forking is not implemented for SegmentAPI"
+        )
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def delete_collection(
         self,
         name: str,
@@ -341,16 +431,16 @@ class SegmentAPI(ServerAPI):
         )
 
         if existing:
+            self._manager.delete_segments(existing[0].id)
             self._sysdb.delete_collection(
                 existing[0].id, tenant=tenant, database=database
             )
-            for s in self._manager.delete_segments(existing[0].id):
-                self._sysdb.delete_segment(existing[0].id, s)
         else:
             raise ValueError(f"Collection {name} does not exist.")
 
     @trace_method("SegmentAPI._add", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def _add(
         self,
         ids: IDs,
@@ -359,8 +449,9 @@ class SegmentAPI(ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.ADD)
         validate_batch(
@@ -378,6 +469,18 @@ class SegmentAPI(ServerAPI):
             )
         )
         self._validate_embedding_record_set(coll, records_to_submit)
+
+        self._quota_enforcer.enforce(
+            action=Action.ADD,
+            tenant=tenant,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            collection_id=collection_id,
+        )
+
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -393,6 +496,7 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._update", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def _update(
         self,
         collection_id: UUID,
@@ -401,8 +505,9 @@ class SegmentAPI(ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPDATE)
         validate_batch(
@@ -420,6 +525,17 @@ class SegmentAPI(ServerAPI):
             )
         )
         self._validate_embedding_record_set(coll, records_to_submit)
+
+        self._quota_enforcer.enforce(
+            action=Action.UPDATE,
+            tenant=tenant,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+        )
+
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -437,6 +553,7 @@ class SegmentAPI(ServerAPI):
 
     @trace_method("SegmentAPI._upsert", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def _upsert(
         self,
         collection_id: UUID,
@@ -445,8 +562,9 @@ class SegmentAPI(ServerAPI):
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> bool:
-        self._quota.static_check(metadatas, documents, embeddings, str(collection_id))
         coll = self._get_collection(collection_id)
         self._manager.hint_use_collection(collection_id, t.Operation.UPSERT)
         validate_batch(
@@ -464,6 +582,18 @@ class SegmentAPI(ServerAPI):
             )
         )
         self._validate_embedding_record_set(coll, records_to_submit)
+
+        self._quota_enforcer.enforce(
+            action=Action.UPSERT,
+            tenant=tenant,
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            uris=uris,
+            collection_id=collection_id,
+        )
+
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         return True
@@ -476,18 +606,18 @@ class SegmentAPI(ServerAPI):
         reraise=True,
     )
     @override
+    @rate_limit
     def _get(
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
-        sort: Optional[str] = None,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
-        include: Include = ["embeddings", "metadatas", "documents"],  # type: ignore[list-item]
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> GetResult:
         add_attributes_to_current_span(
             {
@@ -496,68 +626,23 @@ class SegmentAPI(ServerAPI):
             }
         )
 
-        coll = self._get_collection(collection_id)
-        request_version_context = t.RequestVersionContext(
-            collection_version=coll.version,
-            log_position=coll.log_position,
-        )
+        scan = self._scan(collection_id)
 
-        where = validate_where(where) if where is not None and len(where) > 0 else None
-        where_document = (
+        # TODO: Replace with unified validation
+        if where is not None:
+            validate_where(where)
+
+        if where_document is not None:
             validate_where_document(where_document)
-            if where_document is not None and len(where_document) > 0
-            else None
-        )
 
-        metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
-
-        if sort is not None:
-            raise NotImplementedError("Sorting is not yet supported")
-
-        if page and page_size:
-            offset = (page - 1) * page_size
-            limit = page_size
-
-        records = metadata_segment.get_metadata(
+        self._quota_enforcer.enforce(
+            action=Action.GET,
+            tenant=tenant,
+            ids=ids,
             where=where,
             where_document=where_document,
-            ids=ids,
             limit=limit,
-            offset=offset,
-            request_version_context=request_version_context,
         )
-
-        if len(records) == 0:
-            # Nothing to return if there are no records
-            return GetResult(
-                ids=[],
-                embeddings=[] if "embeddings" in include else None,
-                metadatas=[] if "metadatas" in include else None,
-                documents=[] if "documents" in include else None,
-                uris=[] if "uris" in include else None,
-                data=[] if "data" in include else None,
-                included=include,
-            )
-
-        vectors: Sequence[t.VectorEmbeddingRecord] = []
-        if "embeddings" in include:
-            vector_ids = [r["id"] for r in records]
-            vector_segment = self._manager.get_segment(collection_id, VectorReader)
-            vectors = vector_segment.get_vectors(
-                ids=vector_ids, request_version_context=request_version_context
-            )
-
-        # TODO: Fix type so we don't need to ignore
-        # It is possible to have a set of records, some with metadata and some without
-        # Same with documents
-
-        metadatas = [r["metadata"] for r in records]
-
-        if "documents" in include:
-            documents = [_doc(m) for m in metadatas]
-
-        if "uris" in include:
-            uris = [_uri(m) for m in metadatas]
 
         ids_amount = len(ids) if ids else 0
         self._product_telemetry_client.capture(
@@ -571,29 +656,33 @@ class SegmentAPI(ServerAPI):
             )
         )
 
-        return GetResult(
-            ids=[r["id"] for r in records],
-            embeddings=[r["embedding"] for r in vectors]
-            if "embeddings" in include
-            else None,
-            metadatas=_clean_metadatas(metadatas)
-            if "metadatas" in include
-            else None,  # type: ignore
-            documents=documents if "documents" in include else None,  # type: ignore
-            uris=uris if "uris" in include else None,  # type: ignore
-            data=None,
-            included=include,
+        return self._executor.get(
+            GetPlan(
+                scan,
+                Filter(ids, where, where_document),
+                Limit(offset or 0, limit),
+                Projection(
+                    "documents" in include,
+                    "embeddings" in include,
+                    "metadatas" in include,
+                    False,
+                    "uris" in include,
+                ),
+            )
         )
 
     @trace_method("SegmentAPI._delete", OpenTelemetryGranularity.OPERATION)
     @override
+    @rate_limit
     def _delete(
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-    ) -> IDs:
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
         add_attributes_to_current_span(
             {
                 "collection_id": str(collection_id),
@@ -601,12 +690,12 @@ class SegmentAPI(ServerAPI):
             }
         )
 
-        where = validate_where(where) if where is not None and len(where) > 0 else None
-        where_document = (
+        # TODO: Replace with unified validation
+        if where is not None:
+            validate_where(where)
+
+        if where_document is not None:
             validate_where_document(where_document)
-            if where_document is not None and len(where_document) > 0
-            else None
-        )
 
         # You must have at least one of non-empty ids, where, or where_document.
         if (
@@ -626,32 +715,32 @@ class SegmentAPI(ServerAPI):
                 """
             )
 
-        coll = self._get_collection(collection_id)
-        request_version_context = t.RequestVersionContext(
-            collection_version=coll.version,
-            log_position=coll.log_position,
+        scan = self._scan(collection_id)
+
+        self._quota_enforcer.enforce(
+            action=Action.DELETE,
+            tenant=tenant,
+            ids=ids,
+            where=where,
+            where_document=where_document,
         )
+
         self._manager.hint_use_collection(collection_id, t.Operation.DELETE)
 
         if (where or where_document) or not ids:
-            metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
-            records = metadata_segment.get_metadata(
-                where=where,
-                where_document=where_document,
-                ids=ids,
-                request_version_context=request_version_context,
-            )
-            ids_to_delete = [r["id"] for r in records]
+            ids_to_delete = self._executor.get(
+                GetPlan(scan, Filter(ids, where, where_document))
+            )["ids"]
         else:
             ids_to_delete = ids
 
         if len(ids_to_delete) == 0:
-            return []
+            return
 
         records_to_submit = list(
             _records(operation=t.Operation.DELETE, ids=ids_to_delete)
         )
-        self._validate_embedding_record_set(coll, records_to_submit)
+        self._validate_embedding_record_set(scan.collection, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
         self._product_telemetry_client.capture(
@@ -659,7 +748,6 @@ class SegmentAPI(ServerAPI):
                 collection_uuid=str(collection_id), delete_amount=len(ids_to_delete)
             )
         )
-        return ids_to_delete
 
     @trace_method("SegmentAPI._count", OpenTelemetryGranularity.OPERATION)
     @retry(  # type: ignore[misc]
@@ -669,16 +757,15 @@ class SegmentAPI(ServerAPI):
         reraise=True,
     )
     @override
-    def _count(self, collection_id: UUID) -> int:
+    @rate_limit
+    def _count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
-        coll = self._get_collection(collection_id)
-        request_version_context = t.RequestVersionContext(
-            collection_version=coll.version,
-            log_position=coll.log_position,
-        )
-
-        metadata_segment = self._manager.get_segment(collection_id, MetadataReader)
-        return metadata_segment.count(request_version_context)
+        return self._executor.count(CountPlan(self._scan(collection_id)))
 
     @trace_method("SegmentAPI._query", OpenTelemetryGranularity.OPERATION)
     # We retry on version mismatch errors because the version of the collection
@@ -695,14 +782,18 @@ class SegmentAPI(ServerAPI):
         reraise=True,
     )
     @override
+    @rate_limit
     def _query(
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
-        include: Include = ["documents", "metadatas", "distances"],  # type: ignore[list-item]
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocumentsDistances,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> QueryResult:
         add_attributes_to_current_span(
             {
@@ -713,10 +804,12 @@ class SegmentAPI(ServerAPI):
         )
 
         query_amount = len(query_embeddings)
+        ids_amount = len(ids) if ids else 0
         self._product_telemetry_client.capture(
             CollectionQueryEvent(
                 collection_uuid=str(collection_id),
                 query_amount=query_amount,
+                filtered_ids_amount=ids_amount,
                 n_results=n_results,
                 with_metadata_filter=query_amount if where is not None else 0,
                 with_document_filter=query_amount if where_document is not None else 0,
@@ -727,122 +820,50 @@ class SegmentAPI(ServerAPI):
             )
         )
 
-        where = validate_where(where) if where is not None and len(where) > 0 else where
-        where_document = (
+        # TODO: Replace with unified validation
+        if where is not None:
+            validate_where(where)
+        if where_document is not None:
             validate_where_document(where_document)
-            if where_document is not None and len(where_document) > 0
-            else where_document
-        )
 
-        allowed_ids = None
-
-        coll = self._get_collection(collection_id)
-        request_version_context = t.RequestVersionContext(
-            collection_version=coll.version,
-            log_position=coll.log_position,
-        )
+        scan = self._scan(collection_id)
         for embedding in query_embeddings:
-            self._validate_dimension(coll, len(embedding), update=False)
+            self._validate_dimension(scan.collection, len(embedding), update=False)
 
-        if where or where_document:
-            metadata_reader = self._manager.get_segment(collection_id, MetadataReader)
-            records = metadata_reader.get_metadata(
-                where=where,
-                where_document=where_document,
-                include_metadata=False,
-                request_version_context=request_version_context,
+        self._quota_enforcer.enforce(
+            action=Action.QUERY,
+            tenant=tenant,
+            where=where,
+            where_document=where_document,
+            query_embeddings=query_embeddings,
+            n_results=n_results,
+        )
+
+        return self._executor.knn(
+            KNNPlan(
+                scan,
+                KNN(query_embeddings, n_results),
+                Filter(None, where, where_document),
+                Projection(
+                    "documents" in include,
+                    "embeddings" in include,
+                    "metadatas" in include,
+                    "distances" in include,
+                    "uris" in include,
+                ),
             )
-            allowed_ids = [r["id"] for r in records]
-
-        ids: List[List[str]] = []
-        distances: List[List[float]] = []
-        embeddings: List[Embeddings] = []
-        documents: List[List[Document]] = []
-        uris: List[List[URI]] = []
-        metadatas: List[List[t.Metadata]] = []
-
-        # If where conditions returned empty list then no need to proceed
-        # further and can simply return an empty result set here.
-        if allowed_ids is not None and allowed_ids == []:
-            for em in range(len(query_embeddings)):
-                ids.append([])
-                if "distances" in include:
-                    distances.append([])
-                if "embeddings" in include:
-                    embeddings.append([])
-                if "documents" in include:
-                    documents.append([])
-                if "metadatas" in include:
-                    metadatas.append([])
-                if "uris" in include:
-                    uris.append([])
-        else:
-            query = t.VectorQuery(
-                vectors=query_embeddings,
-                k=n_results,
-                allowed_ids=allowed_ids,
-                include_embeddings="embeddings" in include,
-                options=None,
-                request_version_context=request_version_context,
-            )
-
-            vector_reader = self._manager.get_segment(collection_id, VectorReader)
-            results = vector_reader.query_vectors(query)
-
-            for result in results:
-                ids.append([r["id"] for r in result])
-                if "distances" in include:
-                    distances.append([r["distance"] for r in result])
-                if "embeddings" in include:
-                    embeddings.append([cast(Embedding, r["embedding"]) for r in result])
-
-            if "documents" in include or "metadatas" in include or "uris" in include:
-                all_ids: Set[str] = set()
-                for id_list in ids:
-                    all_ids.update(id_list)
-                metadata_reader = self._manager.get_segment(
-                    collection_id, MetadataReader
-                )
-                records = metadata_reader.get_metadata(
-                    ids=list(all_ids),
-                    include_metadata=True,
-                    request_version_context=request_version_context,
-                )
-                metadata_by_id = {r["id"]: r["metadata"] for r in records}
-                for id_list in ids:
-                    # In the segment based architecture, it is possible for one segment
-                    # to have a record that another segment does not have. This results in
-                    # data inconsistency. For the case of the local segments and the
-                    # local segment manager, there is a case where a thread writes
-                    # a record to the vector segment but not the metadata segment.
-                    # Then a query'ing thread reads from the vector segment and
-                    # queries the metadata segment. The metadata segment does not have
-                    # the record. In this case we choose to return potentially
-                    # incorrect data in the form of None.
-                    metadata_list = [metadata_by_id.get(id, None) for id in id_list]
-                    if "metadatas" in include:
-                        metadatas.append(_clean_metadatas(metadata_list))  # type: ignore
-                    if "documents" in include:
-                        doc_list = [_doc(m) for m in metadata_list]
-                        documents.append(doc_list)  # type: ignore
-                    if "uris" in include:
-                        uri_list = [_uri(m) for m in metadata_list]
-                        uris.append(uri_list)  # type: ignore
-
-        return QueryResult(
-            ids=ids,
-            distances=distances if distances else None,
-            metadatas=metadatas if metadatas else None,
-            embeddings=embeddings if embeddings else None,
-            documents=documents if documents else None,
-            uris=uris if uris else None,
-            data=None,
-            included=include,
         )
 
     @trace_method("SegmentAPI._peek", OpenTelemetryGranularity.OPERATION)
     @override
-    def _peek(self, collection_id: UUID, n: int = 10) -> GetResult:
+    @rate_limit
+    def _peek(
+        self,
+        collection_id: UUID,
+        n: int = 10,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
         return self._get(collection_id, limit=n)  # type: ignore
 
@@ -896,6 +917,7 @@ class SegmentAPI(ServerAPI):
             if update:
                 id = collection.id
                 self._sysdb.update_collection(id=id, dimension=dim)
+                collection["dimension"] = dim
         elif collection["dimension"] != dim:
             raise InvalidDimensionException(
                 f"Embedding dimension {dim} does not match collection dimensionality {collection['dimension']}"
@@ -907,10 +929,27 @@ class SegmentAPI(ServerAPI):
     def _get_collection(self, collection_id: UUID) -> t.Collection:
         collections = self._sysdb.get_collections(id=collection_id)
         if not collections or len(collections) == 0:
-            raise InvalidCollectionException(
-                f"Collection {collection_id} does not exist."
-            )
+            raise NotFoundError(f"Collection {collection_id} does not exist.")
         return collections[0]
+
+    @trace_method("SegmentAPI._scan", OpenTelemetryGranularity.OPERATION)
+    def _scan(self, collection_id: UUID) -> Scan:
+        collection_and_segments = self._sysdb.get_collection_with_segments(
+            collection_id
+        )
+        # For now collection should have exactly one segment per scope:
+        # - Local scopes: vector, metadata
+        # - Distributed scopes: vector, metadata, record
+        scope_to_segment = {
+            segment["scope"]: segment for segment in collection_and_segments["segments"]
+        }
+        return Scan(
+            collection=collection_and_segments["collection"],
+            knn=scope_to_segment[t.SegmentScope.VECTOR],
+            metadata=scope_to_segment[t.SegmentScope.METADATA],
+            # Local chroma do not have record segment, and this is not used by the local executor
+            record=scope_to_segment.get(t.SegmentScope.RECORD, None),  # type: ignore[arg-type]
+        )
 
 
 def _records(
@@ -958,41 +997,3 @@ def _records(
             operation=operation,
         )
         yield record
-
-
-def _doc(metadata: Optional[t.Metadata]) -> Optional[str]:
-    """Retrieve the document (if any) from a Metadata map"""
-
-    if metadata and "chroma:document" in metadata:
-        return str(metadata["chroma:document"])
-    return None
-
-
-def _uri(metadata: Optional[t.Metadata]) -> Optional[str]:
-    """Retrieve the uri (if any) from a Metadata map"""
-
-    if metadata and "chroma:uri" in metadata:
-        return str(metadata["chroma:uri"])
-    return None
-
-
-def _clean_metadatas(
-    metadata: List[Optional[t.Metadata]],
-) -> List[Optional[t.Metadata]]:
-    """Remove any chroma-specific metadata keys that the client shouldn't see from a
-    list of metadata maps."""
-    return [_clean_metadata(m) for m in metadata]
-
-
-def _clean_metadata(metadata: Optional[t.Metadata]) -> Optional[t.Metadata]:
-    """Remove any chroma-specific metadata keys that the client shouldn't see from a
-    metadata map."""
-    if not metadata:
-        return None
-    result = {}
-    for k, v in metadata.items():
-        if not k.startswith("chroma:"):
-            result[k] = v
-    if len(result) == 0:
-        return None
-    return result

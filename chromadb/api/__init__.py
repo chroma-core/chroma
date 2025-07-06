@@ -3,9 +3,9 @@ from typing import Sequence, Optional
 from uuid import UUID
 
 from overrides import override
-from chromadb.api.configuration import (
-    CollectionConfiguration,
-    CollectionConfigurationInternal,
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    UpdateCollectionConfiguration,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.api.types import (
@@ -17,8 +17,8 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
-    IncludeMetadataDocumentsEmbeddings,
-    IncludeMetadataDocumentsEmbeddingsDistances,
+    IncludeMetadataDocumentsDistances,
+    IncludeMetadataDocuments,
     Loadable,
     Metadatas,
     URIs,
@@ -27,11 +27,11 @@ from chromadb.api.types import (
     GetResult,
     WhereDocument,
 )
+from chromadb.auth import UserIdentity
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb.utils.embedding_functions as ef
 from chromadb.api.models.Collection import Collection
-
 
 # Re-export the async version
 from chromadb.api.async_api import (  # noqa: F401
@@ -77,6 +77,7 @@ class BaseAPI(ABC):
         id: UUID,
         new_name: Optional[str] = None,
         new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
         """[Internal] Modify a collection by UUID. Can update the name and/or metadata.
 
@@ -85,6 +86,8 @@ class BaseAPI(ABC):
             new_name: The new name of the collection.
                                 If None, the existing name will remain. Defaults to None.
             new_metadata: The new metadata to associate with the collection.
+                                      Defaults to None.
+            new_configuration: The new configuration to associate with the collection.
                                       Defaults to None.
         """
         pass
@@ -219,28 +222,22 @@ class BaseAPI(ABC):
         self,
         collection_id: UUID,
         ids: Optional[IDs] = None,
-        where: Optional[Where] = {},
-        sort: Optional[str] = None,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
-        page: Optional[int] = None,
-        page_size: Optional[int] = None,
-        where_document: Optional[WhereDocument] = {},
-        include: Include = IncludeMetadataDocumentsEmbeddings,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
     ) -> GetResult:
         """[Internal] Returns entries from a collection specified by UUID.
 
         Args:
             ids: The IDs of the entries to get. Defaults to None.
-            where: Conditional filtering on metadata. Defaults to {}.
-            sort: The column to sort the entries by. Defaults to None.
+            where: Conditional filtering on metadata. Defaults to None.
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
-            page: The page number to return. Defaults to None.
-            page_size: The number of entries to return per page. Defaults to None.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where_document: Conditional filtering on documents. Defaults to None.
             include: The fields to include in the response.
-                          Defaults to ["embeddings", "metadatas", "documents"].
+                          Defaults to ["metadatas", "documents"].
         Returns:
             GetResult: The entries in the collection that match the query.
 
@@ -252,16 +249,16 @@ class BaseAPI(ABC):
         self,
         collection_id: UUID,
         ids: Optional[IDs],
-        where: Optional[Where] = {},
-        where_document: Optional[WhereDocument] = {},
-    ) -> IDs:
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+    ) -> None:
         """[Internal] Deletes entries from a collection specified by UUID.
 
         Args:
             collection_id: The UUID of the collection to delete the entries from.
             ids: The IDs of the entries to delete. Defaults to None.
-            where: Conditional filtering on metadata. Defaults to {}.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where: Conditional filtering on metadata. Defaults to None.
+            where_document: Conditional filtering on documents. Defaults to None.
 
         Returns:
             IDs: The list of IDs of the entries that were deleted.
@@ -273,21 +270,23 @@ class BaseAPI(ABC):
         self,
         collection_id: UUID,
         query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
         n_results: int = 10,
-        where: Where = {},
-        where_document: WhereDocument = {},
-        include: Include = IncludeMetadataDocumentsEmbeddingsDistances,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocumentsDistances,
     ) -> QueryResult:
         """[Internal] Performs a nearest neighbors query on a collection specified by UUID.
 
         Args:
             collection_id: The UUID of the collection to query.
             query_embeddings: The embeddings to use as the query.
+            ids: The IDs to filter by during the query. Defaults to None.
             n_results: The number of results to return. Defaults to 10.
-            where: Conditional filtering on metadata. Defaults to {}.
-            where_document: Conditional filtering on documents. Defaults to {}.
+            where: Conditional filtering on metadata. Defaults to None.
+            where_document: Conditional filtering on documents. Defaults to None.
             include: The fields to include in the response.
-                          Defaults to ["embeddings", "metadatas", "documents", "distances"].
+                          Defaults to ["metadatas", "documents", "distances"].
 
         Returns:
             QueryResult: The results of the query.
@@ -328,6 +327,14 @@ class BaseAPI(ABC):
         """Return the maximum number of records that can be created or mutated in a single call."""
         pass
 
+    @abstractmethod
+    def get_user_identity(self) -> UserIdentity:
+        """Resolve the tenant and databases for the client. Returns the default
+        values if can't be resolved.
+
+        """
+        pass
+
 
 class ClientAPI(BaseAPI, ABC):
     tenant: str
@@ -359,7 +366,7 @@ class ClientAPI(BaseAPI, ABC):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -398,7 +405,6 @@ class ClientAPI(BaseAPI, ABC):
     def get_collection(
         self,
         name: str,
-        id: Optional[UUID] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
         ] = ef.DefaultEmbeddingFunction(),  # type: ignore
@@ -406,7 +412,6 @@ class ClientAPI(BaseAPI, ABC):
     ) -> Collection:
         """Get a collection with the given name.
         Args:
-            id: The UUID of the collection to get. Id and Name are simultaneously used for lookup if provided.
             name: The name of the collection to get
             embedding_function: Optional function to use to embed documents.
                                 Uses the default embedding function if not provided.
@@ -430,7 +435,7 @@ class ClientAPI(BaseAPI, ABC):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfiguration] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         embedding_function: Optional[
             EmbeddingFunction[Embeddable]
@@ -511,6 +516,32 @@ class AdminAPI(ABC):
         pass
 
     @abstractmethod
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        """Delete a database. Raises an error if the database does not exist.
+
+        Args:
+            database: The name of the database to delete.
+            tenant: The tenant of the database to delete.
+
+        """
+        pass
+
+    @abstractmethod
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        """List all databases for a tenant. Raises an error if the tenant does not exist.
+
+        Args:
+            tenant: The tenant to list databases for.
+
+        """
+        pass
+
+    @abstractmethod
     def create_tenant(self, name: str) -> None:
         """Create a new tenant. Raises an error if the tenant already exists.
 
@@ -556,7 +587,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         get_or_create: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -568,7 +599,6 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def get_collection(
         self,
         name: str,
-        id: Optional[UUID] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
@@ -578,7 +608,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def get_or_create_collection(
         self,
         name: str,
-        configuration: Optional[CollectionConfigurationInternal] = None,
+        configuration: Optional[CreateCollectionConfiguration] = None,
         metadata: Optional[CollectionMetadata] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
@@ -590,6 +620,140 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def delete_collection(
         self,
         name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        pass
+
+    @abstractmethod
+    @override
+    def _modify(
+        self,
+        id: UUID,
+        new_name: Optional[str] = None,
+        new_metadata: Optional[CollectionMetadata] = None,
+        new_configuration: Optional[UpdateCollectionConfiguration] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> None:
+        pass
+
+    @abstractmethod
+    def _fork(
+        self,
+        collection_id: UUID,
+        new_name: str,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> CollectionModel:
+        pass
+
+    @abstractmethod
+    @override
+    def _count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        pass
+
+    @abstractmethod
+    @override
+    def _peek(
+        self,
+        collection_id: UUID,
+        n: int = 10,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        pass
+
+    @abstractmethod
+    @override
+    def _get(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocuments,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> GetResult:
+        pass
+
+    @abstractmethod
+    @override
+    def _add(
+        self,
+        ids: IDs,
+        collection_id: UUID,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    def _update(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Optional[Embeddings] = None,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    def _upsert(
+        self,
+        collection_id: UUID,
+        ids: IDs,
+        embeddings: Embeddings,
+        metadatas: Optional[Metadatas] = None,
+        documents: Optional[Documents] = None,
+        uris: Optional[URIs] = None,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> bool:
+        pass
+
+    @abstractmethod
+    @override
+    def _query(
+        self,
+        collection_id: UUID,
+        query_embeddings: Embeddings,
+        ids: Optional[IDs] = None,
+        n_results: int = 10,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
+        include: Include = IncludeMetadataDocumentsDistances,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> QueryResult:
+        pass
+
+    @abstractmethod
+    @override
+    def _delete(
+        self,
+        collection_id: UUID,
+        ids: Optional[IDs] = None,
+        where: Optional[Where] = None,
+        where_document: Optional[WhereDocument] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> None:

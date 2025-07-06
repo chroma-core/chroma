@@ -1,5 +1,5 @@
 use crate::arrow::{
-    block::delta::{BlockDelta, BlockKeyArrowBuilder},
+    block::delta::{BlockKeyArrowBuilder, BlockStorage},
     types::{ArrowReadableKey, ArrowReadableValue, ArrowWriteableKey},
 };
 use arrow::array::{Array, Float32Array, Float32Builder, StringBuilder};
@@ -35,8 +35,8 @@ impl ArrowReadableKey<'_> for f32 {
         prefix: &str,
         key: Self,
         value: V,
-        delta: &mut BlockDelta,
+        storage: &mut BlockStorage,
     ) {
-        V::add_to_delta(prefix, key, value, delta);
+        V::add_to_delta(prefix, key, value, storage);
     }
 }

@@ -1,7 +1,5 @@
-use chroma_distance::{DistanceFunction, DistanceFunctionError};
-use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{MetadataValue, Segment};
-use thiserror::Error;
+use chroma_distance::DistanceFunction;
+use chroma_error::ChromaError;
 use uuid::Uuid;
 
 #[derive(Clone, Debug)]
@@ -10,40 +8,11 @@ pub struct IndexConfig {
     pub distance_function: DistanceFunction,
 }
 
-#[derive(Error, Debug)]
-pub enum IndexConfigFromSegmentError {
-    #[error("Invalid distance function")]
-    InvalidDistanceFunction(#[from] DistanceFunctionError),
-}
-
-impl ChromaError for IndexConfigFromSegmentError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            IndexConfigFromSegmentError::InvalidDistanceFunction(_) => ErrorCodes::InvalidArgument,
-        }
-    }
-}
-
 impl IndexConfig {
-    pub fn from_segment(
-        segment: &Segment,
-        dimensionality: i32,
-    ) -> Result<Self, Box<IndexConfigFromSegmentError>> {
-        let space = match segment.metadata {
-            Some(ref metadata) => match metadata.get("hnsw:space") {
-                Some(MetadataValue::Str(space)) => space,
-                _ => "l2",
-            },
-            None => "l2",
-        };
-        match DistanceFunction::try_from(space) {
-            Ok(distance_function) => Ok(IndexConfig {
-                dimensionality,
-                distance_function,
-            }),
-            Err(e) => Err(Box::new(
-                IndexConfigFromSegmentError::InvalidDistanceFunction(e),
-            )),
+    pub fn new(dimensionality: i32, distance_function: DistanceFunction) -> Self {
+        IndexConfig {
+            dimensionality,
+            distance_function,
         }
     }
 }
@@ -61,7 +30,7 @@ pub trait Index<C> {
     fn init(
         index_config: &IndexConfig,
         custom_config: Option<&C>,
-        id: Uuid,
+        id: IndexUuid,
     ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
@@ -75,6 +44,8 @@ pub trait Index<C> {
         disallow_ids: &[usize],
     ) -> Result<(Vec<usize>, Vec<f32>), Box<dyn ChromaError>>;
     fn get(&self, id: usize) -> Result<Option<Vec<f32>>, Box<dyn ChromaError>>;
+    fn get_all_ids(&self) -> Result<(Vec<usize>, Vec<usize>), Box<dyn ChromaError>>;
+    fn get_all_ids_sizes(&self) -> Result<Vec<usize>, Box<dyn ChromaError>>;
 }
 
 /// The persistent index trait.
@@ -88,7 +59,22 @@ pub trait Index<C> {
 /// TODO: Right now load() takes IndexConfig because we don't implement save/load of the config.
 pub trait PersistentIndex<C>: Index<C> {
     fn save(&self) -> Result<(), Box<dyn ChromaError>>;
-    fn load(path: &str, index_config: &IndexConfig, id: Uuid) -> Result<Self, Box<dyn ChromaError>>
+    fn load(
+        path: &str,
+        index_config: &IndexConfig,
+        ef_search: usize,
+        id: IndexUuid,
+    ) -> Result<Self, Box<dyn ChromaError>>
     where
         Self: Sized;
+}
+
+/// IndexUuid is a wrapper around Uuid to provide a type for the index id.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct IndexUuid(pub Uuid);
+
+impl std::fmt::Display for IndexUuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }

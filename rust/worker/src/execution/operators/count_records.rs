@@ -1,13 +1,11 @@
-use crate::{
-    execution::operator::Operator,
-    segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError},
-};
+use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::blockfile_record::{RecordSegmentReader, RecordSegmentReaderCreationError};
+use chroma_system::Operator;
 use chroma_types::{Chunk, LogRecord, Operation, Segment};
 use std::collections::HashSet;
 use thiserror::Error;
-use tonic::async_trait;
 
 #[derive(Debug)]
 pub(crate) struct CountRecordsOperator {}
@@ -83,7 +81,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
             Err(e) => {
                 match *e {
                     RecordSegmentReaderCreationError::UninitializedSegment => {
-                        tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized");
+                        tracing::info!("[CountQueryOrchestrator] Record segment is uninitialized; using {} records from log", input.log_records.len());
                         // This means there no compaction has occured.
                         // So we can just traverse the log records
                         // and count the number of records.
@@ -107,6 +105,16 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
                     RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                    RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                    RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                        return Err(CountRecordsError::RecordSegmentCreateError(*e));
+                    }
+                    _ => {
+                        tracing::error!("Unexpected error creating record segment reader: {:?}", e);
                         return Err(CountRecordsError::RecordSegmentCreateError(*e));
                     }
                 }
@@ -135,7 +143,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                     }
                 }
                 Err(e) => {
-                    println!("Error reading record segment");
+                    tracing::error!("Error reading record segment: {:?}", e);
                     return Err(CountRecordsError::RecordSegmentReadError(e));
                 }
             }
@@ -181,7 +189,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                 res_count += val as i32;
             }
             Err(e) => {
-                println!("Error reading record segment");
+                tracing::error!("Error reading record segment: {:?}", e);
                 return Err(CountRecordsError::RecordSegmentReadError(e));
             }
         };
@@ -193,39 +201,44 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
 
 #[cfg(test)]
 mod tests {
-    use crate::segment::record_segment::{RecordSegmentReader, RecordSegmentReaderCreationError};
-    use crate::segment::types::SegmentFlusher;
-    use crate::segment::LogMaterializer;
-    use crate::{
-        execution::{
-            operator::Operator,
-            operators::count_records::{CountRecordsInput, CountRecordsOperator},
-        },
-        segment::{record_segment::RecordSegmentWriter, SegmentWriter},
-    };
+    use crate::execution::operators::count_records::{CountRecordsInput, CountRecordsOperator};
     use chroma_blockstore::provider::BlockfileProvider;
-    use chroma_types::{Chunk, LogRecord, Operation, OperationRecord};
+    use chroma_segment::{
+        blockfile_record::{
+            RecordSegmentReader, RecordSegmentReaderCreationError, RecordSegmentWriter,
+        },
+        types::materialize_logs,
+    };
+    use chroma_system::Operator;
+    use chroma_types::{
+        Chunk, CollectionUuid, DatabaseUuid, LogRecord, Operation, OperationRecord, SegmentUuid,
+    };
     use std::{collections::HashMap, str::FromStr};
     use tracing::{Instrument, Span};
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_merge_log_and_storage() {
         let in_memory_provider = BlockfileProvider::new_memory();
         let mut record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),
         };
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &in_memory_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &in_memory_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let data = vec![
                 LogRecord {
                     log_offset: 1,
@@ -277,25 +290,31 @@ mod tests {
                                 );
                             }
                             RecordSegmentReaderCreationError::InvalidNumberOfFiles => {
-                                panic!(
-                                "Error creating record segment reader. Invalid number of files."
-                            );
+                                panic!("Error creating record segment reader. Invalid number of files.");
+                            }
+                            RecordSegmentReaderCreationError::DataRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
+                                panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Error creating record segment reader");
                             }
                         }
                     }
                 };
-            let materializer = LogMaterializer::new(record_segment_reader, data, None);
-            let mat_records = materializer
-                .materialize()
+            let mat_records = materialize_logs(&record_segment_reader, data, None)
                 .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
                 .await
                 .expect("Log materialization failed");
             segment_writer
-                .apply_materialized_log_chunk(mat_records)
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
                 .await
                 .expect("Apply materializated log failed");
             let flusher = segment_writer
                 .commit()
+                .await
                 .expect("Commit for segment writer failed");
             record_segment.file_path = flusher.flush().await.expect("Flush segment writer failed");
         }
@@ -352,10 +371,10 @@ mod tests {
     async fn test_no_compaction_log_only() {
         let in_memory_provider = BlockfileProvider::new_memory();
         let record_segment = chroma_types::Segment {
-            id: Uuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
             scope: chroma_types::SegmentScope::RECORD,
-            collection: Uuid::from_str("00000000-0000-0000-0000-000000000000")
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
                 .expect("parse error"),
             metadata: None,
             file_path: HashMap::new(),

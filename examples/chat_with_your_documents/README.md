@@ -17,6 +17,12 @@ The basic flow is as follows:
 
 You will need an OpenAI API key to run this demo. You can [get one here](https://platform.openai.com/account/api-keys).
 
+Make a `.env` file and define in it your OpenAI API key:
+
+```text
+OPENAI_API_KEY=<your API key>
+```
+
 Install dependencies and run the example:
 
 ```bash

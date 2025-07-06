@@ -1,5 +1,6 @@
 use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
+use tonic::Status;
 
 /// A macro for easily implementing match arms for a base error type with common errors.
 /// Other types can wrap it and still implement the ChromaError trait
@@ -26,8 +27,25 @@ pub enum ConversionError {
 
 impl ChromaError for ConversionError {
     fn code(&self) -> ErrorCodes {
-        match self {
-            ConversionError::DecodeError => ErrorCodes::Internal,
-        }
+        ErrorCodes::InvalidArgument
+    }
+}
+
+impl From<ConversionError> for Status {
+    fn from(value: ConversionError) -> Self {
+        Status::invalid_argument(value.to_string())
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error(transparent)]
+pub enum WrappedSerdeJsonError {
+    #[error(transparent)]
+    SerdeJsonError(#[from] serde_json::Error),
+}
+
+impl ChromaError for WrappedSerdeJsonError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
     }
 }

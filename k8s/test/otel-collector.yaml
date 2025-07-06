@@ -15,6 +15,10 @@ data:
 
     processors:
       batch:
+      # When using the tracing crate in Rust, we sometimes set the otel.name attribute for dynamic spans. Jaeger does not automatically override the span name with this attribute, so we do it manually here.
+      span/override-name:
+        name:
+          from_attributes: [name]
 
     exporters:
       prometheus:
@@ -29,6 +33,7 @@ data:
       pipelines:
         traces:
           receivers: [otlp]
+          processors: [batch, span/override-name]
           exporters: [otlp/jaeger]
         metrics:
           receivers: [otlp]

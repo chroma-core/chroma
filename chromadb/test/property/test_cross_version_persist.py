@@ -1,10 +1,7 @@
 from multiprocessing.connection import Connection
-import sys
 import os
 import shutil
-import subprocess
 import tempfile
-from types import ModuleType
 from typing import Generator, List, Tuple, Dict, Any, Callable, Type
 from hypothesis import given, settings
 import hypothesis.strategies as st
@@ -28,6 +25,11 @@ import re
 import multiprocessing
 from chromadb.config import Settings
 from chromadb.api.client import Client as ClientCreator
+from chromadb.test.utils.cross_version import (
+    switch_to_version,
+    install_version,
+    get_path_to_version_install,
+)
 
 # Minimum persisted version we support, and other substantial change versions
 # 0.4.1 is the first version with persistence
@@ -36,7 +38,7 @@ BASELINE_VERSIONS = ["0.4.1", "0.5.3"]
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 # Some modules do not work across versions, since we upgrade our support for them, and should be explicitly reimported in the subprocess
-VERSIONED_MODULES = ["pydantic", "numpy"]
+VERSIONED_MODULES = ["pydantic", "numpy", "tokenizers"]
 
 
 def versions() -> List[str]:
@@ -122,14 +124,16 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
         (
             version,
             Settings(
-                chroma_api_impl="chromadb.api.segment.SegmentAPI",
+                chroma_api_impl="chromadb.api.rust.RustBindingsAPI"
+                if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ
+                else "chromadb.api.segment.SegmentAPI",
                 chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
                 chroma_segment_manager_impl="chromadb.segment.impl.manager.local.LocalSegmentManager",
                 allow_reset=True,
                 is_persistent=True,
-                persist_directory=tempfile.gettempdir() + "/persistence_test_chromadb",
+                persist_directory=tempfile.mkdtemp(),
             ),
         )
         for version in versions
@@ -137,7 +141,7 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
 
 
 test_old_versions = versions()
-base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
+base_install_dir = tempfile.mkdtemp()
 
 
 # This fixture is not shared with the rest of the tests because it is unique in how it
@@ -146,7 +150,8 @@ base_install_dir = tempfile.gettempdir() + "/persistence_test_chromadb_versions"
 def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
     configuration = request.param
     version = configuration[0]
-    install_version(version)
+
+    install_version(version, {})
     yield configuration
     # Cleanup the installed version
     path = get_path_to_version_install(version)
@@ -157,78 +162,12 @@ def version_settings(request) -> Generator[Tuple[str, Settings], None, None]:
         shutil.rmtree(data_path, ignore_errors=True)
 
 
-def get_path_to_version_install(version: str) -> str:
-    return base_install_dir + "/" + version
-
-
-def get_path_to_version_library(version: str) -> str:
-    return get_path_to_version_install(version) + "/chromadb/__init__.py"
-
-
-def install_version(version: str) -> None:
-    # Check if already installed
-    version_library = get_path_to_version_library(version)
-    if os.path.exists(version_library):
-        return
-    path = get_path_to_version_install(version)
-    install(f"chromadb=={version}", path)
-
-
-def install(pkg: str, path: str) -> int:
-    # -q -q to suppress pip output to ERROR level
-    # https://pip.pypa.io/en/stable/cli/pip/#quiet
-    print("Purging pip cache")
-    subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "cache",
-            "purge",
-        ]
-    )
-    print(f"Installing chromadb version {pkg} to {path}")
-    return subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "-q",
-            "-q",
-            "install",
-            pkg,
-            "--no-binary=chroma-hnswlib",
-            "--target={}".format(path),
-        ]
-    )
-
-
-def switch_to_version(version: str) -> ModuleType:
-    module_name = "chromadb"
-    # Remove old version from sys.modules, except test modules
-    old_modules = {
-        n: m
-        for n, m in sys.modules.items()
-        if n == module_name
-        or (n.startswith(module_name + "."))
-        or n in VERSIONED_MODULES
-        or (any(n.startswith(m + ".") for m in VERSIONED_MODULES))
-    }
-    for n in old_modules:
-        del sys.modules[n]
-
-    # Load the target version and override the path to the installed version
-    # https://docs.python.org/3/library/importlib.html#importing-a-source-file-directly
-    sys.path.insert(0, get_path_to_version_install(version))
-    import chromadb
-
-    assert chromadb.__version__ == version
-    return chromadb
-
-
 class not_implemented_ef(EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         assert False, "Embedding function should not be called"
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
 
 
 def persist_generated_data_with_old_version(
@@ -239,7 +178,12 @@ def persist_generated_data_with_old_version(
     conn: Connection,
 ) -> None:
     try:
-        old_module = switch_to_version(version)
+        old_module = switch_to_version(version, VERSIONED_MODULES)
+        # In 0.7.0 we switch to Rust client. The old versions are using the the python SegmentAPI client
+        if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ and packaging_version.Version(
+            version
+        ) < packaging_version.Version("0.7.0"):
+            settings.chroma_api_impl = "chromadb.api.segment.SegmentAPI"
         system = old_module.config.System(settings)
         api = system.instance(api_import_for_version(old_module, version))
         system.start()
@@ -301,7 +245,7 @@ collection_st: st.SearchStrategy[strategies.Collection] = st.shared(
 
 @given(
     collection_strategy=collection_st,
-    embeddings_strategy=strategies.recordsets(collection_st),
+    embeddings_strategy=strategies.recordsets(collection_st, max_size=200),
 )
 @settings(deadline=None)
 def test_cycle_versions(
@@ -382,11 +326,14 @@ def test_cycle_versions(
     # 07/29/24: the max_seq_id for vector segments was moved from the pickled metadata file to SQLite.
     # Cleaning the log is dependent on vector segments migrating their max_seq_id from the pickled metadata file to SQLite.
     # Vector segments migrate this field automatically on init, but at this point the segment has not been loaded yet.
-    trigger_vector_segments_max_seq_id_migration(
-        embeddings_queue, system.instance(SegmentManager)
-    )
-
-    embeddings_queue.purge_log(coll.id)
+    if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ:
+        # Trigger log purge in Rust impl
+        invariants.count(coll, embeddings_strategy)
+    else:
+        trigger_vector_segments_max_seq_id_migration(
+            embeddings_queue, system.instance(SegmentManager)
+        )
+        embeddings_queue.purge_log(coll.id)
     invariants.log_size_below_max(system, [coll], True)
 
     # Should be able to add embeddings

@@ -2,6 +2,7 @@ import importlib
 import inspect
 import logging
 from abc import ABC
+from enum import Enum
 from graphlib import TopologicalSorter
 from typing import Optional, List, Any, Dict, Set, Iterable, Union
 from typing import Type, TypeVar, cast
@@ -10,7 +11,6 @@ from overrides import EnforceOverrides
 from overrides import override
 from typing_extensions import Literal
 import platform
-
 
 in_pydantic_v2 = False
 try:
@@ -43,7 +43,7 @@ migrate your data to the new Chroma architecture.
 Please `pip install chroma-migrate` and run `chroma-migrate` to migrate your data and then
 change how you construct your Chroma client.
 
-See https://docs.trychroma.com/deployment/migration for more information or join our discord at https://discord.gg/8g5FESbj for help!\033[0m"""
+See https://docs.trychroma.com/deployment/migration for more information or join our discord at https://discord.gg/MMeYNTmh3x for help!\033[0m"""
 
 _legacy_config_keys = {
     "chroma_db_impl",
@@ -76,10 +76,12 @@ _abstract_type_keys: Dict[str, str] = {
     "chromadb.auth.ServerAuthenticationProvider": "chroma_server_authn_provider",
     "chromadb.auth.ServerAuthorizationProvider": "chroma_server_authz_provider",
     "chromadb.db.system.SysDB": "chroma_sysdb_impl",
+    "chromadb.execution.executor.abstract.Executor": "chroma_executor_impl",
     "chromadb.ingest.Consumer": "chroma_consumer_impl",
     "chromadb.ingest.Producer": "chroma_producer_impl",
-    "chromadb.quota.QuotaProvider": "chroma_quota_provider_impl",
+    "chromadb.quota.QuotaEnforcer": "chroma_quota_enforcer_impl",
     "chromadb.rate_limit.RateLimitEnforcer": "chroma_rate_limit_enforcer_impl",
+    "chromadb.rate_limit.AsyncRateLimitEnforcer": "chroma_async_rate_limit_enforcer_impl",
     "chromadb.segment.SegmentManager": "chroma_segment_manager_impl",
     "chromadb.segment.distributed.SegmentDirectory": "chroma_segment_directory_impl",
     "chromadb.segment.distributed.MemberlistProvider": "chroma_memberlist_provider_impl",
@@ -90,6 +92,31 @@ DEFAULT_TENANT = "default_tenant"
 DEFAULT_DATABASE = "default_database"
 
 
+class APIVersion(str, Enum):
+    V1 = "/api/v1"
+    V2 = "/api/v2"
+
+
+# NOTE(hammadb) 1/13/2024 - This has to be in config.py instead of being localized to the module
+# that uses it because of a circular import issue. This is a temporary solution until we can
+# refactor the code to remove the circular import.
+class RoutingMode(Enum):
+    """
+    Routing mode for the segment directory
+
+    node - Assign based on the node name, used in production with multi-node settings with the assumption that
+    there is one query service pod per node. This is useful for when there is a disk based cache on the
+    node that we want to route to.
+
+    id - Assign based on the member id, used in development and testing environments where the node name is not
+    guaranteed to be unique. (I.e a local development kubernetes env). Or when there are multiple query service
+    pods per node.
+    """
+
+    NODE = "node"
+    ID = "id"
+
+
 class Settings(BaseSettings):  # type: ignore
     # ==============
     # Generic config
@@ -97,8 +124,8 @@ class Settings(BaseSettings):  # type: ignore
 
     environment: str = ""
 
-    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI"
-    chroma_api_impl: str = "chromadb.api.segment.SegmentAPI"
+    # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
+    chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
 
     @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
     def empty_str_to_none(cls, v: str) -> Optional[str]:
@@ -123,8 +150,8 @@ class Settings(BaseSettings):  # type: ignore
     chroma_server_ssl_enabled: Optional[bool] = False
 
     chroma_server_ssl_verify: Optional[Union[bool, str]] = None
-    chroma_server_api_default_path: Optional[str] = "/api/v1"
-    # eg ["http://localhost:3000"]
+    chroma_server_api_default_path: Optional[APIVersion] = APIVersion.V2
+    # eg ["http://localhost:8000"]
     chroma_server_cors_allow_origins: List[str] = []
 
     # ==================
@@ -161,12 +188,15 @@ class Settings(BaseSettings):  # type: ignore
     # ================
 
     chroma_server_auth_ignore_paths: Dict[str, List[str]] = {
-        "/api/v1": ["GET"],
-        "/api/v1/heartbeat": ["GET"],
-        "/api/v1/version": ["GET"],
+        f"{APIVersion.V2}": ["GET"],
+        f"{APIVersion.V2}/heartbeat": ["GET"],
+        f"{APIVersion.V2}/version": ["GET"],
+        f"{APIVersion.V1}": ["GET"],
+        f"{APIVersion.V1}/heartbeat": ["GET"],
+        f"{APIVersion.V1}/version": ["GET"],
     }
     # Overwrite singleton tenant and database access from the auth provider
-    # if applicable. See chromadb/server/fastapi/__init__.py's
+    # if applicable. See chromadb/auth/utils/__init__.py's
     # authenticate_and_authorize_or_raise method.
     chroma_overwrite_singleton_tenant_database_access_from_auth: bool = False
 
@@ -217,6 +247,8 @@ class Settings(BaseSettings):  # type: ignore
     # ==================
 
     chroma_segment_directory_impl: str = "chromadb.segment.impl.distributed.segment_directory.RendezvousHashSegmentDirectory"
+    chroma_segment_directory_routing_mode: RoutingMode = RoutingMode.ID
+
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
     worker_memberlist_name: str = "query-service-memberlist"
 
@@ -231,6 +263,8 @@ class Settings(BaseSettings):  # type: ignore
     chroma_segment_manager_impl: str = (
         "chromadb.segment.impl.manager.local.LocalSegmentManager"
     )
+    chroma_executor_impl: str = "chromadb.execution.executor.local.LocalExecutor"
+    chroma_query_replication_factor: int = 2
 
     chroma_logservice_host = "localhost"
     chroma_logservice_port = 50052
@@ -238,8 +272,16 @@ class Settings(BaseSettings):  # type: ignore
     chroma_quota_provider_impl: Optional[str] = None
     chroma_rate_limiting_provider_impl: Optional[str] = None
 
+    chroma_quota_enforcer_impl: str = (
+        "chromadb.quota.simple_quota_enforcer.SimpleQuotaEnforcer"
+    )
+
     chroma_rate_limit_enforcer_impl: str = (
         "chromadb.rate_limit.simple_rate_limit.SimpleRateLimitEnforcer"
+    )
+
+    chroma_async_rate_limit_enforcer_impl: str = (
+        "chromadb.rate_limit.simple_rate_limit.SimpleAsyncRateLimitEnforcer"
     )
 
     # ==========

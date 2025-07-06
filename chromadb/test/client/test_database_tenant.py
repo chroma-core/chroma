@@ -1,13 +1,14 @@
 import pytest
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
 from chromadb.test.conftest import ClientFactories
+from chromadb.errors import InvalidArgumentError
 from chromadb.api.types import GetResult
 from typing import Dict, Any
 import numpy as np
 
 
 def test_database_tenant_collections(client_factories: ClientFactories) -> None:
-    client = client_factories.create_client()
+    client = client_factories.create_client_from_system()
     client.reset()
     # Create a new database in the default tenant
     admin_client = client_factories.create_admin_client_from_system()
@@ -25,7 +26,8 @@ def test_database_tenant_collections(client_factories: ClientFactories) -> None:
     collections = client.list_collections()
     assert len(collections) == 1
     assert collections[0].name == "collection"
-    assert collections[0].metadata == {"database": DEFAULT_DATABASE}
+    collection = client.get_collection(collections[0].name)
+    assert collection.metadata == {"database": DEFAULT_DATABASE}
 
     # List collections in the new database
     client.set_tenant(tenant=DEFAULT_TENANT, database="test_db")
@@ -68,7 +70,7 @@ def test_database_tenant_collections(client_factories: ClientFactories) -> None:
 
 
 def test_database_collections_add(client_factories: ClientFactories) -> None:
-    client = client_factories.create_client()
+    client = client_factories.create_client_from_system()
     client.reset()
 
     # Create a new database in the default tenant
@@ -114,7 +116,7 @@ def test_database_collections_add(client_factories: ClientFactories) -> None:
 
 
 def test_tenant_collections_add(client_factories: ClientFactories) -> None:
-    client = client_factories.create_client()
+    client = client_factories.create_client_from_system()
     client.reset()
 
     # Create two databases with same name in different tenants
@@ -161,17 +163,17 @@ def test_tenant_collections_add(client_factories: ClientFactories) -> None:
 
 
 def test_min_len_name(client_factories: ClientFactories) -> None:
-    client = client_factories.create_client()
+    client = client_factories.create_client_from_system()
     client.reset()
 
     # Create a new database in the default tenant with a name of length 1
     # and expect an error
     admin_client = client_factories.create_admin_client_from_system()
-    with pytest.raises(Exception):
+    with pytest.raises((Exception, InvalidArgumentError)):
         admin_client.create_database("a")
 
     # Create a tenant with a name of length 1 and expect an error
-    with pytest.raises(Exception):
+    with pytest.raises((Exception, InvalidArgumentError)):
         admin_client.create_tenant("a")
 
 

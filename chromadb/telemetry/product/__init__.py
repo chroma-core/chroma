@@ -11,6 +11,7 @@ TELEMETRY_WHITELISTED_SETTINGS = [
     "chroma_api_impl",
     "is_persistent",
     "chroma_server_ssl_enabled",
+    "chroma_server_api_default_path",
 ]
 
 

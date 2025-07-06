@@ -1,0 +1,6 @@
+chromadb
+xai_sdk
+tqdm
+pypdf
+langchain_text_splitters
+sentence_transformers

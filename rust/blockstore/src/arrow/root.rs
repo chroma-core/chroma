@@ -1,0 +1,774 @@
+use super::{
+    block::{Block, BlockToBytesError},
+    sparse_index::{SparseIndexReader, SparseIndexValue, SparseIndexWriter, SparseIndexWriterData},
+    types::{ArrowReadableKey, ArrowWriteableKey},
+};
+use crate::{arrow::sparse_index::SparseIndexDelimiter, key::CompositeKey};
+use arrow::{
+    array::{
+        Array, BinaryArray, BinaryBuilder, RecordBatch, StringArray, StringBuilder, UInt32Array,
+        UInt32Builder,
+    },
+    datatypes::{DataType, Field, Schema},
+};
+use chroma_error::ChromaError;
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt::Display,
+    sync::Arc,
+};
+use thiserror::Error;
+use uuid::Uuid;
+
+pub(super) const CURRENT_VERSION: Version = Version::V1_2;
+
+// ================
+// Version
+// ================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
+pub(crate) enum Version {
+    V1 = 1,
+    V1_1 = 2,
+    V1_2 = 3,
+}
+
+impl Display for Version {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Version::V1 => write!(f, "v1"),
+            Version::V1_1 => write!(f, "v1.1"),
+            Version::V1_2 => write!(f, "v1.2"),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum VersionError {
+    #[error("Unknown version: {0}")]
+    UnknownVersion(String),
+}
+
+impl ChromaError for VersionError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::InvalidArgument
+    }
+}
+
+impl TryFrom<&str> for Version {
+    type Error = VersionError;
+    fn try_from(s: &str) -> Result<Self, VersionError> {
+        match s {
+            "v1" => Ok(Version::V1),
+            "v1.1" => Ok(Version::V1_1),
+            "v1.2" => Ok(Version::V1_2),
+            _ => Err(VersionError::UnknownVersion(s.to_string())),
+        }
+    }
+}
+
+// ================
+// RootWriter
+// ================
+
+#[derive(Debug, Clone)]
+pub struct RootWriter {
+    pub(super) sparse_index: SparseIndexWriter,
+    // Metadata
+    pub(super) id: Uuid,
+    pub(super) version: Version,
+    pub(super) prefix_path: String,
+    pub(super) max_block_size_bytes: usize,
+}
+
+impl RootWriter {
+    pub(crate) fn new(
+        version: Version,
+        id: Uuid,
+        sparse_index: SparseIndexWriter,
+        prefix_path: String,
+        max_block_size_bytes: usize,
+    ) -> Self {
+        Self {
+            version,
+            sparse_index,
+            id,
+            prefix_path,
+            max_block_size_bytes,
+        }
+    }
+
+    fn ids_as_arrow(&self, sparse_index_data: &SparseIndexWriterData) -> (Arc<dyn Array>, Field) {
+        if self.version == Version::V1 {
+            let mut ids_builder = StringBuilder::new();
+            for (_, value) in sparse_index_data.forward.iter() {
+                ids_builder.append_value(value.to_string());
+            }
+            (
+                Arc::new(ids_builder.finish()),
+                Field::new("id", DataType::Utf8, false),
+            )
+        } else {
+            let mut ids_builder = BinaryBuilder::new();
+            for (_, value) in sparse_index_data.forward.iter() {
+                ids_builder.append_value(value.into_bytes());
+            }
+            (
+                Arc::new(ids_builder.finish()),
+                Field::new("id", DataType::Binary, false),
+            )
+        }
+    }
+
+    fn counts_as_arrow(
+        &self,
+        sparse_index_data: &SparseIndexWriterData,
+    ) -> (Arc<dyn Array>, Field) {
+        let mut count_builder = UInt32Builder::new();
+        // We assume the count is always set, so if upgrading from V1 to V1.1 we will always have
+        // a count
+        for (_, value) in sparse_index_data.counts.iter() {
+            count_builder.append_value(*value);
+        }
+        (
+            Arc::new(count_builder.finish()),
+            Field::new("count", DataType::UInt32, false),
+        )
+    }
+
+    pub(super) fn to_bytes<K: ArrowWriteableKey>(&self) -> Result<Vec<u8>, Box<dyn ChromaError>> {
+        // Serialize the sparse index as an arrow record batch
+        // TODO(hammadb): Note that this should ideally use the Block API to serialize the sparse
+        // index, but we are currently using the arrow API directly because the block api
+        // does not support multiple columns with different types. When we add support for this
+        // we can switch to using the block API.
+        let sparse_index_data = self.sparse_index.data.lock();
+        let mut prefix_cap = 0;
+        let mut key_cap = 0;
+        for (key, _) in sparse_index_data.forward.iter() {
+            match key {
+                SparseIndexDelimiter::Start => {}
+                SparseIndexDelimiter::Key(k) => {
+                    prefix_cap += k.prefix.len();
+                    key_cap += k.key.get_size();
+                }
+            }
+        }
+        let mut key_builder =
+            K::get_arrow_builder(sparse_index_data.forward.len(), prefix_cap, key_cap);
+
+        for (key, _) in sparse_index_data.forward.iter() {
+            match key {
+                SparseIndexDelimiter::Start => key_builder.add_key(CompositeKey {
+                    prefix: "START".to_string(),
+                    key: K::default().into(),
+                }),
+                SparseIndexDelimiter::Key(k) => {
+                    key_builder.add_key(k.clone());
+                }
+            };
+        }
+
+        let mut schema_fields = Vec::new();
+        let mut data_arrays: Vec<Arc<dyn Array>> = Vec::new();
+
+        // NOTE(hammadb) This could be done as one pass over the sparse index but
+        // this is simpler to write and this it not performance critical / impact is minimal
+        let (prefix_field, prefix_arr, key_field, key_arr) = key_builder.as_arrow();
+        schema_fields.push(prefix_field);
+        schema_fields.push(key_field);
+        data_arrays.push(Arc::new(prefix_arr));
+        data_arrays.push(Arc::new(key_arr));
+        let (built_ids, id_field) = self.ids_as_arrow(&sparse_index_data);
+        schema_fields.push(id_field);
+        data_arrays.push(built_ids);
+
+        // MIGRATION(10/16/2024 @hammadb) -> Only RootWriter >= V1_1 will write a count field
+        if self.version >= Version::V1_1 {
+            let (built_counts, count_field) = self.counts_as_arrow(&sparse_index_data);
+            schema_fields.push(count_field);
+            data_arrays.push(built_counts);
+        }
+
+        let mut metadata = HashMap::from_iter(vec![
+            ("version".to_string(), self.version.to_string()),
+            ("id".to_string(), self.id.to_string()),
+        ]);
+
+        if self.version >= Version::V1_2 {
+            // MIGRATION(06/25/2025 @sanket) -> V1.2 and above, we store the block size bytes in the metadata
+            metadata.insert(
+                "max_block_size_bytes".to_string(),
+                self.max_block_size_bytes.to_string(),
+            );
+        }
+
+        let schema = Arc::new(Schema::new_with_metadata(schema_fields, metadata));
+
+        let record_batch = match RecordBatch::try_new(schema, data_arrays) {
+            Ok(record_batch) => record_batch,
+            Err(e) => return Err(Box::new(ToBytesError::ArrowError(e))),
+        };
+
+        match Block::from_record_batch(self.id, record_batch).to_bytes() {
+            Ok(bytes) => Ok(bytes),
+            Err(e) => Err(Box::new(ToBytesError::BlockToBytesError(e))),
+        }
+    }
+}
+
+// ================
+// Writer Errors
+// ================
+
+#[derive(Error, Debug)]
+pub enum ToBytesError {
+    #[error(transparent)]
+    BlockToBytesError(#[from] BlockToBytesError),
+    #[error(transparent)]
+    ArrowError(#[from] arrow::error::ArrowError),
+}
+
+impl ChromaError for ToBytesError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            ToBytesError::BlockToBytesError(_) => chroma_error::ErrorCodes::Internal,
+            ToBytesError::ArrowError(_) => chroma_error::ErrorCodes::Internal,
+        }
+    }
+}
+
+// ================
+// RootReader
+// ================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RootReader {
+    pub(super) sparse_index: SparseIndexReader,
+    // Metadata
+    pub(super) id: Uuid,
+    pub(super) version: Version,
+    pub(super) prefix_path: String,
+    pub(super) max_block_size_bytes: usize,
+}
+
+impl chroma_cache::Weighted for RootReader {
+    fn weight(&self) -> usize {
+        1
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum FromBytesError {
+    #[error("Error parsing UUID: {0}")]
+    UuidParseError(#[from] uuid::Error),
+    #[error("Error parsing version: {0}")]
+    VersionParseError(#[from] std::fmt::Error),
+    #[error("Missing metadata: {0}")]
+    MissingMetadata(String),
+    #[error(transparent)]
+    ArrowError(#[from] arrow::error::ArrowError),
+    #[error("No data")]
+    NoDataError,
+    #[error("Stored id does not match provided id")]
+    IdMismatch,
+    #[error(transparent)]
+    VersionError(#[from] VersionError),
+    #[error("Error converting max block size bytes from string to usize")]
+    MaxBlockSizeBytesParseError,
+}
+
+impl ChromaError for FromBytesError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            FromBytesError::UuidParseError(_) => chroma_error::ErrorCodes::InvalidArgument,
+            FromBytesError::VersionParseError(_) => chroma_error::ErrorCodes::InvalidArgument,
+            FromBytesError::MissingMetadata(_) => chroma_error::ErrorCodes::InvalidArgument,
+            FromBytesError::ArrowError(_) => chroma_error::ErrorCodes::Internal,
+            FromBytesError::NoDataError => chroma_error::ErrorCodes::Internal,
+            FromBytesError::IdMismatch => chroma_error::ErrorCodes::InvalidArgument,
+            FromBytesError::VersionError(e) => e.code(),
+            FromBytesError::MaxBlockSizeBytesParseError => chroma_error::ErrorCodes::Internal,
+        }
+    }
+}
+
+impl RootReader {
+    pub(super) fn get_all_block_ids_from_bytes(
+        bytes: &[u8],
+        id: Uuid,
+    ) -> Result<Vec<Uuid>, FromBytesError> {
+        let mut cursor = std::io::Cursor::new(bytes);
+        let arrow_reader = arrow::ipc::reader::FileReader::try_new(&mut cursor, None);
+
+        let record_batch = match arrow_reader {
+            Ok(mut reader) => match reader.next() {
+                Some(Ok(batch)) => batch,
+                Some(Err(e)) => return Err(FromBytesError::ArrowError(e)),
+                None => {
+                    return Err(FromBytesError::NoDataError);
+                }
+            },
+            Err(e) => return Err(FromBytesError::ArrowError(e)),
+        };
+
+        let (version, read_id) = Self::version_and_id_from_record_batch(&record_batch, id)?;
+        if read_id != id {
+            return Err(FromBytesError::IdMismatch);
+        }
+
+        Self::block_ids_from_record_batch(&record_batch, version)
+    }
+
+    pub(super) fn from_bytes<'data, K: ArrowReadableKey<'data>>(
+        bytes: &[u8],
+        prefix_path: &str,
+        id: Uuid,
+        default_max_block_size_bytes: usize,
+    ) -> Result<Self, FromBytesError> {
+        let mut cursor = std::io::Cursor::new(bytes);
+        let arrow_reader = arrow::ipc::reader::FileReader::try_new(&mut cursor, None);
+
+        let record_batch = match arrow_reader {
+            Ok(mut reader) => match reader.next() {
+                Some(Ok(batch)) => batch,
+                Some(Err(e)) => return Err(FromBytesError::ArrowError(e)),
+                None => {
+                    return Err(FromBytesError::NoDataError);
+                }
+            },
+            Err(e) => return Err(FromBytesError::ArrowError(e)),
+        };
+
+        let (version, read_id) = Self::version_and_id_from_record_batch(&record_batch, id)?;
+        let max_block_size_bytes = Self::block_size_bytes_from_record_batch(
+            &record_batch,
+            version,
+            default_max_block_size_bytes,
+        )?;
+
+        if read_id != id {
+            return Err(FromBytesError::IdMismatch);
+        }
+
+        let prefix_arr = record_batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .expect("Prefix array to be a StringArray");
+        // Use unsafe to promote the liftimes using unsafe, we know record batch lives as long as it needs to.
+        // It only needs to live as long as the sparse index is being constructed.
+        // The sparse index copies the data so it can live as long as it needs to independently
+        let record_batch: &'data RecordBatch = unsafe { std::mem::transmute(&record_batch) };
+        let key_arr = record_batch.column(1);
+
+        // Version 1.1 is the first version to have a count column
+        let mut counts = None;
+        if version >= Version::V1_1 {
+            let count_arr = record_batch
+                .column(3)
+                .as_any()
+                .downcast_ref::<UInt32Array>()
+                .expect("Count array to be a UInt32Array");
+            counts = Some(count_arr);
+        }
+
+        let ids = Self::block_ids_from_record_batch(record_batch, version)?;
+
+        let mut forward = BTreeMap::new();
+        for (i, block_id) in ids.iter().enumerate() {
+            let prefix = prefix_arr.value(i);
+            let key: K = K::get(key_arr, i);
+
+            let count = match counts {
+                Some(count_arr) => count_arr.value(i),
+                None => 0,
+            };
+
+            match prefix {
+                "START" => {
+                    forward.insert(
+                        SparseIndexDelimiter::Start,
+                        SparseIndexValue::new(*block_id, count),
+                    );
+                }
+                _ => {
+                    forward.insert(
+                        SparseIndexDelimiter::Key(CompositeKey::new(prefix.to_string(), key)),
+                        SparseIndexValue::new(*block_id, count),
+                    );
+                }
+            }
+        }
+
+        let sparse_index_reader = SparseIndexReader::new(forward);
+        Ok(Self {
+            version,
+            sparse_index: sparse_index_reader,
+            id,
+            prefix_path: prefix_path.to_string(),
+            max_block_size_bytes,
+        })
+    }
+
+    pub(super) fn fork(&self, new_id: Uuid) -> RootWriter {
+        let new_sparse_index = self.sparse_index.fork();
+        RootWriter {
+            version: self.version,
+            sparse_index: new_sparse_index,
+            id: new_id,
+            prefix_path: self.prefix_path.clone(),
+            max_block_size_bytes: self.max_block_size_bytes,
+        }
+    }
+
+    fn version_and_id_from_record_batch(
+        record_batch: &RecordBatch,
+        default_id: Uuid,
+    ) -> Result<(Version, Uuid), FromBytesError> {
+        let metadata = &record_batch.schema_ref().metadata;
+        match (metadata.get("version"), metadata.get("id")) {
+            (Some(version), Some(read_id)) => Ok((
+                Version::try_from(version.as_str())?,
+                Uuid::parse_str(read_id)?,
+            )),
+            (Some(_), None) => Err(FromBytesError::MissingMetadata("id".to_string())),
+            (None, Some(_)) => Err(FromBytesError::MissingMetadata("version".to_string())),
+            // We default to the current version in the absence of metadata for these fields for
+            // backwards compatibility
+            (None, None) => Ok((Version::V1, default_id)),
+        }
+    }
+
+    fn block_size_bytes_from_record_batch(
+        record_batch: &RecordBatch,
+        version: Version,
+        default_max_block_size_bytes: usize,
+    ) -> Result<usize, FromBytesError> {
+        let metadata = &record_batch.schema_ref().metadata;
+        match metadata.get("max_block_size_bytes") {
+            Some(size_str) => size_str
+                .parse::<usize>()
+                .map_err(|_| FromBytesError::MaxBlockSizeBytesParseError),
+            None => {
+                if version <= Version::V1_1 {
+                    // For versions V1 and V1.1, we do not store the max block size bytes
+                    // in the metadata, so we return the default value.
+                    Ok(default_max_block_size_bytes)
+                } else {
+                    // For version V1.2 and above, we expect the max block size bytes to be present
+                    Err(FromBytesError::MissingMetadata(
+                        "max_block_size_bytes".to_string(),
+                    ))
+                }
+            }
+        }
+    }
+
+    fn block_ids_from_record_batch(
+        record_batch: &RecordBatch,
+        version: Version,
+    ) -> Result<Vec<Uuid>, FromBytesError> {
+        let mut ids: Vec<uuid::Uuid> = Vec::new();
+        // Versions after V1 store uuid as bytes
+        if version == Version::V1 {
+            let id_array = record_batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .expect("ID array to be a StringArray");
+
+            for i in 0..id_array.len() {
+                let id = Uuid::parse_str(id_array.value(i)).expect("ID to be a valid UUID");
+                ids.push(id);
+            }
+        } else {
+            let id_arr = record_batch
+                .column(2)
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .expect("ID array to be a BinaryArray");
+
+            for i in 0..id_arr.len() {
+                let id = Uuid::from_slice(id_arr.value(i)).expect("ID to be a valid UUID");
+                ids.push(id);
+            }
+        }
+
+        Ok(ids)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_to_from_bytes() {
+        let block_ids = [
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        ];
+        let sparse_index = SparseIndexWriter::new(block_ids[0]);
+
+        let bf_id = Uuid::new_v4();
+        let prefix_path = "";
+        let max_block_size_bytes = 8 * 1024 * 1024; // 8 MiB
+        let root_writer = RootWriter::new(
+            CURRENT_VERSION,
+            bf_id,
+            sparse_index,
+            prefix_path.to_string(),
+            max_block_size_bytes,
+        );
+
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "a"), block_ids[1])
+            .expect("No error");
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "b"), block_ids[2])
+            .expect("No error");
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "c"), block_ids[3])
+            .expect("No error");
+
+        root_writer
+            .sparse_index
+            .set_count(block_ids[0], 1)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[1], 2)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[2], 3)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[3], 4)
+            .expect("Set count should succeed");
+
+        let bytes = root_writer
+            .to_bytes::<&str>()
+            .expect("To be able to serialize");
+        // Try a different max_block_size_bytes but it should read from the metadata.
+        let root_reader =
+            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, 4 * 1024 * 1024)
+                .expect("To be able to deserialize");
+
+        // Check that the sparse index is the same
+        assert_eq!(
+            root_writer.sparse_index.len(),
+            root_reader.sparse_index.len()
+        );
+
+        // Check that the block mapping is the same
+        for (key, value) in root_writer.sparse_index.data.lock().forward.iter() {
+            assert_eq!(
+                root_reader.sparse_index.data.forward.get(key).unwrap().id,
+                *value
+            );
+        }
+
+        // Check that counts are the same
+        let writer_data = &root_writer.sparse_index.data.lock();
+        for (key, _) in writer_data.forward.iter() {
+            assert_eq!(
+                root_reader
+                    .sparse_index
+                    .data
+                    .forward
+                    .get(key)
+                    .unwrap()
+                    .count,
+                *writer_data.counts.get(key).unwrap()
+            );
+        }
+
+        assert_eq!(root_writer.version, root_reader.version);
+        assert_eq!(root_writer.id, root_reader.id);
+        assert_eq!(
+            root_writer.max_block_size_bytes,
+            root_reader.max_block_size_bytes
+        );
+    }
+
+    #[test]
+    fn test_to_from_bytes_fork() {
+        let block_ids = [
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        ];
+        let sparse_index = SparseIndexWriter::new(block_ids[0]);
+
+        let bf_id = Uuid::new_v4();
+        let prefix_path = "";
+        let max_block_size_bytes = 8 * 1024 * 1024; // 8 MiB
+        let root_writer = RootWriter::new(
+            CURRENT_VERSION,
+            bf_id,
+            sparse_index,
+            prefix_path.to_string(),
+            max_block_size_bytes,
+        );
+
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "a"), block_ids[1])
+            .expect("No error");
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "b"), block_ids[2])
+            .expect("No error");
+        root_writer
+            .sparse_index
+            .add_block(CompositeKey::new("prefix".to_string(), "c"), block_ids[3])
+            .expect("No error");
+
+        root_writer
+            .sparse_index
+            .set_count(block_ids[0], 1)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[1], 2)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[2], 3)
+            .expect("Set count should succeed");
+        root_writer
+            .sparse_index
+            .set_count(block_ids[3], 4)
+            .expect("Set count should succeed");
+
+        let bytes = root_writer
+            .to_bytes::<&str>()
+            .expect("To be able to serialize");
+        // Try a different max_block_size_bytes but it should read from the metadata.
+        let root_reader =
+            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, 4 * 1024 * 1024)
+                .expect("To be able to deserialize");
+        let fork_root_writer = root_reader.fork(Uuid::new_v4());
+
+        // Check that the sparse index is the same
+        assert_eq!(
+            root_writer.sparse_index.len(),
+            fork_root_writer.sparse_index.len()
+        );
+
+        // Check that the block mapping is the same
+        for (key, value) in root_writer.sparse_index.data.lock().forward.iter() {
+            assert_eq!(
+                fork_root_writer
+                    .sparse_index
+                    .data
+                    .lock()
+                    .forward
+                    .get(key)
+                    .unwrap(),
+                value
+            );
+        }
+
+        // Check that counts are the same
+        let writer_data = &root_writer.sparse_index.data.lock();
+        for (key, _) in writer_data.forward.iter() {
+            assert_eq!(
+                fork_root_writer
+                    .sparse_index
+                    .data
+                    .lock()
+                    .counts
+                    .get(key)
+                    .unwrap(),
+                writer_data.counts.get(key).unwrap()
+            );
+        }
+
+        assert_eq!(root_writer.version, fork_root_writer.version);
+        assert_eq!(
+            root_writer.max_block_size_bytes,
+            fork_root_writer.max_block_size_bytes
+        );
+    }
+
+    #[test]
+    fn test_from_v1() {
+        let block_ids = [
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        ];
+        let counts = [1, 2, 3, 4];
+        let composite_keys = [
+            CompositeKey::new("prefix".to_string(), "a"),
+            CompositeKey::new("prefix".to_string(), "b"),
+            CompositeKey::new("prefix".to_string(), "c"),
+            CompositeKey::new("prefix".to_string(), "d"),
+        ];
+        let sparse_index = SparseIndexWriter::new(block_ids[0]);
+        let prefix_path = "";
+
+        let bf_id = Uuid::new_v4();
+        let writer_max_block_size_bytes = 8 * 1024 * 1024; // 8 MiB
+        let root_writer = RootWriter::new(
+            Version::V1,
+            bf_id,
+            sparse_index,
+            prefix_path.to_string(),
+            writer_max_block_size_bytes,
+        );
+        root_writer
+            .sparse_index
+            .set_count(block_ids[0], counts[0])
+            .expect("Set count should succeed");
+        for i in 1..block_ids.len() {
+            root_writer
+                .sparse_index
+                .add_block(composite_keys[i].clone(), block_ids[i])
+                .expect("No error");
+            root_writer
+                .sparse_index
+                .set_count(block_ids[i], counts[i])
+                .expect("Set count should succeed");
+        }
+
+        let bytes = root_writer
+            .to_bytes::<&str>()
+            .expect("To be able to serialize");
+
+        let reader_block_size_bytes = 4 * 1024 * 1024; // 4 MiB
+        let root_reader =
+            RootReader::from_bytes::<&str>(&bytes, prefix_path, bf_id, reader_block_size_bytes)
+                .expect("To be able to deserialize");
+
+        // Check the version is still v1
+        assert_eq!(root_reader.version, Version::V1);
+        // Check that the counts map is just 0, even though we set it, it should be 0 since to_bytes
+        // does not write the count field for v1
+        for (key, _) in root_reader.sparse_index.data.forward.iter() {
+            assert_eq!(
+                root_reader
+                    .sparse_index
+                    .data
+                    .forward
+                    .get(key)
+                    .unwrap()
+                    .count,
+                0
+            );
+        }
+        assert_eq!(root_reader.max_block_size_bytes, reader_block_size_bytes);
+    }
+}

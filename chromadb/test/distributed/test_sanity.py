@@ -5,11 +5,14 @@ import random
 import time
 from chromadb.api import ClientAPI
 from chromadb.test.conftest import (
-    COMPACTION_SLEEP,
     reset,
     skip_if_not_cluster,
 )
 from chromadb.test.property import invariants
+from chromadb.test.utils.wait_for_version_increase import (
+    wait_for_version_increase,
+    get_collection_version,
+)
 import numpy as np
 
 
@@ -64,6 +67,7 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
         name="test_add_include_all_with_compaction_delay",
         metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
     )
+    initial_version = get_collection_version(client, collection.name)
 
     ids = []
     embeddings = []
@@ -78,7 +82,7 @@ def test_add_include_all_with_compaction_delay(client: ClientAPI) -> None:
             documents=[documents[-1]],
         )
 
-    time.sleep(COMPACTION_SLEEP)  # Wait for the documents to be compacted
+    wait_for_version_increase(client, collection.name, initial_version, 120)
 
     random_query_1 = np.random.rand(1, 3)[0]
     random_query_2 = np.random.rand(1, 3)[0]

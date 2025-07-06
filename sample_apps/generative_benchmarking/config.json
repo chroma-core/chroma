@@ -1,0 +1,15 @@
+{
+	"required_env_variables": [
+		{ "name": "OPENAI_API_KEY", "secret": true }
+	],
+    "optional_env_variables": [
+    	{ "name": "JINA_API_KEY", "secret": true },
+    	{ "name": "VOYAGE_API_KEY", "secret": true },
+    	{ "name": "ANTHROPIC_API_KEY", "secret": true }
+    ],
+    "startup_commands": {
+    	"pip": "cd generative_benchmarking\npip install -r requirements.txt",
+    	"poetry": "cd generative_benchmarking\npoetry install",
+    	"conda": "cd generative_benchmarking\nconda env create -f environment.yml\nconda activate generative-benchmarking-env"
+    }
+}

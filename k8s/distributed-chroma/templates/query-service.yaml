@@ -37,7 +37,7 @@ metadata:
   namespace: {{ .Values.namespace }}
 spec:
   serviceName: query-service
-  replicas: 2
+  replicas: {{ .Values.queryService.replicaCount }}
   selector:
     matchLabels:
       app: query-service
@@ -48,21 +48,35 @@ spec:
         member-type: query-service
     spec:
       serviceAccountName: query-service-serviceaccount
-      {{if .Values.queryService.configuration}}
       volumes:
+        {{if .Values.queryService.configuration}}
         - name: query-service-config
           configMap:
             name: query-service-config
-      {{ end }}
+        {{ end }}
+        {{if .Values.queryService.cache}}
+        - name: query-service-cache
+          hostPath:
+            path: {{ .Values.queryService.cache.hostPath }}
+            type: DirectoryOrCreate
+        {{ end }}
       containers:
         - name: query-service
           image: "{{ .Values.queryService.image.repository }}:{{ .Values.queryService.image.tag }}"
           imagePullPolicy: IfNotPresent
-          {{if .Values.queryService.configuration}}
+          readinessProbe:
+            grpc:
+              port: 50051
+              service: chroma.QueryExecutor
           volumeMounts:
+            {{if .Values.queryService.configuration}}
             - name: query-service-config
               mountPath: /config/
-          {{ end }}
+            {{ end }}
+            {{if .Values.queryService.cache}}
+            - name: query-service-cache
+              mountPath: {{ .Values.queryService.cache.mountPath }}
+            {{ end }}
           ports:
             - containerPort: 50051
           env:
@@ -79,6 +93,15 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+          {{ if .Values.queryService.resources }}
+          resources:
+            limits:
+              cpu: {{ .Values.queryService.resources.limits.cpu }}
+              memory: {{ .Values.queryService.resources.limits.memory }}
+            requests:
+              cpu: {{ .Values.queryService.resources.requests.cpu }}
+              memory: {{ .Values.queryService.resources.requests.memory }}
+          {{ end }}
       {{if .Values.queryService.tolerations}}
       tolerations:
         {{ toYaml .Values.queryService.tolerations | nindent 8 }}
@@ -87,10 +110,6 @@ spec:
       nodeSelector:
         {{ toYaml .Values.queryService.nodeSelector | nindent 8 }}
       {{ end }}
-      updateStrategy:
-        type: RollingUpdate
-        rollingUpdate:
-          partition: 0
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: "kubernetes.io/hostname"
