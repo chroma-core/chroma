@@ -33,7 +33,7 @@ const AskAI: React.FC<{ content: string }> = ({ content }) => {
       <DropdownMenuTrigger asChild>
         <UIButton
           variant="outline"
-          className="flex gap-4 pl-4 pr-2 items-center justify-between focus-visible:outline-none"
+          className="flex gap-1 pl-3 pr-2 items-center justify-between focus-visible:outline-none"
         >
           <p>Ask this Page</p>
           <ChevronDown className="w-4 h-4" />
