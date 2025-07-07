@@ -75,7 +75,7 @@ jobs:
 
   build-windows:
     name: Build Windows bindings
-    runs-on: windows-latest
+    runs-on: 8core-32gb-windows-latest
     defaults:
       run:
         working-directory: rust/js_bindings
