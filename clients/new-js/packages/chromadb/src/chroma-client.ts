@@ -144,7 +144,9 @@ export class ChromaClient {
     return this._preflightChecks;
   }
 
-  protected set preflightChecks(preflightChecks: ChecklistResponse | undefined) {
+  protected set preflightChecks(
+    preflightChecks: ChecklistResponse | undefined,
+  ) {
     this._preflightChecks = preflightChecks;
   }
 
@@ -326,9 +328,9 @@ export class ChromaClient {
       embeddingFunction: embeddingFunction
         ? embeddingFunction
         : await getEmbeddingFunction(
-          data.name,
-          data.configuration_json.embedding_function ?? undefined,
-        ),
+            data.name,
+            data.configuration_json.embedding_function ?? undefined,
+          ),
       id: data.id,
     });
   }

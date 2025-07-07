@@ -694,6 +694,8 @@ pub enum GetCollectionsError {
     CollectionId(#[from] uuid::Error),
     #[error("Could not deserialize database ID")]
     DatabaseId,
+    #[error("Provided limit `{0}` exceeds maximum allowable limit `{1}`")]
+    MaximumLimitExceeded(u32, u32),
 }
 
 impl ChromaError for GetCollectionsError {
@@ -703,6 +705,7 @@ impl ChromaError for GetCollectionsError {
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
             GetCollectionsError::DatabaseId => ErrorCodes::Internal,
+            GetCollectionsError::MaximumLimitExceeded(_, _) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -967,7 +970,8 @@ pub struct AddCollectionRecordsRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
-    pub embeddings: Option<Vec<Vec<f32>>>,
+    #[validate(custom(function = "Self::validate_embeddings"))]
+    pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<Metadata>>>,
@@ -980,7 +984,7 @@ impl AddCollectionRecordsRequest {
         database_name: String,
         collection_id: CollectionUuid,
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
@@ -997,6 +1001,14 @@ impl AddCollectionRecordsRequest {
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
+    }
+
+    fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
+        if embeddings.iter().any(|e| e.is_empty()) {
+            return Err(ValidationError::new("embedding_minimum_dimensions")
+                .with_message("Each embedding must have at least 1 dimension".into()));
+        }
+        Ok(())
     }
 }
 

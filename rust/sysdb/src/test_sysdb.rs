@@ -239,11 +239,10 @@ impl TestSysDb {
         let inner = self.inner.lock();
         let mut tenants = Vec::new();
         for tenant_id in tenant_ids {
-            let last_compaction_time = match inner.tenant_last_compaction_time.get(&tenant_id) {
-                Some(last_compaction_time) => *last_compaction_time,
-                None => {
-                    return Err(GetLastCompactionTimeError::TenantNotFound);
-                }
+            let Some(last_compaction_time) =
+                inner.tenant_last_compaction_time.get(&tenant_id).cloned()
+            else {
+                continue;
             };
             tenants.push(Tenant {
                 id: tenant_id,
@@ -257,6 +256,7 @@ impl TestSysDb {
         &mut self,
         collection_id: CollectionUuid,
         segment_flush_info: Arc<[SegmentFlushInfo]>,
+        log_position: i64,
     ) -> Result<(), String> {
         // Check if version file already exists for the collection.
         // If it does not, then create a new one with version 0.
@@ -286,6 +286,7 @@ impl TestSysDb {
                         chrono::Utc::now().timestamp()
                     },
                     version_change_reason: VersionChangeReason::DataCompaction as i32,
+                    collection_info_mutable: Some(Default::default()),
                     ..Default::default()
                 };
                 version_history.versions = vec![version_info];
@@ -294,23 +295,35 @@ impl TestSysDb {
             }
         };
 
+        let time_secs = if inner.mock_time > 0 {
+            inner.mock_time as i64
+        } else {
+            chrono::Utc::now().timestamp()
+        };
+
         // Get current version history
         let mut version_history = version_file.version_history.unwrap_or_default();
-        let next_version = version_history
+        let last_version_info = version_history
             .versions
             .last()
-            .map(|v| v.version + 1)
-            .unwrap_or(0);
+            .cloned()
+            .unwrap_or_default()
+            .clone();
+        let mut collection_info = last_version_info
+            .collection_info_mutable
+            .unwrap_or_default();
+        collection_info.current_collection_version = last_version_info.version + 1;
+        collection_info.current_log_position = log_position;
+        collection_info.updated_at_secs = time_secs;
+        collection_info.last_compaction_time_secs = time_secs;
 
         // Create new version info with segment file paths
+        let next_version = last_version_info.version + 1;
         let mut version_info = CollectionVersionInfo {
             version: next_version,
-            created_at_secs: if inner.mock_time > 0 {
-                inner.mock_time as i64
-            } else {
-                chrono::Utc::now().timestamp()
-            },
+            created_at_secs: time_secs,
             version_change_reason: VersionChangeReason::DataCompaction as i32,
+            collection_info_mutable: Some(collection_info),
             ..Default::default()
         };
 
@@ -456,7 +469,8 @@ impl TestSysDb {
         }
 
         // Update the in-memory version file
-        let result = self.update_collection_version_file(collection_id, segment_flush_info);
+        let result =
+            self.update_collection_version_file(collection_id, segment_flush_info, log_position);
         if result.is_err() {
             return Err(FlushCompactionError::FailedToFlushCompaction(
                 tonic::Status::internal("Failed to update version file"),

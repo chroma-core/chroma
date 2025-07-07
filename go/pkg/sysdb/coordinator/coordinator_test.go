@@ -1596,12 +1596,24 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	suite.NoError(err)
 	suite.Empty(collections)
 
-	res, err := suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil)
+	res, err := suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, nil)
 	suite.NoError(err)
 	suite.NotEmpty(res)
 	suite.Equal(1, len(res))
 	// ListCollectionsToGc groups by fork trees and should always return the root of the tree
 	suite.Equal(forkCollectionWithSameName.SourceCollectionID, res[0].ID)
+
+	// Collection has 2 versions, so setting minVersionsIfAlive to 2 should return 1 collection
+	minVersionsIfAlive := uint64(2)
+	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive)
+	suite.NoError(err)
+	suite.Equal(1, len(res))
+
+	// Collection has 2 versions, so setting minVersionsIfAlive to 3 should return 0 collections
+	minVersionsIfAlive = uint64(3)
+	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive)
+	suite.NoError(err)
+	suite.Equal(0, len(res))
 
 	// Get source collection to grab lineage path and validate it exists
 	sourceCollection, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{sourceCreateCollection.ID}, nil, sourceCreateCollection.TenantID, sourceCreateCollection.DatabaseName, nil, nil, false)
@@ -1610,6 +1622,19 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, *sourceCollection[0].LineageFileName)
 	suite.NoError(err)
 	suite.True(exists, "Lineage file should exist in S3")
+
+	// If the collection is soft deleted, it should always be returned by ListCollectionsToGc, even if it does not meet the minVersionsIfAlive criteria
+	err = suite.coordinator.catalog.DeleteCollection(ctx, &model.DeleteCollection{
+		ID:           sourceCreateCollection.ID,
+		TenantID:     sourceCreateCollection.TenantID,
+		DatabaseName: sourceCreateCollection.DatabaseName,
+	}, true)
+	suite.NoError(err)
+
+	minVersionsIfAlive = uint64(3)
+	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive)
+	suite.NoError(err)
+	suite.Equal(1, len(res))
 }
 
 func (suite *APIsTestSuite) TestBatchGetCollectionVersionFilePaths() {

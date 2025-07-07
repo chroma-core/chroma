@@ -6,11 +6,15 @@ use backon::{ExponentialBuilder, Retryable};
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
+use chroma_metering::{
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable, FinishRequest,
+    FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
+    MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes, WriteAction,
+};
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
-use chroma_tracing::meter_event::{MeterEvent, ReadAction, WriteAction};
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn},
@@ -36,10 +40,13 @@ use chroma_types::{
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashSet, time::Duration};
+use std::{
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Instant,
+};
 
 use super::utils::to_records;
 
@@ -603,7 +610,6 @@ impl ServiceBasedFrontend {
         &mut self,
         ForkCollectionRequest {
             tenant_id,
-            database_name,
             source_collection_id,
             target_collection_name,
             ..
@@ -634,15 +640,20 @@ impl ServiceBasedFrontend {
             .set_collection_with_segments(collection_and_segments)
             .await;
 
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+        });
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionFork {
-            tenant: tenant_id,
-            database: database_name,
-            collection_id: source_collection_id.0,
-            latest_collection_logical_size_bytes,
+        match chroma_metering::close::<CollectionForkContext>() {
+            Ok(collection_fork_context) => {
+                MeterEvent::CollectionFork(collection_fork_context)
+                    .submit()
+                    .await;
+            }
+            Err(e) => tracing::error!("Failed to submit metering event to receiver: {:?}", e),
         }
-        .submit()
-        .await;
 
         Ok(collection)
     }
@@ -698,7 +709,6 @@ impl ServiceBasedFrontend {
         &mut self,
         AddCollectionRecordsRequest {
             tenant_id,
-            database_name,
             collection_id,
             ids,
             embeddings,
@@ -708,13 +718,16 @@ impl ServiceBasedFrontend {
             ..
         }: AddCollectionRecordsRequest,
     ) -> Result<AddCollectionRecordsResponse, AddCollectionRecordsError> {
-        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
-            Some(embedding.len())
-        })
+        self.validate_embedding(
+            collection_id,
+            Some(&embeddings),
+            true,
+            |embedding: &Vec<f32>| Some(embedding.len()),
+        )
         .await
         .map_err(|err| err.boxed())?;
 
-        let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
+        let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
         let (records, log_size_bytes) =
             to_records(ids, embeddings, documents, uris, metadatas, Operation::Add)
@@ -745,19 +758,27 @@ impl ServiceBasedFrontend {
             .add_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
-        // TODO: Submit event after the response is sent
-        MeterEvent::CollectionWrite {
-            tenant: tenant_id,
-            database: database_name,
-            collection_id: collection_id.0,
-            action: WriteAction::Add,
-            log_size_bytes,
-        }
-        .submit()
-        .await;
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+            context.finish_request(Instant::now());
+        });
 
+        // TODO: Submit event after the response is sent
         match res {
-            Ok(()) => Ok(AddCollectionRecordsResponse {}),
+            Ok(()) => {
+                match chroma_metering::close::<CollectionWriteContext>() {
+                    Ok(collection_write_context) => {
+                        MeterEvent::CollectionWrite(collection_write_context)
+                            .submit()
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                    }
+                }
+                Ok(AddCollectionRecordsResponse {})
+            }
             Err(e) => {
                 if e.code() == ErrorCodes::AlreadyExists {
                     Err(AddCollectionRecordsError::Backoff)
@@ -772,7 +793,6 @@ impl ServiceBasedFrontend {
         &mut self,
         UpdateCollectionRecordsRequest {
             tenant_id,
-            database_name,
             collection_id,
             ids,
             embeddings,
@@ -823,19 +843,27 @@ impl ServiceBasedFrontend {
             .update_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
-        // TODO: Submit event after the response is sent
-        MeterEvent::CollectionWrite {
-            tenant: tenant_id,
-            database: database_name,
-            collection_id: collection_id.0,
-            action: WriteAction::Update,
-            log_size_bytes,
-        }
-        .submit()
-        .await;
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+            context.finish_request(Instant::now());
+        });
 
+        // TODO: Submit event after the response is sent
         match res {
-            Ok(()) => Ok(UpdateCollectionRecordsResponse {}),
+            Ok(()) => {
+                match chroma_metering::close::<CollectionWriteContext>() {
+                    Ok(collection_write_context) => {
+                        MeterEvent::CollectionWrite(collection_write_context)
+                            .submit()
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                    }
+                }
+                Ok(UpdateCollectionRecordsResponse {})
+            }
             Err(e) => {
                 if e.code() == ErrorCodes::AlreadyExists {
                     Err(UpdateCollectionRecordsError::Backoff)
@@ -850,7 +878,6 @@ impl ServiceBasedFrontend {
         &mut self,
         UpsertCollectionRecordsRequest {
             tenant_id,
-            database_name,
             collection_id,
             ids,
             embeddings,
@@ -903,19 +930,27 @@ impl ServiceBasedFrontend {
             .upsert_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
 
-        // TODO: Submit event after the response is sent
-        MeterEvent::CollectionWrite {
-            tenant: tenant_id,
-            database: database_name,
-            collection_id: collection_id.0,
-            action: WriteAction::Upsert,
-            log_size_bytes,
-        }
-        .submit()
-        .await;
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+            context.finish_request(Instant::now());
+        });
 
+        // TODO: Submit event after the response is sent
         match res {
-            Ok(()) => Ok(UpsertCollectionRecordsResponse {}),
+            Ok(()) => {
+                match chroma_metering::close::<CollectionWriteContext>() {
+                    Ok(collection_write_context) => {
+                        MeterEvent::CollectionWrite(collection_write_context)
+                            .submit()
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                    }
+                }
+                Ok(UpsertCollectionRecordsResponse {})
+            }
             Err(e) => {
                 if e.code() == ErrorCodes::AlreadyExists {
                     Err(UpsertCollectionRecordsError::Backoff)
@@ -987,19 +1022,26 @@ impl ServiceBasedFrontend {
                     metadata: None,
                 });
             }
-            // TODO: Submit event after the response is sent
-            Some(MeterEvent::CollectionRead {
-                tenant: tenant_id.clone(),
-                database: database_name.clone(),
-                collection_id: collection_id.0,
-                action: ReadAction::GetForDelete,
-                fts_query_length,
-                metadata_predicate_count,
-                query_embedding_count: 0,
-                pulled_log_size_bytes: get_result.pulled_log_bytes,
-                latest_collection_logical_size_bytes,
-                return_bytes,
-            })
+
+            // Attach metadata to the read context
+            chroma_metering::with_current(|context| {
+                context.fts_query_length(fts_query_length);
+                context.metadata_predicate_count(metadata_predicate_count);
+                context.query_embedding_count(0);
+                context.pulled_log_size_bytes(get_result.pulled_log_bytes);
+                context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+                context.return_bytes(return_bytes);
+            });
+
+            match chroma_metering::close::<CollectionReadContext>() {
+                Ok(collection_read_context) => {
+                    Some(MeterEvent::CollectionRead(collection_read_context))
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e);
+                    None
+                }
+            }
         } else if let Some(user_ids) = ids {
             records.extend(user_ids.into_iter().map(|id| OperationRecord {
                 id,
@@ -1013,6 +1055,19 @@ impl ServiceBasedFrontend {
         } else {
             None
         };
+
+        if let Some(event) = read_event {
+            event.submit().await;
+        }
+
+        let collection_write_context_container =
+            chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
+                tenant_id.clone(),
+                database_name.clone(),
+                collection_id.0.to_string(),
+                WriteAction::Delete,
+            ));
+        collection_write_context_container.enter();
 
         if records.is_empty() {
             tracing::debug!("Bailing because no records were found");
@@ -1032,19 +1087,22 @@ impl ServiceBasedFrontend {
                 }
             })?;
 
-        if let Some(event) = read_event {
-            event.submit().await;
-        }
+        // Attach metadata to the write context
+        chroma_metering::with_current(|context| {
+            context.log_size_bytes(log_size_bytes);
+        });
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionWrite {
-            tenant: tenant_id,
-            database: database_name,
-            collection_id: collection_id.0,
-            action: WriteAction::Delete,
-            log_size_bytes,
+        match chroma_metering::close::<CollectionWriteContext>() {
+            Ok(collection_write_context) => {
+                MeterEvent::CollectionWrite(collection_write_context)
+                    .submit()
+                    .await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+            }
         }
-        .submit()
-        .await;
 
         Ok(DeleteCollectionRecordsResponse {})
     }
@@ -1100,12 +1158,7 @@ impl ServiceBasedFrontend {
 
     pub async fn retryable_count(
         &mut self,
-        CountRequest {
-            tenant_id,
-            database_name,
-            collection_id,
-            ..
-        }: CountRequest,
+        CountRequest { collection_id, .. }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
         let collection_and_segments = self
             .collections_with_segments_provider
@@ -1124,21 +1177,29 @@ impl ServiceBasedFrontend {
             })
             .await?;
         let return_bytes = count_result.size_bytes();
+
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.fts_query_length(0);
+            context.metadata_predicate_count(0);
+            context.query_embedding_count(0);
+            context.pulled_log_size_bytes(count_result.pulled_log_bytes);
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.return_bytes(return_bytes);
+        });
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionRead {
-            tenant: tenant_id.clone(),
-            database: database_name.clone(),
-            collection_id: collection_id.0,
-            action: ReadAction::Count,
-            fts_query_length: 0,
-            metadata_predicate_count: 0,
-            query_embedding_count: 0,
-            pulled_log_size_bytes: count_result.pulled_log_bytes,
-            latest_collection_logical_size_bytes,
-            return_bytes,
+        match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                MeterEvent::CollectionRead(collection_read_context)
+                    .submit()
+                    .await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+            }
         }
-        .submit()
-        .await;
+
         Ok(count_result.count)
     }
 
@@ -1191,8 +1252,6 @@ impl ServiceBasedFrontend {
     async fn retryable_get(
         &mut self,
         GetRequest {
-            tenant_id,
-            database_name,
             collection_id,
             ids,
             r#where,
@@ -1242,21 +1301,30 @@ impl ServiceBasedFrontend {
             })
             .await?;
         let return_bytes = get_result.size_bytes();
+
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.fts_query_length(fts_query_length);
+            context.metadata_predicate_count(metadata_predicate_count);
+            context.query_embedding_count(0);
+            context.pulled_log_size_bytes(get_result.pulled_log_bytes);
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.return_bytes(return_bytes);
+            context.finish_request(Instant::now());
+        });
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionRead {
-            tenant: tenant_id.clone(),
-            database: database_name.clone(),
-            collection_id: collection_id.0,
-            action: ReadAction::Get,
-            metadata_predicate_count,
-            fts_query_length,
-            query_embedding_count: 0,
-            pulled_log_size_bytes: get_result.pulled_log_bytes,
-            latest_collection_logical_size_bytes,
-            return_bytes,
+        match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                MeterEvent::CollectionRead(collection_read_context)
+                    .submit()
+                    .await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+            }
         }
-        .submit()
-        .await;
+
         Ok((get_result, include).into())
     }
 
@@ -1309,8 +1377,6 @@ impl ServiceBasedFrontend {
     async fn retryable_query(
         &mut self,
         QueryRequest {
-            tenant_id,
-            database_name,
             collection_id,
             ids,
             r#where,
@@ -1364,21 +1430,30 @@ impl ServiceBasedFrontend {
             })
             .await?;
         let return_bytes = query_result.size_bytes();
+
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.fts_query_length(fts_query_length);
+            context.metadata_predicate_count(metadata_predicate_count);
+            context.query_embedding_count(query_embedding_count);
+            context.pulled_log_size_bytes(query_result.pulled_log_bytes);
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.return_bytes(return_bytes);
+            context.finish_request(Instant::now());
+        });
+
         // TODO: Submit event after the response is sent
-        MeterEvent::CollectionRead {
-            tenant: tenant_id.clone(),
-            database: database_name.clone(),
-            collection_id: collection_id.0,
-            action: ReadAction::Query,
-            metadata_predicate_count,
-            fts_query_length,
-            query_embedding_count,
-            pulled_log_size_bytes: query_result.pulled_log_bytes,
-            latest_collection_logical_size_bytes,
-            return_bytes,
+        match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                MeterEvent::CollectionRead(collection_read_context)
+                    .submit()
+                    .await;
+            }
+            Err(e) => {
+                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+            }
         }
-        .submit()
-        .await;
+
         Ok((query_result, include).into())
     }
 
@@ -1476,6 +1551,9 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             let handle = system.start_component(compaction_manager);
             sqlite_log
                 .init_compactor_handle(handle.clone())
+                .map_err(|e| e.boxed())?;
+            sqlite_log
+                .init_max_batch_size(max_batch_size)
                 .map_err(|e| e.boxed())?;
             registry.register(handle);
         }

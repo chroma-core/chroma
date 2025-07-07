@@ -12,8 +12,9 @@ use chroma_types::{
     operator::{Projection, ProjectionOutput, ProjectionRecord},
     Chunk, LogRecord, Segment,
 };
+use futures::future::try_join_all;
 use thiserror::Error;
-use tracing::{error, trace, Instrument, Span};
+use tracing::{error, Instrument, Span};
 
 /// The `Projection` operator retrieves record content by offset ids
 ///
@@ -68,8 +69,14 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
     type Error = ProjectionError;
 
     async fn run(&self, input: &ProjectionInput) -> Result<ProjectionOutput, ProjectionError> {
-        trace!("[{}]: {:?}", self.get_name(), input);
+        if input.offset_ids.is_empty() {
+            return Ok(ProjectionOutput { records: vec![] });
+        }
 
+        tracing::trace!(
+            "Running projection on {} offset ids",
+            input.offset_ids.len()
+        );
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
@@ -100,55 +107,59 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             })
             .collect();
 
-        let mut records = Vec::with_capacity(input.offset_ids.len());
+        let futures: Vec<_> = input
+            .offset_ids
+            .iter()
+            .map(|offset_id| async {
+                let record = match offset_id_to_log_record.get(offset_id) {
+                    // The offset id is in the log
+                    Some(log) => {
+                        let log = log
+                            .hydrate(record_segment_reader.as_ref())
+                            .await
+                            .map_err(ProjectionError::LogMaterializer)?;
 
-        for offset_id in &input.offset_ids {
-            let record = match offset_id_to_log_record.get(offset_id) {
-                // The offset id is in the log
-                Some(log) => {
-                    let log = log
-                        .hydrate(record_segment_reader.as_ref())
-                        .await
-                        .map_err(ProjectionError::LogMaterializer)?;
-
-                    ProjectionRecord {
-                        id: log.get_user_id().to_string(),
-                        document: log
-                            .merged_document_ref()
-                            .filter(|_| self.document)
-                            .map(str::to_string),
-                        embedding: self
-                            .embedding
-                            .then_some(log.merged_embeddings_ref().to_vec()),
-                        metadata: self
-                            .metadata
-                            .then_some(log.merged_metadata())
-                            .filter(|metadata| !metadata.is_empty()),
-                    }
-                }
-                // The offset id is in the record segment
-                None => {
-                    if let Some(reader) = &record_segment_reader {
-                        let record = reader
-                            .get_data_for_offset_id(*offset_id)
-                            .await?
-                            .ok_or(ProjectionError::RecordSegmentPhantomRecord(*offset_id))?;
                         ProjectionRecord {
-                            id: record.id.to_string(),
-                            document: record
-                                .document
+                            id: log.get_user_id().to_string(),
+                            document: log
+                                .merged_document_ref()
                                 .filter(|_| self.document)
                                 .map(str::to_string),
-                            embedding: self.embedding.then_some(record.embedding.to_vec()),
-                            metadata: record.metadata.filter(|_| self.metadata),
+                            embedding: self
+                                .embedding
+                                .then_some(log.merged_embeddings_ref().to_vec()),
+                            metadata: self
+                                .metadata
+                                .then_some(log.merged_metadata())
+                                .filter(|metadata| !metadata.is_empty()),
                         }
-                    } else {
-                        return Err(ProjectionError::RecordSegmentUninitialized);
                     }
-                }
-            };
-            records.push(record);
-        }
+                    // The offset id is in the record segment
+                    None => {
+                        if let Some(reader) = &record_segment_reader {
+                            let record = reader
+                                .get_data_for_offset_id(*offset_id)
+                                .await?
+                                .ok_or(ProjectionError::RecordSegmentPhantomRecord(*offset_id))?;
+                            ProjectionRecord {
+                                id: record.id.to_string(),
+                                document: record
+                                    .document
+                                    .filter(|_| self.document)
+                                    .map(str::to_string),
+                                embedding: self.embedding.then_some(record.embedding.to_vec()),
+                                metadata: record.metadata.filter(|_| self.metadata),
+                            }
+                        } else {
+                            return Err(ProjectionError::RecordSegmentUninitialized);
+                        }
+                    }
+                };
+                Ok::<_, ProjectionError>(record)
+            })
+            .collect();
+
+        let records: Vec<ProjectionRecord> = try_join_all(futures).await?;
 
         Ok(ProjectionOutput { records })
     }

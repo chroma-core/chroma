@@ -195,9 +195,10 @@ mod test {
             let read = block.get::<&str, &[u32]>("prefix", &key).unwrap();
             values_before_flush.push(read.to_vec());
         }
-        block_manager.flush(&block).await.unwrap();
+        let prefix_path = "";
+        block_manager.flush(&block, prefix_path).await.unwrap();
         let block = block_manager
-            .get(&block.id, StorageRequestPriority::P0)
+            .get(prefix_path, &block.id, StorageRequestPriority::P0)
             .await
             .unwrap()
             .unwrap();
@@ -238,10 +239,11 @@ mod test {
             let read = block.get::<&str, &str>("prefix", &key);
             values_before_flush.push(read.unwrap().to_string());
         }
-        block_manager.flush(&block).await.unwrap();
+        let prefix_path = "";
+        block_manager.flush(&block, prefix_path).await.unwrap();
 
         let block = block_manager
-            .get(&delta_id, StorageRequestPriority::P0)
+            .get(prefix_path, &delta_id, StorageRequestPriority::P0)
             .await
             .unwrap()
             .unwrap();
@@ -265,14 +267,14 @@ mod test {
 
         // test fork
         let forked_block = block_manager
-            .fork::<&str, String, UnorderedBlockDelta>(&delta_id)
+            .fork::<&str, String, UnorderedBlockDelta>(&delta_id, prefix_path)
             .await
             .unwrap();
         let new_id = forked_block.id;
         let block = block_manager.commit::<&str, String>(forked_block).await;
-        block_manager.flush(&block).await.unwrap();
+        block_manager.flush(&block, prefix_path).await.unwrap();
         let forked_block = block_manager
-            .get(&new_id, StorageRequestPriority::P0)
+            .get(prefix_path, &new_id, StorageRequestPriority::P0)
             .await
             .unwrap()
             .unwrap();
@@ -309,9 +311,10 @@ mod test {
             let read = block.get::<f32, &str>("prefix", key).unwrap();
             values_before_flush.push(read);
         }
-        block_manager.flush(&block).await.unwrap();
+        let prefix_path = "";
+        block_manager.flush(&block, prefix_path).await.unwrap();
         let block = block_manager
-            .get(&delta_id, StorageRequestPriority::P0)
+            .get(prefix_path, &delta_id, StorageRequestPriority::P0)
             .await
             .unwrap()
             .unwrap();
@@ -346,9 +349,10 @@ mod test {
         let size = delta.get_size::<&str, RoaringBitmap>();
         let delta_id = delta.id;
         let block = block_manager.commit::<&str, RoaringBitmap>(delta).await;
-        block_manager.flush(&block).await.unwrap();
+        let prefix_path = "";
+        block_manager.flush(&block, prefix_path).await.unwrap();
         let block = block_manager
-            .get(&delta_id, StorageRequestPriority::P0)
+            .get(prefix_path, &delta_id, StorageRequestPriority::P0)
             .await
             .unwrap()
             .unwrap();
@@ -415,9 +419,10 @@ mod test {
         let size = delta.get_size::<&str, &DataRecord>();
         let delta_id = delta.id;
         let block = block_manager.commit::<&str, &DataRecord>(delta).await;
-        block_manager.flush(&block).await.unwrap();
+        let prefix_path = "";
+        block_manager.flush(&block, prefix_path).await.unwrap();
         let block = block_manager
-            .get(&delta_id, StorageRequestPriority::P0)
+            .get(prefix_path, &delta_id, StorageRequestPriority::P0)
             .await
             .unwrap()
             .unwrap();
@@ -454,9 +459,10 @@ mod test {
         let size = delta.get_size::<u32, String>();
         let delta_id = delta.id;
         let block = block_manager.commit::<u32, String>(delta).await;
-        block_manager.flush(&block).await.unwrap();
+        let prefix_path = "";
+        block_manager.flush(&block, prefix_path).await.unwrap();
         let block = block_manager
-            .get(&delta_id, StorageRequestPriority::P0)
+            .get(prefix_path, &delta_id, StorageRequestPriority::P0)
             .await
             .unwrap()
             .unwrap();
@@ -493,10 +499,11 @@ mod test {
             let read = block.get::<u32, u32>("prefix", key);
             values_before_flush.push(read.unwrap().to_string());
         }
-        block_manager.flush(&block).await.unwrap();
+        let prefix_path = "";
+        block_manager.flush(&block, prefix_path).await.unwrap();
 
         let block = block_manager
-            .get(&delta_id, StorageRequestPriority::P0)
+            .get(prefix_path, &delta_id, StorageRequestPriority::P0)
             .await
             .unwrap()
             .unwrap();
@@ -520,14 +527,14 @@ mod test {
 
         // test fork
         let forked_block = block_manager
-            .fork::<u32, u32, UnorderedBlockDelta>(&delta_id)
+            .fork::<u32, u32, UnorderedBlockDelta>(&delta_id, prefix_path)
             .await
             .unwrap();
         let new_id = forked_block.id;
         let block = block_manager.commit::<u32, u32>(forked_block).await;
-        block_manager.flush(&block).await.unwrap();
+        block_manager.flush(&block, prefix_path).await.unwrap();
         let forked_block = block_manager
-            .get(&new_id, StorageRequestPriority::P0)
+            .get(prefix_path, &new_id, StorageRequestPriority::P0)
             .await
             .unwrap()
             .unwrap();

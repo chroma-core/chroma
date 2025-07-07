@@ -66,7 +66,7 @@ type ICollectionDb interface {
 		sizeBytesPostCompaction uint64, lastCompactionTimeSecs uint64, numVersions uint64) (int64, error)
 	GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*Collection, error)
 	GetCollectionSize(collectionID string) (uint64, error)
-	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*CollectionToGc, error)
+	ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*CollectionToGc, error)
 	UpdateVersionRelatedFields(collectionID, existingVersionFileName, newVersionFileName string, oldestVersionTs *time.Time, numActiveVersions *int) (int64, error)
 	LockCollection(collectionID string) (*bool, error)
 	UpdateCollectionLineageFilePath(collectionID string, currentLineageFilePath *string, newLineageFilePath string) error

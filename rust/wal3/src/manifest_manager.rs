@@ -91,8 +91,11 @@ impl Staging {
         self.last_batch = Instant::now();
         let garbage = self.garbage.take();
         let snapshot = if let Some(garbage) = garbage.as_ref() {
-            new_manifest = match new_manifest.apply_garbage(garbage.clone()) {
-                Ok(manifest) => manifest,
+            match new_manifest.apply_garbage(garbage.clone()) {
+                Ok(Some(manifest)) => new_manifest = manifest,
+                Ok(None) => {
+                    tracing::error!("given empty garbage that did not apply");
+                }
                 Err(err) => {
                     tracing::error!("could not apply garabage: {err:?}");
                     for notifier in notifiers {
@@ -142,7 +145,7 @@ impl Staging {
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
         if let Some(garbage) = self.garbage.take() {
-            let new_manifest = self.stable.manifest.apply_garbage(garbage).ok()?;
+            let new_manifest = self.stable.manifest.apply_garbage(garbage).ok()??;
             Some((
                 self.stable.manifest.clone(),
                 self.stable.e_tag.clone(),
@@ -210,6 +213,14 @@ impl ManifestManager {
             writer,
             staging,
         })
+    }
+
+    /// Signal log contention to anyone writing on the manifest.
+    pub fn shutdown(&self) {
+        let mut staging = self.staging.lock().unwrap();
+        for (_, tx) in std::mem::take(&mut staging.fragments) {
+            let _ = tx.send(Some(Error::LogContentionDurable));
+        }
     }
 
     /// Return the latest stable manifest
@@ -317,11 +328,27 @@ impl ManifestManager {
             }
             staging.garbage = Some(garbage);
         }
-        self.do_work().await
+        loop {
+            {
+                let staging = self.staging.lock().unwrap();
+                if staging.garbage.is_none() {
+                    break;
+                }
+            }
+            match self.do_work().await {
+                Ok(_) => {}
+                Err(err) => {
+                    return Err(err);
+                }
+            };
+        }
+        Ok(())
     }
 
     async fn do_work(&self) -> Result<(), Error> {
-        loop {
+        let mut iters = 0;
+        for i in 0..u64::MAX {
+            iters = i + 1;
             let work = {
                 // SAFETY(rescrv):  Mutex poisoning.
                 let mut staging = self.staging.lock().unwrap();
@@ -370,9 +397,13 @@ impl ManifestManager {
                     }
                 }
             } else {
-                break Ok(());
+                break;
             }
         }
+        if iters > 3 {
+            tracing::event!(tracing::Level::INFO, name = "do work iterated", iters =? iters);
+        }
+        Ok(())
     }
 
     pub async fn compute_garbage(
@@ -380,7 +411,7 @@ impl ManifestManager {
         options: &GarbageCollectionOptions,
         first_to_keep: LogPosition,
         cache: &dyn SnapshotCache,
-    ) -> Result<Garbage, Error> {
+    ) -> Result<Option<Garbage>, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
         let stable = {
             let staging = self.staging.lock().unwrap();

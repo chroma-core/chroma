@@ -59,6 +59,7 @@ impl TestDistributedSegment {
                 blockfile_provider,
                 garbage_collection_context: None,
                 metrics: SpannMetrics::default(),
+                pl_block_size: Some(5 * 1024 * 1024),
             },
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
@@ -74,10 +75,14 @@ impl TestDistributedSegment {
                 .await
                 .expect("Should be able to materialize log.");
 
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&self.metadata_segment, &self.blockfile_provider)
-                .await
-                .expect("Should be able to initialize metadata writer.");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &self.collection.tenant,
+            &self.collection.database_id,
+            &self.metadata_segment,
+            &self.blockfile_provider,
+        )
+        .await
+        .expect("Should be able to initialize metadata writer.");
         metadata_writer
             .apply_materialized_log_chunk(&None, &materialized_logs)
             .await
@@ -94,10 +99,14 @@ impl TestDistributedSegment {
             .await
             .expect("Should be able to flush metadata.");
 
-        let record_writer =
-            RecordSegmentWriter::from_segment(&self.record_segment, &self.blockfile_provider)
-                .await
-                .expect("Should be able to initiaize record writer.");
+        let record_writer = RecordSegmentWriter::from_segment(
+            &self.collection.tenant,
+            &self.collection.database_id,
+            &self.record_segment,
+            &self.blockfile_provider,
+        )
+        .await
+        .expect("Should be able to initiaize record writer.");
         record_writer
             .apply_materialized_log_chunk(&None, &materialized_logs)
             .await

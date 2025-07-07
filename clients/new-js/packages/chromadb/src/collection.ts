@@ -400,9 +400,11 @@ export class CollectionImpl implements Collection {
 
     await this.prepareRecords({ recordSet, maxBatchSize });
 
-    const supportsBase64Encoding = await this.chromaClient.supportsBase64Encoding();
-    const embeddingsBase64 = supportsBase64Encoding ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings) : recordSet.embeddings;
-
+    const supportsBase64Encoding =
+      await this.chromaClient.supportsBase64Encoding();
+    const embeddingsBase64 = supportsBase64Encoding
+      ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings)
+      : recordSet.embeddings;
 
     await Api.collectionAdd({
       client: this.apiClient,
@@ -541,11 +543,11 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-        collectionName: this.name,
-        currentConfiguration: this.configuration,
-        newConfiguration: configuration,
-        currentEmbeddingFunction: this.embeddingFunction,
-      })
+          collectionName: this.name,
+          currentConfiguration: this.configuration,
+          newConfiguration: configuration,
+          currentEmbeddingFunction: this.embeddingFunction,
+        })
       : {};
 
     if (updateEmbeddingFunction) {
@@ -582,7 +584,7 @@ export class CollectionImpl implements Collection {
       chromaClient: this.chromaClient,
       apiClient: this.apiClient,
       name: data.name,
-      id: data.name,
+      id: data.id,
       embeddingFunction: this._embeddingFunction,
       metadata: data.metadata ?? undefined,
       configuration: data.configuration_json,
@@ -614,8 +616,11 @@ export class CollectionImpl implements Collection {
 
     await this.prepareRecords({ recordSet, maxBatchSize, update: true });
 
-    const supportsBase64Encoding = await this.chromaClient.supportsBase64Encoding();
-    const embeddingsBase64 = supportsBase64Encoding ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings) : recordSet.embeddings;
+    const supportsBase64Encoding =
+      await this.chromaClient.supportsBase64Encoding();
+    const embeddingsBase64 = supportsBase64Encoding
+      ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings)
+      : recordSet.embeddings;
 
     await Api.collectionUpdate({
       client: this.apiClient,
@@ -654,8 +659,11 @@ export class CollectionImpl implements Collection {
     const maxBatchSize = await this.chromaClient.getMaxBatchSize();
     await this.prepareRecords({ recordSet, maxBatchSize, update: true });
 
-    const supportsBase64Encoding = await this.chromaClient.supportsBase64Encoding();
-    const embeddingsBase64 = supportsBase64Encoding ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings) : recordSet.embeddings;
+    const supportsBase64Encoding =
+      await this.chromaClient.supportsBase64Encoding();
+    const embeddingsBase64 = supportsBase64Encoding
+      ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings)
+      : recordSet.embeddings;
 
     await Api.collectionUpsert({
       client: this.apiClient,

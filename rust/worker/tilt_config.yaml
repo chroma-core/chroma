@@ -45,10 +45,10 @@ query_service:
             alt_host_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"
     dispatcher:
         num_worker_threads: 4
-        dispatcher_queue_size: 100
+        dispatcher_queue_size: 1000
         worker_queue_size: 100
-        task_queue_limit: 1000
-        active_io_tasks: 100
+        task_queue_limit: 10000
+        active_io_tasks: 10000
     blockfile_provider:
         arrow:
             block_manager_config:
@@ -125,13 +125,13 @@ compaction_service:
             alt_host_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"
     dispatcher:
         num_worker_threads: 4
-        dispatcher_queue_size: 100
+        dispatcher_queue_size: 1000
         worker_queue_size: 100
-        task_queue_limit: 1000
-        active_io_tasks: 100
+        task_queue_limit: 10000
+        active_io_tasks: 10000
     compactor:
         compaction_manager_queue_size: 1000
-        max_concurrent_jobs: 100
+        max_concurrent_jobs: 50
         compaction_interval_sec: 10
         min_compaction_size: 10
         max_compaction_size: 10000
@@ -159,6 +159,7 @@ compaction_service:
                 capacity: 8192 # 8192 MiB = 8GB
         permitted_parallelism: 180
     spann_provider:
+        pl_block_size: 5242880 # 5MiB
         pl_garbage_collection:
             enabled: true
             policy:
@@ -170,6 +171,7 @@ compaction_service:
 
 log_service:
     num_records_before_backpressure: 100000
+    reinsert_threshold: 0
     opentelemetry:
         service_name: "rust-log-service"
         endpoint: "http://otel-collector:4317"

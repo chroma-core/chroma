@@ -168,7 +168,7 @@ impl Snapshot {
         })
     }
 
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -208,7 +208,7 @@ impl Snapshot {
         }
     }
 
-    #[tracing::instrument(skip(self, storage), err(Display))]
+    #[tracing::instrument(skip(self, storage))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
@@ -625,15 +625,6 @@ impl Manifest {
         })
     }
 
-    /// Return the lowest addressable fragment sequence number.
-    pub fn oldest_fragment_seq_no(&self) -> FragmentSeqNo {
-        self.fragments
-            .iter()
-            .map(|f| f.seq_no)
-            .min()
-            .unwrap_or(self.initial_seq_no.unwrap_or(FragmentSeqNo::BEGIN))
-    }
-
     /// The next sequence number to generate, or None if the log has exhausted them.
     pub fn next_fragment_seq_no(&self) -> Option<FragmentSeqNo> {
         if let Some(max_seq_no) = self.fragments.iter().map(|f| f.seq_no).max() {
@@ -648,7 +639,7 @@ impl Manifest {
     }
 
     /// Initialize the log with an empty manifest.
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn initialize(
         options: &LogWriterOptions,
         storage: &Storage,
@@ -670,7 +661,7 @@ impl Manifest {
     }
 
     /// Initialize the log with an empty manifest.
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn initialize_from_manifest(
         _: &LogWriterOptions,
         storage: &Storage,
@@ -692,7 +683,7 @@ impl Manifest {
     }
 
     /// Load the latest manifest from object storage.
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -741,7 +732,7 @@ impl Manifest {
     }
 
     /// Install a manifest to object storage.
-    #[tracing::instrument(skip(self, storage, new), err(Display))]
+    #[tracing::instrument(skip(self, storage, new))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
@@ -810,12 +801,15 @@ impl Manifest {
 
     /// Apply the destructive operation specified by the Garbage struct.
     #[allow(clippy::result_large_err)]
-    pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Self, Error> {
+    pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Option<Self>, Error> {
         if garbage.fragments_to_drop_start > garbage.fragments_to_drop_limit {
             return Err(Error::GarbageCollection(format!(
                 "Garbage has start > limit: {:?} > {:?}",
                 garbage.fragments_to_drop_start, garbage.fragments_to_drop_limit
             )));
+        }
+        if garbage.fragments_to_drop_limit == FragmentSeqNo(0) {
+            return Ok(None);
         }
         let mut new = self.clone();
         for to_drop in garbage.snapshots_to_drop.iter() {
@@ -840,15 +834,9 @@ impl Manifest {
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);
-        if garbage.fragments_to_drop_start != FragmentSeqNo(0)
-            || garbage.fragments_to_drop_start < garbage.fragments_to_drop_limit
-        {
-            new.initial_seq_no = Some(garbage.fragments_to_drop_limit);
-        } else {
-            new.initial_seq_no = Some(FragmentSeqNo(1));
-        }
+        new.initial_seq_no = Some(garbage.fragments_to_drop_limit);
         new.scrub()?;
-        Ok(new)
+        Ok(Some(new))
     }
 }
 
@@ -1152,7 +1140,6 @@ mod tests {
         );
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
         assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
-        assert_eq!(manifest.oldest_fragment_seq_no(), FragmentSeqNo(10));
         assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
 
         let fragment = Fragment {
@@ -1185,10 +1172,6 @@ mod tests {
             manifest_with_fragment.next_fragment_seq_no(),
             Some(FragmentSeqNo(11)),
         );
-        assert_eq!(
-            manifest_with_fragment.oldest_fragment_seq_no(),
-            FragmentSeqNo(10)
-        );
     }
 
     #[test]
@@ -1208,7 +1191,6 @@ mod tests {
             manifest.next_write_timestamp(),
             LogPosition::from_offset(100)
         );
-        assert_eq!(manifest.oldest_fragment_seq_no(), FragmentSeqNo(10));
         assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
 
         let fragment = Fragment {
@@ -1232,10 +1214,6 @@ mod tests {
         assert_eq!(
             manifest_with_fragment.oldest_timestamp(),
             LogPosition::from_offset(100)
-        );
-        assert_eq!(
-            manifest_with_fragment.oldest_fragment_seq_no(),
-            FragmentSeqNo(10)
         );
         assert_eq!(
             manifest_with_fragment.next_fragment_seq_no(),
@@ -1517,7 +1495,7 @@ mod tests {
             snapshot_for_root: None,
         };
 
-        let result = manifest.apply_garbage(garbage).unwrap();
+        let result = manifest.apply_garbage(garbage).unwrap().unwrap();
 
         // When fragments_to_drop_start == fragments_to_drop_limit and both are non-zero,
         // initial_seq_no should be set to the limit value
@@ -1565,6 +1543,7 @@ mod tests {
 
         let result = manifest.apply_garbage(valid_garbage_equal);
         assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
 
         // Test case: fragments_to_drop_start < fragments_to_drop_limit should succeed
         let valid_garbage_less = Garbage {

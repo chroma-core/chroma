@@ -90,7 +90,7 @@ message UpdateCollectionLogOffsetResponse {
 }
 
 message PurgeDirtyForCollectionRequest {
-  string collection_id = 1;
+  repeated string collection_ids = 1;
 }
 
 message PurgeDirtyForCollectionResponse {
@@ -144,6 +144,16 @@ message ScrubLogResponse {
   repeated string errors = 3;
 }
 
+message GarbageCollectPhase2Request {
+  oneof log_to_collect {
+    string collection_id = 1;
+    string dirty_log = 2;
+  };
+}
+
+message GarbageCollectPhase2Response {
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
@@ -163,4 +173,6 @@ service LogService {
   rpc InspectLogState(InspectLogStateRequest) returns (InspectLogStateResponse) {}
   // This endpoint should route to the rust log service.
   rpc ScrubLog(ScrubLogRequest) returns (ScrubLogResponse) {}
+  // This endpoint should route to the rust log service.
+  rpc GarbageCollectPhase2(GarbageCollectPhase2Request) returns (GarbageCollectPhase2Response) {}
 }

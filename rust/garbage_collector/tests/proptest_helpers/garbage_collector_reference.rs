@@ -11,14 +11,15 @@
  */
 use super::proptest_types::Transition;
 use super::segment_file_strategies::SegmentGroup;
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, DatabaseUuid};
 use petgraph::graph::{DiGraph, NodeIndex};
-use proptest::prelude::{any, BoxedStrategy};
+use proptest::prelude::{any, any_with, BoxedStrategy};
 use proptest::strategy::Strategy;
 use proptest::{prelude::Just, prop_oneof};
 use proptest_state_machine::ReferenceStateMachine;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
+use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CollectionStatus {
@@ -73,6 +74,9 @@ impl CollectionVersionGraphNode {
 pub struct ReferenceState {
     pub runtime: Arc<tokio::runtime::Runtime>,
     pub collection_status: HashMap<CollectionUuid, CollectionStatus>,
+    pub tenant: String,
+    pub db_name: String,
+    pub db_id: DatabaseUuid,
     version_graph: DiGraph<CollectionVersionGraphNode, ()>,
     root_collection_id: Option<CollectionUuid>,
 }
@@ -196,9 +200,17 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
             .get_or_init(|| Arc::new(tokio::runtime::Runtime::new().unwrap()))
             .clone();
 
+        let tenant_id = Uuid::new_v4();
+        let tenant_name = format!("test_tenant_{}", tenant_id);
+        let database_id = Uuid::new_v4();
+        let database_name = format!("test_database_{}", database_id);
+
         Just(ReferenceState {
             runtime,
             version_graph: DiGraph::new(),
+            tenant: tenant_name,
+            db_name: database_name,
+            db_id: DatabaseUuid(database_id),
             collection_status: HashMap::new(),
             root_collection_id: None,
         })
@@ -227,10 +239,11 @@ impl ReferenceStateMachine for ReferenceGarbageCollector {
 
         let create_collection_id = CollectionUuid::new();
         let create_collection_transition =
-            any::<SegmentGroup>().prop_map(move |segment_group| Transition::CreateCollection {
-                collection_id: create_collection_id,
-                segments: segment_group,
-            });
+            any_with::<SegmentGroup>((state.tenant.clone(), state.db_id, create_collection_id))
+                .prop_map(move |segment_group| Transition::CreateCollection {
+                    collection_id: create_collection_id,
+                    segments: segment_group,
+                });
 
         let _delete_collection_transition = alive_collection_id_strategy
             .clone()

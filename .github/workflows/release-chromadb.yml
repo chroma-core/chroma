@@ -53,9 +53,11 @@ jobs:
     uses: ./.github/workflows/_python-tests.yml
     secrets: inherit
     with:
-      python_versions: '["3.9", "3.10", "3.11", "3.12"]'
+      # we only run windows tests on 3.12 because windows runners are expensive
+      # and we usually don't see failures that are isolated to a specific version
+      python_versions: '["3.12"]'
       property_testing_preset: 'normal'
-      runner: '16core-64gb-windows-latest'
+      runner: '8core-64gb-windows-latest'
 
   javascript-client-tests:
     name: JavaScript client tests
@@ -205,36 +207,25 @@ jobs:
           removeArtifacts: true
           prerelease: true
 
-  release-hosted:
-    name: Release to Chroma Cloud
-    runs-on: blacksmith-4vcpu-ubuntu-2204
+  release-hosted-control-plane:
+    name: Release to Chroma Cloud control plane
+    # depends on release-github because it updates the tag to latest, which is what will get deployed
     needs:
       - release-github
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Dispatch deploy
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN }}
-          script: |
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: 'chroma-core',
-              repo: 'hosted-chroma',
-              workflow_id: 'deploy.yaml',
-              ref: 'main',
-              inputs: {
-                // We intentionally *do not* provide the current commit SHA of chroma-core/chroma here. The workflow we dispatch defaults to the commit tagged with "latest" (which we update above).
-                // If we provided the current commit here, there's a potential race condition:
-                // - Commit history is A -> B
-                // - This CI workflow runs on both commits, but the second commit finishes first
-                // - B is deployed to Chroma Cloud
-                // - This workflow finishes for A and deploys A to Chroma Cloud
-                // Chroma Cloud is now running A, but the last commit was B.
-                "environment": "staging",
-                "planes": "control,data"
-              }
-            })
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      plane: control
+    secrets: inherit
+
+  release-hosted-data-plane:
+    name: Release to Chroma Cloud data plane
+    # depends on release-github because it updates the tag to latest, which is what will get deployed
+    needs:
+      - release-github
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      plane: data
+    secrets: inherit
 
   release-docs:
     name: Deploy docs to Vercel

@@ -9,8 +9,19 @@
     "skipLibCheck": true,
     "declaration": true,
     "outDir": "dist",
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "composite": true
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "**/*.test.ts"]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../common"
+    }
+  ]
 }

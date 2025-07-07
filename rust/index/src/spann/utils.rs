@@ -538,6 +538,7 @@ pub async fn rng_query(
         let allowed_ids = vec![];
         let disallowed_ids = vec![];
         let (ids, distances) = read_guard
+            .hnsw_index
             .query(normalized_query, k, &allowed_ids, &disallowed_ids)
             .map_err(|_| RngQueryError::HnswSearchError)?;
         for (id, distance) in ids.iter().zip(distances.iter()) {
@@ -549,6 +550,7 @@ pub async fn rng_query(
         // Get the embeddings also for distance computation.
         for id in nearby_ids.iter() {
             let emb = read_guard
+                .hnsw_index
                 .get(*id)
                 .map_err(|_| RngQueryError::HnswSearchError)?
                 .ok_or(RngQueryError::HnswSearchError)?;

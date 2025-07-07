@@ -139,10 +139,25 @@ impl SysDb {
 
     pub async fn get_collections(
         &mut self,
-        options: GetCollectionsOptions,
+        mut options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections(options).await,
+            SysDb::Grpc(grpc) => {
+                // TODO(c-gamble): Move this to config
+                let max_get_collections_limit = 100u32;
+                match options.limit {
+                    Some(limit) => {
+                        if limit > max_get_collections_limit {
+                            return Err(GetCollectionsError::MaximumLimitExceeded(
+                                limit,
+                                max_get_collections_limit,
+                            ));
+                        }
+                    }
+                    None => options.limit = Some(max_get_collections_limit),
+                }
+                grpc.get_collections(options).await
+            }
             SysDb::Sqlite(sqlite) => sqlite.get_collections(options).await,
             SysDb::Test(test) => test.get_collections(options).await,
         }
@@ -384,9 +399,13 @@ impl SysDb {
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
         tenant: Option<String>,
+        min_versions_if_alive: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit, tenant).await,
+            SysDb::Grpc(grpc) => {
+                grpc.get_collections_to_gc(cutoff_time, limit, tenant, min_versions_if_alive)
+                    .await
+            }
             SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
@@ -461,12 +480,12 @@ impl SysDb {
 
     pub async fn get_last_compaction_time(
         &mut self,
-        tanant_ids: Vec<String>,
+        tenant_ids: Vec<String>,
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tanant_ids).await,
+            SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tenant_ids).await,
             SysDb::Sqlite(_) => todo!(),
-            SysDb::Test(test) => test.get_last_compaction_time(tanant_ids).await,
+            SysDb::Test(test) => test.get_last_compaction_time(tenant_ids).await,
         }
     }
 
@@ -1124,6 +1143,7 @@ impl GrpcSysDb {
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
         tenant: Option<String>,
+        min_versions_if_alive: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
@@ -1131,6 +1151,7 @@ impl GrpcSysDb {
                 cutoff_time: cutoff_time.map(|t| t.into()),
                 limit,
                 tenant_id: tenant,
+                min_versions_if_alive,
             })
             .await;
 

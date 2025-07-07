@@ -47,7 +47,7 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
         )
         .await
         .unwrap();
-    log.garbage_collect(&GarbageCollectionOptions::default())
+    log.garbage_collect(&GarbageCollectionOptions::default(), None)
         .await
         .unwrap();
 
@@ -94,10 +94,6 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
     assert_eq!(
         before_mani.next_write_timestamp(),
         after_mani.next_write_timestamp()
-    );
-    assert_eq!(
-        before_mani.oldest_fragment_seq_no(),
-        after_mani.oldest_fragment_seq_no()
     );
     assert_eq!(
         before_mani.next_fragment_seq_no(),

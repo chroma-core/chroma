@@ -4,6 +4,10 @@ use super::OneOffCompactMessage;
 use super::RebuildMessage;
 use crate::compactor::types::ScheduledCompactMessage;
 use crate::config::CompactionServiceConfig;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogError;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogInput;
+use crate::execution::operators::purge_dirty_log::PurgeDirtyLogOutput;
 use crate::execution::orchestration::CompactOrchestrator;
 use crate::execution::orchestration::CompactionResponse;
 use async_trait::async_trait;
@@ -18,18 +22,26 @@ use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
+use chroma_system::wrap;
 use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
+use chroma_system::TaskResult;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
 use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
+use futures::FutureExt;
 use futures::StreamExt;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::future::Future;
+use std::panic::AssertUnwindSafe;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::select;
+use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tracing::instrument;
 use tracing::span;
@@ -37,9 +49,17 @@ use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
-pub(crate) struct CompactionManager {
+type BoxedFuture =
+    Pin<Box<dyn Future<Output = Result<CompactionResponse, Box<dyn ChromaError>>> + Send>>;
+
+struct CompactionTask {
+    collection_id: CollectionUuid,
+    future: BoxedFuture,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompactionManagerContext {
     system: System,
-    scheduler: Scheduler,
     // Dependencies
     log: Log,
     sysdb: SysDb,
@@ -58,6 +78,15 @@ pub(crate) struct CompactionManager {
     max_compaction_size: usize,
     max_partition_size: usize,
     fetch_log_batch_size: u32,
+    purge_dirty_log_timeout_seconds: u64,
+}
+
+pub(crate) struct CompactionManager {
+    scheduler: Scheduler,
+    context: CompactionManagerContext,
+    compact_awaiter_channel: mpsc::Sender<CompactionTask>,
+    compact_awaiter_completion_channel: mpsc::UnboundedReceiver<CompactionResponse>,
+    compact_awaiter: tokio::task::JoinHandle<()>,
     on_next_memberlist_signal: Option<oneshot::Sender<()>>,
 }
 
@@ -92,33 +121,147 @@ impl CompactionManager {
         max_compaction_size: usize,
         max_partition_size: usize,
         fetch_log_batch_size: u32,
+        purge_dirty_log_timeout_seconds: u64,
     ) -> Self {
+        let (compact_awaiter_tx, compact_awaiter_rx) =
+            mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
+
+        // Using unbounded channel for the completion channel as its size
+        // is bounded by max_concurrent_jobs. It's far more important for the
+        // completion channel to not block or drop messages.
+        let (completion_tx, completion_rx) = mpsc::unbounded_channel::<CompactionResponse>();
+        let compact_awaiter = tokio::spawn(async {
+            compact_awaiter_loop(compact_awaiter_rx, completion_tx).await;
+        });
         CompactionManager {
-            system,
             scheduler,
-            log,
-            sysdb,
-            storage,
-            blockfile_provider,
-            hnsw_index_provider,
-            spann_provider,
-            dispatcher: None,
-            compaction_manager_queue_size,
-            compaction_interval,
-            min_compaction_size,
-            max_compaction_size,
-            max_partition_size,
+            context: CompactionManagerContext {
+                system,
+                log,
+                sysdb,
+                storage,
+                blockfile_provider,
+                hnsw_index_provider,
+                spann_provider,
+                dispatcher: None,
+                compaction_manager_queue_size,
+                compaction_interval,
+                min_compaction_size,
+                max_compaction_size,
+                max_partition_size,
+                fetch_log_batch_size,
+                purge_dirty_log_timeout_seconds,
+            },
             on_next_memberlist_signal: None,
-            fetch_log_batch_size,
+            compact_awaiter_channel: compact_awaiter_tx,
+            compact_awaiter_completion_channel: completion_rx,
+            compact_awaiter,
         }
     }
 
-    #[instrument(name = "CompactionManager::compact")]
+    #[instrument(name = "CompactionManager::start_compaction_batch", skip(self))]
+    async fn start_compaction_batch(&mut self) {
+        self.process_completions();
+        let compact_awaiter_channel = &self.compact_awaiter_channel;
+        self.scheduler.schedule().await;
+        let jobs_iter = self.scheduler.get_jobs();
+        for job in jobs_iter {
+            let instrumented_span = span!(
+                parent: None,
+                tracing::Level::INFO,
+                "Compacting job",
+                collection_id = ?job.collection_id
+            );
+            instrumented_span.follows_from(Span::current());
+            let future = self
+                .context
+                .clone()
+                .compact(job.collection_id, false)
+                .instrument(instrumented_span);
+            compact_awaiter_channel
+                .send(CompactionTask {
+                    collection_id: job.collection_id,
+                    future: Box::pin(future),
+                })
+                .await
+                .unwrap();
+        }
+    }
+
+    #[instrument(name = "CompactionManager::rebuild_batch", skip(self))]
+    pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
+        let _ = collection_ids
+            .iter()
+            .map(|id| self.context.clone().compact(*id, true))
+            .collect::<FuturesUnordered<_>>()
+            .collect::<Vec<_>>()
+            .await;
+    }
+
+    #[instrument(name = "CompactionManager::purge_dirty_log", skip(ctx))]
+    pub(crate) async fn purge_dirty_log(&mut self, ctx: &ComponentContext<Self>) {
+        let deleted_collection_uuids = self.scheduler.drain_deleted_collections();
+        if deleted_collection_uuids.is_empty() {
+            tracing::info!("Skipping purge dirty log because there is no deleted collections");
+            return;
+        }
+        let purge_dirty_log = PurgeDirtyLog {
+            log_client: self.context.log.clone(),
+            timeout: Duration::from_secs(self.context.purge_dirty_log_timeout_seconds),
+        };
+        let purge_dirty_log_input = PurgeDirtyLogInput {
+            collection_uuids: deleted_collection_uuids.clone(),
+        };
+        let purge_dirty_log_task = wrap(
+            Box::new(purge_dirty_log),
+            purge_dirty_log_input,
+            ctx.receiver(),
+        );
+        let Some(mut dispatcher) = self.context.dispatcher.clone() else {
+            tracing::error!("Unable to create background task to purge dirty log: Dispatcher is not set for compaction manager");
+            return;
+        };
+        if let Err(err) = dispatcher
+            .send(purge_dirty_log_task, Some(Span::current()))
+            .await
+        {
+            tracing::error!("Unable to create background task to purge dirty log: {err}");
+            return;
+        };
+        tracing::info!(
+            "Purging dirty logs for deleted collections: [{deleted_collection_uuids:?}]",
+        );
+    }
+
+    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
+        self.context.dispatcher = Some(dispatcher);
+    }
+
+    fn process_completions(&mut self) -> Vec<CompactionResponse> {
+        let compact_awaiter_completion_channel = &mut self.compact_awaiter_completion_channel;
+        let mut completed_collections = Vec::new();
+        while let Ok(resp) = compact_awaiter_completion_channel.try_recv() {
+            self.scheduler.complete_collection(resp.collection_id);
+            completed_collections.push(resp);
+        }
+        completed_collections
+    }
+}
+
+impl Drop for CompactionManager {
+    fn drop(&mut self) {
+        self.compact_awaiter.abort();
+    }
+}
+
+impl CompactionManagerContext {
+    #[instrument(name = "CompactionManager::compact", skip(self))]
     async fn compact(
-        &self,
+        self,
         collection_id: CollectionUuid,
         rebuild: bool,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
+        tracing::info!("Compacting collection: {}", collection_id);
         let dispatcher = match self.dispatcher {
             Some(ref dispatcher) => dispatcher.clone(),
             None => {
@@ -152,52 +295,6 @@ impl CompactionManager {
                 return Err(Box::new(e));
             }
         }
-    }
-
-    #[instrument(name = "CompactionManager::compact_batch")]
-    pub(crate) async fn compact_batch(&mut self) -> Vec<CollectionUuid> {
-        self.scheduler.schedule().await;
-        let job_futures = self
-            .scheduler
-            .get_jobs()
-            .map(|job| {
-                let instrumented_span = span!(parent: None, tracing::Level::INFO, "Compacting job", collection_id = ?job.collection_id);
-                instrumented_span.follows_from(Span::current());
-                self.compact(job.collection_id, false).instrument(instrumented_span)
-            })
-            .collect::<FuturesUnordered<_>>();
-
-        tracing::info!("Running {} compaction jobs", job_futures.len());
-
-        job_futures
-            .filter_map(|result| async move {
-                match result {
-                    Ok(response) => {
-                        tracing::info!("Compaction completed: {response:?}");
-                        Some(response.collection_id)
-                    }
-                    Err(err) => {
-                        tracing::error!("Compaction failed {err}");
-                        None
-                    }
-                }
-            })
-            .collect()
-            .await
-    }
-
-    #[instrument(name = "CompactionManager::rebuild_batch")]
-    pub(crate) async fn rebuild_batch(&mut self, collection_ids: Vec<CollectionUuid>) {
-        let _ = collection_ids
-            .iter()
-            .map(|id| self.compact(*id, true))
-            .collect::<FuturesUnordered<_>>()
-            .collect::<Vec<_>>()
-            .await;
-    }
-
-    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
-        self.dispatcher = Some(dispatcher);
     }
 }
 
@@ -240,6 +337,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let max_compaction_size = config.compactor.max_compaction_size;
         let max_partition_size = config.compactor.max_partition_size;
         let fetch_log_batch_size = config.compactor.fetch_log_batch_size;
+        let purge_dirty_log_timeout_seconds = config.compactor.purge_dirty_log_timeout_seconds;
         let mut disabled_collections =
             HashSet::with_capacity(config.compactor.disabled_collections.len());
         for collection_id_str in &config.compactor.disabled_collections {
@@ -250,6 +348,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(assignment_policy_config, registry)
                 .await?;
+        let job_expiry_seconds = config.compactor.job_expiry_seconds;
         let scheduler = Scheduler::new(
             my_ip,
             log.clone(),
@@ -259,6 +358,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             min_compaction_size,
             assignment_policy,
             disabled_collections,
+            job_expiry_seconds,
         );
 
         let blockfile_provider = BlockfileProvider::try_from_config(
@@ -298,7 +398,38 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             max_compaction_size,
             max_partition_size,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         ))
+    }
+}
+
+async fn compact_awaiter_loop(
+    mut job_rx: mpsc::Receiver<CompactionTask>,
+    completion_tx: mpsc::UnboundedSender<CompactionResponse>,
+) {
+    let mut futures = FuturesUnordered::new();
+    loop {
+        select! {
+            Some(job) = job_rx.recv() => {
+                futures.push(async move {
+                    let _ = AssertUnwindSafe(job.future).catch_unwind().await;
+                    CompactionResponse {
+                        collection_id: job.collection_id,
+                    }
+                });
+            }
+            Some(compaction_response) = futures.next() => {
+                match completion_tx.send(compaction_response) {
+                    Ok(_) => {},
+                    Err(_) => {
+                        tracing::error!("Failed to send compaction response");
+                    }
+                }
+            }
+            else => {
+                break;
+            }
+        }
     }
 }
 
@@ -310,14 +441,14 @@ impl Component for CompactionManager {
     }
 
     fn queue_size(&self) -> usize {
-        self.compaction_manager_queue_size
+        self.context.compaction_manager_queue_size
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) -> () {
         tracing::info!("Starting CompactionManager");
         ctx.scheduler.schedule(
             ScheduledCompactMessage {},
-            self.compaction_interval,
+            self.context.compaction_interval,
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
         );
@@ -341,12 +472,13 @@ impl Handler<ScheduledCompactMessage> for CompactionManager {
         ctx: &ComponentContext<CompactionManager>,
     ) {
         tracing::info!("CompactionManager: Performing scheduled compaction");
-        let _ = self.compact_batch().await;
+        let _ = self.start_compaction_batch().await;
+        self.purge_dirty_log(ctx).await;
 
-        // Compaction is done, schedule the next compaction
+        // Compactions are kicked off, schedule the next compaction
         ctx.scheduler.schedule(
             ScheduledCompactMessage {},
-            self.compaction_interval,
+            self.context.compaction_interval,
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
         );
@@ -382,7 +514,11 @@ impl Handler<RebuildMessage> for CompactionManager {
             "Rebuild started for collections: {:?}",
             message.collection_ids
         );
-        self.rebuild_batch(message.collection_ids).await;
+        self.rebuild_batch(&message.collection_ids).await;
+        tracing::info!(
+            "Rebuild completed for collections: {:?}",
+            message.collection_ids
+        );
     }
 }
 
@@ -396,6 +532,21 @@ impl Handler<Memberlist> for CompactionManager {
             if let Err(e) = on_next_memberlist_update.send(()) {
                 tracing::error!("Failed to send on_next_memberlist_update: {:?}", e);
             }
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: TaskResult<PurgeDirtyLogOutput, PurgeDirtyLogError>,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        if let Err(err) = message.into_inner() {
+            tracing::error!("Error when purging dirty log: {err}");
         }
     }
 }
@@ -450,7 +601,7 @@ mod tests {
     use std::path::{Path, PathBuf};
     use tokio::fs;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_compaction_manager() {
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
@@ -618,6 +769,8 @@ mod tests {
         let max_compaction_size = 1000;
         let max_partition_size = 1000;
         let fetch_log_batch_size = 100;
+        let purge_dirty_log_timeout_seconds = 60;
+        let job_expiry_seconds = 3600;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
@@ -632,6 +785,7 @@ mod tests {
             min_compaction_size,
             assignment_policy,
             HashSet::new(),
+            job_expiry_seconds,
         );
         // Set memberlist
         scheduler.set_memberlist(vec![my_member.clone()]);
@@ -665,6 +819,7 @@ mod tests {
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: Some(gc_context),
             metrics: SpannMetrics::default(),
+            pl_block_size: Some(5 * 1024 * 1024),
         };
         let system = System::new();
         let mut manager = CompactionManager::new(
@@ -682,6 +837,7 @@ mod tests {
             max_compaction_size,
             max_partition_size,
             fetch_log_batch_size,
+            purge_dirty_log_timeout_seconds,
         );
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
@@ -693,11 +849,27 @@ mod tests {
         });
         let dispatcher_handle = system.start_component(dispatcher);
         manager.set_dispatcher(dispatcher_handle);
-        let compacted = manager.compact_batch().await;
-        assert!(
-            (compacted == vec![collection_uuid_1, collection_uuid_2])
-                || (compacted == vec![collection_uuid_2, collection_uuid_1])
-        );
+        manager.start_compaction_batch().await;
+
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(10);
+        let expected_compactions = HashSet::from([collection_uuid_1, collection_uuid_2]);
+
+        let mut completed_compactions = HashSet::new();
+
+        while completed_compactions.len() < expected_compactions.len() && start.elapsed() < timeout
+        {
+            let completed = manager.process_completions();
+            completed_compactions.extend(
+                completed
+                    .iter()
+                    .map(|c| c.collection_id)
+                    .collect::<Vec<CollectionUuid>>(),
+            );
+        }
+
+        assert_eq!(completed_compactions, expected_compactions);
+
         check_purge_successful(tmpdir.path()).await;
     }
 
@@ -709,11 +881,7 @@ mod tests {
             let metadata = entry.metadata().await.expect("Failed to read metadata");
 
             if metadata.is_dir() {
-                assert!(
-                    path.ends_with("hnsw")
-                        || path.ends_with("block")
-                        || path.ends_with("sparse_index")
-                );
+                assert!(path.ends_with("tenant"));
             } else {
                 panic!("Expected hnsw purge to be successful")
             }

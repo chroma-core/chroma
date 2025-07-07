@@ -11,7 +11,7 @@ use chroma_storage::{
 
 use crate::manifest::unprefixed_snapshot_path;
 use crate::{
-    deserialize_setsum, serialize_setsum, unprefixed_fragment_path, Error, Fragment, FragmentSeqNo,
+    deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment, FragmentSeqNo,
     LogPosition, Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
@@ -61,7 +61,7 @@ impl Garbage {
         throttle: &ThrottleOptions,
         snapshots: &dyn SnapshotCache,
         first_to_keep: LogPosition,
-    ) -> Result<Self, Error> {
+    ) -> Result<Option<Self>, Error> {
         let dropped_snapshots = manifest
             .snapshots
             .iter()
@@ -119,10 +119,14 @@ impl Garbage {
                 "setsums don't balance".to_string(),
             ))));
         }
-        Ok(ret)
+        if !first {
+            Ok(Some(ret))
+        } else {
+            Ok(None)
+        }
     }
 
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -161,7 +165,7 @@ impl Garbage {
         }
     }
 
-    #[tracing::instrument(skip(self, storage), err(Display))]
+    #[tracing::instrument(skip(self, storage))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
@@ -173,7 +177,7 @@ impl Garbage {
         Self::transition(options, storage, prefix, existing, self).await
     }
 
-    #[tracing::instrument(skip(self, storage), err(Display))]
+    #[tracing::instrument(skip(self, storage))]
     pub async fn reset(
         &self,
         options: &ThrottleOptions,
@@ -181,7 +185,6 @@ impl Garbage {
         prefix: &str,
         existing: &ETag,
     ) -> Result<Option<ETag>, Error> {
-        self.install_new_snapshots(storage, prefix, options).await?;
         match Self::transition(options, storage, prefix, Some(existing), &Self::empty()).await {
             Ok(e_tag) => Ok(e_tag),
             Err(Error::LogContentionFailure) => Ok(None),
@@ -235,19 +238,16 @@ impl Garbage {
     }
 
     pub fn prefixed_paths_to_delete(&self, prefix: &str) -> impl Iterator<Item = String> {
+        let prefix = Arc::new(prefix.to_string());
         let mut paths = vec![];
         for snap in self.snapshots_to_drop.iter() {
             paths.push(format!("{}/{}", prefix, snap.path_to_snapshot));
         }
-        // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
-        for seq_no in self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0 {
-            paths.push(format!(
-                "{}/{}",
-                prefix,
-                unprefixed_fragment_path(FragmentSeqNo(seq_no))
-            ));
-        }
-        paths.into_iter()
+        paths.into_iter().chain(
+            (self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0)
+                .map(move |seq_no| (seq_no, Arc::clone(&prefix)))
+                .map(|(seq_no, prefix)| prefixed_fragment_path(&prefix, FragmentSeqNo(seq_no))),
+        )
     }
 
     pub async fn install_new_snapshots(

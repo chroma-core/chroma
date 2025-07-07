@@ -1,4 +1,6 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, SystemTime};
+
 use std::str::FromStr;
 
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
@@ -14,6 +16,24 @@ use uuid::Uuid;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
 use crate::compactor::types::CompactionJob;
 
+struct InProgressJob {
+    _collection_id: CollectionUuid,
+    expires_at: SystemTime,
+}
+
+impl InProgressJob {
+    fn new(collection_id: CollectionUuid, job_expiry_seconds: u64) -> Self {
+        Self {
+            _collection_id: collection_id,
+            expires_at: SystemTime::now() + Duration::from_secs(job_expiry_seconds),
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        SystemTime::now() >= self.expires_at
+    }
+}
+
 pub(crate) struct Scheduler {
     my_member_id: String,
     log: Log,
@@ -26,6 +46,9 @@ pub(crate) struct Scheduler {
     assignment_policy: Box<dyn AssignmentPolicy>,
     oneoff_collections: HashSet<CollectionUuid>,
     disabled_collections: HashSet<CollectionUuid>,
+    deleted_collections: HashSet<CollectionUuid>,
+    in_progress_jobs: HashMap<CollectionUuid, InProgressJob>,
+    job_expiry_seconds: u64,
 }
 
 #[derive(Deserialize, Debug)]
@@ -44,6 +67,7 @@ impl Scheduler {
         min_compaction_size: usize,
         assignment_policy: Box<dyn AssignmentPolicy>,
         disabled_collections: HashSet<CollectionUuid>,
+        job_expiry_seconds: u64,
     ) -> Scheduler {
         Scheduler {
             my_member_id: my_ip,
@@ -57,6 +81,9 @@ impl Scheduler {
             assignment_policy,
             oneoff_collections: HashSet::new(),
             disabled_collections,
+            deleted_collections: HashSet::new(),
+            in_progress_jobs: HashMap::new(),
+            job_expiry_seconds,
         }
     }
 
@@ -68,6 +95,10 @@ impl Scheduler {
         self.oneoff_collections.iter().cloned().collect()
     }
 
+    pub(crate) fn drain_deleted_collections(&mut self) -> Vec<CollectionUuid> {
+        self.deleted_collections.drain().collect()
+    }
+
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
         let collections = self
             .log
@@ -75,7 +106,10 @@ impl Scheduler {
             .await;
 
         match collections {
-            Ok(collections) => collections,
+            Ok(collections) => {
+                tracing::info!("Collections with new data: {collections:?}");
+                collections
+            }
             Err(e) => {
                 tracing::error!("Error: {:?}", e);
                 Vec::new()
@@ -111,24 +145,8 @@ impl Scheduler {
             match result {
                 Ok(collection) => {
                     if collection.is_empty() {
-                        tracing::info!(
-                            "Collection not found, purging: {:?}",
-                            collection_info.collection_id
-                        );
-                        if let Err(err) = self
-                            .log
-                            .purge_dirty_for_collection(collection_info.collection_id)
-                            .await
-                        {
-                            // NOTE(rescrv):  This is something we ideally want to know about, but
-                            // cannot act on except to skip the collection.  Some day we'll have
-                            // something by which we can say, "Watch for this condition."
-                            tracing::warn!(
-                                "Error purging dirty records for collection: {:?}, error: {:?}",
-                                collection_info.collection_id,
-                                err
-                            );
-                        }
+                        self.deleted_collections
+                            .insert(collection_info.collection_id);
                         continue;
                     }
 
@@ -226,6 +244,13 @@ impl Scheduler {
         self.job_queue.clear();
         let mut scheduled_collections = Vec::new();
         for record in collection_records {
+            if self.is_job_in_progress(&record.collection_id) {
+                tracing::info!(
+                    "Compaction for {} is already in progress, skipping",
+                    record.collection_id
+                );
+                continue;
+            }
             if self.oneoff_collections.contains(&record.collection_id) {
                 tracing::info!(
                     "Creating one-off compaction job for collection: {}",
@@ -239,6 +264,13 @@ impl Scheduler {
                     return;
                 }
             } else {
+                if self.in_progress_jobs.len() >= self.max_concurrent_jobs {
+                    tracing::info!(
+                        "Max concurrent jobs reached, skipping compaction for {}",
+                        record.collection_id
+                    );
+                    return;
+                }
                 scheduled_collections.push(record);
             }
         }
@@ -248,7 +280,42 @@ impl Scheduler {
             self.policy
                 .determine(filtered_collections, self.max_concurrent_jobs as i32),
         );
-        self.job_queue.truncate(self.max_concurrent_jobs);
+        self.job_queue
+            .truncate(self.max_concurrent_jobs - self.in_progress_jobs.len());
+
+        // At this point, nobody should modify the job queue and every collection
+        // in the job queue will definitely be compacted. It is now safe to add
+        // them to the in-progress set.
+        let job_ids: Vec<_> = self.job_queue.iter().map(|j| j.collection_id).collect();
+        for collection_id in job_ids {
+            self.add_in_progress(collection_id);
+        }
+    }
+
+    fn is_job_in_progress(&mut self, collection_id: &CollectionUuid) -> bool {
+        match self.in_progress_jobs.get(collection_id) {
+            Some(job) if job.is_expired() => {
+                tracing::info!(
+                    "Compaction for {} is expired, removing from dedup set.",
+                    collection_id
+                );
+                self.in_progress_jobs.remove(collection_id);
+                false
+            }
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    fn add_in_progress(&mut self, collection_id: CollectionUuid) {
+        self.in_progress_jobs.insert(
+            collection_id,
+            InProgressJob::new(collection_id, self.job_expiry_seconds),
+        );
+    }
+
+    pub(crate) fn complete_collection(&mut self, collection_id: CollectionUuid) {
+        self.in_progress_jobs.remove(&collection_id);
     }
 
     pub(crate) fn recompute_disabled_collections(&mut self) {
@@ -422,6 +489,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
+            3600, // job_expiry_seconds
         );
         // Scheduler does nothing without memberlist
         scheduler.schedule().await;
@@ -443,6 +511,7 @@ mod tests {
         // Scheduler ignores collection that failed to fetch last compaction time
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_id, collection_uuid_1,);
+        scheduler.complete_collection(collection_uuid_1);
 
         // Add last compaction time for tenant_2
         match sysdb {
@@ -459,6 +528,8 @@ mod tests {
         assert_eq!(jobs.len(), 2);
         assert_eq!(jobs[0].collection_id, collection_uuid_2,);
         assert_eq!(jobs[1].collection_id, collection_uuid_1,);
+        scheduler.complete_collection(collection_uuid_1);
+        scheduler.complete_collection(collection_uuid_2);
 
         // Set disable list.
         std::env::set_var(
@@ -470,6 +541,7 @@ mod tests {
         let jobs = jobs.collect::<Vec<&CompactionJob>>();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_id, collection_uuid_2,);
+        scheduler.complete_collection(collection_uuid_2);
         std::env::set_var(
             "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
             "[]",
@@ -488,6 +560,7 @@ mod tests {
         let jobs = jobs.collect::<Vec<&CompactionJob>>();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_id, collection_uuid_1,);
+        scheduler.complete_collection(collection_uuid_1);
         std::env::set_var(
             "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
             "[]",
@@ -642,6 +715,7 @@ mod tests {
             1,
             assignment_policy,
             HashSet::new(),
+            3600, // job_expiry_seconds
         );
 
         scheduler.set_memberlist(vec![my_member.clone()]);
