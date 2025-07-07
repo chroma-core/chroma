@@ -1,12 +1,3 @@
----
-{
-  "id": "about",
-  "title": "About",
-  "section": "Overview",
-  "order": 4
-}
----
-
 # About
 
 {% Banner type="tip" title="We are hiring" %}

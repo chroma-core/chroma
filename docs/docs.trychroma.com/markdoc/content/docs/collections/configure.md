@@ -144,14 +144,12 @@ The SPANN index parameters include:
 | Inner product     |   `ip`    |                                                                                     {% Latex %} d = 1.0 - \\sum\\left(A_i \\times B_i\\right) {% /Latex %} |             focuses on vector alignment and magnitude, often used for recommendation systems where larger values indicate stronger preferences              |
 | Cosine similarity | `cosine`  | {% Latex %} d = 1.0 - \\frac{\\sum\\left(A_i \\times B_i\\right)}{\\sqrt{\\sum\\left(A_i^2\\right)} \\cdot \\sqrt{\\sum\\left(B_i^2\\right)}} {% /Latex %} | measures only the angle between vectors (ignoring magnitude), making it ideal for text embeddings or cases where you care about direction rather than scale |
 
-* `search_nprobe`: The default value is 64. 
-* `write_nprobe`: The default value is 64. 
-* `ef_construction`: The default value is 200. 
-* `ef_search`: The default value is 200. 
-* `max_neighbors`: The default value is 64. 
-* `reassign_neighbor_count`: The default value is 64. 
-* `split_threshold`: The default value is 200. 
-* `merge_threshold`: The default value is 100.
+* `search_nprobe` is the number of centers that are probed for a query. The higher the value the more accurate the result will be. The query response time also increases as `search_nprobe` increases. Recommended values are 64/128. We don't allow setting a value higher than 128 today. The default value is 64. 
+* `write_nprobe` is the same as `search_nprobe` but for the index construction phase. It is the number of centers searched when appending or reassigning a point. It has the same limits as `search_nprobe`. The default value is 64. 
+* `ef_construction` determines the size of the candidate list used to select neighbors during index creation. A higher value improves index quality at the cost of more memory and time, while a lower value speeds up construction with reduced accuracy. The default value is 200. 
+* `ef_search` determines the size of the dynamic candidate list used while searching for the nearest neighbors. A higher value improves recall and accuracy by exploring more potential neighbors but increases query time and computational cost, while a lower value results in faster but less accurate searches. The default value is 200. 
+* `max_neighbors` defines the maximum number of neighbors for a node. The default value is 64. 
+* `reassign_neighbor_count` is the number of closest neighboring clusters of a split cluster whose points are considered for reassignment. The default value is 64.
 
 {% /Tab %}
 
