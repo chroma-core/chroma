@@ -6,7 +6,7 @@
 New to Chroma? Check out the [getting started guide](./getting-started)
 {% /Banner %}
 
-![Chroma Computer](/computer.png)
+{% MarkdocImage lightSrc="/computer-light.png" darkSrc="/computer-dark.png" alt="Chroma Computer" %}
 
 Chroma gives you everything you need for retrieval:
 
