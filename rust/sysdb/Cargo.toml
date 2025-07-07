@@ -31,3 +31,4 @@ chroma-types = { workspace = true }
 chroma-tracing = { workspace = true, features = ["grpc"] }
 chroma-sqlite = { workspace = true }
 chroma-storage = { workspace = true }
+log = "0.4.27"

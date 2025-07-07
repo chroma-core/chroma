@@ -17,6 +17,7 @@ use chroma_types::{
     UpdateCollectionError,
 };
 use futures::TryStreamExt;
+use sea_query::{Alias, Expr};
 use sea_query_binder::SqlxBinder;
 use sqlx::error::ErrorKind;
 use sqlx::sqlite::SqliteRow;
@@ -685,6 +686,8 @@ impl SqliteSysDb {
             ])
             .build_sqlx(sea_query::SqliteQueryBuilder);
 
+        log::info!("SQL: {:#?}, values: {:#?}", sql, values);
+
         let mut rows = sqlx::query_with(&sql, values).fetch(conn);
         let mut rows_by_collection_id: HashMap<CollectionUuid, Vec<SqliteRow>> = HashMap::new();
 
@@ -805,9 +808,15 @@ impl SqliteSysDb {
                 table::SegmentMetadata::StrValue,
                 table::SegmentMetadata::IntValue,
                 table::SegmentMetadata::FloatValue,
-                table::SegmentMetadata::BoolValue,
+                // table::SegmentMetadata::BoolValue,
             ])
+            .expr_as(
+                Expr::col(table::SegmentMetadata::BoolValue),
+                Alias::new("bool_value"),
+            )
             .build_sqlx(sea_query::SqliteQueryBuilder);
+
+        log::info!("SQL: {:#?}, values: {:#?}", sql, values);
 
         let mut rows = sqlx::query_with(&sql, values).fetch(conn);
         let mut rows_by_segment_id: HashMap<SegmentUuid, Vec<SqliteRow>> = HashMap::new();
@@ -1009,6 +1018,7 @@ impl SqliteSysDb {
                 } else if let Some(float_value) = row.get::<Option<f64>, _>("float_value") {
                     Some((key.to_string(), MetadataValue::Float(float_value)))
                 } else {
+                    log::info!("defaulting to bool_value: {:#?}", row.columns(),);
                     row.get::<Option<bool>, _>("bool_value")
                         .map(|bool_value| (key.to_string(), MetadataValue::Bool(bool_value)))
                 }

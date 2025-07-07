@@ -30,6 +30,7 @@ impl SqliteDb {
     }
 
     pub fn get_conn(&self) -> &SqlitePool {
+        log::info!("Returning connection: {:?}", self.conn.connect_options());
         &self.conn
     }
 
@@ -94,6 +95,14 @@ impl SqliteDb {
     /// Arguments:
     /// - migrations: Vec<Migration> - The migrations to apply
     async fn apply_migrations(&self, migrations: Vec<Migration>) -> Result<(), sqlx::Error> {
+        let options = self.conn.connect_options();
+        let sqlite_filename = options.get_filename();
+
+        log::info!(
+            "Applying {} migrations to {:?}",
+            migrations.len(),
+            sqlite_filename
+        );
         let mut tx = self.conn.begin().await?;
         for migration in migrations {
             // Apply the migration
@@ -117,6 +126,29 @@ impl SqliteDb {
             tx.execute(query).await?;
         }
         tx.commit().await?;
+        log::info!(
+            "All migrations applied successfully to {:?}",
+            sqlite_filename
+        );
+        let query = r#"
+            SELECT dir, version, filename, sql, hash
+            FROM migrations
+            ORDER BY dir, version
+        "#;
+        let rows = sqlx::query(query)
+            .fetch_all(&self.conn)
+            .await
+            .expect("Expect it to be fetched");
+        let mut migrations = Vec::new();
+        for row in rows {
+            let dir: String = row.get("dir");
+            let version: i32 = row.get("version");
+            let filename: String = row.get("filename");
+            let sql: String = row.get("sql");
+            let hash: String = row.get("hash");
+            migrations.push(Migration::new(dir, filename, version, sql, hash));
+        }
+        log::info!("All migrations applied successfully: {:?}", migrations);
         Ok(())
     }
 
@@ -215,6 +247,7 @@ impl SqliteDb {
             .await
             .expect("Expect it to be fetched");
         let name: String = row.get("name");
+        log::info!("Migrations table initialized: {}", name);
         name == "migrations" // Sanity check
     }
 
