@@ -27,8 +27,9 @@ const generatePages = (slug: string[]): { id: string; name: string }[] => {
   return pages;
 };
 
-const Sidebar: React.FC<{ path: string[]; mobile?: boolean; }> = ({
-  path, mobile
+const Sidebar: React.FC<{ path: string[]; mobile?: boolean }> = ({
+  path,
+  mobile,
 }) => {
   const currentSection = sidebarConfig.find((section) =>
     path.join("").startsWith(section.id),
@@ -45,37 +46,35 @@ const Sidebar: React.FC<{ path: string[]; mobile?: boolean; }> = ({
     allSectionPages.push(...(subsection.pages?.map((p) => p.id) || []));
   });
 
-    /* set to full height and overflow-y auto for scrolling */
+  /* set to full height and overflow-y auto for scrolling */
   return (
     <div
-      className={`${mobile ? '' : 'hidden md:block'} relative h-full overflow-y-auto dark:bg-black`} 
+      className={`text-sm flex flex-col relative h-full  min-w-64 ${mobile ? "" : "hidden md:block border-r-[1px]"} shrink-0 dark:border-gray-700 dark:backdrop-invert dark:bg-black`}
     >
-      <div className={`text-sm flex flex-col overflow-y-scroll min-w-64 p-5 ${mobile ? '' : 'border-r-[1px]'} shrink-0 dark:border-gray-700 dark:backdrop-invert dark:bg-black`}>
-        <ScrollableContent pagesIndex={allSectionPages}>
-          {currentSection.pages && (
-            <div className="flex flex-col gap-2">
-              <PageIndex
-                basePath={`${currentSection.id}`}
-                pages={currentSection.pages}
-                index={0}
-              />
-            </div>
-          )}
-          {currentSection.subsections?.map((subsection, index) => (
+      <ScrollableContent pagesIndex={allSectionPages}>
+        {currentSection.pages && (
+          <div className="flex flex-col gap-2">
             <PageIndex
-              key={subsection.id}
-              index={index}
-              name={subsection.name}
-              basePath={`${currentSection.id}/${subsection.id}`}
-              pages={
-                subsection.generatePages
-                  ? generatePages([currentSection.id, subsection.id])
-                  : subsection.pages || []
-              }
+              basePath={`${currentSection.id}`}
+              pages={currentSection.pages}
+              index={0}
             />
-          ))}
-        </ScrollableContent>
-      </div>
+          </div>
+        )}
+        {currentSection.subsections?.map((subsection, index) => (
+          <PageIndex
+            key={subsection.id}
+            index={index}
+            name={subsection.name}
+            basePath={`${currentSection.id}/${subsection.id}`}
+            pages={
+              subsection.generatePages
+                ? generatePages([currentSection.id, subsection.id])
+                : subsection.pages || []
+            }
+          />
+        ))}
+      </ScrollableContent>
     </div>
   );
 };

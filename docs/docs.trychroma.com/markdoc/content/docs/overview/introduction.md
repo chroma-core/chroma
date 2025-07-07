@@ -1,12 +1,3 @@
----
-{
-  "id": "introduction",
-  "title": "Introduction",
-  "section": "Overview",
-  "order": 0
-}
----
-
 # Chroma
 
 **Chroma is the open-source AI application database**. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
