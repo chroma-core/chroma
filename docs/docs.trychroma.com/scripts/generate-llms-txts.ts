@@ -4,7 +4,6 @@ import { OpenAI } from "openai";
 
 const CONTENT_DIRECTORY = path.join(process.cwd(), "markdoc", "content");
 const PUBLIC_DIRECTORY = path.join(process.cwd(), "public");
-const LLMS_DIRECTORY = path.join(PUBLIC_DIRECTORY, "llms");
 const LLMS_FILE = path.join(PUBLIC_DIRECTORY, "llms.txt");
 const LLMS_FULL_FILE = path.join(PUBLIC_DIRECTORY, "llms-full.txt");
 
@@ -87,7 +86,10 @@ const generateLLMFile = (filePath: string, content: string) => {
   // Clean up extra blank lines
   output = output.replace(/\n{3,}/g, "\n\n").trim();
 
-  const publicPath = path.join(LLMS_DIRECTORY, filePath);
+  const publicPath = path.join(
+    PUBLIC_DIRECTORY,
+    `llms${filePath.replaceAll("/", "-")}`,
+  );
   const dir = path.dirname(publicPath);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(publicPath.replace(".md", ".txt"), output, "utf-8");
@@ -120,7 +122,6 @@ const main = async () => {
     throw new Error("Missing OPENAI_API_KEY");
   }
 
-  fs.rmSync(LLMS_DIRECTORY, { force: true, recursive: true });
   fs.rmSync(LLMS_FILE, { force: true });
   fs.rmSync(LLMS_FULL_FILE, { force: true });
 
