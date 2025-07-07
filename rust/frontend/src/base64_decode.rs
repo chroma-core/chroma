@@ -28,15 +28,14 @@ pub enum UpdateEmbeddingsPayload {
     Base64Binary(Vec<Option<String>>),
 }
 
-pub(crate) fn maybe_decode_embeddings(
-    embeddings: Option<EmbeddingsPayload>,
-) -> Result<Option<Vec<Vec<f32>>>, ValidationError> {
+pub(crate) fn decode_embeddings(
+    embeddings: EmbeddingsPayload,
+) -> Result<Vec<Vec<f32>>, ValidationError> {
     match embeddings {
-        Some(EmbeddingsPayload::Base64Binary(base64_strings)) => {
-            Ok(Some(decode_base64_embeddings(&base64_strings)?))
+        EmbeddingsPayload::Base64Binary(base64_strings) => {
+            Ok(decode_base64_embeddings(&base64_strings)?)
         }
-        Some(EmbeddingsPayload::JsonArrays(arrays)) => Ok(Some(arrays)),
-        None => Ok(None),
+        EmbeddingsPayload::JsonArrays(arrays) => Ok(arrays),
     }
 }
 
@@ -132,7 +131,7 @@ mod tests {
     #[test]
     fn test_get_embeddings_propagates_error() {
         let invalid_embeddings = EmbeddingsPayload::Base64Binary(vec!["invalid!@#$".to_string()]);
-        let result = maybe_decode_embeddings(Some(invalid_embeddings));
+        let result = decode_embeddings(invalid_embeddings);
 
         assert!(matches!(
             result,
@@ -163,7 +162,7 @@ mod tests {
         let embeddings =
             EmbeddingsPayload::Base64Binary(vec![valid_base64, "invalid!@#$".to_string()]);
 
-        let result = maybe_decode_embeddings(Some(embeddings));
+        let result = decode_embeddings(embeddings);
         assert!(matches!(
             result,
             Err(ValidationError::Base64Decode(
