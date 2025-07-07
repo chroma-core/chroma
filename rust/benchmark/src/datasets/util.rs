@@ -25,8 +25,8 @@ async fn get_dataset_cache_path(
 
 /// Calls the populate callback to create a cached dataset file if it doesn't exist, and returns the path to the cached file.
 pub(crate) async fn get_or_populate_cached_dataset_file<F, Fut>(
-    dataset_name: &str,
-    file_name: &str,
+    dataset_name: impl AsRef<str>,
+    file_name: impl AsRef<str>,
     cache_dir: Option<PathBuf>,
     populate: F,
 ) -> Result<PathBuf>
@@ -34,8 +34,8 @@ where
     F: FnOnce(Box<dyn AsyncWrite + Unpin + Send>) -> Fut,
     Fut: Future<Output = Result<()>>,
 {
-    let dataset_dir = get_dataset_cache_path(dataset_name, cache_dir).await?;
-    let file_path = dataset_dir.join(file_name);
+    let dataset_dir = get_dataset_cache_path(dataset_name.as_ref(), cache_dir).await?;
+    let file_path = dataset_dir.join(file_name.as_ref());
 
     if !file_path.exists() {
         // We assume that dataset creation was successful if the file exists, so we use a temporary file to avoid scenarios where the file is partially written and then the callback fails.
