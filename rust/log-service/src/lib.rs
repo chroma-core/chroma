@@ -2198,6 +2198,9 @@ impl LogServerWrapper {
             .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
             .await;
 
+        let max_encoding_message_size = log_server.config.max_encoding_message_size;
+        let max_decoding_message_size = log_server.config.max_decoding_message_size;
+
         let wrapper = LogServerWrapper {
             log_server: Arc::new(log_server),
         };
@@ -2205,7 +2208,9 @@ impl LogServerWrapper {
         let background =
             tokio::task::spawn(async move { background_server.background_task().await });
         let server = Server::builder().add_service(health_service).add_service(
-            chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper),
+            chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
+                .max_decoding_message_size(max_decoding_message_size)
+                .max_encoding_message_size(max_encoding_message_size),
         );
 
         let server = server.serve_with_shutdown(addr, async {
@@ -2353,6 +2358,10 @@ pub struct LogServerConfig {
     pub timeout_us: u64,
     #[serde(default)]
     pub proxy_to: Option<GrpcLogConfig>,
+    #[serde(default = "LogServerConfig::default_max_encoding_message_size")]
+    pub max_encoding_message_size: usize,
+    #[serde(default = "LogServerConfig::default_max_decoding_message_size")]
+    pub max_decoding_message_size: usize,
 }
 
 impl LogServerConfig {
@@ -2384,6 +2393,14 @@ impl LogServerConfig {
     fn default_timeout_us() -> u64 {
         86_400_000_000
     }
+
+    fn default_max_encoding_message_size() -> usize {
+        32_000_000
+    }
+
+    fn default_max_decoding_message_size() -> usize {
+        32_000_000
+    }
 }
 
 impl Default for LogServerConfig {
@@ -2402,6 +2419,8 @@ impl Default for LogServerConfig {
             rollup_interval: Self::default_rollup_interval(),
             timeout_us: Self::default_timeout_us(),
             proxy_to: None,
+            max_encoding_message_size: Self::default_max_encoding_message_size(),
+            max_decoding_message_size: Self::default_max_decoding_message_size(),
         }
     }
 }
