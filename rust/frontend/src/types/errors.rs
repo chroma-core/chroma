@@ -30,8 +30,6 @@ pub enum ValidationError {
     UpdateCollection(#[from] UpdateCollectionError),
     #[error("Error parsing collection configuration: {0}")]
     ParseCollectionConfiguration(#[from] CollectionConfigurationToInternalConfigurationError),
-    #[error("Embeddings not provided")]
-    MissingEmbeddings,
 }
 
 impl ChromaError for ValidationError {
@@ -44,7 +42,6 @@ impl ChromaError for ValidationError {
             ValidationError::GetCollection(err) => err.code(),
             ValidationError::UpdateCollection(err) => err.code(),
             ValidationError::ParseCollectionConfiguration(_) => ErrorCodes::InvalidArgument,
-            ValidationError::MissingEmbeddings => ErrorCodes::InvalidArgument,
         }
     }
 }

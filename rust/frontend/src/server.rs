@@ -47,7 +47,7 @@ use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     base64_decode::{
-        maybe_decode_embeddings, maybe_decode_update_embeddings, EmbeddingsPayload,
+        decode_embeddings, maybe_decode_update_embeddings, EmbeddingsPayload,
         UpdateEmbeddingsPayload,
     },
     config::FrontendServerConfig,
@@ -1242,7 +1242,7 @@ async fn fork_collection(
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
 pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<EmbeddingsPayload>,
+    embeddings: EmbeddingsPayload,
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<Metadata>>>,
@@ -1251,14 +1251,14 @@ pub struct AddCollectionRecordsPayload {
 impl AddCollectionRecordsPayload {
     pub fn new(
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
     ) -> Self {
         Self {
             ids,
-            embeddings: embeddings.map(EmbeddingsPayload::JsonArrays),
+            embeddings: EmbeddingsPayload::JsonArrays(embeddings),
             documents,
             uris,
             metadatas,
@@ -1310,14 +1310,8 @@ async fn collection_add(
     let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
 
-    if payload.embeddings.is_none() {
-        return Err(ValidationError::MissingEmbeddings.into());
-    }
-
-    let payload_embeddings: Option<Vec<Vec<f32>>> = maybe_decode_embeddings(payload.embeddings)?;
-    if let Some(embeddings) = payload_embeddings.as_ref() {
-        quota_payload = quota_payload.with_add_embeddings(embeddings);
-    }
+    let payload_embeddings: Vec<Vec<f32>> = decode_embeddings(payload.embeddings)?;
+    quota_payload = quota_payload.with_add_embeddings(&payload_embeddings);
     if let Some(metadatas) = &payload.metadatas {
         quota_payload = quota_payload.with_metadatas(metadatas);
     }
@@ -1539,7 +1533,10 @@ async fn collection_upsert(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    let payload_embeddings: Option<Vec<Vec<f32>>> = maybe_decode_embeddings(payload.embeddings)?;
+    let payload_embeddings: Option<Vec<Vec<f32>>> = match payload.embeddings {
+        Some(embeddings) => Some(decode_embeddings(embeddings)?),
+        None => None,
+    };
     if let Some(embeddings) = payload_embeddings.as_ref() {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
     }

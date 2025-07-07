@@ -120,7 +120,7 @@ impl Collection {
     pub async fn add(
         &self,
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
