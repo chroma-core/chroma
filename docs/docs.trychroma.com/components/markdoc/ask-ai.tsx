@@ -7,8 +7,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Button } from "@/components/ui/button";
-import { ChevronUpDownIcon } from "@heroicons/react/24/solid";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import OpenAILogo from "../../public/openai-logo.svg";
@@ -17,7 +15,7 @@ import { ChevronDown, Clipboard } from "lucide-react";
 import UIButton from "@/components/ui/ui-button";
 
 const prompt = (page: string) => {
-  const path = `https://docs.trychroma.com/llms${page}.txt`;
+  const path = `https://docs.trychroma.com/llms${page.replaceAll("/", "-")}.txt`;
   return `Read this webpage ${path}, so I can ask questions about it.`;
 };
 
