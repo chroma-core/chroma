@@ -1138,7 +1138,7 @@ import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 const collection = await client.createCollection({
     name: "my_collection",
     embeddingFunction: new OpenAIEmbeddingFunction({
-        apiKey: procees.env.OPENAI_API_KEY,
+        apiKey: process.env.OPENAI_API_KEY,
         modelName: "text-embedding-3-small"
     })
 });
@@ -1924,15 +1924,6 @@ These components operate differently depending on the deployment mode, particula
 Distributed Chroma is built on object storage in order to ensure the durability of your data and to deliver low costs. Object storage has extremely high throughput, easily capable of saturating a single nodes network bandwidth, but this comes at the cost of a relatively high latency floor of ~10-20ms.
 
 In order to reduce the overhead of this latency floor, Distributed Chroma aggressively leverage SSD caching. When you first query a collection, a subset of the data needed to answer the query will be read selectively from object storage, incurring a cold-start latency penalty. In the background, the SSD cache will be loaded with the data for the collection. After the collection is fully warm, queries will be served entirely from SSD.
----
-{
-  "id": "contributing",
-  "title": "Contributing",
-  "section": "Overview",
-  "order": 3
-}
----
-
 # Contributing
 
 We welcome all contributions, bug reports, bug fixes, documentation improvements, enhancements, and ideas.
@@ -1997,7 +1988,6 @@ Each database contains multiple collections, and each collection name must be un
 ### Tenants
 
 At the top level of the model is the **tenant**, which represents a single user, team, or account. Tenants provide complete isolation. No data or metadata, is shared across tenants. All access control, quota enforcement, and billing are scoped to the tenant level.
-
 # Getting Started
 
 Chroma is an AI-native open-source vector database. It comes with everything you need to get started built-in, and runs on your machine.
@@ -2326,15 +2316,6 @@ In this guide we used Chroma's [ephemeral client](../run-chroma/ephemeral-client
 - Learn how to [Deploy Chroma](../../guides/deploy/client-server-mode) to a server
 - Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
 - Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
----
-{
-  "id": "introduction",
-  "title": "Introduction",
-  "section": "Overview",
-  "order": 0
-}
----
-
 # Chroma
 
 **Chroma is the open-source AI application database**. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.

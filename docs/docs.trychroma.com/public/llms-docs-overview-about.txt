@@ -1,5 +1,3 @@
----
-
 # About
 
 We are hiring software engineers and applied research scientists. [View open roles](https://careers.trychroma.com/)

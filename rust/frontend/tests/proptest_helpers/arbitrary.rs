@@ -89,7 +89,7 @@ impl Arbitrary for CollectionRequest {
                             database.clone(),
                             collection_id,
                             ids,
-                            Some(embeddings),
+                            embeddings,
                             documents,
                             None,
                             metadatas,
