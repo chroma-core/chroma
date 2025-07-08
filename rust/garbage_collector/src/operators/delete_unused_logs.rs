@@ -11,7 +11,7 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::CollectionUuid;
 use futures::future::try_join_all;
 use thiserror::Error;
-use wal3::{GarbageCollectionOptions, LogPosition, LogWriter, LogWriterOptions};
+use wal3::{GarbageCollectionOptions, GarbageCollector, LogPosition, LogWriterOptions};
 
 #[derive(Clone, Debug)]
 pub struct DeleteUnusedLogsOperator {
@@ -67,12 +67,11 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                 let storage_clone = storage_arc.clone();
                 let mut logs = self.logs.clone();
                 log_gc_futures.push(async move {
-                    let writer = match LogWriter::open(
+                    let writer = match GarbageCollector::open(
                         LogWriterOptions::default(),
                         storage_clone,
                         &collection_id.storage_prefix_for_log(),
                         "garbage collection service",
-                        (),
                     )
                     .await
                     {
