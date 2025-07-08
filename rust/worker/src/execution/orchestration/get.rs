@@ -18,6 +18,9 @@ use crate::execution::operators::{
     filter::{FilterError, FilterInput, FilterOutput},
     limit::{LimitError, LimitInput, LimitOutput},
     prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
+    prefetch_segment::{
+        PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
+    },
     projection::{ProjectionError, ProjectionInput},
 };
 
@@ -180,10 +183,24 @@ impl Orchestrator for GetOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        vec![(
-            wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver()),
-            Some(Span::current()),
-        )]
+        // Prefetch metadata segment.
+        let prefetch_input = PrefetchSegmentInput::new(
+            self.collection_and_segments.metadata_segment.clone(),
+            self.blockfile_provider.clone(),
+        );
+        let prefetch_metadata_task = wrap(
+            Box::new(PrefetchSegmentOperator::new()),
+            prefetch_input,
+            ctx.receiver(),
+        );
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
+        vec![
+            (
+                wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver()),
+                Some(Span::current()),
+            ),
+            (prefetch_metadata_task, Some(prefetch_span)),
+        ]
     }
 
     fn queue_size(&self) -> usize {
@@ -198,6 +215,19 @@ impl Orchestrator for GetOrchestrator {
         self.result_channel
             .take()
             .expect("The result channel should be set before take")
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for GetOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
+        _: &ComponentContext<GetOrchestrator>,
+    ) {
+        // Nothing to do.
     }
 }
 
