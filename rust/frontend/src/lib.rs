@@ -50,12 +50,13 @@ impl ChromaError for ScorecardRuleError {
 pub async fn frontend_service_entrypoint(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
+    init_otel_tracing: bool,
 ) {
     let config = match std::env::var(CONFIG_PATH_ENV_VAR) {
         Ok(config_path) => FrontendServerConfig::load_from_path(&config_path),
         Err(_) => FrontendServerConfig::load(),
     };
-    frontend_service_entrypoint_with_config(auth, quota_enforcer, &config, true).await;
+    frontend_service_entrypoint_with_config(auth, quota_enforcer, &config, init_otel_tracing).await;
 }
 
 pub async fn frontend_service_entrypoint_with_config_system_registry(
