@@ -55,7 +55,7 @@ pub async fn frontend_service_entrypoint(
         Ok(config_path) => FrontendServerConfig::load_from_path(&config_path),
         Err(_) => FrontendServerConfig::load(),
     };
-    frontend_service_entrypoint_with_config(auth, quota_enforcer, &config).await;
+    frontend_service_entrypoint_with_config(auth, quota_enforcer, &config, true).await;
 }
 
 pub async fn frontend_service_entrypoint_with_config_system_registry(
@@ -135,11 +135,14 @@ pub async fn frontend_service_entrypoint_with_config(
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
     config: &FrontendServerConfig,
+    init_otel_tracing: bool,
 ) {
     let system = System::new();
     let registry = Registry::new();
 
-    init_frontend_otel_tracing(config);
+    if init_otel_tracing {
+        init_frontend_otel_tracing(config);
+    }
 
     frontend_service_entrypoint_with_config_system_registry(
         auth,

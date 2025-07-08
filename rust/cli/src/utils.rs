@@ -359,7 +359,7 @@ pub async fn standup_local_chroma(
 ) -> Result<(AdminClient, JoinHandle<()>), CliError> {
     let host = format!("http://localhost:{}", config.port);
     let handle = spawn(async move {
-        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config).await;
+        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
     });
     let admin_client = AdminClient::local(host);
     admin_client
