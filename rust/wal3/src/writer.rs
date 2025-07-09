@@ -1,11 +1,12 @@
 use std::future::Future;
+use std::iter::Iterator;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{DeleteOptions, GetOptions, PutOptions, Storage, StorageError};
+use chroma_storage::{GetOptions, PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -790,27 +791,52 @@ impl OnceLogWriter {
                 "loaded garbage without e_tag".to_string(),
             ));
         };
-        for path in garbage.prefixed_paths_to_delete(&self.prefix) {
-            loop {
-                match self.storage.delete(&path, DeleteOptions::default()).await {
-                    Ok(()) => break,
-                    Err(StorageError::NotFound { .. }) => break,
-                    Err(err) => {
-                        tracing::error!("could not cleanup garbage: {err:?}");
-                        if start.elapsed() > Duration::from_secs(600) {
-                            tracing::error!(
-                                "could not cleanup garbage within 10 minutes, returning"
-                            );
-                            return Err(Error::StorageError(Arc::new(err)));
+        let mut batch = vec![];
+        let delete_batch = |batch: Vec<String>, exp_backoff: ExponentialBackoff| {
+            let storage = Arc::clone(&self.storage);
+            async move {
+                let paths = batch.iter().map(String::as_str).collect::<Vec<_>>();
+                loop {
+                    match storage.delete_many(&paths).await {
+                        Ok(mut deleted_objects) => {
+                            for err in deleted_objects.errors.iter() {
+                                tracing::error!(error = ?err, "could not clean up");
+                            }
+                            if let Some(err) = deleted_objects.errors.pop() {
+                                return Err(Arc::new(err).into());
+                            } else {
+                                return Ok(());
+                            }
                         }
-                        let mut backoff = exp_backoff.next();
-                        if backoff > Duration::from_secs(600) {
-                            backoff = Duration::from_secs(600);
+                        Err(StorageError::NotFound { .. }) => break,
+                        Err(err) => {
+                            tracing::error!("could not cleanup garbage: {err:?}");
+                            if start.elapsed() > Duration::from_secs(600) {
+                                tracing::error!(
+                                    "could not cleanup garbage within 10 minutes, returning"
+                                );
+                                return Err(Error::StorageError(Arc::new(err)));
+                            }
+                            let mut backoff = exp_backoff.next();
+                            if backoff > Duration::from_secs(600) {
+                                backoff = Duration::from_secs(600);
+                            }
+                            tokio::time::sleep(backoff).await;
                         }
-                        tokio::time::sleep(backoff).await;
                     }
                 }
+                Ok(())
             }
+        };
+        for path in garbage.prefixed_paths_to_delete(&self.prefix) {
+            batch.push(path);
+            if batch.len() >= 100 {
+                let batch = std::mem::take(&mut batch);
+                delete_batch(batch, exp_backoff.clone()).await?;
+            }
+        }
+        if !batch.is_empty() {
+            delete_batch(batch, exp_backoff.clone()).await?;
         }
         garbage
             .reset(

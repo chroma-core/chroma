@@ -50,6 +50,7 @@ use std::time::{Duration, Instant};
 
 //////////////////////////////////////// ExponentialBackoff ////////////////////////////////////////
 
+#[derive(Clone, Debug)]
 pub struct ExponentialBackoff {
     throughput_ops_sec: f64,
     reserve_capacity: f64,
