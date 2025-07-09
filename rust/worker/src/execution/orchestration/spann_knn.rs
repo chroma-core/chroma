@@ -24,9 +24,6 @@ use crate::execution::operators::{
     prefetch_record::{
         PrefetchRecordError, PrefetchRecordInput, PrefetchRecordOperator, PrefetchRecordOutput,
     },
-    prefetch_segment::{
-        PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
-    },
     spann_bf_pl::{SpannBfPlError, SpannBfPlInput, SpannBfPlOperator, SpannBfPlOutput},
     spann_centers_search::{
         SpannCentersSearchError, SpannCentersSearchInput, SpannCentersSearchOperator,
@@ -203,32 +200,6 @@ impl Orchestrator for SpannKnnOrchestrator {
             },
         }
 
-        // prefetch spann segment
-        let prefetch_task = wrap(
-            Box::new(PrefetchSegmentOperator::new()),
-            PrefetchSegmentInput::new(
-                self.knn_filter_output.vector_segment.clone(),
-                self.spann_provider.blockfile_provider.clone(),
-            ),
-            ctx.receiver(),
-        );
-        // Prefetch task is detached from the orchestrator
-        let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.knn_filter_output.vector_segment.id);
-        tasks.push((prefetch_task, Some(prefetch_span)));
-
-        // prefetch record segment
-        let prefetch_record_segment_task = wrap(
-            Box::new(PrefetchSegmentOperator::new()),
-            PrefetchSegmentInput::new(
-                self.knn_filter_output.record_segment.clone(),
-                self.spann_provider.blockfile_provider.clone(),
-            ),
-            ctx.receiver(),
-        );
-        // Prefetch task is detached from the orchestrator
-        let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.knn_filter_output.record_segment.id);
-        tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
-
         tasks
     }
 
@@ -244,19 +215,6 @@ impl Orchestrator for SpannKnnOrchestrator {
         self.result_channel
             .take()
             .expect("The result channel should be set before take")
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for SpannKnnOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        _: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
-        _: &ComponentContext<SpannKnnOrchestrator>,
-    ) {
-        // Nothing to do.
     }
 }
 

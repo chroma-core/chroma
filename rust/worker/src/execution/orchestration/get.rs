@@ -183,24 +183,37 @@ impl Orchestrator for GetOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        // Prefetch metadata segment.
-        let prefetch_input = PrefetchSegmentInput::new(
-            self.collection_and_segments.metadata_segment.clone(),
-            self.blockfile_provider.clone(),
+        let mut tasks = vec![];
+        // prefetch record segment
+        let prefetch_record_segment_task = wrap(
+            Box::new(PrefetchSegmentOperator::new()),
+            PrefetchSegmentInput::new(
+                self.collection_and_segments.record_segment.clone(),
+                self.blockfile_provider.clone(),
+            ),
+            ctx.receiver(),
         );
+        // Prefetch task is detached from the orchestrator
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
+        tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
+
+        // Prefetch metadata segment.
         let prefetch_metadata_task = wrap(
             Box::new(PrefetchSegmentOperator::new()),
-            prefetch_input,
+            PrefetchSegmentInput::new(
+                self.collection_and_segments.metadata_segment.clone(),
+                self.blockfile_provider.clone(),
+            ),
             ctx.receiver(),
         );
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
-        vec![
-            (
-                wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver()),
-                Some(Span::current()),
-            ),
-            (prefetch_metadata_task, Some(prefetch_span)),
-        ]
+        tasks.push((prefetch_metadata_task, Some(prefetch_span)));
+
+        // Fetch log task.
+        let fetch_log_task = wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver());
+        tasks.push((fetch_log_task, Some(Span::current())));
+
+        tasks
     }
 
     fn queue_size(&self) -> usize {
