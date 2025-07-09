@@ -73,17 +73,8 @@ impl From<ChromaHir> for LiteralExpr {
 
 #[derive(Debug, Default)]
 struct PrefixSuffixLookupTable<'me> {
-    prefix: HashMap<&'me str, Vec<usize>>,
-    suffix: HashMap<&'me str, Vec<usize>>,
-}
-
-impl<'me> PrefixSuffixLookupTable<'me> {
-    fn with_capacity(capacity: usize) -> Self {
-        Self {
-            prefix: HashMap::with_capacity(capacity),
-            suffix: HashMap::with_capacity(capacity),
-        }
-    }
+    prefix: Vec<(&'me str, usize)>,
+    suffix: Vec<(&'me str, usize)>,
 }
 
 #[async_trait::async_trait]
@@ -207,7 +198,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         let mut min_lookup_table_size = usize::MAX;
         let mut min_lookup_table_index = 0;
         for ngrams in &ngram_vec {
-            let mut lookup_table = PrefixSuffixLookupTable::with_capacity(ngrams.len());
+            let mut lookup_table = PrefixSuffixLookupTable::default();
             let mut lookup_table_size = 0;
             for ngram in ngrams {
                 let ngram_doc_pos = self
@@ -224,17 +215,11 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
 
                 let prefix = &ngram[..ngram.char_indices().next_back().unwrap_or_default().0];
                 let suffix = &ngram[ngram.char_indices().nth(1).unwrap_or_default().0..];
-                lookup_table
-                    .prefix
-                    .entry(prefix)
-                    .or_insert_with(|| Vec::with_capacity(ngrams.len()))
-                    .push(ngram_doc_pos_index);
-                lookup_table
-                    .suffix
-                    .entry(suffix)
-                    .or_insert_with(|| Vec::with_capacity(ngrams.len()))
-                    .push(ngram_doc_pos_index);
+                lookup_table.prefix.push((prefix, ngram_doc_pos_index));
+                lookup_table.suffix.push((suffix, ngram_doc_pos_index));
             }
+            lookup_table.prefix.sort();
+            lookup_table.suffix.sort();
             let lookup_table_index = lookup_table_vec.len();
             lookup_table_vec.push(lookup_table);
             if lookup_table_size < min_lookup_table_size {
@@ -247,8 +232,8 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         let min_lookup_table = &lookup_table_vec[min_lookup_table_index];
         let min_ngram_doc_pos_iter = min_lookup_table
             .prefix
-            .values()
-            .flat_map(|idxs| idxs.iter().map(|idx| &ngram_doc_pos_vec[*idx]));
+            .iter()
+            .map(|(_, idx)| &ngram_doc_pos_vec[*idx]);
         let mut candidates =
             HashMap::<_, Vec<_>>::with_capacity(min_ngram_doc_pos_iter.clone().map(Vec::len).sum());
         for (ngram, doc, pos) in min_ngram_doc_pos_iter
@@ -269,29 +254,46 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                 .flat_map(|(n, ps)| ps.iter().map(move |p| (n, *p)))
             {
                 // Trace to the right of pivot
+                // `suffix_pos_idx` stores a stack of (
+                //   <suffix of current ngram>,
+                //   <expected position of next ngram>,
+                //   <index of next ngram to check in the prefix lookup table>,
+                // )
                 let mut suffix_pos_idx =
                     Vec::with_capacity(lookup_table_vec.len() - min_lookup_table_index);
                 let suffix_offset = ngram.char_indices().nth(1).unwrap_or_default().0;
-                suffix_pos_idx.push((&ngram[suffix_offset..], pos + suffix_offset as u32, 0));
+                suffix_pos_idx.push((&ngram[suffix_offset..], pos + suffix_offset as u32, None));
                 while let Some((suffix, match_pos, ngram_index)) = suffix_pos_idx.pop() {
+                    // Find the next lookup table to the right
                     let focus_lookup_table = match lookup_table_vec
                         .get(min_lookup_table_index + suffix_pos_idx.len() + 1)
                     {
                         Some(table) => table,
                         None => {
+                            // There is no more lookup table on the right
+                            // We have found a valid trace to the right
                             suffix_pos_idx.push((suffix, match_pos, ngram_index));
                             break;
                         }
                     };
+                    // Find the next ngram to check
+                    let focus_ngram_prefix_index = match ngram_index {
+                        Some(idx) => idx,
+                        None => focus_lookup_table
+                            .prefix
+                            .partition_point(|(prefix, _)| &suffix <= prefix),
+                    };
                     let focus_ngram_doc_pos = match focus_lookup_table
                         .prefix
-                        .get(suffix)
-                        .and_then(|idxs| idxs.get(ngram_index))
-                    {
-                        Some(idx) => &ngram_doc_pos_vec[*idx],
+                        .get(focus_ngram_prefix_index)
+                        .and_then(|(prefix, ngram_index)| {
+                            (&suffix == prefix).then_some(&ngram_doc_pos_vec[*ngram_index])
+                        }) {
+                        Some(ngram_doc_pos) => ngram_doc_pos,
                         None => continue,
                     };
-                    suffix_pos_idx.push((suffix, match_pos, ngram_index + 1));
+                    suffix_pos_idx.push((suffix, match_pos, Some(focus_ngram_prefix_index + 1)));
+                    // Find the document and search for expected position
                     let (focus_ngram, _, pos) =
                         match focus_ngram_doc_pos.binary_search_by_key(&doc, |(_, d, _)| *d) {
                             Ok(idx) => focus_ngram_doc_pos[idx],
@@ -302,39 +304,61 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                         suffix_pos_idx.push((
                             &focus_ngram[suffix_offset..],
                             match_pos + suffix_offset as u32,
-                            0,
+                            None,
                         ));
                     }
                 }
+                // Try next candidate pivot position if there is no valid trace to the right
                 if suffix_pos_idx.is_empty() {
                     continue;
                 }
 
                 // Trace to the left of pivot
+                // `prefix_pos_idx` stores a stack of (
+                //   <prefix of current ngram>,
+                //   <position of current ngram>,
+                //   <index of next ngram to check in the suffix lookup table>,
+                // )
                 let mut prefix_pos_idx = Vec::with_capacity(min_lookup_table_index + 1);
                 let prefix_offset = ngram.char_indices().next_back().unwrap_or_default().0;
-                prefix_pos_idx.push((&ngram[..prefix_offset], pos, 0));
+                prefix_pos_idx.push((&ngram[..prefix_offset], pos, None));
                 while let Some((prefix, match_pos_with_offset, ngram_index)) = prefix_pos_idx.pop()
                 {
+                    // Find the next lookup table to the left
                     let focus_lookup_table = match min_lookup_table_index
                         .checked_sub(prefix_pos_idx.len() + 1)
                         .and_then(|lookup_index| lookup_table_vec.get(lookup_index))
                     {
                         Some(table) => table,
                         None => {
+                            // There is no more lookup table on the left
+                            // We have found a valid trace to the left
                             prefix_pos_idx.push((prefix, match_pos_with_offset, ngram_index));
                             break;
                         }
                     };
+                    // Find the next ngram to check
+                    let focus_ngram_suffix_index = match ngram_index {
+                        Some(idx) => idx,
+                        None => focus_lookup_table
+                            .suffix
+                            .partition_point(|(suffix, _)| &prefix <= suffix),
+                    };
                     let focus_ngram_doc_pos = match focus_lookup_table
                         .suffix
-                        .get(prefix)
-                        .and_then(|idxs| idxs.get(ngram_index))
-                    {
-                        Some(idx) => &ngram_doc_pos_vec[*idx],
+                        .get(focus_ngram_suffix_index)
+                        .and_then(|(suffix, ngram_index)| {
+                            (&prefix == suffix).then_some(&ngram_doc_pos_vec[*ngram_index])
+                        }) {
+                        Some(ngram_doc_pos) => ngram_doc_pos,
                         None => continue,
                     };
-                    prefix_pos_idx.push((prefix, match_pos_with_offset, ngram_index + 1));
+                    suffix_pos_idx.push((
+                        prefix,
+                        match_pos_with_offset,
+                        Some(focus_ngram_suffix_index + 1),
+                    ));
+                    // Find the document and search for expected position
                     let (focus_ngram, _, pos) =
                         match focus_ngram_doc_pos.binary_search_by_key(&doc, |(_, d, _)| *d) {
                             Ok(idx) => focus_ngram_doc_pos[idx],
@@ -349,9 +373,10 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                     if pos.binary_search(&match_pos).is_ok() {
                         let prefix_offset =
                             focus_ngram.char_indices().next_back().unwrap_or_default().0;
-                        prefix_pos_idx.push((&focus_ngram[..prefix_offset], match_pos, 0));
+                        prefix_pos_idx.push((&focus_ngram[..prefix_offset], match_pos, None));
                     }
                 }
+                // Record the candidate if there is a successful trace to the left
                 if !prefix_pos_idx.is_empty() {
                     result.insert(doc);
                     break;
@@ -422,9 +447,12 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
 
     fn can_match_exactly(&self, literal_expression: &LiteralExpr) -> bool {
         match literal_expression {
-            LiteralExpr::Literal(literals) => literals
-                .iter()
-                .all(|c| c.width() <= self.maximum_branching_factor()),
+            LiteralExpr::Literal(literals) => {
+                N <= literals.len()
+                    && literals
+                        .iter()
+                        .all(|c| c.width() <= self.maximum_branching_factor())
+            }
             LiteralExpr::Concat(_) | LiteralExpr::Alternation(_) => false,
         }
     }

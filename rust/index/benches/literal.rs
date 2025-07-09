@@ -9,13 +9,18 @@ use chroma_blockstore::{
 };
 use chroma_cache::new_cache_for_test;
 use chroma_index::fulltext::types::{DocumentMutation, FullTextIndexReader, FullTextIndexWriter};
-use chroma_storage::{local::LocalStorage, Storage};
-use chroma_types::regex::{literal_expr::NgramLiteralProvider, ChromaRegex};
+use chroma_storage::test_storage;
+use chroma_types::regex::{
+    literal_expr::{Literal, NgramLiteralProvider},
+    ChromaRegex,
+};
 use criterion::{criterion_group, criterion_main, Criterion};
+use indicatif::ProgressIterator;
 use tantivy::tokenizer::NgramTokenizer;
-use tempfile::tempdir;
 
 const BLOCK_SIZE: usize = 1 << 23;
+const CHUNK_DOCUMENT_SIZE: usize = 1 << 14;
+const MAX_CODE_LENGTH: usize = 1 << 12;
 
 const FTS_PATTERNS: &[&str] = &[
     r"std::ptr::",
@@ -155,11 +160,22 @@ const REGEX_PATTERNS: &[&str] = &[
     r"let\s+mut\s+\w+",
 ];
 
-async fn bench_fts_query((reader, pattern): (FullTextIndexReader<'_>, &str)) {
+async fn bench_fts((reader, pattern): (FullTextIndexReader<'_>, &str)) {
     reader
         .search(pattern)
         .await
         .expect("FTS match should not fail");
+}
+
+async fn bench_literal_slice((reader, literal_string): (FullTextIndexReader<'_>, String)) {
+    let literals = literal_string
+        .chars()
+        .map(|c| Literal::Char(c))
+        .collect::<Vec<_>>();
+    reader
+        .match_literal_with_mask(&literals, None)
+        .await
+        .expect("Regex match should not fail");
 }
 
 async fn bench_literal_expr((reader, pattern): (FullTextIndexReader<'_>, ChromaRegex)) {
@@ -171,7 +187,7 @@ async fn bench_literal_expr((reader, pattern): (FullTextIndexReader<'_>, ChromaR
 
 fn bench_literal(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
-    let source_code_chunk = runtime.block_on(async {
+    let source_codes = runtime.block_on(async {
         TheStackDedupRust::init()
             .await
             .expect("the-stack-dedup-rust dataset should be initializable")
@@ -179,15 +195,14 @@ fn bench_literal(criterion: &mut Criterion) {
             .await
             .expect("the dataset should contain documents")
     });
+    let selected_source_codes = source_codes
+        .into_iter()
+        .filter(|code| code.len() < MAX_CODE_LENGTH)
+        .take(2 << 17)
+        .collect::<Vec<_>>();
 
-    let temp_dir = tempdir().expect("Temporary directory should be creatable");
-    let storage = Storage::Local(LocalStorage::new(
-        temp_dir
-            .path()
-            .as_os_str()
-            .to_str()
-            .expect("Temporary path should be valid"),
-    ));
+    let (_temp_dir, storage) = test_storage();
+    let prefix_path = String::from("");
     let arrow_blockfile_provider = ArrowBlockfileProvider::new(
         storage.clone(),
         BLOCK_SIZE,
@@ -195,33 +210,58 @@ fn bench_literal(criterion: &mut Criterion) {
         new_cache_for_test(),
     );
     let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-    let prefix_path = String::from("");
-    let blockfile_writer = runtime
-        .block_on(blockfile_provider.write::<u32, Vec<u32>>(
-            BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
-        ))
-        .expect("Blockfile writer should be creatable");
-    let blockfile_id = blockfile_writer.id();
+    let mut blockfile_id = None;
     let tokenizer = NgramTokenizer::new(3, 3, false).expect("Tokenizer should be creatable");
-    let mut full_text_writer = FullTextIndexWriter::new(blockfile_writer, tokenizer.clone());
-    full_text_writer
-        .handle_batch(source_code_chunk.iter().enumerate().map(|(index, code)| {
-            DocumentMutation::Create {
-                offset_id: index as u32,
-                new_document: code,
-            }
-        }))
-        .expect("Full text writer should be writable");
-    runtime
-        .block_on(full_text_writer.write_to_blockfiles())
-        .expect("Blockfile should be writable");
-    let flusher = runtime
-        .block_on(full_text_writer.commit())
-        .expect("Changes should be commitable");
-    runtime
-        .block_on(flusher.flush())
-        .expect("Changes should be flushable");
-    let reader_options = BlockfileReaderOptions::new(blockfile_id, prefix_path);
+
+    for (chunk_index, document_chunk) in selected_source_codes
+        .chunks(CHUNK_DOCUMENT_SIZE)
+        .enumerate()
+        .progress()
+    {
+        let mut blockfile_options =
+            BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
+        if let Some(id) = blockfile_id {
+            blockfile_options = blockfile_options.fork(id);
+        }
+        let blockfile_writer = runtime
+            .block_on(blockfile_provider.write::<u32, Vec<u32>>(blockfile_options))
+            .expect("Blockfile writer should be creatable");
+        blockfile_id = Some(blockfile_writer.id());
+        let mut full_text_writer =
+            FullTextIndexWriter::new(blockfile_writer.clone(), tokenizer.clone());
+        full_text_writer
+            .handle_batch(document_chunk.iter().enumerate().map(|(index, code)| {
+                DocumentMutation::Create {
+                    offset_id: (chunk_index * CHUNK_DOCUMENT_SIZE + index) as u32,
+                    new_document: code,
+                }
+            }))
+            .expect("Full text writer should be writable");
+        runtime
+            .block_on(full_text_writer.write_to_blockfiles())
+            .expect("Blockfile should be writable");
+        let flusher = runtime
+            .block_on(full_text_writer.commit())
+            .expect("Changes should be commitable");
+        runtime
+            .block_on(flusher.flush())
+            .expect("Changes should be flushable");
+        runtime
+            .block_on(blockfile_provider.clear())
+            .expect("Cache should be flushable");
+    }
+
+    let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+        storage.clone(),
+        BLOCK_SIZE,
+        new_cache_for_test(),
+        new_cache_for_test(),
+    );
+    let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+    let reader_options = BlockfileReaderOptions::new(
+        blockfile_id.expect("Block id should have been initialized"),
+        prefix_path,
+    );
     let full_text_readar = FullTextIndexReader::new(
         runtime
             .block_on(blockfile_provider.read(reader_options))
@@ -235,22 +275,14 @@ fn bench_literal(criterion: &mut Criterion) {
             criterion,
             &runtime,
             || (full_text_readar.clone(), *pattern),
-            bench_fts_query,
+            bench_fts,
         );
         bench_run(
             &format!("REGEX-[{pattern}]"),
             criterion,
             &runtime,
-            || {
-                (
-                    full_text_readar.clone(),
-                    pattern
-                        .to_string()
-                        .try_into()
-                        .expect("Regex should be valid"),
-                )
-            },
-            bench_literal_expr,
+            || (full_text_readar.clone(), pattern.to_string()),
+            bench_literal_slice,
         );
     }
 
