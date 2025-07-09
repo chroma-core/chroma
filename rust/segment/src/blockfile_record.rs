@@ -951,12 +951,12 @@ impl RecordSegmentReader<'_> {
     }
 
     /// Returns all data in the record segment, sorted by their offset ids
-    #[allow(dead_code)]
-    pub async fn get_all_data(&self) -> Result<Vec<DataRecord>, Box<dyn ChromaError>> {
-        self.id_to_data
-            .get_range(""..="", ..)
-            .await
-            .map(|vec| vec.into_iter().map(|(_, _, data)| data).collect())
+    pub async fn get_all_data(&self) -> Result<Vec<(u32, DataRecord)>, Box<dyn ChromaError>> {
+        self.id_to_data.get_range(""..="", ..).await.map(|vec| {
+            vec.into_iter()
+                .map(|(_, offset, data)| (offset, data))
+                .collect()
+        })
     }
 
     pub async fn get_data_stream<'me>(
