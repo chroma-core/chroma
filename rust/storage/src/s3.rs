@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
+use aws_sdk_s3::config::StalledStreamProtectionConfig;
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
@@ -845,6 +846,7 @@ impl Configurable<StorageConfig> for S3Storage {
                             .to_builder()
                             .timeout_config(timeout_config_builder.build())
                             .retry_config(retry_config)
+                            .stalled_stream_protection(StalledStreamProtectionConfig::disabled())
                             .build();
                         aws_sdk_s3::Client::new(&config)
                     }
