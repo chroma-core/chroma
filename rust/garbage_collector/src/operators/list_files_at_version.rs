@@ -144,7 +144,6 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
         }
 
         if !sparse_index_ids.is_empty() {
-            let num = sparse_index_ids.len();
             let mut get_block_ids_stream = futures::stream::iter(sparse_index_ids)
                 .map(|(sparse_index_id, file_prefix)|
                     async move {
@@ -159,7 +158,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                             }
                             Err(e) => Err(e),
                         }
-                }).buffer_unordered(num);
+                }).buffer_unordered(100);
 
             while let Some(res) = get_block_ids_stream.next().await {
                 let block_ids = res.map_err(ListFilesAtVersionError::FetchBlockIdsError)?;
