@@ -316,6 +316,18 @@ impl Storage {
         }
     }
 
+    pub async fn delete_many<S: AsRef<str> + std::fmt::Debug, I: IntoIterator<Item = S>>(
+        &self,
+        keys: I,
+    ) -> Result<crate::s3::DeletedObjects, StorageError> {
+        match self {
+            Storage::ObjectStore(_) => Err(StorageError::NotImplemented),
+            Storage::S3(s3) => s3.delete_many(keys).await,
+            Storage::Local(_) => Err(StorageError::NotImplemented),
+            Storage::AdmissionControlledS3(ac) => ac.delete_many(keys).await,
+        }
+    }
+
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         match self {
             Storage::ObjectStore(object_store) => object_store.rename(src_key, dst_key).await,
