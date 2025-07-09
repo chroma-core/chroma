@@ -448,6 +448,8 @@ impl GrpcLog {
             Err(e) => {
                 if e.code() == chroma_error::ErrorCodes::Unavailable.into() {
                     Err(GrpcPullLogsError::Backoff)
+                } else if e.code() == chroma_error::ErrorCodes::NotFound.into() {
+                    Err(GrpcPullLogsError::FailedToPullLogs(e))
                 } else {
                     tracing::error!("Failed to pull logs: {}", e);
                     Err(GrpcPullLogsError::FailedToPullLogs(e))
