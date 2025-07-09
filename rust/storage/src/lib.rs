@@ -323,7 +323,7 @@ impl Storage {
         match self {
             Storage::ObjectStore(_) => Err(StorageError::NotImplemented),
             Storage::S3(s3) => s3.delete_many(keys).await,
-            Storage::Local(_) => Err(StorageError::NotImplemented),
+            Storage::Local(local) => local.delete_many(keys).await,
             Storage::AdmissionControlledS3(ac) => ac.delete_many(keys).await,
         }
     }
