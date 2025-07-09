@@ -80,6 +80,7 @@ impl TestDistributedSegment {
             &self.collection.database_id,
             &self.metadata_segment,
             &self.blockfile_provider,
+            self.collection.config.schema.clone(),
         )
         .await
         .expect("Should be able to initialize metadata writer.");

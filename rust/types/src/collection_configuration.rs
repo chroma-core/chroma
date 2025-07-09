@@ -484,6 +484,28 @@ pub struct UpdateCollectionConfiguration {
     pub schema: Option<HashMap<String, HashMap<ValueType, CollectionSchema>>>,
 }
 
+pub fn diff_metadata_index_enable(
+    old_schema: &Option<HashMap<String, HashMap<ValueType, CollectionSchema>>>,
+    update_schema: &HashMap<String, HashMap<ValueType, CollectionSchema>>,
+) -> Vec<(String, ValueType)> {
+    let mut backfill_needed = Vec::new();
+    for (update_key, update_value) in update_schema {
+        for (update_value_type, update_collection_schema) in update_value {
+            let old_metadata_index = old_schema
+                .as_ref()
+                .and_then(|s| s.get(update_key))
+                .and_then(|vt_map| vt_map.get(update_value_type))
+                .map(|cs| cs.metadata_index)
+                .unwrap_or(true); // default to true if not present
+            let new_metadata_index = update_collection_schema.metadata_index;
+            if !old_metadata_index && new_metadata_index {
+                backfill_needed.push((update_key.clone(), update_value_type.clone()));
+            }
+        }
+    }
+    backfill_needed
+}
+
 #[cfg(test)]
 mod tests {
     use crate::hnsw_configuration::HnswConfiguration;
