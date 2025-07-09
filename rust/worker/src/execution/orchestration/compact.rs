@@ -181,6 +181,16 @@ pub enum CompactionError {
     SourceRecordSegment(#[from] SourceRecordSegmentError),
 }
 
+impl CompactionError {
+    pub fn should_warn_instead_of_error(&self) -> bool {
+        if let Self::FetchLog(FetchLogError::PullLog(status)) = self {
+            status.code() == ErrorCodes::NotFound
+        } else {
+            false
+        }
+    }
+}
+
 impl<E> From<TaskError<E>> for CompactionError
 where
     E: Into<CompactionError>,
