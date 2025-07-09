@@ -15,7 +15,7 @@ use chroma_cache::AysncPartitionedMutex;
 use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use futures::future::join_all;
+use futures::future::{join_all, try_join_all};
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashSet;
@@ -625,24 +625,19 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .sparse_index
             .get_block_ids_range(prefix_range.clone());
 
-        let mut result: Vec<(&str, K, V)> = vec![];
-        for block_id in block_ids {
-            let block_opt = match self.get_block(block_id, StorageRequestPriority::P0).await {
-                Ok(Some(block)) => Some(block),
+        let block_futures = block_ids.into_iter().map(|block_id| async move {
+            match self.get_block(block_id, StorageRequestPriority::P0).await {
+                Ok(Some(block)) => Ok(block),
                 Ok(None) => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                    Err(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)
                 }
-                Err(e) => {
-                    return Err(Box::new(e));
-                }
-            };
+                Err(e) => Err(Box::new(e) as Box<dyn ChromaError>),
+            }
+        });
 
-            let block = match block_opt {
-                Some(b) => b,
-                None => {
-                    return Err(Box::new(ArrowBlockfileError::BlockNotFound));
-                }
-            };
+        let blocks = try_join_all(block_futures).await?;
+        let mut result: Vec<(&str, K, V)> = vec![];
+        for block in blocks {
             result.extend(block.get_range(prefix_range.clone(), key_range.clone()));
         }
 
