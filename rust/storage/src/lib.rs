@@ -316,9 +316,9 @@ impl Storage {
         }
     }
 
-    pub async fn delete_many(
+    pub async fn delete_many<S: AsRef<str> + std::fmt::Debug, I: IntoIterator<Item = S>>(
         &self,
-        keys: &[&str],
+        keys: I,
     ) -> Result<crate::s3::DeletedObjects, StorageError> {
         match self {
             Storage::ObjectStore(_) => Err(StorageError::NotImplemented),

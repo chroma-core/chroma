@@ -497,9 +497,9 @@ impl AdmissionControlledS3Storage {
         self.storage.delete(key, options).await
     }
 
-    pub async fn delete_many(
+    pub async fn delete_many<S: AsRef<str> + std::fmt::Debug, I: IntoIterator<Item = S>>(
         &self,
-        keys: &[&str],
+        keys: I,
     ) -> Result<crate::s3::DeletedObjects, StorageError> {
         self.storage.delete_many(keys).await
     }

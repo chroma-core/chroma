@@ -668,14 +668,17 @@ impl S3Storage {
         }
     }
 
-    #[tracing::instrument(skip(self), level = "trace")]
-    pub async fn delete_many(&self, keys: &[&str]) -> Result<DeletedObjects, StorageError> {
-        tracing::trace!(num_keys = keys.len(), "Deleting objects from S3");
+    #[tracing::instrument(skip(self, keys), level = "trace")]
+    pub async fn delete_many<S: AsRef<str> + std::fmt::Debug, I: IntoIterator<Item = S>>(
+        &self,
+        keys: I,
+    ) -> Result<DeletedObjects, StorageError> {
+        tracing::trace!("Deleting objects from S3");
         let mut objects = vec![];
         for key in keys {
             objects.push(
                 ObjectIdentifier::builder()
-                    .key(*key)
+                    .key(key.as_ref())
                     .build()
                     .map_err(|err| StorageError::Generic {
                         source: Arc::new(err),
