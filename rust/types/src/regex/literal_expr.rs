@@ -193,7 +193,8 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         .await;
 
         // Retrieve all ngram posting lists
-        let mut ngram_doc_pos_vec = Vec::with_capacity(ngram_vec.iter().map(Vec::len).sum());
+        let ngram_doc_pos_len = ngram_vec.iter().map(Vec::len).sum();
+        let mut ngram_doc_pos_vec = Vec::with_capacity(ngram_doc_pos_len);
         let mut lookup_table_vec = Vec::<PrefixSuffixLookupTable>::with_capacity(ngram_vec.len());
         let mut min_lookup_table_size = usize::MAX;
         let mut min_lookup_table_index = 0;
@@ -281,13 +282,13 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                         Some(idx) => idx,
                         None => focus_lookup_table
                             .prefix
-                            .partition_point(|(prefix, _)| &suffix <= prefix),
+                            .partition_point(|(prefix, _)| prefix < &suffix),
                     };
                     let focus_ngram_doc_pos = match focus_lookup_table
                         .prefix
                         .get(focus_ngram_prefix_index)
                         .and_then(|(prefix, ngram_index)| {
-                            (&suffix == prefix).then_some(&ngram_doc_pos_vec[*ngram_index])
+                            (prefix == &suffix).then_some(&ngram_doc_pos_vec[*ngram_index])
                         }) {
                         Some(ngram_doc_pos) => ngram_doc_pos,
                         None => continue,
@@ -342,18 +343,18 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                         Some(idx) => idx,
                         None => focus_lookup_table
                             .suffix
-                            .partition_point(|(suffix, _)| &prefix <= suffix),
+                            .partition_point(|(suffix, _)| suffix < &prefix),
                     };
                     let focus_ngram_doc_pos = match focus_lookup_table
                         .suffix
                         .get(focus_ngram_suffix_index)
                         .and_then(|(suffix, ngram_index)| {
-                            (&prefix == suffix).then_some(&ngram_doc_pos_vec[*ngram_index])
+                            (suffix == &prefix).then_some(&ngram_doc_pos_vec[*ngram_index])
                         }) {
                         Some(ngram_doc_pos) => ngram_doc_pos,
                         None => continue,
                     };
-                    suffix_pos_idx.push((
+                    prefix_pos_idx.push((
                         prefix,
                         match_pos_with_offset,
                         Some(focus_ngram_suffix_index + 1),
