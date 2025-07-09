@@ -409,6 +409,7 @@ impl LogWriter {
                     } else {
                         writer.shutdown();
                         inner.writer.take();
+                        inner.epoch += 1;
                         continue;
                     }
                 }
@@ -1018,8 +1019,8 @@ pub async fn upload_parquet(
                     return Err(Error::StorageError(Arc::new(err)));
                 }
                 let mut backoff = exp_backoff.next();
-                if backoff > Duration::from_secs(3_600) {
-                    backoff = Duration::from_secs(3_600);
+                if backoff > Duration::from_secs(60) {
+                    backoff = Duration::from_secs(60);
                 }
                 tokio::time::sleep(backoff).await;
             }
