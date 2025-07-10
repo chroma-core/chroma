@@ -3,9 +3,11 @@ package dao
 import (
 	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
+	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm/clause"
 
@@ -57,17 +59,17 @@ func (s *collectionDb) GetCollectionEntries(id *string, name *string, tenantID s
 	if id != nil {
 		ids = append(ids, *id)
 	}
-	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, nil)
+	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, nil, nil)
 }
 
-func (s *collectionDb) GetCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*dbmodel.CollectionAndMetadata, error) {
+func (s *collectionDb) GetCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool, where *coordinatorpb.Where) ([]*dbmodel.CollectionAndMetadata, error) {
 	isDeleted := false
 	isDeletedPtr := &isDeleted
 	if includeSoftDeleted {
 		isDeletedPtr = nil
 	}
 
-	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, isDeletedPtr)
+	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, isDeletedPtr, where)
 }
 
 func (s *collectionDb) GetCollectionByResourceName(tenantResourceName string, databaseName string, collectionName string) (*dbmodel.CollectionAndMetadata, error) {
@@ -83,7 +85,7 @@ func (s *collectionDb) GetCollectionByResourceName(tenantResourceName string, da
 	isDeleted := false
 	isDeletedPtr := &isDeleted
 
-	collections, err := s.getCollections(nil, &collectionName, tenant.ID, databaseName, nil, nil, isDeletedPtr)
+	collections, err := s.getCollections(nil, &collectionName, tenant.ID, databaseName, nil, nil, isDeletedPtr, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +144,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	return collections, nil
 }
 
-func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
+func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool, where *coordinatorpb.Where) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	type Result struct {
 		// Collection fields
 		CollectionId               string     `gorm:"column:collection_id"`
@@ -197,15 +199,9 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		query = query.Where("collections.is_deleted = ?", *is_deleted)
 	}
 
-	if limit != nil {
-		query = query.Limit(int(*limit))
-	}
-	if offset != nil {
-		query = query.Offset(int(*offset))
-
-	}
+	// Build the main query with metadata joins
 	var results []Result
-	err = s.db.Table("(?) as ci", query).
+	mainQuery := s.db.Table("(?) as ci", query).
 		Select(`
             ci.*,
             cm.key,
@@ -217,8 +213,39 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
             cm.created_at as metadata_created_at,
             cm.updated_at as metadata_updated_at
         `).
-		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.collection_id").
-		Scan(&results).Error
+		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.collection_id")
+
+	// Apply where clause filtering if provided
+	if where != nil {
+		whereCondition, whereArgs := s.buildWhereCondition(where)
+		if whereCondition != "" {
+			mainQuery = mainQuery.Where(whereCondition, whereArgs...)
+		}
+	}
+
+	if limit != nil {
+		mainQuery = mainQuery.Limit(int(*limit))
+	}
+
+	if offset != nil {
+		mainQuery = mainQuery.Offset(int(*offset))
+	}
+
+	// sql := mainQuery.ToSQL(func(tx *gorm.DB) *gorm.DB {
+	// 	return tx.Find(&results)
+	// })
+
+	// explainResult := s.db.Dialector.Explain(sql)
+	// log.Info("Query execution plan", zap.String("explain", explainResult))
+
+	// var executionPlan string
+	// explainSQL := "EXPLAIN (FORMAT JSON) " + sql
+	// err = s.db.Raw(explainSQL).Scan(&executionPlan).Error
+	// if err == nil {
+	// 	log.Info("Database execution plan", zap.String("plan", executionPlan))
+	// }
+
+	err = mainQuery.Scan(&results).Error
 
 	if err != nil {
 		return nil, err
@@ -369,7 +396,7 @@ func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID 
 	if collectionID != nil {
 		ids = []string{*collectionID}
 	}
-	return s.getCollections(ids, nil, tenantID, databaseName, &limit, nil, &isDeleted)
+	return s.getCollections(ids, nil, tenantID, databaseName, &limit, nil, &isDeleted, nil)
 }
 
 // NOTE: This is the only method to do a hard delete of a single collection.
@@ -635,4 +662,356 @@ func (s *collectionDb) BatchGetCollectionSoftDeleteStatus(collectionIDs []string
 		result[collection.ID] = collection.IsDeleted
 	}
 	return result, nil
+}
+
+// buildWhereCondition converts a coordinatorpb.Where clause into SQL condition and arguments
+func (s *collectionDb) buildWhereCondition(where *coordinatorpb.Where) (string, []interface{}) {
+	if where == nil {
+		return "", nil
+	}
+
+	switch w := where.Where.(type) {
+	case *coordinatorpb.Where_DirectComparison:
+		return s.buildDirectComparisonCondition(w.DirectComparison)
+	case *coordinatorpb.Where_Children:
+		return s.buildCompositeCondition(w.Children)
+	case *coordinatorpb.Where_DirectDocumentComparison:
+		// Document expressions not supported for collection metadata
+		return "", nil
+	default:
+		return "", nil
+	}
+}
+
+// buildDirectComparisonCondition converts a direct comparison into SQL condition
+func (s *collectionDb) buildDirectComparisonCondition(comparison *coordinatorpb.DirectComparison) (string, []interface{}) {
+	if comparison == nil {
+		return "", nil
+	}
+
+	key := comparison.Key
+
+	switch comp := comparison.Comparison.(type) {
+	case *coordinatorpb.DirectComparison_SingleStringOperand:
+		return s.buildSingleStringCondition(key, comp.SingleStringOperand)
+	case *coordinatorpb.DirectComparison_StringListOperand:
+		return s.buildStringListCondition(key, comp.StringListOperand)
+	case *coordinatorpb.DirectComparison_SingleIntOperand:
+		return s.buildSingleIntCondition(key, comp.SingleIntOperand)
+	case *coordinatorpb.DirectComparison_IntListOperand:
+		return s.buildIntListCondition(key, comp.IntListOperand)
+	case *coordinatorpb.DirectComparison_SingleDoubleOperand:
+		return s.buildSingleDoubleCondition(key, comp.SingleDoubleOperand)
+	case *coordinatorpb.DirectComparison_DoubleListOperand:
+		return s.buildDoubleListCondition(key, comp.DoubleListOperand)
+	case *coordinatorpb.DirectComparison_SingleBoolOperand:
+		return s.buildSingleBoolCondition(key, comp.SingleBoolOperand)
+	case *coordinatorpb.DirectComparison_BoolListOperand:
+		return s.buildBoolListCondition(key, comp.BoolListOperand)
+	default:
+		return "", nil
+	}
+}
+
+// buildSingleStringCondition handles single string comparisons
+func (s *collectionDb) buildSingleStringCondition(key string, comp *coordinatorpb.SingleStringComparison) (string, []interface{}) {
+	if comp == nil {
+		return "", nil
+	}
+
+	var operator string
+	switch comp.Comparator {
+	case coordinatorpb.GenericComparator_EQ:
+		operator = "="
+	case coordinatorpb.GenericComparator_NE:
+		operator = "!="
+	default:
+		return "", nil
+	}
+
+	var condition string
+	args := []interface{}{key, comp.Value}
+
+	if comp.Comparator == coordinatorpb.GenericComparator_NE {
+		condition = "ci.collection_id NOT IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.str_value = ?)"
+	} else {
+		condition = "ci.collection_id IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.str_value " + operator + " ?)"
+	}
+
+	return condition, args
+}
+
+// buildSingleIntCondition handles single int comparisons
+func (s *collectionDb) buildSingleIntCondition(key string, comp *coordinatorpb.SingleIntComparison) (string, []interface{}) {
+	if comp == nil {
+		return "", nil
+	}
+
+	var operator string
+	switch c := comp.Comparator.(type) {
+	case *coordinatorpb.SingleIntComparison_GenericComparator:
+		switch c.GenericComparator {
+		case coordinatorpb.GenericComparator_EQ:
+			operator = "="
+		case coordinatorpb.GenericComparator_NE:
+			operator = "!="
+		default:
+			return "", nil
+		}
+		var condition string
+		args := []interface{}{key, comp.Value}
+		if c.GenericComparator == coordinatorpb.GenericComparator_NE {
+			condition = "ci.collection_id NOT IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.int_value = ?)"
+		} else {
+			condition = "ci.collection_id IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.int_value " + operator + " ?)"
+		}
+		return condition, args
+	case *coordinatorpb.SingleIntComparison_NumberComparator:
+		switch c.NumberComparator {
+		case coordinatorpb.NumberComparator_GT:
+			operator = ">"
+		case coordinatorpb.NumberComparator_GTE:
+			operator = ">="
+		case coordinatorpb.NumberComparator_LT:
+			operator = "<"
+		case coordinatorpb.NumberComparator_LTE:
+			operator = "<="
+		default:
+			return "", nil
+		}
+		condition := "ci.collection_id IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.int_value " + operator + " ?)"
+		args := []interface{}{key, comp.Value}
+		return condition, args
+	default:
+		return "", nil
+	}
+}
+
+// buildSingleDoubleCondition handles single double comparisons
+func (s *collectionDb) buildSingleDoubleCondition(key string, comp *coordinatorpb.SingleDoubleComparison) (string, []interface{}) {
+	if comp == nil {
+		return "", nil
+	}
+
+	var operator string
+	switch c := comp.Comparator.(type) {
+	case *coordinatorpb.SingleDoubleComparison_GenericComparator:
+		switch c.GenericComparator {
+		case coordinatorpb.GenericComparator_EQ:
+			operator = "="
+		case coordinatorpb.GenericComparator_NE:
+			operator = "!="
+		default:
+			return "", nil
+		}
+		var condition string
+		args := []interface{}{key, comp.Value}
+		if c.GenericComparator == coordinatorpb.GenericComparator_NE {
+			condition = "ci.collection_id NOT IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.float_value = ?)"
+		} else {
+			condition = "ci.collection_id IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.float_value " + operator + " ?)"
+		}
+		return condition, args
+	case *coordinatorpb.SingleDoubleComparison_NumberComparator:
+		switch c.NumberComparator {
+		case coordinatorpb.NumberComparator_GT:
+			operator = ">"
+		case coordinatorpb.NumberComparator_GTE:
+			operator = ">="
+		case coordinatorpb.NumberComparator_LT:
+			operator = "<"
+		case coordinatorpb.NumberComparator_LTE:
+			operator = "<="
+		default:
+			return "", nil
+		}
+		condition := "ci.collection_id IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.float_value " + operator + " ?)"
+		args := []interface{}{key, comp.Value}
+		return condition, args
+	default:
+		return "", nil
+	}
+}
+
+// buildSingleBoolCondition handles single bool comparisons
+func (s *collectionDb) buildSingleBoolCondition(key string, comp *coordinatorpb.SingleBoolComparison) (string, []interface{}) {
+	if comp == nil {
+		return "", nil
+	}
+
+	var operator string
+	switch comp.Comparator {
+	case coordinatorpb.GenericComparator_EQ:
+		operator = "="
+	case coordinatorpb.GenericComparator_NE:
+		operator = "!="
+	default:
+		return "", nil
+	}
+
+	var condition string
+	args := []interface{}{key, comp.Value}
+
+	if comp.Comparator == coordinatorpb.GenericComparator_NE {
+		condition = "ci.collection_id NOT IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.bool_value = ?)"
+	} else {
+		condition = "ci.collection_id IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.bool_value " + operator + " ?)"
+	}
+
+	return condition, args
+}
+
+// buildStringListCondition handles string list operations (in, not in)
+func (s *collectionDb) buildStringListCondition(key string, comp *coordinatorpb.StringListComparison) (string, []interface{}) {
+	if comp == nil || len(comp.Values) == 0 {
+		return "", nil
+	}
+
+	placeholders := make([]string, len(comp.Values))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	inClause := "(" + strings.Join(placeholders, ", ") + ")"
+
+	args := []interface{}{key}
+	for _, v := range comp.Values {
+		args = append(args, v)
+	}
+
+	var condition string
+	switch comp.ListOperator {
+	case coordinatorpb.ListOperator_IN:
+		condition = "ci.collection_id IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.str_value IN " + inClause + ")"
+	case coordinatorpb.ListOperator_NIN:
+		condition = "ci.collection_id NOT IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.str_value IN " + inClause + ")"
+	default:
+		return "", nil
+	}
+
+	return condition, args
+}
+
+// buildIntListCondition handles int list operations (in, not in)
+func (s *collectionDb) buildIntListCondition(key string, comp *coordinatorpb.IntListComparison) (string, []interface{}) {
+	if comp == nil || len(comp.Values) == 0 {
+		return "", nil
+	}
+
+	placeholders := make([]string, len(comp.Values))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	inClause := "(" + strings.Join(placeholders, ", ") + ")"
+
+	args := []interface{}{key}
+	for _, v := range comp.Values {
+		args = append(args, v)
+	}
+
+	var condition string
+	switch comp.ListOperator {
+	case coordinatorpb.ListOperator_IN:
+		condition = "ci.collection_id IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.int_value IN " + inClause + ")"
+	case coordinatorpb.ListOperator_NIN:
+		condition = "ci.collection_id NOT IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.int_value IN " + inClause + ")"
+	default:
+		return "", nil
+	}
+
+	return condition, args
+}
+
+// buildDoubleListCondition handles double list operations (in, not in)
+func (s *collectionDb) buildDoubleListCondition(key string, comp *coordinatorpb.DoubleListComparison) (string, []interface{}) {
+	if comp == nil || len(comp.Values) == 0 {
+		return "", nil
+	}
+
+	placeholders := make([]string, len(comp.Values))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	inClause := "(" + strings.Join(placeholders, ", ") + ")"
+
+	args := []interface{}{key}
+	for _, v := range comp.Values {
+		args = append(args, v)
+	}
+
+	var condition string
+	switch comp.ListOperator {
+	case coordinatorpb.ListOperator_IN:
+		condition = "ci.collection_id IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.float_value IN " + inClause + ")"
+	case coordinatorpb.ListOperator_NIN:
+		condition = "ci.collection_id NOT IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.float_value IN " + inClause + ")"
+	default:
+		return "", nil
+	}
+
+	return condition, args
+}
+
+// buildBoolListCondition handles bool list operations (in, not in)
+func (s *collectionDb) buildBoolListCondition(key string, comp *coordinatorpb.BoolListComparison) (string, []interface{}) {
+	if comp == nil || len(comp.Values) == 0 {
+		return "", nil
+	}
+
+	placeholders := make([]string, len(comp.Values))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	inClause := "(" + strings.Join(placeholders, ", ") + ")"
+
+	args := []interface{}{key}
+	for _, v := range comp.Values {
+		args = append(args, v)
+	}
+
+	var condition string
+	switch comp.ListOperator {
+	case coordinatorpb.ListOperator_IN:
+		condition = "ci.collection_id IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.bool_value IN " + inClause + ")"
+	case coordinatorpb.ListOperator_NIN:
+		condition = "ci.collection_id NOT IN (SELECT cm_sub.collection_id FROM collection_metadata cm_sub WHERE cm_sub.key = ? AND cm_sub.key IS NOT NULL AND cm_sub.bool_value IN " + inClause + ")"
+	default:
+		return "", nil
+	}
+
+	return condition, args
+}
+
+// buildCompositeCondition handles composite expressions (AND, OR)
+func (s *collectionDb) buildCompositeCondition(children *coordinatorpb.WhereChildren) (string, []interface{}) {
+	if children == nil || len(children.Children) == 0 {
+		return "", nil
+	}
+
+	var conditions []string
+	var allArgs []interface{}
+
+	for _, child := range children.Children {
+		condition, args := s.buildWhereCondition(child)
+		if condition != "" {
+			conditions = append(conditions, "("+condition+")")
+			allArgs = append(allArgs, args...)
+		}
+	}
+
+	if len(conditions) == 0 {
+		return "", nil
+	}
+
+	var operator string
+	switch children.Operator {
+	case coordinatorpb.BooleanOperator_AND:
+		operator = " AND "
+	case coordinatorpb.BooleanOperator_OR:
+		operator = " OR "
+	default:
+		return "", nil
+	}
+
+	finalCondition := strings.Join(conditions, operator)
+	return finalCondition, allArgs
 }

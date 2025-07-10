@@ -3,6 +3,7 @@ package dbmodel
 import (
 	"time"
 
+	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/types"
 )
 
@@ -51,7 +52,7 @@ type CollectionAndMetadata struct {
 
 //go:generate mockery --name=ICollectionDb
 type ICollectionDb interface {
-	GetCollections(collectionIDs []string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*CollectionAndMetadata, error)
+	GetCollections(collectionIDs []string, collectionName *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool, where *coordinatorpb.Where) ([]*CollectionAndMetadata, error)
 	GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*CollectionAndMetadata, error)
 	GetCollectionByResourceName(tenantResourceName string, databaseName string, collectionName string) (*CollectionAndMetadata, error)
 	CountCollections(tenantID string, databaseName *string) (uint64, error)
