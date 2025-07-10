@@ -42,7 +42,7 @@ pub fn init_global_filter_layer(crate_filters: &str) -> Box<dyn Layer<Registry> 
             additional_crate_filters = crate_filters,
     );
 
-    EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| global_filter)).boxed()
+    EnvFilter::new(std::env::var("RUST_LOG").unwrap_or(global_filter)).boxed()
 }
 
 pub fn init_otel_layer(
