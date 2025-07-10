@@ -491,7 +491,7 @@ impl Drop for LogWriter {
 /// structure as the recovery procedure does, this allows us to re-use exactly one code path for
 /// both.  That code path can then be well-tested because any contention state gets exercised from
 /// the perspective of initialization.
-struct OnceLogWriter {
+pub(crate) struct OnceLogWriter {
     /// LogWriterOptions are fixed at log creation time.
     /// LogWriter is intentionally cheap to construct and destroy.
     /// Reopen the log to change the options.
@@ -571,6 +571,35 @@ impl OnceLogWriter {
             }
         });
         Ok(this)
+    }
+
+    pub(crate) async fn open_for_read_only_and_stale_ops(
+        options: LogWriterOptions,
+        storage: Arc<Storage>,
+        prefix: String,
+        writer: String,
+        mark_dirty: Arc<dyn MarkDirty>,
+    ) -> Result<Arc<Self>, Error> {
+        let done = AtomicBool::new(false);
+        let batch_manager =
+            BatchManager::new(options.throttle_fragment).ok_or_else(|| Error::Internal)?;
+        let manifest_manager = ManifestManager::new(
+            options.throttle_manifest,
+            options.snapshot_manifest,
+            Arc::clone(&storage),
+            prefix.clone(),
+            writer,
+        )
+        .await?;
+        Ok(Arc::new(Self {
+            options,
+            storage,
+            prefix,
+            done,
+            mark_dirty,
+            manifest_manager,
+            batch_manager,
+        }))
     }
 
     fn shutdown(&self) {
@@ -727,7 +756,7 @@ impl OnceLogWriter {
     /// Returns Ok(false) if there is no garbage to act upon (e.g., it's already been collected).
     /// Returns Ok(true) if there is garbage to act upon.
     #[tracing::instrument(skip(self, options))]
-    async fn garbage_collect_phase1_compute_garbage(
+    pub(crate) async fn garbage_collect_phase1_compute_garbage(
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
@@ -799,7 +828,7 @@ impl OnceLogWriter {
     /// Post-condition:
     /// - contents of gc/GARBAGE are removed from manifest/MANIFEST.
     #[tracing::instrument(skip(self, _options))]
-    async fn garbage_collect_phase2_update_manifest(
+    pub(crate) async fn garbage_collect_phase2_update_manifest(
         &self,
         _options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
@@ -828,7 +857,7 @@ impl OnceLogWriter {
     /// Post-condition:
     /// - gc/GARBAGE and the files it references get deleted.
     #[tracing::instrument(skip(self, options))]
-    async fn garbage_collect_phase3_delete_garbage(
+    pub(crate) async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
@@ -907,7 +936,7 @@ impl OnceLogWriter {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn garbage_collect(
+    pub(crate) async fn garbage_collect(
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,

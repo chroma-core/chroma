@@ -10,9 +10,11 @@ use chroma_storage::{
 };
 
 use crate::manifest::unprefixed_snapshot_path;
+use crate::writer::OnceLogWriter;
 use crate::{
     deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment, FragmentSeqNo,
-    LogPosition, Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
+    GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest, ScrubError, Snapshot,
+    SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
@@ -465,5 +467,50 @@ impl Garbage {
             drop_acc += self.drop_fragment(frag, first)?;
         }
         Ok(drop_acc)
+    }
+}
+
+///////////////////////////////////////// GarbageCollector /////////////////////////////////////////
+
+pub struct GarbageCollector {
+    log: Arc<OnceLogWriter>,
+}
+
+impl GarbageCollector {
+    /// Open the log into a state where it can be garbage collected.
+    pub async fn open(
+        options: LogWriterOptions,
+        storage: Arc<Storage>,
+        prefix: &str,
+        writer: &str,
+    ) -> Result<Self, Error> {
+        let log = OnceLogWriter::open_for_read_only_and_stale_ops(
+            options.clone(),
+            Arc::clone(&storage),
+            prefix.to_string(),
+            writer.to_string(),
+            Arc::new(()),
+        )
+        .await?;
+        Ok(Self { log })
+    }
+
+    pub async fn garbage_collect_phase1_compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<bool, Error> {
+        self.log
+            .garbage_collect_phase1_compute_garbage(options, keep_at_least)
+            .await
+    }
+
+    pub async fn garbage_collect_phase3_delete_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        self.log
+            .garbage_collect_phase3_delete_garbage(options)
+            .await
     }
 }
