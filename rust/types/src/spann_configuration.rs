@@ -93,6 +93,7 @@ impl ChromaError for DistributedSpannParametersFromSegmentError {
 #[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
 pub struct InternalSpannConfiguration {
     #[serde(default = "default_search_nprobe")]
+    #[validate(range(max = 128))]
     pub search_nprobe: u32,
     #[serde(default = "default_search_rng_factor")]
     pub search_rng_factor: f32,

@@ -1,10 +1,10 @@
 # Configuring Chroma Collections
 
-Chroma collections have a `configuration` that determines how their embeddings index is constructed and used. We use default values for these index configurations that should give you great performance for most use cases out-of-the-box. 
+Chroma collections have a `configuration` that determines how their embeddings index is constructed and used. We use default values for these index configurations that should give you great performance for most use cases out-of-the-box.
 
 The [embedding function](../embeddings/embedding-functions) you choose to use in your collection also affects its index construction, and is included in the configuration.
 
-When you create a collection, you can customize these index configuration values for different data, accuracy and performance requirements. Some query-time configurations can also be customized after the collection's creation using the `.modify` function. 
+When you create a collection, you can customize these index configuration values for different data, accuracy and performance requirements. Some query-time configurations can also be customized after the collection's creation using the `.modify` function.
 
 {% CustomTabs %}
 
@@ -124,17 +124,13 @@ In Distributed Chroma and Chroma Cloud collections, we use a SPANN (Spacial Appr
 
 {% AccordionItem label="What is a SPANN index?" %}
 
-A SPANN index is a data structure used to efficiently find approximate nearest neighbors in large sets of high-dimensional vectors. It works by dividing the set into broad clusters (so we can ignore most of the data during search) and then building efficient, smaller indexes within each cluster for fast local lookups. This two-level approach helps reduce both memory use and search time, making it practical to search billions of vectors stored even on hard drives or separate machines in a distributed system.
+A SPANN index is a data structure used to efficiently find approximate nearest neighbors in large sets of high-dimensional vectors. It works by dividing the set into broad clusters (so we can ignore most of the data during search) and then building efficient, smaller indexes within each cluster for fast local lookups. Each cluster has a centroid that identifies the cluster, and each centroid is then added into an HNSW index. During a query, the higher level HNSW index is first traversed to find the nearest clusters to a given query vector before then searching through the smaller indexes within each cluster. This two-level approach helps reduce both memory use and search time, making it practical to search billions of vectors stored even on hard drives or separate machines in a distributed system.
 
 {% /AccordionItem %}
 
 {% /Accordion %}
 
-{% Banner type="note" %}
-We currently don't allow customization or modification of SPANN configuration. If you set these values they will be ignored by the server.
-{% /Banner %}
-
-The SPANN index parameters include:
+The SPANN parameters on index creation include:
 
 * `space` defines the distance function of the embedding space, and hence how similarity is defined. The default is `l2` (squared L2 norm), and other possible values are `cosine` (cosine similarity), and `ip` (inner product).
 
@@ -144,12 +140,14 @@ The SPANN index parameters include:
 | Inner product     |   `ip`    |                                                                                     {% Latex %} d = 1.0 - \\sum\\left(A_i \\times B_i\\right) {% /Latex %} |             focuses on vector alignment and magnitude, often used for recommendation systems where larger values indicate stronger preferences              |
 | Cosine similarity | `cosine`  | {% Latex %} d = 1.0 - \\frac{\\sum\\left(A_i \\times B_i\\right)}{\\sqrt{\\sum\\left(A_i^2\\right)} \\cdot \\sqrt{\\sum\\left(B_i^2\\right)}} {% /Latex %} | measures only the angle between vectors (ignoring magnitude), making it ideal for text embeddings or cases where you care about direction rather than scale |
 
-* `search_nprobe` is the number of centers that are probed for a query. The higher the value the more accurate the result will be. The query response time also increases as `search_nprobe` increases. Recommended values are 64/128. We don't allow setting a value higher than 128 today. The default value is 64. 
-* `write_nprobe` is the same as `search_nprobe` but for the index construction phase. It is the number of centers searched when appending or reassigning a point. It has the same limits as `search_nprobe`. The default value is 64. 
-* `ef_construction` determines the size of the candidate list used to select neighbors during index creation. A higher value improves index quality at the cost of more memory and time, while a lower value speeds up construction with reduced accuracy. The default value is 200. 
-* `ef_search` determines the size of the dynamic candidate list used while searching for the nearest neighbors. A higher value improves recall and accuracy by exploring more potential neighbors but increases query time and computational cost, while a lower value results in faster but less accurate searches. The default value is 200. 
-* `max_neighbors` defines the maximum number of neighbors for a node. The default value is 64. 
-* `reassign_neighbor_count` is the number of closest neighboring clusters of a split cluster whose points are considered for reassignment. The default value is 64.
+* `search_nprobe` is the number of centers that are probed for a query. The higher the value the more accurate the result will be. The query response time also increases as `search_nprobe` increases. Recommended values are 64/128. The default value is 64, and the max value is 128.
+* `write_nprobe` is the same as `search_nprobe` but for the index construction phase. It is the number of centers searched when appending or reassigning a point. The default value is 64, and the max value is 128.
+* `ef_construction` determines the size of the candidate list used to select neighbors during index creation for the HNSW index of centroids. A higher value improves index quality at the cost of more memory and time, while a lower value speeds up construction with reduced accuracy. The default value is 200, and the max value is 200.
+* `ef_search` determines the size of the dynamic candidate list used while searching for the nearest neighbors for the HNSW index of centroids. A higher value improves recall and accuracy by exploring more potential neighbors but increases query time and computational cost, while a lower value results in faster but less accurate searches. The default value is 200, and the max value is 200.
+* `max_neighbors` defines the maximum number of neighbors for a node. The default value is 64.
+* `reassign_neighbor_count` is the number of closest neighboring clusters of a split cluster whose points are considered for reassignment. The default value is 64, and the max value is 64.
+* `split_threshold` determines when a cluster must be separated into smaller clusters to prevent individual clusters from growing too large. The default value is 200, the min value is 100, and the max value is 200.
+* `merge_threshold` determines when nearby clusters must be merged into a single cluster to prevent too many small clusters. The default value is 100, the min value is 50, and the max value is 100.
 
 {% /Tab %}
 
@@ -157,7 +155,7 @@ The SPANN index parameters include:
 
 ## Embedding Function Configuration
 
-The embedding function you choose when creating a collection, along with the parameters you instantiate it with, is persisted in the collection's configuration. This allows us to reconstruct it correctly when you use collection across different clients. 
+The embedding function you choose when creating a collection, along with the parameters you instantiate it with, is persisted in the collection's configuration. This allows us to reconstruct it correctly when you use collection across different clients.
 
 You can set your embedding function as an argument to the "create" methods, or directly in the configuration:
 
