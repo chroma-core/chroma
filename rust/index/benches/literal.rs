@@ -170,7 +170,7 @@ async fn bench_fts((reader, pattern): (FullTextIndexReader<'_>, &str)) {
 async fn bench_literal_slice((reader, literal_string): (FullTextIndexReader<'_>, String)) {
     let literals = literal_string
         .chars()
-        .map(|c| Literal::Char(c))
+        .map(Literal::Char)
         .collect::<Vec<_>>();
     reader
         .match_literal_with_mask(&literals, None)
