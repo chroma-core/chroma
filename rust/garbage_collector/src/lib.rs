@@ -61,7 +61,7 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
         info!("Starting jemalloc pprof server on port {}", port);
         let shutdown_channel = tokio::sync::oneshot::channel();
         pprof_shutdown_tx = Some(shutdown_channel.0);
-        spawn_pprof_server(6060, shutdown_channel.1).await;
+        spawn_pprof_server(port, shutdown_channel.1).await;
     }
 
     let tracing_layers = vec![
