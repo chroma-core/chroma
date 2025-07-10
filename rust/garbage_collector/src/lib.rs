@@ -65,7 +65,7 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     }
 
     let tracing_layers = vec![
-        init_global_filter_layer(),
+        init_global_filter_layer("garbage_collector=debug"),
         init_otel_layer(&config.service_name, &config.otel_endpoint),
         init_stdout_layer(),
     ];

@@ -12,40 +12,37 @@ use tracing_subscriber::fmt;
 use tracing_subscriber::Registry;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
 
-pub fn init_global_filter_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
-    EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| {
-        "error,opentelemetry_sdk=info,garbage_collector=debug,chroma_storage=debug,".to_string()
-            + &vec![
-                "chroma",
-                "chroma-blockstore",
-                "chroma-config",
-                "chroma-cache",
-                "chroma-distance",
-                "chroma-error",
-                "chroma-log",
-                "chroma-log-service",
-                "chroma-frontend",
-                "chroma-index",
-                "chroma-test",
-                "chroma-types",
-                "compaction_service",
-                "distance_metrics",
-                "full_text",
-                "hosted_frontend",
-                "billing",
-                "metadata_filtering",
-                "query_service",
-                "wal3",
-                "worker",
-                "continuous_verification",
-                "change_notifier",
-            ]
-            .into_iter()
-            .map(|s| s.to_string() + "=trace")
-            .collect::<Vec<String>>()
-            .join(",")
-    }))
-    .boxed()
+pub fn init_global_filter_layer(crate_filters: &str) -> Box<dyn Layer<Registry> + Send + Sync> {
+    let default_crate_names = vec![
+        "chroma",
+        "chroma-blockstore",
+        "chroma-config",
+        "chroma-cache",
+        "chroma-distance",
+        "chroma-error",
+        "chroma-log",
+        "chroma-index",
+        "chroma-test",
+        "chroma-types",
+        "compaction_service",
+        "distance_metrics",
+        "full_text",
+        "metadata_filtering",
+        "query_service",
+        "wal3",
+    ];
+
+    let global_filter = format!(
+        "error,opentelemetry_sdk=info,chroma_storage=debug,{default_crate_filters},{additional_crate_filters}",
+        default_crate_filters = default_crate_names
+            .iter()
+            .map(|s| format!("{s}=trace"))
+            .collect::<Vec<_>>()
+            .join(","),
+            additional_crate_filters = crate_filters,
+    );
+
+    EnvFilter::new(std::env::var("RUST_LOG").unwrap_or_else(|_| global_filter)).boxed()
 }
 
 pub fn init_otel_layer(
@@ -165,9 +162,9 @@ pub fn init_panic_tracing_hook() {
     }));
 }
 
-pub fn init_otel_tracing(service_name: &String, otel_endpoint: &String) {
+pub fn init_otel_tracing(service_name: &String, crate_filters: &str, otel_endpoint: &String) {
     let layers = vec![
-        init_global_filter_layer(),
+        init_global_filter_layer(crate_filters),
         init_otel_layer(service_name, otel_endpoint),
         init_stdout_layer(),
     ];

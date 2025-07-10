@@ -48,6 +48,7 @@ impl ChromaError for ScorecardRuleError {
 }
 
 pub async fn frontend_service_entrypoint(
+    crate_filters: &str,
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
     init_otel_tracing: bool,
@@ -56,7 +57,14 @@ pub async fn frontend_service_entrypoint(
         Ok(config_path) => FrontendServerConfig::load_from_path(&config_path),
         Err(_) => FrontendServerConfig::load(),
     };
-    frontend_service_entrypoint_with_config(auth, quota_enforcer, &config, init_otel_tracing).await;
+    frontend_service_entrypoint_with_config(
+        crate_filters,
+        auth,
+        quota_enforcer,
+        &config,
+        init_otel_tracing,
+    )
+    .await;
 }
 
 pub async fn frontend_service_entrypoint_with_config_system_registry(
@@ -118,10 +126,10 @@ pub async fn frontend_service_entrypoint_with_config_system_registry(
     .await;
 }
 
-pub fn init_frontend_otel_tracing(config: &FrontendServerConfig) {
+pub fn init_frontend_otel_tracing(crate_filters: &str, config: &FrontendServerConfig) {
     if let Some(config) = &config.open_telemetry {
         let tracing_layers = vec![
-            init_global_filter_layer(),
+            init_global_filter_layer(crate_filters),
             init_otel_layer(&config.service_name, &config.endpoint),
             init_stdout_layer(),
         ];
@@ -133,6 +141,7 @@ pub fn init_frontend_otel_tracing(config: &FrontendServerConfig) {
 }
 
 pub async fn frontend_service_entrypoint_with_config(
+    crate_filters: &str,
     auth: Arc<dyn auth::AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
     config: &FrontendServerConfig,
@@ -142,7 +151,7 @@ pub async fn frontend_service_entrypoint_with_config(
     let registry = Registry::new();
 
     if init_otel_tracing {
-        init_frontend_otel_tracing(config);
+        init_frontend_otel_tracing(crate_filters, config);
     }
 
     frontend_service_entrypoint_with_config_system_registry(

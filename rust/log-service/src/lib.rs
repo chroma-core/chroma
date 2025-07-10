@@ -2496,7 +2496,11 @@ pub async fn log_entrypoint() {
     let registry = chroma_config::registry::Registry::new();
     if let Some(otel_config) = &config.opentelemetry {
         eprintln!("enabling tracing");
-        chroma_tracing::init_otel_tracing(&otel_config.service_name, &otel_config.endpoint);
+        chroma_tracing::init_otel_tracing(
+            &otel_config.service_name,
+            "chroma-log-service=trace",
+            &otel_config.endpoint,
+        );
     } else {
         eprintln!("tracing disabled");
     }
