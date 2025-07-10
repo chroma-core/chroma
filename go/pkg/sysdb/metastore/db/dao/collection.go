@@ -428,6 +428,9 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 	if in.Name != nil {
 		ret["name"] = *in.Name
 	}
+	if in.ConfigurationJsonStr != nil {
+		ret["configuration_json_str"] = *in.ConfigurationJsonStr
+	}
 	if in.Dimension != nil {
 		ret["dimension"] = *in.Dimension
 	}

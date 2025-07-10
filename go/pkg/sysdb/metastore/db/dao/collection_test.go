@@ -332,6 +332,366 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollectionByResourceName
 	suite.NoError(err)
 }
 
+func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateConfigurationJsonStr() {
+	collectionName := "test_collection_update_config"
+	dim := int32(128)
+	collectionID, err := CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, dim, suite.databaseId, nil))
+	suite.NoError(err)
+
+	collections, err := suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	defaultConfig := "{\"a\": \"param\", \"b\": \"param2\", \"3\": true}"
+	suite.Equal(&defaultConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	newConfig := "{\"c\": \"param3\", \"d\": \"param3\", \"4\": false}"
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:                   collectionID,
+		DatabaseID:           suite.databaseId,
+		ConfigurationJsonStr: &newConfig,
+		UpdatedAt:            time.Now(),
+	})
+	suite.NoError(err)
+
+	collections, err = suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(&newConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	emptyConfig := ""
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:                   collectionID,
+		DatabaseID:           suite.databaseId,
+		ConfigurationJsonStr: &emptyConfig,
+		UpdatedAt:            time.Now(),
+	})
+	suite.NoError(err)
+
+	collections, err = suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(&emptyConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	err = CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
+func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateHnswConfiguration() {
+	collectionName := "test_collection_hnsw_config"
+	dim := int32(128)
+	collectionID, err := CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, dim, suite.databaseId, nil))
+	suite.NoError(err)
+
+	initialHnswConfig := `{
+		"vector_index": {
+			"hnsw": {
+				"space": "l2",
+				"ef_construction": 100,
+				"ef_search": 100,
+				"max_neighbors": 16,
+				"num_threads": 16,
+				"resize_factor": 1.2,
+				"batch_size": 100,
+				"sync_threshold": 1000
+			}
+		}
+	}`
+
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:                   collectionID,
+		DatabaseID:           suite.databaseId,
+		ConfigurationJsonStr: &initialHnswConfig,
+		UpdatedAt:            time.Now(),
+	})
+	suite.NoError(err)
+
+	collections, err := suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(&initialHnswConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	updatedHnswConfig := `{
+		"vector_index": {
+			"hnsw": {
+				"space": "l2",
+				"ef_construction": 100,
+				"ef_search": 50,
+				"max_neighbors": 32,
+				"num_threads": 8,
+				"resize_factor": 1.5,
+				"batch_size": 200,
+				"sync_threshold": 500
+			}
+		}
+	}`
+
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:                   collectionID,
+		DatabaseID:           suite.databaseId,
+		ConfigurationJsonStr: &updatedHnswConfig,
+		UpdatedAt:            time.Now(),
+	})
+	suite.NoError(err)
+
+	collections, err = suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(&updatedHnswConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	err = CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
+func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateSpannConfiguration() {
+	collectionName := "test_collection_spann_config"
+	dim := int32(128)
+	collectionID, err := CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, dim, suite.databaseId, nil))
+	suite.NoError(err)
+
+	initialSpannConfig := `{
+		"vector_index": {
+			"spann": {
+				"search_nprobe": 10,
+				"write_nprobe": 5,
+				"space": "l2",
+				"ef_construction": 100,
+				"ef_search": 50,
+				"max_neighbors": 16,
+				"reassign_neighbor_count": 2,
+				"split_threshold": 1000,
+				"merge_threshold": 100
+			}
+		}
+	}`
+
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:                   collectionID,
+		DatabaseID:           suite.databaseId,
+		ConfigurationJsonStr: &initialSpannConfig,
+		UpdatedAt:            time.Now(),
+	})
+	suite.NoError(err)
+
+	collections, err := suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(&initialSpannConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	updatedSpannConfig := `{
+		"vector_index": {
+			"spann": {
+				"search_nprobe": 20,
+				"write_nprobe": 10,
+				"space": "cosine",
+				"ef_construction": 200,
+				"ef_search": 100,
+				"max_neighbors": 32,
+				"reassign_neighbor_count": 4,
+				"split_threshold": 2000,
+				"merge_threshold": 200
+			}
+		}
+	}`
+
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:                   collectionID,
+		DatabaseID:           suite.databaseId,
+		ConfigurationJsonStr: &updatedSpannConfig,
+		UpdatedAt:            time.Now(),
+	})
+	suite.NoError(err)
+
+	collections, err = suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(&updatedSpannConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	err = CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
+func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateEmbeddingFunctionConfiguration() {
+	collectionName := "test_collection_embedding_config"
+	dim := int32(128)
+	collectionID, err := CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, dim, suite.databaseId, nil))
+	suite.NoError(err)
+
+	initialEmbeddingConfig := `{
+		"vector_index": {
+			"hnsw": {
+				"space": "l2",
+				"ef_construction": 100,
+				"ef_search": 100,
+				"max_neighbors": 16,
+				"num_threads": 16,
+				"resize_factor": 1.2,
+				"batch_size": 100,
+				"sync_threshold": 1000
+			}
+		},
+		"embedding_function": {
+			"type": "openai",
+			"name": "text-embedding-ada-002",
+			"config": {
+				"api_key": "sk-1234567890abcdef",
+				"model": "text-embedding-ada-002",
+				"dimensions": 1536
+			}
+		}
+	}`
+
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:                   collectionID,
+		DatabaseID:           suite.databaseId,
+		ConfigurationJsonStr: &initialEmbeddingConfig,
+		UpdatedAt:            time.Now(),
+	})
+	suite.NoError(err)
+
+	collections, err := suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(&initialEmbeddingConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	updatedEmbeddingConfig := `{
+		"vector_index": {
+			"hnsw": {
+				"space": "l2",
+				"ef_construction": 100,
+				"ef_search": 100,
+				"max_neighbors": 16,
+				"num_threads": 16,
+				"resize_factor": 1.2,
+				"batch_size": 100,
+				"sync_threshold": 1000
+			}
+		},
+		"embedding_function": {
+			"type": "openai",
+			"name": "text-embedding-3-small",
+			"config": {
+				"api_key": "sk-0987654321fedcba",
+				"model": "text-embedding-3-small",
+				"dimensions": 1536,
+				"encoding_format": "float"
+			}
+		}
+	}`
+
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:                   collectionID,
+		DatabaseID:           suite.databaseId,
+		ConfigurationJsonStr: &updatedEmbeddingConfig,
+		UpdatedAt:            time.Now(),
+	})
+	suite.NoError(err)
+
+	collections, err = suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(&updatedEmbeddingConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	err = CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
+func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateComplexConfiguration() {
+	collectionName := "test_collection_complex_config"
+	dim := int32(128)
+	collectionID, err := CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, dim, suite.databaseId, nil))
+	suite.NoError(err)
+
+	initialComplexConfig := `{
+		"vector_index": {
+			"hnsw": {
+				"space": "l2",
+				"ef_construction": 100,
+				"ef_search": 100,
+				"max_neighbors": 16,
+				"num_threads": 16,
+				"resize_factor": 1.2,
+				"batch_size": 100,
+				"sync_threshold": 1000
+			}
+		},
+		"embedding_function": {
+			"type": "sentence_transformers",
+			"name": "all-MiniLM-L6-v2",
+			"config": {
+				"model_name": "sentence-transformers/all-MiniLM-L6-v2",
+				"device": "cpu",
+				"normalize_embeddings": true
+			}
+		},
+		"metadata": {
+			"description": "Test collection for complex configuration",
+			"tags": ["test", "complex", "configuration"],
+			"version": "1.0.0"
+		}
+	}`
+
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:                   collectionID,
+		DatabaseID:           suite.databaseId,
+		ConfigurationJsonStr: &initialComplexConfig,
+		UpdatedAt:            time.Now(),
+	})
+	suite.NoError(err)
+
+	collections, err := suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(&initialComplexConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	updatedComplexConfig := `{
+		"vector_index": {
+			"spann": {
+				"search_nprobe": 15,
+				"write_nprobe": 8,
+				"space": "cosine",
+				"ef_construction": 150,
+				"ef_search": 75,
+				"max_neighbors": 24,
+				"reassign_neighbor_count": 3,
+				"split_threshold": 1500,
+				"merge_threshold": 150
+			}
+		},
+		"embedding_function": {
+			"type": "huggingface",
+			"name": "sentence-transformers/all-mpnet-base-v2",
+			"config": {
+				"model_name": "sentence-transformers/all-mpnet-base-v2",
+				"device": "cuda",
+				"normalize_embeddings": true,
+				"max_length": 512
+			}
+		},
+		"metadata": {
+			"description": "Updated collection with SPANN and new embedding model",
+			"tags": ["test", "complex", "configuration", "updated"],
+			"version": "2.0.0",
+			"optimization_level": "high"
+		}
+	}`
+
+	err = suite.collectionDb.Update(&dbmodel.Collection{
+		ID:                   collectionID,
+		DatabaseID:           suite.databaseId,
+		ConfigurationJsonStr: &updatedComplexConfig,
+		UpdatedAt:            time.Now(),
+	})
+	suite.NoError(err)
+
+	collections, err = suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(&updatedComplexConfig, collections[0].Collection.ConfigurationJsonStr)
+
+	err = CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
 func TestCollectionDbTestSuiteSuite(t *testing.T) {
 	testSuite := new(CollectionDbTestSuite)
 	suite.Run(t, testSuite)

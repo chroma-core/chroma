@@ -18,10 +18,10 @@ use chroma_types::{
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
     GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateMetadata, UpsertCollectionRecordsResponse,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
+    QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -1101,13 +1101,18 @@ async fn update_collection(
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
+    let configuration = match payload.new_configuration {
+        Some(c) => Some(InternalUpdateCollectionConfiguration::try_from(c)?),
+        None => None,
+    };
+
     let request = chroma_types::UpdateCollectionRequest::try_new(
         collection_id,
         payload.new_name,
         payload
             .new_metadata
             .map(CollectionMetadataUpdate::UpdateMetadata),
-        payload.new_configuration,
+        configuration,
     )?;
 
     server.frontend.update_collection(request).await?;

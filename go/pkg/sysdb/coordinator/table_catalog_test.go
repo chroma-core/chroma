@@ -1183,19 +1183,19 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 	catalog := NewTableCatalog(nil, nil, nil, false)
 
 	tests := []struct {
-		name                string
-		existingConfigJson  *string
-		updateConfigJson    *string
-		collectionMetadata  []*dbmodel.CollectionMetadata
-		expectedError       bool
-		expectedHnswConfig  *model.HnswConfiguration
-		expectedSpannConfig *model.SpannConfiguration
+		name                            string
+		existingConfigJson              *string
+		updateConfigJson                *string
+		collectionMetadata              []*dbmodel.CollectionMetadata
+		expectedError                   bool
+		expectedHnswConfig              *model.HnswConfiguration
+		expectedSpannConfig             *model.SpannConfiguration
+		expectedEmbeddingFunctionConfig *model.EmbeddingFunctionConfiguration
 	}{
 		{
 			name: "Update HNSW configuration",
 			existingConfigJson: strPtr(`{
 				"vector_index": {
-					"type": "hnsw",
 					"hnsw": {
 						"space": "l2",
 						"ef_construction": 100,
@@ -1210,7 +1210,6 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			}`),
 			updateConfigJson: strPtr(`{
 				"vector_index": {
-					"type": "hnsw",
 					"hnsw": {
 						"ef_search": 20,
 						"num_threads": 4
@@ -1255,7 +1254,6 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			},
 			updateConfigJson: strPtr(`{
 				"vector_index": {
-					"type": "hnsw",
 					"hnsw": {
 						"ef_search": 20
 					}
@@ -1276,7 +1274,6 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			name: "Update SPANN configuration",
 			existingConfigJson: strPtr(`{
 				"vector_index": {
-					"type": "spann",
 					"spann": {
 						"search_nprobe": 10,
 						"write_nprobe": 5,
@@ -1289,7 +1286,6 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			}`),
 			updateConfigJson: strPtr(`{
 				"vector_index": {
-					"type": "spann",
 					"spann": {
 						"ef_search": 75,
 						"search_nprobe": 15
@@ -1309,7 +1305,6 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			name: "Convert from HNSW to SPANN",
 			existingConfigJson: strPtr(`{
 				"vector_index": {
-					"type": "hnsw",
 					"hnsw": {
 						"space": "l2",
 						"ef_construction": 100,
@@ -1324,7 +1319,6 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			}`),
 			updateConfigJson: strPtr(`{
 				"vector_index": {
-					"type": "spann",
 					"spann": {
 						"search_nprobe": 10,
 						"write_nprobe": 5,
@@ -1351,7 +1345,6 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			name: "Convert from SPANN to HNSW",
 			existingConfigJson: strPtr(`{
 				"vector_index": {
-					"type": "spann",
 					"spann": {
 						"search_nprobe": 10,
 						"write_nprobe": 5,
@@ -1364,7 +1357,6 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			}`),
 			updateConfigJson: strPtr(`{
 				"vector_index": {
-					"type": "hnsw",
 					"hnsw": {
 						"ef_search": 20,
 						"num_threads": 4
@@ -1385,7 +1377,6 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			name: "Invalid update configuration JSON",
 			existingConfigJson: strPtr(`{
 				"vector_index": {
-					"type": "hnsw",
 					"hnsw": {
 						"space": "l2",
 						"ef_construction": 100,
@@ -1400,6 +1391,82 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			}`),
 			updateConfigJson: strPtr(`{invalid json`),
 			expectedError:    true,
+		},
+		{
+			name: "Update embedding function configuration",
+			existingConfigJson: strPtr(`{
+				"embedding_function": {
+					"type": "known",
+					"name": "test",
+					"config": {}
+				}
+			}`),
+			updateConfigJson: strPtr(`{
+				"embedding_function": {
+					"type": "known",
+					"name": "test2",
+					"config": {
+						"test": "test"
+					}
+				}
+			}`),
+			expectedEmbeddingFunctionConfig: &model.EmbeddingFunctionConfiguration{
+				Name: "test2",
+				Config: map[string]any{
+					"test": "test",
+				},
+				Type: "known",
+			},
+		},
+		{
+			name: "Update embedding function configuration with spann",
+			existingConfigJson: strPtr(`{
+				"vector_index": {
+					"spann": {
+						"search_nprobe": 10,
+						"write_nprobe": 5,
+						"space": "l2",
+						"ef_construction": 100,
+						"ef_search": 50,
+						"max_neighbors": 16
+					}
+				},
+				"embedding_function": {
+					"type": "known",
+					"name": "test",
+					"config": {}
+				}
+			}`),
+			updateConfigJson: strPtr(`{
+				"vector_index": {
+					"spann": {
+						"ef_search": 75,
+						"search_nprobe": 15
+					}
+				},
+				"embedding_function": {
+					"type": "known",
+					"name": "test2",
+					"config": {
+						"test": "test"
+					}
+				}
+			}`),
+			expectedEmbeddingFunctionConfig: &model.EmbeddingFunctionConfiguration{
+				Name: "test2",
+				Config: map[string]any{
+					"test": "test",
+				},
+				Type: "known",
+			},
+			expectedSpannConfig: &model.SpannConfiguration{
+				SearchNprobe:   15,
+				WriteNprobe:    5,
+				Space:          "l2",
+				EfConstruction: 100,
+				EfSearch:       75,
+				MaxNeighbors:   16,
+			},
 		},
 	}
 
@@ -1425,12 +1492,10 @@ func TestUpdateCollectionConfiguration(t *testing.T) {
 			assert.NoError(t, err)
 
 			if tt.expectedHnswConfig != nil {
-				assert.Equal(t, "hnsw", config.VectorIndex.Type)
 				assert.Equal(t, tt.expectedHnswConfig, config.VectorIndex.Hnsw)
 			}
 
 			if tt.expectedSpannConfig != nil {
-				assert.Equal(t, "spann", config.VectorIndex.Type)
 				assert.Equal(t, tt.expectedSpannConfig, config.VectorIndex.Spann)
 			}
 		})

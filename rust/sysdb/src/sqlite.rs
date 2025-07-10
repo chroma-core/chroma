@@ -12,9 +12,9 @@ use chroma_types::{
     CreateTenantError, CreateTenantResponse, Database, DatabaseUuid, DeleteCollectionError,
     DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
     GetCollectionsError, GetDatabaseError, GetSegmentsError, GetTenantError, GetTenantResponse,
-    InternalCollectionConfiguration, ListDatabasesError, Metadata, MetadataValue, ResetError,
-    ResetResponse, Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionConfiguration,
-    UpdateCollectionError,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListDatabasesError,
+    Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope, SegmentType,
+    SegmentUuid, UpdateCollectionError,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
@@ -356,7 +356,7 @@ impl SqliteSysDb {
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
-        configuration: Option<UpdateCollectionConfiguration>,
+        configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
         let mut tx = self
             .db
@@ -1048,8 +1048,9 @@ mod tests {
     use super::*;
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
     use chroma_types::{
-        SegmentScope, SegmentType, SegmentUuid, UpdateHnswConfiguration, UpdateMetadata,
-        UpdateMetadataValue, VectorIndexConfiguration,
+        InternalUpdateCollectionConfiguration, SegmentScope, SegmentType, SegmentUuid,
+        UpdateHnswConfiguration, UpdateMetadata, UpdateMetadataValue,
+        UpdateVectorIndexConfiguration, VectorIndexConfiguration,
     };
 
     #[tokio::test]
@@ -1354,13 +1355,14 @@ mod tests {
                 Some("new_name".to_string()),
                 Some(CollectionMetadataUpdate::UpdateMetadata(metadata)),
                 Some(1024),
-                Some(UpdateCollectionConfiguration {
-                    hnsw: Some(UpdateHnswConfiguration {
-                        ef_search: Some(20),
-                        num_threads: Some(4),
-                        ..Default::default()
-                    }),
-                    spann: None,
+                Some(InternalUpdateCollectionConfiguration {
+                    vector_index: Some(UpdateVectorIndexConfiguration::Hnsw(Some(
+                        UpdateHnswConfiguration {
+                            ef_search: Some(10),
+                            num_threads: Some(2),
+                            ..Default::default()
+                        },
+                    ))),
                     embedding_function: None,
                 }),
             )
@@ -1387,7 +1389,7 @@ mod tests {
         // Access HNSW configuration through pattern matching
         match &collection.config.vector_index {
             VectorIndexConfiguration::Hnsw(hnsw) => {
-                assert_eq!(hnsw.ef_search, 20);
+                assert_eq!(hnsw.ef_search, 10);
             }
             _ => panic!("Expected HNSW configuration"),
         }

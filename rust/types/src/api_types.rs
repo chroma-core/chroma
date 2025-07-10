@@ -1,5 +1,5 @@
 use crate::collection_configuration::InternalCollectionConfiguration;
-use crate::collection_configuration::UpdateCollectionConfiguration;
+use crate::collection_configuration::InternalUpdateCollectionConfiguration;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
@@ -721,7 +721,7 @@ pub struct UpdateCollectionRequest {
     pub new_name: Option<String>,
     #[validate(custom(function = "validate_non_empty_collection_update_metadata"))]
     pub new_metadata: Option<CollectionMetadataUpdate>,
-    pub new_configuration: Option<UpdateCollectionConfiguration>,
+    pub new_configuration: Option<InternalUpdateCollectionConfiguration>,
 }
 
 impl UpdateCollectionRequest {
@@ -729,7 +729,7 @@ impl UpdateCollectionRequest {
         collection_id: CollectionUuid,
         new_name: Option<String>,
         new_metadata: Option<CollectionMetadataUpdate>,
-        new_configuration: Option<UpdateCollectionConfiguration>,
+        new_configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             collection_id,
