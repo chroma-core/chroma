@@ -79,6 +79,9 @@ spec:
             {{ end }}
           ports:
             - containerPort: 50051
+            - containerPort: 6060
+              protocol: TCP
+              name: pprof
           env:
             {{if .Values.queryService.configuration}}
             - name: CONFIG_PATH
