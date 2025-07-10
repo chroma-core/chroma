@@ -82,6 +82,7 @@ query_service:
                 name: "hnsw_cache"
                 capacity: 8589934592 # 8GB
         permitted_parallelism: 180
+    jemalloc_pprof_server_port: 6060
 
 compaction_service:
     service_name: "compaction-service"
