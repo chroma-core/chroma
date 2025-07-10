@@ -35,7 +35,7 @@ members = [
 ]
 
 [workspace.dependencies]
-arrow = "55.1"
+arrow = "55.2"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros"] }
 bytes = "1.10"
