@@ -385,7 +385,7 @@ impl GrpcLog {
         &mut self,
         tenant: &str,
         collection_id: CollectionUuid,
-        start_from: u64,
+        _start_from: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
         let mut client = self
             .client_for(tenant, collection_id)
