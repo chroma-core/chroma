@@ -124,7 +124,7 @@ pub trait TaskWrapper: Send + Debug {
 #[async_trait]
 impl<Input, Output, Error> TaskWrapper for Task<Input, Output, Error>
 where
-    Error: Debug + Send,
+    Error: Debug + Send + ChromaError,
     Input: Send + Sync + Debug,
     Output: Send + Sync + Debug,
 {
@@ -148,8 +148,7 @@ where
         match result {
             Ok(result) => {
                 if let Err(err) = result.as_ref() {
-                    if format!("{err:?}").contains("FailedToPullLogs(Status { code: NotFound") {
-                    } else {
+                    if err.should_trace_error() {
                         tracing::error!("Task {} failed with error: {:?}", self.task_id, err);
                     }
                 }
@@ -271,7 +270,7 @@ pub fn wrap<Input, Output, Error>(
     reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
 ) -> TaskMessage
 where
-    Error: Debug + Send + 'static,
+    Error: ChromaError + Debug + Send + 'static,
     Input: Send + Sync + Debug + 'static,
     Output: Send + Sync + Debug + 'static,
 {
@@ -303,7 +302,7 @@ mod tests {
     struct MockOperator {}
     #[async_trait]
     impl Operator<(), ()> for MockOperator {
-        type Error = ();
+        type Error = std::io::Error;
 
         fn get_name(&self) -> &'static str {
             "MockOperator"
@@ -317,7 +316,7 @@ mod tests {
 
     #[derive(Debug)]
     struct MockComponent {
-        pub received_results: Arc<Mutex<Vec<TaskResult<(), ()>>>>,
+        pub received_results: Arc<Mutex<Vec<TaskResult<(), std::io::Error>>>>,
         pub dispatcher: ComponentHandle<Dispatcher>,
     }
     #[async_trait]
@@ -336,12 +335,12 @@ mod tests {
         }
     }
     #[async_trait]
-    impl Handler<TaskResult<(), ()>> for MockComponent {
+    impl Handler<TaskResult<(), std::io::Error>> for MockComponent {
         type Result = ();
 
         async fn handle(
             &mut self,
-            message: TaskResult<(), ()>,
+            message: TaskResult<(), std::io::Error>,
             ctx: &ComponentContext<MockComponent>,
         ) {
             self.received_results.lock().push(message);

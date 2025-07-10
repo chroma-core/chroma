@@ -97,8 +97,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     ) {
         self.cleanup().await;
         let cancel = if let Err(err) = &res {
-            if format!("{err:?}").contains("FailedToPullLogs(Status { code: NotFound") {
-            } else {
+            if err.should_trace_error() {
                 tracing::error!("Error running {}: {}", Self::name(), err);
             }
             true

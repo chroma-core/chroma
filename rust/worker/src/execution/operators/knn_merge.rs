@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::Operator;
 use chroma_types::operator::{KnnMerge, RecordDistance};
 use thiserror::Error;
@@ -29,6 +30,12 @@ pub struct KnnMergeOutput {
 #[derive(Error, Debug)]
 #[error("Knn merge error (unreachable)")]
 pub struct KnnMergeError;
+
+impl ChromaError for KnnMergeError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
 
 #[async_trait]
 impl Operator<KnnMergeInput, KnnMergeOutput> for KnnMerge {
