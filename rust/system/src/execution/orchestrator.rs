@@ -97,7 +97,10 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     ) {
         self.cleanup().await;
         let cancel = if let Err(err) = &res {
-            tracing::error!("Error running {}: {}", Self::name(), err);
+            if format!("{err:?}").contains("FailedToPullLogs(Status { code: NotFound") {
+            } else {
+                tracing::error!("Error running {}: {}", Self::name(), err);
+            }
             true
         } else {
             false

@@ -148,7 +148,10 @@ where
         match result {
             Ok(result) => {
                 if let Err(err) = result.as_ref() {
-                    tracing::error!("Task {} failed with error: {:?}", self.task_id, err);
+                    if format!("{err:?}").contains("FailedToPullLogs(Status { code: NotFound") {
+                    } else {
+                        tracing::error!("Task {} failed with error: {:?}", self.task_id, err);
+                    }
                 }
 
                 // If this (or similarly, the .send() below) errors, it means the receiver was dropped.
