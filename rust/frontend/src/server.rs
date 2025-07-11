@@ -5,6 +5,10 @@ use axum::{
     routing::{get, post},
     Json, Router, ServiceExt,
 };
+use chroma_metering::{
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
+    MeteredFutureExt, ReadAction, StartRequest, WriteAction,
+};
 use chroma_system::System;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
@@ -25,11 +29,11 @@ use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use opentelemetry::KeyValue;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use std::{str::FromStr, time::Instant};
 use tokio::{select, signal};
 use tower_http::cors::CorsLayer;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
@@ -43,7 +47,7 @@ use crate::{
     ac::AdmissionControlledService,
     auth::{AuthenticateAndAuthorize, AuthzAction, AuthzResource},
     base64_decode::{
-        maybe_decode_embeddings, maybe_decode_update_embeddings, EmbeddingsPayload,
+        decode_embeddings, maybe_decode_update_embeddings, EmbeddingsPayload,
         UpdateEmbeddingsPayload,
     },
     config::FrontendServerConfig,
@@ -1208,6 +1212,14 @@ async fn fork_collection(
     quota_payload = quota_payload.with_collection_name(&payload.new_name);
     server.quota_enforcer.enforce(&quota_payload).await?;
 
+    // Create a metering context
+    let metering_context_container =
+        chroma_metering::create::<CollectionForkContext>(CollectionForkContext::new(
+            tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+        ));
+
     let _guard =
         server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
 
@@ -1218,13 +1230,19 @@ async fn fork_collection(
         payload.new_name,
     )?;
 
-    Ok(Json(server.frontend.fork_collection(request).await?))
+    Ok(Json(
+        server
+            .frontend
+            .fork_collection(request)
+            .meter(metering_context_container)
+            .await?,
+    ))
 }
 
 #[derive(Serialize, Deserialize, ToSchema, Debug, Clone)]
 pub struct AddCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<EmbeddingsPayload>,
+    embeddings: EmbeddingsPayload,
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<Metadata>>>,
@@ -1233,14 +1251,14 @@ pub struct AddCollectionRecordsPayload {
 impl AddCollectionRecordsPayload {
     pub fn new(
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
     ) -> Self {
         Self {
             ids,
-            embeddings: embeddings.map(EmbeddingsPayload::JsonArrays),
+            embeddings: EmbeddingsPayload::JsonArrays(embeddings),
             documents,
             uris,
             metadatas,
@@ -1292,10 +1310,8 @@ async fn collection_add(
     let mut quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
 
-    let payload_embeddings: Option<Vec<Vec<f32>>> = maybe_decode_embeddings(payload.embeddings)?;
-    if let Some(embeddings) = payload_embeddings.as_ref() {
-        quota_payload = quota_payload.with_add_embeddings(embeddings);
-    }
+    let payload_embeddings: Vec<Vec<f32>> = decode_embeddings(payload.embeddings)?;
+    quota_payload = quota_payload.with_add_embeddings(&payload_embeddings);
     if let Some(metadatas) = &payload.metadatas {
         quota_payload = quota_payload.with_metadatas(metadatas);
     }
@@ -1313,6 +1329,21 @@ async fn collection_add(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    // Create a metering context
+    let metering_context_container =
+        chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
+            tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            WriteAction::Add,
+        ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
     tracing::info!(name: "collection_add", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::AddCollectionRecordsRequest::try_new(
         tenant,
@@ -1325,7 +1356,11 @@ async fn collection_add(
         payload.metadatas,
     )?;
 
-    let res = server.frontend.add(request).await?;
+    let res = server
+        .frontend
+        .add(request)
+        .meter(metering_context_container)
+        .await?;
 
     Ok((StatusCode::CREATED, Json(res)))
 }
@@ -1403,6 +1438,21 @@ async fn collection_update(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    // Create a metering context
+    let metering_context_container =
+        chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
+            tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            WriteAction::Update,
+        ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
     tracing::info!(name: "collection_update", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::UpdateCollectionRecordsRequest::try_new(
         tenant,
@@ -1415,7 +1465,13 @@ async fn collection_update(
         payload.metadatas,
     )?;
 
-    Ok(Json(server.frontend.update(request).await?))
+    Ok(Json(
+        server
+            .frontend
+            .update(request)
+            .meter(metering_context_container)
+            .await?,
+    ))
 }
 
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
@@ -1477,7 +1533,10 @@ async fn collection_upsert(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    let payload_embeddings: Option<Vec<Vec<f32>>> = maybe_decode_embeddings(payload.embeddings)?;
+    let payload_embeddings: Option<Vec<Vec<f32>>> = match payload.embeddings {
+        Some(embeddings) => Some(decode_embeddings(embeddings)?),
+        None => None,
+    };
     if let Some(embeddings) = payload_embeddings.as_ref() {
         quota_payload = quota_payload.with_add_embeddings(embeddings);
     }
@@ -1498,6 +1557,21 @@ async fn collection_upsert(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    // Create a metering context
+    let metering_context_container =
+        chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
+            tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            WriteAction::Upsert,
+        ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
     tracing::info!(name: "collection_upsert", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.len());
     let request = chroma_types::UpsertCollectionRecordsRequest::try_new(
         tenant,
@@ -1510,7 +1584,13 @@ async fn collection_upsert(
         payload.metadatas,
     )?;
 
-    Ok(Json(server.frontend.upsert(request).await?))
+    Ok(Json(
+        server
+            .frontend
+            .upsert(request)
+            .meter(metering_context_container)
+            .await?,
+    ))
 }
 
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
@@ -1582,6 +1662,17 @@ async fn collection_delete(
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
     ])?;
+
+    // Create a metering context
+    // NOTE(c-gamble): This is a read context because read happens first on delete, then write.
+    let metering_context_container =
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            ReadAction::GetForDelete,
+        ));
+
     tracing::info!(name: "collection_delete", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.as_ref().map_or(0, |ids| ids.len()), has_where = r#where.is_some());
     let request = chroma_types::DeleteCollectionRecordsRequest::try_new(
         tenant,
@@ -1591,7 +1682,11 @@ async fn collection_delete(
         r#where,
     )?;
 
-    server.frontend.delete(request).await?;
+    server
+        .frontend
+        .delete(request)
+        .meter(metering_context_container)
+        .await?;
 
     Ok(Json(DeleteCollectionRecordsResponse {}))
 }
@@ -1648,13 +1743,28 @@ async fn collection_count(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    // Create a metering context
+    let metering_context_container =
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            tenant.clone(),
+            database.clone(),
+            collection_id.clone(),
+            ReadAction::Count,
+        ));
+
     let request = CountRequest::try_new(
         tenant,
         database,
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
     )?;
 
-    Ok(Json(server.frontend.count(request).await?))
+    Ok(Json(
+        server
+            .frontend
+            .count(request)
+            .meter(metering_context_container)
+            .await?,
+    ))
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -1734,6 +1844,21 @@ async fn collection_get(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    // Create a metering context
+    let metering_context_container =
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            ReadAction::Get,
+        ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
     tracing::info!(
         name: "collection_get",
         num_ids = payload.ids.as_ref().map_or(0, |ids| ids.len()),
@@ -1750,7 +1875,11 @@ async fn collection_get(
         payload.offset.unwrap_or(0),
         payload.include,
     )?;
-    let res = server.frontend.get(request).await?;
+    let res = server
+        .frontend
+        .get(request)
+        .meter(metering_context_container)
+        .await?;
     Ok(Json(res))
 }
 
@@ -1784,6 +1913,7 @@ pub struct QueryRequestPayload {
         ("offset" = Option<u32>, Query, description = "Offset for pagination")
     )
 )]
+
 async fn collection_query(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
@@ -1837,6 +1967,21 @@ async fn collection_query(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
+    // Create a metering context
+    let metering_context_container =
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            tenant.clone(),
+            database.clone(),
+            collection_id.0.to_string(),
+            ReadAction::Query,
+        ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
     tracing::info!(
         name: "collection_query",
         num_ids = payload.ids.as_ref().map_or(0, |ids| ids.len()),
@@ -1855,7 +2000,11 @@ async fn collection_query(
         payload.include,
     )?;
 
-    let res = server.frontend.query(request).await?;
+    let res = server
+        .frontend
+        .query(request)
+        .meter(metering_context_container)
+        .await?;
 
     Ok(Json(res))
 }

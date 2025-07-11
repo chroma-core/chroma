@@ -17,15 +17,16 @@ use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::chroma_proto::{
-    log_service_client::LogServiceClient, log_service_server::LogService,
-    scrub_log_request::LogToScrub, CollectionInfo, GetAllCollectionInfoToCompactRequest,
-    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
-    InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
-    MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
-    PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PushLogsRequest,
-    PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse, ScrubLogRequest, ScrubLogResponse,
-    SealLogRequest, SealLogResponse, UpdateCollectionLogOffsetRequest,
-    UpdateCollectionLogOffsetResponse,
+    garbage_collect_phase2_request::LogToCollect, log_service_client::LogServiceClient,
+    log_service_server::LogService, scrub_log_request::LogToScrub, CollectionInfo,
+    GarbageCollectPhase2Request, GarbageCollectPhase2Response,
+    GetAllCollectionInfoToCompactRequest, GetAllCollectionInfoToCompactResponse,
+    InspectDirtyLogRequest, InspectDirtyLogResponse, InspectLogStateRequest,
+    InspectLogStateResponse, LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord,
+    PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
+    PurgeDirtyForCollectionResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
+    ScoutLogsResponse, ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
+    UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::CollectionUuid;
@@ -41,8 +42,9 @@ use tonic::{transport::Server, Code, Request, Response, Status};
 use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
-    Cursor, CursorName, CursorStore, CursorStoreOptions, Fragment, Limits, LogPosition, LogReader,
-    LogReaderOptions, LogWriter, LogWriterOptions, Manifest, MarkDirty as MarkDirtyTrait, Witness,
+    Cursor, CursorName, CursorStore, CursorStoreOptions, Fragment, GarbageCollectionOptions,
+    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
+    MarkDirty as MarkDirtyTrait, Witness,
 };
 
 pub mod state_hash_table;
@@ -892,8 +894,7 @@ impl LogServer {
                     let value = CachedBytes {
                         bytes: Vec::from(json_witness),
                     };
-                    let insert_span = tracing::info_span!("cache insert");
-                    cache.insert(cache_key, value).instrument(insert_span).await;
+                    cache.insert(cache_key, value).await;
                 }
                 Err(err) => {
                     tracing::error!("could not serialize cursor: {err}");
@@ -1155,8 +1156,7 @@ impl LogServer {
                 let handle = self.open_logs.get_or_create_state(key);
                 let mut _active = handle.active.lock().await;
                 let cache_key = cache_key_for_cursor(collection_id, cursor);
-                let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
-                if let Ok(Some(json_witness)) = cache.get(&cache_key).instrument(cache_span).await {
+                if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
                     let witness: Witness = serde_json::from_slice(&json_witness.bytes)?;
                     return Ok((Some(witness), None));
                 }
@@ -1167,8 +1167,7 @@ impl LogServer {
                     let value = CachedBytes {
                         bytes: Vec::from(json_witness),
                     };
-                    let insert_span = tracing::info_span!("cache insert");
-                    cache.insert(cache_key, value).instrument(insert_span).await;
+                    cache.insert(cache_key, value).await;
                 }
                 res
             } else {
@@ -1475,29 +1474,18 @@ impl LogServer {
                     let prefix = collection_id.storage_prefix_for_log();
                     if let Some(cache) = self.cache.as_ref() {
                         let cache_key = format!("{collection_id}::{}", fragment.path);
-                        let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
-                        if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
-                        {
+                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
                             return Ok(Arc::new(answer.bytes));
                         }
-                        let fetch_span = tracing::info_span!("fragment fetch");
-                        let answer = LogReader::stateless_fetch(&self.storage, &prefix, fragment)
-                            .instrument(fetch_span)
-                            .await?;
+                        let answer =
+                            LogReader::stateless_fetch(&self.storage, &prefix, fragment).await?;
                         let cache_value = CachedBytes {
                             bytes: Clone::clone(&*answer),
                         };
-                        let insert_span = tracing::info_span!("cache insert");
-                        cache
-                            .insert(cache_key, cache_value)
-                            .instrument(insert_span)
-                            .await;
+                        cache.insert(cache_key, cache_value).await;
                         Ok(answer)
                     } else {
-                        let fetch_span = tracing::info_span!("fragment fetch");
-                        LogReader::stateless_fetch(&self.storage, &prefix, fragment)
-                            .instrument(fetch_span)
-                            .await
+                        LogReader::stateless_fetch(&self.storage, &prefix, fragment).await
                     }
                 })
                 .collect::<Vec<_>>();
@@ -1960,6 +1948,65 @@ impl LogServer {
         .instrument(span)
         .await
     }
+
+    async fn garbage_collect_phase2(
+        &self,
+        request: Request<GarbageCollectPhase2Request>,
+    ) -> Result<Response<GarbageCollectPhase2Response>, Status> {
+        let span = wrap_span_with_parent_context(
+            tracing::trace_span!("GarbageCollectPhase2",),
+            request.metadata(),
+        );
+        let gc2 = request.into_inner();
+        async move {
+            match gc2.log_to_collect {
+                Some(LogToCollect::CollectionId(x)) => {
+                    let collection_id = Uuid::parse_str(&x)
+                        .map(CollectionUuid)
+                        .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                    let prefix = collection_id.storage_prefix_for_log();
+                    let key = LogKey { collection_id };
+                    let mark_dirty = MarkDirty {
+                        collection_id,
+                        dirty_log: Arc::clone(&self.dirty_log),
+                    };
+                    let handle = self.open_logs.get_or_create_state(key);
+                    let log = get_log_from_handle(
+                        &handle,
+                        &self.config.writer,
+                        &self.storage,
+                        &prefix,
+                        mark_dirty,
+                    )
+                    .await
+                    .map_err(|err| Status::unknown(err.to_string()))?;
+                    log.garbage_collect_phase2_update_manifest(
+                        &GarbageCollectionOptions::default(),
+                    )
+                    .await
+                    .map_err(|err| Status::unknown(err.to_string()))?;
+                    Ok(Response::new(GarbageCollectPhase2Response {}))
+                }
+                Some(LogToCollect::DirtyLog(host)) => {
+                    if host != self.config.my_member_id {
+                        return Err(Status::failed_precondition(
+                            format!("can only perform gc phase 2 on our own dirty log:  I am {}, but was asked for {}", self.config.my_member_id, host),
+                        ));
+                    }
+                    self.dirty_log
+                        .garbage_collect_phase2_update_manifest(
+                            &GarbageCollectionOptions::default(),
+                        )
+                        .await
+                        .map_err(|err| Status::unknown(err.to_string()))?;
+                    Ok(Response::new(GarbageCollectPhase2Response {}))
+                }
+                None => Err(Status::not_found("log not found because it's null")),
+            }
+        }
+        .instrument(span)
+        .await
+    }
 }
 
 struct LogServerWrapper {
@@ -2053,6 +2100,13 @@ impl LogService for LogServerWrapper {
     ) -> Result<Response<ScrubLogResponse>, Status> {
         self.log_server.scrub_log(request).await
     }
+
+    async fn garbage_collect_phase2(
+        &self,
+        request: Request<GarbageCollectPhase2Request>,
+    ) -> Result<Response<GarbageCollectPhase2Response>, Status> {
+        self.log_server.garbage_collect_phase2(request).await
+    }
 }
 
 fn parquet_to_records(parquet: Arc<Vec<u8>>) -> Result<Vec<(LogPosition, Vec<u8>)>, Status> {
@@ -2130,6 +2184,9 @@ impl LogServerWrapper {
             .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
             .await;
 
+        let max_encoding_message_size = log_server.config.max_encoding_message_size;
+        let max_decoding_message_size = log_server.config.max_decoding_message_size;
+
         let wrapper = LogServerWrapper {
             log_server: Arc::new(log_server),
         };
@@ -2137,7 +2194,9 @@ impl LogServerWrapper {
         let background =
             tokio::task::spawn(async move { background_server.background_task().await });
         let server = Server::builder().add_service(health_service).add_service(
-            chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper),
+            chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
+                .max_decoding_message_size(max_decoding_message_size)
+                .max_encoding_message_size(max_encoding_message_size),
         );
 
         let server = server.serve_with_shutdown(addr, async {
@@ -2285,6 +2344,10 @@ pub struct LogServerConfig {
     pub timeout_us: u64,
     #[serde(default)]
     pub proxy_to: Option<GrpcLogConfig>,
+    #[serde(default = "LogServerConfig::default_max_encoding_message_size")]
+    pub max_encoding_message_size: usize,
+    #[serde(default = "LogServerConfig::default_max_decoding_message_size")]
+    pub max_decoding_message_size: usize,
 }
 
 impl LogServerConfig {
@@ -2316,6 +2379,14 @@ impl LogServerConfig {
     fn default_timeout_us() -> u64 {
         86_400_000_000
     }
+
+    fn default_max_encoding_message_size() -> usize {
+        32_000_000
+    }
+
+    fn default_max_decoding_message_size() -> usize {
+        32_000_000
+    }
 }
 
 impl Default for LogServerConfig {
@@ -2334,6 +2405,8 @@ impl Default for LogServerConfig {
             rollup_interval: Self::default_rollup_interval(),
             timeout_us: Self::default_timeout_us(),
             proxy_to: None,
+            max_encoding_message_size: Self::default_max_encoding_message_size(),
+            max_decoding_message_size: Self::default_max_decoding_message_size(),
         }
     }
 }

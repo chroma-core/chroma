@@ -15,7 +15,7 @@
 export namespace Api {
   export interface AddCollectionRecordsPayload {
     documents?: (string | null)[] | null;
-    embeddings?: Api.EmbeddingsPayload | null;
+    embeddings: Api.EmbeddingsPayload;
     ids: string[];
     metadatas?:
       | ({ [name: string]: boolean | number | number | string } | null)[]

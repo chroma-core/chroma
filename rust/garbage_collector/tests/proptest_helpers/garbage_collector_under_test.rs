@@ -6,6 +6,8 @@ use chroma_blockstore::RootManager;
 use chroma_cache::nop::NopCache;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
+use chroma_log::config::LogConfig;
+use chroma_log::Log;
 use chroma_storage::s3::s3_client_for_test_with_bucket_name;
 use chroma_storage::{DeleteOptions, GetOptions, Storage};
 use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig, SysDb};
@@ -32,6 +34,7 @@ pub struct GarbageCollectorUnderTest {
     runtime: Arc<tokio::runtime::Runtime>,
     sysdb: SysDb,
     storage: Storage,
+    logs: Log,
     root_manager: RootManager,
     collection_id_to_segment_ids: HashMap<CollectionUuid, SegmentIds>,
 }
@@ -113,11 +116,16 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 )
                 .await
                 .unwrap();
+            let system = System::new();
+            let logs = Log::try_from_config(&(LogConfig::default(), system), &registry)
+                .await
+                .unwrap();
 
             Self {
                 runtime: ref_state.runtime.clone(),
                 sysdb,
                 storage: storage.clone(),
+                logs,
                 root_manager,
                 collection_id_to_segment_ids: HashMap::new(),
             }
@@ -309,9 +317,11 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                                 dispatcher_handle.clone(),
                                 system.clone(),
                                 state.storage.clone(),
+                                state.logs.clone(),
                                 state.root_manager.clone(),
                                 CleanupMode::Delete,
                                 min_versions_to_keep as u32,
+                                false,
                             );
                             let result = orchestrator.run(system.clone()).await;
 

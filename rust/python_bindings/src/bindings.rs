@@ -406,7 +406,7 @@ impl Bindings {
             database,
             collection_id,
             ids,
-            Some(embeddings),
+            embeddings,
             documents,
             uris,
             metadatas,

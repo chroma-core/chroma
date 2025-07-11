@@ -248,7 +248,9 @@ async fn copy_collections(
             target_collection
                 .add(
                     records.ids,
-                    records.embeddings,
+                    records
+                        .embeddings
+                        .ok_or_else(|| CollectionAPIError::Add(collection.name.clone()))?,
                     records.documents,
                     records.uris,
                     records.metadatas,

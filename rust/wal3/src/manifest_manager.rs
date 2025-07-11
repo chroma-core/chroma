@@ -40,6 +40,9 @@ struct Staging {
     garbage: Option<Garbage>,
     /// The instant at which the last batch was generated.
     last_batch: Instant,
+    /// True iff the manifest manager is closing, so we want to prevent late-arriving threads from
+    /// being stuck waiting on a notify.
+    tearing_down: bool,
 }
 
 impl Staging {
@@ -160,6 +163,14 @@ impl Staging {
     }
 }
 
+impl Drop for Staging {
+    fn drop(&mut self) {
+        for (_, notify) in std::mem::take(&mut self.fragments).into_iter() {
+            let _ = notify.send(Some(Error::LogContentionDurable));
+        }
+    }
+}
+
 ////////////////////////////////////////// ManifestManager /////////////////////////////////////////
 
 /// ManifestManager is responsible for managing the manifest and batching writes to it.
@@ -175,7 +186,7 @@ pub struct ManifestManager {
     /// The unique ID of the process doing the writing.
     writer: String,
     /// Staging area for manifests to be written.
-    staging: Arc<Mutex<Staging>>,
+    staging: Mutex<Staging>,
 }
 
 impl ManifestManager {
@@ -196,7 +207,7 @@ impl ManifestManager {
         };
         let next_seq_no_to_apply = next_seq_no_to_assign;
         let stable = ManifestAndETag { manifest, e_tag };
-        let staging = Arc::new(Mutex::new(Staging {
+        let staging = Mutex::new(Staging {
             stable,
             fragments: vec![],
             next_log_position,
@@ -204,7 +215,8 @@ impl ManifestManager {
             next_seq_no_to_apply,
             garbage: None,
             last_batch: Instant::now(),
-        }));
+            tearing_down: false,
+        });
         Ok(Self {
             throttle,
             snapshot,
@@ -217,8 +229,12 @@ impl ManifestManager {
 
     /// Signal log contention to anyone writing on the manifest.
     pub fn shutdown(&self) {
-        let mut staging = self.staging.lock().unwrap();
-        for (_, tx) in std::mem::take(&mut staging.fragments) {
+        let fragments = {
+            let mut staging = self.staging.lock().unwrap();
+            staging.tearing_down = true;
+            std::mem::take(&mut staging.fragments)
+        };
+        for (_, tx) in fragments {
             let _ = tx.send(Some(Error::LogContentionDurable));
         }
     }
@@ -299,7 +315,11 @@ impl ManifestManager {
     fn push_work(&self, fragment: Fragment, tx: tokio::sync::oneshot::Sender<Option<Error>>) {
         // SAFETY(rescrv):  Mutex poisoning.
         let mut staging = self.staging.lock().unwrap();
-        staging.fragments.push((fragment, tx));
+        if staging.tearing_down {
+            let _ = tx.send(Some(Error::LogContentionDurable));
+        } else {
+            staging.fragments.push((fragment, tx));
+        }
     }
 
     /// Given a fragment, add it to the manifest, batch its application and wait for it to apply.
@@ -307,7 +327,7 @@ impl ManifestManager {
     pub async fn publish_fragment(&self, fragment: Fragment) -> Result<(), Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.push_work(fragment, tx);
-        self.do_work().await?;
+        self.do_work().await;
         match rx.await {
             Ok(None) => Ok(()),
             Ok(Some(err)) => Err(err),
@@ -335,24 +355,21 @@ impl ManifestManager {
                     break;
                 }
             }
-            match self.do_work().await {
-                Ok(_) => {}
-                Err(err) => {
-                    return Err(err);
-                }
-            };
+            self.do_work().await;
         }
         Ok(())
     }
 
-    async fn do_work(&self) -> Result<(), Error> {
+    async fn do_work(&self) {
         let mut iters = 0;
         for i in 0..u64::MAX {
             iters = i + 1;
             let work = {
                 // SAFETY(rescrv):  Mutex poisoning.
                 let mut staging = self.staging.lock().unwrap();
-                staging.pull_work(self)
+                let work = staging.pull_work(self);
+                assert!(work.is_none() || !staging.tearing_down);
+                work
             };
             if let Some((
                 old_manifest,
@@ -364,9 +381,15 @@ impl ManifestManager {
             )) = work
             {
                 if let Some(snapshot) = snapshot {
-                    snapshot
+                    if let Err(err) = snapshot
                         .install(&self.throttle, &self.storage, &self.prefix)
-                        .await?;
+                        .await
+                    {
+                        for notifier in notifiers.into_iter() {
+                            let _ = notifier.send(Some(err.clone()));
+                        }
+                        continue;
+                    }
                 }
                 match old_manifest
                     .install(
@@ -380,12 +403,14 @@ impl ManifestManager {
                 {
                     Ok(e_tag) => {
                         // SAFETY(rescrv):  Mutex poisoning.
-                        let mut staging = self.staging.lock().unwrap();
-                        staging.next_seq_no_to_apply = next_seq_no_to_apply;
-                        staging.stable = ManifestAndETag {
-                            manifest: new_manifest,
-                            e_tag,
-                        };
+                        {
+                            let mut staging = self.staging.lock().unwrap();
+                            staging.next_seq_no_to_apply = next_seq_no_to_apply;
+                            staging.stable = ManifestAndETag {
+                                manifest: new_manifest,
+                                e_tag,
+                            };
+                        }
                         for notifier in notifiers.into_iter() {
                             let _ = notifier.send(None);
                         }
@@ -403,7 +428,6 @@ impl ManifestManager {
         if iters > 3 {
             tracing::event!(tracing::Level::INFO, name = "do work iterated", iters =? iters);
         }
-        Ok(())
     }
 
     pub async fn compute_garbage(
@@ -426,6 +450,27 @@ impl ManifestManager {
             first_to_keep,
         )
         .await
+    }
+
+    pub fn count_waiters(&self) -> usize {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let staging = self.staging.lock().unwrap();
+        staging.fragments.len()
+    }
+
+    pub fn debug_dump(&self) -> String {
+        let mut output = "[manifest manager]\n".to_string();
+        let staging = self.staging.lock().unwrap();
+        output += &format!("next_log_position: {:?}\n", staging.next_log_position);
+        output += &format!(
+            "next_seq_no_to_assign: {:?}\n",
+            staging.next_seq_no_to_assign
+        );
+        output += &format!("next_seq_no_to_apply: {:?}\n", staging.next_seq_no_to_apply);
+        output += &format!("last_batch: {:?}\n", staging.last_batch);
+        output += &format!("tearing_down: {:?}\n", staging.tearing_down);
+        output += &format!("fragments: {}\n", staging.fragments.len());
+        output
     }
 }
 

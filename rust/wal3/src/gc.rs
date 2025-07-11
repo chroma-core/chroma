@@ -10,9 +10,11 @@ use chroma_storage::{
 };
 
 use crate::manifest::unprefixed_snapshot_path;
+use crate::writer::OnceLogWriter;
 use crate::{
-    deserialize_setsum, serialize_setsum, unprefixed_fragment_path, Error, Fragment, FragmentSeqNo,
-    LogPosition, Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
+    deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment, FragmentSeqNo,
+    GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest, ScrubError, Snapshot,
+    SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
@@ -238,19 +240,16 @@ impl Garbage {
     }
 
     pub fn prefixed_paths_to_delete(&self, prefix: &str) -> impl Iterator<Item = String> {
+        let prefix = Arc::new(prefix.to_string());
         let mut paths = vec![];
         for snap in self.snapshots_to_drop.iter() {
             paths.push(format!("{}/{}", prefix, snap.path_to_snapshot));
         }
-        // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
-        for seq_no in self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0 {
-            paths.push(format!(
-                "{}/{}",
-                prefix,
-                unprefixed_fragment_path(FragmentSeqNo(seq_no))
-            ));
-        }
-        paths.into_iter()
+        paths.into_iter().chain(
+            (self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0)
+                .map(move |seq_no| (seq_no, Arc::clone(&prefix)))
+                .map(|(seq_no, prefix)| prefixed_fragment_path(&prefix, FragmentSeqNo(seq_no))),
+        )
     }
 
     pub async fn install_new_snapshots(
@@ -468,5 +467,50 @@ impl Garbage {
             drop_acc += self.drop_fragment(frag, first)?;
         }
         Ok(drop_acc)
+    }
+}
+
+///////////////////////////////////////// GarbageCollector /////////////////////////////////////////
+
+pub struct GarbageCollector {
+    log: Arc<OnceLogWriter>,
+}
+
+impl GarbageCollector {
+    /// Open the log into a state where it can be garbage collected.
+    pub async fn open(
+        options: LogWriterOptions,
+        storage: Arc<Storage>,
+        prefix: &str,
+        writer: &str,
+    ) -> Result<Self, Error> {
+        let log = OnceLogWriter::open_for_read_only_and_stale_ops(
+            options.clone(),
+            Arc::clone(&storage),
+            prefix.to_string(),
+            writer.to_string(),
+            Arc::new(()),
+        )
+        .await?;
+        Ok(Self { log })
+    }
+
+    pub async fn garbage_collect_phase1_compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<bool, Error> {
+        self.log
+            .garbage_collect_phase1_compute_garbage(options, keep_at_least)
+            .await
+    }
+
+    pub async fn garbage_collect_phase3_delete_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        self.log
+            .garbage_collect_phase3_delete_garbage(options)
+            .await
     }
 }

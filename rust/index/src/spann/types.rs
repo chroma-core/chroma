@@ -724,6 +724,11 @@ impl SpannIndexWriter {
         res
     }
 
+    fn is_deleted(version: u32) -> bool {
+        // Version 0 means deleted.
+        version == 0
+    }
+
     async fn is_outdated(
         &self,
         doc_offset_id: u32,
@@ -734,7 +739,7 @@ impl SpannIndexWriter {
             .versions_map
             .get(&doc_offset_id)
             .ok_or(SpannIndexWriterError::VersionNotFound)?;
-        if *current_version == 0 || version < *current_version {
+        if Self::is_deleted(*current_version) || version < *current_version {
             return Ok(true);
         }
         Ok(false)
@@ -865,7 +870,7 @@ impl SpannIndexWriter {
                 .versions_map
                 .get(&doc_offset_id)
                 .ok_or(SpannIndexWriterError::VersionNotFound)?;
-            if doc_version < *current_version {
+            if Self::is_deleted(*current_version) || doc_version < *current_version {
                 tracing::debug!(
                     "Outdated point {} for reassignment version {} current head id {}",
                     doc_offset_id,

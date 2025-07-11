@@ -1598,16 +1598,16 @@ mod test {
             .await
             .expect("Record segment get all data failed");
         assert_eq!(res.len(), 2);
-        res.sort_by(|x, y| x.id.cmp(y.id));
+        res.sort_by(|x, y| x.1.id.cmp(y.1.id));
         let mut id1_mt = HashMap::new();
         id1_mt.insert(
             String::from("hello"),
             MetadataValue::Str(String::from("new world")),
         );
-        assert_eq!(res.first().as_ref().unwrap().metadata, Some(id1_mt));
+        assert_eq!(res.first().as_ref().unwrap().1.metadata, Some(id1_mt));
         let mut id2_mt = HashMap::new();
         id2_mt.insert(String::from("hello"), MetadataValue::Float(1.0));
-        assert_eq!(res.get(1).as_ref().unwrap().metadata, Some(id2_mt));
+        assert_eq!(res.get(1).as_ref().unwrap().1.metadata, Some(id2_mt));
     }
 
     #[tokio::test]
@@ -1840,13 +1840,13 @@ mod test {
             .await
             .expect("Record segment get all data failed");
         assert_eq!(res.len(), 1);
-        res.sort_by(|x, y| x.id.cmp(y.id));
+        res.sort_by(|x, y| x.1.id.cmp(y.1.id));
         let mut id1_mt = HashMap::new();
         id1_mt.insert(
             String::from("bye"),
             MetadataValue::Str(String::from("world")),
         );
-        assert_eq!(res.first().as_ref().unwrap().metadata, Some(id1_mt));
+        assert_eq!(res.first().as_ref().unwrap().1.metadata, Some(id1_mt));
     }
 
     #[tokio::test]
@@ -2069,9 +2069,9 @@ mod test {
             .await
             .expect("Record segment get all data failed");
         assert_eq!(res.len(), 1);
-        res.sort_by(|x, y| x.id.cmp(y.id));
+        res.sort_by(|x, y| x.1.id.cmp(y.1.id));
         assert_eq!(
-            res.first().as_ref().unwrap().document,
+            res.first().as_ref().unwrap().1.document,
             Some(String::from("bye").as_str())
         );
     }
@@ -2269,13 +2269,13 @@ mod test {
             .await
             .expect("Record segment get all data failed");
         assert_eq!(res.len(), 2);
-        res.sort_by(|x, y| x.id.cmp(y.id));
+        res.sort_by(|x, y| x.1.id.cmp(y.1.id));
         assert_eq!(
-            res.first().as_ref().unwrap().document,
+            res.first().as_ref().unwrap().1.document,
             Some(String::from("hello").as_str())
         );
         assert_eq!(
-            res.get(1).as_ref().unwrap().document,
+            res.get(1).as_ref().unwrap().1.document,
             Some(String::from("world").as_str())
         );
     }

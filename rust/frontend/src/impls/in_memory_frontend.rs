@@ -315,7 +315,7 @@ impl InMemoryFrontend {
             ..
         } = request;
 
-        let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
+        let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
         let (records, _) = to_records(
             ids,
@@ -730,7 +730,7 @@ mod tests {
             collection.database.clone(),
             collection.collection_id,
             ids,
-            Some(embeddings),
+            embeddings,
             Some(documents),
             None,
             Some(metadatas),

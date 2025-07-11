@@ -19,11 +19,11 @@ use chroma_types::{
         literal_expr::{LiteralExpr, NgramLiteralProvider},
         ChromaRegex, ChromaRegexError,
     },
-    BooleanOperator, Chunk, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
-    MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
+    BooleanOperator, Chunk, CompositeExpression, DataRecord, DocumentExpression, DocumentOperator,
+    LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
     MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where,
 };
-use futures::TryStreamExt;
+use futures::future::try_join_all;
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -245,22 +245,27 @@ impl<'me> MetadataProvider<'me> {
                             Some(offset_ids)
                                 if offset_ids.len() < rec_reader.count().await? as u64 / 10 =>
                             {
-                                for id in offset_ids {
-                                    if rec_reader.get_data_for_offset_id(id).await?.is_some_and(
-                                        |rec| rec.document.is_some_and(|doc| regex.is_match(doc)),
-                                    ) {
+                                let fetch_futures: Vec<_> = offset_ids
+                                    .into_iter()
+                                    .map(|id| async move {
+                                        let data = rec_reader.get_data_for_offset_id(id).await?;
+                                        Ok::<(u32, Option<DataRecord>), Box<dyn ChromaError>>((
+                                            id, data,
+                                        ))
+                                    })
+                                    .collect();
+                                let data_results = try_join_all(fetch_futures).await?;
+                                for (id, data_opt) in data_results {
+                                    if data_opt.is_some_and(|rec| {
+                                        rec.document.is_some_and(|doc| regex.is_match(doc))
+                                    }) {
                                         exact_matching_offset_ids.insert(id);
                                     }
                                 }
                             }
                             // Perform range scan of all documents
                             candidate_offsets => {
-                                for (offset, record) in rec_reader
-                                    .get_data_stream(..)
-                                    .await
-                                    .try_collect::<Vec<_>>()
-                                    .await?
-                                {
+                                for (offset, record) in rec_reader.get_all_data().await? {
                                     if (candidate_offsets.is_none()
                                         || candidate_offsets
                                             .as_ref()
