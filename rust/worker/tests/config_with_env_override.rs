@@ -9,6 +9,7 @@ fn test_config_with_env_override() {
     Jail::expect_with(|jail| {
         jail.set_env("CHROMA_QUERY_SERVICE__MY_MEMBER_ID", "query-service-0");
         jail.set_env("CHROMA_QUERY_SERVICE__MY_PORT", 50051);
+        jail.set_env("CHROMA_QUERY_SERVICE__JEMALLOC_PPROF_SERVER_PORT", 6060);
         jail.set_env(
             "CHROMA_COMPACTION_SERVICE__MY_MEMBER_ID",
             "compaction-service-0",
@@ -166,6 +167,10 @@ fn test_config_with_env_override() {
             "compaction-service-0"
         );
         assert_eq!(config.compaction_service.my_port, 50051);
+        assert_eq!(
+            config.compaction_service.jemalloc_pprof_server_port,
+            Some(6060)
+        );
         match &config.compaction_service.storage {
             chroma_storage::config::StorageConfig::S3(s) => {
                 assert_eq!(s.bucket, "buckets!");

@@ -15,6 +15,7 @@ fn test_config_from_specific_path() {
                 otel_endpoint: "http://jaeger:4317"
                 my_member_id: "query-service-0"
                 my_port: 50051
+                jemalloc_pprof_server_port: 6060
                 assignment_policy:
                     rendezvous_hashing:
                         hasher: Murmur3
@@ -156,7 +157,7 @@ fn test_config_from_specific_path() {
         let config = RootConfig::load_from_path("random_path.yaml");
         assert_eq!(config.query_service.my_member_id, "query-service-0");
         assert_eq!(config.query_service.my_port, 50051);
-
+        assert_eq!(config.query_service.jemalloc_pprof_server_port, Some(6060));
         assert_eq!(
             config.compaction_service.my_member_id,
             "compaction-service-0"
