@@ -57,7 +57,7 @@ pub struct StorageMetrics {
 impl Default for StorageMetrics {
     fn default() -> Self {
         Self {
-            s3_get_count: opentelemetry::global::meter("chroma.storage.s3")
+            s3_get_count: opentelemetry::global::meter("chroma.storage")
                 .u64_counter("s3_get_count")
                 .with_description("Number of S3 get operations")
                 .build(),
