@@ -46,7 +46,7 @@ impl CompactionServer {
 
         // Start pprof server
         let mut pprof_shutdown_tx = None;
-        if let Some(port) = self.jemalloc_pprof_server_port.clone() {
+        if let Some(port) = self.jemalloc_pprof_server_port {
             tracing::info!("Starting jemalloc pprof server on port {}", port);
             let shutdown_channel = tokio::sync::oneshot::channel();
             pprof_shutdown_tx = Some(shutdown_channel.0);
