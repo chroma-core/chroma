@@ -288,6 +288,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                     // Find the next ngram to check
                     let focus_ngram_prefix_index = match ngram_index {
                         Some(idx) => idx,
+                        None if focus_lookup_table.prefix.len() <= 1 => 0,
                         None => focus_lookup_table
                             .prefix
                             .partition_point(|(prefix, _)| prefix < &suffix),
@@ -366,6 +367,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
                     // Find the next ngram to check
                     let focus_ngram_suffix_index = match ngram_index {
                         Some(idx) => idx,
+                        None if focus_lookup_table.suffix.len() <= 1 => 0,
                         None => focus_lookup_table
                             .suffix
                             .partition_point(|(suffix, _)| suffix < &prefix),
