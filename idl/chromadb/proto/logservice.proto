@@ -154,6 +154,22 @@ message GarbageCollectPhase2Request {
 message GarbageCollectPhase2Response {
 }
 
+message PurgeFromCacheRequest {
+  oneof entry_to_evict {
+    string cursor_for_collection_id = 1;
+    string manifest_for_collection_id = 2;
+    FragmentToEvict fragment = 3;
+  };
+}
+
+message FragmentToEvict {
+  string collection_id = 1;
+  string fragment_path = 2;
+};
+
+message PurgeFromCacheResponse {
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
@@ -162,17 +178,19 @@ service LogService {
   rpc GetAllCollectionInfoToCompact(GetAllCollectionInfoToCompactRequest) returns (GetAllCollectionInfoToCompactResponse) {}
   rpc UpdateCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
   rpc PurgeDirtyForCollection(PurgeDirtyForCollectionRequest) returns (PurgeDirtyForCollectionResponse) {}
-  // RPC endpoints to expose for operator debuggability.
   // This endpoint must route to the rust log service.
   rpc InspectDirtyLog(InspectDirtyLogRequest) returns (InspectDirtyLogResponse) {}
   // This endpoint must route to the go log service.
   rpc SealLog(SealLogRequest) returns (SealLogResponse) {}
   // This endpoint must route to the rust log service.
   rpc MigrateLog(MigrateLogRequest) returns (MigrateLogResponse) {}
+  // RPC endpoints to expose for operator debuggability.
   // This endpoint can be supported by any log service.
   rpc InspectLogState(InspectLogStateRequest) returns (InspectLogStateResponse) {}
   // This endpoint should route to the rust log service.
   rpc ScrubLog(ScrubLogRequest) returns (ScrubLogResponse) {}
   // This endpoint should route to the rust log service.
   rpc GarbageCollectPhase2(GarbageCollectPhase2Request) returns (GarbageCollectPhase2Response) {}
+  // This endpoint will purge from cache the specified items.
+  rpc PurgeFromCache(PurgeFromCacheRequest) returns (PurgeFromCacheResponse) {}
 }
