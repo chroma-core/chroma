@@ -16,10 +16,10 @@ use chroma_types::{
     CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    GetCollectionRequest, GetCollectionsError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse,
+    IncludeList, InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryError, QueryRequest, QueryResponse,
     UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
     UpdateMetadata, UpsertCollectionRecordsResponse,
 };
@@ -56,6 +56,7 @@ use crate::{
     tower_tracing::add_tracing_middleware,
     traced_json::TracedJson,
     types::errors::{ErrorResponse, ServerError, ValidationError},
+    utils::ensure_limit,
     Frontend,
 };
 
@@ -834,14 +835,19 @@ async fn list_collections(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
+
+    let validated_limit = ensure_limit::<GetCollectionsError>(limit)?;
+
     let mut quota_payload = QuotaPayload::new(Action::ListCollections, tenant.clone(), api_token);
-    if let Some(limit) = limit {
-        quota_payload = quota_payload.with_limit(limit);
-    }
+    quota_payload = quota_payload.with_limit(validated_limit);
+
     server.quota_enforcer.enforce(&quota_payload).await?;
+
     let _guard = server
         .scorecard_request(&["op:list_collections", format!("tenant:{}", tenant).as_str()])?;
-    let request = ListCollectionsRequest::try_new(tenant, database, limit, offset)?;
+
+    // TODO: Limit shouldn't be optional here
+    let request = ListCollectionsRequest::try_new(tenant, database, Some(validated_limit), offset)?;
     Ok(Json(server.frontend.list_collections(request).await?))
 }
 
@@ -1834,9 +1840,12 @@ async fn collection_get(
     if let Some(r#where) = &parsed_where {
         quota_payload = quota_payload.with_where(r#where);
     }
-    if let Some(limit) = payload.limit {
-        quota_payload = quota_payload.with_limit(limit);
-    }
+
+    // NOTE(c-gamble): We use `QueryError` here because by convention we return a `QueryError`
+    // when the frontend's `collection_get` fails.
+    let validated_limit = ensure_limit::<QueryError>(payload.limit)?;
+    quota_payload = quota_payload.with_limit(validated_limit);
+
     server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:read",
@@ -1865,13 +1874,15 @@ async fn collection_get(
         include = ?payload.include,
         has_where = parsed_where.is_some(),
     );
+
     let request = GetRequest::try_new(
         tenant,
         database,
         collection_id,
         payload.ids,
         parsed_where,
-        payload.limit,
+        // TODO: Limit shouldn't be optional here
+        Some(validated_limit),
         payload.offset.unwrap_or(0),
         payload.include,
     )?;

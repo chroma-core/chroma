@@ -94,26 +94,11 @@ impl SysDb {
     pub async fn list_databases(
         &mut self,
         tenant_id: String,
-        mut limit: Option<u32>,
+        limit: Option<u32>,
         offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
         match self {
-            SysDb::Grpc(grpc) => {
-                match limit {
-                    Some(provided_limit) => {
-                        if provided_limit > MAX_LIMIT_VALUE {
-                            return Err(ListDatabasesError::InvalidLimit(
-                                MaximumLimitExceededError {
-                                    provided: provided_limit,
-                                    max: MAX_LIMIT_VALUE,
-                                },
-                            ));
-                        }
-                    }
-                    None => limit = Some(MAX_LIMIT_VALUE),
-                }
-                grpc.list_databases(tenant_id, limit, offset).await
-            }
+            SysDb::Grpc(grpc) => grpc.list_databases(tenant_id, limit, offset).await,
             SysDb::Sqlite(sqlite) => sqlite.list_databases(tenant_id, limit, offset).await,
             SysDb::Test(test) => test.list_databases(tenant_id, limit, offset).await,
         }
