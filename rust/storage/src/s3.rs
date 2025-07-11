@@ -18,13 +18,13 @@ use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
 use aws_sdk_s3;
+use aws_sdk_s3::config::StalledStreamProtectionConfig;
 use aws_sdk_s3::error::ProvideErrorMetadata;
 use aws_sdk_s3::error::SdkError;
 use aws_sdk_s3::operation::create_bucket::CreateBucketError;
 use aws_sdk_s3::operation::get_object::GetObjectOutput;
 use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::types::CompletedMultipartUpload;
-use aws_sdk_s3::types::CompletedPart;
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart, Delete, ObjectIdentifier};
 use aws_smithy_types::byte_stream::Length;
 use bytes::Bytes;
 use chroma_config::registry::Registry;
@@ -42,6 +42,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tracing::Instrument;
+
+#[derive(Clone, Debug, Default)]
+pub struct DeletedObjects {
+    pub deleted: Vec<String>,
+    pub errors: Vec<StorageError>,
+}
 
 #[derive(Clone)]
 pub struct S3Storage {
@@ -659,6 +665,67 @@ impl S3Storage {
         }
     }
 
+    #[tracing::instrument(skip(self, keys), level = "trace")]
+    pub async fn delete_many<S: AsRef<str> + std::fmt::Debug, I: IntoIterator<Item = S>>(
+        &self,
+        keys: I,
+    ) -> Result<DeletedObjects, StorageError> {
+        tracing::trace!("Deleting objects from S3");
+        let mut objects = vec![];
+        for key in keys {
+            objects.push(
+                ObjectIdentifier::builder()
+                    .key(key.as_ref())
+                    .build()
+                    .map_err(|err| StorageError::Generic {
+                        source: Arc::new(err),
+                    })?,
+            );
+        }
+        let delete = Delete::builder()
+            .set_objects(Some(objects))
+            .build()
+            .map_err(|err| StorageError::Generic {
+                source: Arc::new(err),
+            })?;
+
+        let req = self
+            .client
+            .delete_objects()
+            .bucket(&self.bucket)
+            .delete(delete);
+
+        match req.send().await {
+            Ok(resp) => {
+                let mut out = DeletedObjects::default();
+                for deleted in resp.deleted() {
+                    if let Some(key) = deleted.key.clone() {
+                        out.deleted.push(key);
+                    }
+                }
+                for error in resp.errors() {
+                    out.errors.push(if Some("NoSuchKey") == error.code() {
+                        StorageError::NotFound {
+                            path: error.key.clone().unwrap_or(String::new()),
+                            source: Arc::new(StorageError::Message {
+                                message: format!("{error:#?}"),
+                            }),
+                        }
+                    } else {
+                        StorageError::Message {
+                            message: format!("{error:#?}"),
+                        }
+                    });
+                }
+                tracing::trace!("Successfully deleted objects from S3");
+                Ok(out)
+            }
+            Err(e) => Err(StorageError::Generic {
+                source: Arc::new(e),
+            }),
+        }
+    }
+
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         // S3 doesn't have a native rename operation, so we need to copy and delete
@@ -779,6 +846,7 @@ impl Configurable<StorageConfig> for S3Storage {
                             .to_builder()
                             .timeout_config(timeout_config_builder.build())
                             .retry_config(retry_config)
+                            .stalled_stream_protection(StalledStreamProtectionConfig::disabled())
                             .build();
                         aws_sdk_s3::Client::new(&config)
                     }
@@ -1213,5 +1281,51 @@ mod tests {
         for (i, result) in results.iter().enumerate() {
             assert_eq!(format!("test/{:02x}", i), *result, "index = {}", i);
         }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_delete_many() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        // Create every other file (0, 2, 4, 6, 8, 10, 12, 14)
+        let mut created_files = Vec::new();
+        for i in (0..16).step_by(2) {
+            let key = format!("test/{:02x}", i);
+            storage
+                .oneshot_upload(
+                    &key,
+                    0,
+                    |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
+                    PutOptions {
+                        if_not_exists: true,
+                        if_match: None,
+                        priority: StorageRequestPriority::P0,
+                    },
+                )
+                .await
+                .unwrap();
+            created_files.push(key);
+        }
+
+        // Try to delete all files (0-15), including ones that don't exist
+        let mut all_keys = Vec::new();
+        for i in 0..16 {
+            all_keys.push(format!("test/{:02x}", i));
+        }
+        let all_key_refs: Vec<&str> = all_keys.iter().map(|s| s.as_str()).collect();
+
+        let delete_result = storage.delete_many(&all_key_refs).await.unwrap();
+
+        // Verify that every created file appears in the deleted files
+        for created_file in &created_files {
+            assert!(
+                delete_result.deleted.contains(created_file),
+                "Created file {} should be in deleted files",
+                created_file
+            );
+        }
+
+        eprintln!("Successfully deleted: {:#?}", delete_result.deleted);
+        eprintln!("Errors for non-existent files: {:#?}", delete_result.errors);
     }
 }

@@ -489,8 +489,15 @@ impl AdmissionControlledS3Storage {
         self.storage.list_prefix(prefix).await
     }
 
-    pub async fn delete(&self, prefix: &str, options: DeleteOptions) -> Result<(), StorageError> {
-        self.storage.delete(prefix, options).await
+    pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
+        self.storage.delete(key, options).await
+    }
+
+    pub async fn delete_many<S: AsRef<str> + std::fmt::Debug, I: IntoIterator<Item = S>>(
+        &self,
+        keys: I,
+    ) -> Result<crate::s3::DeletedObjects, StorageError> {
+        self.storage.delete_many(keys).await
     }
 }
 

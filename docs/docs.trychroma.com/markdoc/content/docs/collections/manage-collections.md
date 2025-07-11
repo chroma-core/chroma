@@ -145,12 +145,12 @@ When creating collections, you can pass the optional `metadata` argument to add 
 from datetime import datetime
 
 collection = client.create_collection(
-    name="my_collection", 
+    name="my_collection",
     embedding_function=emb_fn,
     metadata={
         "description": "my first Chroma collection",
         "created": str(datetime.now())
-    }  
+    }
 )
 ```
 {% /Tab %}
@@ -209,7 +209,7 @@ collections_subset = client.list_collections(limit=20, offset=50) # get 20 colle
 Current versions of Chroma store the embedding function you used to create a collection on the server, so the client can resolve it for you on subsequent "get" operations. If you are running an older version of the Chroma client or server (<1.1.13), you will need to provide the same embedding function you used to create a collection when using `get_collection`:
 
 ```python
-collection = client.get_collection( 
+collection = client.get_collection(
     name='my-collection',
     embedding_function=ef
 )
@@ -258,7 +258,7 @@ const collectionsSubset = await client.listCollections({ limit: 20, offset: 50 }
 Current versions of Chroma store the embedding function you used to create a collection on the server, so the client can resolve it for you on subsequent "get" operations. If you are running an older version of the Chroma JS/TS client (<3.04) or server (<1.1.13), you will need to provide the same embedding function you used to create a collection when using `getCollection` and `getCollections`:
 
 ```typescript
-const collection = await client.getCollection({ 
+const collection = await client.getCollection({
     name: 'my-collection',
     embeddingFunction: ef
 })
@@ -283,7 +283,7 @@ After a collection is created, you can modify its name, metadata and elements of
 ```python
 collection.modify(
    name="new-name",
-   metadata={"description": "new description"} 
+   metadata={"description": "new description"}
 )
 ```
 {% /Tab %}
@@ -311,13 +311,13 @@ Deleting collections is destructive and not reversible
 
 {% Tab label="python" %}
 ```python
-collection.delete(name="my-collection")
+client.delete_collection(name="my-collection")
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-await collection.delete({ name: "my-collection" });
+await client.deleteCollection({ name: "my-collection" });
 ```
 {% /Tab %}
 

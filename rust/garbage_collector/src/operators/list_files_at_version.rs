@@ -3,6 +3,7 @@ use chroma_blockstore::{
     arrow::provider::{BlockManager, RootManagerError},
     RootManager,
 };
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{
     hnsw_provider::{HnswIndexProvider, FILES},
     IndexUuid,
@@ -58,6 +59,18 @@ pub enum ListFilesAtVersionError {
     FetchBlockIdsError(#[from] RootManagerError),
     #[error("Version file missing collection ID")]
     VersionFileMissingCollectionId,
+}
+
+impl ChromaError for ListFilesAtVersionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ListFilesAtVersionError::VersionHistoryMissing => ErrorCodes::NotFound,
+            ListFilesAtVersionError::VersionNotFound(_) => ErrorCodes::NotFound,
+            ListFilesAtVersionError::InvalidUuid(_) => ErrorCodes::InvalidArgument,
+            ListFilesAtVersionError::FetchBlockIdsError(e) => e.code(),
+            ListFilesAtVersionError::VersionFileMissingCollectionId => ErrorCodes::InvalidArgument,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -144,7 +157,6 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
         }
 
         if !sparse_index_ids.is_empty() {
-            let num = sparse_index_ids.len();
             let mut get_block_ids_stream = futures::stream::iter(sparse_index_ids)
                 .map(|(sparse_index_id, file_prefix)|
                     async move {
@@ -159,7 +171,7 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                             }
                             Err(e) => Err(e),
                         }
-                }).buffer_unordered(num);
+                }).buffer_unordered(100);
 
             while let Some(res) = get_block_ids_stream.next().await {
                 let block_ids = res.map_err(ListFilesAtVersionError::FetchBlockIdsError)?;
