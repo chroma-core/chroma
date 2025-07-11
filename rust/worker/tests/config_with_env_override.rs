@@ -14,6 +14,10 @@ fn test_config_with_env_override() {
             "compaction-service-0",
         );
         jail.set_env("CHROMA_COMPACTION_SERVICE__MY_PORT", 50051);
+        jail.set_env(
+            "CHROMA_COMPACTION_SERVICE__JEMALLOC_PPROF_SERVER_PORT",
+            6060,
+        );
         jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__BUCKET", "buckets!");
         jail.set_env("CHROMA_COMPACTION_SERVICE__STORAGE__S3__CREDENTIALS", "AWS");
         jail.set_env(
@@ -156,6 +160,7 @@ fn test_config_with_env_override() {
         let config = RootConfig::load();
         assert_eq!(config.query_service.my_member_id, "query-service-0");
         assert_eq!(config.query_service.my_port, 50051);
+        assert_eq!(config.query_service.jemalloc_pprof_server_port, Some(6060));
         assert_eq!(
             config.compaction_service.my_member_id,
             "compaction-service-0"
