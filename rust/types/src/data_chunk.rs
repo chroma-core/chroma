@@ -1,18 +1,9 @@
 use std::sync::Arc;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Chunk<T> {
     data: Arc<[T]>,
     visibility: Arc<[bool]>,
-}
-
-impl<T> Clone for Chunk<T> {
-    fn clone(&self) -> Self {
-        Chunk {
-            data: self.data.clone(),
-            visibility: self.visibility.clone(),
-        }
-    }
 }
 
 impl<T> Chunk<T> {
