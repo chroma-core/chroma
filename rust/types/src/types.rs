@@ -49,10 +49,3 @@ impl ChromaError for WrappedSerdeJsonError {
         ErrorCodes::InvalidArgument
     }
 }
-
-#[derive(Debug, Error)]
-#[error("Provided limit `{provided}` exceeds maximum allowable limit `{max}`")]
-pub struct MaximumLimitExceededError {
-    pub provided: u32,
-    pub max: u32,
-}

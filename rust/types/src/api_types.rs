@@ -15,7 +15,6 @@ use crate::CollectionConversionError;
 use crate::CollectionUuid;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
-use crate::MaximumLimitExceededError;
 use crate::Metadata;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
@@ -695,8 +694,6 @@ pub enum GetCollectionsError {
     CollectionId(#[from] uuid::Error),
     #[error("Could not deserialize database ID")]
     DatabaseId,
-    #[error(transparent)]
-    InvalidLimit(#[from] MaximumLimitExceededError),
 }
 
 impl ChromaError for GetCollectionsError {
@@ -706,7 +703,6 @@ impl ChromaError for GetCollectionsError {
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
             GetCollectionsError::DatabaseId => ErrorCodes::Internal,
-            GetCollectionsError::InvalidLimit(_) => ErrorCodes::InvalidArgument,
         }
     }
 }

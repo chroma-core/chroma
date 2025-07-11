@@ -22,8 +22,7 @@ use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
     FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
-    ForkCollectionError, MaximumLimitExceededError, Segment, SegmentConversionError, SegmentScope,
-    Tenant,
+    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -36,7 +35,6 @@ use tower::ServiceBuilder;
 use uuid::{Error, Uuid};
 
 pub const VERSION_FILE_S3_PREFIX: &str = "sysdb/version_files/";
-pub const MAX_LIMIT_VALUE: u32 = 1000; // The maximum size of a result set for a SELECT query.
 
 #[derive(Debug, Clone)]
 pub enum SysDb {
@@ -141,25 +139,10 @@ impl SysDb {
 
     pub async fn get_collections(
         &mut self,
-        mut options: GetCollectionsOptions,
+        options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         match self {
-            SysDb::Grpc(grpc) => {
-                match options.limit {
-                    Some(limit) => {
-                        if limit > MAX_LIMIT_VALUE {
-                            return Err(GetCollectionsError::InvalidLimit(
-                                MaximumLimitExceededError {
-                                    provided: limit,
-                                    max: MAX_LIMIT_VALUE,
-                                },
-                            ));
-                        }
-                    }
-                    None => options.limit = Some(MAX_LIMIT_VALUE),
-                }
-                grpc.get_collections(options).await
-            }
+            SysDb::Grpc(grpc) => grpc.get_collections(options).await,
             SysDb::Sqlite(sqlite) => sqlite.get_collections(options).await,
             SysDb::Test(test) => test.get_collections(options).await,
         }

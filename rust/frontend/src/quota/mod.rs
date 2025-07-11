@@ -353,6 +353,10 @@ lazy_static::lazy_static! {
     };
 }
 
+pub struct QuotaOverrides {
+    pub limit: u32,
+}
+
 #[derive(Debug, Validate)]
 pub struct QuotaExceededError {
     pub usage_type: UsageType,
@@ -408,12 +412,10 @@ impl ChromaError for QuotaEnforcerError {
 pub trait QuotaEnforcer: Send + Sync {
     fn enforce<'other>(
         &'other self,
-        payload: &'other mut QuotaPayload<'other>,
+        payload: &'other QuotaPayload<'other>,
     ) -> Pin<
         Box<
-            dyn Future<Output = Result<&'other mut QuotaPayload<'other>, QuotaEnforcerError>>
-                + Send
-                + 'other,
+            dyn Future<Output = Result<Option<QuotaOverrides>, QuotaEnforcerError>> + Send + 'other,
         >,
     >;
 }
@@ -421,11 +423,10 @@ pub trait QuotaEnforcer: Send + Sync {
 impl QuotaEnforcer for () {
     fn enforce<'a>(
         &'a self,
-        payload: &'a mut QuotaPayload<'a>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<&'a mut QuotaPayload<'a>, QuotaEnforcerError>> + Send + 'a>,
-    > {
-        Box::pin(ready(Ok(payload)))
+        _payload: &'a QuotaPayload<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<QuotaOverrides>, QuotaEnforcerError>> + Send + 'a>>
+    {
+        Box::pin(ready(Ok(None)))
     }
 }
 
