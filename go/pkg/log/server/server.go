@@ -187,6 +187,10 @@ func (s *logServer) GarbageCollectPhase2(ctx context.Context, req *logservicepb.
 	return
 }
 
+func (s *logServer) PurgeFromCache(ctx context.Context, req *logservicepb.PurgeFromCacheRequest) (res *logservicepb.PurgeFromCacheResponse, err error) {
+	return
+}
+
 func NewLogServer(lr *repository.LogRepository) logservicepb.LogServiceServer {
 	return &logServer{
 		lr: lr,
