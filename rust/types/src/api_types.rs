@@ -1725,8 +1725,6 @@ pub enum QueryError {
     Executor(#[from] ExecutorError),
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
-    #[error(transparent)]
-    InvalidLimit(#[from] MaximumLimitExceededError),
 }
 
 impl ChromaError for QueryError {
@@ -1734,7 +1732,6 @@ impl ChromaError for QueryError {
         match self {
             QueryError::Executor(e) => e.code(),
             QueryError::Other(err) => err.code(),
-            QueryError::InvalidLimit(_) => ErrorCodes::InvalidArgument,
         }
     }
 }

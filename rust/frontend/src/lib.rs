@@ -14,7 +14,6 @@ mod server_middleware;
 mod tower_tracing;
 mod traced_json;
 mod types;
-mod utils;
 
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;

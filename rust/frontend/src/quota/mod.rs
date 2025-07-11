@@ -408,16 +408,24 @@ impl ChromaError for QuotaEnforcerError {
 pub trait QuotaEnforcer: Send + Sync {
     fn enforce<'other>(
         &'other self,
-        payload: &'other QuotaPayload<'other>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), QuotaEnforcerError>> + Send + 'other>>;
+        payload: &'other mut QuotaPayload<'other>,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<&'other mut QuotaPayload<'other>, QuotaEnforcerError>>
+                + Send
+                + 'other,
+        >,
+    >;
 }
 
 impl QuotaEnforcer for () {
-    fn enforce(
-        &self,
-        _: &QuotaPayload<'_>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), QuotaEnforcerError>> + Send>> {
-        Box::pin(ready(Ok(())))
+    fn enforce<'a>(
+        &'a self,
+        payload: &'a mut QuotaPayload<'a>,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<&'a mut QuotaPayload<'a>, QuotaEnforcerError>> + Send + 'a>,
+    > {
+        Box::pin(ready(Ok(payload)))
     }
 }
 
