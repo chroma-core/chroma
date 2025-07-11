@@ -35,6 +35,7 @@ use futures::stream;
 use futures::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
+use opentelemetry::metrics::Counter;
 use rand::Rng;
 use std::clone::Clone;
 use std::ops::Range;
@@ -48,6 +49,21 @@ pub struct DeletedObjects {
     pub deleted: Vec<String>,
     pub errors: Vec<StorageError>,
 }
+#[derive(Clone)]
+pub struct StorageMetrics {
+    pub s3_get_count: Counter<u64>,
+}
+
+impl Default for StorageMetrics {
+    fn default() -> Self {
+        Self {
+            s3_get_count: opentelemetry::global::meter("chroma.storage.s3")
+                .u64_counter("s3_get_count")
+                .with_description("Number of S3 get operations")
+                .build(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct S3Storage {
@@ -55,6 +71,7 @@ pub struct S3Storage {
     pub(super) client: aws_sdk_s3::Client,
     pub(super) upload_part_size_bytes: usize,
     pub(super) download_part_size_bytes: usize,
+    pub(super) metrics: StorageMetrics,
 }
 
 impl S3Storage {
@@ -69,6 +86,7 @@ impl S3Storage {
             client,
             upload_part_size_bytes,
             download_part_size_bytes,
+            metrics: StorageMetrics::default(),
         }
     }
 
@@ -129,6 +147,7 @@ impl S3Storage {
             .send()
             .instrument(tracing::trace_span!("cold S3 get"))
             .await;
+        self.metrics.s3_get_count.add(1, &[]);
         match res {
             Ok(res) => {
                 let byte_stream = res.body;
@@ -956,6 +975,7 @@ mod tests {
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: Default::default(),
         };
         storage.create_bucket().await.unwrap();
 
@@ -981,6 +1001,7 @@ mod tests {
             client,
             upload_part_size_bytes,
             download_part_size_bytes,
+            metrics: Default::default(),
         };
         storage.create_bucket().await.unwrap();
         storage
@@ -1028,6 +1049,7 @@ mod tests {
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: Default::default(),
         };
         storage.create_bucket().await.unwrap();
 
