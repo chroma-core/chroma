@@ -164,6 +164,7 @@ func (s *Server) GetCollections(ctx context.Context, req *coordinatorpb.GetColle
 	databaseName := req.Database
 	limit := req.Limit
 	offset := req.Offset
+	// where := req.Where
 
 	res := &coordinatorpb.GetCollectionsResponse{}
 

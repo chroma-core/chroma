@@ -2,6 +2,7 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson
+import json
 from typing import Any, Optional, cast, Tuple, Sequence, Dict
 import logging
 import httpx
@@ -251,11 +252,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     @override
     async def list_collections(
         self,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
+        where_str = json.dumps(where) if where else None
         resp_json = await self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections",
@@ -263,6 +266,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 {
                     "limit": limit,
                     "offset": offset,
+                    "where": where_str,
                 }
             ),
         )

@@ -29,7 +29,10 @@ class DB(Component):
 
     @abstractmethod
     def list_collections(
-        self, limit: Optional[int] = None, offset: Optional[int] = None
+        self,
+        where: Optional[Where] = None,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
     ) -> Sequence:  # type: ignore
         pass
 

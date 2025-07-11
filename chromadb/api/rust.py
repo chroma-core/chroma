@@ -180,12 +180,15 @@ class RustBindingsAPI(ServerAPI):
     @override
     def list_collections(
         self,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> Sequence[CollectionModel]:
-        collections = self.bindings.list_collections(limit, offset, tenant, database)
+        collections = self.bindings.list_collections(
+            limit, offset, tenant, database, json.dumps(where) if where else None
+        )
         return [
             CollectionModel(
                 id=collection.id,

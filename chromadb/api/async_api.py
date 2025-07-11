@@ -336,11 +336,13 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
     @abstractmethod
     async def list_collections(
         self,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> Sequence[AsyncCollection]:
         """List all collections.
         Args:
+            where: Conditional filtering on collection metadata. Defaults to None.
             limit: The maximum number of entries to return. Defaults to None.
             offset: The number of entries to skip before returning. Defaults to None.
 
@@ -562,6 +564,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     @abstractmethod
     async def list_collections(
         self,
+        where: Optional[Where] = None,
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,

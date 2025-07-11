@@ -152,7 +152,8 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
     let tenant = String::from("default_tenant");
     let database = String::from("default_database");
 
-    let list_collections_request = ListCollectionsRequest::try_new(tenant, database, None, 0)?;
+    let list_collections_request =
+        ListCollectionsRequest::try_new(tenant, database, None, 0, None)?;
     let collections = frontend.list_collections(list_collections_request).await?;
 
     let pb = ProgressBar::new(collections.len() as u64);

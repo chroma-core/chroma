@@ -498,6 +498,7 @@ pub struct ListCollectionsRequest {
     pub database_name: String,
     pub limit: Option<u32>,
     pub offset: u32,
+    pub r#where: Option<Where>,
 }
 
 impl ListCollectionsRequest {
@@ -506,12 +507,14 @@ impl ListCollectionsRequest {
         database_name: String,
         limit: Option<u32>,
         offset: u32,
+        r#where: Option<Where>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             limit,
             offset,
+            r#where,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)

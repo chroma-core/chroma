@@ -15,13 +15,13 @@ use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::{SqliteSysDbConfig, SysDbConfig};
 use chroma_system::System;
 use chroma_types::{
-    Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
-    CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
-    DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
-    GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
-    InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListDatabasesRequest,
-    Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest,
-    UpdateMetadata, WrappedSerdeJsonError,
+    parse_where, Collection, CollectionConfiguration, CollectionMetadataUpdate,
+    CountCollectionsRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
+    CreateTenantRequest, Database, DeleteCollectionRequest, DeleteDatabaseRequest,
+    GetCollectionRequest, GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse,
+    HeartbeatError, IncludeList, InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest,
+    ListDatabasesRequest, Metadata, QueryResponse, UpdateCollectionConfiguration,
+    UpdateCollectionRequest, UpdateMetadata, Where, WhereValidationError, WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
@@ -229,16 +229,30 @@ impl Bindings {
         Ok(count)
     }
 
-    #[pyo3(signature = (limit = None, offset = 0, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string()))]
+    #[pyo3(signature = (limit = None, offset = 0, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string(), r#where = None))]
     fn list_collections(
         &self,
         limit: Option<u32>,
         offset: Option<u32>,
         tenant: String,
         database: String,
+        r#where: Option<String>,
     ) -> ChromaPyResult<Vec<Collection>> {
-        let request =
-            ListCollectionsRequest::try_new(tenant, database, limit, offset.unwrap_or(0))?;
+        let parsed_where: Option<Where> = match r#where {
+            Some(r#where) => {
+                let value = serde_json::from_str(r#where.as_str())
+                    .map_err(|_| WhereValidationError::WhereClause)?;
+                parse_where(&value).ok()
+            }
+            None => None,
+        };
+        let request = ListCollectionsRequest::try_new(
+            tenant,
+            database,
+            limit,
+            offset.unwrap_or(0),
+            parsed_where,
+        )?;
         let mut frontend = self.frontend.clone();
         let collections = self
             .runtime
