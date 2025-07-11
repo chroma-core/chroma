@@ -709,6 +709,7 @@ mod tests {
         let config = GarbageCollectorConfig {
             service_name: "gc".to_string(),
             otel_endpoint: "none".to_string(),
+            otel_filters: vec![],
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
@@ -834,6 +835,7 @@ mod tests {
         let config = GarbageCollectorConfig {
             service_name: "gc".to_string(),
             otel_endpoint: "none".to_string(),
+            otel_filters: vec![],
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
@@ -1035,6 +1037,7 @@ mod tests {
         let config = GarbageCollectorConfig {
             service_name: "gc".to_string(),
             otel_endpoint: "none".to_string(),
+            otel_filters: vec![],
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,

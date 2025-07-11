@@ -2,6 +2,7 @@ use chroma_cache::CacheConfig;
 use chroma_log::config::LogConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
+use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
 use std::{
@@ -25,6 +26,8 @@ where
 pub(super) struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
+    #[serde(default = "GarbageCollectorConfig::default_otel_filters")]
+    pub(super) otel_filters: Vec<OtelFilter>,
     #[serde(
         rename = "collection_soft_delete_grace_period_seconds",
         deserialize_with = "deserialize_duration_from_seconds",
@@ -96,6 +99,13 @@ impl GarbageCollectorConfig {
 
     fn default_port() -> u16 {
         50055
+    }
+
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "garbage_collector".to_string(),
+            filter_level: OtelFilterLevel::Debug,
+        }]
     }
 
     fn default_collection_soft_delete_grace_period() -> Duration {

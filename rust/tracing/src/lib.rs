@@ -5,4 +5,7 @@ pub mod util;
 
 #[cfg(feature = "grpc")]
 pub use grpc_tower::*;
-pub use init_tracer::*;
+pub use init_tracer::{
+    init_global_filter_layer, init_otel_layer, init_otel_tracing, init_panic_tracing_hook,
+    init_stdout_layer, init_tracing, OtelFilter, OtelFilterLevel,
+};
