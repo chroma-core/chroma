@@ -15,7 +15,7 @@ _How are these changes tested?_
 
 ## Migration plan
 
-_Are there any migrations, or any forwards/backwards compatability changes needed in order to make sure this change deploys reliably?_
+_Are there any migrations, or any forwards/backwards compatibility changes needed in order to make sure this change deploys reliably?_
 
 ## Observability plan
 
