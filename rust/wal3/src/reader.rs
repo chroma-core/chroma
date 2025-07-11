@@ -105,7 +105,6 @@ impl LogReader {
     ///    interval.
     /// 2. Up to, and including, the number of files to return.
     /// 3. Up to, and including, the total number of bytes to return.
-    #[tracing::instrument(skip(self))]
     pub async fn scan(&self, from: LogPosition, limits: Limits) -> Result<Vec<Fragment>, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
@@ -258,7 +257,6 @@ impl LogReader {
         if let Some(max_files) = limits.max_files {
             if fragments.len() as u64 > max_files {
                 *short_read = true;
-                tracing::info!("truncating to {} files from {}", max_files, fragments.len());
                 fragments.truncate(max_files as usize);
             }
         }
@@ -268,10 +266,6 @@ impl LogReader {
             && fragments[fragments.len() - 1].start - from
                 > limits.max_records.unwrap_or(u64::MAX)
         {
-            tracing::info!(
-                "truncating to {} files because records restrictions",
-                fragments.len() - 1
-            );
             fragments.pop();
             *short_read = true;
         }
@@ -282,10 +276,6 @@ impl LogReader {
                 .fold(0, u64::saturating_add)
                 > limits.max_bytes.unwrap_or(u64::MAX)
         {
-            tracing::info!(
-                "truncating to {} files because bytes restrictions",
-                fragments.len() - 1
-            );
             fragments.pop();
             *short_read = true;
         }

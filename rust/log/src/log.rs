@@ -45,7 +45,7 @@ pub enum Log {
 }
 
 impl Log {
-    #[tracing::instrument(skip(self), err(Display))]
+    #[tracing::instrument(skip(self))]
     pub async fn read(
         &mut self,
         tenant: &str,

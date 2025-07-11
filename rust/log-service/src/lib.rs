@@ -894,8 +894,7 @@ impl LogServer {
                     let value = CachedBytes {
                         bytes: Vec::from(json_witness),
                     };
-                    let insert_span = tracing::info_span!("cache insert");
-                    cache.insert(cache_key, value).instrument(insert_span).await;
+                    cache.insert(cache_key, value).await;
                 }
                 Err(err) => {
                     tracing::error!("could not serialize cursor: {err}");
@@ -1157,8 +1156,7 @@ impl LogServer {
                 let handle = self.open_logs.get_or_create_state(key);
                 let mut _active = handle.active.lock().await;
                 let cache_key = cache_key_for_cursor(collection_id, cursor);
-                let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
-                if let Ok(Some(json_witness)) = cache.get(&cache_key).instrument(cache_span).await {
+                if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
                     let witness: Witness = serde_json::from_slice(&json_witness.bytes)?;
                     return Ok((Some(witness), None));
                 }
@@ -1169,8 +1167,7 @@ impl LogServer {
                     let value = CachedBytes {
                         bytes: Vec::from(json_witness),
                     };
-                    let insert_span = tracing::info_span!("cache insert");
-                    cache.insert(cache_key, value).instrument(insert_span).await;
+                    cache.insert(cache_key, value).await;
                 }
                 res
             } else {
@@ -1477,29 +1474,18 @@ impl LogServer {
                     let prefix = collection_id.storage_prefix_for_log();
                     if let Some(cache) = self.cache.as_ref() {
                         let cache_key = format!("{collection_id}::{}", fragment.path);
-                        let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
-                        if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
-                        {
+                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
                             return Ok(Arc::new(answer.bytes));
                         }
-                        let fetch_span = tracing::info_span!("fragment fetch");
-                        let answer = LogReader::stateless_fetch(&self.storage, &prefix, fragment)
-                            .instrument(fetch_span)
-                            .await?;
+                        let answer =
+                            LogReader::stateless_fetch(&self.storage, &prefix, fragment).await?;
                         let cache_value = CachedBytes {
                             bytes: Clone::clone(&*answer),
                         };
-                        let insert_span = tracing::info_span!("cache insert");
-                        cache
-                            .insert(cache_key, cache_value)
-                            .instrument(insert_span)
-                            .await;
+                        cache.insert(cache_key, cache_value).await;
                         Ok(answer)
                     } else {
-                        let fetch_span = tracing::info_span!("fragment fetch");
-                        LogReader::stateless_fetch(&self.storage, &prefix, fragment)
-                            .instrument(fetch_span)
-                            .await
+                        LogReader::stateless_fetch(&self.storage, &prefix, fragment).await
                     }
                 })
                 .collect::<Vec<_>>();

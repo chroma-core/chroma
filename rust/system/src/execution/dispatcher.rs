@@ -318,7 +318,7 @@ mod tests {
     struct MockOperator {}
     #[async_trait]
     impl Operator<f32, String> for MockOperator {
-        type Error = ();
+        type Error = std::io::Error;
 
         fn get_name(&self) -> &'static str {
             "MockOperator"
@@ -338,7 +338,7 @@ mod tests {
     struct MockIoOperator {}
     #[async_trait]
     impl Operator<String, String> for MockIoOperator {
-        type Error = ();
+        type Error = std::io::Error;
 
         fn get_name(&self) -> &'static str {
             "MockIoOperator"
@@ -392,12 +392,12 @@ mod tests {
         }
     }
     #[async_trait]
-    impl Handler<TaskResult<String, ()>> for MockIoDispatchUser {
+    impl Handler<TaskResult<String, std::io::Error>> for MockIoDispatchUser {
         type Result = ();
 
         async fn handle(
             &mut self,
-            _message: TaskResult<String, ()>,
+            _message: TaskResult<String, std::io::Error>,
             ctx: &ComponentContext<MockIoDispatchUser>,
         ) {
             self.counter.fetch_add(1, Ordering::SeqCst);
@@ -455,12 +455,12 @@ mod tests {
         }
     }
     #[async_trait]
-    impl Handler<TaskResult<String, ()>> for MockDispatchUser {
+    impl Handler<TaskResult<String, std::io::Error>> for MockDispatchUser {
         type Result = ();
 
         async fn handle(
             &mut self,
-            _message: TaskResult<String, ()>,
+            _message: TaskResult<String, std::io::Error>,
             ctx: &ComponentContext<MockDispatchUser>,
         ) {
             self.counter.fetch_add(1, Ordering::SeqCst);

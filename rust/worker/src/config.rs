@@ -135,6 +135,8 @@ pub struct QueryServiceConfig {
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
     #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
+    #[serde(default)]
+    pub jemalloc_pprof_server_port: Option<u16>,
 }
 
 impl QueryServiceConfig {

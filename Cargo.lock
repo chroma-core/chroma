@@ -9754,6 +9754,7 @@ dependencies = [
  "chroma-distance",
  "chroma-error",
  "chroma-index",
+ "chroma-jemalloc-pprof-server",
  "chroma-log",
  "chroma-memberlist",
  "chroma-segment",
