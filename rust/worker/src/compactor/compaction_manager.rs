@@ -291,7 +291,9 @@ impl CompactionManagerContext {
                 return Ok(result);
             }
             Err(e) => {
-                tracing::error!("Compaction Job failed: {:?}", e);
+                if e.should_trace_error() {
+                    tracing::error!("Compaction Job failed: {:?}", e);
+                }
                 return Err(Box::new(e));
             }
         }

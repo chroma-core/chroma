@@ -201,6 +201,14 @@ impl ChromaError for CompactionError {
             _ => ErrorCodes::Internal,
         }
     }
+
+    fn should_trace_error(&self) -> bool {
+        if let CompactionError::FetchLog(FetchLogError::PullLog(e)) = self {
+            e.code() != ErrorCodes::NotFound
+        } else {
+            true
+        }
+    }
 }
 
 #[derive(Debug)]
