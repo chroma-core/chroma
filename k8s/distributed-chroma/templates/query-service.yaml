@@ -94,7 +94,7 @@ spec:
             {{ end }}
             {{ if .Values.queryService.jemallocConfig }}
             - name: _RJEM_MALLOC_CONF
-              value: {{ .Values.queryService.jemallocConfig}}
+              value: {{ .Values.queryService.jemallocConfig }}
             {{ end }}
             - name: CHROMA_QUERY_SERVICE__MY_MEMBER_ID
               valueFrom:

@@ -1,84 +1,82 @@
 # Default values for distributed-chroma.
 # Strongly prefer single quotes.
 
-namespace: 'chroma'
+namespace: "chroma"
 
 rustFrontendService:
   image:
-    repository: 'rust-frontend-service'
-    tag: 'latest'
+    repository: "rust-frontend-service"
+    tag: "latest"
   replicaCount: 1
   resources:
     limits:
-      cpu: '2000m'
-      memory: '1Gi'
+      cpu: "2000m"
+      memory: "1Gi"
     requests:
-      cpu: '1000m'
-      memory: '512Mi'
+      cpu: "1000m"
+      memory: "512Mi"
 
 sysdb:
   image:
-    repository: 'sysdb'
-    tag: 'latest'
+    repository: "sysdb"
+    tag: "latest"
   replicaCount: 1
   env:
-  - name: OPTL_TRACING_ENDPOINT
-    value: 'value: "jaeger:4317"'
+    - name: OPTL_TRACING_ENDPOINT
+      value: 'value: "jaeger:4317"'
   resources:
     limits:
-      cpu: '2000m'
-      memory: '1Gi'
+      cpu: "2000m"
+      memory: "1Gi"
     requests:
-      cpu: '1000m'
-      memory: '512Mi'
+      cpu: "1000m"
+      memory: "512Mi"
   flags:
-
 
 logService:
   image:
-    repository: 'logservice'
-    tag: 'latest'
+    repository: "logservice"
+    tag: "latest"
   env:
-  - name: OPTL_TRACING_ENDPOINT
-    value: 'value: "otel-collector:4317"'
-  - name: SYSDB_CONN
-    value: 'value: "sysdb.chroma:50051"'
+    - name: OPTL_TRACING_ENDPOINT
+      value: 'value: "otel-collector:4317"'
+    - name: SYSDB_CONN
+      value: 'value: "sysdb.chroma:50051"'
   flags:
   replicaCount: 1
 
-
 rustLogService:
   image:
-    repository: 'rust-log-service'
-    tag: 'latest'
+    repository: "rust-log-service"
+    tag: "latest"
   cache:
-    hostPath: '/local/cache/chroma-log-service'
-    mountPath: '/cache/'
+    hostPath: "/local/cache/chroma-log-service"
+    mountPath: "/cache/"
 
 queryService:
   image:
-    repository: 'query-service'
-    tag: 'latest'
+    repository: "query-service"
+    tag: "latest"
   env:
   cache:
-    hostPath: '/local/cache/chroma-query-service'
-    mountPath: '/cache/'
+    hostPath: "/local/cache/chroma-query-service"
+    mountPath: "/cache/"
   replicaCount: 2
 
 compactionService:
   image:
-    repository: 'compaction-service'
-    tag: 'latest'
+    repository: "compaction-service"
+    tag: "latest"
   env:
   cache:
-    hostPath: '/local/cache/chroma-compaction-service'
-    mountPath: '/cache/'
+    hostPath: "/local/cache/chroma-compaction-service"
+    mountPath: "/cache/"
   replicaCount: 1
 
 sysdbMigration:
   image:
-    repository: 'sysdb-migration'
-    tag: 'latest'
+    repository: "sysdb-migration"
+    tag: "latest"
   username: chroma
   password: chroma
   netloc: postgres
@@ -88,28 +86,28 @@ sysdbMigration:
 
 logServiceMigration:
   image:
-    repository: 'logservice-migration'
-    tag: 'latest'
+    repository: "logservice-migration"
+    tag: "latest"
   env:
-  - name: CHROMA_DB_LOG_URL
-    value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'
+    - name: CHROMA_DB_LOG_URL
+      value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'
 
 # Add the garbage collector configuration
 garbageCollector:
   image:
-    repository: 'garbage-collector'
-    tag: 'latest'
+    repository: "garbage-collector"
+    tag: "latest"
   replicaCount: 1
   resources:
     limits:
-      cpu: '200m'
-      memory: '256Mi'
+      cpu: "200m"
+      memory: "256Mi"
     requests:
-      cpu: '100m'
-      memory: '128Mi'
+      cpu: "100m"
+      memory: "128Mi"
   cache:
-    hostPath: '/local/cache/chroma-garbage-collector'
-    mountPath: '/cache/'
+    hostPath: "/local/cache/chroma-garbage-collector"
+    mountPath: "/cache/"
   configuration: |
     service_name: "garbage-collector"
     otel_endpoint: "http://otel-collector:4317"
