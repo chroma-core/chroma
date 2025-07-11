@@ -353,6 +353,7 @@ lazy_static::lazy_static! {
     };
 }
 
+#[derive(Debug)]
 pub struct QuotaOverrides {
     pub limit: u32,
 }
