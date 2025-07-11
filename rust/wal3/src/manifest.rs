@@ -683,7 +683,6 @@ impl Manifest {
     }
 
     /// Load the latest manifest from object storage.
-    #[tracing::instrument(skip(storage))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,

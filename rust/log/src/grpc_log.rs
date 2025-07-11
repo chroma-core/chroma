@@ -381,12 +381,11 @@ impl GrpcLog {
     }
 
     // ScoutLogs returns the offset of the next record to be inserted into the log.
-    #[tracing::instrument(skip(self))]
     pub(super) async fn scout_logs(
         &mut self,
         tenant: &str,
         collection_id: CollectionUuid,
-        start_from: u64,
+        _start_from: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
         let mut client = self
             .client_for(tenant, collection_id)
@@ -406,7 +405,6 @@ impl GrpcLog {
         Ok(scout.first_uninserted_record_offset as u64)
     }
 
-    #[tracing::instrument(skip(self))]
     pub(super) async fn read(
         &mut self,
         tenant: &str,
