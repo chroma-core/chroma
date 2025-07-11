@@ -1,15 +1,19 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
-from typing import List, Dict, Any, Optional
 import os
-import numpy as np
-from chromadb.utils.embedding_functions.schemas import validate_config_schema
 import warnings
+from typing import Any, Callable, Dict, List, Optional
 
+import numpy as np
+
+from chromadb.api.types import Documents, EmbeddingFunction, Embeddings, Space
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
+
+AzureADTokenProvider = Callable[[], str]
 
 class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
         api_key: Optional[str] = None,
+        azure_ad_token_provider: AzureADTokenProvider | None = None,
         model_name: str = "text-embedding-ada-002",
         organization_id: Optional[str] = None,
         api_base: Optional[str] = None,
@@ -37,6 +41,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
             api_version (str, optional): The api version for the API. If not provided,
                 it will use the api version for the OpenAI API. This can be used to
                 point to a different deployment, such as an Azure deployment.
+            azure_ad_token_provider (AzureADTokenProvider, optional) A function that returns an Azure Active Directory token
             deployment_id (str, optional): Deployment ID for Azure OpenAI.
             default_headers (Dict[str, str], optional): A mapping of default headers to be sent with each API request.
             dimensions (int, optional): The number of dimensions for the embeddings.
@@ -59,7 +64,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.api_key_env_var = api_key_env_var
         self.api_key = api_key or os.getenv(api_key_env_var)
-        if not self.api_key:
+        is_azure = api_type == "azure"
+        if not self.api_key and (is_azure and not azure_ad_token_provider):
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 
         self.model_name = model_name
@@ -81,10 +87,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         if self.default_headers is not None:
             client_params["default_headers"] = self.default_headers
 
-        self.client = openai.OpenAI(**client_params)
-
         # For Azure OpenAI
-        if self.api_type == "azure":
+        if is_azure:
             if self.api_version is None:
                 raise ValueError("api_version must be specified for Azure OpenAI")
             if self.deployment_id is None:
@@ -99,8 +103,12 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 api_version=self.api_version,
                 azure_endpoint=self.api_base,
                 azure_deployment=self.deployment_id,
+                azure_ad_token_provider=azure_ad_token_provider,
                 default_headers=self.default_headers,
             )
+        else:
+            self.client = openai.OpenAI(**client_params)
+
 
     def __call__(self, input: Documents) -> Embeddings:
         """
