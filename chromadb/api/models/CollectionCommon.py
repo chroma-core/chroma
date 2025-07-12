@@ -313,7 +313,9 @@ class CollectionCommon(Generic[ClientT]):
         # Prepare
         if query_records["embeddings"] is None:
             validate_record_set_for_embedding(record_set=query_records)
-            request_embeddings = self._embed_record_set(record_set=query_records)
+            request_embeddings = self._embed_record_set(
+                record_set=query_records, is_query=True
+            )
         else:
             request_embeddings = query_records["embeddings"]
 
@@ -531,7 +533,10 @@ class CollectionCommon(Generic[ClientT]):
             )
 
     def _embed_record_set(
-        self, record_set: BaseRecordSet, embeddable_fields: Optional[Set[str]] = None
+        self,
+        record_set: BaseRecordSet,
+        embeddable_fields: Optional[Set[str]] = None,
+        is_query: bool = False,
     ) -> Embeddings:
         if embeddable_fields is None:
             embeddable_fields = get_default_embeddable_record_set_fields()
@@ -545,27 +550,41 @@ class CollectionCommon(Generic[ClientT]):
                             "You must set a data loader on the collection if loading from URIs."
                         )
                     return self._embed(
-                        input=self._data_loader(uris=cast(URIs, record_set[field]))  # type: ignore[literal-required]
+                        input=self._data_loader(uris=cast(URIs, record_set[field])),  # type: ignore[literal-required]
+                        is_query=is_query,
                     )
                 else:
-                    return self._embed(input=record_set[field])  # type: ignore[literal-required]
+                    return self._embed(
+                        input=record_set[field],  # type: ignore[literal-required]
+                        is_query=is_query,
+                    )
         raise ValueError(
             "Record does not contain any non-None fields that can be embedded."
             f"Embeddable Fields: {embeddable_fields}"
             f"Record Fields: {record_set}"
         )
 
-    def _embed(self, input: Any) -> Embeddings:
+    def _embed(self, input: Any, is_query: bool = False) -> Embeddings:
         if self._embedding_function is not None and not isinstance(
             self._embedding_function, ef.DefaultEmbeddingFunction
         ):
-            return self._embedding_function(input=input)
+            if is_query:
+                return self._embedding_function.embed_query(input=input)
+            else:
+                return self._embedding_function(input=input)
+
         config_ef = self.configuration.get("embedding_function")
         if config_ef is not None:
-            return config_ef(input=input)
+            if is_query:
+                return config_ef.embed_query(input=input)
+            else:
+                return config_ef(input=input)
         if self._embedding_function is None:
             raise ValueError(
                 "You must provide an embedding function to compute embeddings."
                 "https://docs.trychroma.com/guides/embeddings"
             )
-        return self._embedding_function(input=input)
+        if is_query:
+            return self._embedding_function.embed_query(input=input)
+        else:
+            return self._embedding_function(input=input)
