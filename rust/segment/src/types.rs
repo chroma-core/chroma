@@ -122,7 +122,7 @@ impl ChromaError for LogMaterializerError {
 /// Instead of cloning or holding references to log records/segment data, this struct contains owned values that can be resolved to the referenced data.
 /// E.x. `final_document_at_log_index: Option<usize>` is used instead of `final_document: Option<&str>` to avoid holding references to the data.
 /// This allows `MaterializedLogRecord` (and types above it) to be trivially Send'able.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct MaterializedLogRecord {
     // False if the record exists only in the log, otherwise true.
     offset_id_exists_in_segment: bool,
