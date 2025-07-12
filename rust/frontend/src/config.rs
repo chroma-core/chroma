@@ -6,6 +6,7 @@ use chroma_log::config::LogConfig;
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
 use chroma_sysdb::SysDbConfig;
+use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use chroma_types::{default_default_knn_index, KnnIndex};
 use figment::providers::{Env, Format, Yaml};
 use mdac::CircuitBreakerConfig;
@@ -94,11 +95,20 @@ fn default_otel_service_name() -> String {
     "chromadb".to_string()
 }
 
+fn default_otel_filters() -> Vec<OtelFilter> {
+    vec![OtelFilter {
+        crate_name: "chroma-frontend".to_string(),
+        filter_level: OtelFilterLevel::Trace,
+    }]
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct OpenTelemetryConfig {
     pub endpoint: String,
     #[serde(default = "default_otel_service_name")]
     pub service_name: String,
+    #[serde(default = "default_otel_filters")]
+    pub filters: Vec<OtelFilter>,
 }
 
 fn default_persist_path() -> String {

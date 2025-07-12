@@ -1,5 +1,6 @@
 use chroma_config::assignment;
 use chroma_sysdb::SysDbConfig;
+use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +111,8 @@ pub struct QueryServiceConfig {
     pub service_name: String,
     #[serde(default = "QueryServiceConfig::default_otel_endpoint")]
     pub otel_endpoint: String,
+    #[serde(default = "QueryServiceConfig::default_otel_filters")]
+    pub otel_filters: Vec<OtelFilter>,
     #[allow(dead_code)]
     #[serde(default = "QueryServiceConfig::default_my_member_id")]
     pub my_member_id: String,
@@ -148,6 +151,13 @@ impl QueryServiceConfig {
         "http://otel-collector:4317".to_string()
     }
 
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "worker".to_string(),
+            filter_level: OtelFilterLevel::Trace,
+        }]
+    }
+
     fn default_my_member_id() -> String {
         "query-service-0".to_string()
     }
@@ -177,6 +187,8 @@ pub struct CompactionServiceConfig {
     pub service_name: String,
     #[serde(default = "CompactionServiceConfig::default_otel_endpoint")]
     pub otel_endpoint: String,
+    #[serde(default = "CompactionServiceConfig::default_otel_filters")]
+    pub otel_filters: Vec<OtelFilter>,
     #[serde(default = "CompactionServiceConfig::default_my_member_id")]
     pub my_member_id: String,
     #[allow(dead_code)]
@@ -213,6 +225,13 @@ impl CompactionServiceConfig {
 
     fn default_otel_endpoint() -> String {
         "http://otel-collector:4317".to_string()
+    }
+
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "compaction_service".to_string(),
+            filter_level: OtelFilterLevel::Trace,
+        }]
     }
 
     fn default_my_member_id() -> String {
