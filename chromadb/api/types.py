@@ -27,6 +27,8 @@ from chromadb.base_types import (
     Where,
     WhereDocumentOperator,
     WhereDocument,
+    CollectionSchema,
+    ValueType,
 )
 from inspect import signature
 from tenacity import retry
@@ -312,6 +314,47 @@ def validate_insert_record_set(record_set: InsertRecordSet) -> None:
     validate_ids(record_set["ids"])
     if record_set["metadatas"] is not None:
         validate_metadatas(record_set["metadatas"])
+
+
+def update_schema_with_insert_record_set(
+    record_set: InsertRecordSet,
+    schema: Optional[Dict[str, Dict[ValueType, CollectionSchema]]] = None,
+) -> Dict[str, Dict[ValueType, CollectionSchema]]:
+    """
+    Updates the schema with the insert record set.
+    """
+    new_attributes: Dict[str, Dict[ValueType, CollectionSchema]] = {}
+
+    if schema is None:
+        schema = {}
+
+    if record_set["metadatas"] is not None:
+        for metadata in record_set["metadatas"]:
+            if metadata is not None:
+                for key, value in metadata.items():
+                    if key not in schema:
+                        if value is not None:
+                            type_name = type(value).__name__
+                            if key not in new_attributes:
+                                new_attributes[key] = {}
+                            if type_name == "str":
+                                new_attributes[key]["string"] = {
+                                    "metadata_index": True,
+                                }
+                            elif type_name == "int":
+                                new_attributes[key]["int"] = {
+                                    "metadata_index": True,
+                                }
+                            elif type_name == "float":
+                                new_attributes[key]["float"] = {
+                                    "metadata_index": True,
+                                }
+                            elif type_name == "bool":
+                                new_attributes[key]["boolean"] = {
+                                    "metadata_index": True,
+                                }
+
+    return new_attributes
 
 
 def _validate_record_set_length_consistency(record_set: BaseRecordSet) -> None:

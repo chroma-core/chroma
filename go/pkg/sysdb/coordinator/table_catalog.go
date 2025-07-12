@@ -854,6 +854,10 @@ func (tc *Catalog) updateCollectionConfiguration(
 		existingConfig.EmbeddingFunction = updateConfig.EmbeddingFunction
 	}
 
+	if updateConfig.Schema != nil {
+		existingConfig.Schema = mergeSchemas(existingConfig.Schema, updateConfig.Schema)
+	}
+
 	// Serialize updated config back to JSON
 	updatedConfigBytes, err := json.Marshal(existingConfig)
 	if err != nil {
@@ -861,6 +865,27 @@ func (tc *Catalog) updateCollectionConfiguration(
 	}
 	updatedConfigStr := string(updatedConfigBytes)
 	return &updatedConfigStr, nil
+}
+
+func mergeSchemas(existingSchema map[string]map[string]model.CollectionSchema, newSchema map[string]map[string]model.CollectionSchema) map[string]map[string]model.CollectionSchema {
+	if newSchema == nil {
+		return existingSchema
+	}
+	if existingSchema == nil {
+		return newSchema
+	}
+
+	for new_key, new_value := range newSchema {
+		if existingSchema[new_key] == nil {
+			existingSchema[new_key] = new_value
+		} else {
+			for update_value_type, update_collection_schema := range new_value {
+				existingSchema[new_key][update_value_type] = update_collection_schema
+			}
+		}
+	}
+
+	return existingSchema
 }
 
 func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection, ts types.Timestamp) (*model.Collection, error) {
