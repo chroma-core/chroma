@@ -239,7 +239,7 @@ def from_proto_collection(collection: chroma_pb.Collection) -> Collection:
     return Collection(
         id=UUID(hex=collection.id),
         name=collection.name,
-        configuration_json=json.loads(collection.configuration_json_str),
+        configuration=json.loads(collection.configuration_json_str),
         metadata=from_proto_metadata(collection.metadata)
         if collection.HasField("metadata")
         else None,

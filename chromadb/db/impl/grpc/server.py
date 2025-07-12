@@ -291,7 +291,7 @@ class GrpcMockSysDB(SysDBServicer, Component):
         new_collection = Collection(
             id=id,
             name=request.name,
-            configuration_json=configuration_json,
+            configuration=configuration_json,
             metadata=from_proto_metadata(request.metadata),
             dimension=request.dimension,
             database=database,

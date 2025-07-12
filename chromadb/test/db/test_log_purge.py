@@ -1,10 +1,10 @@
-from chromadb.api.client import Client
-from chromadb.config import System
 from chromadb.test.property import invariants
+from chromadb.test.conftest import ClientFactories
 
 
-def test_log_purge(sqlite_persistent: System) -> None:
-    client = Client.from_system(sqlite_persistent)
+def test_log_purge(client_factories: ClientFactories) -> None:
+    client = client_factories.create_client()
+    client.reset()
 
     first_collection = client.create_collection(
         "first_collection", metadata={"hnsw:sync_threshold": 10, "hnsw:batch_size": 10}
@@ -26,8 +26,9 @@ def test_log_purge(sqlite_persistent: System) -> None:
     invariants.log_size_below_max(client._system, collections, True)
 
 
-def test_log_purge_with_multiple_collections(sqlite_persistent: System) -> None:
-    client = Client.from_system(sqlite_persistent)
+def test_log_purge_with_multiple_collections(client_factories: ClientFactories) -> None:
+    client = client_factories.create_client()
+    client.reset()
 
     first_collection = client.create_collection(
         "first_collection", metadata={"hnsw:sync_threshold": 10, "hnsw:batch_size": 10}
