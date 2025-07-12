@@ -1,0 +1,37 @@
+{
+    "name": "@chroma-core/morph",
+    "version": "1.0.0",
+    "description": "Chroma integration for Morph embedding models",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "clean": "rm -rf dist",
+        "test": "jest"
+    },
+    "dependencies": {
+        "@chroma-core/common": "workspace:*",
+        "openai": "^4.0.0"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "typescript": "^5.0.0"
+    },
+    "files": [
+        "dist"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/chroma-core/chroma.git"
+    },
+    "keywords": [
+        "chroma",
+        "embeddings",
+        "morph",
+        "ai",
+        "vector",
+        "database"
+    ],
+    "author": "Chroma",
+    "license": "MIT"
+}
