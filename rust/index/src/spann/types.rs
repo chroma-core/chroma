@@ -11,7 +11,7 @@ use chroma_blockstore::{
     provider::{BlockfileProvider, CreateError, OpenError},
     BlockfileFlusher, BlockfileReader, BlockfileWriter, BlockfileWriterOptions,
 };
-use chroma_cache::AysncPartitionedMutex;
+use chroma_cache::AsyncPartitionedMutex;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -288,7 +288,7 @@ pub struct SpannIndexWriter {
     blockfile_provider: BlockfileProvider,
     // Posting list of the centroids.
     pub posting_list_writer: BlockfileWriter,
-    pub posting_list_partitioned_mutex: Arc<AysncPartitionedMutex<u32>>,
+    pub posting_list_partitioned_mutex: Arc<AsyncPartitionedMutex<u32>>,
     pub next_head_id: Arc<AtomicU32>,
     // Version number of each point.
     // TODO(Sanket): Finer grained locking for this map in future if perf is not satisfactory.
@@ -431,7 +431,7 @@ impl SpannIndexWriter {
             hnsw_provider,
             blockfile_provider,
             posting_list_writer,
-            posting_list_partitioned_mutex: Arc::new(AysncPartitionedMutex::new(())),
+            posting_list_partitioned_mutex: Arc::new(AsyncPartitionedMutex::new(())),
             next_head_id: Arc::new(AtomicU32::new(next_head_id)),
             versions_map: Arc::new(tokio::sync::RwLock::new(versions_map)),
             dimensionality,

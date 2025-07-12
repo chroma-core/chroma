@@ -14,7 +14,7 @@ use crate::{
     Value,
 };
 use async_trait::async_trait;
-use chroma_cache::{AysncPartitionedMutex, CacheError, PersistentCache};
+use chroma_cache::{AsyncPartitionedMutex, CacheError, PersistentCache};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{
@@ -355,7 +355,7 @@ pub struct BlockManager {
     storage: Storage,
     default_max_block_size_bytes: usize,
     block_metrics: BlockMetrics,
-    cache_mutex: AysncPartitionedMutex<Uuid>,
+    cache_mutex: AsyncPartitionedMutex<Uuid>,
 }
 
 impl BlockManager {
@@ -370,7 +370,7 @@ impl BlockManager {
             storage,
             default_max_block_size_bytes,
             block_metrics: BlockMetrics::default(),
-            cache_mutex: AysncPartitionedMutex::new(()),
+            cache_mutex: AsyncPartitionedMutex::new(()),
         }
     }
 
