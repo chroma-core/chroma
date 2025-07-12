@@ -19,8 +19,9 @@ use roaring::RoaringBitmap;
 use tokio::time::Instant;
 use worker::execution::operators::filter::FilterInput;
 
-const LOG_CHUNK_SIZE: usize = 10000;
-const DOCUMENT_SIZE: usize = 100000;
+const LOG_CHUNK_SIZE: usize = 2 << 12;
+const DOCUMENT_SIZE: usize = 2 << 16;
+const MAX_DOCUMENT_LENGTH: usize = 1 << 12;
 const REGEX_PATTERNS: &[&str] = &[
     r"std::ptr::",
     r"env_logger::",
@@ -167,6 +168,11 @@ fn bench_regex(criterion: &mut Criterion) {
             .documents()
             .await
             .expect("the dataset should contain documents");
+        let selected_documents = documents
+            .into_iter()
+            .filter(|document| document.len() <= MAX_DOCUMENT_LENGTH)
+            .take(DOCUMENT_SIZE)
+            .collect::<Vec<_>>();
 
         let mut expected_results = HashMap::<String, RoaringBitmap>::new();
         let mut bruteforce_time = HashMap::<_, Duration>::new();
@@ -180,9 +186,8 @@ fn bench_regex(criterion: &mut Criterion) {
             })
             .collect::<Vec<_>>();
 
-        let logs = documents
+        let logs = selected_documents
             .into_iter()
-            .take(DOCUMENT_SIZE)
             .progress()
             .enumerate()
             .map(|(offset, document)| {
