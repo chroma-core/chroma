@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
-
+	"github.com/chroma-core/chroma/go/pkg/leader"
 	"github.com/chroma-core/chroma/go/pkg/memberlist_manager"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
@@ -92,6 +92,48 @@ func New(config Config) (*Server, error) {
 	}
 }
 
+func StartMemberListManagers(leaderCtx context.Context, config Config) error {
+	namespace := config.KubernetesNamespace
+
+	// Store managers for cleanup
+	managers := []struct {
+		serviceType    string
+		manager        *memberlist_manager.MemberlistManager
+		memberlistName string
+		podLabel       string
+	}{
+		{"query", nil, config.QueryServiceMemberlistName, config.QueryServicePodLabel},
+		{"compaction", nil, config.CompactionServiceMemberlistName, config.CompactionServicePodLabel},
+		{"garbage_collection", nil, config.GarbageCollectionServiceMemberlistName, config.GarbageCollectionServicePodLabel},
+		{"log", nil, config.LogServiceMemberlistName, config.LogServicePodLabel},
+	}
+
+	for i, m := range managers {
+		manager, err := createMemberlistManager(namespace, m.memberlistName, m.podLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
+		if err != nil {
+			log.Error("Failed to create memberlist manager for service", zap.String("service", m.serviceType), zap.Error(err))
+			return err
+		}
+		managers[i].manager = manager
+	}
+
+	// Start all memberlist managers
+	for _, m := range managers {
+		if err := m.manager.Start(); err != nil {
+			log.Error("Failed to start memberlist manager for service", zap.String("service", m.serviceType), zap.Error(err))
+		}
+	}
+
+	// Wait for context cancellation (leadership lost)
+	<-leaderCtx.Done()
+
+	// Stop all memberlist managers
+	for _, m := range managers {
+		m.manager.Stop()
+	}
+	return nil
+}
+
 func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Server, error) {
 	log.Info("Creating new GRPC server with config", zap.Any("config", config))
 	ctx := context.Background()
@@ -110,54 +152,14 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 	}
 	s.coordinator = *coordinator
 	if !config.Testing {
-		namespace := config.KubernetesNamespace
-		// Create memberlist manager for query service
-		queryMemberlistManager, err := createMemberlistManager(namespace, config.QueryServiceMemberlistName, config.QueryServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
-		if err != nil {
-			return nil, err
-		}
-
-		// Create memberlist manager for compaction service
-		compactionMemberlistManager, err := createMemberlistManager(namespace, config.CompactionServiceMemberlistName, config.CompactionServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
-		if err != nil {
-			return nil, err
-		}
-
-		// Create memberlist manager for garbage collection service
-		garbageCollectionMemberlistManager, err := createMemberlistManager(namespace, config.GarbageCollectionServiceMemberlistName, config.GarbageCollectionServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
-		if err != nil {
-			return nil, err
-		}
-
-		// Create memberlist manager for log service
-		logServiceMemberlistManager, err := createMemberlistManager(namespace, config.LogServiceMemberlistName, config.LogServicePodLabel, config.WatchInterval, config.ReconcileInterval, config.ReconcileCount)
-		if err != nil {
-			return nil, err
-		}
-
-		// Start the memberlist manager for query service
-		err = queryMemberlistManager.Start()
-		if err != nil {
-			return nil, err
-		}
-		// Start the memberlist manager for compaction service
-		err = compactionMemberlistManager.Start()
-		if err != nil {
-			return nil, err
-		}
-
-		// Start the memberlist manager for garbage collection service
-		err = garbageCollectionMemberlistManager.Start()
-		if err != nil {
-			return nil, err
-		}
-
-		// Start the memberlist manager for log service
-		err = logServiceMemberlistManager.Start()
-		if err != nil {
-			return nil, err
-		}
-
+		// Start leader election for memberlist management
+		go leader.AcquireLeaderLock(context.Background(), func(leaderCtx context.Context) {
+			log.Info("Acquired leadership for memberlist management")
+			if err := StartMemberListManagers(leaderCtx, config); err != nil {
+				log.Error("Failed to start memberlist manager", zap.Error(err))
+			}
+			log.Info("Released leadership for memberlist management")
+		})
 		log.Info("Starting GRPC server")
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
