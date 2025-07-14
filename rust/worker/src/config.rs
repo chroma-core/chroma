@@ -214,6 +214,8 @@ pub struct CompactionServiceConfig {
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
     #[serde(default)]
     pub spann_provider: chroma_index::config::SpannProviderConfig,
+    #[serde(default)]
+    pub jemalloc_pprof_server_port: Option<u16>,
 }
 
 impl CompactionServiceConfig {

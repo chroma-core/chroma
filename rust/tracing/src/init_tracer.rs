@@ -92,10 +92,13 @@ pub fn init_otel_layer(
         service_name,
         otel_endpoint
     );
-    let resource = opentelemetry_sdk::Resource::new(vec![opentelemetry::KeyValue::new(
-        "service.name",
-        service_name.clone(),
-    )]);
+    let resource = opentelemetry_sdk::Resource::new(vec![
+        opentelemetry::KeyValue::new("service.name", service_name.clone()),
+        opentelemetry::KeyValue::new(
+            "service.pod_name",
+            std::env::var("HOSTNAME").unwrap_or("unknown".to_string()),
+        ),
+    ]);
 
     // Prepare tracer.
     let tracing_span_exporter = opentelemetry_otlp::SpanExporter::builder()

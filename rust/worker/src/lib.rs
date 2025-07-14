@@ -156,6 +156,7 @@ pub async fn compaction_service_entrypoint() {
     let compaction_server = CompactionServer {
         manager: compaction_manager_handle.clone(),
         port: config.my_port,
+        jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
     };
 
     let server_join_handle = tokio::spawn(async move {

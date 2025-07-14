@@ -720,6 +720,7 @@ mod tests {
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: Default::default(),
         };
         storage.create_bucket().await.unwrap();
         let admission_controlled_storage =
@@ -771,6 +772,7 @@ mod tests {
             client,
             upload_part_size_bytes: 1024 * 1024 * 8,
             download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: Default::default(),
         };
         storage.create_bucket().await.unwrap();
         let admission_controlled_storage =

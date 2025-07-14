@@ -468,6 +468,43 @@ impl Garbage {
         }
         Ok(drop_acc)
     }
+
+    /// Only call this function if you know what bug you are fixing.  The code documents the bug,
+    /// but it is omitted from the documentation.
+    // NOTE(rescrv):
+    // - The bug:  Delete the data before updating the manifest.
+    // - The fallout:  The manifest refers to a snapshot that doesn't exist; the next pass fails.
+    // - The fix:  Generate a garbage file that erases the snapshots.
+    //
+    // manifest is the manifest to use for getting snapshots to drop.
+    // seq_no is the seq_no of the first fragment to keep.
+    // offset is the log position of the first record to keep.
+    //
+    // To determine these values, find the first snapshot that is in the manifest that wasn't
+    // erased.  It will give you the offset as its start.  Follow the left-most snapshot from that
+    // snapshot, recursively, until you find the first fragment.  That's your seq_no.
+    pub fn bug_patch_construct_garbage_from_manifest(
+        manifest: &Manifest,
+        seq_no: FragmentSeqNo,
+        offset: LogPosition,
+    ) -> Garbage {
+        let mut garbage = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: seq_no,
+            fragments_to_drop_limit: seq_no,
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: offset,
+        };
+        for snapshot in manifest.snapshots.iter() {
+            if snapshot.limit <= garbage.first_to_keep {
+                garbage.snapshots_to_drop.push(snapshot.clone());
+                garbage.setsum_to_discard += snapshot.setsum;
+            }
+        }
+        garbage
+    }
 }
 
 ///////////////////////////////////////// GarbageCollector /////////////////////////////////////////
@@ -512,5 +549,34 @@ impl GarbageCollector {
         self.log
             .garbage_collect_phase3_delete_garbage(options)
             .await
+    }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn case_seen_in_the_wild() {
+        let manifest_json =
+            include_str!("../tests/test_k8s_integration_AA_construct_garbage/MANIFEST");
+        let manifest: Manifest = serde_json::from_str(manifest_json).unwrap();
+        let output = Garbage::bug_patch_construct_garbage_from_manifest(
+            &manifest,
+            FragmentSeqNo(806913),
+            LogPosition::from_offset(900883),
+        );
+        assert_eq!(output.fragments_to_drop_start, FragmentSeqNo(806913));
+        assert_eq!(output.fragments_to_drop_limit, FragmentSeqNo(806913));
+        assert_eq!(
+            output.setsum_to_discard.hexdigest(),
+            "c921d21a0820be5d3b6f2d90942648f2853188bb0e3c6a22fe3dbd81c1e1c380"
+        );
+        assert_eq!(output.first_to_keep, LogPosition::from_offset(900883));
+        for snapshot in output.snapshots_to_drop.iter() {
+            assert!(snapshot.limit <= output.first_to_keep);
+        }
     }
 }

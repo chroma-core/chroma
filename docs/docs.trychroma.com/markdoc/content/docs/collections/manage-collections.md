@@ -6,7 +6,7 @@ Chroma lets you manage collections of embeddings, using the **collection** primi
 
 Chroma collections are created with a name. Collection names are used in the url, so there are a few restrictions on them:
 
-- The length of the name must be between 3 and 63 characters.
+- The length of the name must be between 3 and 512 characters.
 - The name must start and end with a lowercase letter or a digit, and it can contain dots, dashes, and underscores in between.
 - The name must not contain two consecutive dots.
 - The name must not be a valid IP address.

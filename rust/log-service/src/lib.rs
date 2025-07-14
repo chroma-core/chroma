@@ -20,14 +20,15 @@ use chroma_tracing::OtelFilter;
 use chroma_tracing::OtelFilterLevel;
 use chroma_types::chroma_proto::{
     garbage_collect_phase2_request::LogToCollect, log_service_client::LogServiceClient,
-    log_service_server::LogService, scrub_log_request::LogToScrub, CollectionInfo,
-    GarbageCollectPhase2Request, GarbageCollectPhase2Response,
-    GetAllCollectionInfoToCompactRequest, GetAllCollectionInfoToCompactResponse,
-    InspectDirtyLogRequest, InspectDirtyLogResponse, InspectLogStateRequest,
-    InspectLogStateResponse, LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord,
-    PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
-    PurgeDirtyForCollectionResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
-    ScoutLogsResponse, ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
+    log_service_server::LogService, purge_from_cache_request::EntryToEvict,
+    scrub_log_request::LogToScrub, CollectionInfo, GarbageCollectPhase2Request,
+    GarbageCollectPhase2Response, GetAllCollectionInfoToCompactRequest,
+    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
+    InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
+    MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
+    PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PurgeFromCacheRequest,
+    PurgeFromCacheResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
+    ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
     UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
@@ -293,6 +294,10 @@ fn cache_key_for_manifest(collection_id: CollectionUuid) -> String {
 
 fn cache_key_for_cursor(collection_id: CollectionUuid, name: &CursorName) -> String {
     format!("{collection_id}::cursor::{}", name.path())
+}
+
+fn cache_key_for_fragment(collection_id: CollectionUuid, fragment_path: &str) -> String {
+    format!("{collection_id}::{}", fragment_path)
 }
 
 ////////////////////////////////////////// CachedFragment //////////////////////////////////////////
@@ -896,8 +901,7 @@ impl LogServer {
                     let value = CachedBytes {
                         bytes: Vec::from(json_witness),
                     };
-                    let insert_span = tracing::info_span!("cache insert");
-                    cache.insert(cache_key, value).instrument(insert_span).await;
+                    cache.insert(cache_key, value).await;
                 }
                 Err(err) => {
                     tracing::error!("could not serialize cursor: {err}");
@@ -1159,8 +1163,7 @@ impl LogServer {
                 let handle = self.open_logs.get_or_create_state(key);
                 let mut _active = handle.active.lock().await;
                 let cache_key = cache_key_for_cursor(collection_id, cursor);
-                let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
-                if let Ok(Some(json_witness)) = cache.get(&cache_key).instrument(cache_span).await {
+                if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
                     let witness: Witness = serde_json::from_slice(&json_witness.bytes)?;
                     return Ok((Some(witness), None));
                 }
@@ -1171,8 +1174,7 @@ impl LogServer {
                     let value = CachedBytes {
                         bytes: Vec::from(json_witness),
                     };
-                    let insert_span = tracing::info_span!("cache insert");
-                    cache.insert(cache_key, value).instrument(insert_span).await;
+                    cache.insert(cache_key, value).await;
                 }
                 res
             } else {
@@ -1478,30 +1480,19 @@ impl LogServer {
                 .map(|fragment| async {
                     let prefix = collection_id.storage_prefix_for_log();
                     if let Some(cache) = self.cache.as_ref() {
-                        let cache_key = format!("{collection_id}::{}", fragment.path);
-                        let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
-                        if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
-                        {
+                        let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
+                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
                             return Ok(Arc::new(answer.bytes));
                         }
-                        let fetch_span = tracing::info_span!("fragment fetch");
-                        let answer = LogReader::stateless_fetch(&self.storage, &prefix, fragment)
-                            .instrument(fetch_span)
-                            .await?;
+                        let answer =
+                            LogReader::stateless_fetch(&self.storage, &prefix, fragment).await?;
                         let cache_value = CachedBytes {
                             bytes: Clone::clone(&*answer),
                         };
-                        let insert_span = tracing::info_span!("cache insert");
-                        cache
-                            .insert(cache_key, cache_value)
-                            .instrument(insert_span)
-                            .await;
+                        cache.insert(cache_key, cache_value).await;
                         Ok(answer)
                     } else {
-                        let fetch_span = tracing::info_span!("fragment fetch");
-                        LogReader::stateless_fetch(&self.storage, &prefix, fragment)
-                            .instrument(fetch_span)
-                            .await
+                        LogReader::stateless_fetch(&self.storage, &prefix, fragment).await
                     }
                 })
                 .collect::<Vec<_>>();
@@ -2023,6 +2014,48 @@ impl LogServer {
         .instrument(span)
         .await
     }
+
+    async fn purge_from_cache(
+        &self,
+        request: Request<PurgeFromCacheRequest>,
+    ) -> Result<Response<PurgeFromCacheResponse>, Status> {
+        let span = wrap_span_with_parent_context(
+            tracing::trace_span!("PurgeFromCache",),
+            request.metadata(),
+        );
+        let purge = request.into_inner();
+        async move {
+            let key = match purge.entry_to_evict {
+                Some(EntryToEvict::CursorForCollectionId(x)) => {
+                    let collection_id = Uuid::parse_str(&x)
+                        .map(CollectionUuid)
+                        .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                    Some(cache_key_for_cursor(collection_id, &COMPACTION))
+                }
+                Some(EntryToEvict::ManifestForCollectionId(x)) => {
+                    let collection_id = Uuid::parse_str(&x)
+                        .map(CollectionUuid)
+                        .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                    Some(cache_key_for_manifest(collection_id))
+                }
+                Some(EntryToEvict::Fragment(f)) => {
+                    let collection_id = Uuid::parse_str(&f.collection_id)
+                        .map(CollectionUuid)
+                        .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                    Some(cache_key_for_fragment(collection_id, &f.fragment_path))
+                }
+                None => None,
+            };
+            if let Some(key) = key {
+                if let Some(cache) = self.cache.as_ref() {
+                    cache.remove(&key).await;
+                }
+            }
+            Ok(Response::new(PurgeFromCacheResponse {}))
+        }
+        .instrument(span)
+        .await
+    }
 }
 
 struct LogServerWrapper {
@@ -2122,6 +2155,13 @@ impl LogService for LogServerWrapper {
         request: Request<GarbageCollectPhase2Request>,
     ) -> Result<Response<GarbageCollectPhase2Response>, Status> {
         self.log_server.garbage_collect_phase2(request).await
+    }
+
+    async fn purge_from_cache(
+        &self,
+        request: Request<PurgeFromCacheRequest>,
+    ) -> Result<Response<PurgeFromCacheResponse>, Status> {
+        self.log_server.purge_from_cache(request).await
     }
 }
 
