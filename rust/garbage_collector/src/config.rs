@@ -22,7 +22,7 @@ where
     Ok(Duration::from_secs(secs))
 }
 
-#[derive(Debug, serde::Deserialize, Clone)]
+#[derive(Debug, serde::Deserialize, Clone, Default)]
 pub(super) struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,

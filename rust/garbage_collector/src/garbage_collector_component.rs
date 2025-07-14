@@ -541,6 +541,7 @@ mod tests {
     use chroma_storage::s3_config_for_localhost_with_bucket_name;
     use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig};
     use chroma_system::{DispatcherConfig, System};
+    use chroma_tracing::{OtelFilter, OtelFilterLevel};
     use chroma_types::CollectionUuid;
     use tracing_test::traced_test;
     use uuid::Uuid;
@@ -709,7 +710,10 @@ mod tests {
         let config = GarbageCollectorConfig {
             service_name: "gc".to_string(),
             otel_endpoint: "none".to_string(),
-            otel_filters: vec![],
+            otel_filters: vec![OtelFilter {
+                crate_name: "garbage_collector".to_string(),
+                filter_level: OtelFilterLevel::Debug,
+            }],
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
@@ -835,7 +839,10 @@ mod tests {
         let config = GarbageCollectorConfig {
             service_name: "gc".to_string(),
             otel_endpoint: "none".to_string(),
-            otel_filters: vec![],
+            otel_filters: vec![OtelFilter {
+                crate_name: "garbage_collector".to_string(),
+                filter_level: OtelFilterLevel::Debug,
+            }],
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
@@ -1037,7 +1044,6 @@ mod tests {
         let config = GarbageCollectorConfig {
             service_name: "gc".to_string(),
             otel_endpoint: "none".to_string(),
-            otel_filters: vec![],
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
@@ -1064,6 +1070,7 @@ mod tests {
             jemalloc_pprof_server_port: None,
             disable_log_gc: false,
             log: LogConfig::default(),
+            ..Default::default()
         };
         let registry = Registry::new();
 
