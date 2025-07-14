@@ -78,7 +78,7 @@ pnpm install
 Next, you'll need to launch a Chroma server instance.
 
 ```terminal
-npx chromadb run
+npm run chroma run
 ```
 
 The server will be available at `http://localhost:8000`.
@@ -131,7 +131,7 @@ You'll see:
   1️⃣ Assistant with Retriever - Automatic semantic search on every interaction
   2️⃣ Assistant with Tools - LLM decides when to search autonomously
 
-💡 Chroma server started easily with npx chromadb run (no Docker/Python needed!)
+💡 Chroma server started easily with npm run chroma run (no Docker/Python needed!)
 
 ══════════════════════════════════════════════════
   VOLTAGENT SERVER STARTED SUCCESSFULLY
