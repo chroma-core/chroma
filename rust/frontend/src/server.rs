@@ -638,7 +638,7 @@ async fn create_database(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::CreateDatabase, tenant.clone(), api_token);
     quota_payload = quota_payload.with_collection_name(&name);
-    server.quota_enforcer.enforce(&quota_payload).await?;
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard =
         server.scorecard_request(&["op:create_database", format!("tenant:{}", tenant).as_str()])?;
     let create_database_request = CreateDatabaseRequest::try_new(tenant, name)?;
@@ -834,14 +834,24 @@ async fn list_collections(
         .get("x-chroma-token")
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
+
     let mut quota_payload = QuotaPayload::new(Action::ListCollections, tenant.clone(), api_token);
-    if let Some(limit) = limit {
-        quota_payload = quota_payload.with_limit(limit);
+    if let Some(provided_limit) = limit {
+        quota_payload = quota_payload.with_limit(provided_limit);
     }
-    server.quota_enforcer.enforce(&quota_payload).await?;
+
+    let quota_overrides = server.quota_enforcer.enforce(&quota_payload).await?;
+
+    let validated_limit = match quota_overrides {
+        Some(overrides) => Some(overrides.limit),
+        None => limit,
+    };
+
     let _guard = server
         .scorecard_request(&["op:list_collections", format!("tenant:{}", tenant).as_str()])?;
-    let request = ListCollectionsRequest::try_new(tenant, database, limit, offset)?;
+
+    // TODO: Limit shouldn't be optional here
+    let request = ListCollectionsRequest::try_new(tenant, database, validated_limit, offset)?;
     Ok(Json(server.frontend.list_collections(request).await?))
 }
 
@@ -944,7 +954,7 @@ async fn create_collection(
     if let Some(metadata) = &payload.metadata {
         quota_payload = quota_payload.with_create_collection_metadata(metadata);
     }
-    server.quota_enforcer.enforce(&quota_payload).await?;
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:create_collection",
         format!("tenant:{}", tenant).as_str(),
@@ -1083,7 +1093,7 @@ async fn update_collection(
     if let Some(new_metadata) = &payload.new_metadata {
         quota_payload = quota_payload.with_update_collection_metadata(new_metadata);
     }
-    server.quota_enforcer.enforce(&quota_payload).await?;
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:update_collection",
         format!("tenant:{}", tenant).as_str(),
@@ -1210,7 +1220,7 @@ async fn fork_collection(
     let mut quota_payload = QuotaPayload::new(Action::ForkCollection, tenant.clone(), api_token);
     quota_payload = quota_payload.with_collection_uuid(collection_id);
     quota_payload = quota_payload.with_collection_name(&payload.new_name);
-    server.quota_enforcer.enforce(&quota_payload).await?;
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
     let metering_context_container =
@@ -1322,7 +1332,7 @@ async fn collection_add(
         quota_payload = quota_payload.with_uris(uris);
     }
     quota_payload = quota_payload.with_collection_uuid(collection_id);
-    server.quota_enforcer.enforce(&quota_payload).await?;
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant).as_str(),
@@ -1431,7 +1441,7 @@ async fn collection_update(
     if let Some(uris) = &payload.uris {
         quota_payload = quota_payload.with_uris(uris);
     }
-    server.quota_enforcer.enforce(&quota_payload).await?;
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant).as_str(),
@@ -1550,7 +1560,7 @@ async fn collection_upsert(
         quota_payload = quota_payload.with_uris(uris);
     }
     quota_payload = quota_payload.with_collection_uuid(collection_id);
-    server.quota_enforcer.enforce(&quota_payload).await?;
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant).as_str(),
@@ -1656,7 +1666,7 @@ async fn collection_delete(
     if let Some(r#where) = &r#where {
         quota_payload = quota_payload.with_where(r#where);
     }
-    server.quota_enforcer.enforce(&quota_payload).await?;
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:write",
         format!("tenant:{}", tenant).as_str(),
@@ -1834,10 +1844,17 @@ async fn collection_get(
     if let Some(r#where) = &parsed_where {
         quota_payload = quota_payload.with_where(r#where);
     }
-    if let Some(limit) = payload.limit {
-        quota_payload = quota_payload.with_limit(limit);
+    if let Some(provided_limit) = payload.limit {
+        quota_payload = quota_payload.with_limit(provided_limit);
     }
-    server.quota_enforcer.enforce(&quota_payload).await?;
+
+    let quota_overrides = server.quota_enforcer.enforce(&quota_payload).await?;
+
+    let validated_limit = match quota_overrides {
+        Some(overrides) => Some(overrides.limit),
+        None => payload.limit,
+    };
+
     let _guard = server.scorecard_request(&[
         "op:read",
         format!("tenant:{}", tenant).as_str(),
@@ -1865,13 +1882,15 @@ async fn collection_get(
         include = ?payload.include,
         has_where = parsed_where.is_some(),
     );
+
     let request = GetRequest::try_new(
         tenant,
         database,
         collection_id,
         payload.ids,
         parsed_where,
-        payload.limit,
+        // TODO: Limit shouldn't be optional here
+        validated_limit,
         payload.offset.unwrap_or(0),
         payload.include,
     )?;
@@ -1960,7 +1979,7 @@ async fn collection_query(
     if let Some(ids) = &payload.ids {
         quota_payload = quota_payload.with_query_ids(ids);
     }
-    server.quota_enforcer.enforce(&quota_payload).await?;
+    let _ = server.quota_enforcer.enforce(&quota_payload).await?;
     let _guard = server.scorecard_request(&[
         "op:read",
         format!("tenant:{}", tenant).as_str(),
