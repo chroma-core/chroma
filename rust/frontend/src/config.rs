@@ -97,7 +97,7 @@ fn default_otel_service_name() -> String {
 
 fn default_otel_filters() -> Vec<OtelFilter> {
     vec![OtelFilter {
-        crate_name: "chroma-frontend".to_string(),
+        crate_name: "chroma_frontend".to_string(),
         filter_level: OtelFilterLevel::Trace,
     }]
 }

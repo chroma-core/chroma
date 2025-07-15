@@ -176,7 +176,7 @@ log_service:
         service_name: "rust-log-service"
         endpoint: "http://otel-collector:4317"
         filters:
-            - crate_name: "chroma-log"
+            - crate_name: "chroma_log"
               filter_level: "trace" 
             - crate_name: "wal3"
               filter_level: "trace"                  

@@ -43,18 +43,21 @@ pub struct OtelFilter {
 pub fn init_global_filter_layer(
     custom_filters: &[OtelFilter],
 ) -> Box<dyn Layer<Registry> + Send + Sync> {
+    // These need to have underscores because the Rust compiler automatically
+    // converts all hyphens in crate names to underscores to make them valid
+    // Rust identifiers
     let default_crate_names = vec![
         "chroma",
-        "chroma-blockstore",
-        "chroma-config",
-        "chroma-cache",
-        "chroma-distance",
-        "chroma-error",
-        "chroma-log",
-        "chroma-log-service",
-        "chroma-index",
-        "chroma-test",
-        "chroma-types",
+        "chroma_blockstore",
+        "chroma_config",
+        "chroma_cache",
+        "chroma_distance",
+        "chroma_error",
+        "chroma_log",
+        "chroma_log-service",
+        "chroma_index",
+        "chroma_test",
+        "chroma_types",
         "compaction_service",
         "distance_metrics",
         "full_text",

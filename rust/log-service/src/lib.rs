@@ -2293,7 +2293,7 @@ fn default_otel_service_name() -> String {
 
 fn default_otel_filters() -> Vec<OtelFilter> {
     vec![OtelFilter {
-        crate_name: "chroma-log-service".to_string(),
+        crate_name: "chroma_log_service".to_string(),
         filter_level: OtelFilterLevel::Trace,
     }]
 }
