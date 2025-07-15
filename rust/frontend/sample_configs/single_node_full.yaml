@@ -5,7 +5,7 @@ open_telemetry:
   service_name: "chroma"
   endpoint: "http://otel-collector:4317"
   filters:
-    - crate_name: "chroma-frontend"
+    - crate_name: "chroma_frontend"
       filter_level: "trace"  
 port: 8000
 listen_address: "0.0.0.0"
