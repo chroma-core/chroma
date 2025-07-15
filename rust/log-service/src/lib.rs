@@ -16,6 +16,8 @@ use chroma_log::{config::GrpcLogConfig, grpc_log::GrpcLog};
 use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_tracing::util::wrap_span_with_parent_context;
+use chroma_tracing::OtelFilter;
+use chroma_tracing::OtelFilterLevel;
 use chroma_types::chroma_proto::{
     garbage_collect_phase2_request::LogToCollect, log_service_client::LogServiceClient,
     log_service_server::LogService, purge_from_cache_request::EntryToEvict,
@@ -2289,6 +2291,13 @@ fn default_otel_service_name() -> String {
     "rust-log-service".to_string()
 }
 
+fn default_otel_filters() -> Vec<OtelFilter> {
+    vec![OtelFilter {
+        crate_name: "chroma-log-service".to_string(),
+        filter_level: OtelFilterLevel::Trace,
+    }]
+}
+
 fn default_port() -> u16 {
     50051
 }
@@ -2368,6 +2377,8 @@ pub struct OpenTelemetryConfig {
     pub endpoint: String,
     #[serde(default = "default_otel_service_name")]
     pub service_name: String,
+    #[serde(default = "default_otel_filters")]
+    pub filters: Vec<OtelFilter>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -2536,7 +2547,11 @@ pub async fn log_entrypoint() {
     let registry = chroma_config::registry::Registry::new();
     if let Some(otel_config) = &config.opentelemetry {
         eprintln!("enabling tracing");
-        chroma_tracing::init_otel_tracing(&otel_config.service_name, &otel_config.endpoint);
+        chroma_tracing::init_otel_tracing(
+            &otel_config.service_name,
+            &otel_config.filters,
+            &otel_config.endpoint,
+        );
     } else {
         eprintln!("tracing disabled");
     }
@@ -3342,6 +3357,7 @@ mod tests {
         let config = OpenTelemetryConfig {
             endpoint: default_endpoint(),
             service_name: default_otel_service_name(),
+            filters: default_otel_filters(),
         };
         assert_eq!("http://otel-collector:4317", config.endpoint);
         assert_eq!("rust-log-service", config.service_name);
