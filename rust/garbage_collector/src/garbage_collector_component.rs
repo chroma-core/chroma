@@ -127,6 +127,12 @@ impl GarbageCollector {
             .ok_or(GarbageCollectCollectionError::Uninitialized)?;
 
         if cleanup_mode.is_v2() {
+            let enable_log_gc = collection.tenant <= self.config.enable_log_gc_for_tenant_threshold
+                || self
+                    .config
+                    .enable_log_gc_for_tenant
+                    .contains(&collection.tenant);
+
             let orchestrator =
                 crate::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator::new(
                     collection.id,
@@ -142,7 +148,7 @@ impl GarbageCollector {
                     self.root_manager.clone(),
                     cleanup_mode,
                     self.config.min_versions_to_keep,
-                    self.config.disable_log_gc,
+                    enable_log_gc,
                 );
 
             let started_at = SystemTime::now();
@@ -738,8 +744,10 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
-            disable_log_gc: false,
             log: LogConfig::default(),
+            enable_log_gc_for_tenant: Vec::new(),
+            enable_log_gc_for_tenant_threshold: "tenant-ffffffff-ffff-ffff-ffff-ffffffffffff"
+                .to_string(),
         };
         let registry = Registry::new();
 
@@ -867,7 +875,8 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
-            disable_log_gc: false,
+            enable_log_gc_for_tenant: Vec::new(),
+            enable_log_gc_for_tenant_threshold: "tenant-threshold".to_string(),
             log: LogConfig::default(),
         };
         let registry = Registry::new();
@@ -1068,7 +1077,9 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
-            disable_log_gc: false,
+            enable_log_gc_for_tenant: Vec::new(),
+            enable_log_gc_for_tenant_threshold:
+                "tenant-delete-mode-ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
             log: LogConfig::default(),
             ..Default::default()
         };

@@ -76,7 +76,7 @@ pub struct GarbageCollectorOrchestrator {
     file_ref_counts: HashMap<String, u32>,
     num_pending_tasks: usize,
     min_versions_to_keep: u32,
-    disable_log_gc: bool,
+    enable_log_gc: bool,
     graph: Option<VersionGraph>,
     soft_deleted_collections_to_gc: HashSet<CollectionUuid>,
     tenant: Option<String>,
@@ -102,7 +102,7 @@ impl GarbageCollectorOrchestrator {
         root_manager: RootManager,
         cleanup_mode: CleanupMode,
         min_versions_to_keep: u32,
-        disable_log_gc: bool,
+        enable_log_gc: bool,
     ) -> Self {
         Self {
             collection_id,
@@ -127,7 +127,7 @@ impl GarbageCollectorOrchestrator {
             delete_unused_log_output: None,
             num_pending_tasks: 0,
             min_versions_to_keep,
-            disable_log_gc,
+            enable_log_gc,
             graph: None,
             soft_deleted_collections_to_gc: HashSet::new(),
             tenant: None,
@@ -513,11 +513,8 @@ impl GarbageCollectorOrchestrator {
 
         let task = wrap(
             Box::new(DeleteUnusedLogsOperator {
-                dry_run: self.disable_log_gc
-                    || matches!(
-                        self.cleanup_mode,
-                        CleanupMode::DryRun | CleanupMode::DryRunV2
-                    ),
+                enabled: self.enable_log_gc,
+                mode: self.cleanup_mode,
                 storage: self.storage.clone(),
                 logs: self.logs.clone(),
             }),
@@ -1201,7 +1198,7 @@ mod tests {
             root_manager,
             crate::types::CleanupMode::Delete,
             1,
-            false,
+            true,
         );
         let result = orchestrator.run(system).await;
         assert!(result.is_err());
