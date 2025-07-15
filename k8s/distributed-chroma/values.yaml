@@ -113,6 +113,9 @@ garbageCollector:
   configuration: |
     service_name: "garbage-collector"
     otel_endpoint: "http://otel-collector:4317"
+    otel_filters:
+      - crate_name: "garbage_collector"
+        filter_level: "debug"
     relative_cutoff_time_seconds: 60 # GC all versions created at time < now() - relative_cutoff_time_seconds (1 minute)
     max_collections_to_gc: 1000
     gc_interval_mins: 1

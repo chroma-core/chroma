@@ -6,6 +6,9 @@
 query_service:
     service_name: "query-service"
     otel_endpoint: "http://otel-collector:4317"
+    otel_filters:
+        - crate_name: "worker"
+          filter_level: "trace"    
     my_member_id: "query-service-0"
     my_port: 50051
     assignment_policy:
@@ -86,6 +89,9 @@ query_service:
 compaction_service:
     service_name: "compaction-service"
     otel_endpoint: "http://otel-collector:4317"
+    otel_filters:
+        - crate_name: "worker"
+          filter_level: "trace"    
     my_member_id: "compaction-service-0"
     my_port: 50051
     assignment_policy:
@@ -175,6 +181,11 @@ log_service:
     opentelemetry:
         service_name: "rust-log-service"
         endpoint: "http://otel-collector:4317"
+        filters:
+            - crate_name: "chroma-log"
+              filter_level: "trace" 
+            - crate_name: "wal3"
+              filter_level: "trace"        
     storage:
         admission_controlled_s3:
             s3_config:

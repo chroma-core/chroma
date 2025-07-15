@@ -51,14 +51,17 @@ pub fn init_global_filter_layer(
         "chroma-distance",
         "chroma-error",
         "chroma-log",
+        "chroma-log-service",
         "chroma-index",
         "chroma-test",
         "chroma-types",
+        "compaction_service",
         "distance_metrics",
         "full_text",
         "metadata_filtering",
         "query_service",
         "wal3",
+        "worker",
     ];
 
     let global_filter = format!(
