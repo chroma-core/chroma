@@ -321,7 +321,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                                 state.root_manager.clone(),
                                 CleanupMode::Delete,
                                 min_versions_to_keep as u32,
-                                false,
+                                true
                             );
                             let result = orchestrator.run(system.clone()).await;
 

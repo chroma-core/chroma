@@ -13,9 +13,12 @@ use futures::future::try_join_all;
 use thiserror::Error;
 use wal3::{GarbageCollectionOptions, GarbageCollector, LogPosition, LogWriterOptions};
 
+use crate::types::CleanupMode;
+
 #[derive(Clone, Debug)]
 pub struct DeleteUnusedLogsOperator {
-    pub dry_run: bool,
+    pub enabled: bool,
+    pub mode: CleanupMode,
     pub storage: Storage,
     pub logs: Log,
 }
@@ -55,10 +58,11 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
         input: &DeleteUnusedLogsInput,
     ) -> Result<DeleteUnusedLogsOutput, DeleteUnusedLogsError> {
         tracing::info!("Garbage collecting logs: {input:?}");
-        if self.dry_run {
-            tracing::info!("Skipping actual log cleanup in dry run mode");
+        if !self.enabled {
+            tracing::info!("Skipping log GC because it is not enabled for this tenant");
             return Ok(());
         }
+
         let storage_arc = Arc::new(self.storage.clone());
         if !input.collections_to_garbage_collect.is_empty() {
             let mut log_gc_futures = Vec::with_capacity(input.collections_to_garbage_collect.len());
@@ -95,10 +99,17 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                         tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
                         return Err(DeleteUnusedLogsError::Gc(err));
                     };
-                    if let Err(err) = writer.garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default()).await {
-                        tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
-                        return Err(DeleteUnusedLogsError::Wal3(err));
-                    };
+                    match self.mode {
+                        CleanupMode::Delete | CleanupMode::DeleteV2 => {
+                            if let Err(err) = writer.garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default()).await {
+                                tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
+                                return Err(DeleteUnusedLogsError::Wal3(err));
+                            };
+                        }
+                        mode => {
+                            tracing::info!("Skipping delete phase of log GC in {mode:?} mode");
+                        }
+                    }
                     Ok(())
                 });
             }
@@ -108,29 +119,37 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                 input.collections_to_garbage_collect
             );
         }
-        if !input.collections_to_destroy.is_empty() {
-            let mut log_destroy_futures = Vec::with_capacity(input.collections_to_destroy.len());
-            for collection_id in &input.collections_to_destroy {
-                let storage_clone = storage_arc.clone();
-                log_destroy_futures.push(async move {
-                    match wal3::destroy(storage_clone, &collection_id.storage_prefix_for_log())
-                        .await
-                    {
-                        Ok(()) => Ok(()),
-                        Err(err) => {
-                            tracing::error!(
-                                "Unable to destroy log for collection [{collection_id}]: {err:?}"
-                            );
-                            Err(DeleteUnusedLogsError::Wal3(err))
-                        }
+        match self.mode {
+            CleanupMode::Delete | CleanupMode::DeleteV2 => {
+                if !input.collections_to_destroy.is_empty() {
+                    let mut log_destroy_futures =
+                        Vec::with_capacity(input.collections_to_destroy.len());
+                    for collection_id in &input.collections_to_destroy {
+                        let storage_clone = storage_arc.clone();
+                        log_destroy_futures.push(async move {
+                            match wal3::destroy(storage_clone, &collection_id.storage_prefix_for_log())
+                                .await
+                            {
+                                Ok(()) => Ok(()),
+                                Err(err) => {
+                                    tracing::error!(
+                                        "Unable to destroy log for collection [{collection_id}]: {err:?}"
+                                    );
+                                    Err(DeleteUnusedLogsError::Wal3(err))
+                                }
+                            }
+                        })
                     }
-                })
+                    try_join_all(log_destroy_futures).await?;
+                    tracing::info!(
+                        "Wal3 destruction complete for collections: {:?}",
+                        input.collections_to_destroy
+                    );
+                }
             }
-            try_join_all(log_destroy_futures).await?;
-            tracing::info!(
-                "Wal3 destruction complete for collections: {:?}",
-                input.collections_to_destroy
-            );
+            mode => {
+                tracing::info!("Keeping logs for soft deleted collections in {mode:?} mode");
+            }
         }
 
         Ok(())

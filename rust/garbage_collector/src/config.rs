@@ -63,7 +63,9 @@ pub(super) struct GarbageCollectorConfig {
     pub root_cache_config: CacheConfig,
     pub jemalloc_pprof_server_port: Option<u16>,
     #[serde(default)]
-    pub disable_log_gc: bool,
+    pub enable_log_gc_for_tenant: Vec<String>,
+    #[serde(default = "GarbageCollectorConfig::enable_log_gc_for_tenant_threshold")]
+    pub enable_log_gc_for_tenant_threshold: String,
     pub log: LogConfig,
 }
 
@@ -110,6 +112,10 @@ impl GarbageCollectorConfig {
 
     fn default_collection_soft_delete_grace_period() -> Duration {
         Duration::from_secs(60 * 60 * 24) // 1 day
+    }
+
+    fn enable_log_gc_for_tenant_threshold() -> String {
+        "00000000-0000-0000-0000-000000000000".to_string()
     }
 }
 
