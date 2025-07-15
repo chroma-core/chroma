@@ -13,6 +13,7 @@ use chroma_error::ChromaError;
 use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::{future::Shared, stream, FutureExt, StreamExt};
+use opentelemetry::KeyValue;
 use std::{
     collections::HashMap,
     future::Future,
@@ -592,7 +593,11 @@ impl CountBasedPolicy {
         priority: Arc<AtomicUsize>,
         mut channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
-        let _stopwatch = Stopwatch::new(&self.metrics.nac_delay_ms, &[]);
+        let priority_attribute = &[KeyValue::new(
+            "priority",
+            priority.load(Ordering::Relaxed).to_string(),
+        )];
+        let _stopwatch = Stopwatch::new(&self.metrics.nac_delay_ms, priority_attribute);
         loop {
             let current_priority = priority.load(Ordering::SeqCst);
             let current_priority: StorageRequestPriority = current_priority.into();
