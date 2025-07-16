@@ -835,6 +835,21 @@ impl Manifest {
         new.initial_offset = Some(garbage.first_to_keep);
         new.initial_seq_no = Some(garbage.fragments_to_drop_limit);
         new.scrub()?;
+
+        // Sanity check that new manifest contains valid range of logs
+        // From the scrub above we know the manifest is continuous, so we only need to check endpoints
+        if new.oldest_timestamp() > garbage.first_to_keep {
+            tracing::error!("Manifest after garbage collection does not contain the first log to keep: needs logs since position {:?} to be present, but the smallest log postion available is {:?}", garbage.first_to_keep, new.oldest_timestamp());
+            return Err(Error::CorruptManifest(
+                "Manifest corruption detected after GC: missing first log to keep".to_string(),
+            ));
+        }
+        if new.next_write_timestamp() != self.next_write_timestamp() {
+            tracing::error!("Manifest after garbage collection has a different max log position: expected next log position to be {:?}, but got {:?}", self.next_write_timestamp(), new.next_write_timestamp());
+            return Err(Error::CorruptManifest(
+                "Manifest corruption detected after GC: next log position mismatch".to_string(),
+            ));
+        }
         Ok(Some(new))
     }
 }
@@ -1480,7 +1495,7 @@ mod tests {
             acc_bytes: 0,
             snapshots: vec![],
             fragments: vec![],
-            initial_offset: None,
+            initial_offset: Some(LogPosition::from_offset(100)),
             initial_seq_no: None,
         };
 
