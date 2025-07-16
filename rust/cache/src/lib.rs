@@ -15,7 +15,7 @@ use crate::nop::NopCache;
 use crate::unbounded::UnboundedCache;
 pub use async_partitioned_mutex::*;
 
-pub use foyer::FoyerCacheConfig;
+pub use foyer::{FoyerCacheConfig, FoyerError};
 pub use unbounded::UnboundedCacheConfig;
 
 /// A CacheError represents an error that occurred while interacting with a cache.
@@ -27,7 +27,7 @@ pub enum CacheError {
     #[error("Invalid cache config")]
     InvalidCacheConfig(String),
     #[error("I/O error when serving from cache {0}")]
-    DiskError(#[from] anyhow::Error),
+    DiskError(#[from] FoyerError),
 }
 
 impl ChromaError for CacheError {
