@@ -51,7 +51,10 @@ pub struct DeletedObjects {
 }
 #[derive(Clone)]
 pub struct StorageMetrics {
-    pub s3_get_count: Counter<u64>,
+    s3_get_count: Counter<u64>,
+    s3_put_count: Counter<u64>,
+    s3_delete_count: Counter<u64>,
+    s3_delete_many_count: Counter<u64>,
 }
 
 impl Default for StorageMetrics {
@@ -60,6 +63,18 @@ impl Default for StorageMetrics {
             s3_get_count: opentelemetry::global::meter("chroma.storage.s3")
                 .u64_counter("s3_get_count")
                 .with_description("Number of S3 get operations")
+                .build(),
+            s3_put_count: opentelemetry::global::meter("chroma.storage")
+                .u64_counter("s3_put_count")
+                .with_description("Number of S3 put operations")
+                .build(),
+            s3_delete_count: opentelemetry::global::meter("chroma.storage")
+                .u64_counter("s3_delete_count")
+                .with_description("Number of S3 delete operations")
+                .build(),
+            s3_delete_many_count: opentelemetry::global::meter("chroma.storage")
+                .u64_counter("s3_delete_many_count")
+                .with_description("Number of S3 delete many operations")
                 .build(),
         }
     }
@@ -444,6 +459,8 @@ impl S3Storage {
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
+        self.metrics.s3_put_count.add(1, &[]);
+
         if self.is_oneshot_upload(total_size_bytes) {
             return self
                 .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
@@ -647,7 +664,7 @@ impl S3Storage {
 
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
-        tracing::trace!(key = %key, "Deleting object from S3");
+        self.metrics.s3_delete_count.add(1, &[]);
 
         let req = self.client.delete_object().bucket(&self.bucket).key(key);
 
@@ -689,7 +706,8 @@ impl S3Storage {
         &self,
         keys: I,
     ) -> Result<DeletedObjects, StorageError> {
-        tracing::trace!("Deleting objects from S3");
+        self.metrics.s3_delete_many_count.add(1, &[]);
+
         let mut objects = vec![];
         for key in keys {
             objects.push(
