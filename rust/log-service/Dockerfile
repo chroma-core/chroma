@@ -7,11 +7,11 @@ WORKDIR /chroma/
 
 RUN ARCH=$(uname -m) && \
   if [ "$ARCH" = "x86_64" ]; then \
-  PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip; \
+    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip; \
   elif [ "$ARCH" = "aarch64" ]; then \
-  PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip; \
+    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip; \
   else \
-  echo "Unsupported architecture: $ARCH" && exit 1; \
+    echo "Unsupported architecture: $ARCH" && exit 1; \
   fi && \
   curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/$PROTOC_ZIP && \
   unzip -o $PROTOC_ZIP -d /usr/local bin/protoc && \
@@ -28,11 +28,11 @@ COPY rust/ rust/
 FROM builder AS log_service_builder
 # sharing=locked is necessary to prevent cargo build from running concurrently on the same mounted directory
 RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
-  --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
-  cd rust/log-service && \
-  if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin log_service --release; else cargo build --bin log_service; fi && \
-  cd ../.. && \
-  if [ "$RELEASE_MODE" = "1" ]; then mv target/release/log_service ./log_service; else mv target/debug/log_service ./log_service; fi
+    --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
+    cd rust/log-service && \
+    if [ "$RELEASE_MODE" = "1" ]; then cargo build --bin log_service --release; else cargo build --bin log_service; fi && \
+    cd ../.. && \
+    if [ "$RELEASE_MODE" = "1" ]; then mv target/release/log_service ./log_service; else mv target/debug/log_service ./log_service; fi
 
 
 FROM debian:bookworm-slim AS runner
