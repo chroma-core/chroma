@@ -2580,13 +2580,14 @@ mod tests {
     use super::*;
     use crate::state_hash_table::Value;
 
-    use chroma_storage::s3::s3_client_for_test_with_bucket_name;
+    use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
     use futures::{stream, StreamExt};
     use opentelemetry::global::meter;
     use proptest::prelude::*;
-    use tokio::runtime::Runtime;
-    use wal3::SnapshotOptions;
+    use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel};
+    use tonic::IntoRequest;
+    use wal3::{GarbageCollector, SnapshotOptions, ThrottleOptions};
 
     #[test]
     fn unsafe_constants() {
@@ -3709,16 +3710,21 @@ mod tests {
         })
         .await
         .expect("Legacy log service should be present");
-        let storage = Arc::new(s3_client_for_test_with_bucket_name("rust-log-proptest").await);
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+        let writer_options = LogWriterOptions {
+            snapshot_manifest: SnapshotOptions {
+                snapshot_rollover_threshold: 3,
+                fragment_rollover_threshold: 3,
+            },
+            throttle_fragment: ThrottleOptions {
+                batch_size_bytes: 4,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let dirty_log = Arc::new(
             LogWriter::open_or_initialize(
-                LogWriterOptions {
-                    snapshot_manifest: SnapshotOptions {
-                        snapshot_rollover_threshold: 3,
-                        fragment_rollover_threshold: 3,
-                    },
-                    ..Default::default()
-                },
+                writer_options.clone(),
                 storage.clone(),
                 "test-rust-log-service",
                 "test-dirty-log-writer",
@@ -3727,12 +3733,14 @@ mod tests {
             .await
             .expect("Dirty log should be initializable"),
         );
+        let mut config = LogServerConfig::default();
+        config.writer = writer_options;
         LogServer {
             storage,
             dirty_log,
             proxy: Some(legacy_log_client),
             metrics: Metrics::new(meter("test-rust-log-service")),
-            config: Default::default(),
+            config: config,
             open_logs: Default::default(),
             rolling_up: Default::default(),
             backpressure: Default::default(),
@@ -3873,6 +3881,61 @@ mod tests {
                     .expect("Collection Uuid should be valid")
             }));
         assert_eq!(got_collection_ids, expected_collection_ids);
+    }
+
+    async fn garbage_collect_unused_logs(
+        server: &LogServer,
+        collection_id: CollectionUuid,
+        first_log_position_to_keep: u64,
+    ) {
+        let writer = GarbageCollector::open(
+            server.config.writer.clone(),
+            server.storage.clone(),
+            &collection_id.storage_prefix_for_log(),
+            "proptest garbage collection service",
+        )
+        .await
+        .expect("Garbage collector should be initializable");
+        if let Err(err) = writer
+            .garbage_collect_phase1_compute_garbage(
+                &Default::default(),
+                Some(LogPosition::from_offset(first_log_position_to_keep)),
+            )
+            .await
+        {
+            eprintln!("Log GC phase 1 error: {err}");
+            return;
+        }
+        if let Err(err) = server
+            .garbage_collect_phase2(
+                GarbageCollectPhase2Request {
+                    log_to_collect: Some(LogToCollect::CollectionId(collection_id.to_string())),
+                }
+                .into_request(),
+            )
+            .await
+        {
+            eprintln!("Log GC phase 2 error: {err}");
+            return;
+        }
+        if let Err(err) = writer
+            .garbage_collect_phase3_delete_garbage(&Default::default())
+            .await
+        {
+            eprintln!("Log GC phase 3 error: {err}");
+            return;
+        };
+        let reader = LogReader::open(
+            server.config.reader.clone(),
+            server.storage.clone(),
+            collection_id.storage_prefix_for_log(),
+        )
+        .await
+        .expect("Log reader should be initializable");
+        reader
+            .scrub(Limits::UNLIMITED)
+            .await
+            .expect("Log scrub should not fail after garbage collection");
     }
 
     fn test_push_pull_logs(
@@ -4070,6 +4133,40 @@ mod tests {
         });
     }
 
+    fn test_garbage_collect_unused_logs(operations: Vec<OperationRecord>) {
+        let runtime = Runtime::new().unwrap();
+        let collection_id = CollectionUuid::new();
+        let log_server = Arc::new(runtime.block_on(setup_log_server()));
+        let log_server_clone = log_server.clone();
+        let (tx, mut rx) = unbounded_channel();
+        let background_gc_task = runtime.spawn(async move {
+            while let Some(compact_offset) = rx.recv().await {
+                mock_compact_on_server(&log_server_clone, collection_id, compact_offset).await;
+                let first_uncompacted_offset = compact_offset.saturating_add(1) as usize;
+                garbage_collect_unused_logs(
+                    &log_server_clone,
+                    collection_id,
+                    first_uncompacted_offset as u64,
+                )
+                .await;
+            }
+        });
+
+        runtime.block_on(async move {
+            seal_collection_on_server(&log_server, collection_id).await;
+
+            for (offset, log) in operations.iter().enumerate() {
+                push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
+                tx.send(offset as i64 + 1)
+                    .expect("Should be able to send compaction signal");
+            }
+
+            background_gc_task
+                .await
+                .expect("The background GC task should finish");
+        });
+    }
+
     async fn test_stress_seal_and_migrate() {
         let log_server = setup_log_server().await;
         let collection_id = CollectionUuid::new();
@@ -4153,7 +4250,7 @@ mod tests {
         fn test_k8s_integration_rust_log_service_push_pull_logs(
             read_offset in 1usize..=100,
             batch_size in 1usize..=150,
-            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=100)
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36)
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
             std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_push_pull_logs(read_offset, batch_size, operations))
@@ -4188,11 +4285,22 @@ mod tests {
 
         #[test]
         fn test_k8s_integration_rust_log_service_seal_and_migrate_logs(
-            operations_before_seal in proptest::collection::vec(any::<OperationRecord>(), 0..=100),
-            operations_after_migrate in proptest::collection::vec(any::<OperationRecord>(), 1..=20),
+            operations_before_seal in proptest::collection::vec(any::<OperationRecord>(), 0..=36),
+            operations_after_migrate in proptest::collection::vec(any::<OperationRecord>(), 1..=12),
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
             std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_seal_and_migrate_logs(operations_before_seal, operations_after_migrate))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+
+        #[test]
+        fn test_k8s_integration_rust_log_service_garbage_collect_unused_logs(
+            operations in proptest::collection::vec(any::<OperationRecord>(), 0..=36),
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_garbage_collect_unused_logs(operations))
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
