@@ -4,8 +4,8 @@ import (
 	"context"
 	"net"
 
+	"github.com/chroma-core/chroma/go/pkg/leader"
 	"github.com/chroma-core/chroma/go/pkg/log/configuration"
-	"github.com/chroma-core/chroma/go/pkg/log/leader"
 	"github.com/chroma-core/chroma/go/pkg/log/metrics"
 	"github.com/chroma-core/chroma/go/pkg/log/purging"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
