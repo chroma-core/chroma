@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_system::{
-    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
-    TaskResult,
+    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    OrchestratorContext, TaskMessage, TaskResult,
 };
 use chroma_types::operator::{
     Knn, KnnMerge, KnnOutput, KnnProjection, KnnProjectionOutput, RecordDistance,
@@ -109,10 +109,9 @@ use super::knn_filter::{KnnError, KnnFilterOutput};
 #[derive(Debug)]
 pub struct KnnOrchestrator {
     // Orchestrator parameters
+    context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
-    dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
-
     // Output from KnnFilterOrchestrator
     knn_filter_output: KnnFilterOutput,
 
@@ -145,9 +144,10 @@ impl KnnOrchestrator {
         } else {
             Vec::new()
         };
+        let context = OrchestratorContext::new(dispatcher);
         Self {
+            context,
             blockfile_provider,
-            dispatcher,
             queue,
             knn_filter_output,
             knn,
@@ -178,7 +178,11 @@ impl Orchestrator for KnnOrchestrator {
     type Error = KnnError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(

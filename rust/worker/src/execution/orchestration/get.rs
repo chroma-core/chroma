@@ -3,7 +3,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
     operator::{Filter, GetResult, Limit, Projection, ProjectionOutput},
@@ -121,9 +121,9 @@ where
 #[derive(Debug)]
 pub struct GetOrchestrator {
     // Orchestrator parameters
-    blockfile_provider: BlockfileProvider,
-    dispatcher: ComponentHandle<Dispatcher>,
+    context: OrchestratorContext,
     queue: usize,
+    blockfile_provider: BlockfileProvider,
 
     // Collection segments
     collection_and_segments: CollectionAndSegments,
@@ -155,10 +155,11 @@ impl GetOrchestrator {
         limit: Limit,
         projection: Projection,
     ) -> Self {
+        let context = OrchestratorContext::new(dispatcher);
         Self {
-            blockfile_provider,
-            dispatcher,
+            context,
             queue,
+            blockfile_provider,
             collection_and_segments,
             fetch_log,
             fetched_logs: None,
@@ -176,7 +177,11 @@ impl Orchestrator for GetOrchestrator {
     type Error = GetError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(

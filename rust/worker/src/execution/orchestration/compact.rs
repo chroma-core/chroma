@@ -26,7 +26,7 @@ use chroma_segment::{
 use chroma_sysdb::SysDb;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
     Chunk, Collection, CollectionUuid, LogRecord, SegmentFlushInfo, SegmentType, SegmentUuid,
@@ -112,10 +112,10 @@ pub struct CompactOrchestrator {
     max_partition_size: usize,
 
     // Dependencies
-    dispatcher: ComponentHandle<Dispatcher>,
+    context: OrchestratorContext,
+    blockfile_provider: BlockfileProvider,
     log: Log,
     sysdb: SysDb,
-    blockfile_provider: BlockfileProvider,
     hnsw_provider: HnswIndexProvider,
     spann_provider: SpannProvider,
 
@@ -232,6 +232,7 @@ impl CompactOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         result_channel: Option<Sender<Result<CompactionResponse, CompactionError>>>,
     ) -> Self {
+        let context = OrchestratorContext::new(dispatcher);
         CompactOrchestrator {
             collection_id,
             hnsw_index_uuid: None,
@@ -239,10 +240,10 @@ impl CompactOrchestrator {
             fetch_log_batch_size,
             max_compaction_size,
             max_partition_size,
-            dispatcher,
+            context,
+            blockfile_provider,
             log,
             sysdb,
-            blockfile_provider,
             hnsw_provider,
             spann_provider,
             collection: OnceCell::new(),
@@ -531,7 +532,11 @@ impl Orchestrator for CompactOrchestrator {
     type Error = CompactionError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(

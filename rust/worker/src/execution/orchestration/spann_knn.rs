@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_segment::{
     distributed_spann::{SpannSegmentReader, SpannSegmentReaderError},
     spann_provider::SpannProvider,
 };
 use chroma_system::{
-    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
-    TaskResult,
+    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    OrchestratorContext, TaskMessage, TaskResult,
 };
 use chroma_types::{
     operator::{Knn, KnnMerge, KnnOutput, KnnProjection, KnnProjectionOutput, RecordDistance},
@@ -39,8 +40,9 @@ use super::knn_filter::{KnnError, KnnFilterOutput};
 #[derive(Debug)]
 pub struct SpannKnnOrchestrator {
     // Orchestrator parameters
+    context: OrchestratorContext,
+    blockfile_provider: BlockfileProvider,
     spann_provider: SpannProvider,
-    dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
     collection: Collection,
 
@@ -94,10 +96,12 @@ impl SpannKnnOrchestrator {
             } else {
                 query_embedding.clone()
             };
+        let context = OrchestratorContext::new(dispatcher);
+        let blockfile_provider = spann_provider.blockfile_provider.clone();
         Self {
+            context,
+            blockfile_provider,
             spann_provider,
-            dispatcher,
-            queue,
             collection,
             knn_filter_output,
             k,
@@ -118,6 +122,7 @@ impl SpannKnnOrchestrator {
             knn_projection,
             result_channel: None,
             spann_reader: None,
+            queue,
         }
     }
 
@@ -142,7 +147,11 @@ impl Orchestrator for SpannKnnOrchestrator {
     type Error = KnnError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(
@@ -155,7 +164,7 @@ impl Orchestrator for SpannKnnOrchestrator {
             Box::new(self.log_knn.clone()),
             KnnLogInput {
                 logs: self.knn_filter_output.logs.clone(),
-                blockfile_provider: self.spann_provider.blockfile_provider.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
                 record_segment: self.knn_filter_output.record_segment.clone(),
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 distance_function: self.knn_filter_output.distance_function.clone(),
@@ -166,7 +175,7 @@ impl Orchestrator for SpannKnnOrchestrator {
         let reader_res = SpannSegmentReader::from_segment(
             &self.collection,
             &self.knn_filter_output.vector_segment,
-            &self.spann_provider.blockfile_provider,
+            &self.blockfile_provider,
             &self.spann_provider.hnsw_provider,
             self.knn_filter_output.dimension,
         )
