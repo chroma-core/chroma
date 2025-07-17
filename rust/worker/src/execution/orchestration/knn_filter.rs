@@ -9,7 +9,7 @@ use chroma_segment::{
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
     operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, Segment, SegmentType,
@@ -160,8 +160,8 @@ type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
 #[derive(Debug)]
 pub struct KnnFilterOrchestrator {
     // Orchestrator parameters
+    context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
-    dispatcher: ComponentHandle<Dispatcher>,
     hnsw_provider: HnswIndexProvider,
     queue: usize,
 
@@ -191,9 +191,10 @@ impl KnnFilterOrchestrator {
         fetch_log: FetchLogOperator,
         filter: Filter,
     ) -> Self {
+        let context = OrchestratorContext::new(dispatcher);
         Self {
+            context,
             blockfile_provider,
-            dispatcher,
             hnsw_provider,
             queue,
             collection_and_segments,
@@ -211,7 +212,11 @@ impl Orchestrator for KnnFilterOrchestrator {
     type Error = KnnError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(
@@ -227,6 +232,7 @@ impl Orchestrator for KnnFilterOrchestrator {
                 self.blockfile_provider.clone(),
             ),
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         // Prefetch task is detached from the orchestrator
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.collection_and_segments.vector_segment.id);
@@ -240,6 +246,7 @@ impl Orchestrator for KnnFilterOrchestrator {
                 self.blockfile_provider.clone(),
             ),
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         // Prefetch task is detached from the orchestrator
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
@@ -253,12 +260,18 @@ impl Orchestrator for KnnFilterOrchestrator {
                 self.blockfile_provider.clone(),
             ),
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
         tasks.push((prefetch_metadata_task, Some(prefetch_span)));
 
         // Fetch log task.
-        let fetch_log_task = wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver());
+        let fetch_log_task = wrap(
+            Box::new(self.fetch_log.clone()),
+            (),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
         tasks.push((fetch_log_task, Some(Span::current())));
 
         tasks
@@ -317,6 +330,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
                 record_segment: self.collection_and_segments.record_segment.clone(),
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         self.send(task, ctx, Some(Span::current())).await;
     }

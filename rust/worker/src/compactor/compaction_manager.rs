@@ -216,6 +216,7 @@ impl CompactionManager {
             Box::new(purge_dirty_log),
             purge_dirty_log_input,
             ctx.receiver(),
+            ctx.cancellation_token.clone(),
         );
         let Some(mut dispatcher) = self.context.dispatcher.clone() else {
             tracing::error!("Unable to create background task to purge dirty log: Dispatcher is not set for compaction manager");

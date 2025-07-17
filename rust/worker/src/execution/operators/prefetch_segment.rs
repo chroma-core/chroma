@@ -104,6 +104,10 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
     fn errors_when_sender_dropped(&self) -> bool {
         false
     }
+
+    fn can_cancel(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
