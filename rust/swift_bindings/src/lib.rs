@@ -12,6 +12,8 @@ use chroma_types::{
     GetCollectionRequest,
     ListCollectionsRequest,
     DeleteCollectionRequest,
+    DeleteCollectionRecordsRequest,
+    DeleteCollectionRecordsError,
     CreateDatabaseRequest,
     CreateTenantRequest,
 };
@@ -61,6 +63,12 @@ impl From<AddCollectionRecordsError> for ChromaError {
 
 impl From<QueryError> for ChromaError {
     fn from(e: QueryError) -> Self {
+        Self::Generic { message: e.to_string() }
+    }
+}
+
+impl From<DeleteCollectionRecordsError> for ChromaError {
+    fn from(e: DeleteCollectionRecordsError) -> Self {
         Self::Generic { message: e.to_string() }
     }
 }
@@ -559,6 +567,51 @@ pub fn get_max_batch_size() -> FfiResult<u32> {
             })?
     };
     Ok(frontend.get_max_batch_size())
+}
+
+#[uniffi::export]
+pub fn delete_documents(collection_name: String, ids: Option<Vec<String>>) -> FfiResult<()> {
+    
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    // Get collection id
+    let get_request = chroma_types::GetCollectionRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        collection_name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
+    let mut frontend_clone = frontend.clone();
+    let coll = runtime
+        .block_on(async { frontend_clone.get_collection(get_request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
+    
+    // Create delete request
+    let request = DeleteCollectionRecordsRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        coll.collection_id,
+        ids,
+        None, // where clause (not supported yet)
+    ).map_err(|e| ChromaError::Generic { message: format!("delete req: {e}") })?;
+    
+    let mut frontend_clone = frontend.clone();
+    runtime
+        .block_on(async { frontend_clone.delete(request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("delete: {e}") })?;
+    
+    Ok(())
 }
 
         
