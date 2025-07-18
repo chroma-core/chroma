@@ -501,8 +501,6 @@ impl Operator<FilterInput, FilterOutput> for Filter {
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
         tracing::debug!(
-            operator = ?self,
-            input = ?input,
             "[{}]: Num log entries {:?}, metadata segment {:?}, record segment {:?}",
             self.get_name(),
             input.logs.len(),
