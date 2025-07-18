@@ -70,7 +70,7 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
 
     async fn run(&self, input: &ProjectionInput) -> Result<ProjectionOutput, ProjectionError> {
         tracing::debug!(
-            opeartor = ?self,
+            operator = ?self,
             input = ?input,
             "[{}]: num log entries {:?}, record segment {:?}, offset ids {:?}",
             self.get_name(),

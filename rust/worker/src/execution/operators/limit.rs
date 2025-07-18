@@ -182,7 +182,7 @@ impl Operator<LimitInput, LimitOutput> for Limit {
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
         tracing::debug!(
-            opeartor = ?self,
+            operator = ?self,
             input = ?input,
             "[{}]: num log entries {:?}, record segment {:?}, log offset ids {:?}, compact ids {:?}",
             self.get_name(),
