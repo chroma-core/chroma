@@ -358,10 +358,12 @@ func (suite *CollectionServiceTestSuite) TestServer_GetCollection() {
 	suite.NoError(err)
 
 	// Soft delete the collection
+	parsedDatabaseID, err := types.ToUniqueID(&suite.databaseId)
+	suite.NoError(err)
 	err = suite.s.coordinator.SoftDeleteCollection(context.Background(), &model.DeleteCollection{
-		ID:           types.MustParse(collectionID),
-		DatabaseName: suite.databaseName,
-		TenantID:     suite.tenantName,
+		ID:         types.MustParse(collectionID),
+		DatabaseID: parsedDatabaseID,
+		TenantID:   suite.tenantName,
 	})
 	suite.NoError(err)
 
@@ -606,10 +608,12 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	// Create collection and soft-delete it.
 	collectionID, err = dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection("test_flush_collection_compaction_soft_delete", 128, suite.databaseId, nil))
 	suite.NoError(err)
+	parsedDatabaseID2, err := types.ToUniqueID(&suite.databaseId)
+	suite.NoError(err)
 	suite.s.coordinator.SoftDeleteCollection(context.Background(), &model.DeleteCollection{
-		ID:           types.MustParse(collectionID),
-		DatabaseName: suite.databaseName,
-		TenantID:     suite.tenantName,
+		ID:         types.MustParse(collectionID),
+		DatabaseID: parsedDatabaseID2,
+		TenantID:   suite.tenantName,
 	})
 	// Send FlushCollectionCompaction for the soft-deleted collection.
 	// It should fail with a failed precondition error.
@@ -748,11 +752,13 @@ func (suite *CollectionServiceTestSuite) TestFork() {
 	suite.Equal(len(forkedCollection2.Segments), 2)
 
 	// Delete the root.
+	parsedDatabaseID3, err := types.ToUniqueID(&suite.databaseId)
+	suite.NoError(err)
 	deleteReq := model.DeleteCollection{
-		ID:           types.MustParse(collectionID),
-		TenantID:     suite.tenantName,
-		DatabaseName: suite.databaseName,
-		Ts:           time.Now().Unix(),
+		ID:         types.MustParse(collectionID),
+		TenantID:   suite.tenantName,
+		DatabaseID: parsedDatabaseID3,
+		Ts:         time.Now().Unix(),
 	}
 	err = suite.s.coordinator.SoftDeleteCollection(context.Background(), &deleteReq)
 	suite.NoError(err)
@@ -773,10 +779,10 @@ func (suite *CollectionServiceTestSuite) TestFork() {
 
 	// Deleting the source and fork should not succeed.
 	deleteReq2 := model.DeleteCollection{
-		ID:           fork3CollectionId,
-		TenantID:     suite.tenantName,
-		DatabaseName: suite.databaseName,
-		Ts:           time.Now().Unix(),
+		ID:         fork3CollectionId,
+		TenantID:   suite.tenantName,
+		DatabaseID: parsedDatabaseID3,
+		Ts:         time.Now().Unix(),
 	}
 	err = suite.s.coordinator.SoftDeleteCollection(context.Background(), &deleteReq2)
 	suite.NoError(err)

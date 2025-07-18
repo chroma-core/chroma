@@ -55,10 +55,10 @@ type CreateCollection struct {
 }
 
 type DeleteCollection struct {
-	ID           types.UniqueID
-	TenantID     string
-	DatabaseName string
-	Ts           types.Timestamp
+	ID         types.UniqueID
+	TenantID   string
+	DatabaseID types.UniqueID
+	Ts         types.Timestamp
 }
 
 type UpdateCollection struct {
