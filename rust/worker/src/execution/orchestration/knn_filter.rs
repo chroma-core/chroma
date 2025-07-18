@@ -9,7 +9,7 @@ use chroma_segment::{
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
     operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, Segment, SegmentType,
@@ -160,8 +160,8 @@ type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
 #[derive(Debug)]
 pub struct KnnFilterOrchestrator {
     // Orchestrator parameters
+    context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
-    dispatcher: ComponentHandle<Dispatcher>,
     hnsw_provider: HnswIndexProvider,
     queue: usize,
 
@@ -191,9 +191,10 @@ impl KnnFilterOrchestrator {
         fetch_log: FetchLogOperator,
         filter: Filter,
     ) -> Self {
+        let context = OrchestratorContext::new(dispatcher);
         Self {
+            context,
             blockfile_provider,
-            dispatcher,
             hnsw_provider,
             queue,
             collection_and_segments,
@@ -211,7 +212,11 @@ impl Orchestrator for KnnFilterOrchestrator {
     type Error = KnnError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(

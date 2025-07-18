@@ -38,7 +38,7 @@ use chroma_storage::Storage;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, System, TaskError, TaskResult,
+    OrchestratorContext, PanicError, System, TaskError, TaskResult,
 };
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
 use chroma_types::{CollectionUuid, DeleteCollectionError};
@@ -60,7 +60,7 @@ pub struct GarbageCollectorOrchestrator {
     version_absolute_cutoff_time: DateTime<Utc>,
     collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
     sysdb_client: SysDb,
-    dispatcher: ComponentHandle<Dispatcher>,
+    context: OrchestratorContext,
     system: System,
     storage: Storage,
     logs: Log,
@@ -111,7 +111,7 @@ impl GarbageCollectorOrchestrator {
             version_absolute_cutoff_time,
             collection_soft_delete_absolute_cutoff_time,
             sysdb_client,
-            dispatcher,
+            context: OrchestratorContext::new(dispatcher),
             system,
             storage,
             logs,
@@ -209,7 +209,11 @@ impl Orchestrator for GarbageCollectorOrchestrator {
     type Error = GarbageCollectorError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {

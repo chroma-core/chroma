@@ -263,6 +263,55 @@ where
     }
 }
 
+#[derive(Debug)]
+pub struct CancellableTask {
+    inner: Box<dyn TaskWrapper>,
+    cancellation_token: tokio_util::sync::CancellationToken,
+}
+
+impl CancellableTask {
+    pub fn new(
+        task_message: TaskMessage,
+        cancellation_token: tokio_util::sync::CancellationToken,
+    ) -> TaskMessage {
+        let cancellable_msg = CancellableTask {
+            inner: task_message,
+            cancellation_token,
+        };
+        Box::new(cancellable_msg)
+    }
+}
+
+#[async_trait]
+impl TaskWrapper for CancellableTask {
+    fn get_name(&self) -> &'static str {
+        self.inner.get_name()
+    }
+
+    async fn run(&mut self) {
+        tokio::select! {
+            biased; // We want to prioritize the cancellation token over the task run
+            _ = self.cancellation_token.cancelled() => {
+                self.inner.abort().await;
+                tracing::debug!("Task {} was cancelled", self.inner.id());
+            },
+            _ = self.inner.run() => {}
+        }
+    }
+
+    fn id(&self) -> Uuid {
+        self.inner.id()
+    }
+
+    fn get_type(&self) -> OperatorType {
+        self.inner.get_type()
+    }
+
+    async fn abort(&mut self) {
+        self.inner.abort().await;
+    }
+}
+
 /// Wrap an operator and its input into a task message.
 pub fn wrap<Input, Output, Error>(
     operator: Box<dyn Operator<Input, Output, Error = Error>>,
