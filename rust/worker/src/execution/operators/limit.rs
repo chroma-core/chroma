@@ -181,8 +181,16 @@ impl Operator<LimitInput, LimitOutput> for Limit {
     type Error = LimitError;
 
     async fn run(&self, input: &LimitInput) -> Result<LimitOutput, LimitError> {
-        tracing::debug!("[{}]: num log entries {:?}, record segment {:?}, log offset ids {:?}, compact ids {:?}", self.get_name(),
-            input.logs.len(), input.record_segment, input.log_offset_ids, input.compact_offset_ids);
+        tracing::debug!(
+            opeartor = ?self,
+            input = ?input,
+            "[{}]: num log entries {:?}, record segment {:?}, log offset ids {:?}, compact ids {:?}",
+            self.get_name(),
+            input.logs.len(),
+            input.record_segment,
+            input.log_offset_ids,
+            input.compact_offset_ids
+        );
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,

@@ -69,6 +69,16 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
     type Error = ProjectionError;
 
     async fn run(&self, input: &ProjectionInput) -> Result<ProjectionOutput, ProjectionError> {
+        tracing::debug!(
+            opeartor = ?self,
+            input = ?input,
+            "[{}]: num log entries {:?}, record segment {:?}, offset ids {:?}",
+            self.get_name(),
+            input.logs.len(),
+            input.record_segment,
+            input.offset_ids,
+        );
+
         if input.offset_ids.is_empty() {
             return Ok(ProjectionOutput { records: vec![] });
         }
