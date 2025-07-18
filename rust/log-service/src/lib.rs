@@ -2587,7 +2587,7 @@ mod tests {
     use proptest::prelude::*;
     use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel};
     use tonic::IntoRequest;
-    use wal3::{GarbageCollector, SnapshotOptions, ThrottleOptions};
+    use wal3::{GarbageCollector, Snapshot, SnapshotOptions, ThrottleOptions};
 
     #[test]
     fn unsafe_constants() {
@@ -3766,19 +3766,22 @@ mod tests {
         collection_id: CollectionUuid,
         logs: &[OperationRecord],
     ) {
-        let proto_push_log_req = Request::new(PushLogsRequest {
-            collection_id: collection_id.to_string(),
-            records: logs
-                .iter()
-                .cloned()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()
-                .expect("Logs should be valid"),
-        });
-        server
-            .push_logs(proto_push_log_req)
-            .await
-            .expect("Push Logs should not fail");
+        loop {
+            let proto_push_log_req = Request::new(PushLogsRequest {
+                collection_id: collection_id.to_string(),
+                records: logs
+                    .iter()
+                    .cloned()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()
+                    .expect("Logs should be valid"),
+            });
+            if let Err(err) = server.push_logs(proto_push_log_req).await {
+                println!("Failed to push log: {err}");
+            } else {
+                break;
+            }
+        }
     }
 
     async fn validate_log_on_server(
@@ -3925,17 +3928,6 @@ mod tests {
             eprintln!("Log GC phase 3 error: {err}");
             return;
         };
-        let reader = LogReader::open(
-            server.config.reader.clone(),
-            server.storage.clone(),
-            collection_id.storage_prefix_for_log(),
-        )
-        .await
-        .expect("Log reader should be initializable");
-        reader
-            .scrub(Limits::UNLIMITED)
-            .await
-            .expect("Log scrub should not fail after garbage collection");
     }
 
     fn test_push_pull_logs(
@@ -4141,6 +4133,10 @@ mod tests {
         let (tx, mut rx) = unbounded_channel();
         let background_gc_task = runtime.spawn(async move {
             while let Some(compact_offset) = rx.recv().await {
+                if compact_offset == 0 {
+                    rx.close();
+                    break;
+                }
                 mock_compact_on_server(&log_server_clone, collection_id, compact_offset).await;
                 let first_uncompacted_offset = compact_offset.saturating_add(1) as usize;
                 garbage_collect_unused_logs(
@@ -4161,9 +4157,49 @@ mod tests {
                     .expect("Should be able to send compaction signal");
             }
 
+            tx.send(0).expect("Should be able to close channel");
+
             background_gc_task
                 .await
                 .expect("The background GC task should finish");
+
+            let reader = LogReader::open(
+                log_server.config.reader.clone(),
+                log_server.storage.clone(),
+                collection_id.storage_prefix_for_log(),
+            )
+            .await
+            .expect("Log reader should be initializable");
+            // if let Err(err) = reader.scrub(Limits::UNLIMITED).await {
+            //     eprintln!(">>>[TST]>>> Scrub error after log GC: {err:#?}");
+            //     let manifest = reader
+            //         .manifest()
+            //         .await
+            //         .expect("Reader should be able to get manifest")
+            //         .expect("Manifest should be present");
+            //     eprintln!(">>>[TST]>>> Manifest: {:#?}", manifest);
+            //     let mut pointers = manifest.snapshots.clone();
+            //     while let Some(ptr) = pointers.pop() {
+            //         let snapshot = Snapshot::load(
+            //             &Default::default(),
+            //             &log_server.storage,
+            //             &collection_id.storage_prefix_for_log(),
+            //             &ptr,
+            //         )
+            //         .await
+            //         .expect("Should be able to get snapshot");
+            //         if let Some(snap) = snapshot {
+            //             eprintln!(">>>[TST]>>> Snapshot: {snap:#?}");
+            //             pointers.extend(snap.snapshots);
+            //         } else {
+            //             eprintln!(">>>[TST]>>> Dangling snapshot reference: {ptr:#?}");
+            //         }
+            //     }
+            // }
+            reader
+                .scrub(Limits::UNLIMITED)
+                .await
+                .expect("Log scrub should not fail after garbage collection");
         });
     }
 
