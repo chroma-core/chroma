@@ -37,7 +37,7 @@ struct Staging {
     next_seq_no_to_apply: FragmentSeqNo,
     /// A prefix of the log to be garbage collected.  This is added to the manager from somewhere
     /// else and the manager will apply the garbage to the next manifest that gets written.
-    garbage: Option<Garbage>,
+    garbage: Option<(Garbage, tokio::sync::oneshot::Sender<Option<Error>>)>,
     /// The instant at which the last batch was generated.
     last_batch: Instant,
     /// True iff the manifest manager is closing, so we want to prevent late-arriving threads from
@@ -92,9 +92,9 @@ impl Staging {
             return self.pull_gc_work_only();
         }
         self.last_batch = Instant::now();
-        let garbage = self.garbage.take();
-        let snapshot = if let Some(garbage) = garbage.as_ref() {
-            match new_manifest.apply_garbage(garbage.clone()) {
+        let snapshot = if let Some((garbage, notifier)) = self.garbage.take() {
+            notifiers.push(notifier);
+            match new_manifest.apply_garbage(garbage) {
                 Ok(Some(manifest)) => new_manifest = manifest,
                 Ok(None) => {
                     tracing::error!("given empty garbage that did not apply");
@@ -147,7 +147,7 @@ impl Staging {
         Option<Snapshot>,
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
-        if let Some(garbage) = self.garbage.take() {
+        if let Some((garbage, notifier)) = self.garbage.take() {
             let new_manifest = self.stable.manifest.apply_garbage(garbage).ok()??;
             Some((
                 self.stable.manifest.clone(),
@@ -155,7 +155,7 @@ impl Staging {
                 new_manifest,
                 self.next_seq_no_to_apply,
                 None,
-                vec![],
+                vec![notifier],
             ))
         } else {
             None
@@ -338,6 +338,7 @@ impl ManifestManager {
     // Given garbage that has already been written to S3, apply the garbage collection to this
     // manifest.
     pub async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
         // SAFETY(rescrv):  Mutex poisoning.
         {
             let mut staging = self.staging.lock().unwrap();
@@ -346,18 +347,24 @@ impl ManifestManager {
                     "tried collecting garbage twice".to_string(),
                 ));
             }
-            staging.garbage = Some(garbage);
+            staging.garbage = Some((garbage, tx));
         }
-        loop {
-            {
-                let staging = self.staging.lock().unwrap();
-                if staging.garbage.is_none() {
-                    break;
-                }
+        self.do_work().await;
+        match rx.await {
+            Ok(None) => Ok(()),
+            Ok(Some(err)) => {
+                tracing::error!("Unable to apply garbage: {err}");
+                Err(err)
             }
-            self.do_work().await;
+            Err(err) => {
+                tracing::error!(
+                    "Unable to receive message for garbage application completion: {err}"
+                );
+                Err(Error::GarbageCollection(format!(
+                    "Unable to receive message for garbage application completion: {err}"
+                )))
+            }
         }
-        Ok(())
     }
 
     async fn do_work(&self) {
