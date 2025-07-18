@@ -1,7 +1,7 @@
 use super::{CacheError, Weighted};
 use ahash::RandomState;
 use chroma_error::ChromaError;
-use chroma_tracing::util::Stopwatch;
+use chroma_tracing::util::{StopWatchUnit, Stopwatch};
 use clap::Parser;
 use foyer::{
     CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
@@ -456,7 +456,7 @@ where
 {
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.get_latency, hostname);
+        let _stopwatch = Stopwatch::new(&self.get_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.get(key).await?.map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, hostname);
@@ -468,25 +468,25 @@ where
 
     async fn insert(&self, key: K, value: V) {
         let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.insert_latency, hostname);
+        let _stopwatch = Stopwatch::new(&self.insert_latency, hostname, StopWatchUnit::Millis);
         self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
         let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.remove_latency, hostname);
+        let _stopwatch = Stopwatch::new(&self.remove_latency, hostname, StopWatchUnit::Millis);
         self.cache.remove(key);
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
         let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.clear_latency, hostname);
+        let _stopwatch = Stopwatch::new(&self.clear_latency, hostname, StopWatchUnit::Millis);
         Ok(self.cache.clear().await?)
     }
 
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
         let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname);
+        let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.obtain(key).await?.map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, hostname);
@@ -639,7 +639,7 @@ where
 {
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
         let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.get_latency, hostname);
+        let _stopwatch = Stopwatch::new(&self.get_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.get(key).map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, hostname);
@@ -651,26 +651,26 @@ where
 
     async fn insert(&self, key: K, value: V) {
         let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.insert_latency, hostname);
+        let _stopwatch = Stopwatch::new(&self.insert_latency, hostname, StopWatchUnit::Millis);
         self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
         let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.remove_latency, hostname);
+        let _stopwatch = Stopwatch::new(&self.remove_latency, hostname, StopWatchUnit::Millis);
         self.cache.remove(key);
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
         let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.clear_latency, hostname);
+        let _stopwatch = Stopwatch::new(&self.clear_latency, hostname, StopWatchUnit::Millis);
         self.cache.clear();
         Ok(())
     }
 
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
         let hostname = &[self.hostname.clone()];
-        let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname);
+        let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.get(&key).map(|v| v.value().clone());
         if res.is_some() {
             self.cache_hit.add(1, hostname);

@@ -13,7 +13,7 @@ use chroma_error::ChromaError;
 use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::{future::Shared, stream, FutureExt, StreamExt};
-use opentelemetry::KeyValue;
+use opentelemetry::{global, KeyValue};
 use std::{
     collections::HashMap,
     future::Future,
@@ -40,6 +40,38 @@ pub struct AdmissionControlledS3Storage {
     #[allow(clippy::type_complexity)]
     outstanding_read_requests: Arc<tokio::sync::Mutex<HashMap<String, InflightRequest>>>,
     rate_limiter: Arc<RateLimitPolicy>,
+    metrics: AdmissionControlledS3StorageMetrics,
+}
+
+#[derive(Debug, Clone)]
+struct AdmissionControlledS3StorageMetrics {
+    pub nac_dedup_count: opentelemetry::metrics::Counter<u64>,
+    pub nac_lock_wait_duration: opentelemetry::metrics::Histogram<u64>,
+    pub outstanding_read_requests: Arc<AtomicUsize>,
+    pub nac_outstanding_read_requests: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl Default for AdmissionControlledS3StorageMetrics {
+    fn default() -> Self {
+        let meter = global::meter("chroma");
+        Self {
+            outstanding_read_requests: Arc::new(AtomicUsize::new(0)),
+            nac_dedup_count: meter
+                .u64_counter("nac_dedup_count")
+                .with_description("Number of deduplicated requests")
+                .build(),
+            nac_lock_wait_duration: meter
+                .u64_histogram("nac_lock_wait_duration")
+                .with_description("Duration of waiting for the lock in milliseconds")
+                .with_unit("ms")
+                .build(),
+            nac_outstanding_read_requests: meter
+                .u64_histogram("nac_outstanding_requests")
+                .with_description("Number of outstanding requests in the admission control system")
+                .with_unit("1")
+                .build(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +151,7 @@ impl AdmissionControlledS3Storage {
                 2,
                 &vec![1.0],
             ))),
+            metrics: AdmissionControlledS3StorageMetrics::default(),
         }
     }
 
@@ -127,6 +160,7 @@ impl AdmissionControlledS3Storage {
             storage,
             outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(policy),
+            metrics: AdmissionControlledS3StorageMetrics::default(),
         }
     }
 
@@ -275,6 +309,15 @@ impl AdmissionControlledS3Storage {
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        self.metrics.nac_outstanding_read_requests.record(
+            self.metrics
+                .outstanding_read_requests
+                .load(Ordering::Relaxed) as u64,
+            &[],
+        );
+        self.metrics
+            .outstanding_read_requests
+            .fetch_add(1, Ordering::Relaxed);
         if options.requires_strong_consistency {
             return self.strongly_consistent_get_with_e_tag(key, options).await;
         }
@@ -283,10 +326,16 @@ impl AdmissionControlledS3Storage {
         // request to S3.
         let future_to_await;
         {
+            let _stopwatch = Stopwatch::new(
+                &self.metrics.nac_lock_wait_duration,
+                &[],
+                chroma_tracing::util::StopWatchUnit::Micros,
+            );
             let mut requests = self.outstanding_read_requests.lock().await;
             let maybe_inflight = requests.get(key).cloned();
             future_to_await = match maybe_inflight {
                 Some(fut) => {
+                    self.metrics.nac_dedup_count.add(1, &[]);
                     // Update the priority if the new request has higher priority.
                     fut.update_priority(options.priority).await;
                     fut.future
@@ -321,6 +370,9 @@ impl AdmissionControlledS3Storage {
             let mut requests = self.outstanding_read_requests.lock().await;
             requests.remove(key);
         }
+        self.metrics
+            .outstanding_read_requests
+            .fetch_sub(1, Ordering::Relaxed);
         res
     }
 
@@ -552,17 +604,28 @@ impl RateLimitPolicy {
 pub struct CountBasedPolicyMetrics {
     // The delay in milliseconds before a request is allowed to proceed.
     pub nac_delay_ms: opentelemetry::metrics::Histogram<u64>,
+    pub nac_priority_increase_count: opentelemetry::metrics::Counter<u64>,
+    pub nac_receive_channel_closed_count: opentelemetry::metrics::Counter<u64>,
 }
 
 impl Default for CountBasedPolicyMetrics {
     fn default() -> Self {
+        let meter = opentelemetry::global::meter("chroma.storage.admission_control");
         Self {
-            nac_delay_ms: opentelemetry::global::meter("chroma.storage.admission_control")
+            nac_delay_ms: meter
                 .u64_histogram("nac_delay_ms")
                 .with_description(
                     "The delay in milliseconds before a request is allowed to proceed.",
                 )
                 .with_unit("ms")
+                .build(),
+            nac_priority_increase_count: meter
+                .u64_counter("nac_priority_increase_count")
+                .with_description("Number of times priority was increased for a request.")
+                .build(),
+            nac_receive_channel_closed_count: meter
+                .u64_counter("nac_receive_channel_closed_count")
+                .with_description("Number of times the receive channel was closed.")
                 .build(),
         }
     }
@@ -597,7 +660,11 @@ impl CountBasedPolicy {
             "priority",
             priority.load(Ordering::Relaxed).to_string(),
         )];
-        let _stopwatch = Stopwatch::new(&self.metrics.nac_delay_ms, priority_attribute);
+        let _stopwatch = Stopwatch::new(
+            &self.metrics.nac_delay_ms,
+            priority_attribute,
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
         loop {
             let current_priority = priority.load(Ordering::SeqCst);
             let current_priority: StorageRequestPriority = current_priority.into();
@@ -624,10 +691,12 @@ impl CountBasedPolicy {
                             // Reevaluate priority if we got a notification.
                             match did_recv {
                                 Some(_) => {
+                                    self.metrics.nac_priority_increase_count.add(1, &[]);
                                     // If we got a notification, continue to acquire.
                                     continue;
                                 }
                                 None => {
+                                    self.metrics.nac_receive_channel_closed_count.add(1, &[]);
                                     // If the channel was closed, break out of the loop.
                                     channel_receiver = None;
                                     continue;
