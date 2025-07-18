@@ -9,3 +9,4 @@ export * from "@chroma-core/ollama";
 export * from "@chroma-core/openai";
 export * from "@chroma-core/together-ai";
 export * from "@chroma-core/voyageai";
+export * from "@chroma-core/runpod";

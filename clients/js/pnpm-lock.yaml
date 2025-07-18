@@ -28,6 +28,9 @@ importers:
       openai:
         specifier: ^3.0.0 || ^4.0.0
         version: 4.51.0
+      runpod-sdk:
+        specifier: ^1.1.2
+        version: 1.1.2
       voyageai:
         specifier: ^0.0.3-1
         version: 0.0.3-1
@@ -147,6 +150,22 @@ importers:
       typescript:
         specifier: ^5.0.4
         version: 5.4.5
+    optionalDependencies:
+      chromadb-js-bindings-darwin-arm64:
+        specifier: ^0.1.3
+        version: 0.1.3
+      chromadb-js-bindings-darwin-x64:
+        specifier: ^0.1.3
+        version: 0.1.3
+      chromadb-js-bindings-linux-arm64-gnu:
+        specifier: ^0.1.3
+        version: 0.1.3
+      chromadb-js-bindings-linux-x64-gnu:
+        specifier: ^0.1.3
+        version: 0.1.3
+      chromadb-js-bindings-win32-x64-msvc:
+        specifier: ^0.1.3
+        version: 0.1.3
 
   packages/chromadb-client:
     dependencies:
@@ -2634,6 +2653,51 @@ packages:
         integrity: sha512-odCiCzZ5jqNI0sS6RcRxObx8gM7aCPULQkdWw/OgqIGdIUOKUj9b8jDElLbZ6feMKNB0MSQhtXi0P8QEeVO75w==,
       }
 
+  chromadb-js-bindings-darwin-arm64@0.1.3:
+    resolution:
+      {
+        integrity: sha512-TZq90O3QuVSfMZcYXWP8juP9q7O7ebSz7PsewW2deVJd3aihOnVxpZtxfwlFKYEDiWz5XwArL6xLBbKNYZGnLA==,
+      }
+    engines: { node: ">= 10" }
+    cpu: [arm64]
+    os: [darwin]
+
+  chromadb-js-bindings-darwin-x64@0.1.3:
+    resolution:
+      {
+        integrity: sha512-ynIKTgcJ89YAhuGjp5E39E/gsjJ4IgRpGzVrsYSYfx4K449LaIx0yUdFsxx/QoY0Q5/AJDgUH6dG5DXgYg5LxA==,
+      }
+    engines: { node: ">= 10" }
+    cpu: [x64]
+    os: [darwin]
+
+  chromadb-js-bindings-linux-arm64-gnu@0.1.3:
+    resolution:
+      {
+        integrity: sha512-RLReKrGYygGbKWgh3Y9nGevl2/8/QXr6QHB8f03CbfogKwk7NGPjblO6O1P4gQMxU+b9kRldDWBOZbsvIlJt9g==,
+      }
+    engines: { node: ">= 10" }
+    cpu: [arm64]
+    os: [linux]
+
+  chromadb-js-bindings-linux-x64-gnu@0.1.3:
+    resolution:
+      {
+        integrity: sha512-YMY4A0tYbmsiyV7ASS+aL7cp+QdoFpC6Q4AjBgpA9+Lh131eli0xIqrnwe3/YF5SkcAKK/1GcNXqSzx8P3eVLQ==,
+      }
+    engines: { node: ">= 10" }
+    cpu: [x64]
+    os: [linux]
+
+  chromadb-js-bindings-win32-x64-msvc@0.1.3:
+    resolution:
+      {
+        integrity: sha512-smVxJRVhUPPTW2G8mu4GizCvrcii3F1ZPp8CbNMvgWJhYi98CWN9KV3df3b12xRt76tIWIF/Lp5TgZfPnk4pmQ==,
+      }
+    engines: { node: ">= 10" }
+    cpu: [x64]
+    os: [win32]
+
   ci-info@3.9.0:
     resolution:
       {
@@ -4585,6 +4649,7 @@ packages:
         integrity: sha512-/jKZoMpw0F8GRwl4/eLROPA3cfcXtLApP0QzLmUT/HuPCZWyB7IY9ZrMeKw2O/nFIqPQB3PVM9aYm0F312AXDQ==,
       }
     engines: { node: ">=10.5.0" }
+    deprecated: Use your platform's native DOMException instead
 
   node-fetch@2.7.0:
     resolution:
@@ -5086,6 +5151,12 @@ packages:
       }
     engines: { node: ">=8" }
 
+  ramda@0.29.1:
+    resolution:
+      {
+        integrity: sha512-OfxIeWzd4xdUNxlWhgFazxsA/nl3mS4/jGZI5n00uWOoSSFRhC1b6gl6xvmzUamgmqELraWp0J/qqVlXYPDPyA==,
+      }
+
   rc@1.2.8:
     resolution:
       {
@@ -5257,6 +5328,12 @@ packages:
     resolution:
       {
         integrity: sha512-5l4VyZR86LZ/lDxZTR6jqL8AFE2S0IFLMP26AbjsLVADxHdhB/c0GUsH+y39UfCi3dzz8OlQuPmnaJOMoDHQBA==,
+      }
+
+  runpod-sdk@1.1.2:
+    resolution:
+      {
+        integrity: sha512-t/ngt8/pVtuJaaW4alGgqD01BBFpLB4dZ3GNyfLQX3X7vW/oxt3Bhpf2CGGSfTvnBHhotd095/YQ186FP0eXHg==,
       }
 
   safe-array-concat@1.1.2:
@@ -5755,6 +5832,13 @@ packages:
         integrity: sha512-RVZSIV5IG10Hk3enotrhvz0T9em6cyHBLkH/YAZuKqd8hRkKhSfCGIcP2KUY0EPxndzANBmNllzWPwak+bheSw==,
       }
 
+  tiny-lru@11.3.3:
+    resolution:
+      {
+        integrity: sha512-/ShxBZOgHXDdZi7FxajcsH0MfcBqwP+t7i4T3PGjI//NUA5aCpC7cB9bbdAYrAeQLBUTJfg2rk191fzZGeo7DA==,
+      }
+    engines: { node: ">=12" }
+
   tmp@0.2.3:
     resolution:
       {
@@ -5802,6 +5886,13 @@ packages:
         integrity: sha512-c1PTsA3tYrIsLGkJkzHF+w9F2EyxfXGo4UyJc4pFL++FMjnq0HJS69T3M7d//gKrFKwy429bouPescbjecU+Zw==,
       }
     engines: { node: ">=8" }
+
+  ts-deepmerge@7.0.3:
+    resolution:
+      {
+        integrity: sha512-Du/ZW2RfwV/D4cmA5rXafYjBQVuvu4qGiEEla4EmEHVHgRdx68Gftx7i66jn2bzHPwSVZY36Ae6OuDn9el4ZKA==,
+      }
+    engines: { node: ">=14.13.1" }
 
   ts-interface-checker@0.1.13:
     resolution:
@@ -6186,6 +6277,12 @@ packages:
         integrity: sha512-7KxauUdBmSdWnmpaGFg+ppNjKF8uNLry8LyzjauQDOVONfFLNKrKvQOxZ/VuTIcS/gge/YNahf5RIIQWTSarlg==,
       }
     engines: { node: ^12.13.0 || ^14.15.0 || >=16.0.0 }
+
+  xior@0.1.4:
+    resolution:
+      {
+        integrity: sha512-vigS5TEZEmM76FeE/tmIhp0MX9dHOdysxMTKtWgzjbuPK5Hmgi+zwgiI6xVShMkQqPf6mpXIcywYidOJwmksaw==,
+      }
 
   y18n@5.0.8:
     resolution:
@@ -8264,6 +8361,21 @@ snapshots:
     optionalDependencies:
       onnxruntime-node: 1.14.0
 
+  chromadb-js-bindings-darwin-arm64@0.1.3:
+    optional: true
+
+  chromadb-js-bindings-darwin-x64@0.1.3:
+    optional: true
+
+  chromadb-js-bindings-linux-arm64-gnu@0.1.3:
+    optional: true
+
+  chromadb-js-bindings-linux-x64-gnu@0.1.3:
+    optional: true
+
+  chromadb-js-bindings-win32-x64-msvc@0.1.3:
+    optional: true
+
   ci-info@3.9.0: {}
 
   cjs-module-lexer@1.3.1: {}
@@ -9894,6 +10006,8 @@ snapshots:
 
   quick-lru@4.0.1: {}
 
+  ramda@0.29.1: {}
+
   rc@1.2.8:
     dependencies:
       deep-extend: 0.6.0
@@ -10023,6 +10137,11 @@ snapshots:
   run-parallel@1.2.0:
     dependencies:
       queue-microtask: 1.2.3
+
+  runpod-sdk@1.1.2:
+    dependencies:
+      ramda: 0.29.1
+      xior: 0.1.4
 
   safe-array-concat@1.1.2:
     dependencies:
@@ -10368,6 +10487,8 @@ snapshots:
     dependencies:
       any-promise: 1.3.0
 
+  tiny-lru@11.3.3: {}
+
   tmp@0.2.3: {}
 
   tmpl@1.0.5: {}
@@ -10385,6 +10506,8 @@ snapshots:
   tree-kill@1.2.2: {}
 
   trim-newlines@3.0.1: {}
+
+  ts-deepmerge@7.0.3: {}
 
   ts-interface-checker@0.1.13: {}
 
@@ -10645,6 +10768,11 @@ snapshots:
     dependencies:
       imurmurhash: 0.1.4
       signal-exit: 3.0.7
+
+  xior@0.1.4:
+    dependencies:
+      tiny-lru: 11.3.3
+      ts-deepmerge: 7.0.3
 
   y18n@5.0.8: {}
 
