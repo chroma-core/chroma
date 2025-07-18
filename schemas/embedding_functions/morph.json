@@ -1,0 +1,36 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Morph Embedding Function Schema",
+    "description": "Schema for the Morph embedding function configuration",
+    "version": "1.0.0",
+    "type": "object",
+    "properties": {
+        "model_name": {
+            "type": "string",
+            "description": "The name of the model to use for embeddings"
+        },
+        "api_key_env_var": {
+            "type": "string",
+            "description": "Environment variable name that contains your API key for the Morph API"
+        },
+        "api_base": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "The base URL for the Morph API"
+        },
+        "encoding_format": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "The format for embeddings (float or base64)"
+        }
+    },
+    "required": [
+        "api_key_env_var",
+        "model_name"
+    ],
+    "additionalProperties": false
+}

@@ -42,11 +42,12 @@
     "@chroma-core/google-gemini": "workspace:^",
     "@chroma-core/huggingface-server": "workspace:^",
     "@chroma-core/jina": "workspace:^",
+    "@chroma-core/mistral": "workspace:^",
+    "@chroma-core/morph": "workspace:^",
     "@chroma-core/ollama": "workspace:^",
     "@chroma-core/openai": "workspace:^",
     "@chroma-core/together-ai": "workspace:^",
-    "@chroma-core/voyageai": "workspace:^",
-    "@chroma-core/mistral": "workspace:^"
+    "@chroma-core/voyageai": "workspace:^"
   },
   "engines": {
     "node": ">=20"
