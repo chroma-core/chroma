@@ -14,6 +14,8 @@ use chroma_types::{
     DeleteCollectionRequest,
     DeleteCollectionRecordsRequest,
     DeleteCollectionRecordsError,
+    CountRequest,
+    HeartbeatResponse,
     CreateDatabaseRequest,
     CreateTenantRequest,
 };
@@ -567,6 +569,77 @@ pub fn get_max_batch_size() -> FfiResult<u32> {
             })?
     };
     Ok(frontend.get_max_batch_size())
+}
+
+#[uniffi::export]
+pub fn heartbeat() -> FfiResult<i64> {
+    
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    let mut frontend_clone = frontend.clone();
+    let heartbeat_response = runtime
+        .block_on(async { frontend_clone.heartbeat().await })
+        .map_err(|e| ChromaError::Generic { message: format!("heartbeat: {e}") })?;
+    
+    // Convert u128 to i64 (nanoseconds since Unix epoch)
+    // If the timestamp is too large for i64, we'll truncate it
+    let timestamp = heartbeat_response.nanosecond_heartbeat as i64;
+    
+    Ok(timestamp)
+}
+
+#[uniffi::export]
+pub fn count_documents(collection_name: String) -> FfiResult<u32> {
+    
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    // Get collection id
+    let get_request = chroma_types::GetCollectionRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        collection_name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
+    let mut frontend_clone = frontend.clone();
+    let coll = runtime
+        .block_on(async { frontend_clone.get_collection(get_request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
+    
+    // Count documents in the collection
+    let count_request = chroma_types::CountRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        coll.collection_id,
+    ).map_err(|e| ChromaError::Generic { message: format!("count req: {e}") })?;
+    let mut frontend_clone = frontend.clone();
+    let count = runtime
+        .block_on(async { frontend_clone.count(count_request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("count: {e}") })?;
+    
+    Ok(count)
 }
 
 #[uniffi::export]
