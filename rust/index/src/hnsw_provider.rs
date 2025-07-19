@@ -4,7 +4,7 @@ use super::config::HnswProviderConfig;
 use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
 
 use async_trait::async_trait;
-use chroma_cache::AysncPartitionedMutex;
+use chroma_cache::AsyncPartitionedMutex;
 use chroma_cache::Cache;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
@@ -54,7 +54,7 @@ pub struct HnswIndexProvider {
     cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
-    pub write_mutex: AysncPartitionedMutex<IndexUuid>,
+    pub write_mutex: AsyncPartitionedMutex<IndexUuid>,
 }
 
 pub struct HnswIndexFlusher {
@@ -140,7 +140,7 @@ impl HnswIndexProvider {
             cache,
             storage,
             temporary_storage_path: storage_path,
-            write_mutex: AysncPartitionedMutex::with_parallelism(
+            write_mutex: AsyncPartitionedMutex::with_parallelism(
                 permitted_parallelism as usize,
                 (),
             ),
