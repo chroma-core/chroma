@@ -9,15 +9,28 @@ use chroma_types::{
     AddCollectionRecordsError,
     QueryError,
     GetRequest,
+    GetResponse,
+    Include,
+    IncludeList,
+    RawWhereFields,
     GetCollectionRequest,
     ListCollectionsRequest,
     DeleteCollectionRequest,
     DeleteCollectionRecordsRequest,
     DeleteCollectionRecordsError,
+    UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsError,
+    UpsertCollectionRecordsRequest,
+    UpsertCollectionRecordsError,
     CountRequest,
-    HeartbeatResponse,
+    CountCollectionsRequest,
+    ListDatabasesRequest,
     CreateDatabaseRequest,
+    GetDatabaseRequest,
+    DeleteDatabaseRequest,
     CreateTenantRequest,
+    UpdateCollectionRequest,
+    UpdateCollectionError,
 };
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
@@ -74,6 +87,25 @@ impl From<DeleteCollectionRecordsError> for ChromaError {
         Self::Generic { message: e.to_string() }
     }
 }
+
+impl From<UpdateCollectionRecordsError> for ChromaError {
+    fn from(e: UpdateCollectionRecordsError) -> Self {
+        Self::Generic { message: e.to_string() }
+    }
+}
+
+impl From<UpsertCollectionRecordsError> for ChromaError {
+    fn from(e: UpsertCollectionRecordsError) -> Self {
+        Self::Generic { message: e.to_string() }
+    }
+}
+
+impl From<UpdateCollectionError> for ChromaError {
+    fn from(e: UpdateCollectionError) -> Self {
+        Self::Generic { message: e.to_string() }
+    }
+}
+
 
 type FfiResult<T> = Result<T, ChromaError>;
 
@@ -418,6 +450,104 @@ pub fn get_all_documents(collection_name: String) -> FfiResult<GetResult> {
     Ok(GetResult { ids, documents })
 }
 
+#[derive(uniffi::Record)]
+pub struct AdvancedGetResult {
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<String>>>, // JSON strings for Swift compatibility
+    pub uris: Option<Vec<Option<String>>>,
+}
+
+#[uniffi::export]
+pub fn get_documents(
+    collection_name: String,
+    ids: Option<Vec<String>>,
+    where_clause: Option<String>,
+    limit: Option<u32>,
+    offset: Option<u32>,
+    where_document: Option<String>,
+    include: Option<Vec<String>>,
+) -> FfiResult<AdvancedGetResult> {
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    // Get collection ID from name
+    let get_collection_request = chroma_types::GetCollectionRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        collection_name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("get collection req: {e}") })?;
+    
+    let mut frontend_clone = frontend.clone();
+    let collection = runtime
+        .block_on(async { frontend_clone.get_collection(get_collection_request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("get collection: {e}") })?;
+    
+    // Parse where clauses
+    let where_filter = RawWhereFields::from_json_str(
+        where_clause.as_deref(),
+        where_document.as_deref(),
+    ).map_err(|e| ChromaError::Generic { message: format!("parse where: {e}") })?
+    .parse().map_err(|e| ChromaError::Generic { message: format!("parse where filter: {e}") })?;
+    
+    // Parse include list
+    let include_list = if let Some(include_vec) = include {
+        IncludeList::try_from(include_vec)
+            .map_err(|e| ChromaError::Generic { message: format!("parse include: {e}") })?
+    } else {
+        // Default: include documents and metadatas
+        IncludeList::try_from(vec!["documents".to_string(), "metadatas".to_string()])
+            .map_err(|e| ChromaError::Generic { message: format!("default include: {e}") })?
+    };
+    
+    // Create get request
+    let request = GetRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        collection.collection_id,
+        ids,
+        where_filter,
+        limit,
+        offset.unwrap_or(0),
+        include_list,
+    ).map_err(|e| ChromaError::Generic { message: format!("get request: {e}") })?;
+    
+    // Execute request
+    let mut frontend_clone = frontend.clone();
+    let result = runtime
+        .block_on(async { frontend_clone.get(request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("get documents: {e}") })?;
+    
+    // Convert metadata to JSON strings for Swift compatibility
+    let metadatas_json = result.metadatas.map(|metas| {
+        metas.into_iter().map(|meta_opt| {
+            meta_opt.map(|meta| {
+                serde_json::to_string(&meta).unwrap_or_else(|_| "{}".to_string())
+            })
+        }).collect()
+    });
+    
+    Ok(AdvancedGetResult {
+        ids: result.ids,
+        embeddings: result.embeddings,
+        documents: result.documents,
+        metadatas: metadatas_json,
+        uris: result.uris,
+    })
+}
+
 #[uniffi::export]
 pub fn list_collections() -> FfiResult<Vec<String>> {
     
@@ -484,7 +614,7 @@ pub struct CollectionInfo {
 }
 
 #[uniffi::export]
-pub fn get_collection_info(collection_name: String) -> FfiResult<CollectionInfo> {
+pub fn get_collection(collection_name: String) -> FfiResult<CollectionInfo> {
     
     let mut frontend_lock = FRONTEND.lock().unwrap();
     let frontend = {
@@ -601,6 +731,35 @@ pub fn heartbeat() -> FfiResult<i64> {
 }
 
 #[uniffi::export]
+pub fn count_collections() -> FfiResult<u32> {
+    
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    let request = CountCollectionsRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+    ).map_err(|e| ChromaError::Generic { message: format!("count collections req: {e}") })?;
+    let mut frontend_clone = frontend.clone();
+    let count = runtime
+        .block_on(async { frontend_clone.count_collections(request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("count collections: {e}") })?;
+    
+    Ok(count)
+}
+
+#[uniffi::export]
 pub fn count_documents(collection_name: String) -> FfiResult<u32> {
     
     let frontend = {
@@ -687,4 +846,276 @@ pub fn delete_documents(collection_name: String, ids: Option<Vec<String>>) -> Ff
     Ok(())
 }
 
-        
+#[uniffi::export]
+pub fn update_documents(collection_name: String, ids: Vec<String>, embeddings: Option<Vec<Vec<f32>>>, documents: Option<Vec<String>>) -> FfiResult<()> {
+    
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    // Get collection id
+    let get_request = chroma_types::GetCollectionRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        collection_name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
+    let mut frontend_clone = frontend.clone();
+    let coll = runtime
+        .block_on(async { frontend_clone.get_collection(get_request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
+    
+    // Prepare documents as Option<Vec<Option<String>>>
+    let documents_opt = documents.map(|docs| docs.into_iter().map(Some).collect());
+    // Prepare embeddings as Option<Vec<Option<Vec<f32>>>>
+    let embeddings_opt = embeddings.map(|embs| embs.into_iter().map(Some).collect::<Vec<Option<Vec<f32>>>>());
+    
+    let request = UpdateCollectionRecordsRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        coll.collection_id,
+        ids,
+        embeddings_opt,
+        documents_opt,
+        None, // metadatas
+        None, // uris
+    ).map_err(|e| ChromaError::Generic { message: format!("update req: {e}") })?;
+    
+    let mut frontend_clone = frontend.clone();
+    runtime
+        .block_on(async { frontend_clone.update(request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("update: {e}") })?;
+    
+    Ok(())
+}
+
+#[uniffi::export]
+pub fn upsert_documents(collection_name: String, ids: Vec<String>, embeddings: Option<Vec<Vec<f32>>>, documents: Option<Vec<String>>) -> FfiResult<()> {
+    
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    // Get collection id
+    let get_request = chroma_types::GetCollectionRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        collection_name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
+    let mut frontend_clone = frontend.clone();
+    let coll = runtime
+        .block_on(async { frontend_clone.get_collection(get_request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
+    
+    // Prepare documents as Option<Vec<Option<String>>>
+    let documents_opt = documents.map(|docs| docs.into_iter().map(Some).collect());
+    
+    let request = UpsertCollectionRecordsRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        coll.collection_id,
+        ids,
+        embeddings,
+        documents_opt,
+        None, // uris
+        None, // metadatas
+    ).map_err(|e| ChromaError::Generic { message: format!("upsert req: {e}") })?;
+    
+    let mut frontend_clone = frontend.clone();
+    runtime
+        .block_on(async { frontend_clone.upsert(request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("upsert: {e}") })?;
+    
+    Ok(())
+}
+
+#[uniffi::export]
+pub fn list_databases() -> FfiResult<Vec<String>> {
+    
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    let request = ListDatabasesRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        None, // limit
+        0,    // offset
+    ).map_err(|e| ChromaError::Generic { message: format!("list databases req: {e}") })?;
+    let mut frontend_clone = frontend.clone();
+    let databases = runtime
+        .block_on(async { frontend_clone.list_databases(request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("list databases: {e}") })?;
+    let names = databases.into_iter().map(|d| d.name).collect();
+    Ok(names)
+}
+
+#[uniffi::export]
+pub fn create_database(name: String) -> FfiResult<String> {
+    
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    let request = CreateDatabaseRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("create database req: {e}") })?;
+    let mut frontend_clone = frontend.clone();
+    let _database = runtime
+        .block_on(async { frontend_clone.create_database(request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("create database: {e}") })?;
+    
+    Ok(name)
+}
+
+#[derive(uniffi::Record)]
+pub struct DatabaseInfo {
+    pub id: String,
+    pub name: String,
+    pub tenant: String,
+}
+
+#[uniffi::export]
+pub fn get_database(name: String) -> FfiResult<DatabaseInfo> {
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    let request = GetDatabaseRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("get database req: {e}") })?;
+    
+    let mut frontend_clone = frontend.clone();
+    let database = runtime
+        .block_on(async { frontend_clone.get_database(request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("get database: {e}") })?;
+    
+    Ok(DatabaseInfo {
+        id: database.id.to_string(),
+        name: database.name,
+        tenant: database.tenant,
+    })
+}
+
+#[uniffi::export]
+pub fn delete_database(name: String) -> FfiResult<()> {
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    let request = DeleteDatabaseRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("delete database req: {e}") })?;
+    
+    let mut frontend_clone = frontend.clone();
+    runtime
+        .block_on(async { frontend_clone.delete_database(request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("delete database: {e}") })?;
+    
+    Ok(())
+}
+
+#[uniffi::export]
+pub fn update_collection(collection_name: String, new_name: Option<String>) -> FfiResult<()> {
+    
+    let frontend = {
+        let frontend_lock = FRONTEND.lock().unwrap();
+        frontend_lock
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| ChromaError::Generic {
+                message: "Chroma not initialized. Call initialize() first.".to_string(),
+            })?
+    };
+    let runtime_lock = RUNTIME.lock().unwrap();
+    let runtime = runtime_lock.as_ref().ok_or_else(|| ChromaError::Generic {
+        message: "Chroma not initialized. Call initialize() first.".to_string(),
+    })?;
+    
+    // Get collection id
+    let get_request = chroma_types::GetCollectionRequest::try_new(
+        DEFAULT_TENANT.to_string(),
+        DEFAULT_DATABASE.to_string(),
+        collection_name.clone(),
+    ).map_err(|e| ChromaError::Generic { message: format!("get req: {e}") })?;
+    let mut frontend_clone = frontend.clone();
+    let coll = runtime
+        .block_on(async { frontend_clone.get_collection(get_request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("get: {e}") })?;
+    
+    let request = UpdateCollectionRequest::try_new(
+        coll.collection_id,
+        new_name,
+        None, // metadata
+        None, // configuration
+    ).map_err(|e| ChromaError::Generic { message: format!("update collection req: {e}") })?;
+    
+    let mut frontend_clone = frontend.clone();
+    runtime
+        .block_on(async { frontend_clone.update_collection(request).await })
+        .map_err(|e| ChromaError::Generic { message: format!("update collection: {e}") })?;
+    
+    Ok(())
+}
+
