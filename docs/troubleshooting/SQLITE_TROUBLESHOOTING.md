@@ -4,20 +4,20 @@ Why this guide? Many developers hit confusing sqlite3 errors when first running
 systems that ship an outdated SQLite build.  This quick reference shows how to diagnose and fix the
 issue in minutes.
 
-## Common Errors
+## Common Errors
 
 sqlite3.OperationalError: no such module: VectorSearch
 ModuleNotFoundError: No module named '_sqlite3'
 chromadb.errors.InvalidDimensionException
 
-## Root Cause
+## Root Cause
 ChromaDB requires SQLite ≥ 3.35 compiled with FTS5 support.  Stock Python builds on Ubuntu,
 Windows, and macOS often link against older or stripped‑down versions, so ChromaDB’s vector search
 extension cannot load.
 
-## Solutions
+## Solutions
 
-### 1  |  Python‑only Fix (Recommended)
+### 1  |  Python‑only Fix (Recommended)
 
 Add to 'requirements.txt':
 ```text
@@ -34,7 +34,7 @@ except ImportError:
     # Fallback — will still work on environments that already have a good SQLite
     pass
 ```
-### 2  |  Environment Override
+### 2  |  Environment Override
 If you build your own Python interpreter with a modern SQLite, set:
 ```bash
 export CHROMA_SQLITE_OVERRIDE=1
@@ -46,7 +46,7 @@ ChromaDB will skip the version check and trust your system library.
 Use an up‑to‑date base such as python:3.11-slim or python:3.10-bookworm which already ships
 SQLite 3.43 + FTS5.
 
-## Verification
+## Verification
 ```python
 import chromadb
 client = chromadb.Client()
@@ -54,7 +54,7 @@ collection = client.create_collection("test")
 print("✅ ChromaDB working correctly!")
 ```
 
-## Tested Environments
+## Tested Environments
 
 Ubuntu 20.04 & 22.04 (Python 3.10 & 3.11)
 
