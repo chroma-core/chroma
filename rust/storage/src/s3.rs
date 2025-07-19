@@ -30,12 +30,13 @@ use bytes::Bytes;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
-use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::{Counter, Histogram};
 use rand::Rng;
 use std::clone::Clone;
 use std::ops::Range;
@@ -55,6 +56,8 @@ pub struct StorageMetrics {
     s3_put_count: Counter<u64>,
     s3_delete_count: Counter<u64>,
     s3_delete_many_count: Counter<u64>,
+    s3_get_latency_ms: Histogram<u64>,
+    hostname: String,
 }
 
 impl Default for StorageMetrics {
@@ -76,6 +79,12 @@ impl Default for StorageMetrics {
                 .u64_counter("s3_delete_many_count")
                 .with_description("Number of S3 delete many operations")
                 .build(),
+            s3_get_latency_ms: opentelemetry::global::meter("chroma.storage")
+                .u64_histogram("s3_get_latency_ms")
+                .with_description("Latency of S3 get operations in milliseconds")
+                .with_unit("ms")
+                .build(),
+            hostname: std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
         }
     }
 }
@@ -162,7 +171,6 @@ impl S3Storage {
             .send()
             .instrument(tracing::trace_span!("cold S3 get"))
             .await;
-        self.metrics.s3_get_count.add(1, &[]);
         match res {
             Ok(res) => {
                 let byte_stream = res.body;
@@ -302,6 +310,10 @@ impl S3Storage {
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        let metric_attr = &[opentelemetry::KeyValue::new(
+            "hostname",
+            self.metrics.hostname.clone(),
+        )];
         let (content_length, ranges, e_tag) = self.get_key_ranges(key).await?;
 
         // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
@@ -315,7 +327,13 @@ impl S3Storage {
         let range_and_output_slices = ranges.iter().zip(output_slices.drain(..));
         let mut get_futures = Vec::new();
         let num_parts = range_and_output_slices.len();
+        self.metrics.s3_get_count.add(num_parts as u64, metric_attr);
         for (range, output_slice) in range_and_output_slices {
+            let _stopwatch = Stopwatch::new(
+                &self.metrics.s3_get_latency_ms,
+                metric_attr,
+                chroma_tracing::util::StopWatchUnit::Millis,
+            );
             let range_str = format!("bytes={}-{}", range.0, range.1);
             let fut = self
                 .fetch_range(key.to_string(), range_str)
@@ -358,6 +376,16 @@ impl S3Storage {
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        let metric_attr = &[opentelemetry::KeyValue::new(
+            "hostname",
+            self.metrics.hostname.clone(),
+        )];
+        self.metrics.s3_get_count.add(1, metric_attr);
+        let _stopwatch = Stopwatch::new(
+            &self.metrics.s3_get_latency_ms,
+            metric_attr,
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
         let (mut stream, e_tag) = self.get_stream_and_e_tag(key).await?;
         let buf = async {
             let mut buf: Vec<u8> = Vec::new();
