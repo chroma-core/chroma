@@ -10,12 +10,14 @@ from typing import (
     TypeVar,
     Union,
     cast,
+    Tuple,
 )
 from chromadb.types import Metadata
 import numpy as np
 from uuid import UUID
-
 import chromadb.utils.embedding_functions as ef
+from chromadb.base_types import CollectionSchema, ValueType
+
 from chromadb.api.types import (
     URI,
     URIs,
@@ -47,6 +49,7 @@ from chromadb.api.types import (
     maybe_cast_one_to_many,
     normalize_base_record_set,
     normalize_insert_record_set,
+    update_schema_with_insert_record_set,
     validate_base_record_set,
     validate_ids,
     validate_include,
@@ -204,7 +207,8 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]],
         uris: Optional[OneOrMany[URI]],
-    ) -> AddRequest:
+        schema: Optional[Dict[str, Dict[ValueType, CollectionSchema]]],
+    ) -> Tuple[AddRequest, Dict[str, Dict[ValueType, CollectionSchema]]]:
         # Unpack
         add_records = normalize_insert_record_set(
             ids=ids,
@@ -219,6 +223,10 @@ class CollectionCommon(Generic[ClientT]):
         validate_insert_record_set(record_set=add_records)
         validate_record_set_contains_any(record_set=add_records, contains_any={"ids"})
 
+        new_attributes = update_schema_with_insert_record_set(
+            record_set=add_records, schema=schema
+        )
+
         # Prepare
         if add_records["embeddings"] is None:
             validate_record_set_for_embedding(record_set=add_records)
@@ -226,12 +234,15 @@ class CollectionCommon(Generic[ClientT]):
         else:
             add_embeddings = add_records["embeddings"]
 
-        return AddRequest(
-            ids=add_records["ids"],
-            embeddings=add_embeddings,
-            metadatas=add_records["metadatas"],
-            documents=add_records["documents"],
-            uris=add_records["uris"],
+        return (
+            AddRequest(
+                ids=add_records["ids"],
+                embeddings=add_embeddings,
+                metadatas=add_records["metadatas"],
+                documents=add_records["documents"],
+                uris=add_records["uris"],
+            ),
+            new_attributes,
         )
 
     @validation_context("get")
@@ -348,7 +359,8 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]],
         images: Optional[OneOrMany[Image]],
         uris: Optional[OneOrMany[URI]],
-    ) -> UpdateRequest:
+        schema: Optional[Dict[str, Dict[ValueType, CollectionSchema]]],
+    ) -> Tuple[UpdateRequest, Dict[str, Dict[ValueType, CollectionSchema]]]:
         # Unpack
         update_records = normalize_insert_record_set(
             ids=ids,
@@ -361,6 +373,9 @@ class CollectionCommon(Generic[ClientT]):
 
         # Validate
         validate_insert_record_set(record_set=update_records)
+        new_attributes = update_schema_with_insert_record_set(
+            record_set=update_records, schema=schema
+        )
 
         # Prepare
         if update_records["embeddings"] is None:
@@ -378,12 +393,15 @@ class CollectionCommon(Generic[ClientT]):
         else:
             update_embeddings = update_records["embeddings"]
 
-        return UpdateRequest(
-            ids=update_records["ids"],
-            embeddings=update_embeddings,
-            metadatas=update_records["metadatas"],
-            documents=update_records["documents"],
-            uris=update_records["uris"],
+        return (
+            UpdateRequest(
+                ids=update_records["ids"],
+                embeddings=update_embeddings,
+                metadatas=update_records["metadatas"],
+                documents=update_records["documents"],
+                uris=update_records["uris"],
+            ),
+            new_attributes,
         )
 
     @validation_context("upsert")
@@ -400,7 +418,8 @@ class CollectionCommon(Generic[ClientT]):
         documents: Optional[OneOrMany[Document]] = None,
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
-    ) -> UpsertRequest:
+        schema: Optional[Dict[str, Dict[ValueType, CollectionSchema]]] = None,
+    ) -> Tuple[UpsertRequest, Dict[str, Dict[ValueType, CollectionSchema]]]:
         # Unpack
         upsert_records = normalize_insert_record_set(
             ids=ids,
@@ -413,7 +432,9 @@ class CollectionCommon(Generic[ClientT]):
 
         # Validate
         validate_insert_record_set(record_set=upsert_records)
-
+        new_attributes = update_schema_with_insert_record_set(
+            record_set=upsert_records, schema=schema
+        )
         # Prepare
         if upsert_records["embeddings"] is None:
             validate_record_set_for_embedding(
@@ -423,12 +444,15 @@ class CollectionCommon(Generic[ClientT]):
         else:
             upsert_embeddings = upsert_records["embeddings"]
 
-        return UpsertRequest(
-            ids=upsert_records["ids"],
-            metadatas=upsert_records["metadatas"],
-            embeddings=upsert_embeddings,
-            documents=upsert_records["documents"],
-            uris=upsert_records["uris"],
+        return (
+            UpsertRequest(
+                ids=upsert_records["ids"],
+                metadatas=upsert_records["metadatas"],
+                embeddings=upsert_embeddings,
+                documents=upsert_records["documents"],
+                uris=upsert_records["uris"],
+            ),
+            new_attributes,
         )
 
     @validation_context("delete")
