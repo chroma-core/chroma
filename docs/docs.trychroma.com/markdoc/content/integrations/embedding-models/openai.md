@@ -49,16 +49,16 @@ openai_ef = embedding_functions.OpenAIEmbeddingFunction(
 
 {% Tab label="typescript" %}
 
-You can pass in an optional `model` argument, which lets you choose which OpenAI embeddings model to use. By default, Chroma uses `text-embedding-3-small`.
+You must pass a `modelName` argument, which specifies the OpenAI embeddings model to use. The most common choice is `text-embedding-3-small`.
 
 ```typescript
 // npm install @chroma-core/openai
 
-import { OpenAIEmbeddingFunction } from '@chroma-core/ollama';
+import { OpenAIEmbeddingFunction } from '@chroma-core/openai';
 
 const embeddingFunction = new OpenAIEmbeddingFunction({
-    openai_api_key: "apiKey",
-    openai_model: "text-embedding-3-small"
+    apiKey: "apiKey",
+    modelName: "text-embedding-3-small"
 })
 
 // use directly
