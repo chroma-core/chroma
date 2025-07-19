@@ -1,4 +1,4 @@
-ChromaDB SQLite Compatibility Guide
+# ChromaDB SQLite Compatibility Guide
 
 Why this guide? Many developers hit confusing sqlite3 errors when first running ChromaDB on
 systems that ship an outdated SQLite build.  This quick reference shows how to diagnose and fix the
@@ -19,12 +19,13 @@ extension cannot load.
 
 ### 1  |  Python‑only Fix (Recommended)
 
-Add to requirements.txt:
-
+Add to 'requirements.txt':
+```text
 pysqlite3-binary>=0.5.2
+```
 
 Override the import at the very top of your main entrypoint (before any other SQLite usage):
-
+```python
 import sys
 try:
     import pysqlite3 as sqlite3  # bundles SQLite 3.45 with FTS5
@@ -32,11 +33,12 @@ try:
 except ImportError:
     # Fallback — will still work on environments that already have a good SQLite
     pass
-
+```
 ### 2  |  Environment Override
 If you build your own Python interpreter with a modern SQLite, set:
-
+```bash
 export CHROMA_SQLITE_OVERRIDE=1
+```
 
 ChromaDB will skip the version check and trust your system library.
 
@@ -45,11 +47,12 @@ Use an up‑to‑date base such as python:3.11-slim or python:3.10-bookworm whic
 SQLite 3.43 + FTS5.
 
 ## Verification
-
+```python
 import chromadb
 client = chromadb.Client()
 collection = client.create_collection("test")
 print("✅ ChromaDB working correctly!")
+```
 
 ## Tested Environments
 
