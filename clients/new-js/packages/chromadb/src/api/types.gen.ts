@@ -2,7 +2,7 @@
 
 export type AddCollectionRecordsPayload = {
   documents?: Array<string | null> | null;
-  embeddings?: null | EmbeddingsPayload;
+  embeddings: EmbeddingsPayload;
   ids: Array<string>;
   metadatas?: Array<null | HashMap> | null;
   uris?: Array<string | null> | null;

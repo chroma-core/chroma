@@ -545,6 +545,13 @@ class EmbeddingFunction(Protocol[D]):
     def __call__(self, input: D) -> Embeddings:
         ...
 
+    def embed_query(self, input: D) -> Embeddings:
+        """
+        Get the embeddings for a query input.
+        This method is optional, and if not implemented, the default behavior is to call __call__.
+        """
+        return self.__call__(input)
+
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
         # Raise an exception if __call__ is not defined since it is expected to be defined
