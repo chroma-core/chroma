@@ -1866,6 +1866,7 @@ dependencies = [
  "chroma-config",
  "chroma-error",
  "futures",
+ "opentelemetry",
  "parking_lot",
  "rand 0.8.5",
  "serde",

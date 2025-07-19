@@ -13,7 +13,7 @@ use chroma_error::ChromaError;
 use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::{future::Shared, stream, FutureExt, StreamExt};
-use opentelemetry::KeyValue;
+use opentelemetry::{global, KeyValue};
 use std::{
     collections::HashMap,
     future::Future,
@@ -40,6 +40,48 @@ pub struct AdmissionControlledS3Storage {
     #[allow(clippy::type_complexity)]
     outstanding_read_requests: Arc<tokio::sync::Mutex<HashMap<String, InflightRequest>>>,
     rate_limiter: Arc<RateLimitPolicy>,
+    metrics: AdmissionControlledS3StorageMetrics,
+}
+
+#[derive(Debug, Clone)]
+struct AdmissionControlledS3StorageMetrics {
+    pub nac_dedup_count: opentelemetry::metrics::Counter<u64>,
+    pub nac_lock_wait_duration_us: opentelemetry::metrics::Histogram<u64>,
+    pub outstanding_read_requests: Arc<AtomicUsize>,
+    pub read_requests_waiting_for_token: Arc<AtomicUsize>,
+    pub hostname: String,
+    pub nac_outstanding_read_requests: opentelemetry::metrics::Histogram<u64>,
+    pub nac_read_requests_waiting_for_token: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl Default for AdmissionControlledS3StorageMetrics {
+    fn default() -> Self {
+        let meter = global::meter("chroma");
+        Self {
+            outstanding_read_requests: Arc::new(AtomicUsize::new(0)),
+            read_requests_waiting_for_token: Arc::new(AtomicUsize::new(0)),
+            hostname: std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
+            nac_dedup_count: meter
+                .u64_counter("nac_dedup_count")
+                .with_description("Number of deduplicated requests")
+                .build(),
+            nac_lock_wait_duration_us: meter
+                .u64_histogram("nac_lock_wait_duration_us")
+                .with_description("Duration of waiting for the lock in milliseconds")
+                .with_unit("ms")
+                .build(),
+            nac_outstanding_read_requests: meter
+                .u64_histogram("nac_outstanding_requests")
+                .with_description("Number of outstanding requests in the admission control system")
+                .build(),
+            nac_read_requests_waiting_for_token: meter
+                .u64_histogram("nac_read_requests_waiting_for_token")
+                .with_description(
+                    "Number of requests in the admission control system waiting for a token",
+                )
+                .build(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +161,7 @@ impl AdmissionControlledS3Storage {
                 2,
                 &vec![1.0],
             ))),
+            metrics: AdmissionControlledS3StorageMetrics::default(),
         }
     }
 
@@ -127,6 +170,7 @@ impl AdmissionControlledS3Storage {
             storage,
             outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(policy),
+            metrics: AdmissionControlledS3StorageMetrics::default(),
         }
     }
 
@@ -135,6 +179,9 @@ impl AdmissionControlledS3Storage {
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
         priority: Arc<AtomicUsize>,
+        outstanding_read_request_counter: Arc<AtomicUsize>,
+        outstanding_read_request_metric: opentelemetry::metrics::Histogram<u64>,
+        hostname: String,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let (content_length, ranges, e_tag) = storage.get_key_ranges(&key).await?;
 
@@ -159,11 +206,20 @@ impl AdmissionControlledS3Storage {
             let storage_clone = storage.clone();
             let key_clone = key.clone();
             let priority = priority.clone();
+            let hostname_clone = hostname.clone();
+            let outstanding_read_request_counter = outstanding_read_request_counter.clone();
+            let outstanding_read_request_metric = outstanding_read_request_metric.clone();
             let fut = async move {
                 // Acquire permit.
                 let token = rate_limiter_clone.enter(priority, None).await;
                 let range_str = format!("bytes={}-{}", range.0, range.1);
-                storage_clone
+                let hostname_attribute = &[KeyValue::new("hostname", hostname_clone)];
+                outstanding_read_request_metric.record(
+                    outstanding_read_request_counter.load(Ordering::Relaxed) as u64,
+                    hostname_attribute,
+                );
+                outstanding_read_request_counter.fetch_add(1, Ordering::Relaxed);
+                let res = storage_clone
                     .fetch_range(key_clone, range_str)
                     .then(|res| async move {
                         let _token = token;
@@ -190,7 +246,9 @@ impl AdmissionControlledS3Storage {
                         }
                         // _token gets dropped due to RAII and we've released the permit.
                     })
-                    .await
+                    .await;
+                outstanding_read_request_counter.fetch_sub(1, Ordering::Relaxed);
+                res
             };
             futures.push(fut);
         }
@@ -202,16 +260,28 @@ impl AdmissionControlledS3Storage {
         Ok((Arc::new(output_buffer), e_tag))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn read_from_storage(
         storage: S3Storage,
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
         priority: Arc<AtomicUsize>,
         channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
+        outstanding_read_request_counter: Arc<AtomicUsize>,
+        outstanding_read_request_metric: opentelemetry::metrics::Histogram<u64>,
+        hostname: String,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        let hostname_attribute = &[KeyValue::new("hostname", hostname.clone())];
+        outstanding_read_request_metric.record(
+            outstanding_read_request_counter.load(Ordering::Relaxed) as u64,
+            hostname_attribute,
+        );
+        outstanding_read_request_counter.fetch_add(1, Ordering::Relaxed);
         // Acquire permit.
         let _permit = rate_limiter.enter(priority, channel_receiver).await;
-        storage.get_with_e_tag(&key).await
+        let res = storage.get_with_e_tag(&key).await;
+        outstanding_read_request_counter.fetch_sub(1, Ordering::Relaxed);
+        res
         // Permit gets dropped here due to RAII.
     }
 
@@ -220,16 +290,32 @@ impl AdmissionControlledS3Storage {
         key: String,
         options: GetOptions,
     ) -> Result<Arc<Vec<u8>>, StorageError> {
+        let hostname_attribute = &[KeyValue::new("hostname", self.metrics.hostname.clone())];
+        self.metrics.nac_outstanding_read_requests.record(
+            self.metrics
+                .outstanding_read_requests
+                .load(Ordering::Relaxed) as u64,
+            hostname_attribute,
+        );
+        self.metrics
+            .outstanding_read_requests
+            .fetch_add(1, Ordering::Relaxed);
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.
         let future_to_await;
         {
+            let _stopwatch = Stopwatch::new(
+                &self.metrics.nac_lock_wait_duration_us,
+                hostname_attribute,
+                chroma_tracing::util::StopWatchUnit::Micros,
+            );
             let mut requests = self.outstanding_read_requests.lock().await;
             let maybe_inflight = requests.get(&key).cloned();
             future_to_await = match maybe_inflight {
                 Some(fut) => {
                     tracing::trace!("[AdmissionControlledS3] Found inflight request to s3 for key: {:?}. Deduping", key);
+                    self.metrics.nac_dedup_count.add(1, hostname_attribute);
                     fut.update_priority(options.priority).await;
                     fut.future
                 }
@@ -240,6 +326,9 @@ impl AdmissionControlledS3Storage {
                         self.rate_limiter.clone(),
                         key.clone(),
                         atomic_priority.clone(),
+                        self.metrics.read_requests_waiting_for_token.clone(),
+                        self.metrics.nac_read_requests_waiting_for_token.clone(),
+                        self.metrics.hostname.clone(),
                     )
                     .boxed()
                     .shared();
@@ -261,6 +350,9 @@ impl AdmissionControlledS3Storage {
             let mut requests = self.outstanding_read_requests.lock().await;
             requests.remove(&key);
         }
+        self.metrics
+            .outstanding_read_requests
+            .fetch_sub(1, Ordering::Relaxed);
         Ok(res?.0)
     }
 
@@ -275,18 +367,38 @@ impl AdmissionControlledS3Storage {
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        let hostname_attribute = &[KeyValue::new("hostname", self.metrics.hostname.clone())];
+        self.metrics.nac_outstanding_read_requests.record(
+            self.metrics
+                .outstanding_read_requests
+                .load(Ordering::Relaxed) as u64,
+            hostname_attribute,
+        );
+        self.metrics
+            .outstanding_read_requests
+            .fetch_add(1, Ordering::Relaxed);
         if options.requires_strong_consistency {
-            return self.strongly_consistent_get_with_e_tag(key, options).await;
+            let res = self.strongly_consistent_get_with_e_tag(key, options).await;
+            self.metrics
+                .outstanding_read_requests
+                .fetch_sub(1, Ordering::Relaxed);
+            return res;
         }
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.
         let future_to_await;
         {
+            let _stopwatch = Stopwatch::new(
+                &self.metrics.nac_lock_wait_duration_us,
+                hostname_attribute,
+                chroma_tracing::util::StopWatchUnit::Micros,
+            );
             let mut requests = self.outstanding_read_requests.lock().await;
             let maybe_inflight = requests.get(key).cloned();
             future_to_await = match maybe_inflight {
                 Some(fut) => {
+                    self.metrics.nac_dedup_count.add(1, hostname_attribute);
                     // Update the priority if the new request has higher priority.
                     fut.update_priority(options.priority).await;
                     fut.future
@@ -300,6 +412,9 @@ impl AdmissionControlledS3Storage {
                         key.to_string(),
                         atomic_priority.clone(),
                         Some(rx),
+                        self.metrics.read_requests_waiting_for_token.clone(),
+                        self.metrics.nac_read_requests_waiting_for_token.clone(),
+                        self.metrics.hostname.clone(),
                     )
                     .boxed()
                     .shared();
@@ -321,6 +436,9 @@ impl AdmissionControlledS3Storage {
             let mut requests = self.outstanding_read_requests.lock().await;
             requests.remove(key);
         }
+        self.metrics
+            .outstanding_read_requests
+            .fetch_sub(1, Ordering::Relaxed);
         res
     }
 
@@ -336,6 +454,9 @@ impl AdmissionControlledS3Storage {
             key.to_string(),
             atomic_priority,
             None,
+            self.metrics.read_requests_waiting_for_token.clone(),
+            self.metrics.nac_read_requests_waiting_for_token.clone(),
+            self.metrics.hostname.clone(),
         )
         .await
     }
@@ -551,19 +672,35 @@ impl RateLimitPolicy {
 #[derive(Debug)]
 pub struct CountBasedPolicyMetrics {
     // The delay in milliseconds before a request is allowed to proceed.
-    pub nac_delay_ms: opentelemetry::metrics::Histogram<u64>,
+    pub nac_delay_secs: opentelemetry::metrics::Histogram<u64>,
+    pub nac_priority_increase_count: opentelemetry::metrics::Counter<u64>,
+    pub nac_receive_channel_closed_count: opentelemetry::metrics::Counter<u64>,
+    pub hostname: String,
+    pub nac_available_permits: opentelemetry::metrics::Histogram<u64>,
 }
 
 impl Default for CountBasedPolicyMetrics {
     fn default() -> Self {
+        let meter = opentelemetry::global::meter("chroma.storage.admission_control");
         Self {
-            nac_delay_ms: opentelemetry::global::meter("chroma.storage.admission_control")
-                .u64_histogram("nac_delay_ms")
-                .with_description(
-                    "The delay in milliseconds before a request is allowed to proceed.",
-                )
-                .with_unit("ms")
+            nac_delay_secs: meter
+                .u64_histogram("nac_delay_secs")
+                .with_description("The delay in seconds before a request is allowed to proceed.")
+                .with_unit("secs")
                 .build(),
+            nac_priority_increase_count: meter
+                .u64_counter("nac_priority_increase_count")
+                .with_description("Number of times priority was increased for a request.")
+                .build(),
+            nac_receive_channel_closed_count: meter
+                .u64_counter("nac_receive_channel_closed_count")
+                .with_description("Number of times the receive channel was closed.")
+                .build(),
+            nac_available_permits: meter
+                .u64_histogram("nac_available_permits")
+                .with_description("Number of available permits in the semaphore.")
+                .build(),
+            hostname: std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
         }
     }
 }
@@ -593,11 +730,19 @@ impl CountBasedPolicy {
         priority: Arc<AtomicUsize>,
         mut channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
-        let priority_attribute = &[KeyValue::new(
-            "priority",
-            priority.load(Ordering::Relaxed).to_string(),
-        )];
-        let _stopwatch = Stopwatch::new(&self.metrics.nac_delay_ms, priority_attribute);
+        let priority_and_hostname_attr = &[
+            KeyValue::new("priority", priority.load(Ordering::Relaxed).to_string()),
+            KeyValue::new("hostname", self.metrics.hostname.clone()),
+        ];
+        self.metrics.nac_available_permits.record(
+            self.remaining_tokens[priority.load(Ordering::Relaxed)].available_permits() as u64,
+            priority_and_hostname_attr,
+        );
+        let _stopwatch = Stopwatch::new(
+            &self.metrics.nac_delay_secs,
+            priority_and_hostname_attr,
+            chroma_tracing::util::StopWatchUnit::Seconds,
+        );
         loop {
             let current_priority = priority.load(Ordering::SeqCst);
             let current_priority: StorageRequestPriority = current_priority.into();
@@ -624,10 +769,14 @@ impl CountBasedPolicy {
                             // Reevaluate priority if we got a notification.
                             match did_recv {
                                 Some(_) => {
+                                    let hostname_attribute = KeyValue::new("hostname", self.metrics.hostname.clone());
+                                    self.metrics.nac_priority_increase_count.add(1, &[hostname_attribute]);
                                     // If we got a notification, continue to acquire.
                                     continue;
                                 }
                                 None => {
+                                    let hostname_attribute = KeyValue::new("hostname", self.metrics.hostname.clone());
+                                    self.metrics.nac_receive_channel_closed_count.add(1, &[hostname_attribute]);
                                     // If the channel was closed, break out of the loop.
                                     channel_receiver = None;
                                     continue;

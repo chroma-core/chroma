@@ -2059,7 +2059,11 @@ impl SpannIndexWriter {
             self.collection_id.to_string(),
         )];
         let gc_latency_metric = self.metrics.gc_latency.clone();
-        let stopwatch = Stopwatch::new(&gc_latency_metric, attributes);
+        let stopwatch = Stopwatch::new(
+            &gc_latency_metric,
+            attributes,
+            chroma_tracing::util::StopWatchUnit::Seconds,
+        );
         if self.gc_context.pl_context.enabled {
             match &self.gc_context.pl_context.policy {
                 PlGarbageCollectionPolicy::RandomSample(random_sample) => {
@@ -2225,7 +2229,11 @@ impl SpannIndexWriter {
             self.collection_id.to_string(),
         )];
         let pl_flusher = {
-            let stopwatch = Stopwatch::new(&self.metrics.pl_commit_latency, attribute);
+            let stopwatch = Stopwatch::new(
+                &self.metrics.pl_commit_latency,
+                attribute,
+                chroma_tracing::util::StopWatchUnit::Millis,
+            );
             let pl_writer_clone = self.posting_list_writer.clone();
             let pl_flusher = pl_writer_clone
                 .commit::<u32, &SpannPostingList<'_>>()
@@ -2241,7 +2249,11 @@ impl SpannIndexWriter {
             pl_flusher
         };
         let versions_map_flusher = {
-            let stopwatch = Stopwatch::new(&self.metrics.versions_map_commit_latency, attribute);
+            let stopwatch = Stopwatch::new(
+                &self.metrics.versions_map_commit_latency,
+                attribute,
+                chroma_tracing::util::StopWatchUnit::Millis,
+            );
             // Versions map. Create a writer, write all the data and commit.
             let mut bf_options = BlockfileWriterOptions::new(self.prefix_path.clone());
             bf_options = bf_options.unordered_mutations();
@@ -2311,7 +2323,11 @@ impl SpannIndexWriter {
 
         // Hnsw.
         let (hnsw_id, prefix_path) = {
-            let stopwatch = Stopwatch::new(&self.metrics.hnsw_commit_latency, attribute);
+            let stopwatch = Stopwatch::new(
+                &self.metrics.hnsw_commit_latency,
+                attribute,
+                chroma_tracing::util::StopWatchUnit::Millis,
+            );
             let (hnsw_id, prefix_path, hnsw_index) = match self.cleaned_up_hnsw_index {
                 Some(index) => {
                     tracing::info!("Committing cleaned up hnsw index");
@@ -2404,7 +2420,11 @@ impl SpannIndexFlusher {
             self.collection_id.to_string(),
         )];
         {
-            let stopwatch = Stopwatch::new(&self.metrics.pl_flush_latency, attribute);
+            let stopwatch = Stopwatch::new(
+                &self.metrics.pl_flush_latency,
+                attribute,
+                chroma_tracing::util::StopWatchUnit::Millis,
+            );
             let num_pl_entries_flushed = self.pl_flusher.num_entries();
             self.pl_flusher
                 .flush::<u32, &SpannPostingList<'_>>()
@@ -2423,7 +2443,11 @@ impl SpannIndexFlusher {
             );
         }
         {
-            let stopwatch = Stopwatch::new(&self.metrics.versions_map_flush_latency, attribute);
+            let stopwatch = Stopwatch::new(
+                &self.metrics.versions_map_flush_latency,
+                attribute,
+                chroma_tracing::util::StopWatchUnit::Millis,
+            );
             let num_versions_map_entries_flushed = self.versions_map_flusher.num_entries();
             self.versions_map_flusher
                 .flush::<u32, u32>()
@@ -2449,7 +2473,11 @@ impl SpannIndexFlusher {
                 SpannIndexWriterError::MaxHeadIdFlushError(e)
             })?;
         {
-            let stopwatch = Stopwatch::new(&self.metrics.hnsw_flush_latency, attribute);
+            let stopwatch = Stopwatch::new(
+                &self.metrics.hnsw_flush_latency,
+                attribute,
+                chroma_tracing::util::StopWatchUnit::Millis,
+            );
             self.hnsw_flusher
                 .provider
                 .flush(&self.hnsw_flusher.prefix_path, &self.hnsw_flusher.index_id)

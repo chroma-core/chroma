@@ -67,6 +67,29 @@ pub struct Dispatcher {
     waiters: Vec<TaskRequestMessage>,
     active_io_tasks: Arc<AtomicU64>,
     worker_handles: Arc<Mutex<Vec<ComponentHandle<WorkerThread>>>>,
+    metrics: DispatcherMetrics,
+}
+
+#[derive(Debug, Clone)]
+struct DispatcherMetrics {
+    worker_queue_depth: opentelemetry::metrics::Histogram<u64>,
+    io_task_depth: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl Default for DispatcherMetrics {
+    fn default() -> Self {
+        let meter = opentelemetry::global::meter("chroma.execution.dispatcher");
+        DispatcherMetrics {
+            worker_queue_depth: meter
+                .u64_histogram("worker_queue_depth")
+                .with_description("The depth of the worker queue")
+                .build(),
+            io_task_depth: meter
+                .u64_histogram("io_task_depth")
+                .with_description("The depth of the IO task queue")
+                .build(),
+        }
+    }
 }
 
 impl Dispatcher {
@@ -79,6 +102,7 @@ impl Dispatcher {
             waiters: Vec::new(),
             active_io_tasks: Arc::new(AtomicU64::new(active_io_tasks as u64)),
             worker_handles: Arc::new(Mutex::new(Vec::new())),
+            metrics: DispatcherMetrics::default(),
         }
     }
 
@@ -102,6 +126,8 @@ impl Dispatcher {
     /// # Parameters
     /// - task: The task to enqueue
     async fn enqueue_task(&mut self, mut task: TaskMessage) {
+        let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string());
+        let hostname_kv = &[opentelemetry::KeyValue::new("hostname", hostname)];
         match task.get_type() {
             OperatorType::IO => {
                 let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name(), task_type = "io");
@@ -114,6 +140,7 @@ impl Dispatcher {
                 // This is conceptually what a semaphore is doing, except that it bails if
                 // acquisition fails rather than blocking.
                 let mut witness = self.active_io_tasks.load(Ordering::Relaxed);
+                self.metrics.io_task_depth.record(witness, hostname_kv);
                 loop {
                     if witness == 0 {
                         task.abort().await;
@@ -142,7 +169,9 @@ impl Dispatcher {
                 // If a worker is waiting for a task, send it to the worker in FIFO order
                 // Otherwise, add it to the task queue
                 let span = trace_span!(parent: Span::current(), "Other task execution", name = task.get_name(), task_type = "other");
-
+                self.metrics
+                    .worker_queue_depth
+                    .record(self.task_queue.len() as u64, hostname_kv);
                 match self.waiters.pop() {
                     Some(channel) => match channel.reply_to.send(task, Some(span)).await {
                         Ok(_) => {}

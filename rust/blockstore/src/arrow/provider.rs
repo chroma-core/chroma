@@ -406,7 +406,11 @@ impl BlockManager {
     ) -> Block {
         let trace_id = get_current_trace_id().to_string();
         let attribute = [KeyValue::new("trace_id", trace_id)];
-        let _stopwatch = Stopwatch::new(&self.block_metrics.commit_latency, &attribute);
+        let _stopwatch = Stopwatch::new(
+            &self.block_metrics.commit_latency,
+            &attribute,
+            chroma_tracing::util::StopWatchUnit::Micros,
+        );
         let delta_id = delta.id();
         let record_batch = delta.finish::<K, V>(None);
         let block = Block::from_record_batch(delta_id, record_batch);
@@ -507,7 +511,11 @@ impl BlockManager {
         let key = Self::format_key(prefix_path, &block.id);
         let trace_id = get_current_trace_id().to_string();
         let attribute = [KeyValue::new("trace_id", trace_id)];
-        let _stopwatch = Stopwatch::new(&self.block_metrics.flush_latency, &attribute);
+        let _stopwatch = Stopwatch::new(
+            &self.block_metrics.flush_latency,
+            &attribute,
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
         let block_bytes_len = bytes.len();
         let res = self
             .storage
