@@ -152,39 +152,47 @@ impl InternalCollectionConfiguration {
         }
     }
 
-    pub fn update(&mut self, configuration: &UpdateCollectionConfiguration) {
+    pub fn update(&mut self, configuration: &InternalUpdateCollectionConfiguration) {
         // Update vector_index if it exists in the update configuration
 
-        if let Some(hnsw_config) = &configuration.hnsw {
-            if let VectorIndexConfiguration::Hnsw(current_config) = &mut self.vector_index {
-                // Update only the non-None fields from the update configuration
-                if let Some(ef_search) = hnsw_config.ef_search {
-                    current_config.ef_search = ef_search;
+        if let Some(vector_index) = &configuration.vector_index {
+            match vector_index {
+                UpdateVectorIndexConfiguration::Hnsw(hnsw_config) => {
+                    if let VectorIndexConfiguration::Hnsw(current_config) = &mut self.vector_index {
+                        if let Some(update_config) = hnsw_config {
+                            if let Some(ef_search) = update_config.ef_search {
+                                current_config.ef_search = ef_search;
+                            }
+                            if let Some(max_neighbors) = update_config.max_neighbors {
+                                current_config.max_neighbors = max_neighbors;
+                            }
+                            if let Some(num_threads) = update_config.num_threads {
+                                current_config.num_threads = num_threads;
+                            }
+                            if let Some(resize_factor) = update_config.resize_factor {
+                                current_config.resize_factor = resize_factor;
+                            }
+                            if let Some(sync_threshold) = update_config.sync_threshold {
+                                current_config.sync_threshold = sync_threshold;
+                            }
+                            if let Some(batch_size) = update_config.batch_size {
+                                current_config.batch_size = batch_size;
+                            }
+                        }
+                    }
                 }
-                if let Some(max_neighbors) = hnsw_config.max_neighbors {
-                    current_config.max_neighbors = max_neighbors;
-                }
-                if let Some(num_threads) = hnsw_config.num_threads {
-                    current_config.num_threads = num_threads;
-                }
-                if let Some(resize_factor) = hnsw_config.resize_factor {
-                    current_config.resize_factor = resize_factor;
-                }
-                if let Some(sync_threshold) = hnsw_config.sync_threshold {
-                    current_config.sync_threshold = sync_threshold;
-                }
-                if let Some(batch_size) = hnsw_config.batch_size {
-                    current_config.batch_size = batch_size;
-                }
-            }
-        }
-        if let Some(spann_config) = &configuration.spann {
-            if let VectorIndexConfiguration::Spann(current_config) = &mut self.vector_index {
-                if let Some(search_nprobe) = spann_config.search_nprobe {
-                    current_config.search_nprobe = search_nprobe;
-                }
-                if let Some(ef_search) = spann_config.ef_search {
-                    current_config.ef_search = ef_search;
+                UpdateVectorIndexConfiguration::Spann(spann_config) => {
+                    if let VectorIndexConfiguration::Spann(current_config) = &mut self.vector_index
+                    {
+                        if let Some(update_config) = spann_config {
+                            if let Some(search_nprobe) = update_config.search_nprobe {
+                                current_config.search_nprobe = search_nprobe;
+                            }
+                            if let Some(ef_search) = update_config.ef_search {
+                                current_config.ef_search = ef_search;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -396,6 +404,48 @@ pub struct UpdateCollectionConfiguration {
     pub hnsw: Option<UpdateHnswConfiguration>,
     pub spann: Option<UpdateSpannConfiguration>,
     pub embedding_function: Option<EmbeddingFunctionConfiguration>,
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug, Clone)]
+pub struct InternalUpdateCollectionConfiguration {
+    pub vector_index: Option<UpdateVectorIndexConfiguration>,
+    pub embedding_function: Option<EmbeddingFunctionConfiguration>,
+}
+
+#[derive(Debug, Error)]
+pub enum UpdateCollectionConfigurationToInternalUpdateConfigurationError {
+    #[error("Multiple vector index configurations provided")]
+    MultipleVectorIndexConfigurations,
+}
+
+impl ChromaError for UpdateCollectionConfigurationToInternalUpdateConfigurationError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            Self::MultipleVectorIndexConfigurations => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
+impl TryFrom<UpdateCollectionConfiguration> for InternalUpdateCollectionConfiguration {
+    type Error = UpdateCollectionConfigurationToInternalUpdateConfigurationError;
+
+    fn try_from(value: UpdateCollectionConfiguration) -> Result<Self, Self::Error> {
+        match (value.hnsw, value.spann) {
+            (Some(_), Some(_)) => Err(Self::Error::MultipleVectorIndexConfigurations),
+            (Some(hnsw), None) => Ok(InternalUpdateCollectionConfiguration {
+                vector_index: Some(UpdateVectorIndexConfiguration::Hnsw(Some(hnsw))),
+                embedding_function: value.embedding_function,
+            }),
+            (None, Some(spann)) => Ok(InternalUpdateCollectionConfiguration {
+                vector_index: Some(UpdateVectorIndexConfiguration::Spann(Some(spann))),
+                embedding_function: value.embedding_function,
+            }),
+            (None, None) => Ok(InternalUpdateCollectionConfiguration {
+                vector_index: None,
+                embedding_function: value.embedding_function,
+            }),
+        }
+    }
 }
 
 #[cfg(test)]
