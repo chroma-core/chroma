@@ -43,8 +43,8 @@ export CHROMA_SQLITE_OVERRIDE=1
 ChromaDB will skip the version check and trust your system library.
 
 ### 3  |  Docker Base Image
-Use an up‑to‑date base such as python:3.11-slim or python:3.10-bookworm which already ships
-SQLite 3.43 + FTS5.
+Use an up‑to‑date base such as python:3.11-slim or "python:3.10-bookworm which already ships
+SQLite 3.43 + FTS5".
 
 ## Verification
 ```python
