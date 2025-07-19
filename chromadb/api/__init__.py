@@ -562,6 +562,63 @@ class AdminAPI(ABC):
         pass
 
 
+class AdminCloudAPI(ABC):
+    @abstractmethod
+    def create_database(self, name: str) -> None:
+        """Create a new database. Raises an error if the database already exists.
+
+        Args:
+            name: The name of the database to create.
+
+        """
+        pass
+
+    @abstractmethod
+    def get_database(self, name: str) -> Database:
+        """Get a database. Raises an error if the database does not exist.
+
+        Args:
+            name: The name of the database to get.
+
+        """
+        pass
+
+    @abstractmethod
+    def delete_database(self, name: str) -> None:
+        """Delete a database. Raises an error if the database does not exist.
+
+        Args:
+            name: The name of the database to delete.
+
+        """
+        pass
+
+    @abstractmethod
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+    ) -> Sequence[Database]:
+        """List all databases for a tenant. Raises an error if the tenant does not exist.
+
+        Args:
+            limit: The maximum number of databases to return.
+            offset: The offset to start from.
+
+        """
+        pass
+
+    @abstractmethod
+    def get_tenant(self, name: str) -> Tenant:
+        """Get a tenant. Raises an error if the tenant does not exist.
+
+        Args:
+            name: The name of the tenant to get.
+
+        """
+        pass
+
+
 class ServerAPI(BaseAPI, AdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing
     in a tenant and database. This is the root component of the Chroma System"""
