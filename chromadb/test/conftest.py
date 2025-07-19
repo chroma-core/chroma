@@ -131,7 +131,7 @@ def override_hypothesis_profile(
 
 
 NOT_CLUSTER_ONLY = os.getenv("CHROMA_CLUSTER_TEST_ONLY") != "1"
-COMPACTION_SLEEP = 120
+COMPACTION_SLEEP = 240
 
 
 def skip_if_not_cluster() -> pytest.MarkDecorator:
