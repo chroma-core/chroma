@@ -1,4 +1,4 @@
-FROM rust:1.81.0 AS builder
+FROM rust:1.82.0 AS builder
 
 ARG RELEASE_MODE=
 ARG PROTOC_VERSION=31.1
@@ -16,7 +16,7 @@ RUN ARCH=$(uname -m) && \
   curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/$PROTOC_ZIP && \
   unzip -o $PROTOC_ZIP -d /usr/local bin/protoc && \
   unzip -o $PROTOC_ZIP -d /usr/local 'include/*' && \
-  rm -f $PROTOC_ZIP && \ 
+  rm -f $PROTOC_ZIP && \
   chmod +x /usr/local/bin/protoc && \
   protoc --version  # Verify installed version
 

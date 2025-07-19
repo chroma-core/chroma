@@ -6,7 +6,7 @@ use chroma_cache::{CacheConfig, FoyerCacheConfig};
 
 fn main() {
     let mut config = FoyerCacheConfig::parse();
-    config.dir = None;
+    config.disk = vec![];
     let out = serde_yaml::to_string(&CacheConfig::Memory(config)).unwrap();
     print!("{out}");
 }

@@ -97,7 +97,7 @@ jobs:
           set -euo pipefail
 
           # Pre-pull base images to speed up the build
-          docker pull --platform ${{ matrix.docker_platform }} rust:1.81.0
+          docker pull --platform ${{ matrix.docker_platform }} rust:1.82.0
           docker pull --platform ${{ matrix.docker_platform }} debian:stable-slim
 
       - name: Build and push image

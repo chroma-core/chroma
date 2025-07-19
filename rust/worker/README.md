@@ -24,4 +24,4 @@ Start the Tilt stack and run `cargo test` to run all tests.
 
 ## Rust version
 
-Use rust 1.81.0 or greater.
+Use rust 1.82.0 or greater.

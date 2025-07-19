@@ -11,7 +11,7 @@ query_service:
     otel_endpoint: "http://otel-collector:4317"
     otel_filters:
         - crate_name: "worker"
-          filter_level: "trace"    
+          filter_level: "trace"
     my_member_id: "query-service-0"
     my_port: 50051
     assignment_policy:
@@ -60,11 +60,12 @@ query_service:
                 block_cache_config:
                     disk:
                         name: "block_cache"
-                        dir: "/cache/chroma/query-service/block-cache"
                         # 1k blocks * 8MiB = 8GiB, this is actually ignored in the disk cache config. Leaving it set to 1k for consistency.
                         capacity: 1000
                         mem: 8000 # 8GiB
-                        disk: 12884 # 12GiB
+                        disk:
+                            - path: "/cache/chroma/query-service/block-cache"
+                              capacity: 12884 # 12 GiB
                         file_size: 256 #  256 MiB
                         flushers: 4
                         flush: false
@@ -91,7 +92,7 @@ compaction_service:
     otel_endpoint: "http://otel-collector:4317"
     otel_filters:
         - crate_name: "worker"
-          filter_level: "trace"    
+          filter_level: "trace"
     my_member_id: "compaction-service-0"
     my_port: 50051
     assignment_policy:
@@ -177,9 +178,9 @@ log_service:
         endpoint: "http://otel-collector:4317"
         filters:
             - crate_name: "chroma_log"
-              filter_level: "trace" 
+              filter_level: "trace"
             - crate_name: "wal3"
-              filter_level: "trace"                  
+              filter_level: "trace"
     storage:
         admission_controlled_s3:
             s3_config:
