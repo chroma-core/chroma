@@ -60,7 +60,7 @@ Ubuntu 20.04 & 22.04 (Python 3.10 & 3.11)
 
 Windows 10 & 11 (WSL 2 + native)
 
-macOS Monterey 12 + (macOS‑provided Python & Homebrew)
+macOS Monterey 12  (macOS‑provided Python & Homebrew)
 
 Docker images based on Debian bookworm & Alpine edge
 
