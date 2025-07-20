@@ -213,6 +213,7 @@ impl ChromaError for CompactionError {
 
 #[derive(Debug)]
 pub struct CompactionResponse {
+    #[allow(dead_code)]
     pub(crate) collection_id: CollectionUuid,
 }
 
