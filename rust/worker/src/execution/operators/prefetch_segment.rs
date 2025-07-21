@@ -66,33 +66,36 @@ impl Operator<PrefetchSegmentInput, PrefetchSegmentOutput> for PrefetchSegmentOp
         &self,
         input: &PrefetchSegmentInput,
     ) -> Result<PrefetchSegmentOutput, PrefetchSegmentError> {
-        if !input.segment.prefetch_supported() {
-            return Err(PrefetchSegmentError::UnsupportedSegmentType(
-                input.segment.r#type,
-            ));
-        }
+        // if !input.segment.prefetch_supported() {
+        //     return Err(PrefetchSegmentError::UnsupportedSegmentType(
+        //         input.segment.r#type,
+        //     ));
+        // }
 
-        let mut futures = input
-            .segment
-            .filepaths_to_prefetch()
-            .into_iter()
-            .map(|blockfile_path| async move {
-                let (prefix, blockfile_id) = Segment::extract_prefix_and_id(&blockfile_path)?;
-                let count = input
-                    .blockfile_provider
-                    .prefetch(&blockfile_id, prefix)
-                    .await?;
-                Ok::<_, PrefetchSegmentError>(count)
-            })
-            .collect::<FuturesUnordered<_>>();
+        // let mut futures = input
+        //     .segment
+        //     .filepaths_to_prefetch()
+        //     .into_iter()
+        //     .map(|blockfile_path| async move {
+        //         let (prefix, blockfile_id) = Segment::extract_prefix_and_id(&blockfile_path)?;
+        //         let count = input
+        //             .blockfile_provider
+        //             .prefetch(&blockfile_id, prefix)
+        //             .await?;
+        //         Ok::<_, PrefetchSegmentError>(count)
+        //     })
+        //     .collect::<FuturesUnordered<_>>();
 
-        let mut total_blocks_fetched = 0;
-        while let Some(result) = futures.next().await {
-            total_blocks_fetched += result?;
-        }
+        // let mut total_blocks_fetched = 0;
+        // while let Some(result) = futures.next().await {
+        //     total_blocks_fetched += result?;
+        // }
 
+        // Ok(PrefetchSegmentOutput {
+        //     num_blocks_fetched: total_blocks_fetched,
+        // })
         Ok(PrefetchSegmentOutput {
-            num_blocks_fetched: total_blocks_fetched,
+            num_blocks_fetched: 0,
         })
     }
 
