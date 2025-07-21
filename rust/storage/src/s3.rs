@@ -37,6 +37,7 @@ use futures::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::KeyValue;
 use rand::Rng;
 use std::clone::Clone;
 use std::ops::Range;
@@ -57,6 +58,7 @@ pub struct StorageMetrics {
     s3_delete_count: Counter<u64>,
     s3_delete_many_count: Counter<u64>,
     s3_get_latency_ms: Histogram<u64>,
+    hostname_attribute: [KeyValue; 1],
 }
 
 impl Default for StorageMetrics {
@@ -83,6 +85,10 @@ impl Default for StorageMetrics {
                 .with_description("Latency of S3 get operations in milliseconds")
                 .with_unit("ms")
                 .build(),
+            hostname_attribute: [KeyValue::new(
+                "hostname",
+                std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
+            )],
         }
     }
 }
@@ -321,11 +327,13 @@ impl S3Storage {
         let range_and_output_slices = ranges.iter().zip(output_slices.drain(..));
         let mut get_futures = Vec::new();
         let num_parts = range_and_output_slices.len();
-        self.metrics.s3_get_count.add(num_parts as u64, &[]);
+        self.metrics
+            .s3_get_count
+            .add(num_parts as u64, &self.metrics.hostname_attribute);
         for (range, output_slice) in range_and_output_slices {
             let _stopwatch = Stopwatch::new(
                 &self.metrics.s3_get_latency_ms,
-                &[],
+                &self.metrics.hostname_attribute,
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
             let range_str = format!("bytes={}-{}", range.0, range.1);
@@ -370,10 +378,12 @@ impl S3Storage {
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        self.metrics.s3_get_count.add(1, &[]);
+        self.metrics
+            .s3_get_count
+            .add(1, &self.metrics.hostname_attribute);
         let _stopwatch = Stopwatch::new(
             &self.metrics.s3_get_latency_ms,
-            &[],
+            &self.metrics.hostname_attribute,
             chroma_tracing::util::StopWatchUnit::Millis,
         );
         let (mut stream, e_tag) = self.get_stream_and_e_tag(key).await?;
@@ -477,7 +487,9 @@ impl S3Storage {
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        self.metrics.s3_put_count.add(1, &[]);
+        self.metrics
+            .s3_put_count
+            .add(1, &self.metrics.hostname_attribute);
 
         if self.is_oneshot_upload(total_size_bytes) {
             return self
@@ -682,7 +694,9 @@ impl S3Storage {
 
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
-        self.metrics.s3_delete_count.add(1, &[]);
+        self.metrics
+            .s3_delete_count
+            .add(1, &self.metrics.hostname_attribute);
 
         let req = self.client.delete_object().bucket(&self.bucket).key(key);
 
@@ -724,7 +738,9 @@ impl S3Storage {
         &self,
         keys: I,
     ) -> Result<DeletedObjects, StorageError> {
-        self.metrics.s3_delete_many_count.add(1, &[]);
+        self.metrics
+            .s3_delete_many_count
+            .add(1, &self.metrics.hostname_attribute);
 
         let mut objects = vec![];
         for key in keys {
