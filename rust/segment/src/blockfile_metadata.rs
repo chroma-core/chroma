@@ -1017,6 +1017,23 @@ mod test {
 
     #[tokio::test]
     async fn empty_blocks() {
+        // Run the actual test logic in a separate thread with increased stack size
+        let handle = std::thread::Builder::new()
+            .name("empty_blocks_test".to_string())
+            .stack_size(8 * 1024 * 1024) // 8MB stack size
+            .spawn(|| {
+                // Create a new tokio runtime within the thread
+                let runtime = tokio::runtime::Runtime::new().unwrap();
+                runtime.block_on(async {
+                    empty_blocks_impl().await;
+                });
+            })
+            .expect("Failed to spawn thread");
+
+        handle.join().expect("Test thread panicked");
+    }
+
+    async fn empty_blocks_impl() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
