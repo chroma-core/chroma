@@ -36,12 +36,3 @@ runs:
         workspaces: ${{ inputs.workspaces }}
     - name: Setup Nextest
       uses: taiki-e/install-action@nextest
-    - name: Set stack size
-      shell: bash
-      run: |
-        echo "Setting stack size to 8MB"
-        if [[ "${{ runner.os }}" == "Linux" ]]; then
-          ulimit -s 8192
-        elif [[ "${{ runner.os }}" == "macOS" ]]; then
-          ulimit -s 8192
-        fi
