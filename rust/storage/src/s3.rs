@@ -57,7 +57,6 @@ pub struct StorageMetrics {
     s3_delete_count: Counter<u64>,
     s3_delete_many_count: Counter<u64>,
     s3_get_latency_ms: Histogram<u64>,
-    hostname: String,
 }
 
 impl Default for StorageMetrics {
@@ -84,7 +83,6 @@ impl Default for StorageMetrics {
                 .with_description("Latency of S3 get operations in milliseconds")
                 .with_unit("ms")
                 .build(),
-            hostname: std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
         }
     }
 }
@@ -310,10 +308,6 @@ impl S3Storage {
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        let metric_attr = &[opentelemetry::KeyValue::new(
-            "hostname",
-            self.metrics.hostname.clone(),
-        )];
         let (content_length, ranges, e_tag) = self.get_key_ranges(key).await?;
 
         // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
@@ -327,11 +321,11 @@ impl S3Storage {
         let range_and_output_slices = ranges.iter().zip(output_slices.drain(..));
         let mut get_futures = Vec::new();
         let num_parts = range_and_output_slices.len();
-        self.metrics.s3_get_count.add(num_parts as u64, metric_attr);
+        self.metrics.s3_get_count.add(num_parts as u64, &[]);
         for (range, output_slice) in range_and_output_slices {
             let _stopwatch = Stopwatch::new(
                 &self.metrics.s3_get_latency_ms,
-                metric_attr,
+                &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
             let range_str = format!("bytes={}-{}", range.0, range.1);
@@ -376,14 +370,10 @@ impl S3Storage {
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        let metric_attr = &[opentelemetry::KeyValue::new(
-            "hostname",
-            self.metrics.hostname.clone(),
-        )];
-        self.metrics.s3_get_count.add(1, metric_attr);
+        self.metrics.s3_get_count.add(1, &[]);
         let _stopwatch = Stopwatch::new(
             &self.metrics.s3_get_latency_ms,
-            metric_attr,
+            &[],
             chroma_tracing::util::StopWatchUnit::Millis,
         );
         let (mut stream, e_tag) = self.get_stream_and_e_tag(key).await?;

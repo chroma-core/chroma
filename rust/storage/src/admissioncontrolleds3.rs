@@ -13,7 +13,7 @@ use chroma_error::ChromaError;
 use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::{future::Shared, stream, FutureExt, StreamExt};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{global, metrics::Counter, KeyValue};
 use std::{
     collections::HashMap,
     future::Future,
@@ -52,11 +52,12 @@ struct AdmissionControlledS3StorageMetrics {
     pub hostname: String,
     pub nac_outstanding_read_requests: opentelemetry::metrics::Histogram<u64>,
     pub nac_read_requests_waiting_for_token: opentelemetry::metrics::Histogram<u64>,
+    pub nac_priority_increase_sent: opentelemetry::metrics::Counter<u64>,
 }
 
 impl Default for AdmissionControlledS3StorageMetrics {
     fn default() -> Self {
-        let meter = global::meter("chroma");
+        let meter = global::meter("chroma.storage.admission_control");
         Self {
             outstanding_read_requests: Arc::new(AtomicUsize::new(0)),
             read_requests_waiting_for_token: Arc::new(AtomicUsize::new(0)),
@@ -80,6 +81,10 @@ impl Default for AdmissionControlledS3StorageMetrics {
                     "Number of requests in the admission control system waiting for a token",
                 )
                 .build(),
+            nac_priority_increase_sent: meter
+                .u64_counter("nac_priority_increase_sent")
+                .with_description("Number of times increase of priority was sent")
+                .build(),
         }
     }
 }
@@ -102,7 +107,12 @@ struct InflightRequest {
 
 impl InflightRequest {
     // Not thread safe.
-    async fn update_priority(&self, priority: StorageRequestPriority) {
+    async fn update_priority(
+        &self,
+        priority: StorageRequestPriority,
+        update_priority_counter: Counter<u64>,
+        hostname: &[KeyValue],
+    ) {
         // It is ok to not do Compare And Swap here since the caller obtains a mutex before
         // performing this operation so at any point there will only be one writer
         // for this AtomicUsize.
@@ -111,6 +121,7 @@ impl InflightRequest {
             if priority.as_usize() < curr_pri {
                 self.priority
                     .store(priority.as_usize(), std::sync::atomic::Ordering::SeqCst);
+                update_priority_counter.add(1, hostname);
                 // Ignore send errors since it can happen that the receiver is dropped
                 // and the task is busy reading the data from s3.
                 let _ = channel.send(()).await;
@@ -316,7 +327,12 @@ impl AdmissionControlledS3Storage {
                 Some(fut) => {
                     tracing::trace!("[AdmissionControlledS3] Found inflight request to s3 for key: {:?}. Deduping", key);
                     self.metrics.nac_dedup_count.add(1, hostname_attribute);
-                    fut.update_priority(options.priority).await;
+                    fut.update_priority(
+                        options.priority,
+                        self.metrics.nac_priority_increase_sent.clone(),
+                        hostname_attribute,
+                    )
+                    .await;
                     fut.future
                 }
                 None => {
@@ -400,7 +416,12 @@ impl AdmissionControlledS3Storage {
                 Some(fut) => {
                     self.metrics.nac_dedup_count.add(1, hostname_attribute);
                     // Update the priority if the new request has higher priority.
-                    fut.update_priority(options.priority).await;
+                    fut.update_priority(
+                        options.priority,
+                        self.metrics.nac_priority_increase_sent.clone(),
+                        hostname_attribute,
+                    )
+                    .await;
                     fut.future
                 }
                 None => {
