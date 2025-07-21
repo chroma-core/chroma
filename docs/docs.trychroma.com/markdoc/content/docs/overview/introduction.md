@@ -73,6 +73,7 @@ Continue with the full [getting started guide](./getting-started).
 | Javascript    | [`chromadb`](https://www.npmjs.com/package/chromadb) (by Chroma)                                                         |
 | Ruby          | [from @mariochavez](https://github.com/mariochavez/chroma)                                                               |
 | Java          | [from @t_azarov](https://github.com/amikos-tech/chromadb-java-client)                                                    |
+| Java          | [from @locxngo](https://github.com/locxngo/chroma-client) (Java 17+, ChromaAPI V2)                                       |
 | Go            | [from @t_azarov](https://github.com/amikos-tech/chroma-go)                                                               |
 | C#/.NET       | [from @cincuranet, @ssone95, @microsoft](https://github.com/ssone95/ChromaDB.Client)                                     |
 | Rust          | [from @Anush008](https://crates.io/crates/chromadb)                                                                      |
