@@ -694,7 +694,7 @@ impl RateLimitPolicy {
 pub struct CountBasedPolicyMetrics {
     // The delay in milliseconds before a request is allowed to proceed.
     pub nac_delay_secs: opentelemetry::metrics::Histogram<u64>,
-    pub nac_priority_increase_count: opentelemetry::metrics::Counter<u64>,
+    pub nac_priority_increase_received: opentelemetry::metrics::Counter<u64>,
     pub nac_receive_channel_closed_count: opentelemetry::metrics::Counter<u64>,
     pub hostname: String,
     pub nac_available_permits: opentelemetry::metrics::Histogram<u64>,
@@ -709,8 +709,8 @@ impl Default for CountBasedPolicyMetrics {
                 .with_description("The delay in seconds before a request is allowed to proceed.")
                 .with_unit("secs")
                 .build(),
-            nac_priority_increase_count: meter
-                .u64_counter("nac_priority_increase_count")
+            nac_priority_increase_received: meter
+                .u64_counter("nac_priority_increase_received")
                 .with_description("Number of times priority was increased for a request.")
                 .build(),
             nac_receive_channel_closed_count: meter
@@ -791,7 +791,7 @@ impl CountBasedPolicy {
                             match did_recv {
                                 Some(_) => {
                                     let hostname_attribute = KeyValue::new("hostname", self.metrics.hostname.clone());
-                                    self.metrics.nac_priority_increase_count.add(1, &[hostname_attribute]);
+                                    self.metrics.nac_priority_increase_received.add(1, &[hostname_attribute]);
                                     // If we got a notification, continue to acquire.
                                     continue;
                                 }
