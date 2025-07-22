@@ -80,6 +80,15 @@ collection = client.create_collection(
 )
 ```
 
+Instead of having Chroma embed documents, you can also provide embeddings directly when [adding data](./add-data) to a collection. In this case, your collection will not have an embedding function set, and you will be responsible for providing embeddings directly when adding data and querying.
+
+```python
+collection = client.create_collection(
+    name="my_collection",
+    embedding_function=None
+)
+```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -128,11 +137,44 @@ const collection = await client.createCollection({
 });
 ```
 
+Instead of having Chroma embed documents, you can also provide embeddings directly when [adding data](./add-data) to a collection. In this case, your collection will not have an embedding function set, and you will be responsible for providing embeddings directly when adding data and querying.
+
+```typescript
+const collection = await client.createCollection({
+    name: "my_collection",
+    embeddingFunction: null
+})
+```
+
 {% /Tab %}
 
 {% /Tabs %}
 
-Instead of having Chroma embed documents, you can also provide embeddings directly when [adding data](./add-data) to a collection. In this case, your collection will not have an embedding function set, and you will be responsible for providing embeddings directly when adding data and querying.
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+collection = client.create_collection(
+    name="my_collection",
+    embedding_function=None
+)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+let collection = await client.createCollection({
+    name: "my_collection",
+    embeddingFunction: emb_fn,
+    metadata: {
+        description: "my first Chroma collection",
+        created: (new Date()).toString()
+    }
+});
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
 
 ### Collection Metadata
 
