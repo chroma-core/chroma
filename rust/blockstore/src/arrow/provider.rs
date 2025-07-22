@@ -484,17 +484,32 @@ impl BlockManager {
                             let storage_clone = self.storage.clone();
                             let id_clone = id.clone();
                             let key_clone = key.clone();
+                            let block_cache_clone = self.block_cache.clone();
                             let shared_future = async move {
                             let bytes_res = storage_clone
                                 .get(&key_clone.storage_key, GetOptions::new(priority))
                                 .await;
                             match bytes_res {
                                 Ok(bytes) => {
-                                    // TODO: i removed the caching logic
                                     let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
                                     let block =
                                         deserialization_span.in_scope(|| Block::from_bytes(&bytes, id_clone));
-                                    block.map_err(GetError::BlockLoadError).map(Option::Some)
+                                    let block_res = block.map_err(GetError::BlockLoadError).map(Option::Some);
+                                    match block_res {
+                                        Ok(block_opt) => {
+                                            match block_opt {
+                                                Some(block) => {
+                                                    block_cache_clone.insert(id_clone, block.clone()).await;
+                                                    Ok(Some(block))
+                                                },
+                                                None => Ok(None),
+                                            }
+                                        },
+                                        Err(e) => {
+                                            tracing::error!("Error converting bytes to Block {:?}", e);
+                                            Err(e)
+                                        }
+                                    }
                                 }
                                 Err(e) => {
                                     tracing::error!("Error converting bytes to Block {:?}", e);
@@ -513,25 +528,7 @@ impl BlockManager {
                     let mut requests = self.inflight_serde.lock().await;
                     requests.remove(&key);
                 }
-                // Check the result first
-                match result? {
-                    Some(block) => {
-                        // We have a valid block, now insert to cache
-                        let _guard = self.cache_mutex.lock(id).await;
-                        match self.block_cache.obtain(*id).await {
-                            Ok(Some(b)) => Ok(Some(b)),
-                            Ok(None) => {
-                                self.block_cache.insert(*id, block.clone()).await;
-                                Ok(Some(block))
-                            }
-                            Err(e) => {
-                                tracing::error!("Error getting block from cache {:?}", e);
-                                Err(GetError::BlockLoadError(e.into()))
-                            }
-                        }
-                    }
-                    None => Ok(None), // No block to cache, just return None
-                }
+                result
             }
         }
     }
