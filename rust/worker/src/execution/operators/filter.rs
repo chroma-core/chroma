@@ -508,6 +508,18 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             input.record_segment
         );
 
+        // Short-circuit if filter is none and logs are empty, don't need to fetch from segments.
+        if self.query_ids.is_none() && self.where_clause.is_none() && input.logs.is_empty() {
+            tracing::debug!(
+                "[{}]: Early short-circuit for empty filter with no logs",
+                self.get_name()
+            );
+            return Ok(FilterOutput {
+                log_offset_ids: SignedRoaringBitmap::empty(),
+                compact_offset_ids: SignedRoaringBitmap::full(),
+            });
+        }
+
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
@@ -681,6 +693,37 @@ mod tests {
         assert_eq!(
             filter_output.compact_offset_ids,
             SignedRoaringBitmap::Exclude((11..=20).collect())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_empty_filter_early_shortcut() {
+        let test_segment = TestDistributedSegment::default();
+        let blockfile_provider = test_segment.blockfile_provider.clone();
+        let metadata_segment = test_segment.metadata_segment.clone();
+        let record_segment = test_segment.record_segment.clone();
+
+        let filter_input = FilterInput {
+            logs: Chunk::new(vec![].into()),
+            blockfile_provider,
+            metadata_segment,
+            record_segment,
+        };
+
+        let filter_operator = Filter {
+            query_ids: None,
+            where_clause: None,
+        };
+
+        let filter_output = filter_operator
+            .run(&filter_input)
+            .await
+            .expect("Filter should not fail");
+
+        assert_eq!(filter_output.log_offset_ids, SignedRoaringBitmap::empty());
+        assert_eq!(
+            filter_output.compact_offset_ids,
+            SignedRoaringBitmap::full()
         );
     }
 
