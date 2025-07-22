@@ -291,10 +291,10 @@ impl AdmissionControlledS3Storage {
         outstanding_read_request_counter.fetch_add(1, Ordering::Relaxed);
         // Acquire permit.
         let _permit = rate_limiter.enter(priority, channel_receiver).await;
-        // let res = storage.get_with_e_tag(&key).await;
+        let res = storage.get_with_e_tag(&key).await;
         // fake return some hardcoded data for testing
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let res = Ok((Arc::new("test_string".as_bytes().to_vec()), None));
+        // tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // let res = Ok((Arc::new("test_string".as_bytes().to_vec()), None));
         outstanding_read_request_counter.fetch_sub(1, Ordering::Relaxed);
         res
         // Permit gets dropped here due to RAII.
