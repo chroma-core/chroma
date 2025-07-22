@@ -27,7 +27,7 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
-    sync::Arc,
+    sync::{atomic::AtomicUsize, Arc},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
@@ -370,13 +370,19 @@ pub struct BlockManager {
     inflight_serde: Arc<
         tokio::sync::Mutex<
             HashMap<
-                String,
+                InflightRequestKey,
                 Shared<
                     Pin<Box<dyn Future<Output = Result<Option<Block>, GetError>> + Send + 'static>>,
                 >,
             >,
         >,
     >,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+struct InflightRequestKey {
+    storage_key: String,
+    priority: usize,
 }
 
 impl BlockManager {
@@ -464,9 +470,11 @@ impl BlockManager {
         match block {
             Some(block) => Ok(Some(block)),
             None => {
-                let key = Self::format_key(prefix_path, id);
+                let key = InflightRequestKey {
+                    storage_key: Self::format_key(prefix_path, id),
+                    priority: priority as usize,
+                };
                 let future_to_await;
-
                 {
                     let mut shared_future_lock = self.inflight_serde.lock().await;
                     let maybe_inflight = shared_future_lock.get(&key).cloned();
@@ -478,7 +486,7 @@ impl BlockManager {
                             let key_clone = key.clone();
                             let shared_future = async move {
                             let bytes_res = storage_clone
-                                .get(&key_clone, GetOptions::new(priority))
+                                .get(&key_clone.storage_key, GetOptions::new(priority))
                                 .await;
                             match bytes_res {
                                 Ok(bytes) => {
@@ -493,21 +501,37 @@ impl BlockManager {
                                     Err(GetError::StorageGetError(e))
                                 }
                             }
-                    }.boxed().shared();
+                            }.boxed().shared();
                             // Insert the future into the inflight serde map.
                             shared_future_lock.insert(key.clone(), shared_future.clone());
                             shared_future
                         }
                     };
                 }
-
                 let result = future_to_await.await;
                 {
                     let mut requests = self.inflight_serde.lock().await;
                     requests.remove(&key);
                 }
-
-                result
+                // Check the result first
+                match result? {
+                    Some(block) => {
+                        // We have a valid block, now insert to cache
+                        let _guard = self.cache_mutex.lock(id).await;
+                        match self.block_cache.obtain(*id).await {
+                            Ok(Some(b)) => Ok(Some(b)),
+                            Ok(None) => {
+                                self.block_cache.insert(*id, block.clone()).await;
+                                Ok(Some(block))
+                            }
+                            Err(e) => {
+                                tracing::error!("Error getting block from cache {:?}", e);
+                                Err(GetError::BlockLoadError(e.into()))
+                            }
+                        }
+                    }
+                    None => Ok(None), // No block to cache, just return None
+                }
             }
         }
     }
