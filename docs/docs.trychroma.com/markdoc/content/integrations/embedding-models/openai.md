@@ -54,7 +54,7 @@ You can pass in an optional `model` argument, which lets you choose which OpenAI
 ```typescript
 // npm install @chroma-core/openai
 
-import { OpenAIEmbeddingFunction } from '@chroma-core/ollama';
+import { OpenAIEmbeddingFunction } from '@chroma-core/openai';
 
 const embeddingFunction = new OpenAIEmbeddingFunction({
     openai_api_key: "apiKey",
