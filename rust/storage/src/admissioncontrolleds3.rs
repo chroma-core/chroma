@@ -172,8 +172,8 @@ impl AdmissionControlledS3Storage {
             storage,
             outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(
-                2,
-                &vec![1.0],
+                40,
+                &vec![0.7, 0.3],
             ))),
             metrics: AdmissionControlledS3StorageMetrics::default(),
         }
@@ -291,7 +291,10 @@ impl AdmissionControlledS3Storage {
         outstanding_read_request_counter.fetch_add(1, Ordering::Relaxed);
         // Acquire permit.
         let _permit = rate_limiter.enter(priority, channel_receiver).await;
-        let res = storage.get_with_e_tag(&key).await;
+        // let res = storage.get_with_e_tag(&key).await;
+        // fake return some hardcoded data for testing
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let res = Ok((Arc::new("test_string".as_bytes().to_vec()), None));
         outstanding_read_request_counter.fetch_sub(1, Ordering::Relaxed);
         res
         // Permit gets dropped here due to RAII.
@@ -865,7 +868,9 @@ impl Configurable<RateLimitingConfig> for RateLimitPolicy {
 mod tests {
     use std::sync::Arc;
 
+    use futures::{stream::FuturesUnordered, FutureExt, StreamExt};
     use rand::{distributions::Alphanumeric, Rng};
+    use tokio::runtime::Runtime;
 
     use crate::{admissioncontrolleds3::AdmissionControlledS3Storage, s3::S3Storage, GetOptions};
 
@@ -991,5 +996,80 @@ mod tests {
     #[tokio::test]
     async fn test_k8s_integration_empty_file() {
         test_multipart_get_for_size(0).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 12)]
+    // Naming this "test_k8s_integration_" means that the Tilt stack is required. See rust/worker/README.md.
+    async fn test_k8s_integration_stress() {
+        let client = get_s3_client();
+
+        let storage = S3Storage {
+            bucket: format!("test-{}", rand::thread_rng().gen::<u64>()),
+            client,
+            upload_part_size_bytes: 1024 * 1024 * 8,
+            download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: Default::default(),
+        };
+        storage.create_bucket().await.unwrap();
+        let admission_controlled_storage =
+            AdmissionControlledS3Storage::new_with_default_policy(storage);
+
+        // ~88,000 unique keys, over 10 requests, each with 64 tasks.
+        let n_tasks = 64 * 10; // 64 tasks, each with 10 requests
+        let n_req_per_task = 140; // ~88,000 / (64*10 requests)
+        let n_unique_keys = 640;
+        let mut tasks = Vec::new();
+        let fetch_keys = (0..n_tasks)
+            .flat_map(|c| {
+                (0..n_req_per_task)
+                    .map(move |i| format!("test__key_{}", (c * n_req_per_task + i) % n_unique_keys))
+            })
+            .collect::<Vec<_>>();
+        println!("Generated {} keys", fetch_keys.len());
+        println!(
+            "Launching {} tasks with {} requests each over {} unique keys",
+            n_tasks, n_req_per_task, n_unique_keys
+        );
+        for c in 0..n_tasks {
+            let admission_controlled_storage_clone = admission_controlled_storage.clone();
+            let fetch_keys_clone = fetch_keys.clone();
+            tasks.push(tokio::spawn(async move {
+                let reqs = FuturesUnordered::new();
+                for i in 0..n_req_per_task {
+                    let buf = admission_controlled_storage_clone.get(
+                        &fetch_keys_clone[c * n_req_per_task + i],
+                        GetOptions::default(),
+                    );
+                    reqs.push(buf);
+                }
+                reqs.for_each_concurrent(n_req_per_task, |res| async move {
+                    match res {
+                        Ok(_) => {
+                            // println!("Got response");
+                        }
+                        Err(e) => {
+                            eprintln!("Error getting response: {}", e);
+                        }
+                    }
+                })
+                .await;
+
+                // Setup 2
+                // tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+                // Setup 3
+                // let buf = admission_controlled_storage_clone
+                //     .get(&fetch_keys_clone[c * n_req_per_task], GetOptions::default())
+                //     .await;
+            }));
+        }
+
+        let start_time = std::time::Instant::now();
+        println!("Waiting for {} tasks to complete...", n_tasks);
+        for task in tasks {
+            let _ = task.await;
+        }
+        let elapsed = start_time.elapsed();
+        println!("All tasks completed in {} seconds", elapsed.as_secs_f64());
     }
 }

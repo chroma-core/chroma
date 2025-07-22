@@ -4,9 +4,10 @@ use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{hash::DefaultHasher, path::Path};
 use thiserror::Error;
 
@@ -19,6 +20,8 @@ pub struct LocalStoraegError;
 #[derive(Clone)]
 pub struct LocalStorage {
     root: PathBuf,
+    // in-memory-data
+    data: Arc<Mutex<HashMap<String, Arc<Vec<u8>>>>>,
 }
 
 impl LocalStorage {
@@ -26,6 +29,7 @@ impl LocalStorage {
         // Create the local storage with the root path.
         LocalStorage {
             root: Path::new(root).to_path_buf(),
+            data: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -40,20 +44,28 @@ impl LocalStorage {
     }
 
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
-        let file_path = self.path_for_key(key);
-        if !file_path.exists() {
-            return Err(StorageError::NotFound {
-                path: file_path
-                    .to_str()
-                    .expect("File path should be valid string")
-                    .to_string(),
+        // let file_path = self.path_for_key(key);
+        // if !file_path.exists() {
+        //     return Err(StorageError::NotFound {
+        //         path: file_path
+        //             .to_str()
+        //             .expect("File path should be valid string")
+        //             .to_string(),
+        //         source: Arc::new(LocalStoraegError),
+        //     });
+        // }
+        // match std::fs::read(file_path) {
+        //     Ok(bytes_u8) => Ok(Arc::new(bytes_u8)),
+        //     Err(e) => Err(StorageError::Generic {
+        //         source: Arc::new(e),
+        //     }),
+        // }
+        let guard = self.data.lock().expect("Failed to lock data mutex");
+        match guard.get(key) {
+            Some(bytes) => Ok(Arc::clone(bytes)),
+            None => Err(StorageError::NotFound {
+                path: key.to_string(),
                 source: Arc::new(LocalStoraegError),
-            });
-        }
-        match std::fs::read(file_path) {
-            Ok(bytes_u8) => Ok(Arc::new(bytes_u8)),
-            Err(e) => Err(StorageError::Generic {
-                source: Arc::new(e),
             }),
         }
     }
@@ -73,21 +85,24 @@ impl LocalStorage {
         bytes: &[u8],
         _options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        // TODO: Handle options
-        let file_path = self.path_for_key(key);
-        std::fs::create_dir_all(
-            file_path
-                .parent()
-                .expect("Parent should be present for the file path"),
-        )
-        .unwrap();
-        let res = std::fs::write(&file_path, bytes);
-        match res {
-            Ok(_) => Ok(None),
-            Err(e) => Err(StorageError::Generic {
-                source: Arc::new(e),
-            }),
-        }
+        // // TODO: Handle options
+        // let file_path = self.path_for_key(key);
+        // std::fs::create_dir_all(
+        //     file_path
+        //         .parent()
+        //         .expect("Parent should be present for the file path"),
+        // )
+        // .unwrap();
+        // let res = std::fs::write(&file_path, bytes);
+        // match res {
+        //     Ok(_) => Ok(None),
+        //     Err(e) => Err(StorageError::Generic {
+        //         source: Arc::new(e),
+        //     }),
+        // }
+        let mut guard = self.data.lock().expect("Failed to lock data mutex");
+        guard.insert(key.to_string(), Arc::new(bytes.to_vec()));
+        Ok(None)
     }
 
     pub async fn put_file(

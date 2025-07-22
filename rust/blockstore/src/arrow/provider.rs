@@ -21,10 +21,12 @@ use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
 };
 use chroma_tracing::util::Stopwatch;
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{future::Shared, stream::FuturesUnordered, FutureExt, StreamExt};
 use opentelemetry::global;
 use std::{
     collections::HashMap,
+    future::Future,
+    pin::Pin,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -281,6 +283,15 @@ pub enum GetError {
     StorageGetError(#[from] chroma_storage::StorageError),
 }
 
+impl Clone for GetError {
+    fn clone(&self) -> Self {
+        match self {
+            GetError::BlockLoadError(e) => GetError::BlockLoadError(e.clone()),
+            GetError::StorageGetError(e) => GetError::StorageGetError(e.clone()),
+        }
+    }
+}
+
 impl ChromaError for GetError {
     fn code(&self) -> ErrorCodes {
         match self {
@@ -356,6 +367,16 @@ pub struct BlockManager {
     default_max_block_size_bytes: usize,
     block_metrics: BlockMetrics,
     cache_mutex: AysncPartitionedMutex<Uuid>,
+    inflight_serde: Arc<
+        tokio::sync::Mutex<
+            HashMap<
+                String,
+                Shared<
+                    Pin<Box<dyn Future<Output = Result<Option<Block>, GetError>> + Send + 'static>>,
+                >,
+            >,
+        >,
+    >,
 }
 
 impl BlockManager {
@@ -371,6 +392,7 @@ impl BlockManager {
             default_max_block_size_bytes,
             block_metrics: BlockMetrics::default(),
             cache_mutex: AysncPartitionedMutex::new(()),
+            inflight_serde: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -441,54 +463,52 @@ impl BlockManager {
         let block = self.block_cache.obtain(*id).await.ok().flatten();
         match block {
             Some(block) => Ok(Some(block)),
-            None => async {
+            None => {
                 let key = Self::format_key(prefix_path, id);
-                let bytes_res = self
-                    .storage
-                    .get(&key, GetOptions::new(priority))
-                    .instrument(
-                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
-                    )
-                    .await;
-                match bytes_res {
-                    Ok(bytes) => {
-                        self.block_metrics.num_get_requests.record(1, &[]);
-                        let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
-                        let block =
-                            deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
-                        match block {
-                            Ok(block) => {
-                                let _guard = self.cache_mutex.lock(id).await;
-                                match self.block_cache.obtain(*id).await {
-                                    Ok(Some(b)) => {
-                                        Ok(Some(b))
-                                    }
-                                    Ok(None) => {
-                                        self.block_cache.insert(*id, block.clone()).await;
-                                        Ok(Some(block))
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Error getting block from cache {:?}", e);
-                                        Err(GetError::BlockLoadError(e.into()))
-                                    }
+                let future_to_await;
+
+                {
+                    let mut shared_future_lock = self.inflight_serde.lock().await;
+                    let maybe_inflight = shared_future_lock.get(&key).cloned();
+                    future_to_await = match maybe_inflight {
+                        Some(future) => future,
+                        None => {
+                            let storage_clone = self.storage.clone();
+                            let id_clone = id.clone();
+                            let key_clone = key.clone();
+                            let shared_future = async move {
+                            let bytes_res = storage_clone
+                                .get(&key_clone, GetOptions::new(priority))
+                                .await;
+                            match bytes_res {
+                                Ok(bytes) => {
+                                    // TODO: i removed the caching logic
+                                    let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
+                                    let block =
+                                        deserialization_span.in_scope(|| Block::from_bytes(&bytes, id_clone));
+                                    block.map_err(GetError::BlockLoadError).map(Option::Some)
+                                }
+                                Err(e) => {
+                                    tracing::error!("Error converting bytes to Block {:?}", e);
+                                    Err(GetError::StorageGetError(e))
                                 }
                             }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Error converting bytes to Block {:?}/{:?}",
-                                    key,
-                                    e
-                                );
-                                Err(GetError::BlockLoadError(e))
-                            }
+                    }.boxed().shared();
+                            // Insert the future into the inflight serde map.
+                            shared_future_lock.insert(key.clone(), shared_future.clone());
+                            shared_future
                         }
-                    }
-                    Err(e) => {
-                        tracing::error!("Error converting bytes to Block {:?}", e);
-                        Err(GetError::StorageGetError(e))
-                    }
+                    };
                 }
-            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string())).await
+
+                let result = future_to_await.await;
+                {
+                    let mut requests = self.inflight_serde.lock().await;
+                    requests.remove(&key);
+                }
+
+                result
+            }
         }
     }
 
@@ -773,10 +793,13 @@ impl RootManager {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicU32;
+
     use super::*;
-    use crate::arrow::block::delta::UnorderedBlockDelta;
-    use chroma_cache::new_cache_for_test;
+    use crate::arrow::block::{self, delta::UnorderedBlockDelta};
+    use chroma_cache::{new_cache_for_test, FoyerCacheConfig};
     use chroma_storage::test_storage;
+    use chroma_types::SpannPostingList;
 
     #[tokio::test]
     async fn test_cached() {
@@ -787,5 +810,192 @@ mod tests {
         let delta = manager.create::<&str, String, UnorderedBlockDelta>();
         let block = manager.commit::<&str, String>(delta).await;
         assert!(manager.cached(&block.id).await, "should be write-through");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 12)]
+    async fn test_cache_stress() {
+        let (_temp_dir, storage) = test_storage();
+
+        let cache = FoyerCacheConfig {
+            dir: Some("./hammad/test_cache".to_string()),
+            capacity: 6000, // 6000 MB = 6 GB
+            mem: 6000,      // 6000 MB = 6 GB
+            ..Default::default()
+        };
+        let cache = cache.build_hybrid().await.expect("Failed to create cache");
+        let manager = BlockManager::new(storage, 8 * 1024 * 1024, cache);
+        assert!(!manager.cached(&Uuid::new_v4()).await);
+
+        let n_req = 10;
+        let n_tasks_per_req = 64;
+        let n_block_fetches_per_task = 140; // ~88,000 cache accesses
+
+        let mut block_ids = Vec::new();
+        // Add ~5MB of data to the block
+        let value_size = 1024 * 1024; // 1MB per value
+        for d in 0..n_block_fetches_per_task {
+            let delta = manager.create::<&str, String, UnorderedBlockDelta>();
+            for i in 0..5 {
+                delta.add("", format!("key_{}", i).as_str(), "".repeat(value_size));
+            }
+            let block = manager.commit::<&str, String>(delta).await;
+            let block_id = block.id.clone();
+            block_ids.push(block_id);
+        }
+
+        for block_id in block_ids.iter() {
+            assert!(manager.cached(block_id).await, "should be cached yet");
+        }
+
+        let counter = Arc::new(AtomicU32::new(0));
+        let mut tasks = Vec::new();
+        for c in 0..n_req {
+            for t in 0..n_tasks_per_req {
+                let manager_clone = manager.clone();
+                let counter_clone = counter.clone();
+                let block_ids = block_ids.clone();
+                let task = tokio::spawn(async move {
+                    let futures_unorded = FuturesUnordered::new();
+                    for i in 0..n_block_fetches_per_task {
+                        let block = manager_clone.get(
+                            "",
+                            &block_ids[i % block_ids.len()],
+                            StorageRequestPriority::P0,
+                        );
+                        futures_unorded.push(block);
+                    }
+                    futures_unorded
+                        .for_each_concurrent(n_tasks_per_req, |result| async {
+                            match result {
+                                Ok(Some(_)) => {
+                                    counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                }
+                                Ok(None) => {
+                                    panic!("Block not found in cache");
+                                }
+                                Err(e) => {
+                                    panic!("Error fetching block: {:?}", e);
+                                }
+                            }
+                        })
+                        .await;
+                });
+                tasks.push(task);
+            }
+        }
+        let mut futures = FuturesUnordered::new();
+        for task in tasks {
+            futures.push(task);
+        }
+        let start_time = std::time::Instant::now();
+        while let Some(result) = futures.next().await {
+            result.expect("Task failed");
+        }
+        let elapsed = start_time.elapsed();
+        println!("Finished in {} seconds", elapsed.as_secs_f64());
+        println!(
+            "Total cache accesses: {}",
+            counter.load(std::sync::atomic::Ordering::SeqCst)
+        );
+        // assert!(manager.cached(&block_id).await, "should still be cached");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 12)]
+    async fn test_serde_stress() {
+        let (_temp_dir, storage) = test_storage();
+
+        let cache = FoyerCacheConfig {
+            dir: Some("./hammad/test_cache".to_string()),
+            capacity: 10, // 500 MB
+            mem: 10,      // 500 MB
+            ..Default::default()
+        };
+        let cache = cache.build_hybrid().await.expect("Failed to create cache");
+        let manager = BlockManager::new(storage, 8 * 1024 * 1024, cache);
+        assert!(!manager.cached(&Uuid::new_v4()).await);
+
+        let n_req = 10;
+        let n_tasks_per_req = 64;
+        let n_block_fetches_per_task = 140; // ~88,000 cache accesses
+
+        let mut block_ids = Vec::new();
+        // Add ~5MB of data to the block
+        let offset_ids = (0..100).collect::<Vec<_>>();
+        let versions = (0..100).collect::<Vec<_>>();
+        let embeddings = (0..100 * 1536)
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|x| *x as f32)
+            .collect::<Vec<_>>();
+        for d in 0..n_block_fetches_per_task {
+            let delta = manager.create::<&str, &SpannPostingList, UnorderedBlockDelta>();
+            for i in 0..5 {
+                let pl = SpannPostingList {
+                    doc_offset_ids: &offset_ids,
+                    doc_versions: &versions,
+                    doc_embeddings: &embeddings,
+                };
+                delta.add("", format!("key_{}", i).as_str(), &pl);
+            }
+            let block = manager.commit::<&str, String>(delta).await;
+            manager
+                .flush(&block, "test")
+                .await
+                .expect("Failed to flush block");
+            let block_id = block.id.clone();
+            block_ids.push(block_id);
+        }
+
+        let counter = Arc::new(AtomicU32::new(0));
+        let mut tasks = Vec::new();
+        for c in 0..n_req {
+            for t in 0..n_tasks_per_req {
+                let manager_clone = manager.clone();
+                let counter_clone = counter.clone();
+                let block_ids = block_ids.clone();
+                let task = tokio::spawn(async move {
+                    let futures_unorded = FuturesUnordered::new();
+                    for i in 0..n_block_fetches_per_task {
+                        let block = manager_clone.get(
+                            "test",
+                            &block_ids[i % block_ids.len()],
+                            StorageRequestPriority::P0,
+                        );
+                        futures_unorded.push(block);
+                    }
+                    futures_unorded
+                        .for_each_concurrent(n_tasks_per_req, |result| async {
+                            match result {
+                                Ok(Some(_)) => {
+                                    counter_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                                }
+                                Ok(None) => {
+                                    panic!("Block not found in cache");
+                                }
+                                Err(e) => {
+                                    panic!("Error fetching block: {:?}", e);
+                                }
+                            }
+                        })
+                        .await;
+                });
+                tasks.push(task);
+            }
+        }
+        let mut futures = FuturesUnordered::new();
+        for task in tasks {
+            futures.push(task);
+        }
+        let start_time = std::time::Instant::now();
+        while let Some(result) = futures.next().await {
+            result.expect("Task failed");
+        }
+        let elapsed = start_time.elapsed();
+        println!("Finished in {} seconds", elapsed.as_secs_f64());
+        println!(
+            "Total cache accesses: {}",
+            counter.load(std::sync::atomic::Ordering::SeqCst)
+        );
+        // assert!(manager.cached(&block_id).await, "should still be cached");
     }
 }

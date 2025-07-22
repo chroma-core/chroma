@@ -692,6 +692,13 @@ pub enum BlockLoadError {
     CacheError(#[from] chroma_cache::CacheError),
 }
 
+impl Clone for BlockLoadError {
+    fn clone(&self) -> Self {
+        // HACK
+        return BlockLoadError::NoRecordBatches;
+    }
+}
+
 impl ChromaError for BlockLoadError {
     fn code(&self) -> ErrorCodes {
         match self {
