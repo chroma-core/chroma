@@ -19,7 +19,8 @@ use chroma_types::{
     plan::{Count, Get, Knn},
     ExecutorError,
 };
-use rand::seq::SliceRandom;
+
+use rand::distributions::Distribution;
 use tonic::Request;
 
 // Convenience type alias for the gRPC query client used by the DistributedExecutor
@@ -40,6 +41,22 @@ pub struct DistributedExecutor {
     client_assigner: ClientAssigner<QueryClient>,
     replication_factor: usize,
     backoff: ExponentialBuilder,
+    client_selection_config: ClientSelectionConfig,
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct ClientSelectionConfig {
+    pub first_attempt_weights: Vec<f64>,
+    pub uniform_on_retry: bool,
+}
+
+impl Default for ClientSelectionConfig {
+    fn default() -> Self {
+        Self {
+            first_attempt_weights: vec![1.0, 1.0, 1.0],
+            uniform_on_retry: true,
+        }
+    }
 }
 
 #[async_trait]
@@ -74,10 +91,13 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
 
         let retry_config = &config.retry;
         let backoff = retry_config.into();
+        let client_selection_config = config.client_selection_config.clone();
+
         Ok(Self {
             client_assigner,
             replication_factor: config.replication_factor,
             backoff,
+            client_selection_config,
         })
     }
 }
@@ -108,14 +128,22 @@ impl DistributedExecutor {
             )
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let plan: chroma_types::chroma_proto::CountPlan = plan.clone().try_into()?;
-        let res = (|| async {
-            choose_client(clients.as_slice())?
-                .count(Request::new(plan.clone()))
-                .await
-        })
-        .retry(self.backoff)
-        .when(is_retryable_error)
-        .await?;
+        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let config = self.client_selection_config.clone();
+        let res = {
+            let attempt_count = attempt_count.clone();
+            (|| async {
+                let current_attempt =
+                    attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let is_retry = current_attempt > 0;
+                choose_query_client_weighted(&clients, &config, is_retry)?
+                    .count(Request::new(plan.clone()))
+                    .await
+            })
+            .retry(self.backoff)
+            .when(is_retryable_error)
+            .await?
+        };
         Ok(res.into_inner().into())
     }
 
@@ -131,14 +159,22 @@ impl DistributedExecutor {
                     .to_string(),
             )
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
-        let res = (|| async {
-            choose_client(clients.as_slice())?
-                .get(Request::new(plan.clone().try_into()?))
-                .await
-        })
-        .retry(self.backoff)
-        .when(is_retryable_error)
-        .await?;
+        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let config = self.client_selection_config.clone();
+        let res = {
+            let attempt_count = attempt_count.clone();
+            (|| async {
+                let current_attempt =
+                    attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let is_retry = current_attempt > 0;
+                choose_query_client_weighted(&clients, &config, is_retry)?
+                    .get(Request::new(plan.clone().try_into()?))
+                    .await
+            })
+            .retry(self.backoff)
+            .when(is_retryable_error)
+            .await?
+        };
         Ok(res.into_inner().try_into()?)
     }
 
@@ -154,14 +190,22 @@ impl DistributedExecutor {
                     .to_string(),
             )
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
-        let res = (|| async {
-            choose_client(clients.as_slice())?
-                .knn(Request::new(plan.clone().try_into()?))
-                .await
-        })
-        .retry(self.backoff)
-        .when(is_retryable_error)
-        .await?;
+        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let config = self.client_selection_config.clone();
+        let res = {
+            let attempt_count = attempt_count.clone();
+            (|| async {
+                let current_attempt =
+                    attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let is_retry = current_attempt > 0;
+                choose_query_client_weighted(&clients, &config, is_retry)?
+                    .knn(Request::new(plan.clone().try_into()?))
+                    .await
+            })
+            .retry(self.backoff)
+            .when(is_retryable_error)
+            .await?
+        };
         Ok(res.into_inner().try_into()?)
     }
 
@@ -170,11 +214,61 @@ impl DistributedExecutor {
     }
 }
 
-fn choose_client(clients: &[QueryClient]) -> Result<QueryClient, tonic::Status> {
-    Ok(clients
-        .choose(&mut rand::thread_rng())
-        .ok_or(no_clients_found_status())?
-        .clone())
+fn choose_client_weighted<T: Clone>(
+    clients: &[T],
+    config: &ClientSelectionConfig,
+    is_retry: bool,
+) -> Result<T, tonic::Status> {
+    if clients.is_empty() {
+        return Err(no_clients_found_status());
+    }
+
+    if clients.len() == 1 {
+        return Ok(clients[0].clone());
+    }
+
+    let mut rng = rand::thread_rng();
+
+    let selection_weights = if is_retry && config.uniform_on_retry {
+        vec![1.0; clients.len()]
+    } else {
+        let mut res = config.first_attempt_weights.clone();
+        if clients.len() < res.len() {
+            tracing::warn!(
+                "Client selection weights ({}) exceed available clients ({}), truncating",
+                res.len(),
+                clients.len()
+            );
+        }
+
+        res.truncate(clients.len());
+        res
+    };
+
+    let weight_sum: f64 = selection_weights.iter().sum();
+    let normalized_weights: Vec<f64> = if weight_sum > 0.0 {
+        selection_weights.iter().map(|w| w / weight_sum).collect()
+    } else {
+        vec![1.0 / clients.len() as f64; clients.len()]
+    };
+
+    let dist = rand::distributions::WeightedIndex::new(&normalized_weights).map_err(|e| {
+        tracing::error!(
+            "Failed to create weighted index for client selection: {}",
+            e
+        );
+        no_clients_found_status()
+    })?;
+    let idx = dist.sample(&mut rng);
+    Ok(clients[idx].clone())
+}
+
+fn choose_query_client_weighted(
+    clients: &[QueryClient],
+    config: &ClientSelectionConfig,
+    is_retry: bool,
+) -> Result<QueryClient, tonic::Status> {
+    choose_client_weighted(clients, config, is_retry)
 }
 
 fn is_retryable_error(e: &tonic::Status) -> bool {
@@ -186,4 +280,99 @@ fn is_retryable_error(e: &tonic::Status) -> bool {
 
 fn no_clients_found_status() -> tonic::Status {
     tonic::Status::internal("No clients found")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Simple test client type for easier testing
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct TestClient {
+        id: usize,
+    }
+
+    impl TestClient {
+        fn new(id: usize) -> Self {
+            Self { id }
+        }
+    }
+
+    // Helper function to create test clients
+    fn create_test_clients(count: usize) -> Vec<TestClient> {
+        (0..count).map(TestClient::new).collect()
+    }
+
+    #[test]
+    fn test_weighted_routing_all_to_first_client() {
+        // Test that with weights [1.0, 0.0], all queries route to the first client
+        let clients = create_test_clients(2);
+        let config = ClientSelectionConfig {
+            first_attempt_weights: vec![1.0, 0.0],
+            uniform_on_retry: false,
+        };
+
+        let mut first_client_count = 0;
+        let mut second_client_count = 0;
+        let total_attempts = 1000;
+
+        for _ in 0..total_attempts {
+            let selected_client = choose_client_weighted(&clients, &config, false)
+                .expect("Should successfully select a client");
+
+            // Now we can directly compare the clients!
+            if selected_client == clients[0] {
+                first_client_count += 1;
+            } else if selected_client == clients[1] {
+                second_client_count += 1;
+            }
+        }
+
+        // With weights [1.0, 0.0], ALL queries should go to the first client
+        assert_eq!(
+            first_client_count, total_attempts,
+            "All queries should route to client A (weight 1.0)"
+        );
+        assert_eq!(
+            second_client_count, 0,
+            "No queries should route to client B (weight 0.0)"
+        );
+    }
+
+    #[test]
+    fn test_biased_client_selection() {
+        let clients = create_test_clients(2);
+        let config = ClientSelectionConfig {
+            first_attempt_weights: vec![0.1, 0.9],
+            uniform_on_retry: false,
+        };
+
+        let mut first_client_count = 0;
+        let mut second_client_count = 0;
+        let total_attempts = 1000;
+
+        for _ in 0..total_attempts {
+            let selected_client = choose_client_weighted(&clients, &config, false)
+                .expect("Should successfully select a client");
+
+            if selected_client == clients[0] {
+                first_client_count += 1;
+            } else if selected_client == clients[1] {
+                second_client_count += 1;
+            }
+        }
+
+        assert!(
+            second_client_count > total_attempts * 2 / 3,
+            "Most queries should route to client B (weight 0.9), got {}/{}",
+            second_client_count,
+            total_attempts
+        );
+        assert!(
+            first_client_count < total_attempts / 3,
+            "Few queries should route to client A (weight 0.1), got {}/{}",
+            first_client_count,
+            total_attempts
+        );
+    }
 }
