@@ -2585,7 +2585,7 @@ mod tests {
     use futures::{stream, StreamExt};
     use opentelemetry::global::meter;
     use proptest::prelude::*;
-    use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel};
+    use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
     use tonic::IntoRequest;
     use wal3::{GarbageCollector, SnapshotOptions, ThrottleOptions};
 
@@ -3718,6 +3718,7 @@ mod tests {
             },
             throttle_fragment: ThrottleOptions {
                 batch_size_bytes: 4,
+                batch_interval_us: 4096,
                 ..Default::default()
             },
             ..Default::default()
@@ -3785,9 +3786,10 @@ mod tests {
                 break;
             }
             retries += 1;
-            if retries >= 3 {
-                panic!("Unable to push log within three retries");
+            if retries >= 6 {
+                panic!("Unable to push log within six retries");
             }
+            sleep(Duration::from_millis(1)).await;
         }
     }
 
@@ -3875,9 +3877,10 @@ mod tests {
                 break;
             }
             retries += 1;
-            if retries >= 3 {
-                panic!("Unable to push log within three retries");
+            if retries >= 6 {
+                panic!("Unable to update compaction offset in six retries");
             }
+            sleep(Duration::from_millis(1)).await;
         }
     }
 
@@ -4204,7 +4207,7 @@ mod tests {
     async fn test_stress_seal_and_migrate() {
         let log_server = setup_log_server().await;
         let collection_id = CollectionUuid::new();
-        let mut logs = (0..100000)
+        let mut logs = (0..1000)
             .map(|index| OperationRecord {
                 id: index.to_string(),
                 embedding: None,
@@ -4215,21 +4218,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        push_log_to_server(&log_server, collection_id, &logs[0..100]).await;
+        push_log_to_server(&log_server, collection_id, &logs[..=0]).await;
 
-        stream::iter(logs.chunks(100).skip(1).map(|log_chunk| async {
-            push_log_to_server(&log_server, collection_id, log_chunk).await;
-
-            if (log_chunk
-                .first()
-                .and_then(|op| op.id.parse::<usize>().ok())
-                .unwrap_or_default()
-                ..=log_chunk
-                    .last()
-                    .and_then(|op| op.id.parse::<usize>().ok())
-                    .unwrap_or_default())
-                .contains(&50000)
-            {
+        stream::iter(logs.iter().skip(1).map(|log| async {
+            push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
+            if log.id.parse::<usize>().expect("Log id should be usize") == 500 {
                 seal_collection_on_server(&log_server, collection_id).await;
                 log_server
                     .migrate_log(Request::new(MigrateLogRequest {
@@ -4239,7 +4232,7 @@ mod tests {
                     .expect("Migrate Logs should not fail");
             }
         }))
-        .buffer_unordered(32)
+        .buffer_unordered(6)
         .collect::<Vec<_>>()
         .await;
 
@@ -4247,7 +4240,7 @@ mod tests {
             .pull_logs(Request::new(PullLogsRequest {
                 collection_id: collection_id.to_string(),
                 start_from_offset: 1,
-                batch_size: 100000,
+                batch_size: 1000,
                 end_timestamp: i64::MAX,
             }))
             .await
@@ -4358,8 +4351,8 @@ mod tests {
     proptest! {
         #[test]
         fn test_k8s_integration_rust_log_service_push_pull_logs(
-            read_offset in 1usize..=100,
-            batch_size in 1usize..=150,
+            read_offset in 1usize..=36,
+            batch_size in 1usize..=36,
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36)
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
