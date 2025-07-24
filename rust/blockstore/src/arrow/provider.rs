@@ -439,57 +439,81 @@ impl BlockManager {
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
         let block = self.block_cache.obtain(*id).await.ok().flatten();
-        match block {
-            Some(block) => Ok(Some(block)),
-            None => async {
-                let key = Self::format_key(prefix_path, id);
-                let bytes_res = self
-                    .storage
-                    .get(&key, GetOptions::new(priority))
-                    .instrument(
-                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
-                    )
-                    .await;
-                match bytes_res {
-                    Ok(bytes) => {
-                        self.block_metrics.num_get_requests.record(1, &[]);
-                        let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
-                        let block =
-                            deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
-                        match block {
-                            Ok(block) => {
-                                let _guard = self.cache_mutex.lock(id).await;
-                                match self.block_cache.obtain(*id).await {
-                                    Ok(Some(b)) => {
-                                        Ok(Some(b))
-                                    }
-                                    Ok(None) => {
-                                        self.block_cache.insert(*id, block.clone()).await;
-                                        Ok(Some(block))
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Error getting block from cache {:?}", e);
-                                        Err(GetError::BlockLoadError(e.into()))
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Error converting bytes to Block {:?}/{:?}",
-                                    key,
-                                    e
-                                );
-                                Err(GetError::BlockLoadError(e))
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!("Error converting bytes to Block {:?}", e);
-                        Err(GetError::StorageGetError(e))
-                    }
-                }
-            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string())).await
+        let ac_storage = match &self.storage {
+            Storage::AdmissionControlledS3(s3) => s3,
+            _ => {
+                panic!("tst");
+            }
+        };
+        if let Some(block) = block {
+            return Ok(Some(block));
         }
+        let key = Self::format_key(prefix_path, id);
+        let id_clone = *id;
+        // If the block is not in the cache, we fetch it from storage.
+        let res = ac_storage
+            .fetch(&key, GetOptions::new(priority), move |bytes| {
+                let deserialization_span = tracing::trace_span!(
+                    parent: Span::current(),
+                    "BlockManager deserialize block",
+                    id = id_clone.to_string()
+                );
+                deserialization_span.in_scope(|| Block::from_bytes(&bytes, id_clone).unwrap())
+            })
+            .await;
+        let res = res.unwrap().0;
+        Ok(Some(res))
+
+        // match block {
+        //     Some(block) => Ok(Some(block)),
+        //     None => async {
+        //         let key = Self::format_key(prefix_path, id);
+        //         let bytes_res = self
+        //             .storage
+        //             .get(&key, GetOptions::new(priority))
+        //             .instrument(
+        //                 tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
+        //             )
+        //             .await;
+        //         match bytes_res {
+        //             Ok(bytes) => {
+        //                 self.block_metrics.num_get_requests.record(1, &[]);
+        //                 let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
+        //                 let block =
+        //                     deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
+        //                 match block {
+        //                     Ok(block) => {
+        //                         let _guard = self.cache_mutex.lock(id).await;
+        //                         match self.block_cache.obtain(*id).await {
+        //                             Ok(Some(b)) => {
+        //                                 Ok(Some(b))
+        //                             }
+        //                             Ok(None) => {
+        //                                 self.block_cache.insert(*id, block.clone()).await;
+        //                                 Ok(Some(block))
+        //                             }
+        //                             Err(e) => {
+        //                                 tracing::error!("Error getting block from cache {:?}", e);
+        //                                 Err(GetError::BlockLoadError(e.into()))
+        //                             }
+        //                         }
+        //                     }
+        //                     Err(e) => {
+        //                         tracing::error!(
+        //                             "Error converting bytes to Block {:?}/{:?}",
+        //                             key,
+        //                             e
+        //                         );
+        //                         Err(GetError::BlockLoadError(e))
+        //                     }
+        //                 }
+        //             }
+        //             Err(e) => {
+        //                 tracing::error!("Error converting bytes to Block {:?}", e);
+        //                 Err(GetError::StorageGetError(e))
+        //             }
+        //         }
+        //     }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string())).await
     }
 
     pub(super) async fn flush(

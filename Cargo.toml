@@ -65,7 +65,7 @@ regex-syntax = "0.8.5"
 roaring = "0.10.6"
 sea-query = "0.32"
 sea-query-binder = "0.7"
-serde = { version = "1.0.215", features = ["derive"] }
+serde = { version = "1.0.215", features = ["derive", "rc"] }
 serde_json = "1.0.133"
 setsum = "0.7"
 tantivy = "0.22.0"
