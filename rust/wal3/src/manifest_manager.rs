@@ -148,7 +148,19 @@ impl Staging {
         Vec<tokio::sync::oneshot::Sender<Option<Error>>>,
     )> {
         if let Some((garbage, notifier)) = self.garbage.take() {
-            let new_manifest = self.stable.manifest.apply_garbage(garbage).ok()??;
+            let new_manifest = match self.stable.manifest.apply_garbage(garbage) {
+                Ok(Some(manifest)) => manifest,
+                Ok(None) => {
+                    tracing::error!("given empty garbage that did not apply");
+                    let _ = notifier.send(None);
+                    return None;
+                }
+                Err(err) => {
+                    tracing::error!("could not apply garabage: {err:?}");
+                    let _ = notifier.send(Some(err));
+                    return None;
+                }
+            };
             Some((
                 self.stable.manifest.clone(),
                 self.stable.e_tag.clone(),
@@ -229,12 +241,18 @@ impl ManifestManager {
 
     /// Signal log contention to anyone writing on the manifest.
     pub fn shutdown(&self) {
-        let fragments = {
+        let (fragments, garbage) = {
             let mut staging = self.staging.lock().unwrap();
             staging.tearing_down = true;
-            std::mem::take(&mut staging.fragments)
+            (
+                std::mem::take(&mut staging.fragments),
+                std::mem::take(&mut staging.garbage),
+            )
         };
         for (_, tx) in fragments {
+            let _ = tx.send(Some(Error::LogContentionDurable));
+        }
+        if let Some((_, tx)) = garbage {
             let _ = tx.send(Some(Error::LogContentionDurable));
         }
     }
