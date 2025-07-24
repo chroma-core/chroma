@@ -15,9 +15,9 @@ use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::{stream, FutureExt, StreamExt};
 use opentelemetry::{global, metrics::Counter, KeyValue};
-use serde::ser::Error;
 use std::any::Any;
 use std::fmt::Debug;
+use std::future::Future;
 use std::{
     collections::HashMap,
     sync::{atomic::Ordering, Arc},
@@ -103,7 +103,7 @@ struct InflightRequest {
 
 enum InflightRequestResult {
     Initial,
-    Updated(Result<(Arc<dyn Any + Send + Sync>, Option<ETag>), Arc<dyn std::error::Error>>),
+    Updated(Result<(Arc<dyn Any + Send + Sync>, Option<ETag>), StorageError>),
 }
 
 impl InflightRequest {
@@ -302,77 +302,9 @@ impl AdmissionControlledS3Storage {
         key: String,
         options: GetOptions,
     ) -> Result<Arc<Vec<u8>>, StorageError> {
-        self.metrics.nac_outstanding_read_requests.record(
-            self.metrics
-                .outstanding_read_requests
-                .load(Ordering::Relaxed) as u64,
-            &self.metrics.hostname_attribute,
-        );
-        self.metrics
-            .outstanding_read_requests
-            .fetch_add(1, Ordering::Relaxed);
-        // If there is a duplicate request and the original request finishes
-        // before we look it up in the map below then we will end up with another
-        // request to S3.
-        // let future_to_await;
-        // {
-        //     let _stopwatch = Stopwatch::new(
-        //         &self.metrics.nac_lock_wait_duration_us,
-        //         &self.metrics.hostname_attribute,
-        //         chroma_tracing::util::StopWatchUnit::Micros,
-        //     );
-        //     let mut requests = self.outstanding_read_requests.lock().await;
-        //     let maybe_inflight = requests.get(&key).cloned();
-        //     future_to_await = match maybe_inflight {
-        //         Some(fut) => {
-        //             tracing::trace!("[AdmissionControlledS3] Found inflight request to s3 for key: {:?}. Deduping", key);
-        //             self.metrics
-        //                 .nac_dedup_count
-        //                 .add(1, &self.metrics.hostname_attribute);
-        //             fut.update_priority(
-        //                 options.priority,
-        //                 self.metrics.nac_priority_increase_sent.clone(),
-        //                 &self.metrics.hostname_attribute,
-        //             )
-        //             .await;
-        //             fut.future
-        //         }
-        //         None => {
-        //             let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
-        //             let get_parallel_storage_future = AdmissionControlledS3Storage::parallel_fetch(
-        //                 self.storage.clone(),
-        //                 self.rate_limiter.clone(),
-        //                 key.clone(),
-        //                 atomic_priority.clone(),
-        //                 self.metrics.read_requests_waiting_for_token.clone(),
-        //                 self.metrics.nac_read_requests_waiting_for_token.clone(),
-        //                 self.metrics.hostname_attribute.clone(),
-        //             )
-        //             .boxed()
-        //             .shared();
-        //             requests.insert(
-        //                 key.clone(),
-        //                 InflightRequest {
-        //                     priority: atomic_priority,
-        //                     future: get_parallel_storage_future.clone(),
-        //                     priority_upgrade_channel: None,
-        //                 },
-        //             );
-        //             get_parallel_storage_future
-        //         }
-        //     };
-        // }
-
-        // let res = future_to_await.await;
-        // {
-        //     let mut requests = self.outstanding_read_requests.lock().await;
-        //     requests.remove(&key);
-        // }
-        // self.metrics
-        //     .outstanding_read_requests
-        //     .fetch_sub(1, Ordering::Relaxed);
-        // Ok(res?.0)
-        unimplemented!();
+        self.get_with_e_tag_internal::<_, _, _>(&key, options, true, Self::no_op_closure)
+            .await
+            .map(|(bytes, _e_tag)| bytes)
     }
 
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
@@ -381,61 +313,70 @@ impl AdmissionControlledS3Storage {
             .map(|(bytes, _e_tag)| bytes)
     }
 
-    // pub async fn fetch<Ret, F>(
-    //     &self,
-    //     key: &str,
-    //     options: GetOptions,
-    //     fetch_fn: F,
-    // ) -> Result<(Ret, Option<ETag>), StorageError>
-    // where
-    //     F: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> Result<Ret, StorageError> + Send + 'static,
-    //     Ret: Clone + Any + Sync + Send,
-    // {
-    //     self.get_with_e_tag_internal(key, options, fetch_fn).await
-    // }
+    pub async fn fetch<FetchReturn, FetchFn, FetchFut>(
+        &self,
+        key: &str,
+        options: GetOptions,
+        fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Option<ETag>), StorageError>
+    where
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
+        self.get_with_e_tag_internal(key, options, false, fetch_fn)
+            .await
+    }
 
     pub async fn get_with_e_tag(
         &self,
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        self.get_with_e_tag_internal::<_, _>(key, options, Self::no_op_closure)
+        self.get_with_e_tag_internal::<_, _, _>(key, options, false, Self::no_op_closure)
             .await
     }
 
-    fn no_op_closure(r: Result<Arc<Vec<u8>>, StorageError>) -> Result<Arc<Vec<u8>>, StorageError> {
+    async fn no_op_closure(
+        r: Result<Arc<Vec<u8>>, StorageError>,
+    ) -> Result<Arc<Vec<u8>>, StorageError> {
         r
     }
 
-    fn dispatch_fetch<Ret, F>(
-        fetch_fn: F,
+    async fn dispatch_fetch<FetchReturn, FetchFn, FetchFut>(
+        fetch_fn: FetchFn,
         input: Result<(Arc<Vec<u8>>, Option<ETag>), StorageError>,
-    ) -> Result<(Ret, Option<ETag>), StorageError>
+    ) -> Result<(FetchReturn, Option<ETag>), StorageError>
     where
-        F: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> Result<Ret, StorageError>,
-        Ret: Clone + Any + Sync + Send,
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
     {
         match input {
             Ok((bytes, e_tag)) => {
-                let ret = fetch_fn(Ok(bytes));
+                let ret = fetch_fn(Ok(bytes)).await;
                 ret.map(|r| (r, e_tag))
             }
             Err(e) => {
-                let ret = fetch_fn(Err(e));
+                let ret = fetch_fn(Err(e)).await;
                 ret.map(|r| (r, None))
             }
         }
     }
 
-    async fn get_with_e_tag_internal<Ret, F>(
+    async fn get_with_e_tag_internal<FetchReturn, FetchFn, FetchFut>(
         &self,
         key: &str,
         options: GetOptions,
-        fetch_fn: F,
-    ) -> Result<(Ret, Option<ETag>), StorageError>
+        // TODO: remove is_parallel and move it into GetOptions, refactor all callers
+        // to use the new options instead of special methods.
+        is_parallel: bool,
+        fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Option<ETag>), StorageError>
     where
-        F: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> Result<Ret, StorageError>,
-        Ret: Clone + Any + Sync + Send,
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
     {
         self.metrics.nac_outstanding_read_requests.record(
             self.metrics
@@ -451,7 +392,7 @@ impl AdmissionControlledS3Storage {
             self.metrics
                 .outstanding_read_requests
                 .fetch_sub(1, Ordering::Relaxed);
-            return Self::dispatch_fetch(fetch_fn, res);
+            return Self::dispatch_fetch(fetch_fn, res).await;
         }
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
@@ -494,25 +435,40 @@ impl AdmissionControlledS3Storage {
                             sender: output_tx.clone(),
                         },
                     );
-                    unimplemented!();
-                    let res = AdmissionControlledS3Storage::read_from_storage(
-                        self.storage.clone(),
-                        self.rate_limiter.clone(),
-                        key.to_string(),
-                        atomic_priority,
-                        Some(priority_rx),
-                        self.metrics.read_requests_waiting_for_token.clone(),
-                        self.metrics.nac_read_requests_waiting_for_token.clone(),
-                        self.metrics.hostname_attribute.clone(),
-                    )
-                    .map(|res| {
-                        Self::dispatch_fetch(fetch_fn, res)
-                            .map(|(r, e_tag)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tag))
-                            .map_err(|e| (Arc::new(e) as Arc<dyn std::error::Error>))
-                    })
-                    .await;
+                    let res = match is_parallel {
+                        true => {
+                            AdmissionControlledS3Storage::parallel_fetch(
+                                self.storage.clone(),
+                                self.rate_limiter.clone(),
+                                key.to_string(),
+                                atomic_priority,
+                                self.metrics.read_requests_waiting_for_token.clone(),
+                                self.metrics.nac_read_requests_waiting_for_token.clone(),
+                                self.metrics.hostname_attribute.clone(),
+                            )
+                            .await
+                        }
+                        false => {
+                            AdmissionControlledS3Storage::read_from_storage(
+                                self.storage.clone(),
+                                self.rate_limiter.clone(),
+                                key.to_string(),
+                                atomic_priority,
+                                Some(priority_rx),
+                                self.metrics.read_requests_waiting_for_token.clone(),
+                                self.metrics.nac_read_requests_waiting_for_token.clone(),
+                                self.metrics.hostname_attribute.clone(),
+                            )
+                            .await
+                        }
+                    };
+                    let fetched = Self::dispatch_fetch(fetch_fn, res)
+                        .await
+                        .map(|(r, e_tag)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tag));
                     // TODO: don't unwrap here
-                    output_tx.send(InflightRequestResult::Updated(res)).unwrap();
+                    output_tx
+                        .send(InflightRequestResult::Updated(fetched))
+                        .unwrap();
                 }
             };
         }
@@ -520,6 +476,7 @@ impl AdmissionControlledS3Storage {
         if !matches!(*output_rx.borrow(), InflightRequestResult::Initial) {
             // If the output_rx is already updated, we don't need to wait for it.
             // This can happen if the request was already completed before we subscribed to it.
+            // TODO: don't expect here
             output_rx
                 .changed()
                 .await
@@ -539,21 +496,16 @@ impl AdmissionControlledS3Storage {
                 panic!("Impossible state: InflightRequestResult::Initial should not be returned after output_rx.changed() is awaited");
             }
             InflightRequestResult::Updated(ref res) => res.clone(),
-        };
-        unimplemented!();
-        // match ret {
-        //     Ok((any_ret, e_tag)) => Ok((
-        //         any_ret
-        //             .downcast_ref::<Ret>()
-        //             .expect("This unwrap should be correct by construction")
-        //             .clone(),
-        //         e_tag,
-        //     )),
-        //     Err(e) => Err(e
-        //         .downcast_ref::<Err>()
-        //         .expect("This unwrap should be correct by construction")
-        //         .clone()),
-        // }
+        }?;
+
+        Ok((
+            ret.0
+                .downcast::<FetchReturn>()
+                .expect("Impossible state: downcast failed")
+                .as_ref()
+                .clone(),
+            ret.1,
+        ))
     }
 
     async fn strongly_consistent_get_with_e_tag(
