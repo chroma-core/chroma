@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fmt,
     future::{ready, Future},
     pin::Pin,
@@ -6,10 +7,12 @@ use std::{
 
 use chroma_error::ChromaError;
 use chroma_types::{CollectionUuid, Metadata, UpdateMetadata, Where};
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 use thiserror::Error;
 use validator::Validate;
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumIter)]
 pub enum Action {
     CreateDatabase,
     CreateCollection,
@@ -220,9 +223,7 @@ impl<'other> QuotaPayload<'other> {
     }
 }
 
-use std::collections::HashMap;
-
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, EnumIter)]
 pub enum UsageType {
     MetadataKeySizeBytes,       // Max metadata key size in bytes
     MetadataValueSizeBytes,     // Max metadata value size in bytes
@@ -313,33 +314,48 @@ impl TryFrom<&str> for UsageType {
     }
 }
 
+pub trait DefaultQuota {
+    fn default_quota(&self) -> usize;
+}
+
+impl DefaultQuota for UsageType {
+    fn default_quota(&self) -> usize {
+        match self {
+            UsageType::MetadataKeySizeBytes => 36,
+            UsageType::MetadataValueSizeBytes => 36,
+            UsageType::NumMetadataKeys => 16,
+            UsageType::NumWherePredicates => 8,
+            UsageType::WhereValueSizeBytes => 36, // Same as METADATA_VALUE_SIZE
+            UsageType::NumWhereDocumentPredicates => 8,
+            UsageType::WhereDocumentValueLength => 130,
+            UsageType::NumRecords => 100,
+            UsageType::EmbeddingDimensions => 3072,
+            UsageType::DocumentSizeBytes => 5000,
+            UsageType::UriSizeBytes => 32,
+            UsageType::IdSizeBytes => 128,
+            UsageType::NameSizeBytes => 128,
+            UsageType::LimitValue => 1000,
+            UsageType::NumResults => 100,
+            UsageType::NumQueryEmbeddings => 100,
+            UsageType::CollectionSizeRecords => 1_000_000,
+            UsageType::NumCollections => 1_000_000,
+            UsageType::NumDatabases => 10,
+            UsageType::NumQueryIDs => 1000,
+            UsageType::RegexPatternLength => 256,
+            UsageType::NumForks => 256,
+        }
+    }
+}
+
 lazy_static::lazy_static! {
     pub static ref DEFAULT_QUOTAS: HashMap<UsageType, usize> = {
-        let mut m = HashMap::new();
-        m.insert(UsageType::MetadataKeySizeBytes, 36);
-        m.insert(UsageType::MetadataValueSizeBytes, 36);
-        m.insert(UsageType::NumMetadataKeys, 16);
-        m.insert(UsageType::NumWherePredicates, 8);
-        m.insert(UsageType::WhereValueSizeBytes, 36); // Same as METADATA_VALUE_SIZE
-        m.insert(UsageType::NumWhereDocumentPredicates, 8);
-        m.insert(UsageType::WhereDocumentValueLength, 130);
-        m.insert(UsageType::NumRecords, 100);
-        m.insert(UsageType::EmbeddingDimensions, 3072);
-        m.insert(UsageType::DocumentSizeBytes, 5000);
-        m.insert(UsageType::UriSizeBytes, 32);
-        m.insert(UsageType::IdSizeBytes, 128);
-        m.insert(UsageType::NameSizeBytes, 128);
-        m.insert(UsageType::LimitValue, 1000);
-        m.insert(UsageType::NumResults, 100);
-        m.insert(UsageType::NumQueryEmbeddings, 100);
-        m.insert(UsageType::CollectionSizeRecords, 1_000_000);
-        m.insert(UsageType::NumCollections, 1_000_000);
-        m.insert(UsageType::NumDatabases, 10);
-        m.insert(UsageType::NumQueryIDs, 1000);
-        m.insert(UsageType::RegexPatternLength, 0);
-        m.insert(UsageType::NumForks, 256);
-        m
+        UsageType::iter().map(|usage_type| (usage_type.clone(), usage_type.default_quota())).collect()
     };
+}
+
+#[derive(Debug)]
+pub struct QuotaOverrides {
+    pub limit: u32,
 }
 
 #[derive(Debug, Validate)]
@@ -387,7 +403,9 @@ impl ChromaError for QuotaEnforcerError {
             QuotaEnforcerError::ApiKeyMissing => chroma_error::ErrorCodes::InvalidArgument,
             QuotaEnforcerError::Unauthorized => chroma_error::ErrorCodes::PermissionDenied,
             QuotaEnforcerError::InitializationFailed => chroma_error::ErrorCodes::Internal,
-            QuotaEnforcerError::GenericQuotaError(_) => chroma_error::ErrorCodes::ResourceExhausted,
+            QuotaEnforcerError::GenericQuotaError(_) => {
+                chroma_error::ErrorCodes::UnprocessableEntity
+            }
         }
     }
 }
@@ -396,15 +414,20 @@ pub trait QuotaEnforcer: Send + Sync {
     fn enforce<'other>(
         &'other self,
         payload: &'other QuotaPayload<'other>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), QuotaEnforcerError>> + Send + 'other>>;
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Option<QuotaOverrides>, QuotaEnforcerError>> + Send + 'other,
+        >,
+    >;
 }
 
 impl QuotaEnforcer for () {
-    fn enforce(
-        &self,
-        _: &QuotaPayload<'_>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), QuotaEnforcerError>> + Send>> {
-        Box::pin(ready(Ok(())))
+    fn enforce<'a>(
+        &'a self,
+        _payload: &'a QuotaPayload<'a>,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<QuotaOverrides>, QuotaEnforcerError>> + Send + 'a>>
+    {
+        Box::pin(ready(Ok(None)))
     }
 }
 

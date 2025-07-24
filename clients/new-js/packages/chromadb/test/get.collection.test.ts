@@ -6,7 +6,9 @@ import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 describe("get collections", () => {
   // connects to the unauthenticated chroma instance started in
   // the global jest setup file.
-  const client = new ChromaClient();
+  const client = new ChromaClient({
+    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+  });
 
   beforeEach(async () => {
     await client.reset();

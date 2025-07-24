@@ -130,16 +130,25 @@ proptest::proptest! {
             manifest.apply_fragment(fragment);
         }
         eprintln!("starting manifest = {manifest:#?}");
-        let start = manifest.oldest_timestamp().unwrap();
-        let limit = manifest.newest_timestamp().unwrap();
+        let start = manifest.oldest_timestamp();
+        let limit = manifest.next_write_timestamp();
         let cache = TestingSnapshotCache::default();
-        for offset in start.offset()..limit.offset() {
+        let mut count = 0;
+        let mut last_limit = 0;
+        for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
-            let garbage = rt.block_on(Garbage::new(&storage, "manifests_gargage", &manifest, &throttle, &cache, position)).unwrap();
+            let Some(garbage) = rt.block_on(Garbage::new(&storage, "manifests_gargage", &manifest, &throttle, &cache, position)).unwrap() else {
+                continue;
+            };
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.setsum_to_discard;
-            let new_manifest = manifest.apply_garbage(garbage.clone()).unwrap();
+            if garbage.is_empty() {
+                continue;
+            }
+            let Some(new_manifest) = manifest.apply_garbage(garbage.clone()).unwrap() else {
+                panic!("garbage fail {garbage:#?}");
+            };
             eprintln!("manifest.setsum = {}", manifest.setsum.hexdigest());
             eprintln!("new_manifest.setsum = {}", new_manifest.setsum.hexdigest());
             eprintln!("dropped = {}", dropped.hexdigest());
@@ -151,7 +160,11 @@ proptest::proptest! {
             assert_eq!(manifest.setsum, new_manifest.setsum, "manifest.setsum mismatch");
             assert_eq!(manifest.collected + dropped, new_manifest.collected, "manifest.collected mismatch");
             assert!(new_manifest.scrub().is_ok(), "scrub error");
+            count += 1;
+            last_limit = offset;
         }
+        assert!(count >= 1);
+        assert!(LogPosition::from_offset(last_limit) == manifest.next_write_timestamp());
     }
 }
 
@@ -170,7 +183,7 @@ proptest::proptest! {
         let fragments = deltas_to_fragment_sequence(&deltas);
         println!("fragments = {fragments:#?}");
         let mut snapshots = vec![];
-        for fragment in fragments.into_iter() {
+        for fragment in fragments.iter().cloned() {
             assert!(manifest.can_apply_fragment(&fragment));
             manifest.apply_fragment(fragment);
             if let Some(snapshot) = manifest.generate_snapshot(SnapshotOptions {
@@ -182,20 +195,27 @@ proptest::proptest! {
             }
         }
         eprintln!("starting manifest = {manifest:#?}");
-        let start = manifest.oldest_timestamp().unwrap();
-        let limit = manifest.newest_timestamp().unwrap();
+        let start = manifest.oldest_timestamp();
+        let limit = manifest.next_write_timestamp();
         let mut cache = TestingSnapshotCache {
             snapshots: snapshots.clone(),
         };
         eprintln!("[{:?}, {:?})", start, limit);
-        for offset in start.offset()..limit.offset() {
+        let mut last_initial_seq_no = FragmentSeqNo(0);
+        for offset in start.offset()..=limit.offset() {
             let position = LogPosition::from_offset(offset);
             eprintln!("position = {position:?}");
             let garbage = rt.block_on(Garbage::new(&storage, "manifests_with_snapshots_gargage", &manifest, &throttle, &cache, position)).unwrap();
+            let Some(garbage) = garbage else {
+                continue;
+            };
             eprintln!("garbage = {garbage:#?}");
             let dropped = garbage.setsum_to_discard;
             cache.snapshots.extend(garbage.snapshots_to_make.clone());
-            let new_manifest = manifest.apply_garbage(garbage.clone()).unwrap();
+            if garbage.is_empty() {
+                continue;
+            }
+            let new_manifest = manifest.apply_garbage(garbage.clone()).unwrap().unwrap();
             eprintln!("manifest.setsum = {}", manifest.setsum.hexdigest());
             eprintln!("new_manifest.setsum = {}", new_manifest.setsum.hexdigest());
             eprintln!("dropped = {}", dropped.hexdigest());
@@ -203,7 +223,13 @@ proptest::proptest! {
             assert_eq!(manifest.setsum, new_manifest.setsum, "manifest.setsum mismatch");
             assert_eq!(manifest.collected + dropped, new_manifest.collected, "manifest.collected mismatch");
             assert!(new_manifest.scrub().is_ok(), "scrub error");
+            assert!(new_manifest.initial_seq_no.is_some() || new_manifest.initial_offset.is_none());
+            if new_manifest.initial_seq_no.is_some() {
+                assert!(new_manifest.initial_seq_no.unwrap() >= last_initial_seq_no);
+                last_initial_seq_no = new_manifest.initial_seq_no.unwrap();
+            }
         }
+        assert_eq!(last_initial_seq_no, fragments.last().unwrap().seq_no + 1);
     }
 }
 

@@ -156,6 +156,7 @@ impl ChromaError for ResetError {
 #[derive(Serialize, ToSchema)]
 pub struct ChecklistResponse {
     pub max_batch_size: u32,
+    pub supports_base64_encoding: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -646,6 +647,8 @@ pub enum CreateCollectionError {
     SpannNotImplemented,
     #[error("HNSW is not supported on this platform")]
     HnswNotSupported,
+    #[error("Failed to parse db id")]
+    DatabaseIdParseError,
 }
 
 impl ChromaError for CreateCollectionError {
@@ -662,6 +665,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::Aborted(_) => ErrorCodes::Aborted,
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
+            CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
         }
     }
 }
@@ -688,6 +692,8 @@ pub enum GetCollectionsError {
     Configuration(#[from] serde_json::Error),
     #[error("Could not deserialize collection ID")]
     CollectionId(#[from] uuid::Error),
+    #[error("Could not deserialize database ID")]
+    DatabaseId,
 }
 
 impl ChromaError for GetCollectionsError {
@@ -696,6 +702,7 @@ impl ChromaError for GetCollectionsError {
             GetCollectionsError::Internal(err) => err.code(),
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
+            GetCollectionsError::DatabaseId => ErrorCodes::Internal,
         }
     }
 }
@@ -960,7 +967,8 @@ pub struct AddCollectionRecordsRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
-    pub embeddings: Option<Vec<Vec<f32>>>,
+    #[validate(custom(function = "Self::validate_embeddings"))]
+    pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<Metadata>>>,
@@ -973,7 +981,7 @@ impl AddCollectionRecordsRequest {
         database_name: String,
         collection_id: CollectionUuid,
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
@@ -990,6 +998,14 @@ impl AddCollectionRecordsRequest {
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
+    }
+
+    fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
+        if embeddings.iter().any(|e| e.is_empty()) {
+            return Err(ValidationError::new("embedding_minimum_dimensions")
+                .with_message("Each embedding must have at least 1 dimension".into()));
+        }
+        Ok(())
     }
 }
 

@@ -22,11 +22,19 @@ use crate::{
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
 
 pub fn manifest_path(prefix: &str) -> String {
-    format!("{prefix}/manifest/MANIFEST")
+    format!("{prefix}/{}", unprefixed_manifest_path())
+}
+
+pub fn unprefixed_manifest_path() -> String {
+    "manifest/MANIFEST".to_string()
+}
+
+pub fn snapshot_prefix() -> String {
+    "snapshot/".to_string()
 }
 
 pub fn unprefixed_snapshot_path(setsum: Setsum) -> String {
-    format!("snapshot/SNAPSHOT.{}", setsum.hexdigest())
+    format!("{}SNAPSHOT.{}", snapshot_prefix(), setsum.hexdigest())
 }
 
 pub fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
@@ -156,10 +164,11 @@ impl Snapshot {
         Ok(ScrubSuccess {
             calculated_setsum,
             bytes_read,
+            short_read: false,
         })
     }
 
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -199,7 +208,7 @@ impl Snapshot {
         }
     }
 
-    #[tracing::instrument(skip(self, storage), err(Display))]
+    #[tracing::instrument(skip(self, storage))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
@@ -210,6 +219,7 @@ impl Snapshot {
             options.throughput as f64,
             options.headroom as f64,
         );
+        let mut retry_count = 0;
         loop {
             let path = format!("{}/{}", prefix, self.path);
             let payload = serde_json::to_string(&self)
@@ -232,18 +242,19 @@ impl Snapshot {
                 }
                 Err(e) => {
                     tracing::error!("error uploading manifest: {e:?}");
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(3_600) {
-                        backoff = Duration::from_secs(3_600);
+                    let backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
+                        return Err(Arc::new(e).into());
                     }
                     tokio::time::sleep(backoff).await;
                 }
             }
+            retry_count += 1;
         }
     }
 
-    /// Return the lowest addressable offset in the log.
-    pub fn maximum_log_position(&self) -> LogPosition {
+    /// Return the the next address to insert into the log.
+    pub fn limiting_log_position(&self) -> LogPosition {
         let frags = self
             .fragments
             .iter()
@@ -292,7 +303,7 @@ impl Snapshot {
             path_to_snapshot: self.path.clone(),
             depth: self.depth,
             start: self.minimum_log_position(),
-            limit: self.maximum_log_position(),
+            limit: self.limiting_log_position(),
             num_bytes: self.num_bytes(),
         }
     }
@@ -319,6 +330,8 @@ pub struct Manifest {
     pub fragments: Vec<Fragment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_offset: Option<LogPosition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_seq_no: Option<FragmentSeqNo>,
 }
 
 impl Manifest {
@@ -332,6 +345,7 @@ impl Manifest {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: None,
+            initial_seq_no: None,
         }
     }
 
@@ -454,7 +468,7 @@ impl Manifest {
             path_to_snapshot: snapshot.path.clone(),
             depth: snapshot.depth,
             start: snapshot.minimum_log_position(),
-            limit: snapshot.maximum_log_position(),
+            limit: snapshot.limiting_log_position(),
             num_bytes: snapshot.num_bytes(),
         });
         self.scrub()?;
@@ -466,14 +480,7 @@ impl Manifest {
     /// Once upon a time there was more parallelism in wal3 and this was a more interesting.  Now
     /// it mostly returns true unless internal invariants are violated.
     pub fn can_apply_fragment(&self, fragment: &Fragment) -> bool {
-        let max_seq_no = self
-            .fragments
-            .iter()
-            .map(|f| f.seq_no)
-            .max()
-            .unwrap_or(FragmentSeqNo(0));
-        max_seq_no < max_seq_no + 1
-            && max_seq_no + 1 == fragment.seq_no
+        Some(fragment.seq_no) == self.next_fragment_seq_no()
             && fragment.start.offset() < fragment.limit.offset()
     }
 
@@ -503,35 +510,47 @@ impl Manifest {
     }
 
     /// The oldest LogPosition in the manifest.
-    pub fn oldest_timestamp(&self) -> Option<LogPosition> {
-        if let Some(snap) = self
+    pub fn oldest_timestamp(&self) -> LogPosition {
+        let frags = self
+            .fragments
+            .iter()
+            .map(|f| f.start)
+            .min_by_key(|p| p.offset());
+        let snaps = self
             .snapshots
             .iter()
-            .map(|f| f.start)
-            .min_by_key(|p| p.offset())
-        {
-            return Some(snap);
+            .map(|s| s.start)
+            .min_by_key(|p| p.offset());
+        match (frags, snaps) {
+            (Some(f), Some(s)) => LogPosition {
+                offset: std::cmp::min(f.offset, s.offset),
+            },
+            (Some(f), None) => f,
+            (None, Some(s)) => s,
+            (None, None) => self.initial_offset.unwrap_or(LogPosition::from_offset(1)),
         }
-        self.fragments
-            .iter()
-            .map(|f| f.start)
-            .min_by_key(|p| p.offset())
     }
 
     /// The LogPosition of the next record to be written.
-    pub fn newest_timestamp(&self) -> Option<LogPosition> {
-        if let Some(frag) = self
+    pub fn next_write_timestamp(&self) -> LogPosition {
+        let frags = self
             .fragments
             .iter()
             .map(|f| f.limit)
-            .max_by_key(|p| p.offset())
-        {
-            return Some(frag);
-        }
-        self.snapshots
+            .max_by_key(|p| p.offset());
+        let snaps = self
+            .snapshots
             .iter()
-            .map(|f| f.start)
-            .max_by_key(|p| p.offset())
+            .map(|s| s.limit)
+            .max_by_key(|p| p.offset());
+        match (frags, snaps) {
+            (Some(f), Some(s)) => LogPosition {
+                offset: std::cmp::max(f.offset, s.offset),
+            },
+            (Some(f), None) => f,
+            (None, Some(s)) => s,
+            (None, None) => self.initial_offset.unwrap_or(LogPosition::from_offset(1)),
+        }
     }
 
     /// Given a position, get the fragment to be written.
@@ -541,7 +560,7 @@ impl Manifest {
             .find(|f| f.limit.offset() >= position.offset())
     }
 
-    /// Scrub the manifest.
+    /// Scrub the manifest without doing I/O.
     pub fn scrub(&self) -> Result<ScrubSuccess, Box<ScrubError>> {
         let mut calculated_setsum = Setsum::default();
         let mut bytes_read = 0u64;
@@ -602,26 +621,25 @@ impl Manifest {
         Ok(ScrubSuccess {
             calculated_setsum,
             bytes_read,
+            short_read: false,
         })
     }
 
     /// The next sequence number to generate, or None if the log has exhausted them.
     pub fn next_fragment_seq_no(&self) -> Option<FragmentSeqNo> {
-        let max_seq_no = self
-            .fragments
-            .iter()
-            .map(|f| f.seq_no)
-            .max()
-            .unwrap_or(FragmentSeqNo(0));
-        if max_seq_no + 1 > max_seq_no {
-            Some(max_seq_no + 1)
+        if let Some(max_seq_no) = self.fragments.iter().map(|f| f.seq_no).max() {
+            if max_seq_no + 1 > max_seq_no {
+                Some(max_seq_no + 1)
+            } else {
+                None
+            }
         } else {
-            None
+            Some(self.initial_seq_no.unwrap_or(FragmentSeqNo::BEGIN))
         }
     }
 
     /// Initialize the log with an empty manifest.
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn initialize(
         options: &LogWriterOptions,
         storage: &Storage,
@@ -637,12 +655,13 @@ impl Manifest {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: None,
+            initial_seq_no: None,
         };
         Self::initialize_from_manifest(options, storage, prefix, initial).await
     }
 
     /// Initialize the log with an empty manifest.
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn initialize_from_manifest(
         _: &LogWriterOptions,
         storage: &Storage,
@@ -664,7 +683,6 @@ impl Manifest {
     }
 
     /// Load the latest manifest from object storage.
-    #[tracing::instrument(skip(storage), err(Display))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -713,7 +731,7 @@ impl Manifest {
     }
 
     /// Install a manifest to object storage.
-    #[tracing::instrument(skip(self, storage, new), err(Display))]
+    #[tracing::instrument(skip(self, storage, new))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
@@ -729,9 +747,10 @@ impl Manifest {
         tracing::info!(
             "installing manifest at {} {:?} {:?}",
             prefix,
-            new.maximum_log_position(),
+            new.next_write_timestamp(),
             current,
         );
+        let mut retry_count = 0;
         loop {
             let payload = serde_json::to_string(&new)
                 .map_err(|e| {
@@ -755,79 +774,42 @@ impl Manifest {
                     // without an e_tag we cannot do anything.  The log contention backoff protocol
                     // cares for this case, rather than having to error-handle it separately
                     // because it "crashes" the log and reinitializes.
-                    return Err(Error::LogContention);
+                    return Err(Error::LogContentionFailure);
                 }
                 Err(StorageError::Precondition { path: _, source: _ }) => {
-                    return Err(Error::LogContention);
+                    // NOTE(rescrv):  This is "durable" because it's a manifest failure.  See the
+                    // comment in the Error enum for why this makes sense.
+                    return Err(Error::LogContentionDurable);
                 }
                 Err(e) => {
                     tracing::error!("error uploading manifest: {e:?}");
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(3_600) {
-                        backoff = Duration::from_secs(3_600);
+                    let backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
+                        // NOTE(rescrv):  This is "durable" because it's a manifest failure.  See the
+                        // comment in the Error enum for why this makes sense.  By returning
+                        // "durable" rather than the underlying error we force an end-to-end
+                        // recovery.
+                        return Err(Error::LogContentionDurable);
                     }
                     tokio::time::sleep(backoff).await;
                 }
             }
+            retry_count += 1;
         }
-    }
-
-    /// Return the lowest addressable offset in the log.
-    pub fn maximum_log_position(&self) -> LogPosition {
-        let frags = self
-            .fragments
-            .iter()
-            .map(|f| f.limit)
-            .max_by_key(|p| p.offset());
-        let snaps = self
-            .snapshots
-            .iter()
-            .map(|s| s.limit)
-            .max_by_key(|p| p.offset());
-        match (frags, snaps) {
-            (Some(f), Some(s)) => LogPosition {
-                offset: std::cmp::max(f.offset, s.offset),
-            },
-            (Some(f), None) => f,
-            (None, Some(s)) => s,
-            (None, None) => self.initial_offset.unwrap_or(LogPosition::from_offset(1)),
-        }
-    }
-
-    /// Return the lowest addressable offset in the log.
-    pub fn minimum_log_position(&self) -> LogPosition {
-        let frags = self
-            .fragments
-            .iter()
-            .map(|f| f.start)
-            .min_by_key(|p| p.offset());
-        let snaps = self
-            .snapshots
-            .iter()
-            .map(|s| s.start)
-            .min_by_key(|p| p.offset());
-        match (frags, snaps) {
-            (Some(f), Some(s)) => LogPosition {
-                offset: std::cmp::min(f.offset, s.offset),
-            },
-            (Some(f), None) => f,
-            (None, Some(s)) => s,
-            (None, None) => self.initial_offset.unwrap_or(LogPosition::from_offset(1)),
-        }
-    }
-
-    /// Return the lowest addressable offset in the log.
-    pub fn minimum_fragment_seq_no(&self) -> FragmentSeqNo {
-        self.fragments
-            .iter()
-            .map(|f| f.seq_no)
-            .min()
-            .unwrap_or(FragmentSeqNo::BEGIN)
     }
 
     /// Apply the destructive operation specified by the Garbage struct.
     #[allow(clippy::result_large_err)]
-    pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Self, Error> {
+    pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Option<Self>, Error> {
+        if garbage.fragments_to_drop_start > garbage.fragments_to_drop_limit {
+            return Err(Error::GarbageCollection(format!(
+                "Garbage has start > limit: {:?} > {:?}",
+                garbage.fragments_to_drop_start, garbage.fragments_to_drop_limit
+            )));
+        }
+        if garbage.fragments_to_drop_limit == FragmentSeqNo(0) {
+            return Ok(None);
+        }
         let mut new = self.clone();
         for to_drop in garbage.snapshots_to_drop.iter() {
             if let Some(index) = new.snapshots.iter().position(|s| s == to_drop) {
@@ -850,8 +832,25 @@ impl Manifest {
             }
         }
         new.collected += garbage.setsum_to_discard;
+        new.initial_offset = Some(garbage.first_to_keep);
+        new.initial_seq_no = Some(garbage.fragments_to_drop_limit);
         new.scrub()?;
-        Ok(new)
+
+        // Sanity check that new manifest contains valid range of logs
+        // From the scrub above we know the manifest is continuous, so we only need to check endpoints
+        if new.oldest_timestamp() > garbage.first_to_keep {
+            tracing::error!("Manifest after garbage collection does not contain the first log to keep: needs logs since position {:?} to be present, but the smallest log postion available is {:?}", garbage.first_to_keep, new.oldest_timestamp());
+            return Err(Error::CorruptManifest(
+                "Manifest corruption detected after GC: missing first log to keep".to_string(),
+            ));
+        }
+        if new.next_write_timestamp() != self.next_write_timestamp() {
+            tracing::error!("Manifest after garbage collection has a different max log position: expected next log position to be {:?}, but got {:?}", self.next_write_timestamp(), new.next_write_timestamp());
+            return Err(Error::CorruptManifest(
+                "Manifest corruption detected after GC: next log position mismatch".to_string(),
+            ));
+        }
+        Ok(Some(new))
     }
 }
 
@@ -868,6 +867,7 @@ mod tests {
             "snapshot/SNAPSHOT.0000000000000000000000000000000000000000000000000000000000000000",
             unprefixed_snapshot_path(Setsum::default())
         );
+        assert_eq!("snapshot/", snapshot_prefix(),);
     }
 
     #[test]
@@ -913,6 +913,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
             initial_offset: None,
+            initial_seq_no: None,
         };
         assert!(!manifest.contains_position(LogPosition::from_offset(0)));
         assert!(manifest.contains_position(LogPosition::from_offset(1)));
@@ -957,6 +958,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
             initial_offset: None,
+            initial_seq_no: None,
         };
         assert!(manifest.scrub().is_ok());
         let manifest = Manifest {
@@ -970,6 +972,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
             initial_offset: None,
+            initial_seq_no: None,
         };
         assert!(manifest.scrub().is_err());
     }
@@ -1006,6 +1009,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: None,
+            initial_seq_no: None,
         };
         assert!(!manifest.can_apply_fragment(&fragment2));
         assert!(manifest.can_apply_fragment(&fragment1));
@@ -1047,6 +1051,7 @@ mod tests {
                     }
                 ],
                 initial_offset: None,
+                initial_seq_no: None,
             },
             manifest
         );
@@ -1102,6 +1107,7 @@ mod tests {
             }],
             fragments: vec![fragment2.clone()],
             initial_offset: None,
+            initial_seq_no: None,
         };
         assert!(manifest.can_apply_fragment(&fragment3));
         manifest.apply_fragment(fragment3.clone());
@@ -1124,13 +1130,14 @@ mod tests {
                 }],
                 fragments: vec![fragment2.clone(), fragment3.clone()],
                 initial_offset: None,
+                initial_seq_no: None,
             },
             manifest
         );
     }
 
     #[test]
-    fn manifest_maximum_log_position_with_initial_offset() {
+    fn manifest_limiting_log_position_with_initial_offset() {
         let manifest = Manifest {
             writer: "bootstrap".to_string(),
             setsum: Setsum::default(),
@@ -1139,15 +1146,19 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(100)),
+            initial_seq_no: Some(FragmentSeqNo(10)),
         };
         assert_eq!(
-            manifest.maximum_log_position(),
+            manifest.next_write_timestamp(),
             LogPosition::from_offset(100)
         );
+        assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
+        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
+        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
 
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentSeqNo(10),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(200),
             num_bytes: 100,
@@ -1161,10 +1172,19 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(100)),
+            initial_seq_no: Some(FragmentSeqNo(10)),
         };
         assert_eq!(
-            manifest_with_fragment.maximum_log_position(),
+            manifest_with_fragment.next_write_timestamp(),
             LogPosition::from_offset(200)
+        );
+        assert_eq!(
+            manifest_with_fragment.oldest_timestamp(),
+            LogPosition::from_offset(100)
+        );
+        assert_eq!(
+            manifest_with_fragment.next_fragment_seq_no(),
+            Some(FragmentSeqNo(11)),
         );
     }
 
@@ -1178,15 +1198,18 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(100)),
+            initial_seq_no: Some(FragmentSeqNo(10)),
         };
+        assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
         assert_eq!(
-            manifest.minimum_log_position(),
+            manifest.next_write_timestamp(),
             LogPosition::from_offset(100)
         );
+        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
 
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentSeqNo(10),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(200),
             num_bytes: 100,
@@ -1200,10 +1223,15 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(100)),
+            initial_seq_no: Some(FragmentSeqNo(10)),
         };
         assert_eq!(
-            manifest_with_fragment.minimum_log_position(),
+            manifest_with_fragment.oldest_timestamp(),
             LogPosition::from_offset(100)
+        );
+        assert_eq!(
+            manifest_with_fragment.next_fragment_seq_no(),
+            Some(FragmentSeqNo(11))
         );
     }
 
@@ -1234,14 +1262,12 @@ mod tests {
             snapshots: vec![snapshot],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(25)),
+            initial_seq_no: Some(FragmentSeqNo(1)),
         };
 
+        assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(50));
         assert_eq!(
-            manifest.minimum_log_position(),
-            LogPosition::from_offset(50)
-        );
-        assert_eq!(
-            manifest.maximum_log_position(),
+            manifest.next_write_timestamp(),
             LogPosition::from_offset(200)
         );
     }
@@ -1256,6 +1282,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(1000)),
+            initial_seq_no: Some(FragmentSeqNo(100)),
         };
 
         let serialized = serde_json::to_string(&manifest).unwrap();
@@ -1265,6 +1292,7 @@ mod tests {
             deserialized.initial_offset,
             Some(LogPosition::from_offset(1000))
         );
+        assert_eq!(deserialized.initial_seq_no, Some(FragmentSeqNo(100)));
 
         let manifest_none = Manifest {
             writer: "bootstrap".to_string(),
@@ -1274,6 +1302,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: None,
+            initial_seq_no: None,
         };
 
         let serialized_none = serde_json::to_string(&manifest_none).unwrap();
@@ -1292,11 +1321,12 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(500)),
+            initial_seq_no: Some(FragmentSeqNo(50)),
         };
 
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentSeqNo(50),
             start: LogPosition::from_offset(500),
             limit: LogPosition::from_offset(600),
             num_bytes: 100,
@@ -1317,10 +1347,11 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(500)),
+            initial_seq_no: Some(FragmentSeqNo(50)),
         };
 
         assert_eq!(manifest, expected_manifest);
-        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(2)));
+        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(51)));
     }
 
     #[test]
@@ -1350,6 +1381,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
             initial_offset: Some(LogPosition::from_offset(100)),
+            initial_seq_no: Some(FragmentSeqNo(1)),
         };
 
         assert_eq!(
@@ -1389,6 +1421,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(100)),
+            initial_seq_no: Some(FragmentSeqNo(1)),
         };
 
         assert!(!manifest.contains_position(LogPosition::from_offset(50)));
@@ -1423,15 +1456,13 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
             initial_offset: Some(LogPosition::from_offset(100)),
+            initial_seq_no: Some(FragmentSeqNo(42)),
         };
 
+        assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
         assert_eq!(
-            manifest.oldest_timestamp(),
-            Some(LogPosition::from_offset(100))
-        );
-        assert_eq!(
-            manifest.newest_timestamp(),
-            Some(LogPosition::from_offset(200))
+            manifest.next_write_timestamp(),
+            LogPosition::from_offset(200)
         );
 
         let empty_manifest = Manifest {
@@ -1442,9 +1473,104 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(500)),
+            initial_seq_no: Some(FragmentSeqNo(50)),
         };
 
-        assert_eq!(empty_manifest.oldest_timestamp(), None);
-        assert_eq!(empty_manifest.newest_timestamp(), None);
+        assert_eq!(
+            empty_manifest.oldest_timestamp(),
+            LogPosition::from_offset(500)
+        );
+        assert_eq!(
+            empty_manifest.next_write_timestamp(),
+            LogPosition::from_offset(500)
+        );
+    }
+
+    #[test]
+    fn apply_garbage_equal_nonzero_fragment_seq_nos() {
+        let manifest = Manifest {
+            writer: "test_writer".to_string(),
+            setsum: Setsum::default(),
+            collected: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: Some(LogPosition::from_offset(100)),
+            initial_seq_no: None,
+        };
+
+        let garbage = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            fragments_to_drop_start: FragmentSeqNo(5),
+            fragments_to_drop_limit: FragmentSeqNo(5),
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: LogPosition::from_offset(100),
+            snapshot_for_root: None,
+        };
+
+        let result = manifest.apply_garbage(garbage).unwrap().unwrap();
+
+        // When fragments_to_drop_start == fragments_to_drop_limit and both are non-zero,
+        // initial_seq_no should be set to the limit value
+        assert_eq!(result.initial_seq_no, Some(FragmentSeqNo(5)));
+        assert_eq!(result.initial_offset, Some(LogPosition::from_offset(100)));
+    }
+
+    #[test]
+    fn apply_garbage_validates_fragment_drop_range() {
+        use crate::gc::Garbage;
+
+        let manifest = Manifest::new_empty("test");
+
+        // Test case: fragments_to_drop_start > fragments_to_drop_limit should fail
+        let invalid_garbage = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: FragmentSeqNo(10),
+            fragments_to_drop_limit: FragmentSeqNo(5),
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: LogPosition::from_offset(1),
+        };
+
+        let result = manifest.apply_garbage(invalid_garbage);
+        assert!(result.is_err());
+
+        if let Err(crate::Error::GarbageCollection(msg)) = result {
+            assert!(msg.contains("Garbage has start > limit"));
+            assert!(msg.contains("FragmentSeqNo(10) > FragmentSeqNo(5)"));
+        } else {
+            panic!("Expected GarbageCollection error, got {:?}", result);
+        }
+
+        // Test case: fragments_to_drop_start == fragments_to_drop_limit should succeed
+        let valid_garbage_equal = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: FragmentSeqNo(5),
+            fragments_to_drop_limit: FragmentSeqNo(5),
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: LogPosition::from_offset(1),
+        };
+
+        let result = manifest.apply_garbage(valid_garbage_equal);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_some());
+
+        // Test case: fragments_to_drop_start < fragments_to_drop_limit should succeed
+        let valid_garbage_less = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: FragmentSeqNo(1),
+            fragments_to_drop_limit: FragmentSeqNo(5),
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: LogPosition::from_offset(1),
+        };
+
+        let result = manifest.apply_garbage(valid_garbage_less);
+        assert!(result.is_ok());
     }
 }

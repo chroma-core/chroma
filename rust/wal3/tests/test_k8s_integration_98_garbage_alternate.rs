@@ -6,8 +6,8 @@ use tokio::sync::Mutex;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    Cursor, CursorName, CursorStoreOptions, Error, GarbageCollectionOptions, LogWriter,
-    LogWriterOptions, Manifest,
+    Cursor, CursorName, CursorStoreOptions, Error, GarbageCollectionOptions, LogReaderOptions,
+    LogWriter, LogWriterOptions, Manifest,
 };
 
 pub mod common;
@@ -34,6 +34,7 @@ async fn writer_thread(
         loop {
             match writer.append(message.clone()).await {
                 Ok(position) => {
+                    let position = position + 1u64;
                     println!("writer succeeds in iteration {i}");
                     successful_writes += 1;
                     witness = cursors
@@ -48,9 +49,17 @@ async fn writer_thread(
                         )
                         .await
                         .unwrap();
+                    writer
+                        .reader(LogReaderOptions::default())
+                        .unwrap()
+                        .scrub(wal3::Limits::default())
+                        .await
+                        .unwrap();
                     break;
                 }
-                Err(Error::LogContention) => {
+                Err(Error::LogContentionDurable)
+                | Err(Error::LogContentionRetry)
+                | Err(Error::LogContentionFailure) => {
                     println!("writer sees contention preventing {i}");
                     contention_errors += 1;
                     continue;
@@ -78,11 +87,13 @@ async fn garbage_collector_thread(
         println!("gc grabs lock in iteration {i}");
         loop {
             match writer
-                .garbage_collect(&GarbageCollectionOptions::default())
+                .garbage_collect(&GarbageCollectionOptions::default(), None)
                 .await
             {
                 Ok(()) => break,
-                Err(Error::LogContention) => {
+                Err(Error::LogContentionDurable)
+                | Err(Error::LogContentionRetry)
+                | Err(Error::LogContentionFailure) => {
                     println!("gc sees contention preventing {i}");
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     continue;

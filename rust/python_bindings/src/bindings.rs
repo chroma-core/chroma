@@ -123,6 +123,7 @@ impl Bindings {
             executor: executor_config,
             default_knn_index: knn_index,
             tenants_to_migrate_immediately: vec![],
+            tenants_to_migrate_immediately_threshold: None,
         };
 
         let frontend = runtime.block_on(async {
@@ -273,6 +274,7 @@ impl Bindings {
             Some(c) => Some(InternalCollectionConfiguration::try_from_config(
                 c,
                 self.frontend.get_default_knn_index(),
+                metadata.clone(),
             )?),
             None => Some(InternalCollectionConfiguration::try_from_config(
                 CollectionConfiguration {
@@ -281,6 +283,7 @@ impl Bindings {
                     embedding_function: None,
                 },
                 self.frontend.get_default_knn_index(),
+                metadata.clone(),
             )?),
         };
 
@@ -403,7 +406,7 @@ impl Bindings {
             database,
             collection_id,
             ids,
-            Some(embeddings),
+            embeddings,
             documents,
             uris,
             metadatas,

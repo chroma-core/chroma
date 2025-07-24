@@ -10,14 +10,16 @@ use chroma_storage::{
 };
 
 use crate::manifest::unprefixed_snapshot_path;
+use crate::writer::OnceLogWriter;
 use crate::{
-    deserialize_setsum, serialize_setsum, unprefixed_fragment_path, Error, Fragment, FragmentSeqNo,
-    LogPosition, Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
+    deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment, FragmentSeqNo,
+    GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest, ScrubError, Snapshot,
+    SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
 
-#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Garbage {
     pub snapshots_to_drop: Vec<SnapshotPointer>,
     pub snapshots_to_make: Vec<Snapshot>,
@@ -33,6 +35,22 @@ pub struct Garbage {
 }
 
 impl Garbage {
+    pub fn empty() -> Self {
+        Garbage {
+            snapshots_to_drop: Vec::new(),
+            snapshots_to_make: Vec::new(),
+            snapshot_for_root: None,
+            fragments_to_drop_start: FragmentSeqNo(0),
+            fragments_to_drop_limit: FragmentSeqNo(0),
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: LogPosition::from_offset(1),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::empty()
+    }
+
     pub fn path(prefix: &str) -> String {
         format!("{}/gc/GARBAGE", prefix)
     }
@@ -45,7 +63,7 @@ impl Garbage {
         throttle: &ThrottleOptions,
         snapshots: &dyn SnapshotCache,
         first_to_keep: LogPosition,
-    ) -> Result<Self, Error> {
+    ) -> Result<Option<Self>, Error> {
         let dropped_snapshots = manifest
             .snapshots
             .iter()
@@ -103,10 +121,14 @@ impl Garbage {
                 "setsums don't balance".to_string(),
             ))));
         }
-        Ok(ret)
+        if !first {
+            Ok(Some(ret))
+        } else {
+            Ok(None)
+        }
     }
 
-    #[tracing::instrument(skip(storage), err(Display))]
+    #[tracing::instrument(skip(storage))]
     pub async fn load(
         options: &ThrottleOptions,
         storage: &Storage,
@@ -145,61 +167,89 @@ impl Garbage {
         }
     }
 
-    #[tracing::instrument(skip(self, storage), err(Display))]
+    #[tracing::instrument(skip(self, storage))]
     pub async fn install(
         &self,
         options: &ThrottleOptions,
         storage: &Storage,
         prefix: &str,
+        existing: Option<&ETag>,
     ) -> Result<Option<ETag>, Error> {
         self.install_new_snapshots(storage, prefix, options).await?;
+        Self::transition(options, storage, prefix, existing, self).await
+    }
+
+    #[tracing::instrument(skip(self, storage))]
+    pub async fn reset(
+        &self,
+        options: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+        existing: &ETag,
+    ) -> Result<Option<ETag>, Error> {
+        match Self::transition(options, storage, prefix, Some(existing), &Self::empty()).await {
+            Ok(e_tag) => Ok(e_tag),
+            Err(Error::LogContentionFailure) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    async fn transition(
+        options: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+        existing: Option<&ETag>,
+        replacement: &Self,
+    ) -> Result<Option<ETag>, Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
             options.headroom as f64,
         );
+        let mut retry_count = 0;
         loop {
             let path = Self::path(prefix);
-            let payload = serde_json::to_string(&self)
+            let payload = serde_json::to_string(replacement)
                 .map_err(|e| {
                     Error::CorruptManifest(format!("could not encode JSON garbage: {e:?}"))
                 })?
                 .into_bytes();
-            let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
+            let options = if let Some(e_tag) = existing {
+                PutOptions::if_matches(e_tag, StorageRequestPriority::P0)
+            } else {
+                PutOptions::if_not_exists(StorageRequestPriority::P0)
+            };
             match storage.put_bytes(&path, payload, options).await {
                 Ok(e_tag) => return Ok(e_tag),
                 Err(StorageError::Precondition { path: _, source: _ }) => {
-                    // NOTE(rescrv):  We know that someone put the file before us, and therefore we
-                    // know this write failed.  Because the garbage file is created and deleted
-                    // we cannot just overwrite, so fail with log contention and let higher level
-                    // protocol decide.
-                    return Err(Error::LogContention);
+                    // NOTE(rescrv):  We know that we put the file.  The e_tag no longer matches.
+                    // Therefore, we know someone else transitioned the file and our reset should
+                    // be a NOP.
+                    return Err(Error::LogContentionFailure);
                 }
                 Err(e) => {
-                    tracing::error!("error uploading manifest: {e:?}");
-                    let mut backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(3_600) {
-                        backoff = Duration::from_secs(3_600);
+                    tracing::error!("error uploading garbage: {e:?}");
+                    let backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
+                        return Err(Arc::new(e).into());
                     }
                     tokio::time::sleep(backoff).await;
                 }
             }
+            retry_count += 1;
         }
     }
 
     pub fn prefixed_paths_to_delete(&self, prefix: &str) -> impl Iterator<Item = String> {
+        let prefix = Arc::new(prefix.to_string());
         let mut paths = vec![];
         for snap in self.snapshots_to_drop.iter() {
             paths.push(format!("{}/{}", prefix, snap.path_to_snapshot));
         }
-        // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
-        for seq_no in self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0 {
-            paths.push(format!(
-                "{}/{}",
-                prefix,
-                unprefixed_fragment_path(FragmentSeqNo(seq_no))
-            ));
-        }
-        paths.into_iter()
+        paths.into_iter().chain(
+            (self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0)
+                .map(move |seq_no| (seq_no, Arc::clone(&prefix)))
+                .map(|(seq_no, prefix)| prefixed_fragment_path(&prefix, FragmentSeqNo(seq_no))),
+        )
     }
 
     pub async fn install_new_snapshots(
@@ -417,5 +467,116 @@ impl Garbage {
             drop_acc += self.drop_fragment(frag, first)?;
         }
         Ok(drop_acc)
+    }
+
+    /// Only call this function if you know what bug you are fixing.  The code documents the bug,
+    /// but it is omitted from the documentation.
+    // NOTE(rescrv):
+    // - The bug:  Delete the data before updating the manifest.
+    // - The fallout:  The manifest refers to a snapshot that doesn't exist; the next pass fails.
+    // - The fix:  Generate a garbage file that erases the snapshots.
+    //
+    // manifest is the manifest to use for getting snapshots to drop.
+    // seq_no is the seq_no of the first fragment to keep.
+    // offset is the log position of the first record to keep.
+    //
+    // To determine these values, find the first snapshot that is in the manifest that wasn't
+    // erased.  It will give you the offset as its start.  Follow the left-most snapshot from that
+    // snapshot, recursively, until you find the first fragment.  That's your seq_no.
+    pub fn bug_patch_construct_garbage_from_manifest(
+        manifest: &Manifest,
+        seq_no: FragmentSeqNo,
+        offset: LogPosition,
+    ) -> Garbage {
+        let mut garbage = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: seq_no,
+            fragments_to_drop_limit: seq_no,
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: offset,
+        };
+        for snapshot in manifest.snapshots.iter() {
+            if snapshot.limit <= garbage.first_to_keep {
+                garbage.snapshots_to_drop.push(snapshot.clone());
+                garbage.setsum_to_discard += snapshot.setsum;
+            }
+        }
+        garbage
+    }
+}
+
+///////////////////////////////////////// GarbageCollector /////////////////////////////////////////
+
+pub struct GarbageCollector {
+    log: Arc<OnceLogWriter>,
+}
+
+impl GarbageCollector {
+    /// Open the log into a state where it can be garbage collected.
+    pub async fn open(
+        options: LogWriterOptions,
+        storage: Arc<Storage>,
+        prefix: &str,
+        writer: &str,
+    ) -> Result<Self, Error> {
+        let log = OnceLogWriter::open_for_read_only_and_stale_ops(
+            options.clone(),
+            Arc::clone(&storage),
+            prefix.to_string(),
+            writer.to_string(),
+            Arc::new(()),
+        )
+        .await?;
+        Ok(Self { log })
+    }
+
+    pub async fn garbage_collect_phase1_compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<bool, Error> {
+        self.log
+            .garbage_collect_phase1_compute_garbage(options, keep_at_least)
+            .await
+    }
+
+    pub async fn garbage_collect_phase3_delete_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        self.log
+            .garbage_collect_phase3_delete_garbage(options)
+            .await
+    }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn case_seen_in_the_wild() {
+        let manifest_json =
+            include_str!("../tests/test_k8s_integration_AA_construct_garbage/MANIFEST");
+        let manifest: Manifest = serde_json::from_str(manifest_json).unwrap();
+        let output = Garbage::bug_patch_construct_garbage_from_manifest(
+            &manifest,
+            FragmentSeqNo(806913),
+            LogPosition::from_offset(900883),
+        );
+        assert_eq!(output.fragments_to_drop_start, FragmentSeqNo(806913));
+        assert_eq!(output.fragments_to_drop_limit, FragmentSeqNo(806913));
+        assert_eq!(
+            output.setsum_to_discard.hexdigest(),
+            "c921d21a0820be5d3b6f2d90942648f2853188bb0e3c6a22fe3dbd81c1e1c380"
+        );
+        assert_eq!(output.first_to_keep, LogPosition::from_offset(900883));
+        for snapshot in output.snapshots_to_drop.iter() {
+            assert!(snapshot.limit <= output.first_to_keep);
+        }
     }
 }

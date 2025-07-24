@@ -35,7 +35,11 @@ pub async fn query_service_entrypoint() {
     let config = config.query_service;
     let registry = Registry::new();
 
-    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
+    chroma_tracing::init_otel_tracing(
+        &config.service_name,
+        &config.otel_filters,
+        &config.otel_endpoint,
+    );
 
     let system = chroma_system::System::new();
     let dispatcher =
@@ -100,7 +104,11 @@ pub async fn compaction_service_entrypoint() {
     let config = config.compaction_service;
     let registry = Registry::new();
 
-    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
+    chroma_tracing::init_otel_tracing(
+        &config.service_name,
+        &config.otel_filters,
+        &config.otel_endpoint,
+    );
 
     let system = chroma_system::System::new();
 
@@ -148,6 +156,7 @@ pub async fn compaction_service_entrypoint() {
     let compaction_server = CompactionServer {
         manager: compaction_manager_handle.clone(),
         port: config.my_port,
+        jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
     };
 
     let server_join_handle = tokio::spawn(async move {

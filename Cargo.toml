@@ -1,10 +1,41 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server"]
+members = [
+    "rust/benchmark",
+    "rust/blockstore",
+    "rust/cache",
+    "rust/chroma",
+    "rust/config",
+    "rust/distance",
+    "rust/error",
+    "rust/frontend",
+    "rust/garbage_collector",
+    "rust/index",
+    "rust/load",
+    "rust/log",
+    "rust/log-service",
+    "rust/memberlist",
+    "rust/metering-macros",
+    "rust/metering",
+    "rust/storage",
+    "rust/system",
+    "rust/sysdb",
+    "rust/types",
+    "rust/worker",
+    "rust/segment",
+    "rust/python_bindings",
+    "rust/mdac",
+    "rust/tracing",
+    "rust/sqlite",
+    "rust/cli",
+    "rust/wal3",
+    "rust/js_bindings",
+    "rust/jemalloc-pprof-server"
+]
 
 [workspace.dependencies]
-arrow = "52.2.0"
+arrow = "55.1"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["macros"] }
 bytes = "1.10"
@@ -12,19 +43,21 @@ chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 criterion = { version = "0.5", features = ["async_tokio"] }
 figment = { version = "0.10.12", features = ["env", "yaml", "test"] }
-flatbuffers = "24.3.25"
+flatbuffers = "25.2.10"
 futures = "0.3"
 futures-core = "0.3"
 http-body-util = "0.1.3"
 lazy_static = { version = "1.4" }
 lexical-core = "1.0"
 num_cpus = "1.16.0"
+once_cell = "1.21.3"
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 opentelemetry-otlp = { version = "0.27", features = ["http-proto"] }
 opentelemetry-http = { version = "0.27", features = ["reqwest"] }
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
-parquet = "52"
+parquet = { version = "55.1", features = ["async"] }
+pin-project = "1.1.10"
 prost = "0.13"
 prost-types = "0.13.5"
 regex = "1.11.1"
@@ -78,6 +111,8 @@ chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
 chroma-memberlist = { path = "rust/memberlist" }
+chroma-metering-macros = { path = "rust/metering-macros" }
+chroma-metering = { path = "rust/metering" }
 chroma-segment = { path = "rust/segment" }
 chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
@@ -93,7 +128,7 @@ worker = { path = "rust/worker" }
 
 # Dev dependencies
 bincode = "1.3.3"
-indicatif = "0.17.9"
+indicatif = { version = "0.17.9", features = ["rayon"] }
 proptest = "1.6.0"
 proptest-state-machine = "0.3.1"
 proptest-derive = "0.5.1"

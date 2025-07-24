@@ -263,6 +263,7 @@ func (s *Server) GetCollectionSize(ctx context.Context, req *coordinatorpb.GetCo
 func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckCollectionsRequest) (*coordinatorpb.CheckCollectionsResponse, error) {
 	res := &coordinatorpb.CheckCollectionsResponse{}
 	res.Deleted = make([]bool, len(req.CollectionIds))
+	res.LogPosition = make([]int64, len(req.CollectionIds))
 
 	for i, collectionID := range req.CollectionIds {
 		parsedId, err := types.ToUniqueID(&collectionID)
@@ -270,7 +271,7 @@ func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckC
 			log.Error("CheckCollection failed. collection id format error", zap.Error(err), zap.String("collection_id", collectionID))
 			return nil, grpcutils.BuildInternalGrpcError(err.Error())
 		}
-		deleted, err := s.coordinator.CheckCollection(ctx, parsedId)
+		deleted, logPosition, err := s.coordinator.CheckCollection(ctx, parsedId)
 
 		if err != nil {
 			log.Error("CheckCollection failed", zap.Error(err), zap.String("collection_id", collectionID))
@@ -278,6 +279,7 @@ func (s *Server) CheckCollections(ctx context.Context, req *coordinatorpb.CheckC
 		}
 
 		res.Deleted[i] = deleted
+		res.LogPosition[i] = logPosition
 	}
 	return res, nil
 }
@@ -572,7 +574,7 @@ func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.Lis
 		absoluteCutoffTimeSecs = &cutoffTime
 	}
 
-	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx, absoluteCutoffTimeSecs, req.Limit, req.TenantId)
+	collectionsToGc, err := s.coordinator.ListCollectionsToGc(ctx, absoluteCutoffTimeSecs, req.Limit, req.TenantId, req.MinVersionsIfAlive)
 	if err != nil {
 		log.Error("ListCollectionsToGc failed", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())

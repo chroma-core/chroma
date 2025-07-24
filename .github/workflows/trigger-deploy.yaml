@@ -10,34 +10,26 @@ on:
       - rc/**-**-**
 
 jobs:
-  deploy:
-    name: Dispatch deploy workflow
-    runs-on: blacksmith-4vcpu-ubuntu-2204
-    steps:
-      - name: Dispatch deploy
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.HOSTED_CHROMA_WORKFLOW_DISPATCH_TOKEN}}
-          script: |
-            const result = await github.rest.actions.createWorkflowDispatch({
-              owner: 'chroma-core',
-              repo: 'hosted-chroma',
-              workflow_id: 'deploy.yaml',
-              ref: 'main',
-              inputs: {
-                'planes': 'control,data',
-                 environment: 'staging',
-                'ignore-lock': true,
-                'oss-ref': '${{ github.ref_name }}',
-                'hosted-ref': '${{ github.ref_name }}'
-              }
-            })
-            console.log(result)
+  deploy-control-plane:
+    name: Dispatch deploy control plane workflow
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      plane: control
+      ignore-lock: true
+    secrets: inherit
+
+  deploy-data-plane:
+    name: Dispatch deploy data plane workflow
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      plane: data
+      ignore-lock: true
+    secrets: inherit
 
   notify-slack-on-failure:
     name: Notify Slack on Deploy Failure
     if: failure()
-    needs: [deploy]
+    needs: [deploy-control-plane, deploy-data-plane]
     runs-on: blacksmith-2vcpu-ubuntu-2204
     steps:
       - name: Notify Slack

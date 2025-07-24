@@ -8,8 +8,6 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
-	trace_log "github.com/pingcap/log"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -67,7 +65,6 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 		FirstUninsertedRecordOffset:  int64(limit + 1),
 		IsSealed:                     isSealed,
 	}
-	trace_log.Info("Scouted Logs", zap.Int64("start", int64(start+1)), zap.Int64("limit", int64(limit+1)), zap.String("collectionId", req.CollectionId))
 	return
 }
 
@@ -179,6 +176,18 @@ func (s *logServer) MigrateLog(ctx context.Context, req *logservicepb.MigrateLog
 }
 
 func (s *logServer) InspectLogState(ctx context.Context, req *logservicepb.InspectLogStateRequest) (res *logservicepb.InspectLogStateResponse, err error) {
+	return
+}
+
+func (s *logServer) ScrubLog(ctx context.Context, req *logservicepb.ScrubLogRequest) (res *logservicepb.ScrubLogResponse, err error) {
+	return
+}
+
+func (s *logServer) GarbageCollectPhase2(ctx context.Context, req *logservicepb.GarbageCollectPhase2Request) (res *logservicepb.GarbageCollectPhase2Response, err error) {
+	return
+}
+
+func (s *logServer) PurgeFromCache(ctx context.Context, req *logservicepb.PurgeFromCacheRequest) (res *logservicepb.PurgeFromCacheResponse, err error) {
 	return
 }
 

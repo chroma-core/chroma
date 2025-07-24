@@ -24,6 +24,7 @@ from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 def persist_dir():
     return tempfile.mkdtemp()
 
+
 @pytest.fixture
 def local_persist_api(persist_dir):
     client = chromadb.Client(
@@ -220,9 +221,33 @@ def test_heartbeat(client):
 
 
 def test_max_batch_size(client):
-    print(client)
     batch_size = client.get_max_batch_size()
     assert batch_size > 0
+
+
+def test_supports_base64_encoding(client):
+    if not isinstance(client, FastAPI):
+        pytest.skip("Not a FastAPI instance")
+
+    client.reset()
+
+    supports_base64_encoding = client.supports_base64_encoding()
+    assert supports_base64_encoding is True
+
+
+def test_supports_base64_encoding_legacy(client):
+    if not isinstance(client, FastAPI):
+        pytest.skip("Not a FastAPI instance")
+
+    client.reset()
+
+    # legacy server does not give back supports_base64_encoding
+    client.pre_flight_checks = {
+        "max_batch_size": 100,
+    }
+
+    assert client.supports_base64_encoding() is False
+    assert client.get_max_batch_size() == 100
 
 
 def test_pre_flight_checks(client):
@@ -233,6 +258,7 @@ def test_pre_flight_checks(client):
     assert resp.status_code == 200
     assert resp.json() is not None
     assert "max_batch_size" in resp.json().keys()
+    assert "supports_base64_encoding" in resp.json().keys()
 
 
 batch_records = {
@@ -1630,6 +1656,7 @@ def test_ssl_self_signed(client_ssl):
     if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
         pytest.skip("Skipping test for integration test")
     client_ssl.heartbeat()
+
 
 # this may be flaky on windows, so we rerun it
 @pytest.mark.flaky(reruns=3, condition=sys.platform.startswith("win32"))

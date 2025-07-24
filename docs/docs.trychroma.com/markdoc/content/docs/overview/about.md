@@ -1,21 +1,10 @@
----
-{
-  "id": "about",
-  "title": "About",
-  "section": "Overview",
-  "order": 4
-}
----
-
 # About
 
 {% Banner type="tip" title="We are hiring" %}
-We are hiring software engineers and applied research scientists.
+We are hiring software engineers and applied research scientists. [View open roles](https://careers.trychroma.com/)
 {% /Banner %}
 
 ## Who we are
-
-[View open roles](https://careers.trychroma.com/)
 
 Chroma as a project is coordinated by a small team of full-time employees who work at a company also called Chroma.
 

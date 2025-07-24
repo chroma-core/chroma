@@ -1,0 +1,198 @@
+# Embedding Functions
+
+Embeddings are the way to represent any kind of data, making them the perfect fit for working with all kinds of AI-powered tools and algorithms. They can represent text, images, and soon audio and video. Chroma collections index embeddings to enable efficient similarity search on the data they represent. There are many options for creating embeddings, whether locally using an installed library, or by calling an API.
+
+Chroma provides lightweight wrappers around popular embedding providers, making it easy to use them in your apps. You can set an embedding function when you [create](../collections/manage-collections) a Chroma collection, to be automatically used when adding and querying data, or you can call them directly yourself.
+
+|                                                                                          | Python | Typescript |
+|------------------------------------------------------------------------------------------|--------|------------|
+| [OpenAI](../../integrations/embedding-models/openai)                                     | ✓      | ✓          |
+| [Google Generative AI](../../integrations/embedding-models/google-gemini)                | ✓      | ✓          |
+| [Cohere](../../integrations/embedding-models/cohere)                                     | ✓      | ✓          |
+| [Hugging Face](../../integrations/embedding-models/hugging-face)                         | ✓      | -          |
+| [Instructor](../../integrations/embedding-models/instructor)                             | ✓      | -          |
+| [Hugging Face Embedding Server](../../integrations/embedding-models/hugging-face-server) | ✓      | ✓          |
+| [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          |
+| [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai)    | ✓      | ✓          |
+| [Together AI](../../integrations/embedding-models/together-ai)                        | ✓      | ✓          |
+| [Mistral](../../integrations/embedding-models/mistral)                                | ✓      | ✓          |
+
+We welcome pull requests to add new Embedding Functions to the community.
+
+***
+
+## Default: all-MiniLM-L6-v2
+
+Chroma's default embedding function uses the [Sentence Transformers](https://www.sbert.net/) `all-MiniLM-L6-v2` model to create embeddings. This embedding model can create sentence and document embeddings that can be used for a wide variety of tasks. This embedding function runs locally on your machine, and may require you download the model files (this will happen automatically).
+
+If you don't specify an embedding function when creating a collection, Chroma will set it to be the `DefaultEmbeddingFunction`:
+
+### python
+
+```python
+collection = client.create_collection(name="my_collection")
+```
+
+### typescript
+
+Install the `@chroma-core/default-embed` package:
+
+```terminal
+npm install @chroma-core/default-embed
+```
+
+### pnpm
+
+```terminal
+pnpm add @chroma-core/default-embed
+```
+
+### yarn
+
+```terminal
+yarn add @chroma-core/default-embed
+```
+
+### bun
+
+```terminal
+bun add @chroma-core/default-embed
+```
+
+Create a collection without providing an embedding function. It will automatically be set with the `DefaultEmbeddingFunction`:
+
+```typescript
+const collection = await client.createCollection({ name: "my-collection" });
+```
+
+## Using Embedding Functions
+
+Embedding functions can be linked to a collection and used whenever you call `add`, `update`, `upsert` or `query`.
+
+### python
+
+```python
+# Set your OPENAI_API_KEY environment variable
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+
+collection = client.create_collection(
+    name="my_collection",
+    embedding_function=OpenAIEmbeddingFunction(
+        model_name="text-embedding-3-small"
+    )
+)
+
+# Chroma will use OpenAIEmbeddingFunction to embed your documents
+collection.add(
+    ids=["id1", "id2"],
+    documents=["doc1", "doc2"]
+)
+```
+
+### typescript
+
+Install the `@chroma-core/openai` package:
+
+```terminal
+npm install @chroma-core/openai
+```
+
+### pnpm
+
+```terminal
+pnpm add @chroma-core/openai
+```
+
+### yarn
+
+```terminal
+yarn add @chroma-core/openai
+```
+
+### bun
+
+```terminal
+bun add @chroma-core/openai
+```
+
+Create a collection with the `OpenAIEmbeddingFunction`:
+
+```typescript
+// Set your OPENAI_API_KEY environment variable
+import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
+
+collection = await client.createCollection({
+    name: "my_collection",
+    embedding_function: new OpenAIEmbeddingFunction({
+        model_name: "text-embedding-3-small"
+    })
+});
+
+// Chroma will use OpenAIEmbeddingFunction to embed your documents
+await collection.add({
+    ids: ["id1", "id2"],
+    documents: ["doc1", "doc2"]
+})
+```
+
+You can also use embedding functions directly which can be handy for debugging.
+
+### python
+
+```python
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+
+default_ef = DefaultEmbeddingFunction()
+embeddings = default_ef(["foo"])
+print(embeddings) # [[0.05035809800028801, 0.0626462921500206, -0.061827320605516434...]]
+
+collection.query(query_embeddings=embeddings)
+```
+
+### typescript
+
+```typescript
+import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
+
+const defaultEF = new DefaultEmbeddingFunction();
+const embeddings = await defaultEF.generate(["foo"]);
+console.log(embeddings); // [[0.05035809800028801, 0.0626462921500206, -0.061827320605516434...]]
+
+await collection.query({ queryEmbeddings: embeddings })
+```
+
+## Custom Embedding Functions
+
+You can create your own embedding function to use with Chroma; it just needs to implement `EmbeddingFunction`.
+
+### python
+
+```python
+from chromadb import Documents, EmbeddingFunction, Embeddings
+
+class MyEmbeddingFunction(EmbeddingFunction):
+    def __call__(self, input: Documents) -> Embeddings:
+        # embed the documents somehow
+        return embeddings
+```
+
+### typescript
+
+```typescript
+import { EmbeddingFunction } from  "chromadb";
+
+class MyEmbeddingFunction implements EmbeddingFunction {
+    private api_key: string;
+
+    constructor(api_key: string) {
+        this.api_key = api_key;
+    }
+
+    public async generate(texts: string[]): Promise<number[][]> {
+        // do things to turn texts into embeddings with an api_key perhaps
+        return embeddings;
+    }
+}
+```
+
+We welcome contributions! If you create an embedding function that you think would be useful to others, please consider [submitting a pull request](https://github.com/chroma-core/chroma).

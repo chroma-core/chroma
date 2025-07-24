@@ -1,14 +1,24 @@
 FROM rust:1.81.0 AS builder
 
 ARG RELEASE_MODE=
+ARG PROTOC_VERSION=31.1
 
 WORKDIR /chroma/
 
-ENV PROTOC_ZIP=protoc-25.1-linux-x86_64.zip
-RUN curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.1/$PROTOC_ZIP \
-    && unzip -o $PROTOC_ZIP -d /usr/local bin/protoc \
-    && unzip -o $PROTOC_ZIP -d /usr/local 'include/*' \
-    && rm -f $PROTOC_ZIP
+RUN ARCH=$(uname -m) && \
+  if [ "$ARCH" = "x86_64" ]; then \
+    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip; \
+  elif [ "$ARCH" = "aarch64" ]; then \
+    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip; \
+  else \
+    echo "Unsupported architecture: $ARCH" && exit 1; \
+  fi && \
+  curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/$PROTOC_ZIP && \
+  unzip -o $PROTOC_ZIP -d /usr/local bin/protoc && \
+  unzip -o $PROTOC_ZIP -d /usr/local 'include/*' && \
+  rm -f $PROTOC_ZIP && \
+  chmod +x /usr/local/bin/protoc && \
+  protoc --version  # Verify installed version
 
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock

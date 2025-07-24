@@ -79,6 +79,9 @@ spec:
             {{ end }}
           ports:
             - containerPort: 50051
+            - containerPort: 6060
+              protocol: TCP
+              name: pprof
           env:
             {{if .Values.queryService.configuration}}
             - name: CONFIG_PATH
@@ -88,6 +91,10 @@ spec:
             - name: {{ .name }}
               # TODO properly use flow control here to check which type of value we need.
 {{ .value | nindent 14 }}
+            {{ end }}
+            {{ if .Values.queryService.jemallocConfig }}
+            - name: _RJEM_MALLOC_CONF
+              value: {{ .Values.queryService.jemallocConfig }}
             {{ end }}
             - name: CHROMA_QUERY_SERVICE__MY_MEMBER_ID
               valueFrom:

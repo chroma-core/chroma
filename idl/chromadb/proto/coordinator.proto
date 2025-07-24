@@ -227,6 +227,7 @@ message CheckCollectionsRequest {
 
 message CheckCollectionsResponse {
   repeated bool deleted = 1;
+  repeated int64 log_position = 2;
 }
 
 message UpdateCollectionRequest {
@@ -466,6 +467,8 @@ message ListCollectionsToGcRequest {
   optional uint64 limit = 2;
 
   optional string tenant_id = 3;
+
+  optional uint64 min_versions_if_alive = 4;
 
   // Design NOTE: When GC calls DeleteCollectionVersion, sysdb will update the
   // time associated with the oldest version of the collection. This allows

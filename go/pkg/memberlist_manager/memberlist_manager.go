@@ -2,8 +2,8 @@ package memberlist_manager
 
 import (
 	"context"
-	"time"
 	"sort"
+	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/pingcap/log"

@@ -1,6 +1,6 @@
 FROM python:3.11-slim-bookworm AS builder
 ARG REBUILD_HNSWLIB
-ARG PROTOBUF_VERSION=28.2
+ARG PROTOC_VERSION=31.1
 RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     build-essential \
     gcc \
@@ -15,12 +15,21 @@ RUN apt-get update --fix-missing && apt-get install -y --fix-missing \
     rm -rf /var/lib/apt/lists/* && \
     mkdir /install
 ENV PATH="/root/.cargo/bin:$PATH"
-# Install specific Protobuf compiler (v28.2)
-RUN curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOBUF_VERSION}/protoc-${PROTOBUF_VERSION}-linux-x86_64.zip && \
-    unzip protoc-${PROTOBUF_VERSION}-linux-x86_64.zip -d /usr/local/ && \
-    rm protoc-${PROTOBUF_VERSION}-linux-x86_64.zip && \
-    chmod +x /usr/local/bin/protoc && \
-    protoc --version  # Verify installed version
+
+RUN ARCH=$(uname -m) && \
+  if [ "$ARCH" = "x86_64" ]; then \
+    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip; \
+  elif [ "$ARCH" = "aarch64" ]; then \
+    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip; \
+  else \
+    echo "Unsupported architecture: $ARCH" && exit 1; \
+  fi && \
+  curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/$PROTOC_ZIP && \
+  unzip -o $PROTOC_ZIP -d /usr/local bin/protoc && \
+  unzip -o $PROTOC_ZIP -d /usr/local 'include/*' && \
+  rm -f $PROTOC_ZIP && \
+  chmod +x /usr/local/bin/protoc && \
+  protoc --version  # Verify installed version
 
 WORKDIR /install
 

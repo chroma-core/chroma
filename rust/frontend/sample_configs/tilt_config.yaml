@@ -3,6 +3,9 @@
 open_telemetry:
   service_name: "rust-frontend-service"
   endpoint: "http://otel-collector:4317"
+  filters:
+    - crate_name: "chroma_frontend"
+      filter_level: "trace"  
 sysdb:
   grpc:
     host: "sysdb.chroma"
@@ -58,3 +61,4 @@ enable_span_indexing: true
 default_knn_index: "spann"
 tenants_to_migrate_immediately:
 - "default_tenant"
+tenants_to_migrate_immediately_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"

@@ -144,8 +144,6 @@ class Settings(BaseSettings):  # type: ignore
     tenant_id: str = "default"
     topic_namespace: str = "default"
 
-    use_base64_encoding_for_embeddings: bool = False
-
     chroma_server_host: Optional[str] = None
     chroma_server_headers: Optional[Dict[str, str]] = None
     chroma_server_http_port: Optional[int] = None
@@ -153,7 +151,7 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_server_ssl_verify: Optional[Union[bool, str]] = None
     chroma_server_api_default_path: Optional[APIVersion] = APIVersion.V2
-    # eg ["http://localhost:3000"]
+    # eg ["http://localhost:8000"]
     chroma_server_cors_allow_origins: List[str] = []
 
     # ==================

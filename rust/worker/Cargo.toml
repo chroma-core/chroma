@@ -31,6 +31,7 @@ async-trait = { workspace = true }
 roaring = { workspace = true }
 figment = { workspace = true }
 futures = { workspace = true }
+opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
@@ -57,6 +58,7 @@ chroma-storage = { workspace = true }
 chroma-system = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
+chroma-jemalloc-pprof-server = { workspace = true }
 
 fastrace = "0.7"
 fastrace-opentelemetry = "0.8"

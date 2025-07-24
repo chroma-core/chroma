@@ -1,11 +1,12 @@
 use async_trait::async_trait;
+use chroma_blockstore::RootManager;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage};
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     chroma_proto::{CollectionVersionFile, VersionListForCollection},
-    HNSW_PATH,
+    Segment, HNSW_PATH,
 };
 use std::collections::HashMap;
 use thiserror::Error;
@@ -46,6 +47,8 @@ pub enum FetchSparseIndexFilesError {
     S3Error(String),
     #[error("File not found for version: {0}")]
     FileNotFound(i64),
+    #[error("Error parsing id")]
+    ParsingIdFailed,
 }
 
 impl ChromaError for FetchSparseIndexFilesError {
@@ -53,6 +56,7 @@ impl ChromaError for FetchSparseIndexFilesError {
         match self {
             FetchSparseIndexFilesError::S3Error(_) => ErrorCodes::Internal,
             FetchSparseIndexFilesError::FileNotFound(_) => ErrorCodes::NotFound,
+            FetchSparseIndexFilesError::ParsingIdFailed => ErrorCodes::Internal,
         }
     }
 }
@@ -127,13 +131,12 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                             }
                             // Attempt to fetch each file
                             for file_path in &file_paths.paths {
-                                let prefixed_path = format!("sparse_index/{}", file_path);
+                                let (prefix, file_uuid) = Segment::extract_prefix_and_id(file_path)
+                                    .map_err(|_| FetchSparseIndexFilesError::ParsingIdFailed)?;
+                                let s3_key = RootManager::get_storage_key(prefix, &file_uuid);
                                 match self
                                     .storage
-                                    .get(
-                                        &prefixed_path,
-                                        GetOptions::new(StorageRequestPriority::P0),
-                                    )
+                                    .get(&s3_key, GetOptions::new(StorageRequestPriority::P0))
                                     .await
                                 {
                                     Ok(content) => {
@@ -141,7 +144,7 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                                         total_bytes_fetched += content.len();
                                         tracing::info!(
                                             "      ✓ Fetched:  {} ({} bytes)",
-                                            prefixed_path,
+                                            s3_key,
                                             content.len()
                                         );
                                         version_files
@@ -150,13 +153,13 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                                     Err(e) => {
                                         tracing::error!(
                                             "Failed to fetch file {} for version {}: {}",
-                                            prefixed_path,
+                                            s3_key,
                                             version,
                                             e
                                         );
                                         return Err(FetchSparseIndexFilesError::S3Error(format!(
                                             "Failed to fetch file {} for version {}: {}",
-                                            prefixed_path, version, e
+                                            s3_key, version, e
                                         )));
                                     }
                                 }

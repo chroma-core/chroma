@@ -225,3 +225,13 @@ def test_fork_with_log_migration(
     fork_collection = collection.fork("fork-legacy-go-collection-1")
     wait_for_version_increase(client, fork_collection.name, 0)
     assert sorted(fork_collection.get()["ids"]) == ids
+
+    collection = client.create_collection("legacy-go-collection-2")
+    for i in range(NUMBER):
+        collection.add(ids=[f"id_{i}"], embeddings=[[i, i]])
+    wait_for_version_increase(client, collection.name, 0)
+    go_log_service.SealLog(SealLogRequest(collection_id=collection.id.hex))
+    collection.add(ids=[f"id_{NUMBER}"], embeddings=[[NUMBER, NUMBER]])
+    fork_collection = collection.fork("fork-legacy-go-collection-2")
+    ids = sorted([f"id_{i}" for i in range(NUMBER + 1)])
+    assert sorted(fork_collection.get()["ids"]) == ids

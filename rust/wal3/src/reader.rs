@@ -82,22 +82,22 @@ impl LogReader {
         )
     }
 
-    pub async fn maximum_log_position(&self) -> Result<LogPosition, Error> {
+    pub async fn oldest_timestamp(&self) -> Result<LogPosition, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
         else {
             return Err(Error::UninitializedLog);
         };
-        Ok(manifest.maximum_log_position())
+        Ok(manifest.oldest_timestamp())
     }
 
-    pub async fn minimum_log_position(&self) -> Result<LogPosition, Error> {
+    pub async fn next_write_timestamp(&self) -> Result<LogPosition, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
         else {
             return Err(Error::UninitializedLog);
         };
-        Ok(manifest.minimum_log_position())
+        Ok(manifest.next_write_timestamp())
     }
 
     /// Scan up to:
@@ -105,13 +105,24 @@ impl LogReader {
     ///    interval.
     /// 2. Up to, and including, the number of files to return.
     /// 3. Up to, and including, the total number of bytes to return.
-    #[tracing::instrument(skip(self))]
     pub async fn scan(&self, from: LogPosition, limits: Limits) -> Result<Vec<Fragment>, Error> {
         let Some((manifest, _)) =
             Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
         else {
             return Err(Error::UninitializedLog);
         };
+        let mut short_read = false;
+        self.scan_with_cache(manifest, from, limits, &mut short_read)
+            .await
+    }
+
+    async fn scan_with_cache(
+        &self,
+        manifest: Manifest,
+        from: LogPosition,
+        limits: Limits,
+        short_read: &mut bool,
+    ) -> Result<Vec<Fragment>, Error> {
         let log_position_range = if let Some(max_records) = limits.max_records {
             (from, from + max_records)
         } else {
@@ -173,7 +184,9 @@ impl LogReader {
         }
         fragments.retain(|f| f.limit > from);
         fragments.sort_by_key(|f| f.start.offset());
-        Ok(Self::post_process_fragments(fragments, from, limits))
+        Ok(Self::post_process_fragments(
+            fragments, from, limits, short_read,
+        ))
     }
 
     /// Do a consistent stale read of the manifest.  If the read can be returned without I/O,
@@ -223,18 +236,27 @@ impl LogReader {
             .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
             .cloned()
             .collect::<Vec<_>>();
-        Some(Self::post_process_fragments(fragments, from, limits))
+        let mut short_read = false;
+        Some(Self::post_process_fragments(
+            fragments,
+            from,
+            limits,
+            &mut short_read,
+        ))
     }
 
+    // Post process the fragments such that only records starting at from and not exceeding limits
+    // will be processed.  Sets *short_read=true when the limits truncate the log.
     fn post_process_fragments(
         mut fragments: Vec<Fragment>,
         from: LogPosition,
         limits: Limits,
+        short_read: &mut bool,
     ) -> Vec<Fragment> {
         fragments.sort_by_key(|f| f.start.offset());
         if let Some(max_files) = limits.max_files {
             if fragments.len() as u64 > max_files {
-                tracing::info!("truncating to {} files from {}", max_files, fragments.len());
+                *short_read = true;
                 fragments.truncate(max_files as usize);
             }
         }
@@ -244,11 +266,8 @@ impl LogReader {
             && fragments[fragments.len() - 1].start - from
                 > limits.max_records.unwrap_or(u64::MAX)
         {
-            tracing::info!(
-                "truncating to {} files because records restrictions",
-                fragments.len() - 1
-            );
             fragments.pop();
+            *short_read = true;
         }
         while fragments.len() > 1
             && fragments
@@ -257,11 +276,8 @@ impl LogReader {
                 .fold(0, u64::saturating_add)
                 > limits.max_bytes.unwrap_or(u64::MAX)
         {
-            tracing::info!(
-                "truncating to {} files because bytes restrictions",
-                fragments.len() - 1
-            );
             fragments.pop();
+            *short_read = true;
         }
         fragments
     }
@@ -296,130 +312,134 @@ impl LogReader {
     }
 
     #[tracing::instrument(skip(self), ret)]
-    pub async fn scrub(&self) -> Result<ScrubSuccess, Error> {
+    pub async fn scrub(&self, limits: Limits) -> Result<ScrubSuccess, Vec<Error>> {
         let Some((manifest, _)) =
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
+            Manifest::load(&self.options.throttle, &self.storage, &self.prefix)
+                .await
+                .map_err(|x| vec![x])?
         else {
-            return Err(Error::UninitializedLog);
+            return Err(vec![Error::UninitializedLog]);
         };
-        let manifest_scrub_success = manifest.scrub()?;
+        let manifest_scrub_success = manifest.scrub().map_err(|x| vec![x.into()])?;
+        let from = manifest
+            .initial_offset
+            .unwrap_or(LogPosition::from_offset(1));
+        let mut short_read = false;
+        let fragments = self
+            .scan_with_cache(manifest, from, limits, &mut short_read)
+            .await
+            .map_err(|x| vec![x])?;
+        let futures = fragments
+            .iter()
+            .map(|reference| async {
+                if let Some(empirical) = read_fragment(&self.storage, &self.prefix, &reference.path)
+                    .await
+                    .map_err(|x| vec![x])?
+                {
+                    if reference.path != empirical.path {
+                        return Err(vec![Error::ScrubError(
+                            ScrubError::MismatchedPath {
+                                reference: reference.clone(),
+                                empirical,
+                            }
+                            .into(),
+                        )]);
+                    }
+                    if reference.seq_no != empirical.seq_no {
+                        return Err(vec![Error::ScrubError(
+                            ScrubError::MismatchedSeqNo {
+                                reference: reference.clone(),
+                                empirical,
+                            }
+                            .into(),
+                        )]);
+                    }
+                    if reference.num_bytes != empirical.num_bytes {
+                        return Err(vec![Error::ScrubError(
+                            ScrubError::MismatchedNumBytes {
+                                reference: reference.clone(),
+                                empirical,
+                            }
+                            .into(),
+                        )]);
+                    }
+                    if reference.start != empirical.start {
+                        return Err(vec![Error::ScrubError(
+                            ScrubError::MismatchedStart {
+                                reference: reference.clone(),
+                                empirical,
+                            }
+                            .into(),
+                        )]);
+                    }
+                    if reference.limit != empirical.limit {
+                        return Err(vec![Error::ScrubError(
+                            ScrubError::MismatchedLimit {
+                                reference: reference.clone(),
+                                empirical,
+                            }
+                            .into(),
+                        )]);
+                    }
+                    if reference.setsum != empirical.setsum {
+                        return Err(vec![Error::ScrubError(
+                            ScrubError::MismatchedFragmentSetsum {
+                                reference: reference.clone(),
+                                empirical,
+                            }
+                            .into(),
+                        )]);
+                    }
+                    Ok(reference.clone())
+                } else {
+                    Err(vec![Error::ScrubError(
+                        ScrubError::MissingFragment {
+                            reference: reference.clone(),
+                        }
+                        .into(),
+                    )])
+                }
+            })
+            .collect::<Vec<_>>();
+        if futures.is_empty() {
+            return Ok(ScrubSuccess {
+                calculated_setsum: manifest_scrub_success.calculated_setsum,
+                bytes_read: 0,
+                short_read: manifest_scrub_success.short_read,
+            });
+        }
         let mut calculated_setsum = Setsum::default();
         let mut bytes_read = 0u64;
-        for reference in manifest.snapshots.iter() {
-            if let Some(empirical) = Snapshot::load(
-                &self.options.throttle,
-                &self.storage,
-                &self.prefix,
-                reference,
-            )
-            .await?
-            {
-                let empirical_scrub_success = empirical.scrub()?;
-                if empirical_scrub_success.calculated_setsum != reference.setsum
-                    || empirical_scrub_success.calculated_setsum != empirical.setsum
-                {
-                    return Err(Error::ScrubError(
-                        ScrubError::MismatchedSnapshotSetsum {
-                            reference: reference.clone(),
-                            empirical,
-                        }
-                        .into(),
-                    ));
+        let mut errors = vec![];
+        for result in futures::future::join_all(futures).await {
+            match result {
+                Ok(frag) => {
+                    calculated_setsum += frag.setsum;
+                    bytes_read += frag.num_bytes;
                 }
-                calculated_setsum += empirical_scrub_success.calculated_setsum;
-                bytes_read += empirical_scrub_success.bytes_read;
-            } else {
-                return Err(Error::ScrubError(
-                    ScrubError::MissingSnapshot {
-                        reference: reference.clone(),
-                    }
-                    .into(),
-                ));
-            }
-        }
-        for reference in manifest.fragments.iter() {
-            if let Some(empirical) =
-                read_fragment(&self.storage, &self.prefix, &reference.path).await?
-            {
-                calculated_setsum += empirical.setsum;
-                bytes_read += empirical.num_bytes;
-                if reference.path != empirical.path {
-                    return Err(Error::ScrubError(
-                        ScrubError::MismatchedPath {
-                            reference: reference.clone(),
-                            empirical,
-                        }
-                        .into(),
-                    ));
-                }
-                if reference.seq_no != empirical.seq_no {
-                    return Err(Error::ScrubError(
-                        ScrubError::MismatchedSeqNo {
-                            reference: reference.clone(),
-                            empirical,
-                        }
-                        .into(),
-                    ));
-                }
-                if reference.num_bytes != empirical.num_bytes {
-                    return Err(Error::ScrubError(
-                        ScrubError::MismatchedNumBytes {
-                            reference: reference.clone(),
-                            empirical,
-                        }
-                        .into(),
-                    ));
-                }
-                if reference.start != empirical.start {
-                    return Err(Error::ScrubError(
-                        ScrubError::MismatchedStart {
-                            reference: reference.clone(),
-                            empirical,
-                        }
-                        .into(),
-                    ));
-                }
-                if reference.limit != empirical.limit {
-                    return Err(Error::ScrubError(
-                        ScrubError::MismatchedLimit {
-                            reference: reference.clone(),
-                            empirical,
-                        }
-                        .into(),
-                    ));
-                }
-                if reference.setsum != empirical.setsum {
-                    return Err(Error::ScrubError(
-                        ScrubError::MismatchedFragmentSetsum {
-                            reference: reference.clone(),
-                            empirical,
-                        }
-                        .into(),
-                    ));
-                }
-            } else {
-                return Err(Error::ScrubError(
-                    ScrubError::MissingFragment {
-                        reference: reference.clone(),
-                    }
-                    .into(),
-                ));
+                Err(errs) => errors.extend(errs),
             }
         }
         let observed_scrub_success = ScrubSuccess {
             calculated_setsum,
             bytes_read,
+            short_read,
         };
-        if manifest_scrub_success != observed_scrub_success {
-            return Err(Error::ScrubError(
+        if !short_read && manifest_scrub_success != observed_scrub_success {
+            let mut ret = vec![Error::ScrubError(
                 ScrubError::OverallMismatch {
                     manifest: manifest_scrub_success,
                     observed: observed_scrub_success,
                 }
                 .into(),
-            ));
+            )];
+            ret.extend(errors);
+            Err(ret)
+        } else if short_read {
+            Err(vec![Error::Success])
+        } else {
+            Ok(observed_scrub_success)
         }
-        Ok(observed_scrub_success)
     }
 }
 
@@ -556,11 +576,14 @@ mod tests {
             max_records: Some(100), // Set a limit that should trigger the record check
         };
 
-        let result = LogReader::post_process_fragments(fragments.clone(), from, limits);
+        let mut short_read = false;
+        let result =
+            LogReader::post_process_fragments(fragments.clone(), from, limits, &mut short_read);
 
         // With the fix: last fragment start (200) - from (125) = 75 records
         // This should be under the 100 record limit, so all fragments should remain
         assert_eq!(result.len(), 3);
+        assert!(!short_read);
 
         // Test case that would fail with the old bug:
         // If we were using fragments[0].start (100) instead of from (125),
@@ -572,13 +595,19 @@ mod tests {
             max_records: Some(74), // Just under the actual span from 'from'
         };
 
-        let result_strict =
-            LogReader::post_process_fragments(fragments.clone(), from, limits_strict);
+        let mut short_read = false;
+        let result_strict = LogReader::post_process_fragments(
+            fragments.clone(),
+            from,
+            limits_strict,
+            &mut short_read,
+        );
 
         // With the fix: 200 - 125 = 75 > 74, so last fragment should be removed
         assert_eq!(result_strict.len(), 2);
         assert_eq!(result_strict[0].seq_no, FragmentSeqNo(1));
         assert_eq!(result_strict[1].seq_no, FragmentSeqNo(2));
+        assert!(short_read);
     }
 
     #[test]
@@ -615,7 +644,9 @@ mod tests {
             max_records: Some(75),
         };
 
-        let result = LogReader::post_process_fragments(fragments.clone(), from, limits);
+        let mut short_read = false;
+        let result =
+            LogReader::post_process_fragments(fragments.clone(), from, limits, &mut short_read);
 
         // With the fix: both fragments should be returned
         // The calculation is: last fragment start (101) - from (50) = 51 records
@@ -627,6 +658,7 @@ mod tests {
         );
         assert_eq!(result[0].seq_no, FragmentSeqNo(1));
         assert_eq!(result[1].seq_no, FragmentSeqNo(2));
+        assert!(!short_read);
 
         // Test the edge case where the old bug would have incorrectly calculated:
         // Old bug would use: fragments[1].start (101) - fragments[0].start (1) = 100 records
@@ -637,8 +669,13 @@ mod tests {
             max_records: Some(50), // Just under the actual span from 'from' (51)
         };
 
-        let result_edge =
-            LogReader::post_process_fragments(fragments.clone(), from, limits_edge_case);
+        let mut short_read = false;
+        let result_edge = LogReader::post_process_fragments(
+            fragments.clone(),
+            from,
+            limits_edge_case,
+            &mut short_read,
+        );
 
         // With the fix: 101 - 50 = 51 > 50, so the second fragment should be removed
         assert_eq!(
@@ -647,6 +684,7 @@ mod tests {
             "Only first fragment should remain with 50 record limit"
         );
         assert_eq!(result_edge[0].seq_no, FragmentSeqNo(1));
+        assert!(short_read);
     }
 
     #[test]
@@ -781,6 +819,7 @@ mod tests {
             snapshots: vec![],
             fragments: fragments.clone(),
             initial_offset: Some(LogPosition::from_offset(1)),
+            initial_seq_no: Some(FragmentSeqNo(1)),
         };
 
         // Boundary case 1: Request exactly at the manifest limit
@@ -869,6 +908,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: None,
+            initial_seq_no: None,
         };
         let result_empty =
             LogReader::scan_from_manifest(&empty_manifest, LogPosition::from_offset(0), limits);
@@ -3360,6 +3400,7 @@ mod tests {
                 },
             ],
             initial_offset: Some(LogPosition { offset: 1 }),
+            initial_seq_no: Some(FragmentSeqNo(1)),
         };
         let Some(fragments) = LogReader::scan_from_manifest(
             &manifest,

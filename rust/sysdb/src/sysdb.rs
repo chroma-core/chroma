@@ -20,9 +20,9 @@ use chroma_types::{
 };
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
-    CollectionConversionError, CollectionUuid, CountForksError, FinishDatabaseDeletionError,
-    FlushCompactionResponse, FlushCompactionResponseConversionError, ForkCollectionError, Segment,
-    SegmentConversionError, SegmentScope, Tenant,
+    CollectionConversionError, CollectionUuid, CountForksError, DatabaseUuid,
+    FinishDatabaseDeletionError, FlushCompactionResponse, FlushCompactionResponseConversionError,
+    ForkCollectionError, Segment, SegmentConversionError, SegmentScope, Tenant,
 };
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -266,6 +266,7 @@ impl SysDb {
                     root_collection_id: None,
                     lineage_file_path: None,
                     updated_at: SystemTime::now(),
+                    database_id: DatabaseUuid::new(),
                 };
 
                 test_sysdb.add_collection(collection.clone());
@@ -383,9 +384,13 @@ impl SysDb {
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
         tenant: Option<String>,
+        min_versions_if_alive: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_collections_to_gc(cutoff_time, limit, tenant).await,
+            SysDb::Grpc(grpc) => {
+                grpc.get_collections_to_gc(cutoff_time, limit, tenant, min_versions_if_alive)
+                    .await
+            }
             SysDb::Sqlite(_) => unimplemented!("Garbage collection does not work for local chroma"),
             SysDb::Test(_) => todo!(),
         }
@@ -460,12 +465,12 @@ impl SysDb {
 
     pub async fn get_last_compaction_time(
         &mut self,
-        tanant_ids: Vec<String>,
+        tenant_ids: Vec<String>,
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tanant_ids).await,
+            SysDb::Grpc(grpc) => grpc.get_last_compaction_time(tenant_ids).await,
             SysDb::Sqlite(_) => todo!(),
-            SysDb::Test(test) => test.get_last_compaction_time(tanant_ids).await,
+            SysDb::Test(test) => test.get_last_compaction_time(tenant_ids).await,
         }
     }
 
@@ -1123,6 +1128,7 @@ impl GrpcSysDb {
         cutoff_time: Option<SystemTime>,
         limit: Option<u64>,
         tenant: Option<String>,
+        min_versions_if_alive: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
         let res = self
             .client
@@ -1130,6 +1136,7 @@ impl GrpcSysDb {
                 cutoff_time: cutoff_time.map(|t| t.into()),
                 limit,
                 tenant_id: tenant,
+                min_versions_if_alive,
             })
             .await;
 

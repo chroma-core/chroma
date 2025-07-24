@@ -19,11 +19,11 @@ use chroma_types::{
         literal_expr::{LiteralExpr, NgramLiteralProvider},
         ChromaRegex, ChromaRegexError,
     },
-    BooleanOperator, Chunk, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
-    MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
+    BooleanOperator, Chunk, CompositeExpression, DataRecord, DocumentExpression, DocumentOperator,
+    LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
     MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where,
 };
-use futures::TryStreamExt;
+use futures::future::try_join_all;
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{Instrument, Span};
@@ -245,22 +245,27 @@ impl<'me> MetadataProvider<'me> {
                             Some(offset_ids)
                                 if offset_ids.len() < rec_reader.count().await? as u64 / 10 =>
                             {
-                                for id in offset_ids {
-                                    if rec_reader.get_data_for_offset_id(id).await?.is_some_and(
-                                        |rec| rec.document.is_some_and(|doc| regex.is_match(doc)),
-                                    ) {
+                                let fetch_futures: Vec<_> = offset_ids
+                                    .into_iter()
+                                    .map(|id| async move {
+                                        let data = rec_reader.get_data_for_offset_id(id).await?;
+                                        Ok::<(u32, Option<DataRecord>), Box<dyn ChromaError>>((
+                                            id, data,
+                                        ))
+                                    })
+                                    .collect();
+                                let data_results = try_join_all(fetch_futures).await?;
+                                for (id, data_opt) in data_results {
+                                    if data_opt.is_some_and(|rec| {
+                                        rec.document.is_some_and(|doc| regex.is_match(doc))
+                                    }) {
                                         exact_matching_offset_ids.insert(id);
                                     }
                                 }
                             }
                             // Perform range scan of all documents
                             candidate_offsets => {
-                                for (offset, record) in rec_reader
-                                    .get_data_stream(..)
-                                    .await
-                                    .try_collect::<Vec<_>>()
-                                    .await?
-                                {
+                                for (offset, record) in rec_reader.get_all_data().await? {
                                     if (candidate_offsets.is_none()
                                         || candidate_offsets
                                             .as_ref()
@@ -524,6 +529,16 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             MetadataLogReader::create(&materialized_logs, &record_segment_reader)
                 .await
                 .map_err(FilterError::LogMaterializer)?;
+
+        // Short-circuit if filter is none.
+        if self.query_ids.is_none() && self.where_clause.is_none() {
+            return Ok(FilterOutput {
+                log_offset_ids: SignedRoaringBitmap::full(),
+                compact_offset_ids: SignedRoaringBitmap::full()
+                    & SignedRoaringBitmap::Exclude(metadata_log_reader.updated_offset_ids),
+            });
+        }
+
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
 
         let metadata_segement_reader =
@@ -616,9 +631,9 @@ mod tests {
     use chroma_system::Operator;
     use chroma_types::{
         operator::Filter, BooleanOperator, Chunk, CollectionUuid, CompositeExpression,
-        DocumentExpression, LogRecord, MetadataComparison, MetadataExpression, MetadataSetValue,
-        MetadataValue, Operation, OperationRecord, PrimitiveOperator, SegmentUuid, SetOperator,
-        SignedRoaringBitmap, Where,
+        DatabaseUuid, DocumentExpression, LogRecord, MetadataComparison, MetadataExpression,
+        MetadataSetValue, MetadataValue, Operation, OperationRecord, PrimitiveOperator,
+        SegmentUuid, SetOperator, SignedRoaringBitmap, Where,
     };
 
     use crate::execution::operators::filter::{MetadataLogReader, MetadataProvider};
@@ -1087,6 +1102,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1106,14 +1123,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let data = vec![
                 LogRecord {
                     log_offset: 1,
@@ -1159,6 +1184,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -1225,14 +1253,22 @@ mod tests {
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
                 .await
                 .expect("Reader should be initialized by now");
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
         let mat_records = materialize_logs(&some_reader, data, None)
             .await

@@ -24,6 +24,7 @@ queryService:
       value: 'value: "1"'
     - name: CONFIG_PATH
       value: 'value: "/tilt_config.yaml"'
+  jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
 
 compactionService:
   env:
@@ -31,6 +32,7 @@ compactionService:
       value: 'value: "1"'
     - name: CONFIG_PATH
       value: 'value: "/tilt_config.yaml"'
+  jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
 
 rustLogService:
   replicaCount: 1

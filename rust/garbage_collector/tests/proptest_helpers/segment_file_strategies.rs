@@ -1,14 +1,19 @@
-use super::proptest_types::SegmentIds;
+use chroma_blockstore::arrow::provider::BlockManager;
 use chroma_blockstore::test_utils::sparse_index_test_utils::create_test_sparse_index;
+use chroma_blockstore::RootManager;
+use chroma_index::hnsw_provider::{HnswIndexProvider, FILES};
+use chroma_segment::types::ChromaSegmentFlusher;
 use chroma_storage::Storage;
-use chroma_types::{SegmentFlushInfo, SegmentUuid};
+use chroma_types::{CollectionUuid, DatabaseUuid, SegmentFlushInfo, SegmentUuid};
 use futures::StreamExt;
-use proptest::prelude::{any, Arbitrary, BoxedStrategy};
+use proptest::prelude::{any, any_with, Arbitrary, BoxedStrategy};
 use proptest::strategy::Strategy;
 use proptest::{prelude::Just, prop_oneof};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
+
+use super::proptest_types::SegmentIds;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Default)]
 enum SegmentFileReferenceType {
@@ -76,15 +81,19 @@ struct SegmentFileReference {
     reference: FileReference,
 }
 
-fn new_hnsw_index_strategy() -> BoxedStrategy<SegmentFileReference> {
+fn new_hnsw_index_strategy(prefix_path: String) -> BoxedStrategy<SegmentFileReference> {
     let hnsw_index_id = Uuid::new_v4();
     let hnsw_index = FileReference::Hnsw {
-        file_paths: vec![
-            format!("hnsw/{}/header.bin", hnsw_index_id),
-            format!("hnsw/{}/data_level0.bin", hnsw_index_id),
-            format!("hnsw/{}/length.bin", hnsw_index_id),
-            format!("hnsw/{}/link_lists.bin", hnsw_index_id),
-        ],
+        file_paths: FILES
+            .iter()
+            .map(|file_name| {
+                HnswIndexProvider::format_key(
+                    &prefix_path,
+                    &chroma_index::IndexUuid(hnsw_index_id),
+                    file_name,
+                )
+            })
+            .collect::<Vec<String>>(),
     };
     Just(SegmentFileReference {
         reference_id: hnsw_index_id,
@@ -95,11 +104,16 @@ fn new_hnsw_index_strategy() -> BoxedStrategy<SegmentFileReference> {
 
 fn new_or_forked_sparse_index_strategy(
     existing_sparse_index: Option<SegmentFileReference>,
+    prefix_path: String,
 ) -> BoxedStrategy<SegmentFileReference> {
-    let new_block_paths_strategy = (1..10).prop_map(|num| {
+    let prefix_path_clone = prefix_path.clone();
+    let new_block_paths_strategy = (1..10).prop_map(move |num| {
         let mut block_paths = vec![];
         for _ in 0..num {
-            block_paths.push(format!("block/{}", Uuid::new_v4()));
+            block_paths.push(BlockManager::format_key(
+                &prefix_path_clone,
+                &Uuid::new_v4(),
+            ));
         }
         block_paths
     });
@@ -133,10 +147,10 @@ fn new_or_forked_sparse_index_strategy(
         });
 
     block_paths_strategy
-        .prop_map(|block_paths| {
+        .prop_map(move |block_paths| {
             let sparse_index_id = Uuid::new_v4();
             let sparse_index = FileReference::SparseIndex {
-                path: format!("sparse_index/{}", sparse_index_id),
+                path: RootManager::get_storage_key(&prefix_path, &sparse_index_id),
                 block_paths: block_paths.into_iter().collect(),
             };
             SegmentFileReference {
@@ -149,33 +163,47 @@ fn new_or_forked_sparse_index_strategy(
 
 /// A collection of file references for a segment.
 #[derive(Clone, Debug)]
-pub struct SegmentFilePaths(HashMap<SegmentFileReferenceType, Vec<SegmentFileReference>>);
+pub struct SegmentFilePaths {
+    paths: HashMap<SegmentFileReferenceType, Vec<SegmentFileReference>>,
+    pub root_segment_id: SegmentUuid,
+    pub prefix_path: String,
+}
 
 impl Arbitrary for SegmentFilePaths {
-    type Parameters = ();
+    type Parameters = (String, DatabaseUuid, CollectionUuid);
     type Strategy = BoxedStrategy<Self>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
+        let segment_id = SegmentUuid::new();
+        let prefix_path = format!(
+            "tenant/{}/database/{}/collection/{}/segment/{}",
+            params.0, params.1, params.2, segment_id
+        );
+        let prefix_path_clone = prefix_path.clone();
         proptest::collection::vec(
-            any::<SegmentFileReferenceType>().prop_flat_map(|segment_file_reference_type| {
+            any::<SegmentFileReferenceType>().prop_flat_map(move |segment_file_reference_type| {
                 let refs = match segment_file_reference_type.clone() {
-                    SegmentFileReferenceType::HNSWIndex => new_hnsw_index_strategy(),
-                    SegmentFileReferenceType::HNSWPath => new_hnsw_index_strategy(),
+                    SegmentFileReferenceType::HNSWIndex => {
+                        new_hnsw_index_strategy(prefix_path.clone())
+                    }
+                    SegmentFileReferenceType::HNSWPath => {
+                        new_hnsw_index_strategy(prefix_path.clone())
+                    }
                     SegmentFileReferenceType::SparseIndex { .. } => {
-                        new_or_forked_sparse_index_strategy(None)
+                        new_or_forked_sparse_index_strategy(None, prefix_path.clone())
                     }
                 };
                 (Just(segment_file_reference_type), refs)
             }),
             0..10,
         )
-        .prop_map(|elements| {
-            SegmentFilePaths(
-                elements
-                    .into_iter()
-                    .map(|(k, v)| (k, vec![v]))
-                    .collect::<HashMap<_, _>>(),
-            )
+        .prop_map(move |elements| SegmentFilePaths {
+            paths: elements
+                .into_iter()
+                .map(|(k, v)| (k, vec![v]))
+                .collect::<HashMap<_, _>>(),
+            root_segment_id: segment_id,
+            prefix_path: prefix_path_clone.clone(),
         })
         .boxed()
     }
@@ -184,10 +212,18 @@ impl Arbitrary for SegmentFilePaths {
 impl From<SegmentFilePaths> for HashMap<String, Vec<String>> {
     fn from(segment_file_paths: SegmentFilePaths) -> Self {
         let mut file_paths = HashMap::new();
-        for (key, value) in segment_file_paths.0 {
+        for (key, value) in segment_file_paths.paths {
             file_paths.insert(
                 key.name().to_string(),
-                value.iter().map(|f| f.reference_id.to_string()).collect(),
+                value
+                    .iter()
+                    .map(|f| {
+                        ChromaSegmentFlusher::flush_key(
+                            &segment_file_paths.prefix_path,
+                            &f.reference_id,
+                        )
+                    })
+                    .collect(),
             );
         }
         file_paths
@@ -197,7 +233,7 @@ impl From<SegmentFilePaths> for HashMap<String, Vec<String>> {
 impl SegmentFilePaths {
     fn paths(&self) -> Vec<String> {
         let mut paths = vec![];
-        for file_reference in self.0.values() {
+        for file_reference in self.paths.values() {
             for file_ref in file_reference {
                 paths.extend(file_ref.reference.paths());
             }
@@ -213,6 +249,7 @@ impl SegmentFilePaths {
     }
 
     pub fn next_version_strategy(&self) -> BoxedStrategy<Self> {
+        let prefix_path = self.prefix_path.clone();
         let hnsw_references_strategy = (
             any::<Option<bool>>(),
             prop_oneof![
@@ -221,7 +258,7 @@ impl SegmentFilePaths {
             ],
         )
             .prop_map({
-                let current_refs = self.0.clone();
+                let current_refs = self.paths.clone();
                 move |(hnsw_index, ref_type)| {
                     let mut refs = HashMap::new();
                     match hnsw_index {
@@ -235,12 +272,16 @@ impl SegmentFilePaths {
                             // Don't inherit, create new
                             let hnsw_index_id = Uuid::new_v4();
                             let hnsw_index = FileReference::Hnsw {
-                                file_paths: vec![
-                                    format!("hnsw/{}/header.bin", hnsw_index_id),
-                                    format!("hnsw/{}/data_level0.bin", hnsw_index_id),
-                                    format!("hnsw/{}/length.bin", hnsw_index_id),
-                                    format!("hnsw/{}/link_lists.bin", hnsw_index_id),
-                                ],
+                                file_paths: FILES
+                                    .iter()
+                                    .map(|file_name| {
+                                        HnswIndexProvider::format_key(
+                                            &prefix_path,
+                                            &chroma_index::IndexUuid(hnsw_index_id),
+                                            file_name,
+                                        )
+                                    })
+                                    .collect::<Vec<String>>(),
                             };
 
                             refs.insert(
@@ -259,12 +300,13 @@ impl SegmentFilePaths {
             });
 
         let sparse_indices = self
-            .0
+            .paths
             .iter()
             .filter(|(k, _)| matches!(k, SegmentFileReferenceType::SparseIndex { .. }))
             .flat_map(|(k, v)| v.iter().map(|v| (k.clone(), v.clone())))
             .collect::<Vec<_>>();
 
+        let prefix_path = self.prefix_path.clone();
         let current_sparse_indices_strategy = if sparse_indices.is_empty() {
             Just(HashMap::new()).boxed()
         } else {
@@ -272,8 +314,11 @@ impl SegmentFilePaths {
             // proptest does not yet support `Vec<BoxedStrategy<T>> -> BoxedStrategy<Vec<T>>`, so instead we first sample a subset of Vec<T> and apply the desired flat map while sampling. We then reject the generated Vec<T> if it contains duplicates.
             proptest::collection::vec(
                 proptest::sample::select(sparse_indices).prop_flat_map(
-                    |(sparse_index_name, sparse_index)| {
-                        let sparse_index = new_or_forked_sparse_index_strategy(Some(sparse_index));
+                    move |(sparse_index_name, sparse_index)| {
+                        let sparse_index = new_or_forked_sparse_index_strategy(
+                            Some(sparse_index),
+                            prefix_path.clone(),
+                        );
                         (Just(sparse_index_name), sparse_index)
                     },
                 ),
@@ -308,7 +353,7 @@ impl SegmentFilePaths {
 
         let new_sparse_indices_strategy = proptest::collection::hash_map(
             (0..10).prop_map(|i| format!("sparse_index_{}", i)),
-            new_or_forked_sparse_index_strategy(None),
+            new_or_forked_sparse_index_strategy(None, self.prefix_path.clone()),
             0..3,
         )
         .prop_map(|sparse_indices| {
@@ -334,12 +379,18 @@ impl SegmentFilePaths {
                 },
             );
 
+        let segment_id = self.root_segment_id;
+        let prefix_path = self.prefix_path.clone();
         (hnsw_references_strategy, sparse_indices_strategy)
-            .prop_map(|(hnsw_references, sparse_indices)| {
+            .prop_map(move |(hnsw_references, sparse_indices)| {
                 let mut references = hnsw_references;
                 references.extend(sparse_indices);
 
-                Self(references)
+                Self {
+                    paths: references,
+                    root_segment_id: segment_id,
+                    prefix_path: prefix_path.clone(),
+                }
             })
             .boxed()
     }
@@ -348,8 +399,6 @@ impl SegmentFilePaths {
 /// A group of the three segment types. Note that the files generated for each segment type may not corelate with what the real system would create (e.g. the metadata segment may have HNSW files).
 ///
 /// This grouping is used instead of generating a variable number of segments as the latter is quite difficult to construct with proptest (there's no transform for `Vec<BoxedStrategy<T>> -> BoxedStrategy<Vec<T>>`).
-///
-/// We do not track segment IDs here as they are not known until after creation.
 #[derive(Clone, Debug)]
 pub struct SegmentGroup {
     pub vector: SegmentFilePaths,
@@ -385,7 +434,8 @@ impl SegmentGroup {
 }
 
 async fn write_files_for_segment(storage: &Storage, file_paths: &SegmentFilePaths) {
-    for refs in file_paths.0.values() {
+    let prefix_path = file_paths.prefix_path.clone();
+    for refs in file_paths.paths.values() {
         for file_ref in refs {
             match &file_ref.reference {
                 FileReference::SparseIndex { block_paths, .. } => {
@@ -395,9 +445,15 @@ async fn write_files_for_segment(storage: &Storage, file_paths: &SegmentFilePath
                             Uuid::parse_str(block_path.split('/').last().unwrap()).unwrap()
                         })
                         .collect::<Vec<_>>();
-                    create_test_sparse_index(storage, file_ref.reference_id, block_ids, None)
-                        .await
-                        .unwrap();
+                    create_test_sparse_index(
+                        storage,
+                        file_ref.reference_id,
+                        block_ids,
+                        None,
+                        prefix_path.clone(),
+                    )
+                    .await
+                    .unwrap();
 
                     // Write blocks
                     let contents = vec![0; 8];
@@ -439,14 +495,14 @@ async fn write_files_for_segment(storage: &Storage, file_paths: &SegmentFilePath
 }
 
 impl Arbitrary for SegmentGroup {
-    type Parameters = ();
+    type Parameters = (String, DatabaseUuid, CollectionUuid);
     type Strategy = BoxedStrategy<Self>;
 
-    fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
+    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
         (
-            any::<SegmentFilePaths>(),
-            any::<SegmentFilePaths>(),
-            any::<SegmentFilePaths>(),
+            any_with::<SegmentFilePaths>(params.clone()),
+            any_with::<SegmentFilePaths>(params.clone()),
+            any_with::<SegmentFilePaths>(params.clone()),
         )
             .prop_map(
                 |(vector_segment_paths, metadata_segment_paths, record_segment_paths)| {

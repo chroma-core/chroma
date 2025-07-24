@@ -12,7 +12,7 @@ chroma run --path /db_path
 
 {% Tab label="python" %}
 
-Then use the Chroma HTTP client to connect to the server:
+Then use the Chroma `HttpClient` to connect to the server:
 
 ```python
 import chromadb
@@ -22,7 +22,7 @@ chroma_client = chromadb.HttpClient(host='localhost', port=8000)
 
 That's it! Chroma's API will run in `client-server` mode with just this change.
 
-Chroma also provides an async HTTP client. The behaviors and method signatures are identical to the synchronous client, but all methods that would block are now async. To use it, call `AsyncHttpClient` instead:
+Chroma also provides the async HTTP client. The behaviors and method signatures are identical to the synchronous client, but all methods that would block are now async. To use it, call `AsyncHttpClient` instead:
 
 ```python
 import asyncio
@@ -40,7 +40,7 @@ async def main():
 asyncio.run(main())
 ```
 
-If you [deploy](../../production/deployment) your Chroma server, you can also use our [http-only](./python-http-client) package.
+If you [deploy](../../guides/deploy/client-server-mode) your Chroma server, you can also use our [http-only](../../guides/deploy/python-thin-client) package.
 
 {% /Tab %}
 
@@ -52,6 +52,18 @@ Then you can connect to it by instantiating a new `ChromaClient`:
 import { ChromaClient } from "chromadb";
 
 const client = new ChromaClient();
+```
+
+If you run your Chroma server using a different configuration, or [deploy](../../guides/deploy/client-server-mode) your Chroma server, you can specify the `host`, `port`, and whether the client should connect over `ssl`:
+
+```typescript
+import { ChromaClient } from "chromadb";
+
+const client = new ChromaClient({
+    host: "YOUR-HOST",
+    port: "YOUR-PORT",
+    ssl: true
+});
 ```
 
 {% /Tab %}

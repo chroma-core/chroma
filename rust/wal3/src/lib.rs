@@ -9,6 +9,7 @@ mod backoff;
 mod batch_manager;
 mod copy;
 mod cursors;
+mod destroy;
 mod gc;
 mod manifest;
 mod manifest_manager;
@@ -20,7 +21,8 @@ pub use backoff::ExponentialBackoff;
 pub use batch_manager::BatchManager;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
-pub use gc::Garbage;
+pub use destroy::destroy;
+pub use gc::{Garbage, GarbageCollector};
 pub use manifest::{unprefixed_snapshot_path, Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
@@ -41,8 +43,27 @@ pub enum Error {
     AlreadyInitialized,
     #[error("scanned region is garbage collected")]
     GarbageCollected,
-    #[error("log contention fails a write")]
-    LogContention,
+    // NOTE(rescrv):  Durable means the contention occurs only on the manifest.  A manifest-scoped
+    // op may return this case and assume higher ups translate it to failure.  This is hypothetical
+    // and a note to the future because in the code as of this comment the data is always durable
+    // before any manifest contention can happen.
+    //
+    // There are three cases:
+    // - The operation does not need to be retried because it is durable, but we need to internally
+    //   propagate state to correct for the log contention.
+    // - The operation needs to be retried because there was explicit contention writing the
+    //   fragement.  We need to retry, but can return this error to the user.
+    // - The operation is in an ambiguous state and we cannot advise the user either way.  Fail the
+    //   write and let a higher level protocol handle it.
+    //
+    // By observation, manifest contention on the write path is always LogContentionDurable.  If
+    // you change the write path you need to audit where it gets returned.
+    #[error("log contention, but your data is durable")]
+    LogContentionDurable,
+    #[error("log contention, and your operation may be retried")]
+    LogContentionRetry,
+    #[error("log contention, and your data may or may not be durable")]
+    LogContentionFailure,
     #[error("the log is full")]
     LogFull,
     #[error("the log is closed")]
@@ -82,7 +103,9 @@ impl chroma_error::ChromaError for Error {
             Self::UninitializedLog => chroma_error::ErrorCodes::FailedPrecondition,
             Self::AlreadyInitialized => chroma_error::ErrorCodes::AlreadyExists,
             Self::GarbageCollected => chroma_error::ErrorCodes::NotFound,
-            Self::LogContention => chroma_error::ErrorCodes::Aborted,
+            Self::LogContentionDurable => chroma_error::ErrorCodes::Aborted,
+            Self::LogContentionRetry => chroma_error::ErrorCodes::Aborted,
+            Self::LogContentionFailure => chroma_error::ErrorCodes::Aborted,
             Self::LogFull => chroma_error::ErrorCodes::Aborted,
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
             Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
@@ -108,6 +131,7 @@ impl chroma_error::ChromaError for Error {
 pub struct ScrubSuccess {
     pub calculated_setsum: Setsum,
     pub bytes_read: u64,
+    pub short_read: bool,
 }
 
 //////////////////////////////////////////// ScrubError ////////////////////////////////////////////
@@ -281,7 +305,7 @@ impl std::ops::AddAssign<usize> for LogPosition {
 /// for different prefixes.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ThrottleOptions {
-    /// The maximum number of bytes to batch.  Defaults to 8MB.
+    /// The maximum number of bytes to batch.  Defaults to 64MB (2 * GRPC max payload size).
     #[serde(default = "ThrottleOptions::default_batch_size_bytes")]
     pub batch_size_bytes: usize,
     /// The maximum number of microseconds to batch.  Defaults to 100ms or 100_000us.
@@ -297,7 +321,7 @@ pub struct ThrottleOptions {
 
 impl ThrottleOptions {
     fn default_batch_size_bytes() -> usize {
-        8 * 1_000_000
+        64_000_000
     }
 
     fn default_batch_interval_us() -> usize {
@@ -542,10 +566,15 @@ where
 
 ////////////////////////////////////////// Fragment Paths //////////////////////////////////////////
 
+pub fn fragment_prefix() -> String {
+    "log/".to_string()
+}
+
 pub fn prefixed_fragment_path(prefix: &str, fragment_seq_no: FragmentSeqNo) -> String {
     format!(
-        "{}/log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
+        "{}/{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
         prefix,
+        fragment_prefix(),
         fragment_seq_no.bucket(),
         fragment_seq_no.0,
     )
@@ -565,4 +594,19 @@ pub fn parse_fragment_path(path: &str) -> Option<FragmentSeqNo> {
     let fsn_equals_number = basename.strip_suffix(".parquet")?;
     let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
     u64::from_str_radix(number, 16).ok().map(FragmentSeqNo)
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn paths() {
+        assert_eq!(
+            "THIS_IS_THE_COLLECTION/log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet",
+            prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentSeqNo(1))
+        );
+    }
 }

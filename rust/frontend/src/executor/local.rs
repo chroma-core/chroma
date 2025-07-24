@@ -373,7 +373,7 @@ mod tests {
                     "default_database".to_string(),
                     collection.collection_id,
                     vec!["id1".to_string(), "id2".to_string()],
-                    Some(vec![vec![-1.0, -1.0], vec![1.0, 1.0]]),
+                    vec![vec![-1.0, -1.0], vec![1.0, 1.0]],
                     None,
                     None,
                     None,

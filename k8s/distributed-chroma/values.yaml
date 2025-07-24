@@ -107,9 +107,15 @@ garbageCollector:
     requests:
       cpu: '100m'
       memory: '128Mi'
+  cache:
+    hostPath: '/local/cache/chroma-garbage-collector'
+    mountPath: '/cache/'
   configuration: |
     service_name: "garbage-collector"
     otel_endpoint: "http://otel-collector:4317"
+    otel_filters:
+      - crate_name: "garbage_collector"
+        filter_level: "debug"
     relative_cutoff_time_seconds: 60 # GC all versions created at time < now() - relative_cutoff_time_seconds (1 minute)
     max_collections_to_gc: 1000
     gc_interval_mins: 1
@@ -135,3 +141,10 @@ garbageCollector:
         kube_namespace: "chroma"
         memberlist_name: "garbage-collection-service-memberlist"
         queue_size: 100
+    log:
+      grpc:
+        host: "logservice.chroma"
+        port: 50051
+        connect_timeout_ms: 5000
+        request_timeout_ms: 5000
+        alt_host: "rust-log-service.chroma"

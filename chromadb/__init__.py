@@ -50,11 +50,13 @@ __all__ = [
     "TokenTransportHeader",
 ]
 
+from chromadb.types import CloudClientArg
+
 logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "1.0.12"
+__version__ = "1.0.15"
 
 
 # Workaround to deal with Colab's old sqlite3 version
@@ -296,8 +298,8 @@ async def AsyncHttpClient(
 
 
 def CloudClient(
-    tenant: str,
-    database: str,
+    tenant: Optional[str] = None,
+    database: Optional[str] = None,
     api_key: Optional[str] = None,
     settings: Optional[Settings] = None,
     *,  # Following arguments are keyword-only, intended for testing only.
@@ -313,19 +315,24 @@ def CloudClient(
         database: The database to use for this client.
         api_key: The api key to use for this client.
     """
+    required_args = [
+        CloudClientArg(name="tenant", env_var="CHROMA_TENANT", value=tenant),
+        CloudClientArg(name="database", env_var="CHROMA_DATABASE", value=database),
+        CloudClientArg(name="api_key", env_var="CHROMA_API_KEY", value=api_key),
+    ]
 
-    # If no API key is provided, try to load it from the environment variable
-    if api_key is None:
+    # If any of tenant, database, or api_key is not provided, try to load it from the environment variable
+    if not all([arg.value for arg in required_args]):
         import os
+        for arg in required_args:
+            arg.value = arg.value or os.environ.get(arg.env_var)
 
-        api_key = os.environ.get("CHROMA_API_KEY")
-
-    # If the API key is still not provided, prompt the user
-    if api_key is None:
-        print(
-            "\033[93mDon't have an API key?\033[0m Get one at https://app.trychroma.com"
+    missing_args = [arg for arg in required_args if arg.value is None]
+    if missing_args:
+        raise ValueError(
+            f"Missing required arguments: {', '.join([arg.name for arg in missing_args])}. "
+            f"Please provide them or set the environment variables: {', '.join([arg.env_var for arg in missing_args])}"
         )
-        api_key = input("Please enter your Chroma API key: ")
 
     if settings is None:
         settings = Settings()

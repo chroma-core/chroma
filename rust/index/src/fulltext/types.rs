@@ -285,6 +285,10 @@ impl FullTextIndexFlusher {
     pub fn pls_id(&self) -> Uuid {
         self.posting_lists_blockfile_flusher.id()
     }
+
+    pub fn prefix_path(&self) -> &str {
+        self.posting_lists_blockfile_flusher.prefix_path()
+    }
 }
 
 #[derive(Clone)]
@@ -436,6 +440,15 @@ impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'
         6
     }
 
+    async fn prefetch_ngrams<'me, Ngrams>(&'me self, ngrams: Ngrams)
+    where
+        Ngrams: IntoIterator<Item = &'me str> + Send + Sync,
+    {
+        self.posting_lists_blockfile_reader
+            .load_blocks_for_prefixes(ngrams)
+            .await
+    }
+
     async fn lookup_ngram_range<'me, NgramRange>(
         &'me self,
         ngram_range: NgramRange,
@@ -453,7 +466,10 @@ impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
+    use chroma_blockstore::{
+        arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider,
+        BlockfileWriterOptions,
+    };
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
     use tantivy::tokenizer::NgramTokenizer;
@@ -462,8 +478,9 @@ mod tests {
     #[tokio::test]
     async fn test_new_writer() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path))
             .await
             .unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
@@ -473,8 +490,9 @@ mod tests {
     #[tokio::test]
     async fn test_new_writer_then_reader() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -485,10 +503,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let _ = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
     }
@@ -496,8 +512,9 @@ mod tests {
     #[tokio::test]
     async fn test_index_and_search_single_document() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -514,10 +531,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -534,8 +549,9 @@ mod tests {
     #[tokio::test]
     async fn test_repeating_character_in_query() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -552,10 +568,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -566,8 +580,9 @@ mod tests {
     #[tokio::test]
     async fn test_query_of_repeating_character() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -590,10 +605,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -604,8 +617,9 @@ mod tests {
     #[tokio::test]
     async fn test_repeating_character_in_document() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -622,10 +636,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -636,8 +648,9 @@ mod tests {
     #[tokio::test]
     async fn test_search_absent_token() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -654,10 +667,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -668,8 +679,9 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_candidates_within_document() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -692,10 +704,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let reader_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(reader_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -709,8 +719,9 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_simple_documents() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -733,10 +744,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -750,8 +759,9 @@ mod tests {
     #[tokio::test]
     async fn test_multiple_complex_documents() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -782,10 +792,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -805,8 +813,9 @@ mod tests {
     #[tokio::test]
     async fn test_index_multiple_character_repeating() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -841,10 +850,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -861,8 +868,9 @@ mod tests {
     #[tokio::test]
     async fn test_index_special_characters() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -889,10 +897,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -909,8 +915,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_all_results_for_token() {
         let provider = BlockfileProvider::new_memory();
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -939,10 +946,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -963,8 +968,11 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+            )
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -983,10 +991,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -1001,8 +1007,11 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+            )
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1021,10 +1030,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -1042,8 +1049,11 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+            )
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1075,7 +1085,7 @@ mod tests {
         // Update document document 1 with same content, update document 3 with new content
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
-                BlockfileWriterOptions::new()
+                BlockfileWriterOptions::new(prefix_path.clone())
                     .ordered_mutations()
                     .fork(pl_blockfile_id),
             )
@@ -1102,10 +1112,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -1126,8 +1134,11 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default().ordered_mutations())
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+            )
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1146,7 +1157,7 @@ mod tests {
         // Add document to index
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
-                BlockfileWriterOptions::new()
+                BlockfileWriterOptions::new(prefix_path.clone())
                     .ordered_mutations()
                     .fork(pl_blockfile_id),
             )
@@ -1168,7 +1179,7 @@ mod tests {
         // Update document with same content, should be a noop
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
-                BlockfileWriterOptions::new()
+                BlockfileWriterOptions::new(prefix_path.clone())
                     .ordered_mutations()
                     .fork(pl_blockfile_id),
             )
@@ -1188,10 +1199,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 
@@ -1206,8 +1215,9 @@ mod tests {
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
         let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let prefix_path = String::from("");
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::default())
+            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1238,7 +1248,9 @@ mod tests {
 
         // Delete document 3
         let pl_blockfile_writer = provider
-            .write::<u32, Vec<u32>>(BlockfileWriterOptions::new().fork(pl_blockfile_id))
+            .write::<u32, Vec<u32>>(
+                BlockfileWriterOptions::new(prefix_path.clone()).fork(pl_blockfile_id),
+            )
             .await
             .unwrap();
         let pl_blockfile_id = pl_blockfile_writer.id();
@@ -1254,10 +1266,8 @@ mod tests {
         let flusher = index_writer.commit().await.unwrap();
         flusher.flush().await.unwrap();
 
-        let pl_blockfile_reader = provider
-            .read::<u32, &[u32]>(&pl_blockfile_id)
-            .await
-            .unwrap();
+        let read_options = BlockfileReaderOptions::new(pl_blockfile_id, prefix_path);
+        let pl_blockfile_reader = provider.read::<u32, &[u32]>(read_options).await.unwrap();
         let tokenizer = NgramTokenizer::new(1, 1, false).unwrap();
         let index_reader = FullTextIndexReader::new(pl_blockfile_reader, tokenizer);
 

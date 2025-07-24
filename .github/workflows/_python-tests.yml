@@ -173,7 +173,7 @@ jobs:
         env:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_FRONTEND_TEST_ONLY: "1"
-          CHROMA_SERVER_HOST: "localhost:3000"
+          CHROMA_SERVER_HOST: "localhost:8000"
       - name: Compute artifact name
         if: always()
         id: compute-artifact-name
@@ -257,13 +257,15 @@ jobs:
         PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
 
   test-windows-smoke:
-    # only run windows smoke tests when the runner isn't already windows
-    if: ${{ !contains(inputs.runner, 'windows') }}
+    # only run windows smoke tests when the runner isn't already windows,
+    # also only run the smoke tests on PRs (ie not main and not tags) since
+    # we are already running the full suite on Windows in those cases
+    if: ${{ !contains(inputs.runner, 'windows') && github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
     strategy:
       fail-fast: false
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-    runs-on: 16core-64gb-windows-latest
+    runs-on: 8core-32gb-windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4

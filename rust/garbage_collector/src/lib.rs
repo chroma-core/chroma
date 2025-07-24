@@ -61,11 +61,11 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
         info!("Starting jemalloc pprof server on port {}", port);
         let shutdown_channel = tokio::sync::oneshot::channel();
         pprof_shutdown_tx = Some(shutdown_channel.0);
-        spawn_pprof_server(6060, shutdown_channel.1).await;
+        spawn_pprof_server(port, shutdown_channel.1).await;
     }
 
     let tracing_layers = vec![
-        init_global_filter_layer(),
+        init_global_filter_layer(&config.otel_filters),
         init_otel_layer(&config.service_name, &config.otel_endpoint),
         init_stdout_layer(),
     ];
@@ -111,12 +111,13 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
     // Start a background task to periodically check for garbage.
     // Garbage collector is a component that gets notified every
     // gc_interval_mins to check for garbage.
-    let mut garbage_collector_component = GarbageCollector::try_from_config(&config, &registry)
-        .await
-        .map_err(|e| {
-            error!("Failed to create garbage collector component: {:?}", e);
-            e
-        })?;
+    let mut garbage_collector_component =
+        GarbageCollector::try_from_config(&(config, system.clone()), &registry)
+            .await
+            .map_err(|e| {
+                error!("Failed to create garbage collector component: {:?}", e);
+                e
+            })?;
 
     garbage_collector_component.set_dispatcher(dispatcher_handle.clone());
     garbage_collector_component.set_system(system.clone());

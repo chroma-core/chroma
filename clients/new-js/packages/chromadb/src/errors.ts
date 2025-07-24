@@ -92,6 +92,13 @@ export class ChromaQuotaExceededError extends Error {
   }
 }
 
+export class ChromaRateLimitError extends Error {
+  name = "ChromaRateLimitError";
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+  }
+}
+
 export function createErrorByType(type: string, message: string) {
   switch (type) {
     case "InvalidCollection":

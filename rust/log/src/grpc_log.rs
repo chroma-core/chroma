@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::config::GrpcLogConfig;
 use crate::types::CollectionInfo;
 use async_trait::async_trait;
@@ -14,7 +16,7 @@ use chroma_memberlist::memberlist_provider::{
 };
 use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
-use chroma_types::chroma_proto::{self};
+use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
 use chroma_types::{
     CollectionUuid, ForkLogsResponse, LogRecord, OperationRecord, RecordConversionError,
 };
@@ -25,13 +27,15 @@ use tonic::transport::Endpoint;
 use tower::ServiceBuilder;
 use uuid::Uuid;
 
+use crate::GarbageCollectError;
+
 //////////////// Errors ////////////////
 
 #[derive(Error, Debug)]
 pub enum GrpcPullLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
-    #[error("Failed to fetch")]
+    #[error("Failed to fetch: {0}")]
     FailedToPullLogs(#[from] tonic::Status),
     #[error("Failed to scout logs: {0}")]
     FailedToScoutLogs(tonic::Status),
@@ -101,7 +105,7 @@ impl ChromaError for GrpcForkLogsError {
 
 #[derive(Error, Debug)]
 pub enum GrpcGetCollectionsWithNewDataError {
-    #[error("Failed to fetch")]
+    #[error("Failed to fetch: {0}")]
     FailedGetCollectionsWithNewData(#[from] tonic::Status),
 }
 
@@ -117,7 +121,7 @@ impl ChromaError for GrpcGetCollectionsWithNewDataError {
 
 #[derive(Error, Debug)]
 pub enum GrpcUpdateCollectionLogOffsetError {
-    #[error("Failed to update collection log offset")]
+    #[error("Failed to update collection log offset: {0}")]
     FailedToUpdateCollectionLogOffset(#[from] tonic::Status),
     #[error(transparent)]
     ClientAssignerError(#[from] ClientAssignmentError),
@@ -136,7 +140,7 @@ impl ChromaError for GrpcUpdateCollectionLogOffsetError {
 
 #[derive(Error, Debug)]
 pub enum GrpcPurgeDirtyForCollectionError {
-    #[error("Failed to update collection log offset")]
+    #[error("Failed to purge dirty: {0}")]
     FailedToPurgeDirty(#[from] tonic::Status),
 }
 
@@ -376,27 +380,12 @@ impl GrpcLog {
         Ok(self.client.clone())
     }
 
-    fn client_for_purge(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Option<LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>> {
-        match &mut self.alt_client_assigner {
-            Some(assigner) => assigner
-                .clients(&collection_id.to_string())
-                .unwrap_or_default()
-                .first()
-                .cloned(),
-            None => None,
-        }
-    }
-
     // ScoutLogs returns the offset of the next record to be inserted into the log.
-    #[tracing::instrument(skip(self))]
     pub(super) async fn scout_logs(
         &mut self,
         tenant: &str,
         collection_id: CollectionUuid,
-        start_from: u64,
+        _start_from: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
         let mut client = self
             .client_for(tenant, collection_id)
@@ -416,7 +405,6 @@ impl GrpcLog {
         Ok(scout.first_uninserted_record_offset as u64)
     }
 
-    #[tracing::instrument(skip(self))]
     pub(super) async fn read(
         &mut self,
         tenant: &str,
@@ -458,6 +446,8 @@ impl GrpcLog {
             Err(e) => {
                 if e.code() == chroma_error::ErrorCodes::Unavailable.into() {
                     Err(GrpcPullLogsError::Backoff)
+                } else if e.code() == chroma_error::ErrorCodes::NotFound.into() {
+                    Err(GrpcPullLogsError::FailedToPullLogs(e))
                 } else {
                     tracing::error!("Failed to pull logs: {}", e);
                     Err(GrpcPullLogsError::FailedToPullLogs(e))
@@ -557,8 +547,8 @@ impl GrpcLog {
             };
             norm.extend(alt);
         }
-        norm.sort_by_key(|n| n.collection_id);
-        norm.dedup_by_key(|n| n.collection_id);
+        norm.sort_by_key(|x| (x.collection_id, x.first_log_offset));
+        norm.dedup_by_key(|x| x.collection_id);
         Ok(norm)
     }
 
@@ -629,13 +619,17 @@ impl GrpcLog {
                 }
             };
         };
-
         if let Some(status) = error {
             if combined_response.is_empty() {
                 return Err(status.into());
             }
         }
+        Self::post_process_get_all(combined_response)
+    }
 
+    fn post_process_get_all(
+        combined_response: Vec<GetAllCollectionInfoToCompactResponse>,
+    ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
         let mut all_collections = Vec::new();
         for response in combined_response {
             let collections = response.all_collection_info;
@@ -658,6 +652,14 @@ impl GrpcLog {
                 });
             }
         }
+
+        // NOTE(rescrv):  What we want is to return each collection once.  If there are two of the
+        // same collection, assume that the older offset is correct.  In the event that a writer
+        // migrates from one server to another the dirty log entries will be fractured between two
+        // servers.  To not panic the compactor, we sort by (collection_id, offset) and then dedup.
+        all_collections.sort_by_key(|x| (x.collection_id, x.first_log_offset));
+        all_collections.dedup_by_key(|x| x.collection_id);
+
         Ok(all_collections)
     }
 
@@ -683,22 +685,38 @@ impl GrpcLog {
 
     pub(super) async fn purge_dirty_for_collection(
         &mut self,
-        collection_id: CollectionUuid,
+        collection_ids: Vec<CollectionUuid>,
     ) -> Result<(), GrpcPurgeDirtyForCollectionError> {
-        if let Some(mut client) = self.client_for_purge(collection_id) {
-            let request =
-                client.purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
-                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
-                    collection_id: collection_id.0.to_string(),
-                });
-            let response = request.await;
-            match response {
-                Ok(_) => Ok(()),
-                Err(e) => Err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty(e)),
-            }
-        } else {
-            Ok(())
+        let Some(assigner) = self.alt_client_assigner.as_mut() else {
+            return Ok(());
+        };
+        let mut futures = vec![];
+        let limiter = Arc::new(tokio::sync::Semaphore::new(10));
+        for client in assigner.all().into_iter() {
+            let mut client = client.clone();
+            let limiter = Arc::clone(&limiter);
+            let collection_ids_clone = collection_ids.clone();
+            let request = async move {
+                // NOTE(rescrv): This can never fail and the result is to fail open.  Don't
+                // error-check.
+                let _permit = limiter.acquire().await;
+                client
+                    .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
+                        // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                        collection_ids: collection_ids_clone
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect(),
+                    })
+                    .await
+                    .map_err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty)
+            };
+            futures.push(request);
         }
+        if !futures.is_empty() {
+            futures::future::try_join_all(futures.into_iter()).await?;
+        }
+        Ok(())
     }
 
     pub async fn seal_log(
@@ -750,11 +768,79 @@ impl GrpcLog {
             true // If no client assigner is configured, we assume it's ready.
         }
     }
+
+    pub async fn garbage_collect_phase2(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GarbageCollectError> {
+        if let Some(client_assigner) = self.alt_client_assigner.as_mut() {
+            let mut client = client_assigner
+                .clients(&collection_id.to_string())?
+                .drain(..)
+                .next()
+                .ok_or(ClientAssignmentError::NoClientFound(
+                    "Impossible state: no client found for collection".to_string(),
+                ))?;
+            client
+                .garbage_collect_phase2(chroma_proto::GarbageCollectPhase2Request {
+                    log_to_collect: Some(
+                        chroma_proto::garbage_collect_phase2_request::LogToCollect::CollectionId(
+                            collection_id.to_string(),
+                        ),
+                    ),
+                })
+                .await?;
+            Ok(())
+        } else {
+            Err(GarbageCollectError::NotEnabled)
+        }
+    }
+
+    pub async fn garbage_collect_phase2_for_dirty_log(
+        &mut self,
+        ordinal: u64,
+    ) -> Result<(), GarbageCollectError> {
+        // NOTE(rescrv): Use a raw LogServiceClient so we can open by stateful set ordinal.
+        let endpoint_res = match Endpoint::from_shared(format!(
+            "grpc://rust-log-service-{ordinal}.rust-log-service:50051"
+        )) {
+            Ok(endpoint) => endpoint,
+            Err(e) => {
+                return Err(GarbageCollectError::Resolution(format!(
+                    "could not connect to rust-log-service-{ordinal}:50051: {}",
+                    e
+                )));
+            }
+        };
+        let endpoint_res = endpoint_res
+            .connect_timeout(Duration::from_millis(self.config.connect_timeout_ms))
+            .timeout(Duration::from_millis(self.config.request_timeout_ms));
+        let channel = endpoint_res.connect().await.map_err(|err| {
+            GarbageCollectError::Resolution(format!(
+                "could not connect to rust-log-service-{ordinal}:50051: {}",
+                err
+            ))
+        })?;
+        let channel = ServiceBuilder::new()
+            .layer(chroma_tracing::GrpcTraceLayer)
+            .service(channel);
+        let mut log = LogServiceClient::new(channel);
+        log.garbage_collect_phase2(chroma_proto::GarbageCollectPhase2Request {
+            log_to_collect: Some(
+                chroma_proto::garbage_collect_phase2_request::LogToCollect::DirtyLog(format!(
+                    "rust-log-service-{ordinal}"
+                )),
+            ),
+        })
+        .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chroma_types::chroma_proto::CollectionInfo as ProtoCollectionInfo;
 
     #[test]
     fn client_is_on_alt_log() {
@@ -778,5 +864,33 @@ mod tests {
             CollectionUuid(Uuid::parse_str("fffdb379-d592-41d1-8de6-412abc6e0b35").unwrap()),
             Some("ffffffff-ffff-ffff-ffff-ffffffffffff"),
         ));
+    }
+
+    #[test]
+    fn post_process_get_all_returns_smaller_first_log_offset() {
+        let collection_id = "12345678-1234-1234-1234-123456789abc";
+
+        let response1 = GetAllCollectionInfoToCompactResponse {
+            all_collection_info: vec![ProtoCollectionInfo {
+                collection_id: collection_id.to_string(),
+                first_log_offset: 100,
+                first_log_ts: 1000,
+            }],
+        };
+
+        let response2 = GetAllCollectionInfoToCompactResponse {
+            all_collection_info: vec![ProtoCollectionInfo {
+                collection_id: collection_id.to_string(),
+                first_log_offset: 50,
+                first_log_ts: 2000,
+            }],
+        };
+
+        let combined_response = vec![response1, response2];
+        let result = GrpcLog::post_process_get_all(combined_response).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].first_log_offset, 50);
+        assert_eq!(result[0].collection_id.to_string(), collection_id);
     }
 }

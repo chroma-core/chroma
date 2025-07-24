@@ -51,7 +51,7 @@ async fn test_k8s_integration_log_offsets_empty_log_50052() {
     let resp = log_service
         .pull_logs(PullLogsRequest {
             collection_id: collection_id.clone(),
-            batch_size: 2,
+            batch_size: 1,
             end_timestamp: i64::MAX,
             start_from_offset: 1,
         })
@@ -160,7 +160,7 @@ async fn test_k8s_integration_log_offsets_empty_log_50054() {
     let resp = rust_log_service
         .pull_logs(PullLogsRequest {
             collection_id: collection_id.clone(),
-            batch_size: 2,
+            batch_size: 1,
             end_timestamp: i64::MAX,
             start_from_offset: 1,
         })
@@ -169,24 +169,32 @@ async fn test_k8s_integration_log_offsets_empty_log_50054() {
     let resp = resp.into_inner();
     assert_eq!(1, resp.records.len());
     assert_eq!(1, resp.records[0].log_offset);
-    // Wait 15 seconds for the background interval.  It's a magic constant in log service code.
-    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
-    // "compact" said record.
-    let resp = rust_log_service
-        .get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {
-            min_compaction_size: 1,
-        })
-        .await
-        .unwrap();
-    let resp = resp.into_inner();
-    let Some(coll) = resp
-        .all_collection_info
-        .iter()
-        .find(|c| c.collection_id == collection_id)
-    else {
-        panic!("collection not found");
-    };
-    assert_eq!(1, coll.first_log_offset);
+    let mut found = false;
+    // Wait 20 seconds for the background interval.  10s is a magic constant in log service code.
+    for _ in 0..200 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // "compact" said record.
+        let resp = rust_log_service
+            .get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {
+                min_compaction_size: 1,
+            })
+            .await
+            .unwrap();
+        let resp = resp.into_inner();
+        let Some(coll) = resp
+            .all_collection_info
+            .iter()
+            .find(|c| c.collection_id == collection_id)
+        else {
+            continue;
+        };
+        assert_eq!(1, coll.first_log_offset);
+        found = true;
+        break;
+    }
+    if !found {
+        panic!("never saw collection info");
+    }
     // "finish" the compaction.
     let _resp = rust_log_service
         .update_collection_log_offset(UpdateCollectionLogOffsetRequest {
@@ -195,8 +203,8 @@ async fn test_k8s_integration_log_offsets_empty_log_50054() {
         })
         .await
         .unwrap();
-    // Wait 15 seconds for the background interval.  It's a magic constant in log service code.
-    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+    // Wait 20 seconds for the background interval.  It's a magic constant in log service code.
+    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
     // said record no longer shows in compaction.
     let resp = rust_log_service
         .get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {

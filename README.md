@@ -12,7 +12,7 @@
       <img src="https://img.shields.io/discord/1073293645303795742?cacheSeconds=3600" alt="Discord">
   </a> |
   <a href="https://github.com/chroma-core/chroma/blob/master/LICENSE" target="_blank">
-      <img src="https://img.shields.io/static/v1?label=license&message=Apache 2.0&color=white" alt="License">
+      <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License">
   </a> |
   <a href="https://docs.trychroma.com/" target="_blank">
       Docs
@@ -29,7 +29,7 @@ pip install chromadb # python client
 # for client-server mode, chroma run --path /chroma_db_path
 ```
 
-The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@swyx/BasicChromaStarter?v=1)):
+The core API is only 4 functions (run our [💡 Google Colab](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing) or [Replit template](https://replit.com/@chroma/Chroma-Pluggable-knowledge-for-AI?v=1)):
 
 ```python
 import chromadb
