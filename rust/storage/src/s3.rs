@@ -373,7 +373,7 @@ impl S3Storage {
     }
 
     /// Perform a strongly consistent get and return the e_tag.
-    #[tracing::instrument(skip(self), level = "trace")]
+    #[tracing::instrument(skip(self), level = "info")]
     pub async fn get_with_e_tag(
         &self,
         key: &str,
