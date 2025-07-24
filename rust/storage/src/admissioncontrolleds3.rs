@@ -421,6 +421,7 @@ impl AdmissionControlledS3Storage {
                     let (output_tx, output_rx) = tokio::sync::oneshot::channel();
                     // Add the new sender to the existing request.
                     inflight_req.senders.push(output_tx);
+                    drop(requests);
                     // TODO: don't unwrap here
                     output_rx
                         .await
@@ -1017,6 +1018,56 @@ mod tests {
         test_multipart_get_for_size(1024 * 1024 * 10).await;
         // Greater than NAC limit i.e. > 2*8 MB = 16 MB.
         test_multipart_get_for_size(1024 * 1024 * 18).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_dedupe_requests() {
+        let client = get_s3_client();
+
+        let storage = S3Storage {
+            bucket: format!("test-{}", rand::thread_rng().gen::<u64>()),
+            client,
+            upload_part_size_bytes: 1024 * 1024 * 8,
+            download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: Default::default(),
+        };
+        storage.create_bucket().await.unwrap();
+        let admission_controlled_storage =
+            AdmissionControlledS3Storage::new_with_default_policy(storage);
+
+        let test_data_key: String = rand::thread_rng()
+            .sample_iter(Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .collect();
+        let test_data_value_string = "test data".to_string();
+        admission_controlled_storage
+            .put_bytes(
+                &test_data_key,
+                test_data_value_string.as_bytes().to_vec(),
+                crate::PutOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        const N_REQUESTS: usize = 100;
+        let mut futures = Vec::new();
+        for _ in 0..N_REQUESTS {
+            let storage_clone = admission_controlled_storage.clone();
+            let key_clone = test_data_key.clone();
+            let test_data_value_string_clone = test_data_value_string.clone();
+            let fut = async move {
+                let buf = storage_clone
+                    .get(key_clone.as_str(), GetOptions::default())
+                    .await
+                    .unwrap();
+                let buf = String::from_utf8(Arc::unwrap_or_clone(buf)).unwrap();
+                assert_eq!(buf, test_data_value_string_clone);
+            };
+            futures.push(fut);
+        }
+        // Await all futures and return the result.
+        let _ = futures::future::join_all(futures).await;
     }
 
     #[tokio::test]
