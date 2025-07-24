@@ -14,11 +14,11 @@ use crate::{
     Value,
 };
 use async_trait::async_trait;
-use chroma_cache::{AysncPartitionedMutex, CacheError, PersistentCache};
+use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
 };
 use chroma_tracing::util::Stopwatch;
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -355,7 +355,6 @@ pub struct BlockManager {
     storage: Storage,
     default_max_block_size_bytes: usize,
     block_metrics: BlockMetrics,
-    cache_mutex: AysncPartitionedMutex<Uuid>,
 }
 
 impl BlockManager {
@@ -370,7 +369,6 @@ impl BlockManager {
             storage,
             default_max_block_size_bytes,
             block_metrics: BlockMetrics::default(),
-            cache_mutex: AysncPartitionedMutex::new(()),
         }
     }
 
@@ -439,56 +437,58 @@ impl BlockManager {
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
         let block = self.block_cache.obtain(*id).await.ok().flatten();
-        match block {
-            Some(block) => Ok(Some(block)),
-            None => async {
-                let key = Self::format_key(prefix_path, id);
-                let bytes_res = self
-                    .storage
-                    .get(&key, GetOptions::new(priority))
-                    .instrument(
-                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
-                    )
-                    .await;
-                match bytes_res {
-                    Ok(bytes) => {
-                        self.block_metrics.num_get_requests.record(1, &[]);
-                        let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
-                        let block =
-                            deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
-                        match block {
-                            Ok(block) => {
-                                let _guard = self.cache_mutex.lock(id).await;
-                                match self.block_cache.obtain(*id).await {
-                                    Ok(Some(b)) => {
-                                        Ok(Some(b))
-                                    }
-                                    Ok(None) => {
-                                        self.block_cache.insert(*id, block.clone()).await;
-                                        Ok(Some(block))
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Error getting block from cache {:?}", e);
-                                        Err(GetError::BlockLoadError(e.into()))
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Error converting bytes to Block {:?}/{:?}",
-                                    key,
-                                    e
-                                );
-                                Err(GetError::BlockLoadError(e))
-                            }
-                        }
+        if let Some(block) = block {
+            return Ok(Some(block));
+        }
+
+        // Closure cloning
+        let key = Self::format_key(prefix_path, id);
+        let id_clone = *id;
+        let block_cache_clone = self.block_cache.clone();
+        let key_clone = key.clone();
+        let num_get_requests_metric_clone = self.block_metrics.num_get_requests.clone();
+
+        let res = self.storage
+            .fetch(&key, GetOptions::new(priority), |bytes| async move {
+                let bytes = match bytes {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        tracing::error!("Error loading block from storage: {:?}", e);
+                        return Err(StorageError::Message {
+                            message: "Error loading block".to_string(),
+                        });
+                    }
+                };
+                num_get_requests_metric_clone.record(1, &[]);
+                let deserialization_span = tracing::trace_span!(
+                    parent: Span::current(),
+                    "BlockManager deserialize block",
+                    id = id_clone.to_string()
+                );
+                let block = deserialization_span.in_scope(|| Block::from_bytes(&bytes, id_clone));
+                match block {
+                    Ok(block) => {
+                        block_cache_clone.insert(id_clone, block.clone()).await;
+                        Ok(block)
                     }
                     Err(e) => {
-                        tracing::error!("Error converting bytes to Block {:?}", e);
-                        Err(GetError::StorageGetError(e))
+                        tracing::error!("Error converting bytes to Block {:?}/{:?}", key_clone, e);
+                        // TODO(hammadb): We should ideally use BlockLoadError here since that is what this level of the code expects,
+                        // however that type is not trivially Clone. Since for all practical purposes this error results in the same upstream handling
+                        // and observability properties we use a generic StorageError here.
+                        Err(StorageError::Message {
+                            message: "Error converting bytes to Block".to_string(),
+                        })
                     }
                 }
-            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string())).await
+            }).instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string()))
+            .await;
+        match res {
+            Ok(block) => Ok(Some(block.0)),
+            Err(e) => {
+                tracing::error!("Error fetching block from storage: {:?}", e);
+                Err(GetError::StorageGetError(e))
+            }
         }
     }
 

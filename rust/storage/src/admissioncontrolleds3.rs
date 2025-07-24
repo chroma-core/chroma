@@ -1,3 +1,4 @@
+use crate::StorageError;
 use crate::{
     config::{RateLimitingConfig, StorageConfig},
     s3::S3Storage,
@@ -12,12 +13,13 @@ use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
-use futures::{future::Shared, stream, FutureExt, StreamExt};
+use futures::{stream, FutureExt, StreamExt};
 use opentelemetry::{global, metrics::Counter, KeyValue};
+use std::any::Any;
+use std::fmt::Debug;
+use std::future::Future;
 use std::{
     collections::HashMap,
-    future::Future,
-    pin::Pin,
     sync::{atomic::Ordering, Arc},
 };
 use std::{ops::Range, sync::atomic::AtomicUsize};
@@ -26,8 +28,6 @@ use tokio::{
     select,
     sync::{Semaphore, SemaphorePermit, TryAcquireError},
 };
-
-use crate::StorageError;
 
 /// Wrapper over s3 storage that provides proxy features such as
 /// request coalescing, rate limiting, etc.
@@ -43,6 +43,7 @@ pub struct AdmissionControlledS3Storage {
     metrics: AdmissionControlledS3StorageMetrics,
 }
 
+////// Metrics //////
 #[derive(Debug, Clone)]
 struct AdmissionControlledS3StorageMetrics {
     pub nac_dedup_count: opentelemetry::metrics::Counter<u64>,
@@ -92,18 +93,14 @@ impl Default for AdmissionControlledS3StorageMetrics {
     }
 }
 
-#[derive(Debug, Clone)]
+////// Inflight Request Management //////
 struct InflightRequest {
     priority: Arc<AtomicUsize>,
-    notify_channel: Option<tokio::sync::mpsc::Sender<()>>,
+    priority_upgrade_channel: Option<tokio::sync::mpsc::Sender<()>>,
     #[allow(clippy::type_complexity)]
-    future: Shared<
-        Pin<
-            Box<
-                dyn Future<Output = Result<(Arc<Vec<u8>>, Option<ETag>), StorageError>>
-                    + Send
-                    + 'static,
-            >,
+    senders: Vec<
+        tokio::sync::oneshot::Sender<
+            Result<(Arc<dyn Any + Send + Sync>, Option<ETag>), StorageError>,
         >,
     >,
 }
@@ -119,7 +116,7 @@ impl InflightRequest {
         // It is ok to not do Compare And Swap here since the caller obtains a mutex before
         // performing this operation so at any point there will only be one writer
         // for this AtomicUsize.
-        if let Some(channel) = &self.notify_channel {
+        if let Some(channel) = &self.priority_upgrade_channel {
             let curr_pri = self.priority.load(std::sync::atomic::Ordering::SeqCst);
             if priority.as_usize() < curr_pri {
                 self.priority
@@ -165,6 +162,8 @@ impl From<usize> for StorageRequestPriority {
         }
     }
 }
+
+////// AdmissionControlledS3Storage //////
 
 impl AdmissionControlledS3Storage {
     pub fn new_with_default_policy(storage: S3Storage) -> Self {
@@ -302,76 +301,9 @@ impl AdmissionControlledS3Storage {
         key: String,
         options: GetOptions,
     ) -> Result<Arc<Vec<u8>>, StorageError> {
-        self.metrics.nac_outstanding_read_requests.record(
-            self.metrics
-                .outstanding_read_requests
-                .load(Ordering::Relaxed) as u64,
-            &self.metrics.hostname_attribute,
-        );
-        self.metrics
-            .outstanding_read_requests
-            .fetch_add(1, Ordering::Relaxed);
-        // If there is a duplicate request and the original request finishes
-        // before we look it up in the map below then we will end up with another
-        // request to S3.
-        let future_to_await;
-        {
-            let _stopwatch = Stopwatch::new(
-                &self.metrics.nac_lock_wait_duration_us,
-                &self.metrics.hostname_attribute,
-                chroma_tracing::util::StopWatchUnit::Micros,
-            );
-            let mut requests = self.outstanding_read_requests.lock().await;
-            let maybe_inflight = requests.get(&key).cloned();
-            future_to_await = match maybe_inflight {
-                Some(fut) => {
-                    tracing::trace!("[AdmissionControlledS3] Found inflight request to s3 for key: {:?}. Deduping", key);
-                    self.metrics
-                        .nac_dedup_count
-                        .add(1, &self.metrics.hostname_attribute);
-                    fut.update_priority(
-                        options.priority,
-                        self.metrics.nac_priority_increase_sent.clone(),
-                        &self.metrics.hostname_attribute,
-                    )
-                    .await;
-                    fut.future
-                }
-                None => {
-                    let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
-                    let get_parallel_storage_future = AdmissionControlledS3Storage::parallel_fetch(
-                        self.storage.clone(),
-                        self.rate_limiter.clone(),
-                        key.clone(),
-                        atomic_priority.clone(),
-                        self.metrics.read_requests_waiting_for_token.clone(),
-                        self.metrics.nac_read_requests_waiting_for_token.clone(),
-                        self.metrics.hostname_attribute.clone(),
-                    )
-                    .boxed()
-                    .shared();
-                    requests.insert(
-                        key.clone(),
-                        InflightRequest {
-                            priority: atomic_priority,
-                            future: get_parallel_storage_future.clone(),
-                            notify_channel: None,
-                        },
-                    );
-                    get_parallel_storage_future
-                }
-            };
-        }
-
-        let res = future_to_await.await;
-        {
-            let mut requests = self.outstanding_read_requests.lock().await;
-            requests.remove(&key);
-        }
-        self.metrics
-            .outstanding_read_requests
-            .fetch_sub(1, Ordering::Relaxed);
-        Ok(res?.0)
+        self.get_with_e_tag_internal::<_, _, _>(&key, options, true, |r| async move { r })
+            .await
+            .map(|(bytes, _e_tag)| bytes)
     }
 
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
@@ -380,11 +312,65 @@ impl AdmissionControlledS3Storage {
             .map(|(bytes, _e_tag)| bytes)
     }
 
+    pub async fn fetch<FetchReturn, FetchFn, FetchFut>(
+        &self,
+        key: &str,
+        options: GetOptions,
+        fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Option<ETag>), StorageError>
+    where
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
+        self.get_with_e_tag_internal(key, options, false, fetch_fn)
+            .await
+    }
+
     pub async fn get_with_e_tag(
         &self,
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+        self.get_with_e_tag_internal::<_, _, _>(key, options, false, |r| async move { r })
+            .await
+    }
+
+    async fn execute_fetch<FetchReturn, FetchFn, FetchFut>(
+        fetch_fn: FetchFn,
+        input: Result<(Arc<Vec<u8>>, Option<ETag>), StorageError>,
+    ) -> Result<(FetchReturn, Option<ETag>), StorageError>
+    where
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
+        match input {
+            Ok((bytes, e_tag)) => {
+                let ret = fetch_fn(Ok(bytes)).await;
+                ret.map(|r| (r, e_tag))
+            }
+            Err(e) => {
+                let ret = fetch_fn(Err(e)).await;
+                ret.map(|r| (r, None))
+            }
+        }
+    }
+
+    async fn get_with_e_tag_internal<FetchReturn, FetchFn, FetchFut>(
+        &self,
+        key: &str,
+        options: GetOptions,
+        // TODO: remove is_parallel and move it into GetOptions, refactor all callers
+        // to use the new options instead of special methods.
+        is_parallel: bool,
+        fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Option<ETag>), StorageError>
+    where
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
         self.metrics.nac_outstanding_read_requests.record(
             self.metrics
                 .outstanding_read_requests
@@ -394,17 +380,18 @@ impl AdmissionControlledS3Storage {
         self.metrics
             .outstanding_read_requests
             .fetch_add(1, Ordering::Relaxed);
+
         if options.requires_strong_consistency {
             let res = self.strongly_consistent_get_with_e_tag(key, options).await;
             self.metrics
                 .outstanding_read_requests
                 .fetch_sub(1, Ordering::Relaxed);
-            return res;
+            return Self::execute_fetch(fetch_fn, res).await;
         }
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.
-        let future_to_await;
+        let any_res;
         {
             let _stopwatch = Stopwatch::new(
                 &self.metrics.nac_lock_wait_duration_us,
@@ -412,61 +399,108 @@ impl AdmissionControlledS3Storage {
                 chroma_tracing::util::StopWatchUnit::Micros,
             );
             let mut requests = self.outstanding_read_requests.lock().await;
-            let maybe_inflight = requests.get(key).cloned();
-            future_to_await = match maybe_inflight {
-                Some(fut) => {
+            any_res = match requests.get_mut(key) {
+                Some(inflight_req) => {
                     self.metrics
                         .nac_dedup_count
                         .add(1, &self.metrics.hostname_attribute);
                     // Update the priority if the new request has higher priority.
-                    fut.update_priority(
-                        options.priority,
-                        self.metrics.nac_priority_increase_sent.clone(),
-                        &self.metrics.hostname_attribute,
-                    )
-                    .await;
-                    fut.future
+                    inflight_req
+                        .update_priority(
+                            options.priority,
+                            self.metrics.nac_priority_increase_sent.clone(),
+                            &self.metrics.hostname_attribute,
+                        )
+                        .await;
+                    let (output_tx, output_rx) = tokio::sync::oneshot::channel();
+                    // Add the new sender to the existing request, then release the lock so the driving task
+                    // can make progress.
+                    inflight_req.senders.push(output_tx);
+                    drop(requests);
+                    output_rx.await.map_err(|e| {
+                        tracing::error!("Unexpected channel closure: {}", e);
+                        StorageError::Generic {
+                            source: Arc::new(e),
+                        }
+                    })??
                 }
                 None => {
                     let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
-                    let (tx, rx) = tokio::sync::mpsc::channel(100);
-                    let get_storage_future = AdmissionControlledS3Storage::read_from_storage(
-                        self.storage.clone(),
-                        self.rate_limiter.clone(),
-                        key.to_string(),
-                        atomic_priority.clone(),
-                        Some(rx),
-                        self.metrics.read_requests_waiting_for_token.clone(),
-                        self.metrics.nac_read_requests_waiting_for_token.clone(),
-                        self.metrics.hostname_attribute.clone(),
-                    )
-                    .boxed()
-                    .shared();
+                    let (priority_tx, priority_rx) = tokio::sync::mpsc::channel(100);
                     requests.insert(
                         key.to_string(),
                         InflightRequest {
-                            priority: atomic_priority,
-                            future: get_storage_future.clone(),
-                            notify_channel: Some(tx),
+                            priority: atomic_priority.clone(),
+                            priority_upgrade_channel: Some(priority_tx),
+                            // The driving task is not a waiter
+                            senders: vec![],
                         },
                     );
-                    get_storage_future
+                    // Release the lock before running the network request
+                    drop(requests);
+                    let res = match is_parallel {
+                        true => {
+                            AdmissionControlledS3Storage::parallel_fetch(
+                                self.storage.clone(),
+                                self.rate_limiter.clone(),
+                                key.to_string(),
+                                atomic_priority,
+                                self.metrics.read_requests_waiting_for_token.clone(),
+                                self.metrics.nac_read_requests_waiting_for_token.clone(),
+                                self.metrics.hostname_attribute.clone(),
+                            )
+                            .await
+                        }
+                        false => {
+                            AdmissionControlledS3Storage::read_from_storage(
+                                self.storage.clone(),
+                                self.rate_limiter.clone(),
+                                key.to_string(),
+                                atomic_priority,
+                                Some(priority_rx),
+                                self.metrics.read_requests_waiting_for_token.clone(),
+                                self.metrics.nac_read_requests_waiting_for_token.clone(),
+                                self.metrics.hostname_attribute.clone(),
+                            )
+                            .await
+                        }
+                    };
+                    let fetched = Self::execute_fetch(fetch_fn, res)
+                        .await
+                        .map(|(r, e_tag)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tag));
+                    let mut requests = self.outstanding_read_requests.lock().await;
+                    // SAFETY(hammadb): We just created this entry above, so it must exist.
+                    let mut inflight = requests.remove(key).expect("Key must exist");
+                    drop(requests);
+                    for output_tx in inflight.senders.drain(..) {
+                        output_tx.send(fetched.clone()).map_err(|_| {
+                            tracing::error!("Unexpected channel closure");
+                            StorageError::Message {
+                                message: "Failed to send response to waiting task".to_string(),
+                            }
+                        })?;
+                    }
+                    fetched?
                 }
             };
         }
 
-        let res = future_to_await.await;
-        {
-            let mut requests = self.outstanding_read_requests.lock().await;
-            requests.remove(key);
-        }
         self.metrics
             .outstanding_read_requests
             .fetch_sub(1, Ordering::Relaxed);
-        res
+
+        Ok((
+            any_res
+                .0
+                .downcast::<FetchReturn>()
+                .expect("Impossible state: downcast failed")
+                .as_ref()
+                .clone(),
+            any_res.1,
+        ))
     }
 
-    pub async fn strongly_consistent_get_with_e_tag(
+    async fn strongly_consistent_get_with_e_tag(
         &self,
         key: &str,
         options: GetOptions,
@@ -986,6 +1020,56 @@ mod tests {
         test_multipart_get_for_size(1024 * 1024 * 10).await;
         // Greater than NAC limit i.e. > 2*8 MB = 16 MB.
         test_multipart_get_for_size(1024 * 1024 * 18).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_dedupe_requests() {
+        let client = get_s3_client();
+
+        let storage = S3Storage {
+            bucket: format!("test-{}", rand::thread_rng().gen::<u64>()),
+            client,
+            upload_part_size_bytes: 1024 * 1024 * 8,
+            download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: Default::default(),
+        };
+        storage.create_bucket().await.unwrap();
+        let admission_controlled_storage =
+            AdmissionControlledS3Storage::new_with_default_policy(storage);
+
+        let test_data_key: String = rand::thread_rng()
+            .sample_iter(Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .collect();
+        let test_data_value_string = "test data".to_string();
+        admission_controlled_storage
+            .put_bytes(
+                &test_data_key,
+                test_data_value_string.as_bytes().to_vec(),
+                crate::PutOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        const N_REQUESTS: usize = 100;
+        let mut futures = Vec::new();
+        for _ in 0..N_REQUESTS {
+            let storage_clone = admission_controlled_storage.clone();
+            let key_clone = test_data_key.clone();
+            let test_data_value_string_clone = test_data_value_string.clone();
+            let fut = async move {
+                let buf = storage_clone
+                    .get(key_clone.as_str(), GetOptions::default())
+                    .await
+                    .unwrap();
+                let buf = String::from_utf8(Arc::unwrap_or_clone(buf)).unwrap();
+                assert_eq!(buf, test_data_value_string_clone);
+            };
+            futures.push(fut);
+        }
+        // Await all futures and return the result.
+        let _ = futures::future::join_all(futures).await;
     }
 
     #[tokio::test]
