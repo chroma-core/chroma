@@ -477,6 +477,9 @@ impl BlockManager {
                     }
                     Err(e) => {
                         tracing::error!("Error converting bytes to Block {:?}/{:?}", key_clone, e);
+                        // TODO(hammadb): We should ideally use BlockLoadError here since that is what this level of the code expects,
+                        // however that type is not trivially Clone. Since for all practical purposes this error results in the same upstream handling
+                        // and observability properties we use a generic StorageError here.
                         Err(StorageError::Message {
                             message: "Error converting bytes to Block".to_string(),
                         })

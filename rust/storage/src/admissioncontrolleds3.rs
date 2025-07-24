@@ -94,16 +94,15 @@ impl Default for AdmissionControlledS3StorageMetrics {
 }
 
 ////// Inflight Request Management //////
-#[derive(Clone)]
 struct InflightRequest {
     priority: Arc<AtomicUsize>,
     priority_upgrade_channel: Option<tokio::sync::mpsc::Sender<()>>,
-    sender: tokio::sync::watch::Sender<InflightRequestResult>,
-}
-
-enum InflightRequestResult {
-    Initial,
-    Updated(Result<(Arc<dyn Any + Send + Sync>, Option<ETag>), StorageError>),
+    #[allow(clippy::type_complexity)]
+    senders: Vec<
+        tokio::sync::oneshot::Sender<
+            Result<(Arc<dyn Any + Send + Sync>, Option<ETag>), StorageError>,
+        >,
+    >,
 }
 
 impl InflightRequest {
@@ -387,6 +386,7 @@ impl AdmissionControlledS3Storage {
         self.metrics
             .outstanding_read_requests
             .fetch_add(1, Ordering::Relaxed);
+
         if options.requires_strong_consistency {
             let res = self.strongly_consistent_get_with_e_tag(key, options).await;
             self.metrics
@@ -397,7 +397,7 @@ impl AdmissionControlledS3Storage {
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.
-        let mut output_rx;
+        let any_res;
         {
             let _stopwatch = Stopwatch::new(
                 &self.metrics.nac_lock_wait_duration_us,
@@ -405,8 +405,7 @@ impl AdmissionControlledS3Storage {
                 chroma_tracing::util::StopWatchUnit::Micros,
             );
             let mut requests = self.outstanding_read_requests.lock().await;
-            let maybe_inflight = requests.get(key).cloned();
-            match maybe_inflight {
+            any_res = match requests.get_mut(key) {
                 Some(inflight_req) => {
                     self.metrics
                         .nac_dedup_count
@@ -419,22 +418,27 @@ impl AdmissionControlledS3Storage {
                             &self.metrics.hostname_attribute,
                         )
                         .await;
-                    output_rx = inflight_req.sender.subscribe();
+                    let (output_tx, output_rx) = tokio::sync::oneshot::channel();
+                    // Add the new sender to the existing request.
+                    inflight_req.senders.push(output_tx);
+                    // TODO: don't unwrap here
+                    output_rx
+                        .await
+                        .expect("Output channel should not be closed")?
                 }
                 None => {
                     let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
                     let (priority_tx, priority_rx) = tokio::sync::mpsc::channel(100);
-                    let output_tx;
-                    (output_tx, output_rx) =
-                        tokio::sync::watch::channel(InflightRequestResult::Initial);
                     requests.insert(
                         key.to_string(),
                         InflightRequest {
                             priority: atomic_priority.clone(),
                             priority_upgrade_channel: Some(priority_tx),
-                            sender: output_tx.clone(),
+                            // The driving task is not a waiter
+                            senders: vec![],
                         },
                     );
+                    drop(requests);
                     let res = match is_parallel {
                         true => {
                             AdmissionControlledS3Storage::parallel_fetch(
@@ -465,46 +469,31 @@ impl AdmissionControlledS3Storage {
                     let fetched = Self::dispatch_fetch(fetch_fn, res)
                         .await
                         .map(|(r, e_tag)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tag));
-                    // TODO: don't unwrap here
-                    output_tx
-                        .send(InflightRequestResult::Updated(fetched))
-                        .unwrap();
+                    let mut requests = self.outstanding_read_requests.lock().await;
+                    // SAFETY(hammadb): We just created this entry above, so it must exist.
+                    let mut inflight = requests.remove(key).unwrap();
+                    drop(requests);
+                    for output_tx in inflight.senders.drain(..) {
+                        // TODO: don't unwrap here
+                        output_tx.send(fetched.clone()).unwrap();
+                    }
+                    fetched?
                 }
             };
-        }
-
-        if !matches!(*output_rx.borrow(), InflightRequestResult::Initial) {
-            // If the output_rx is already updated, we don't need to wait for it.
-            // This can happen if the request was already completed before we subscribed to it.
-            // TODO: don't expect here
-            output_rx
-                .changed()
-                .await
-                .expect("Failed to wait for output_rx to change");
-        }
-
-        {
-            let mut requests = self.outstanding_read_requests.lock().await;
-            requests.remove(key);
         }
 
         self.metrics
             .outstanding_read_requests
             .fetch_sub(1, Ordering::Relaxed);
-        let ret = match *output_rx.borrow() {
-            InflightRequestResult::Initial => {
-                panic!("Impossible state: InflightRequestResult::Initial should not be returned after output_rx.changed() is awaited");
-            }
-            InflightRequestResult::Updated(ref res) => res.clone(),
-        }?;
 
         Ok((
-            ret.0
+            any_res
+                .0
                 .downcast::<FetchReturn>()
                 .expect("Impossible state: downcast failed")
                 .as_ref()
                 .clone(),
-            ret.1,
+            any_res.1,
         ))
     }
 
