@@ -1021,7 +1021,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_dedupe_requests() {
+    async fn test_k8s_integration_dedupe_requests() {
         let client = get_s3_client();
 
         let storage = S3Storage {
