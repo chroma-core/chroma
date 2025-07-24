@@ -5,6 +5,7 @@ use parking_lot::Mutex;
 use std::sync::Arc;
 use thiserror::Error;
 use tonic::async_trait;
+use tracing::{Instrument, Span};
 
 #[derive(Debug, Default)]
 pub struct IoGroupOperator {}
@@ -51,7 +52,10 @@ impl Operator<IoGroupOperatorInput, IoGroupOperatorOutput> for IoGroupOperator {
         let mut subtasks = input.sub_tasks.lock().take().unwrap();
         let mut futures = FuturesUnordered::new();
         for task in subtasks.iter_mut() {
-            let fut = task.run();
+            let fut = task.run().instrument(tracing::info_span!(
+                parent: Span::current(),
+                "Fetch single posting list task",
+            ));
             futures.push(fut);
         }
 
