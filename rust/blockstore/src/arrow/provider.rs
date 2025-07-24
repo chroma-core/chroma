@@ -441,11 +441,13 @@ impl BlockManager {
             return Ok(Some(block));
         }
 
+        // Closure cloning
         let key = Self::format_key(prefix_path, id);
         let id_clone = *id;
         let block_cache_clone = self.block_cache.clone();
         let key_clone = key.clone();
-        // If the block is not in the cache, we fetch it from storage.
+        let num_get_requests_metric_clone = self.block_metrics.num_get_requests.clone();
+
         let res = self.storage
             .fetch(&key, GetOptions::new(priority), |bytes| async move {
                 let bytes = match bytes {
@@ -457,7 +459,7 @@ impl BlockManager {
                         });
                     }
                 };
-
+                num_get_requests_metric_clone.record(1, &[]);
                 let deserialization_span = tracing::trace_span!(
                     parent: Span::current(),
                     "BlockManager deserialize block",

@@ -301,7 +301,7 @@ impl AdmissionControlledS3Storage {
         key: String,
         options: GetOptions,
     ) -> Result<Arc<Vec<u8>>, StorageError> {
-        self.get_with_e_tag_internal::<_, _, _>(&key, options, true, Self::no_op_closure)
+        self.get_with_e_tag_internal::<_, _, _>(&key, options, true, |r| async move { r })
             .await
             .map(|(bytes, _e_tag)| bytes)
     }
@@ -332,17 +332,11 @@ impl AdmissionControlledS3Storage {
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        self.get_with_e_tag_internal::<_, _, _>(key, options, false, Self::no_op_closure)
+        self.get_with_e_tag_internal::<_, _, _>(key, options, false, |r| async move { r })
             .await
     }
 
-    async fn no_op_closure(
-        r: Result<Arc<Vec<u8>>, StorageError>,
-    ) -> Result<Arc<Vec<u8>>, StorageError> {
-        r
-    }
-
-    async fn dispatch_fetch<FetchReturn, FetchFn, FetchFut>(
+    async fn execute_fetch<FetchReturn, FetchFn, FetchFut>(
         fetch_fn: FetchFn,
         input: Result<(Arc<Vec<u8>>, Option<ETag>), StorageError>,
     ) -> Result<(FetchReturn, Option<ETag>), StorageError>
@@ -392,7 +386,7 @@ impl AdmissionControlledS3Storage {
             self.metrics
                 .outstanding_read_requests
                 .fetch_sub(1, Ordering::Relaxed);
-            return Self::dispatch_fetch(fetch_fn, res).await;
+            return Self::execute_fetch(fetch_fn, res).await;
         }
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
@@ -419,13 +413,16 @@ impl AdmissionControlledS3Storage {
                         )
                         .await;
                     let (output_tx, output_rx) = tokio::sync::oneshot::channel();
-                    // Add the new sender to the existing request.
+                    // Add the new sender to the existing request, then release the lock so the driving task
+                    // can make progress.
                     inflight_req.senders.push(output_tx);
                     drop(requests);
-                    // TODO: don't unwrap here
-                    output_rx
-                        .await
-                        .expect("Output channel should not be closed")?
+                    output_rx.await.map_err(|e| {
+                        tracing::error!("Unexpected channel closure: {}", e);
+                        StorageError::Generic {
+                            source: Arc::new(e),
+                        }
+                    })??
                 }
                 None => {
                     let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
@@ -439,6 +436,7 @@ impl AdmissionControlledS3Storage {
                             senders: vec![],
                         },
                     );
+                    // Release the lock before running the network request
                     drop(requests);
                     let res = match is_parallel {
                         true => {
@@ -467,16 +465,20 @@ impl AdmissionControlledS3Storage {
                             .await
                         }
                     };
-                    let fetched = Self::dispatch_fetch(fetch_fn, res)
+                    let fetched = Self::execute_fetch(fetch_fn, res)
                         .await
                         .map(|(r, e_tag)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tag));
                     let mut requests = self.outstanding_read_requests.lock().await;
                     // SAFETY(hammadb): We just created this entry above, so it must exist.
-                    let mut inflight = requests.remove(key).unwrap();
+                    let mut inflight = requests.remove(key).expect("Key must exist");
                     drop(requests);
                     for output_tx in inflight.senders.drain(..) {
-                        // TODO: don't unwrap here
-                        output_tx.send(fetched.clone()).unwrap();
+                        output_tx.send(fetched.clone()).map_err(|_| {
+                            tracing::error!("Unexpected channel closure");
+                            StorageError::Message {
+                                message: "Failed to send response to waiting task".to_string(),
+                            }
+                        })?;
                     }
                     fetched?
                 }
