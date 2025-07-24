@@ -4266,7 +4266,7 @@ mod tests {
         let log_server = setup_log_server().await;
         let collection_id = CollectionUuid::new();
         seal_collection_on_server(&log_server, collection_id).await;
-        let logs = (1..=26)
+        let logs = (1..=42)
             .map(|index| OperationRecord {
                 id: index.to_string(),
                 embedding: None,
@@ -4284,7 +4284,9 @@ mod tests {
         update_compact_offset_on_server(&log_server, collection_id, 6).await;
         garbage_collect_unused_logs(&log_server, collection_id, 7).await;
 
-        push_log_to_server(&log_server, collection_id, &logs[25..]).await;
+        for log in &logs[26..] {
+            push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
+        }
 
         let reader = LogReader::open(
             log_server.config.reader.clone(),
@@ -4298,11 +4300,11 @@ mod tests {
             .await
             .expect("Log scrub should not fail after push log");
 
-        let inserted_logs = log_server
+        let remaining_logs = log_server
             .pull_logs(Request::new(PullLogsRequest {
                 collection_id: collection_id.to_string(),
                 start_from_offset: 7,
-                batch_size: 20,
+                batch_size: 36,
                 end_timestamp: i64::MAX,
             }))
             .await
@@ -4313,8 +4315,8 @@ mod tests {
             .map(chroma_types::LogRecord::try_from)
             .collect::<Result<Vec<_>, _>>()
             .expect("Logs should be valid");
-        assert_eq!(inserted_logs.len() + 6, logs.len());
-        for (got_op, ref_op) in inserted_logs
+        assert_eq!(remaining_logs.len() + 6, logs.len());
+        for (got_op, ref_op) in remaining_logs
             .into_iter()
             .map(|l| l.record)
             .zip(logs.iter().skip(6))
