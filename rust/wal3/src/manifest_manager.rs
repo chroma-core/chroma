@@ -374,8 +374,7 @@ impl ManifestManager {
             let work = {
                 // SAFETY(rescrv):  Mutex poisoning.
                 let mut staging = self.staging.lock().unwrap();
-                let work = staging.pull_work(self);
-                work
+                staging.pull_work(self)
             };
             if let Some((
                 old_manifest,
