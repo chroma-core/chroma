@@ -12,6 +12,7 @@ type LogServiceConfiguration struct {
 	PORT                  string
 	DATABASE_URL          string
 	OPTL_TRACING_ENDPOINT string
+	OPTL_METRIC_ENDPOINT  string
 	SYSDB_CONN            string
 	MAX_CONNS             int32
 }
@@ -42,6 +43,7 @@ func NewLogServiceConfiguration() *LogServiceConfiguration {
 		PORT:                  getEnvWithDefault("PORT", "50051"),
 		DATABASE_URL:          getEnvWithDefault("CHROMA_DATABASE_URL", "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log"),
 		OPTL_TRACING_ENDPOINT: getEnvWithDefault("OPTL_TRACING_ENDPOINT", "jaeger:4317"),
+		OPTL_METRIC_ENDPOINT:  getEnvWithDefault("OPTL_METRIC_ENDPOINT", "otel-collector:4317"),
 		SYSDB_CONN:            getEnvWithDefault("SYSDB_CONN", "sysdb"),
 		MAX_CONNS:             getEnvWithDefaultInt("MAX_CONNS", 100),
 	}
