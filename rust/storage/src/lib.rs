@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::Any, future::Future, sync::Arc};
 
 use self::config::StorageConfig;
 use admissioncontrolleds3::StorageRequestPriority;
@@ -227,6 +227,41 @@ impl Storage {
             Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage.get(key, options).await
+            }
+        }
+    }
+
+    pub async fn fetch<FetchReturn, FetchFn, FetchFut>(
+        &self,
+        key: &str,
+        options: GetOptions,
+        fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Option<ETag>), StorageError>
+    where
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
+        match self {
+            Storage::ObjectStore(object_store) => {
+                let res = object_store.get_with_e_tag(key).await?;
+                let fetch_result = fetch_fn(Ok(res.0)).await?;
+                Ok((fetch_result, res.1))
+            }
+            Storage::S3(s3) => {
+                let res = s3.get_with_e_tag(key).await?;
+                let fetch_result = fetch_fn(Ok(res.0)).await?;
+                Ok((fetch_result, res.1))
+            }
+            Storage::Local(local) => {
+                let res = local.get_with_e_tag(key).await?;
+                let fetch_result = fetch_fn(Ok(res.0)).await?;
+                Ok((fetch_result, res.1))
+            }
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                admission_controlled_storage
+                    .fetch(key, options, fetch_fn)
+                    .await
             }
         }
     }

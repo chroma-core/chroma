@@ -437,12 +437,6 @@ impl BlockManager {
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
         let block = self.block_cache.obtain(*id).await.ok().flatten();
-        let ac_storage = match &self.storage {
-            Storage::AdmissionControlledS3(s3) => s3,
-            _ => {
-                panic!("tst");
-            }
-        };
         if let Some(block) = block {
             return Ok(Some(block));
         }
@@ -452,7 +446,7 @@ impl BlockManager {
         let block_cache_clone = self.block_cache.clone();
         let key_clone = key.clone();
         // If the block is not in the cache, we fetch it from storage.
-        let res = ac_storage
+        let res = self.storage
             .fetch(&key, GetOptions::new(priority), |bytes| async move {
                 let bytes = match bytes {
                     Ok(bytes) => bytes,
