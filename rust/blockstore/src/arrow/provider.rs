@@ -14,7 +14,7 @@ use crate::{
     Value,
 };
 use async_trait::async_trait;
-use chroma_cache::{AysncPartitionedMutex, CacheError, PersistentCache};
+use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{
