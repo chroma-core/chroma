@@ -194,7 +194,7 @@ Delete a collection with the given name.
 
 **Raises**:
 
-- `ValueError` - If the collection does not exist.
+- `chromadb.errors.NotFoundError` - If the collection does not exist.
 
 
 **Examples**:
@@ -356,7 +356,7 @@ Get a collection with the given name.
 
 **Raises**:
 
-- `ValueError` - If the collection does not exist
+- `chromadb.errors.NotFoundError` - If the collection does not exist
 
 
 **Examples**:

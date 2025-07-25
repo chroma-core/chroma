@@ -22,7 +22,7 @@ use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid};
 use chrono::DateTime;
@@ -45,7 +45,7 @@ struct VersionDependency {
 
 #[derive(Debug)]
 pub struct ConstructVersionGraphOrchestrator {
-    dispatcher: ComponentHandle<Dispatcher>,
+    context: OrchestratorContext,
     result_channel:
         Option<Sender<Result<ConstructVersionGraphResponse, ConstructVersionGraphError>>>,
     storage: Storage,
@@ -71,7 +71,7 @@ impl ConstructVersionGraphOrchestrator {
         lineage_file_path: Option<String>,
     ) -> Self {
         Self {
-            dispatcher,
+            context: OrchestratorContext::new(dispatcher),
             storage,
             sysdb,
             result_channel: None,
@@ -158,7 +158,11 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
     type Error = ConstructVersionGraphError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(
@@ -175,6 +179,7 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
                 Box::new(FetchVersionFileOperator {}),
                 FetchVersionFileInput::new(self.version_file_path.clone(), self.storage.clone()),
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             ),
             Some(Span::current()),
         )];
@@ -185,6 +190,7 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
                     Box::new(FetchLineageFileOperator {}),
                     FetchLineageFileInput::new(self.storage.clone(), lineage_file_path.clone()),
                     ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
                 ),
                 Some(Span::current()),
             ));
@@ -447,6 +453,7 @@ impl Handler<TaskResult<FetchLineageFileOutput, FetchLineageFileError>>
                     self.sysdb.clone(),
                 ),
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             );
 
             if let Err(e) = self
@@ -492,6 +499,7 @@ impl Handler<TaskResult<GetVersionFilePathsOutput, GetVersionFilePathsError>>
                 Box::new(FetchVersionFileOperator {}),
                 version_file,
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             );
 
             if let Err(e) = self

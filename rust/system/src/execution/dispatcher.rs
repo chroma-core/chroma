@@ -452,7 +452,12 @@ mod tests {
                 .map(char::from)
                 .collect();
             println!("Scheduling mock io operator with filename {}", filename);
-            let task = wrap(Box::new(MockIoOperator {}), filename, ctx.receiver());
+            let task = wrap(
+                Box::new(MockIoOperator {}),
+                filename,
+                ctx.receiver(),
+                ctx.cancellation_token.clone(),
+            );
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
             let _res = self.dispatcher.send(task, None).await;
@@ -508,7 +513,12 @@ mod tests {
 
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
             println!("Scheduling mock cpu operator with input {}", 42.0);
-            let task = wrap(Box::new(MockOperator {}), 42.0, ctx.receiver());
+            let task = wrap(
+                Box::new(MockOperator {}),
+                42.0,
+                ctx.receiver(),
+                ctx.cancellation_token.clone(),
+            );
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
             let _res = self.dispatcher.send(task, None).await;

@@ -248,3 +248,30 @@ jobs:
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
+
+  notify-slack-on-failure:
+    name: Notify Slack on ChromaDB Release Failure
+    if: failure()
+    needs:
+      - release-docker
+      - release-pypi
+      - release-thin-pypi
+      - release-github
+      - release-hosted-control-plane
+      - release-hosted-data-plane
+      - release-docs
+    runs-on: blacksmith-2vcpu-ubuntu-2204
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *ChromaDB release failure!*
+              *Workflow:* ${{ github.workflow }}
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Author:* ${{ github.actor }}
+              *Ref:* ${{ github.ref_name }}

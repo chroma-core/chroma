@@ -228,7 +228,9 @@ impl GarbageCollector {
             }),
             (),
             ctx.receiver(),
+            ctx.cancellation_token.clone(),
         );
+
         if let Err(err) = dispatcher
             .send(truncate_dirty_log_task, Some(Span::current()))
             .await
