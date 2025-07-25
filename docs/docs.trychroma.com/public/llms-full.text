@@ -63,7 +63,7 @@ collection.query(
 {% Tab label="typescript" %}
 ```typescript
 await collection.query(
-   queryEmbeddings=[[1.0, 2.3, 1.1, ...]], 
+   queryEmbeddings=[[1.0, 2.3, 1.1, ...]],
    whereDocument={"$contains": "hello world"}
 )
 ```
@@ -147,7 +147,7 @@ chroma browse [collection_name] [--local]
 
 {% Tab label="cloud" %}
 ```terminal
-chroma browse my-collection 
+chroma browse my-collection
 ```
 {% /Tab %}
 
@@ -159,19 +159,19 @@ chroma browse my-collection --db my-db
 
 {% Tab label="local default" %}
 ```terminal
-chroma browse my-local-collection --local 
+chroma browse my-local-collection --local
 ```
 {% /Tab %}
 
 {% Tab label="local with host" %}
 ```terminal
-chroma browse my-local-collection --host http://localhost:8050 
+chroma browse my-local-collection --host http://localhost:8050
 ```
 {% /Tab %}
 
 {% Tab label="local with path" %}
 ```terminal
-chroma browse my-local-collection --path ~/Developer/my-app/chroma 
+chroma browse my-local-collection --path ~/Developer/my-app/chroma
 ```
 {% /Tab %}
 
@@ -200,7 +200,7 @@ The query editor persists your edits after you submit. You can clear it by hitti
 Using the Chroma CLI, you can copy collections from a local Chroma server to Chroma Cloud and vice versa.
 
 ```terminal
-chroma copy --from-local collections [collection names] 
+chroma copy --from-local collections [collection names]
 ```
 
 ### Arguments
@@ -221,7 +221,7 @@ chroma copy --from-local collections [collection names]
 
 {% Tab label="simple" %}
 ```terminal
-chroma copy --from-local collections col-1 col-2 
+chroma copy --from-local collections col-1 col-2
 ```
 {% /Tab %}
 
@@ -234,13 +234,13 @@ chroma copy --from-local --all --db my-db
 
 {% Tab label="host" %}
 ```terminal
-chroma copy --from-local --all --host http://localhost:8050 
+chroma copy --from-local --all --host http://localhost:8050
 ```
 {% /Tab %}
 
 {% Tab label="path" %}
 ```terminal
-chroma copy --from-local --all --path ~/Developer/my-app/chroma 
+chroma copy --from-local --all --path ~/Developer/my-app/chroma
 ```
 {% /Tab %}
 
@@ -252,7 +252,7 @@ chroma copy --from-local --all --path ~/Developer/my-app/chroma
 
 {% Tab label="simple" %}
 ```terminal
-chroma copy --from-cloud collections col-1 col-2 
+chroma copy --from-cloud collections col-1 col-2
 ```
 {% /Tab %}
 
@@ -265,13 +265,13 @@ chroma copy --from-cloud --all --db my-db
 
 {% Tab label="host" %}
 ```terminal
-chroma copy --from-cloud --all --host http://localhost:8050 
+chroma copy --from-cloud --all --host http://localhost:8050
 ```
 {% /Tab %}
 
 {% Tab label="path" %}
 ```terminal
-chroma copy --from-cloud --all --path ~/Developer/my-app/chroma 
+chroma copy --from-cloud --all --path ~/Developer/my-app/chroma
 ```
 {% /Tab %}
 
@@ -362,7 +362,7 @@ pipx install chromadb
 {% Tab label="yarn" %}
 
 ```terminal
-yarn global add chromadb 
+yarn global add chromadb
 ```
 
 {% /Tab %}
@@ -380,7 +380,7 @@ npm install -g chromadb
 {% Tab label="pnpm" %}
 
 ```terminal
-pnpm add -g chromadb 
+pnpm add -g chromadb
 ```
 
 {% /Tab %}
@@ -389,7 +389,7 @@ pnpm add -g chromadb
 {% Tab label="bun" %}
 
 ```terminal
-bun add -g chromadb 
+bun add -g chromadb
 ```
 
 {% /Tab %}
@@ -403,7 +403,7 @@ bun add -g chromadb
 
 {% Tab label="cURL" %}
 ```terminal
-curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash 
+curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash
 ```
 {% /Tab %}
 
@@ -438,7 +438,7 @@ Back in the CLI, you will be prompted to select the team you want to authenticat
 
 Upon your first login, the first created profile will be automatically set as your "active" profile.
 
-On subsequent logins, the CLI will instruct you how to switch to a new profile you added (using the `chroma profile use` command). 
+On subsequent logins, the CLI will instruct you how to switch to a new profile you added (using the `chroma profile use` command).
 # Profile Management
 
 A **profile** in the Chroma CLI persists the credentials (API key and tenant ID) for authenticating with Chroma Cloud.
@@ -529,7 +529,7 @@ const client = new ChromaClient();
 {% /TabbedCodeBlock %}# Sample Apps
 
 {% Banner type="tip" %}
-This CLI command is available on Chroma 1.0.4 and later. 
+This CLI command is available on Chroma 1.0.4 and later.
 {% /Banner %}
 
 The Chroma team regularly releases sample AI applications powered by Chroma, which you can use to learn about retrieval, building with AI, and as a jumping-off board for your own projects.
@@ -572,7 +572,7 @@ chroma utils vacuum --path <your-data-directory>
 
 For large databases, expect this to take up to a few minutes.# Adding Data to Chroma Collections
 
-Add data to a Chroma collection with the `.add` method. It takes a list of unique string `ids`, and a list of `documents`. Chroma will embed these documents for you using the collection's [embedding function](../embeddings/embedding-functions). It will also store the documents themselves. You can optionally provide a metadata dictionary for each document you add. 
+Add data to a Chroma collection with the `.add` method. It takes a list of unique string `ids`, and a list of `documents`. Chroma will embed these documents for you using the collection's [embedding function](../embeddings/embedding-functions). It will also store the documents themselves. You can optionally provide a metadata dictionary for each document you add.
 
 {% TabbedCodeBlock %}
 
@@ -611,7 +611,7 @@ collection.add(
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     documents=["doc1", "doc2", "doc3", ...],
     metadatas=[{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
-    
+
 )
 ```
 {% /Tab %}
@@ -658,11 +658,11 @@ await collection.add({
 {% /TabbedCodeBlock %}
 # Configuring Chroma Collections
 
-Chroma collections have a `configuration` that determines how their embeddings index is constructed and used. We use default values for these index configurations that should give you great performance for most use cases out-of-the-box. 
+Chroma collections have a `configuration` that determines how their embeddings index is constructed and used. We use default values for these index configurations that should give you great performance for most use cases out-of-the-box.
 
 The [embedding function](../embeddings/embedding-functions) you choose to use in your collection also affects its index construction, and is included in the configuration.
 
-When you create a collection, you can customize these index configuration values for different data, accuracy and performance requirements. Some query-time configurations can also be customized after the collection's creation using the `.modify` function. 
+When you create a collection, you can customize these index configuration values for different data, accuracy and performance requirements. Some query-time configurations can also be customized after the collection's creation using the `.modify` function.
 
 {% CustomTabs %}
 
@@ -802,11 +802,11 @@ The SPANN index parameters include:
 | Inner product     |   `ip`    |                                                                                     {% Latex %} d = 1.0 - \\sum\\left(A_i \\times B_i\\right) {% /Latex %} |             focuses on vector alignment and magnitude, often used for recommendation systems where larger values indicate stronger preferences              |
 | Cosine similarity | `cosine`  | {% Latex %} d = 1.0 - \\frac{\\sum\\left(A_i \\times B_i\\right)}{\\sqrt{\\sum\\left(A_i^2\\right)} \\cdot \\sqrt{\\sum\\left(B_i^2\\right)}} {% /Latex %} | measures only the angle between vectors (ignoring magnitude), making it ideal for text embeddings or cases where you care about direction rather than scale |
 
-* `search_nprobe` is the number of centers that are probed for a query. The higher the value the more accurate the result will be. The query response time also increases as `search_nprobe` increases. Recommended values are 64/128. We don't allow setting a value higher than 128 today. The default value is 64. 
-* `write_nprobe` is the same as `search_nprobe` but for the index construction phase. It is the number of centers searched when appending or reassigning a point. It has the same limits as `search_nprobe`. The default value is 64. 
-* `ef_construction` determines the size of the candidate list used to select neighbors during index creation. A higher value improves index quality at the cost of more memory and time, while a lower value speeds up construction with reduced accuracy. The default value is 200. 
-* `ef_search` determines the size of the dynamic candidate list used while searching for the nearest neighbors. A higher value improves recall and accuracy by exploring more potential neighbors but increases query time and computational cost, while a lower value results in faster but less accurate searches. The default value is 200. 
-* `max_neighbors` defines the maximum number of neighbors for a node. The default value is 64. 
+* `search_nprobe` is the number of centers that are probed for a query. The higher the value the more accurate the result will be. The query response time also increases as `search_nprobe` increases. Recommended values are 64/128. We don't allow setting a value higher than 128 today. The default value is 64.
+* `write_nprobe` is the same as `search_nprobe` but for the index construction phase. It is the number of centers searched when appending or reassigning a point. It has the same limits as `search_nprobe`. The default value is 64.
+* `ef_construction` determines the size of the candidate list used to select neighbors during index creation. A higher value improves index quality at the cost of more memory and time, while a lower value speeds up construction with reduced accuracy. The default value is 200.
+* `ef_search` determines the size of the dynamic candidate list used while searching for the nearest neighbors. A higher value improves recall and accuracy by exploring more potential neighbors but increases query time and computational cost, while a lower value results in faster but less accurate searches. The default value is 200.
+* `max_neighbors` defines the maximum number of neighbors for a node. The default value is 64.
 * `reassign_neighbor_count` is the number of closest neighboring clusters of a split cluster whose points are considered for reassignment. The default value is 64.
 
 {% /Tab %}
@@ -815,7 +815,7 @@ The SPANN index parameters include:
 
 ## Embedding Function Configuration
 
-The embedding function you choose when creating a collection, along with the parameters you instantiate it with, is persisted in the collection's configuration. This allows us to reconstruct it correctly when you use collection across different clients. 
+The embedding function you choose when creating a collection, along with the parameters you instantiate it with, is persisted in the collection's configuration. This allows us to reconstruct it correctly when you use collection across different clients.
 
 You can set your embedding function as an argument to the "create" methods, or directly in the configuration:
 
@@ -1424,9 +1424,9 @@ collection.update(
 {% Tab label="typescript" %}
 ```typescript
 await collection.update({
-    ids: ["id1", "id2", "id3", ...], 
-    embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...], 
-    metadatas: [{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...], 
+    ids: ["id1", "id2", "id3", ...],
+    embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
+    metadatas: [{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
     documents: ["doc1", "doc2", "doc3", ...]
 })
 ```
@@ -1704,7 +1704,7 @@ We welcome contributions! If you create an embedding function that you think wou
 # Multimodal
 
 {% Banner type="note" %}
-Multimodal support is currently available only in Python. Javascript/Typescript support coming soon! 
+Multimodal support is currently available only in Python. Javascript/Typescript support coming soon!
 {% /Banner %}
 
 You can create multimodal Chroma collections; these are collections which can store, and can be queried by, multiple modalities of data.
@@ -3986,7 +3986,7 @@ This is a great tool for experimenting with different embedding functions and re
 
 {% Tab label="python" %}
 
-You can configure Chroma to save and load the database from your local machine, using the `PersistentClient`. 
+You can configure Chroma to save and load the database from your local machine, using the `PersistentClient`.
 
 Data will be persisted automatically and loaded on start (if it exists).
 
@@ -4002,7 +4002,7 @@ The `path` is where Chroma will store its database files on disk, and load them 
 
 {% Tab label="typescript" %}
 
-To connect with the JS/TS client, you must connect to a Chroma server. 
+To connect with the JS/TS client, you must connect to a Chroma server.
 
 To run a Chroma server locally that will persist your data, install Chroma via `pip`:
 
@@ -4013,7 +4013,7 @@ pip install chromadb
 And run the server using our CLI:
 
 ```terminal
-chroma run --path ./getting-started 
+chroma run --path ./getting-started
 ```
 
 The `path` is where Chroma will store its database files on disk, and load them on start. The default is `.chroma`.
@@ -5857,7 +5857,7 @@ The embedding model is configured on the server side. Check the docker-compose f
 
 ## Authentication
 
-The embedding server can be configured to only allow usage with API keys. 
+The embedding server can be configured to only allow usage with API keys.
 You can use authentication in the chroma clients:
 
 {% TabbedCodeBlock %}
@@ -6355,7 +6355,7 @@ voyageai_ef(input=["document1","document2"])
 import { VoyageAIEmbeddingFunction } from '@chroma-core/voyageai';
 
 const embedder = new VoyageAIEmbeddingFunction({
-    apiKey: "apiKey", 
+    apiKey: "apiKey",
     modelName: "model_name"
 })
 
@@ -6883,7 +6883,7 @@ test_case = LLMTestCase(
 Define retriever metrics like `Contextual Precision`, `Contextual Recall`, and `Contextual Relevancy` to evaluate test cases. Recall ensures enough vectors are retrieved, while relevancy reduces noise by filtering out irrelevant ones.
 
 {% Banner type="tip" %}
-Balancing recall and relevancy is key. `distance_function` and `embedding_model` affects recall, while `n_results` and `chunk_size` impact relevancy.  
+Balancing recall and relevancy is key. `distance_function` and `embedding_model` affects recall, while `n_results` and `chunk_size` impact relevancy.
 {% /Banner %}
 
 ```python
@@ -8890,6 +8890,7 @@ Get the n_results nearest neighbor embeddings for provided query_embeddings or q
 
 - `query_embeddings` - The embeddings to get the closest neighbors of. Optional.
 - `query_texts` - The document texts to get the closest neighbors of. Optional.
+- `ids` - The list of ids to limit search space to. Optional.
 - `n_results` - The number of neighbors to return for each query_embedding or query_texts. Optional.
 - `where` - A Where type dict used to filter results by. E.g. `{$and: [{"color" : "red"}, {"price": 4.20}]}`. Optional.
 - `where_document` - A WhereDocument type dict used to filter by the documents. E.g. `{"$contains" : "hello"}`. Optional.

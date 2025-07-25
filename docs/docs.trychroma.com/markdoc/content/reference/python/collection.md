@@ -102,6 +102,7 @@ Get the first few results in the database up to limit
 def query(
         query_embeddings: Optional[OneOrMany[Embedding]] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
+        ids: Optional[OneOrMany[ID]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -115,6 +116,7 @@ Get the n_results nearest neighbor embeddings for provided query_embeddings or q
 
 - `query_embeddings` - The embeddings to get the closest neighbors of. Optional.
 - `query_texts` - The document texts to get the closest neighbors of. Optional.
+- `ids` - The list of ids to limit search space to. Optional.
 - `n_results` - The number of neighbors to return for each query_embedding or query_texts. Optional.
 - `where` - A Where type dict used to filter results by. E.g. `{$and: [{"color" : "red"}, {"price": 4.20}]}`. Optional.
 - `where_document` - A WhereDocument type dict used to filter by the documents. E.g. `{"$contains" : "hello"}`. Optional.

@@ -205,6 +205,7 @@ If there is an issue executing the query.
 // Query the collection using embeddings
 const embeddingsResults = await collection.query({
   queryEmbeddings: [[0.1, 0.2, ...], ...],
+  ids: ["id1", "id2", ...],
   nResults: 10,
   where: {"name": {"$eq": "John Doe"}},
   include: ["metadata", "document"]
@@ -213,6 +214,7 @@ const embeddingsResults = await collection.query({
 // Query the collection using query text
 const textResults = await collection.query({
     queryTexts: "some text",
+    ids: ["id1", "id2", ...],
     nResults: 10,
     where: {"name": {"$eq": "John Doe"}},
     include: ["metadata", "document"]
