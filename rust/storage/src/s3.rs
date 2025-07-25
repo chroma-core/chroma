@@ -367,7 +367,7 @@ impl S3Storage {
         Ok((Arc::new(output_buffer), e_tag))
     }
 
-    #[tracing::instrument(skip(self), level = "trace")]
+    #[tracing::instrument(skip(self), level = "info")]
     pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         self.get_with_e_tag(key).await.map(|(buf, _)| buf)
     }
