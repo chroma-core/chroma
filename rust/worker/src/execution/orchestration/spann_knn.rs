@@ -310,6 +310,7 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
             Box::new(IoGroupOperator {}),
             IoGroupOperatorInput::new(Arc::new(Mutex::new(Some(subtasks)))),
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         let pl_span = tracing::info_span!(
             parent: Span::current(),
