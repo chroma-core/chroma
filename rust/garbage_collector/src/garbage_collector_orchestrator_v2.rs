@@ -38,7 +38,7 @@ use chroma_storage::Storage;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, System, TaskError, TaskResult,
+    OrchestratorContext, PanicError, System, TaskError, TaskResult,
 };
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
 use chroma_types::{CollectionUuid, DeleteCollectionError};
@@ -60,7 +60,7 @@ pub struct GarbageCollectorOrchestrator {
     version_absolute_cutoff_time: DateTime<Utc>,
     collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
     sysdb_client: SysDb,
-    dispatcher: ComponentHandle<Dispatcher>,
+    context: OrchestratorContext,
     system: System,
     storage: Storage,
     logs: Log,
@@ -111,7 +111,7 @@ impl GarbageCollectorOrchestrator {
             version_absolute_cutoff_time,
             collection_soft_delete_absolute_cutoff_time,
             sysdb_client,
-            dispatcher,
+            context: OrchestratorContext::new(dispatcher),
             system,
             storage,
             logs,
@@ -209,7 +209,11 @@ impl Orchestrator for GarbageCollectorOrchestrator {
     type Error = GarbageCollectorError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
@@ -322,6 +326,7 @@ impl GarbageCollectorOrchestrator {
                 min_versions_to_keep: self.min_versions_to_keep,
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
 
         self.dispatcher()
@@ -400,6 +405,7 @@ impl GarbageCollectorOrchestrator {
                     oldest_version_to_keep: 0,
                 },
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             );
             self.dispatcher()
                 .send(mark_deleted_versions_task, Some(Span::current()))
@@ -415,6 +421,7 @@ impl GarbageCollectorOrchestrator {
                         *version,
                     ),
                     ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
                 );
 
                 self.dispatcher()
@@ -523,6 +530,7 @@ impl GarbageCollectorOrchestrator {
                 collections_to_garbage_collect,
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         self.dispatcher()
             .send(task, Some(Span::current()))
@@ -733,6 +741,7 @@ impl GarbageCollectorOrchestrator {
                 hnsw_prefixes_for_deletion: vec![],
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         self.dispatcher()
             .send(task, Some(Span::current()))
@@ -850,6 +859,7 @@ impl GarbageCollectorOrchestrator {
                     unused_s3_files: output.deleted_files.clone(),
                 },
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             );
 
             self.dispatcher()

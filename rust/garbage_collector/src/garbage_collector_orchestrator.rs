@@ -44,7 +44,7 @@ use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::chroma_proto::CollectionVersionFile;
 use chroma_types::CollectionUuid;
@@ -84,7 +84,7 @@ pub struct GarbageCollectorOrchestrator {
     version_file_path: String,
     absolute_cutoff_time: DateTime<Utc>,
     sysdb_client: SysDb,
-    dispatcher: ComponentHandle<Dispatcher>,
+    context: OrchestratorContext,
     storage: Storage,
     result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
     pending_version_file: Option<Arc<CollectionVersionFile>>,
@@ -117,7 +117,7 @@ impl GarbageCollectorOrchestrator {
             version_file_path,
             absolute_cutoff_time,
             sysdb_client,
-            dispatcher,
+            context: OrchestratorContext::new(dispatcher),
             storage,
             cleanup_mode,
             result_channel: None,
@@ -181,7 +181,11 @@ impl Orchestrator for GarbageCollectorOrchestrator {
     type Error = GarbageCollectorError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(
@@ -198,6 +202,7 @@ impl Orchestrator for GarbageCollectorOrchestrator {
                 Box::new(FetchVersionFileOperator {}),
                 FetchVersionFileInput::new(self.version_file_path.clone(), self.storage.clone()),
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             ),
             Some(Span::current()),
         )]
@@ -251,6 +256,7 @@ impl Handler<TaskResult<FetchVersionFileOutput, FetchVersionFileError>>
                 min_versions_to_keep: 2,
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
 
         tracing::info!("Sending compute versions task to dispatcher");
@@ -314,6 +320,7 @@ impl Handler<TaskResult<ComputeVersionsToDeleteOutput, ComputeVersionsToDeleteEr
                 oldest_version_to_keep: output.oldest_version_to_keep,
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
 
         if let Err(e) = self
@@ -358,6 +365,7 @@ impl Handler<TaskResult<MarkVersionsAtSysDbOutput, MarkVersionsAtSysDbError>>
                 oldest_version_to_keep: output.oldest_version_to_keep,
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
 
         if let Err(e) = self
@@ -400,6 +408,7 @@ impl Handler<TaskResult<ComputeUnusedFilesOutput, ComputeUnusedFilesError>>
                 hnsw_prefixes_for_deletion: output.unused_hnsw_prefixes,
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
 
         if let Err(e) = self
@@ -472,6 +481,7 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
                 unused_s3_files: output.deleted_files.clone(),
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
 
         // Update the deletion list so that GarbageCollectorOrchestrator can use it in the final stage.

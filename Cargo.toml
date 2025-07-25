@@ -70,7 +70,7 @@ serde_json = "1.0.133"
 setsum = "0.7"
 tantivy = "0.22.0"
 thiserror = "1.0.69"
-tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread"] }
+tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread", "time", "io-util"] }
 tokio-util = "0.7.12"
 tonic = "0.12"
 tonic-health = "0.12.3"
