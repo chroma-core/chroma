@@ -17,6 +17,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use serde::de::Error as DeError;
 use serde::ser::Error as SerError;
 use serde::{Deserialize, Serialize};
+use serde_bytes::{ByteArray, ByteBuf};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -70,7 +71,7 @@ impl<'de> Deserialize<'de> for RecordBatchWrapper {
     where
         D: serde::Deserializer<'de>,
     {
-        let data = Vec::<u8>::deserialize(deserializer)?;
+        let data: ByteBuf = Deserialize::deserialize(deserializer)?;
         let reader = std::io::Cursor::new(data);
         let rb = Block::load_record_batch(reader, false).map_err(D::Error::custom)?;
         Ok(RecordBatchWrapper(rb))
