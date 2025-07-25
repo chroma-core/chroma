@@ -17,7 +17,10 @@ use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
-    sync::{atomic::Ordering, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
 };
 use std::{ops::Range, sync::atomic::AtomicUsize};
 use tokio::{
@@ -37,13 +40,14 @@ use crate::StorageError;
 pub struct AdmissionControlledS3Storage {
     storage: S3Storage,
     #[allow(clippy::type_complexity)]
-    outstanding_read_requests: Arc<tokio::sync::Mutex<HashMap<String, InflightRequest>>>,
+    outstanding_read_requests: Arc<tokio::sync::Mutex<HashMap<String, Arc<InflightRequest>>>>,
     rate_limiter: Arc<RateLimitPolicy>,
 }
 
 #[derive(Debug, Clone)]
 struct InflightRequest {
-    priority: Arc<AtomicUsize>,
+    finished: Arc<AtomicBool>,
+    priority_holder: Arc<PriorityHolder>,
     notify_channel: Option<tokio::sync::mpsc::Sender<()>>,
     #[allow(clippy::type_complexity)]
     future: Shared<
@@ -57,22 +61,78 @@ struct InflightRequest {
     >,
 }
 
+type InflightRequestFuture = Shared<
+    Pin<
+        Box<
+            dyn Future<Output = Result<(Arc<Vec<u8>>, Option<ETag>), StorageError>>
+                + Send
+                + 'static,
+        >,
+    >,
+>;
+
 impl InflightRequest {
+    pub fn new(
+        priority_holder: Arc<PriorityHolder>,
+        future: InflightRequestFuture,
+        notify_channel: Option<tokio::sync::mpsc::Sender<()>>,
+    ) -> Self {
+        Self {
+            finished: Arc::new(AtomicBool::new(false)),
+            priority_holder,
+            notify_channel,
+            future,
+        }
+    }
+
     // Not thread safe.
-    async fn update_priority(&self, priority: StorageRequestPriority) {
+    async fn update_priority(&self, priority: StorageRequestPriority) -> RollbackPriorityOnDrop {
         // It is ok to not do Compare And Swap here since the caller obtains a mutex before
         // performing this operation so at any point there will only be one writer
         // for this AtomicUsize.
+        let before_pri = self.priority_holder.get_priority();
+        self.priority_holder.add_priority(priority);
+        let guard = RollbackPriorityOnDrop(self.clone(), priority);
+
+        if before_pri.is_none() {
+            return guard;
+        }
+
         if let Some(channel) = &self.notify_channel {
-            let curr_pri = self.priority.load(std::sync::atomic::Ordering::SeqCst);
-            if priority.as_usize() < curr_pri {
-                self.priority
-                    .store(priority.as_usize(), std::sync::atomic::Ordering::SeqCst);
+            if priority.as_usize() < before_pri.unwrap().as_usize() {
                 // Ignore send errors since it can happen that the receiver is dropped
                 // and the task is busy reading the data from s3.
                 let _ = channel.send(()).await;
             }
         }
+        guard
+    }
+
+    fn cleanup_priority(&mut self, priority: StorageRequestPriority) {
+        if self.finished.load(Ordering::SeqCst) {
+            return;
+        }
+
+        // Want to avoid locking here as this function will be used in a Drop
+        // implementation.
+        // Don't need a lock here as our goal is just to remove the priority and
+        // ensure the channel is non-empty if we changed the priority.
+        let prio_changed = self.priority_holder.remove_priority(priority);
+
+        // prio_changed and remove_priority are atomic with respect to each other.
+        if prio_changed {
+            if let Some(channel) = &self.notify_channel {
+                // If this fails because the buffer is full, it is ok to ignore it
+                // as we just need some signal in this channel to unblock the receiver
+                // on the other end. If there is no receiver on the other end that
+                // means the task is done and we don't need to signal anything.
+                let _ = channel.try_send(());
+            }
+        }
+    }
+
+    pub fn complete(&self) {
+        self.finished.store(true, Ordering::SeqCst);
     }
 }
 
@@ -90,6 +150,59 @@ impl StorageRequestPriority {
 
     pub fn as_usize(self) -> usize {
         self as usize
+    }
+}
+#[derive(Debug, Clone, Default)]
+pub struct PriorityHolder {
+    p0: Arc<AtomicUsize>,
+    p1: Arc<AtomicUsize>,
+}
+
+pub struct RollbackPriorityOnDrop(InflightRequest, StorageRequestPriority);
+
+impl Drop for RollbackPriorityOnDrop {
+    fn drop(&mut self) {
+        self.0.cleanup_priority(self.1);
+    }
+}
+
+impl PriorityHolder {
+    pub fn new(initial_priority: StorageRequestPriority) -> Self {
+        let holder = Self {
+            p0: Arc::new(AtomicUsize::new(0)),
+            p1: Arc::new(AtomicUsize::new(0)),
+        };
+        holder.add_priority(initial_priority);
+        holder
+    }
+
+    pub fn add_priority(&self, priority: StorageRequestPriority) {
+        match priority {
+            StorageRequestPriority::P0 => {
+                self.p0.fetch_add(1, Ordering::SeqCst);
+            }
+            StorageRequestPriority::P1 => {
+                self.p1.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }
+
+    pub fn remove_priority(&self, priority: StorageRequestPriority) -> bool {
+        match priority {
+            StorageRequestPriority::P0 => self.p0.fetch_sub(1, Ordering::SeqCst) == 1,
+            StorageRequestPriority::P1 => self.p1.fetch_sub(1, Ordering::SeqCst) == 1,
+        }
+    }
+
+    pub fn get_priority(&self) -> Option<StorageRequestPriority> {
+        // Returns the highest nonzero priority. If all are zero, returns None.
+        if self.p0.load(Ordering::SeqCst) > 0 {
+            Some(StorageRequestPriority::P0)
+        } else if self.p1.load(Ordering::SeqCst) > 0 {
+            Some(StorageRequestPriority::P1)
+        } else {
+            None
+        }
     }
 }
 
@@ -133,7 +246,7 @@ impl AdmissionControlledS3Storage {
         storage: S3Storage,
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
-        priority: Arc<AtomicUsize>,
+        priority: Arc<PriorityHolder>,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let (content_length, ranges, e_tag) = storage.get_key_ranges(&key).await?;
 
@@ -205,7 +318,7 @@ impl AdmissionControlledS3Storage {
         storage: S3Storage,
         rate_limiter: Arc<RateLimitPolicy>,
         key: String,
-        priority: Arc<AtomicUsize>,
+        priority: Arc<PriorityHolder>,
         channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         // Acquire permit.
@@ -222,35 +335,35 @@ impl AdmissionControlledS3Storage {
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.
-        let future_to_await;
+        let (future_to_await, _guard);
         {
             let mut requests = self.outstanding_read_requests.lock().await;
             let maybe_inflight = requests.get(&key).cloned();
-            future_to_await = match maybe_inflight {
+            (future_to_await, _guard) = match maybe_inflight {
                 Some(fut) => {
                     tracing::trace!("[AdmissionControlledS3] Found inflight request to s3 for key: {:?}. Deduping", key);
-                    fut.update_priority(options.priority).await;
-                    fut.future
+                    let guard = fut.update_priority(options.priority).await;
+                    (fut.future.clone(), guard)
                 }
                 None => {
-                    let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+                    let priority_holder = Arc::new(PriorityHolder::new(options.priority));
                     let get_parallel_storage_future = AdmissionControlledS3Storage::parallel_fetch(
                         self.storage.clone(),
                         self.rate_limiter.clone(),
                         key.clone(),
-                        atomic_priority.clone(),
+                        priority_holder.clone(),
                     )
                     .boxed()
                     .shared();
-                    requests.insert(
-                        key.clone(),
-                        InflightRequest {
-                            priority: atomic_priority,
-                            future: get_parallel_storage_future.clone(),
-                            notify_channel: None,
-                        },
-                    );
-                    get_parallel_storage_future
+
+                    let request = Arc::new(InflightRequest::new(
+                        priority_holder.clone(),
+                        get_parallel_storage_future.clone(),
+                        None,
+                    ));
+                    let guard = request.update_priority(options.priority).await;
+                    requests.insert(key.clone(), request);
+                    (get_parallel_storage_future, guard)
                 }
             };
         }
@@ -258,7 +371,9 @@ impl AdmissionControlledS3Storage {
         let res = future_to_await.await;
         {
             let mut requests = self.outstanding_read_requests.lock().await;
-            requests.remove(&key);
+            if let Some(request) = requests.remove(&key) {
+                request.complete();
+            }
         }
         Ok(res?.0)
     }
@@ -279,46 +394,49 @@ impl AdmissionControlledS3Storage {
         }
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
-        // request to S3.
-        let future_to_await;
+        // request to S3.;
+        let (future_to_await, _guard);
         {
             let mut requests = self.outstanding_read_requests.lock().await;
             let maybe_inflight = requests.get(key).cloned();
-            future_to_await = match maybe_inflight {
+            (future_to_await, _guard) = match maybe_inflight {
                 Some(fut) => {
                     // Update the priority if the new request has higher priority.
-                    fut.update_priority(options.priority).await;
-                    fut.future
+                    let guard = fut.update_priority(options.priority).await;
+                    (fut.future.clone(), guard)
                 }
                 None => {
-                    let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+                    let priority_holder = Arc::new(PriorityHolder::new(options.priority));
                     let (tx, rx) = tokio::sync::mpsc::channel(100);
                     let get_storage_future = AdmissionControlledS3Storage::read_from_storage(
                         self.storage.clone(),
                         self.rate_limiter.clone(),
                         key.to_string(),
-                        atomic_priority.clone(),
+                        priority_holder.clone(),
                         Some(rx),
                     )
                     .boxed()
                     .shared();
-                    requests.insert(
-                        key.to_string(),
-                        InflightRequest {
-                            priority: atomic_priority,
-                            future: get_storage_future.clone(),
-                            notify_channel: Some(tx),
-                        },
-                    );
-                    get_storage_future
+
+                    let request = Arc::new(InflightRequest::new(
+                        priority_holder.clone(),
+                        get_storage_future.clone(),
+                        Some(tx),
+                    ));
+                    let guard = request.update_priority(options.priority).await;
+                    requests.insert(key.to_string(), request.clone());
+                    (request.future.clone(), guard)
                 }
             };
         }
 
         let res = future_to_await.await;
+
         {
             let mut requests = self.outstanding_read_requests.lock().await;
-            requests.remove(key);
+            if let Some(request) = requests.remove(key) {
+                request.complete();
+            }
         }
         res
     }
@@ -328,12 +446,13 @@ impl AdmissionControlledS3Storage {
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+        let priority_holder = Arc::new(PriorityHolder::new(options.priority));
+        let _permit = self.rate_limiter.enter(priority_holder.clone(), None).await;
         AdmissionControlledS3Storage::read_from_storage(
             self.storage.clone(),
             self.rate_limiter.clone(),
             key.to_string(),
-            atomic_priority,
+            priority_holder.clone(),
             None,
         )
         .await
@@ -348,9 +467,8 @@ impl AdmissionControlledS3Storage {
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
-        // Acquire permit.
-        let _permit = self.rate_limiter.enter(atomic_priority, None).await;
+        let priority_holder = Arc::new(PriorityHolder::new(options.priority));
+        let _permit = self.rate_limiter.enter(priority_holder, None).await;
         self.storage
             .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
             .await
@@ -366,7 +484,7 @@ impl AdmissionControlledS3Storage {
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+        let priority_holder = Arc::new(PriorityHolder::new(options.priority));
         let (part_count, size_of_last_part, upload_id) = self
             .storage
             .prepare_multipart_upload(key, total_size_bytes)
@@ -374,7 +492,7 @@ impl AdmissionControlledS3Storage {
         let mut upload_parts = Vec::new();
         for part_index in 0..part_count {
             // Acquire token.
-            let _permit = self.rate_limiter.enter(atomic_priority.clone(), None).await;
+            let _permit = self.rate_limiter.enter(priority_holder.clone(), None).await;
             let completed_part = self
                 .storage
                 .upload_part(
@@ -484,8 +602,8 @@ impl AdmissionControlledS3Storage {
         prefix: &str,
         options: GetOptions,
     ) -> Result<Vec<String>, StorageError> {
-        let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
-        let _permit = self.rate_limiter.enter(atomic_priority, None).await;
+        let priority_holder = Arc::new(PriorityHolder::new(options.priority));
+        let _permit = self.rate_limiter.enter(priority_holder, None).await;
         self.storage.list_prefix(prefix).await
     }
 
@@ -536,7 +654,7 @@ pub enum RateLimitPolicy {
 impl RateLimitPolicy {
     async fn enter(
         &self,
-        priority: Arc<AtomicUsize>,
+        priority: Arc<PriorityHolder>,
         channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
         match self {
@@ -589,13 +707,14 @@ impl CountBasedPolicy {
 
     async fn acquire(
         &self,
-        priority: Arc<AtomicUsize>,
+        priority: Arc<PriorityHolder>,
         mut channel_receiver: Option<tokio::sync::mpsc::Receiver<()>>,
     ) -> SemaphorePermit<'_> {
         let _stopwatch = Stopwatch::new(&self.metrics.nac_delay_ms, &[]);
         loop {
-            let current_priority = priority.load(Ordering::SeqCst);
-            let current_priority: StorageRequestPriority = current_priority.into();
+            // Unwrap shouldn't fail here as update_priority should have been called before
+            // entering this.
+            let current_priority = priority.get_priority().unwrap();
 
             // Try acquiring permits at current and lower priorities
             for pri in current_priority.as_usize()
