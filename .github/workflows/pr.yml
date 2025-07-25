@@ -263,7 +263,6 @@ jobs:
     - javascript-client-tests
     - rust-tests
     - go-tests
-    - check-title
     - lint
     - check-helm-version-bump
     - delete-helm-comment

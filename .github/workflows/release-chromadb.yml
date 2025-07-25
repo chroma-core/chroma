@@ -257,7 +257,8 @@ jobs:
       - release-pypi
       - release-thin-pypi
       - release-github
-      - release-hosted
+      - release-hosted-control-plane
+      - release-hosted-data-plane
       - release-docs
     runs-on: blacksmith-2vcpu-ubuntu-2204
     steps:
