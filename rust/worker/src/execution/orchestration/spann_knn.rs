@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
@@ -15,10 +15,14 @@ use chroma_types::{
     operator::{Knn, KnnMerge, KnnOutput, KnnProjection, KnnProjectionOutput, RecordDistance},
     Collection,
 };
+use parking_lot::Mutex;
 use tokio::sync::oneshot::Sender;
 use tracing::Span;
 
 use crate::execution::operators::{
+    io_group_operator::{
+        IoGroupOperator, IoGroupOperatorError, IoGroupOperatorInput, IoGroupOperatorOutput,
+    },
     knn_log::{KnnLogError, KnnLogInput},
     knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOutput},
     knn_projection::{KnnProjectionError, KnnProjectionInput},
@@ -268,14 +272,29 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
         self.heads_searched = true;
         self.num_outstanding_bf_pl = output.center_ids.len();
         // Spawn fetch posting list tasks for the centers.
+        // for head_id in output.center_ids {
+        //     let pl_span = tracing::info_span!(
+        //         parent: Span::current(),
+        //         "Fetch posting list",
+        //         head_id = head_id,
+        //     );
+        //     self.pl_spans.insert(head_id as u32, pl_span.clone());
+        //     // Invoke Head search operator.
+        //     let fetch_pl_task = wrap(
+        //         Box::new(self.fetch_pl.clone()),
+        //         SpannFetchPlInput {
+        //             reader: self.spann_reader.clone(),
+        //             head_id: head_id as u32,
+        //         },
+        //         ctx.receiver(),
+        //     );
+
+        //     self.send(fetch_pl_task, ctx, Some(pl_span)).await;
+        // }
+
+        // New: Create a IoGroupOperator to handle multiple fetch posting list tasks.
+        let mut subtasks = Vec::with_capacity(output.center_ids.len());
         for head_id in output.center_ids {
-            let pl_span = tracing::info_span!(
-                parent: Span::current(),
-                "Fetch posting list",
-                head_id = head_id,
-            );
-            self.pl_spans.insert(head_id as u32, pl_span.clone());
-            // Invoke Head search operator.
             let fetch_pl_task = wrap(
                 Box::new(self.fetch_pl.clone()),
                 SpannFetchPlInput {
@@ -285,9 +304,32 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
             );
-
-            self.send(fetch_pl_task, ctx, Some(pl_span)).await;
+            subtasks.push(fetch_pl_task);
         }
+        let io_group_task = wrap(
+            Box::new(IoGroupOperator {}),
+            IoGroupOperatorInput::new(Arc::new(Mutex::new(Some(subtasks)))),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        let pl_span = tracing::info_span!(
+            parent: Span::current(),
+            "Fetch all posting lists in IoGroupOperator",
+        );
+        self.send(io_group_task, ctx, Some(pl_span)).await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<IoGroupOperatorOutput, IoGroupOperatorError>> for SpannKnnOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _message: TaskResult<IoGroupOperatorOutput, IoGroupOperatorError>,
+        _ctx: &ComponentContext<Self>,
+    ) {
+        // No-op
     }
 }
 
