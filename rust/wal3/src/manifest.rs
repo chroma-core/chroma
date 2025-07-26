@@ -362,13 +362,21 @@ impl Manifest {
         let mut snapshot_depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
         while snapshot_depth > 0 {
             let mut snapshots = vec![];
-            let mut setsum = Setsum::default();
-            for snapshot in self.snapshots.iter().filter(|s| s.depth == snapshot_depth) {
-                if snapshots.len() < snapshot_options.snapshot_rollover_threshold {
-                    setsum += snapshot.setsum;
+            for snapshot in self.snapshots.iter().rev() {
+                if snapshot.depth < snapshot_depth {
+                    continue;
+                } else if snapshot.depth == snapshot_depth
+                    && snapshots.len() < snapshot_options.snapshot_rollover_threshold
+                {
                     snapshots.push(snapshot.clone());
+                } else {
+                    break;
                 }
             }
+            snapshots.reverse();
+            let mut setsum = snapshots
+                .iter()
+                .fold(Setsum::default(), |acc, s| acc + s.setsum);
             if snapshots.len() >= snapshot_options.snapshot_rollover_threshold {
                 if let Some(snap) = snapshots.iter().min_by_key(|s| s.start) {
                     if !self.snapshots.is_empty()

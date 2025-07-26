@@ -48,6 +48,10 @@ async fn destroy_cursors(storage: &Arc<Storage>, prefix: &str) -> Result<(), Err
     Ok(())
 }
 
+async fn destroy_garbage(storage: &Arc<Storage>, prefix: &str) -> Result<(), Error> {
+    delete_file(storage, prefix, "gc/GARBAGE").await
+}
+
 async fn destroy_dangling_snapshots(storage: &Arc<Storage>, prefix: &str) -> Result<(), Error> {
     loop {
         let possible_snapshots = match storage
@@ -151,6 +155,7 @@ pub async fn destroy(storage: Arc<Storage>, prefix: &str) -> Result<(), Error> {
         destroy_fragment(&storage, prefix, fragment).await?;
     }
     destroy_cursors(&storage, prefix).await?;
+    destroy_garbage(&storage, prefix).await?;
     destroy_dangling_snapshots(&storage, prefix).await?;
     destroy_dangling_fragments(&storage, prefix).await?;
     destroy_manifest(&storage, prefix).await?;

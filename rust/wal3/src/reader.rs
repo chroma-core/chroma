@@ -321,9 +321,7 @@ impl LogReader {
             return Err(vec![Error::UninitializedLog]);
         };
         let manifest_scrub_success = manifest.scrub().map_err(|x| vec![x.into()])?;
-        let from = manifest
-            .initial_offset
-            .unwrap_or(LogPosition::from_offset(1));
+        let from = manifest.oldest_timestamp();
         let mut short_read = false;
         let fragments = self
             .scan_with_cache(manifest, from, limits, &mut short_read)
