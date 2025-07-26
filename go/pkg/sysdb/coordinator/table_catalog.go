@@ -815,8 +815,8 @@ func (tc *Catalog) updateCollectionConfiguration(
 
 	// Update existing configuration with new values
 	if updateConfig.VectorIndex != nil {
-		if updateConfig.VectorIndex.Type == "hnsw" && updateConfig.VectorIndex.Hnsw != nil {
-			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Type != "hnsw" {
+		if updateConfig.VectorIndex.Hnsw != nil {
+			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Hnsw == nil {
 				return existingConfigJsonStr, nil
 			}
 			if updateConfig.VectorIndex.Hnsw.EfSearch != nil {
@@ -837,8 +837,8 @@ func (tc *Catalog) updateCollectionConfiguration(
 			if updateConfig.VectorIndex.Hnsw.BatchSize != nil {
 				existingConfig.VectorIndex.Hnsw.BatchSize = *updateConfig.VectorIndex.Hnsw.BatchSize
 			}
-		} else if updateConfig.VectorIndex.Type == "spann" && updateConfig.VectorIndex.Spann != nil {
-			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Type != "spann" {
+		} else if updateConfig.VectorIndex.Spann != nil {
+			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Spann == nil {
 				return existingConfigJsonStr, nil
 			}
 			if updateConfig.VectorIndex.Spann.EfSearch != nil {
