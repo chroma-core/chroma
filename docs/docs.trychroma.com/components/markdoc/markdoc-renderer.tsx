@@ -19,12 +19,15 @@ const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
   const txtFilePath = `${path.join(process.cwd(), "public", `llms-${slug.join("-")}`)}.txt`;
   console.log(txtFilePath);
 
-  if (!fs.existsSync(filePath) || !fs.existsSync(txtFilePath)) {
+  if (!fs.existsSync(filePath)) {
     notFound();
   }
 
   const source = fs.readFileSync(filePath, "utf-8");
-  const txtContent = fs.readFileSync(txtFilePath, "utf-8");
+  const txtContentExists = fs.existsSync(txtFilePath);
+  const txtContent = txtContentExists
+    ? fs.readFileSync(txtFilePath, "utf-8")
+    : undefined;
 
   const ast = Markdoc.parse(source);
 
