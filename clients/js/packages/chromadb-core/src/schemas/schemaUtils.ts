@@ -22,6 +22,7 @@ import transformersSchema from "../../../../../../schemas/embedding_functions/tr
 import voyageaiSchema from "../../../../../../schemas/embedding_functions/voyageai.json";
 import cloudflareWorkersAiSchema from "../../../../../../schemas/embedding_functions/cloudflare_workers_ai.json";
 import togetherAiSchema from "../../../../../../schemas/embedding_functions/together_ai.json";
+import runpodSchema from "../../../../../../schemas/embedding_functions/runpod.json";
 import Ajv from "ajv";
 
 // Define a common interface for all schemas
@@ -67,6 +68,7 @@ const schemaMap = {
   voyageai: voyageaiSchema as Schema,
   cloudflare_workers_ai: cloudflareWorkersAiSchema as Schema,
   together_ai: togetherAiSchema as Schema,
+  runpod: runpodSchema as Schema,
 };
 
 /**
