@@ -1666,6 +1666,7 @@ mod tests {
                 assignment: Default::default(),
                 memberlist_provider: Default::default(),
                 max_query_service_response_size_bytes: 65536,
+                client_selection_config: Default::default(),
             }),
             default_knn_index: KnnIndex::Spann,
         };
