@@ -60,14 +60,21 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             ValueError: If you provide an id that already exists
 
         """
-        add_request = self._validate_and_prepare_add_request(
+
+        curr_schema = self._model.get_configuration().get("schema")
+
+        add_request, new_attributes = self._validate_and_prepare_add_request(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
             images=images,
             uris=uris,
+            schema=curr_schema,
         )
+
+        if len(new_attributes.keys()) > 0:
+            await self.modify(configuration={"schema": new_attributes})
 
         await self._client._add(
             collection_id=self.id,
@@ -313,14 +320,19 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        update_request = self._validate_and_prepare_update_request(
+        curr_schema = self._model.get_configuration().get("schema")
+        update_request, new_attributes = self._validate_and_prepare_update_request(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
             images=images,
             uris=uris,
+            schema=curr_schema,
         )
+
+        if len(new_attributes.keys()) > 0:
+            await self.modify(configuration={"schema": new_attributes})
 
         await self._client._update(
             collection_id=self.id,
@@ -358,14 +370,18 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Returns:
             None
         """
-        upsert_request = self._validate_and_prepare_upsert_request(
+        curr_schema = self._model.get_configuration().get("schema")
+        upsert_request, new_attributes = self._validate_and_prepare_upsert_request(
             ids=ids,
             embeddings=embeddings,
             metadatas=metadatas,
             documents=documents,
             images=images,
             uris=uris,
+            schema=curr_schema,
         )
+        if len(new_attributes.keys()) > 0:
+            await self.modify(configuration={"schema": new_attributes})
 
         await self._client._upsert(
             collection_id=self.id,
