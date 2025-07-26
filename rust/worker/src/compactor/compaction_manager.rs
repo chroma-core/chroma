@@ -49,12 +49,17 @@ use tracing::Instrument;
 use tracing::Span;
 use uuid::Uuid;
 
-type BoxedFuture =
-    Pin<Box<dyn Future<Output = Result<CompactionResponse, Box<dyn ChromaError>>> + Send>>;
+type CompactionOutput = Result<CompactionResponse, Box<dyn ChromaError>>;
+type BoxedFuture = Pin<Box<dyn Future<Output = CompactionOutput> + Send>>;
 
 struct CompactionTask {
     collection_id: CollectionUuid,
     future: BoxedFuture,
+}
+
+struct CompactionTaskCompletion {
+    collection_id: CollectionUuid,
+    result: CompactionOutput,
 }
 
 #[derive(Clone)]
@@ -85,7 +90,7 @@ pub(crate) struct CompactionManager {
     scheduler: Scheduler,
     context: CompactionManagerContext,
     compact_awaiter_channel: mpsc::Sender<CompactionTask>,
-    compact_awaiter_completion_channel: mpsc::UnboundedReceiver<CompactionResponse>,
+    compact_awaiter_completion_channel: mpsc::UnboundedReceiver<CompactionTaskCompletion>,
     compact_awaiter: tokio::task::JoinHandle<()>,
     on_next_memberlist_signal: Option<oneshot::Sender<()>>,
 }
@@ -129,7 +134,7 @@ impl CompactionManager {
         // Using unbounded channel for the completion channel as its size
         // is bounded by max_concurrent_jobs. It's far more important for the
         // completion channel to not block or drop messages.
-        let (completion_tx, completion_rx) = mpsc::unbounded_channel::<CompactionResponse>();
+        let (completion_tx, completion_rx) = mpsc::unbounded_channel::<CompactionTaskCompletion>();
         let compact_awaiter = tokio::spawn(async {
             compact_awaiter_loop(compact_awaiter_rx, completion_tx).await;
         });
@@ -216,6 +221,7 @@ impl CompactionManager {
             Box::new(purge_dirty_log),
             purge_dirty_log_input,
             ctx.receiver(),
+            ctx.cancellation_token.clone(),
         );
         let Some(mut dispatcher) = self.context.dispatcher.clone() else {
             tracing::error!("Unable to create background task to purge dirty log: Dispatcher is not set for compaction manager");
@@ -237,11 +243,18 @@ impl CompactionManager {
         self.context.dispatcher = Some(dispatcher);
     }
 
-    fn process_completions(&mut self) -> Vec<CompactionResponse> {
+    fn process_completions(&mut self) -> Vec<CompactionTaskCompletion> {
         let compact_awaiter_completion_channel = &mut self.compact_awaiter_completion_channel;
         let mut completed_collections = Vec::new();
         while let Ok(resp) = compact_awaiter_completion_channel.try_recv() {
-            self.scheduler.complete_collection(resp.collection_id);
+            match resp.result {
+                Ok(_) => {
+                    self.scheduler.succeed_collection(resp.collection_id);
+                }
+                Err(_) => {
+                    self.scheduler.fail_collection(resp.collection_id);
+                }
+            }
             completed_collections.push(resp);
         }
         completed_collections
@@ -291,7 +304,9 @@ impl CompactionManagerContext {
                 return Ok(result);
             }
             Err(e) => {
-                tracing::error!("Compaction Job failed: {:?}", e);
+                if e.should_trace_error() {
+                    tracing::error!("Compaction Job failed: {:?}", e);
+                }
                 return Err(Box::new(e));
             }
         }
@@ -349,6 +364,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             Box::<dyn AssignmentPolicy>::try_from_config(assignment_policy_config, registry)
                 .await?;
         let job_expiry_seconds = config.compactor.job_expiry_seconds;
+        let max_failure_count = config.compactor.max_failure_count;
         let scheduler = Scheduler::new(
             my_ip,
             log.clone(),
@@ -359,6 +375,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             assignment_policy,
             disabled_collections,
             job_expiry_seconds,
+            max_failure_count,
         );
 
         let blockfile_provider = BlockfileProvider::try_from_config(
@@ -405,25 +422,31 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
 
 async fn compact_awaiter_loop(
     mut job_rx: mpsc::Receiver<CompactionTask>,
-    completion_tx: mpsc::UnboundedSender<CompactionResponse>,
+    completion_tx: mpsc::UnboundedSender<CompactionTaskCompletion>,
 ) {
     let mut futures = FuturesUnordered::new();
     loop {
         select! {
             Some(job) = job_rx.recv() => {
                 futures.push(async move {
-                    let _ = AssertUnwindSafe(job.future).catch_unwind().await;
-                    CompactionResponse {
-                        collection_id: job.collection_id,
+                    let result = AssertUnwindSafe(job.future).catch_unwind().await;
+                    match result {
+                        Ok(response) => CompactionTaskCompletion {
+                            collection_id: job.collection_id,
+                            result: response,
+                        },
+                        Err(_) => CompactionTaskCompletion {
+                            collection_id: job.collection_id,
+                            result: Err(Box::new(CompactionError::FailedToCompact)),
+                        },
                     }
                 });
             }
-            Some(compaction_response) = futures.next() => {
-                match completion_tx.send(compaction_response) {
+            Some(completed_job) = futures.next() => {
+                let collection_id = completed_job.collection_id;
+                match completion_tx.send(completed_job) {
                     Ok(_) => {},
-                    Err(_) => {
-                        tracing::error!("Failed to send compaction response");
-                    }
+                    Err(_) => tracing::error!("Failed to record compaction result for collection {}", collection_id),
                 }
             }
             else => {
@@ -771,6 +794,7 @@ mod tests {
         let fetch_log_batch_size = 100;
         let purge_dirty_log_timeout_seconds = 60;
         let job_expiry_seconds = 3600;
+        let max_failure_count = 3;
 
         // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
@@ -786,6 +810,7 @@ mod tests {
             assignment_policy,
             HashSet::new(),
             job_expiry_seconds,
+            max_failure_count,
         );
         // Set memberlist
         scheduler.set_memberlist(vec![my_member.clone()]);
@@ -863,6 +888,7 @@ mod tests {
             completed_compactions.extend(
                 completed
                     .iter()
+                    .filter(|c| c.result.is_ok())
                     .map(|c| c.collection_id)
                     .collect::<Vec<CollectionUuid>>(),
             );

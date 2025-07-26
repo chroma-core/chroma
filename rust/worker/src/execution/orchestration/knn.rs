@@ -1,8 +1,8 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_system::{
-    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, TaskMessage,
-    TaskResult,
+    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    OrchestratorContext, TaskMessage, TaskResult,
 };
 use chroma_types::operator::{
     Knn, KnnMerge, KnnOutput, KnnProjection, KnnProjectionOutput, RecordDistance,
@@ -109,10 +109,9 @@ use super::knn_filter::{KnnError, KnnFilterOutput};
 #[derive(Debug)]
 pub struct KnnOrchestrator {
     // Orchestrator parameters
+    context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
-    dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
-
     // Output from KnnFilterOrchestrator
     knn_filter_output: KnnFilterOutput,
 
@@ -145,9 +144,10 @@ impl KnnOrchestrator {
         } else {
             Vec::new()
         };
+        let context = OrchestratorContext::new(dispatcher);
         Self {
+            context,
             blockfile_provider,
-            dispatcher,
             queue,
             knn_filter_output,
             knn,
@@ -166,6 +166,7 @@ impl KnnOrchestrator {
                     batch_distances: self.batch_distances.drain(..).collect(),
                 },
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             );
             self.send(task, ctx, Some(Span::current())).await;
         }
@@ -178,7 +179,11 @@ impl Orchestrator for KnnOrchestrator {
     type Error = KnnError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(
@@ -197,6 +202,7 @@ impl Orchestrator for KnnOrchestrator {
                 distance_function: self.knn_filter_output.distance_function.clone(),
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         tasks.push((knn_log_task, Some(Span::current())));
 
@@ -213,6 +219,7 @@ impl Orchestrator for KnnOrchestrator {
                     distance_function: self.knn_filter_output.distance_function.clone(),
                 },
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             );
             tasks.push((knn_segment_task, Some(Span::current())));
         }
@@ -299,6 +306,7 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
                     .collect(),
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         // Prefetch span is detached from the orchestrator.
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch_record", num_records = output.distances.len());
@@ -313,6 +321,7 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
                 record_distances: output.distances,
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         self.send(projection_task, ctx, Some(Span::current())).await;
     }

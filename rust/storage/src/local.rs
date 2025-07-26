@@ -116,6 +116,35 @@ impl LocalStorage {
         }
     }
 
+    pub async fn delete_many<S: AsRef<str> + std::fmt::Debug, I: IntoIterator<Item = S>>(
+        &self,
+        keys: I,
+    ) -> Result<crate::s3::DeletedObjects, StorageError> {
+        let mut deleted_objects = crate::s3::DeletedObjects::default();
+        for key in keys {
+            let file_path = self.path_for_key(key.as_ref());
+            match std::fs::remove_file(&file_path) {
+                Ok(_) => {
+                    deleted_objects.deleted.push(key.as_ref().to_string());
+                }
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::NotFound => {
+                        deleted_objects.errors.push(StorageError::NotFound {
+                            path: key.as_ref().to_string(),
+                            source: Arc::new(e),
+                        });
+                    }
+                    _ => {
+                        deleted_objects.errors.push(StorageError::Generic {
+                            source: Arc::new(e),
+                        });
+                    }
+                },
+            }
+        }
+        Ok(deleted_objects)
+    }
+
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         let src_path = self.path_for_key(src_key);
         let dst_path = self.path_for_key(dst_key);

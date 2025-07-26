@@ -10,9 +10,11 @@ use chroma_storage::{
 };
 
 use crate::manifest::unprefixed_snapshot_path;
+use crate::writer::OnceLogWriter;
 use crate::{
     deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment, FragmentSeqNo,
-    LogPosition, Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
+    GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest, ScrubError, Snapshot,
+    SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
@@ -465,5 +467,116 @@ impl Garbage {
             drop_acc += self.drop_fragment(frag, first)?;
         }
         Ok(drop_acc)
+    }
+
+    /// Only call this function if you know what bug you are fixing.  The code documents the bug,
+    /// but it is omitted from the documentation.
+    // NOTE(rescrv):
+    // - The bug:  Delete the data before updating the manifest.
+    // - The fallout:  The manifest refers to a snapshot that doesn't exist; the next pass fails.
+    // - The fix:  Generate a garbage file that erases the snapshots.
+    //
+    // manifest is the manifest to use for getting snapshots to drop.
+    // seq_no is the seq_no of the first fragment to keep.
+    // offset is the log position of the first record to keep.
+    //
+    // To determine these values, find the first snapshot that is in the manifest that wasn't
+    // erased.  It will give you the offset as its start.  Follow the left-most snapshot from that
+    // snapshot, recursively, until you find the first fragment.  That's your seq_no.
+    pub fn bug_patch_construct_garbage_from_manifest(
+        manifest: &Manifest,
+        seq_no: FragmentSeqNo,
+        offset: LogPosition,
+    ) -> Garbage {
+        let mut garbage = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: seq_no,
+            fragments_to_drop_limit: seq_no,
+            setsum_to_discard: Setsum::default(),
+            first_to_keep: offset,
+        };
+        for snapshot in manifest.snapshots.iter() {
+            if snapshot.limit <= garbage.first_to_keep {
+                garbage.snapshots_to_drop.push(snapshot.clone());
+                garbage.setsum_to_discard += snapshot.setsum;
+            }
+        }
+        garbage
+    }
+}
+
+///////////////////////////////////////// GarbageCollector /////////////////////////////////////////
+
+pub struct GarbageCollector {
+    log: Arc<OnceLogWriter>,
+}
+
+impl GarbageCollector {
+    /// Open the log into a state where it can be garbage collected.
+    pub async fn open(
+        options: LogWriterOptions,
+        storage: Arc<Storage>,
+        prefix: &str,
+        writer: &str,
+    ) -> Result<Self, Error> {
+        let log = OnceLogWriter::open_for_read_only_and_stale_ops(
+            options.clone(),
+            Arc::clone(&storage),
+            prefix.to_string(),
+            writer.to_string(),
+            Arc::new(()),
+        )
+        .await?;
+        Ok(Self { log })
+    }
+
+    pub async fn garbage_collect_phase1_compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<bool, Error> {
+        self.log
+            .garbage_collect_phase1_compute_garbage(options, keep_at_least)
+            .await
+    }
+
+    pub async fn garbage_collect_phase3_delete_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        self.log
+            .garbage_collect_phase3_delete_garbage(options)
+            .await
+    }
+}
+
+/////////////////////////////////////////////// tests //////////////////////////////////////////////
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn case_seen_in_the_wild() {
+        let manifest_json =
+            include_str!("../tests/test_k8s_integration_AA_construct_garbage/MANIFEST");
+        let manifest: Manifest = serde_json::from_str(manifest_json).unwrap();
+        let output = Garbage::bug_patch_construct_garbage_from_manifest(
+            &manifest,
+            FragmentSeqNo(806913),
+            LogPosition::from_offset(900883),
+        );
+        assert_eq!(output.fragments_to_drop_start, FragmentSeqNo(806913));
+        assert_eq!(output.fragments_to_drop_limit, FragmentSeqNo(806913));
+        assert_eq!(
+            output.setsum_to_discard.hexdigest(),
+            "c921d21a0820be5d3b6f2d90942648f2853188bb0e3c6a22fe3dbd81c1e1c380"
+        );
+        assert_eq!(output.first_to_keep, LogPosition::from_offset(900883));
+        for snapshot in output.snapshots_to_drop.iter() {
+            assert!(snapshot.limit <= output.first_to_keep);
+        }
     }
 }

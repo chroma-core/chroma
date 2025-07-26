@@ -6,7 +6,7 @@ Chroma lets you manage collections of embeddings, using the **collection** primi
 
 Chroma collections are created with a name. Collection names are used in the url, so there are a few restrictions on them:
 
-- The length of the name must be between 3 and 63 characters.
+- The length of the name must be between 3 and 512 characters.
 - The name must start and end with a lowercase letter or a digit, and it can contain dots, dashes, and underscores in between.
 - The name must not contain two consecutive dots.
 - The name must not be a valid IP address.
@@ -80,6 +80,15 @@ collection = client.create_collection(
 )
 ```
 
+Instead of having Chroma embed documents, you can also provide embeddings directly when [adding data](./add-data) to a collection. In this case, your collection will not have an embedding function set, and you will be responsible for providing embeddings directly when adding data and querying.
+
+```python
+collection = client.create_collection(
+    name="my_collection",
+    embedding_function=None
+)
+```
+
 {% /Tab %}
 
 {% Tab label="typescript" %}
@@ -128,11 +137,44 @@ const collection = await client.createCollection({
 });
 ```
 
+Instead of having Chroma embed documents, you can also provide embeddings directly when [adding data](./add-data) to a collection. In this case, your collection will not have an embedding function set, and you will be responsible for providing embeddings directly when adding data and querying.
+
+```typescript
+const collection = await client.createCollection({
+    name: "my_collection",
+    embeddingFunction: null
+})
+```
+
 {% /Tab %}
 
 {% /Tabs %}
 
-Instead of having Chroma embed documents, you can also provide embeddings directly when [adding data](./add-data) to a collection. In this case, your collection will not have an embedding function set, and you will be responsible for providing embeddings directly when adding data and querying.
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+collection = client.create_collection(
+    name="my_collection",
+    embedding_function=None
+)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+let collection = await client.createCollection({
+    name: "my_collection",
+    embeddingFunction: emb_fn,
+    metadata: {
+        description: "my first Chroma collection",
+        created: (new Date()).toString()
+    }
+});
+```
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
 
 ### Collection Metadata
 
@@ -145,12 +187,12 @@ When creating collections, you can pass the optional `metadata` argument to add 
 from datetime import datetime
 
 collection = client.create_collection(
-    name="my_collection", 
+    name="my_collection",
     embedding_function=emb_fn,
     metadata={
         "description": "my first Chroma collection",
         "created": str(datetime.now())
-    }  
+    }
 )
 ```
 {% /Tab %}
@@ -209,7 +251,7 @@ collections_subset = client.list_collections(limit=20, offset=50) # get 20 colle
 Current versions of Chroma store the embedding function you used to create a collection on the server, so the client can resolve it for you on subsequent "get" operations. If you are running an older version of the Chroma client or server (<1.1.13), you will need to provide the same embedding function you used to create a collection when using `get_collection`:
 
 ```python
-collection = client.get_collection( 
+collection = client.get_collection(
     name='my-collection',
     embedding_function=ef
 )
@@ -258,7 +300,7 @@ const collectionsSubset = await client.listCollections({ limit: 20, offset: 50 }
 Current versions of Chroma store the embedding function you used to create a collection on the server, so the client can resolve it for you on subsequent "get" operations. If you are running an older version of the Chroma JS/TS client (<3.04) or server (<1.1.13), you will need to provide the same embedding function you used to create a collection when using `getCollection` and `getCollections`:
 
 ```typescript
-const collection = await client.getCollection({ 
+const collection = await client.getCollection({
     name: 'my-collection',
     embeddingFunction: ef
 })
@@ -283,7 +325,7 @@ After a collection is created, you can modify its name, metadata and elements of
 ```python
 collection.modify(
    name="new-name",
-   metadata={"description": "new description"} 
+   metadata={"description": "new description"}
 )
 ```
 {% /Tab %}
@@ -311,13 +353,13 @@ Deleting collections is destructive and not reversible
 
 {% Tab label="python" %}
 ```python
-collection.delete(name="my-collection")
+client.delete_collection(name="my-collection")
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
 ```typescript
-await collection.delete({ name: "my-collection" });
+await client.deleteCollection({ name: "my-collection" });
 ```
 {% /Tab %}
 

@@ -1,11 +1,12 @@
 use std::future::Future;
+use std::iter::Iterator;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{DeleteOptions, GetOptions, PutOptions, Storage, StorageError};
+use chroma_storage::{GetOptions, PutOptions, Storage, StorageError};
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
@@ -352,7 +353,9 @@ impl LogWriter {
                         // SAFETY(rescrv):  Mutex poisoning.
                         let mut inner = self.inner.lock().unwrap();
                         if inner.epoch == epoch {
-                            inner.writer.take();
+                            if let Some(writer) = inner.writer.take() {
+                                writer.shutdown();
+                            }
                         }
                     }
                     // Silence this error in favor of the one we got from f.
@@ -366,7 +369,9 @@ impl LogWriter {
                     // SAFETY(rescrv):  Mutex poisoning.
                     let mut inner = self.inner.lock().unwrap();
                     if inner.epoch == epoch {
-                        inner.writer.take();
+                        if let Some(writer) = inner.writer.take() {
+                            writer.shutdown();
+                        }
                     }
                     return Err(Error::LogContentionFailure);
                 }
@@ -374,13 +379,17 @@ impl LogWriter {
                     // SAFETY(rescrv):  Mutex poisoning.
                     let mut inner = self.inner.lock().unwrap();
                     if inner.epoch == epoch {
-                        inner.writer.take();
+                        if let Some(writer) = inner.writer.take() {
+                            writer.shutdown();
+                        }
                     }
                 }
                 Err(err) => {
                     let mut inner = self.inner.lock().unwrap();
                     if inner.epoch == epoch {
-                        inner.writer.take();
+                        if let Some(writer) = inner.writer.take() {
+                            writer.shutdown();
+                        }
                     }
                     return Err(err);
                 }
@@ -394,9 +403,16 @@ impl LogWriter {
         for _ in 0..3 {
             let epoch = {
                 // SAFETY(rescrv):  Mutex poisoning.
-                let inner = self.inner.lock().unwrap();
+                let mut inner = self.inner.lock().unwrap();
                 if let Some(writer) = inner.writer.as_ref() {
-                    return Ok((Arc::clone(writer), inner.epoch));
+                    if !writer.done.load(std::sync::atomic::Ordering::Relaxed) {
+                        return Ok((Arc::clone(writer), inner.epoch));
+                    } else {
+                        writer.shutdown();
+                        inner.writer.take();
+                        inner.epoch += 1;
+                        continue;
+                    }
                 }
                 inner.epoch
             };
@@ -415,7 +431,7 @@ impl LogWriter {
             };
             // SAFETY(rescrv):  Mutex poisoning.
             let mut inner = self.inner.lock().unwrap();
-            if inner.epoch == epoch {
+            if inner.epoch == epoch && inner.writer.is_none() {
                 inner.epoch += 1;
                 if let Some(writer) = inner.writer.take() {
                     writer.shutdown();
@@ -425,6 +441,29 @@ impl LogWriter {
             }
         }
         Err(Error::LogContentionRetry)
+    }
+
+    pub fn count_waiters(&self) -> Option<(usize, usize)> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let inner = self.inner.lock().unwrap();
+        inner.writer.as_ref().map(|writer| {
+            (
+                writer.batch_manager.count_waiters(),
+                writer.manifest_manager.count_waiters(),
+            )
+        })
+    }
+
+    pub fn debug_dump(&self) -> String {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let inner = self.inner.lock().unwrap();
+        let Some(writer) = inner.writer.as_ref() else {
+            return "<no writer>\n".to_string();
+        };
+        let mut output = String::new();
+        output += &writer.batch_manager.debug_dump();
+        output += &writer.manifest_manager.debug_dump();
+        output
     }
 }
 
@@ -452,7 +491,7 @@ impl Drop for LogWriter {
 /// structure as the recovery procedure does, this allows us to re-use exactly one code path for
 /// both.  That code path can then be well-tested because any contention state gets exercised from
 /// the perspective of initialization.
-struct OnceLogWriter {
+pub(crate) struct OnceLogWriter {
     /// LogWriterOptions are fixed at log creation time.
     /// LogWriter is intentionally cheap to construct and destroy.
     /// Reopen the log to change the options.
@@ -469,8 +508,6 @@ struct OnceLogWriter {
     manifest_manager: ManifestManager,
     /// BatchManager coordinates batching writes to the log.
     batch_manager: BatchManager,
-    /// A background future that flushes the log.
-    flusher: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl OnceLogWriter {
@@ -482,7 +519,8 @@ impl OnceLogWriter {
         mark_dirty: Arc<dyn MarkDirty>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
-        let batch_manager = BatchManager::new(options.throttle_fragment).ok_or(Error::Internal)?;
+        let batch_manager =
+            BatchManager::new(options.throttle_fragment).ok_or_else(|| Error::Internal)?;
         let mut manifest_manager = ManifestManager::new(
             options.throttle_manifest,
             options.snapshot_manifest,
@@ -492,7 +530,6 @@ impl OnceLogWriter {
         )
         .await?;
         manifest_manager.recover(&*mark_dirty).await?;
-        let flusher = Mutex::new(None);
         let this = Arc::new(Self {
             options,
             storage,
@@ -501,44 +538,75 @@ impl OnceLogWriter {
             mark_dirty,
             manifest_manager,
             batch_manager,
-            flusher,
         });
-        let that = Arc::clone(&this);
-        let flusher = tokio::task::spawn(async move {
-            while !that.done.load(std::sync::atomic::Ordering::Relaxed) {
-                that.batch_manager.wait_for_writable().await;
-                match that.batch_manager.take_work(&that.manifest_manager) {
-                    Ok(Some((fragment_seq_no, log_position, work))) => {
-                        let _ = tokio::task::spawn(Arc::clone(&that).append_batch(
-                            fragment_seq_no,
-                            log_position,
-                            work,
-                        ))
-                        .await;
+        let that = Arc::downgrade(&this);
+        let _flusher = tokio::task::spawn(async move {
+            loop {
+                let Some(that) = that.upgrade() else {
+                    break;
+                };
+                if !that.done.load(std::sync::atomic::Ordering::Relaxed) {
+                    that.batch_manager.wait_for_writable().await;
+                    match that.batch_manager.take_work(&that.manifest_manager) {
+                        Ok(Some((fragment_seq_no, log_position, work))) => {
+                            Arc::clone(&that)
+                                .append_batch(fragment_seq_no, log_position, work)
+                                .await;
+                        }
+                        Ok(None) => {
+                            let sleep_for = that.batch_manager.until_next_time();
+                            drop(that);
+                            tokio::time::sleep(sleep_for).await;
+                        }
+                        Err(err) => {
+                            let sleep_for = that.batch_manager.until_next_time();
+                            drop(that);
+                            tracing::error!("batch_manager.take_work: {:?}", err);
+                            tokio::time::sleep(sleep_for).await;
+                        }
                     }
-                    Ok(None) => {
-                        tokio::time::sleep(that.batch_manager.until_next_time()).await;
-                    }
-                    Err(err) => {
-                        tracing::error!("batch_manager.take_work: {:?}", err);
-                        tokio::time::sleep(that.batch_manager.until_next_time()).await;
-                    }
+                } else {
+                    break;
                 }
             }
         });
-        // SAFETY(rescrv): Mutex poisoning.
-        this.flusher.lock().unwrap().replace(flusher);
         Ok(this)
     }
 
+    pub(crate) async fn open_for_read_only_and_stale_ops(
+        options: LogWriterOptions,
+        storage: Arc<Storage>,
+        prefix: String,
+        writer: String,
+        mark_dirty: Arc<dyn MarkDirty>,
+    ) -> Result<Arc<Self>, Error> {
+        let done = AtomicBool::new(false);
+        let batch_manager =
+            BatchManager::new(options.throttle_fragment).ok_or_else(|| Error::Internal)?;
+        let manifest_manager = ManifestManager::new(
+            options.throttle_manifest,
+            options.snapshot_manifest,
+            Arc::clone(&storage),
+            prefix.clone(),
+            writer,
+        )
+        .await?;
+        Ok(Arc::new(Self {
+            options,
+            storage,
+            prefix,
+            done,
+            mark_dirty,
+            manifest_manager,
+            batch_manager,
+        }))
+    }
+
     fn shutdown(&self) {
-        self.done.store(true, std::sync::atomic::Ordering::Relaxed);
-        // SAFETY(rescrv): Mutex poisoning.
-        if let Some(flusher) = self.flusher.lock().unwrap().take() {
-            flusher.abort();
-        }
         self.batch_manager.shutdown();
         self.manifest_manager.shutdown();
+        self.done.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.batch_manager.pump_write_finished();
     }
 
     async fn close(mut self: Arc<Self>) -> Result<(), Error> {
@@ -564,11 +632,21 @@ impl OnceLogWriter {
         }
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.batch_manager.push_work(messages, tx);
-        if let Some((fragment_seq_no, log_position, work)) =
-            self.batch_manager.take_work(&self.manifest_manager)?
-        {
-            let this = Arc::clone(self);
-            tokio::task::spawn(this.append_batch(fragment_seq_no, log_position, work));
+        match self.batch_manager.take_work(&self.manifest_manager) {
+            Ok(Some(work)) => {
+                let (fragment_seq_no, log_position, work) = work;
+                {
+                    tokio::task::spawn(Arc::clone(self).append_batch(
+                        fragment_seq_no,
+                        log_position,
+                        work,
+                    ));
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::error!(error = %err, "batch manager failed");
+            }
         }
         let span = tracing::info_span!("wait_for_durability");
         rx.instrument(span).await.map_err(|_| Error::Internal)?
@@ -591,7 +669,7 @@ impl OnceLogWriter {
             notifies.push((work.0.len(), work.1));
             messages.extend(work.0);
         }
-        if messages.is_empty() {
+        if notifies.is_empty() {
             tracing::error!("somehow got empty messages");
             return;
         }
@@ -608,7 +686,7 @@ impl OnceLogWriter {
                 }
             }
             Err(e) => {
-                for (_, notify) in notifies {
+                for (_, notify) in notifies.into_iter() {
                     if notify.send(Err(e.clone())).is_err() {
                         // TODO(rescrv):  Counter this.
                     }
@@ -641,8 +719,12 @@ impl OnceLogWriter {
             }
         };
         let (res1, res2) = futures::future::join(fut1, fut2).await;
-        res2?;
-        let (path, setsum, num_bytes) = res1?;
+        res2.inspect_err(|_| {
+            self.shutdown();
+        })?;
+        let (path, setsum, num_bytes) = res1.inspect_err(|_| {
+            self.shutdown();
+        })?;
         // Upload to a coalesced manifest.
         let fragment = Fragment {
             path: path.to_string(),
@@ -652,7 +734,12 @@ impl OnceLogWriter {
             num_bytes: num_bytes as u64,
             setsum,
         };
-        self.manifest_manager.publish_fragment(fragment).await?;
+        self.manifest_manager
+            .publish_fragment(fragment)
+            .await
+            .inspect_err(|_| {
+                self.shutdown();
+            })?;
         // Record the records/batches written.
         self.batch_manager.finish_write();
         Ok(log_position)
@@ -669,7 +756,7 @@ impl OnceLogWriter {
     /// Returns Ok(false) if there is no garbage to act upon (e.g., it's already been collected).
     /// Returns Ok(true) if there is garbage to act upon.
     #[tracing::instrument(skip(self, options))]
-    async fn garbage_collect_phase1_compute_garbage(
+    pub(crate) async fn garbage_collect_phase1_compute_garbage(
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
@@ -741,7 +828,7 @@ impl OnceLogWriter {
     /// Post-condition:
     /// - contents of gc/GARBAGE are removed from manifest/MANIFEST.
     #[tracing::instrument(skip(self, _options))]
-    async fn garbage_collect_phase2_update_manifest(
+    pub(crate) async fn garbage_collect_phase2_update_manifest(
         &self,
         _options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
@@ -770,7 +857,7 @@ impl OnceLogWriter {
     /// Post-condition:
     /// - gc/GARBAGE and the files it references get deleted.
     #[tracing::instrument(skip(self, options))]
-    async fn garbage_collect_phase3_delete_garbage(
+    pub(crate) async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
@@ -790,27 +877,52 @@ impl OnceLogWriter {
                 "loaded garbage without e_tag".to_string(),
             ));
         };
-        for path in garbage.prefixed_paths_to_delete(&self.prefix) {
-            loop {
-                match self.storage.delete(&path, DeleteOptions::default()).await {
-                    Ok(()) => break,
-                    Err(StorageError::NotFound { .. }) => break,
-                    Err(err) => {
-                        tracing::error!("could not cleanup garbage: {err:?}");
-                        if start.elapsed() > Duration::from_secs(600) {
-                            tracing::error!(
-                                "could not cleanup garbage within 10 minutes, returning"
-                            );
-                            return Err(Error::StorageError(Arc::new(err)));
+        let mut batch = vec![];
+        let delete_batch = |batch: Vec<String>, exp_backoff: ExponentialBackoff| {
+            let storage = Arc::clone(&self.storage);
+            async move {
+                let paths = batch.iter().map(String::as_str).collect::<Vec<_>>();
+                loop {
+                    match storage.delete_many(&paths).await {
+                        Ok(mut deleted_objects) => {
+                            for err in deleted_objects.errors.iter() {
+                                tracing::error!(error = ?err, "could not clean up");
+                            }
+                            if let Some(err) = deleted_objects.errors.pop() {
+                                return Err(Arc::new(err).into());
+                            } else {
+                                return Ok(());
+                            }
                         }
-                        let mut backoff = exp_backoff.next();
-                        if backoff > Duration::from_secs(600) {
-                            backoff = Duration::from_secs(600);
+                        Err(StorageError::NotFound { .. }) => break,
+                        Err(err) => {
+                            tracing::error!("could not cleanup garbage: {err:?}");
+                            if start.elapsed() > Duration::from_secs(600) {
+                                tracing::error!(
+                                    "could not cleanup garbage within 10 minutes, returning"
+                                );
+                                return Err(Error::StorageError(Arc::new(err)));
+                            }
+                            let mut backoff = exp_backoff.next();
+                            if backoff > Duration::from_secs(600) {
+                                backoff = Duration::from_secs(600);
+                            }
+                            tokio::time::sleep(backoff).await;
                         }
-                        tokio::time::sleep(backoff).await;
                     }
                 }
+                Ok(())
             }
+        };
+        for path in garbage.prefixed_paths_to_delete(&self.prefix) {
+            batch.push(path);
+            if batch.len() >= 100 {
+                let batch = std::mem::take(&mut batch);
+                delete_batch(batch, exp_backoff.clone()).await?;
+            }
+        }
+        if !batch.is_empty() {
+            delete_batch(batch, exp_backoff.clone()).await?;
         }
         garbage
             .reset(
@@ -824,7 +936,7 @@ impl OnceLogWriter {
     }
 
     #[tracing::instrument(skip(self))]
-    async fn garbage_collect(
+    pub(crate) async fn garbage_collect(
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
@@ -863,6 +975,12 @@ impl OnceLogWriter {
             )));
         };
         Ok(collect_up_to)
+    }
+}
+
+impl Drop for OnceLogWriter {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }
 
@@ -956,8 +1074,8 @@ pub async fn upload_parquet(
                     return Err(Error::StorageError(Arc::new(err)));
                 }
                 let mut backoff = exp_backoff.next();
-                if backoff > Duration::from_secs(3_600) {
-                    backoff = Duration::from_secs(3_600);
+                if backoff > Duration::from_secs(60) {
+                    backoff = Duration::from_secs(60);
                 }
                 tokio::time::sleep(backoff).await;
             }

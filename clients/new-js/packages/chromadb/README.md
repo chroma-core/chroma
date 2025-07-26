@@ -11,15 +11,28 @@ This package gives you a JS/TS interface to talk to a backend Chroma DB over RES
 - [💡 Colab Example](https://colab.research.google.com/drive/1QEzFyqnoFxq7LUGyP1vzR4iLt9PpCDXv?usp=sharing)
 - [🏠 Homepage](https://www.trychroma.com/)
 
+## Chroma Cloud
+
+Our hosted service, Chroma Cloud, powers serverless vector and full-text search. It's extremely fast, cost-effective, scalable and painless. Create a DB and try it out in under 30 seconds with $5 of free credits.
+
+[Get started with Chroma Cloud](https://trychroma.com/signup)
+
 ## Getting started
 
-Chroma needs to be running in order for this client to talk to it. Please see the [🧪 Usage Guide](https://docs.trychroma.com/guides) to learn how to quickly stand this up.
+First, start a Chroma server using the Chroma CLI:
+
+```bash
+chroma run
+```
+
+See more examples on our [docs](https://docs.trychroma.com/docs/overview/getting-started)
 
 ## Small example
 
 ```js
 import { ChromaClient } from "chromadb";
-const chroma = new ChromaClient({ path: "http://localhost:8000" });
+
+const chroma = new ChromaClient();
 const collection = await chroma.createCollection({ name: "test-from-js" });
 for (let i = 0; i < 20; i++) {
   await collection.add({

@@ -18,11 +18,11 @@ use chroma_cache::{CacheError, PersistentCache};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage,
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
 };
-use chroma_tracing::util::{get_current_trace_id, Stopwatch};
+use chroma_tracing::util::Stopwatch;
 use futures::{stream::FuturesUnordered, StreamExt};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::global;
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -402,9 +402,11 @@ impl BlockManager {
         &self,
         delta: impl Delta,
     ) -> Block {
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        let _stopwatch = Stopwatch::new(&self.block_metrics.commit_latency, &attribute);
+        let _stopwatch = Stopwatch::new(
+            &self.block_metrics.commit_latency,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Micros,
+        );
         let delta_id = delta.id();
         let record_batch = delta.finish::<K, V>(None);
         let block = Block::from_record_batch(delta_id, record_batch);
@@ -435,46 +437,58 @@ impl BlockManager {
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
         let block = self.block_cache.obtain(*id).await.ok().flatten();
-        match block {
-            Some(block) => Ok(Some(block)),
-            None => async {
-                let key = Self::format_key(prefix_path, id);
-                let bytes_res = self
-                    .storage
-                    .get(&key, GetOptions::new(priority))
-                    .instrument(
-                        tracing::trace_span!(parent: Span::current(), "BlockManager storage get", id = id.to_string()),
-                    )
-                    .await;
-                match bytes_res {
-                    Ok(bytes) => {
-                        let trace_id = get_current_trace_id().to_string();
-                        let attribute = [KeyValue::new("trace_id", trace_id)];
-                        self.block_metrics.num_get_requests.record(1, &attribute);
-                        let deserialization_span = tracing::trace_span!(parent: Span::current(), "BlockManager deserialize block");
-                        let block =
-                            deserialization_span.in_scope(|| Block::from_bytes(&bytes, *id));
-                        match block {
-                            Ok(block) => {
-                                self.block_cache.insert(*id, block.clone()).await;
-                                Ok(Some(block))
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Error converting bytes to Block {:?}/{:?}",
-                                    key,
-                                    e
-                                );
-                                Err(GetError::BlockLoadError(e))
-                            }
-                        }
+        if let Some(block) = block {
+            return Ok(Some(block));
+        }
+
+        // Closure cloning
+        let key = Self::format_key(prefix_path, id);
+        let id_clone = *id;
+        let block_cache_clone = self.block_cache.clone();
+        let key_clone = key.clone();
+        let num_get_requests_metric_clone = self.block_metrics.num_get_requests.clone();
+
+        let res = self.storage
+            .fetch(&key, GetOptions::new(priority), |bytes| async move {
+                let bytes = match bytes {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        tracing::error!("Error loading block from storage: {:?}", e);
+                        return Err(StorageError::Message {
+                            message: "Error loading block".to_string(),
+                        });
+                    }
+                };
+                num_get_requests_metric_clone.record(1, &[]);
+                let deserialization_span = tracing::trace_span!(
+                    parent: Span::current(),
+                    "BlockManager deserialize block",
+                    id = id_clone.to_string()
+                );
+                let block = deserialization_span.in_scope(|| Block::from_bytes(&bytes, id_clone));
+                match block {
+                    Ok(block) => {
+                        block_cache_clone.insert(id_clone, block.clone()).await;
+                        Ok(block)
                     }
                     Err(e) => {
-                        tracing::error!("Error converting bytes to Block {:?}", e);
-                        Err(GetError::StorageGetError(e))
+                        tracing::error!("Error converting bytes to Block {:?}/{:?}", key_clone, e);
+                        // TODO(hammadb): We should ideally use BlockLoadError here since that is what this level of the code expects,
+                        // however that type is not trivially Clone. Since for all practical purposes this error results in the same upstream handling
+                        // and observability properties we use a generic StorageError here.
+                        Err(StorageError::Message {
+                            message: "Error converting bytes to Block".to_string(),
+                        })
                     }
                 }
-            }.instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string())).await
+            }).instrument(tracing::trace_span!(parent: Span::current(), "BlockManager get cold", block_id = id.to_string()))
+            .await;
+        match res {
+            Ok(block) => Ok(Some(block.0)),
+            Err(e) => {
+                tracing::error!("Error fetching block from storage: {:?}", e);
+                Err(GetError::StorageGetError(e))
+            }
         }
     }
 
@@ -491,9 +505,11 @@ impl BlockManager {
             }
         };
         let key = Self::format_key(prefix_path, &block.id);
-        let trace_id = get_current_trace_id().to_string();
-        let attribute = [KeyValue::new("trace_id", trace_id)];
-        let _stopwatch = Stopwatch::new(&self.block_metrics.flush_latency, &attribute);
+        let _stopwatch = Stopwatch::new(
+            &self.block_metrics.flush_latency,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
         let block_bytes_len = bytes.len();
         let res = self
             .storage
@@ -510,7 +526,7 @@ impl BlockManager {
                     block.id,
                     block_bytes_len
                 );
-                self.block_metrics.num_blocks_flushed.record(1, &attribute);
+                self.block_metrics.num_blocks_flushed.record(1, &[]);
             }
             Err(e) => {
                 tracing::info!("Error writing block to storage {}", e);

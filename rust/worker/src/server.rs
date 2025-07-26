@@ -3,6 +3,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannMetrics};
+use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_log::Log;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
@@ -45,6 +46,7 @@ pub struct WorkerServer {
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
     port: u16,
+    jemalloc_pprof_server_port: Option<u16>,
     // config
     fetch_log_batch_size: u32,
 }
@@ -77,6 +79,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             hnsw_index_provider,
             blockfile_provider,
             port: config.my_port,
+            jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
         })
     }
@@ -92,6 +95,15 @@ impl WorkerServer {
         let server = Server::builder()
             .add_service(health_service)
             .add_service(QueryExecutorServer::new(worker.clone()));
+
+        // Start pprof server
+        let mut pprof_shutdown_tx = None;
+        if let Some(port) = worker.jemalloc_pprof_server_port {
+            tracing::info!("Starting jemalloc pprof server on port {}", port);
+            let shutdown_channel = tokio::sync::oneshot::channel();
+            pprof_shutdown_tx = Some(shutdown_channel.0);
+            spawn_pprof_server(port, shutdown_channel.1).await;
+        }
 
         #[cfg(debug_assertions)]
         let server = server.add_service(
@@ -127,6 +139,11 @@ impl WorkerServer {
         });
 
         server.await?;
+
+        // Shutdown pprof server after server is finished shutting down
+        if let Some(shutdown_tx) = pprof_shutdown_tx {
+            let _ = shutdown_tx.send(());
+        }
 
         Ok(())
     }
@@ -492,6 +509,7 @@ mod tests {
             hnsw_index_provider: segments.hnsw_provider,
             blockfile_provider: segments.blockfile_provider,
             port,
+            jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
         };
 

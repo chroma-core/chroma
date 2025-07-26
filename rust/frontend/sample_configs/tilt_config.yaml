@@ -3,6 +3,9 @@
 open_telemetry:
   service_name: "rust-frontend-service"
   endpoint: "http://otel-collector:4317"
+  filters:
+    - crate_name: "chroma_frontend"
+      filter_level: "trace"  
 sysdb:
   grpc:
     host: "sysdb.chroma"

@@ -37,14 +37,15 @@ We welcome pull requests to add new Integrations to the community.
 {% special_table %}
 {% /special_table %}
 
-|                                         | Python | JS           |
-| --------------------------------------- | ------ | ------------ |
-| [DeepEval](./frameworks/deepeval)       | ✓      | -            |
-| [Langchain](./frameworks/langchain)     | ✓      | ✓            |
-| [LlamaIndex](./frameworks/llamaindex)   | ✓      | ✓            |
-| [Braintrust](./frameworks/braintrust)   | ✓      | ✓            |
-| [OpenLLMetry](./frameworks/openllmetry) | ✓      | Coming Soon! |
-| [Streamlit](./frameworks/streamlit)     | ✓      | -            |
-| [Haystack](./frameworks/haystack)       | ✓      | -            |
-| [OpenLIT](./frameworks/openlit)         | ✓      | Coming Soon! |
-| [Anthropic MCP](./frameworks/anthropic-mcp) | ✓ | Coming Soon! |
+|                                             | Python | JS           |
+| ------------------------------------------- | ------ | ------------ |
+| [DeepEval](./frameworks/deepeval)           | ✓      | -            |
+| [Langchain](./frameworks/langchain)         | ✓      | ✓            |
+| [LlamaIndex](./frameworks/llamaindex)       | ✓      | ✓            |
+| [Braintrust](./frameworks/braintrust)       | ✓      | ✓            |
+| [OpenLLMetry](./frameworks/openllmetry)     | ✓      | Coming Soon! |
+| [Streamlit](./frameworks/streamlit)         | ✓      | -            |
+| [Haystack](./frameworks/haystack)           | ✓      | -            |
+| [OpenLIT](./frameworks/openlit)             | ✓      | Coming Soon! |
+| [Anthropic MCP](./frameworks/anthropic-mcp) | ✓      | Coming Soon! |
+| [VoltAgent](./frameworks/voltagent)         | -      | ✓            |

@@ -22,7 +22,7 @@ pub use batch_manager::BatchManager;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
 pub use destroy::destroy;
-pub use gc::Garbage;
+pub use gc::{Garbage, GarbageCollector};
 pub use manifest::{unprefixed_snapshot_path, Manifest, Snapshot, SnapshotPointer};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
@@ -305,7 +305,7 @@ impl std::ops::AddAssign<usize> for LogPosition {
 /// for different prefixes.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct ThrottleOptions {
-    /// The maximum number of bytes to batch.  Defaults to 8MB.
+    /// The maximum number of bytes to batch.  Defaults to 64MB (2 * GRPC max payload size).
     #[serde(default = "ThrottleOptions::default_batch_size_bytes")]
     pub batch_size_bytes: usize,
     /// The maximum number of microseconds to batch.  Defaults to 100ms or 100_000us.
@@ -321,7 +321,7 @@ pub struct ThrottleOptions {
 
 impl ThrottleOptions {
     fn default_batch_size_bytes() -> usize {
-        8 * 1_000_000
+        64_000_000
     }
 
     fn default_batch_interval_us() -> usize {

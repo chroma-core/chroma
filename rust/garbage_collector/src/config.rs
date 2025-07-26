@@ -2,6 +2,7 @@ use chroma_cache::CacheConfig;
 use chroma_log::config::LogConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
+use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use chroma_types::CollectionUuid;
 use figment::providers::{Env, Format, Yaml};
 use std::{
@@ -21,10 +22,12 @@ where
     Ok(Duration::from_secs(secs))
 }
 
-#[derive(Debug, serde::Deserialize, Clone)]
+#[derive(Debug, serde::Deserialize, Clone, Default)]
 pub(super) struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
+    #[serde(default = "GarbageCollectorConfig::default_otel_filters")]
+    pub(super) otel_filters: Vec<OtelFilter>,
     #[serde(
         rename = "collection_soft_delete_grace_period_seconds",
         deserialize_with = "deserialize_duration_from_seconds",
@@ -60,7 +63,9 @@ pub(super) struct GarbageCollectorConfig {
     pub root_cache_config: CacheConfig,
     pub jemalloc_pprof_server_port: Option<u16>,
     #[serde(default)]
-    pub disable_log_gc: bool,
+    pub enable_log_gc_for_tenant: Vec<String>,
+    #[serde(default = "GarbageCollectorConfig::enable_log_gc_for_tenant_threshold")]
+    pub enable_log_gc_for_tenant_threshold: String,
     pub log: LogConfig,
 }
 
@@ -98,8 +103,19 @@ impl GarbageCollectorConfig {
         50055
     }
 
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "garbage_collector".to_string(),
+            filter_level: OtelFilterLevel::Debug,
+        }]
+    }
+
     fn default_collection_soft_delete_grace_period() -> Duration {
         Duration::from_secs(60 * 60 * 24) // 1 day
+    }
+
+    fn enable_log_gc_for_tenant_threshold() -> String {
+        "00000000-0000-0000-0000-000000000000".to_string()
     }
 }
 

@@ -67,6 +67,29 @@ pub struct Dispatcher {
     waiters: Vec<TaskRequestMessage>,
     active_io_tasks: Arc<AtomicU64>,
     worker_handles: Arc<Mutex<Vec<ComponentHandle<WorkerThread>>>>,
+    metrics: DispatcherMetrics,
+}
+
+#[derive(Debug, Clone)]
+struct DispatcherMetrics {
+    worker_queue_depth: opentelemetry::metrics::Histogram<u64>,
+    io_task_depth: opentelemetry::metrics::Histogram<u64>,
+}
+
+impl Default for DispatcherMetrics {
+    fn default() -> Self {
+        let meter = opentelemetry::global::meter("chroma.execution.dispatcher");
+        DispatcherMetrics {
+            worker_queue_depth: meter
+                .u64_histogram("worker_queue_depth")
+                .with_description("The depth of the worker queue")
+                .build(),
+            io_task_depth: meter
+                .u64_histogram("io_task_depth")
+                .with_description("The depth of the IO task queue")
+                .build(),
+        }
+    }
 }
 
 impl Dispatcher {
@@ -79,6 +102,7 @@ impl Dispatcher {
             waiters: Vec::new(),
             active_io_tasks: Arc::new(AtomicU64::new(active_io_tasks as u64)),
             worker_handles: Arc::new(Mutex::new(Vec::new())),
+            metrics: DispatcherMetrics::default(),
         }
     }
 
@@ -102,6 +126,8 @@ impl Dispatcher {
     /// # Parameters
     /// - task: The task to enqueue
     async fn enqueue_task(&mut self, mut task: TaskMessage) {
+        let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string());
+        let hostname_kv = &[opentelemetry::KeyValue::new("hostname", hostname)];
         match task.get_type() {
             OperatorType::IO => {
                 let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name(), task_type = "io");
@@ -114,6 +140,7 @@ impl Dispatcher {
                 // This is conceptually what a semaphore is doing, except that it bails if
                 // acquisition fails rather than blocking.
                 let mut witness = self.active_io_tasks.load(Ordering::Relaxed);
+                self.metrics.io_task_depth.record(witness, hostname_kv);
                 loop {
                     if witness == 0 {
                         task.abort().await;
@@ -142,7 +169,9 @@ impl Dispatcher {
                 // If a worker is waiting for a task, send it to the worker in FIFO order
                 // Otherwise, add it to the task queue
                 let span = trace_span!(parent: Span::current(), "Other task execution", name = task.get_name(), task_type = "other");
-
+                self.metrics
+                    .worker_queue_depth
+                    .record(self.task_queue.len() as u64, hostname_kv);
                 match self.waiters.pop() {
                     Some(channel) => match channel.reply_to.send(task, Some(span)).await {
                         Ok(_) => {}
@@ -318,7 +347,7 @@ mod tests {
     struct MockOperator {}
     #[async_trait]
     impl Operator<f32, String> for MockOperator {
-        type Error = ();
+        type Error = std::io::Error;
 
         fn get_name(&self) -> &'static str {
             "MockOperator"
@@ -338,7 +367,7 @@ mod tests {
     struct MockIoOperator {}
     #[async_trait]
     impl Operator<String, String> for MockIoOperator {
-        type Error = ();
+        type Error = std::io::Error;
 
         fn get_name(&self) -> &'static str {
             "MockIoOperator"
@@ -392,12 +421,12 @@ mod tests {
         }
     }
     #[async_trait]
-    impl Handler<TaskResult<String, ()>> for MockIoDispatchUser {
+    impl Handler<TaskResult<String, std::io::Error>> for MockIoDispatchUser {
         type Result = ();
 
         async fn handle(
             &mut self,
-            _message: TaskResult<String, ()>,
+            _message: TaskResult<String, std::io::Error>,
             ctx: &ComponentContext<MockIoDispatchUser>,
         ) {
             self.counter.fetch_add(1, Ordering::SeqCst);
@@ -423,7 +452,12 @@ mod tests {
                 .map(char::from)
                 .collect();
             println!("Scheduling mock io operator with filename {}", filename);
-            let task = wrap(Box::new(MockIoOperator {}), filename, ctx.receiver());
+            let task = wrap(
+                Box::new(MockIoOperator {}),
+                filename,
+                ctx.receiver(),
+                ctx.cancellation_token.clone(),
+            );
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
             let _res = self.dispatcher.send(task, None).await;
@@ -455,12 +489,12 @@ mod tests {
         }
     }
     #[async_trait]
-    impl Handler<TaskResult<String, ()>> for MockDispatchUser {
+    impl Handler<TaskResult<String, std::io::Error>> for MockDispatchUser {
         type Result = ();
 
         async fn handle(
             &mut self,
-            _message: TaskResult<String, ()>,
+            _message: TaskResult<String, std::io::Error>,
             ctx: &ComponentContext<MockDispatchUser>,
         ) {
             self.counter.fetch_add(1, Ordering::SeqCst);
@@ -479,7 +513,12 @@ mod tests {
 
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
             println!("Scheduling mock cpu operator with input {}", 42.0);
-            let task = wrap(Box::new(MockOperator {}), 42.0, ctx.receiver());
+            let task = wrap(
+                Box::new(MockOperator {}),
+                42.0,
+                ctx.receiver(),
+                ctx.cancellation_token.clone(),
+            );
             let task_id = task.id();
             self.sent_tasks.lock().insert(task_id);
             let _res = self.dispatcher.send(task, None).await;

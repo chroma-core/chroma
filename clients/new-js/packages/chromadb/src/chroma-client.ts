@@ -265,7 +265,7 @@ export class ChromaClient {
     name: string;
     configuration?: CreateCollectionConfiguration;
     metadata?: CollectionMetadata;
-    embeddingFunction?: EmbeddingFunction;
+    embeddingFunction?: EmbeddingFunction | null;
   }): Promise<Collection> {
     const collectionConfig = await processCreateCollectionConfig({
       configuration,
@@ -382,7 +382,7 @@ export class ChromaClient {
     name: string;
     configuration?: CreateCollectionConfiguration;
     metadata?: CollectionMetadata;
-    embeddingFunction?: EmbeddingFunction;
+    embeddingFunction?: EmbeddingFunction | null;
   }): Promise<Collection> {
     const collectionConfig = await processCreateCollectionConfig({
       configuration,

@@ -54,6 +54,18 @@ import { ChromaClient } from "chromadb";
 const client = new ChromaClient();
 ```
 
+If you run your Chroma server using a different configuration, or [deploy](../../guides/deploy/client-server-mode) your Chroma server, you can specify the `host`, `port`, and whether the client should connect over `ssl`:
+
+```typescript
+import { ChromaClient } from "chromadb";
+
+const client = new ChromaClient({
+    host: "YOUR-HOST",
+    port: "YOUR-PORT",
+    ssl: true
+});
+```
+
 {% /Tab %}
 
 {% /Tabs %}

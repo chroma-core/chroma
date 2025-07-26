@@ -3,7 +3,7 @@ use crate::types::RENAMED_FILE_PREFIX;
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
-use chroma_storage::{DeleteOptions, StorageError};
+use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
 use futures::stream::StreamExt;
 use std::collections::HashSet;
@@ -28,13 +28,6 @@ impl DeleteUnusedFilesOperator {
     fn get_rename_path(&self, path: &str) -> String {
         format!("{}{}/{path}", RENAMED_FILE_PREFIX, self.tenant_id,)
     }
-
-    async fn delete_with_path(&self, file_path: String) -> Result<(), StorageError> {
-        self.storage
-            .delete(&file_path, DeleteOptions::default())
-            .await
-    }
-
     async fn rename_with_path(
         &self,
         file_path: String,
@@ -63,6 +56,8 @@ pub enum DeleteUnusedFilesError {
     RenameError { path: String, message: String },
     #[error("Error writing deletion list {path}: {message}")]
     WriteListError { path: String, message: String },
+    #[error("Storage error: {0}")]
+    StorageError(#[from] StorageError),
 }
 
 impl ChromaError for DeleteUnusedFilesError {
@@ -129,18 +124,18 @@ impl Operator<DeleteUnusedFilesInput, DeleteUnusedFilesOutput> for DeleteUnusedF
             CleanupMode::Delete | CleanupMode::DeleteV2 => {
                 // Hard delete - remove the file
                 if !all_files.is_empty() {
-                    let mut delete_stream = futures::stream::iter(all_files.clone())
-                        .map(move |file_path| self.delete_with_path(file_path))
-                        .buffer_unordered(100);
-
-                    // Process any errors that occurred
-                    while let Some(result) = delete_stream.next().await {
-                        if let Err(e) = result {
-                            match e {
-                                StorageError::NotFound { path, source } => {
-                                    tracing::info!("Rename file {path} not found: {source}")
+                    // The S3 DeleteObjects API allows up to 1000 objects per request
+                    for chunk in all_files.chunks(1000) {
+                        let result = self.storage.delete_many(chunk).await?;
+                        if !result.errors.is_empty() {
+                            // Log the errors but don't fail the operation
+                            for error in result.errors {
+                                match error {
+                                    StorageError::NotFound { path, source } => {
+                                        tracing::warn!("Delete file {path} not found: {source}")
+                                    }
+                                    err => return Err(DeleteUnusedFilesError::StorageError(err)),
                                 }
-                                err => tracing::error!("Failed to delete: {err}"),
                             }
                         }
                     }

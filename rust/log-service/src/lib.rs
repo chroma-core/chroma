@@ -16,16 +16,19 @@ use chroma_log::{config::GrpcLogConfig, grpc_log::GrpcLog};
 use chroma_storage::config::StorageConfig;
 use chroma_storage::Storage;
 use chroma_tracing::util::wrap_span_with_parent_context;
+use chroma_tracing::OtelFilter;
+use chroma_tracing::OtelFilterLevel;
 use chroma_types::chroma_proto::{
     garbage_collect_phase2_request::LogToCollect, log_service_client::LogServiceClient,
-    log_service_server::LogService, scrub_log_request::LogToScrub, CollectionInfo,
-    GarbageCollectPhase2Request, GarbageCollectPhase2Response,
-    GetAllCollectionInfoToCompactRequest, GetAllCollectionInfoToCompactResponse,
-    InspectDirtyLogRequest, InspectDirtyLogResponse, InspectLogStateRequest,
-    InspectLogStateResponse, LogRecord, MigrateLogRequest, MigrateLogResponse, OperationRecord,
-    PullLogsRequest, PullLogsResponse, PurgeDirtyForCollectionRequest,
-    PurgeDirtyForCollectionResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest,
-    ScoutLogsResponse, ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
+    log_service_server::LogService, purge_from_cache_request::EntryToEvict,
+    scrub_log_request::LogToScrub, CollectionInfo, GarbageCollectPhase2Request,
+    GarbageCollectPhase2Response, GetAllCollectionInfoToCompactRequest,
+    GetAllCollectionInfoToCompactResponse, InspectDirtyLogRequest, InspectDirtyLogResponse,
+    InspectLogStateRequest, InspectLogStateResponse, LogRecord, MigrateLogRequest,
+    MigrateLogResponse, OperationRecord, PullLogsRequest, PullLogsResponse,
+    PurgeDirtyForCollectionRequest, PurgeDirtyForCollectionResponse, PurgeFromCacheRequest,
+    PurgeFromCacheResponse, PushLogsRequest, PushLogsResponse, ScoutLogsRequest, ScoutLogsResponse,
+    ScrubLogRequest, ScrubLogResponse, SealLogRequest, SealLogResponse,
     UpdateCollectionLogOffsetRequest, UpdateCollectionLogOffsetResponse,
 };
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
@@ -291,6 +294,10 @@ fn cache_key_for_manifest(collection_id: CollectionUuid) -> String {
 
 fn cache_key_for_cursor(collection_id: CollectionUuid, name: &CursorName) -> String {
     format!("{collection_id}::cursor::{}", name.path())
+}
+
+fn cache_key_for_fragment(collection_id: CollectionUuid, fragment_path: &str) -> String {
+    format!("{collection_id}::{}", fragment_path)
 }
 
 ////////////////////////////////////////// CachedFragment //////////////////////////////////////////
@@ -894,8 +901,7 @@ impl LogServer {
                     let value = CachedBytes {
                         bytes: Vec::from(json_witness),
                     };
-                    let insert_span = tracing::info_span!("cache insert");
-                    cache.insert(cache_key, value).instrument(insert_span).await;
+                    cache.insert(cache_key, value).await;
                 }
                 Err(err) => {
                     tracing::error!("could not serialize cursor: {err}");
@@ -1157,8 +1163,7 @@ impl LogServer {
                 let handle = self.open_logs.get_or_create_state(key);
                 let mut _active = handle.active.lock().await;
                 let cache_key = cache_key_for_cursor(collection_id, cursor);
-                let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
-                if let Ok(Some(json_witness)) = cache.get(&cache_key).instrument(cache_span).await {
+                if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
                     let witness: Witness = serde_json::from_slice(&json_witness.bytes)?;
                     return Ok((Some(witness), None));
                 }
@@ -1169,8 +1174,7 @@ impl LogServer {
                     let value = CachedBytes {
                         bytes: Vec::from(json_witness),
                     };
-                    let insert_span = tracing::info_span!("cache insert");
-                    cache.insert(cache_key, value).instrument(insert_span).await;
+                    cache.insert(cache_key, value).await;
                 }
                 res
             } else {
@@ -1476,30 +1480,19 @@ impl LogServer {
                 .map(|fragment| async {
                     let prefix = collection_id.storage_prefix_for_log();
                     if let Some(cache) = self.cache.as_ref() {
-                        let cache_key = format!("{collection_id}::{}", fragment.path);
-                        let cache_span = tracing::info_span!("cache get", cache_key = ?cache_key);
-                        if let Ok(Some(answer)) = cache.get(&cache_key).instrument(cache_span).await
-                        {
+                        let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
+                        if let Ok(Some(answer)) = cache.get(&cache_key).await {
                             return Ok(Arc::new(answer.bytes));
                         }
-                        let fetch_span = tracing::info_span!("fragment fetch");
-                        let answer = LogReader::stateless_fetch(&self.storage, &prefix, fragment)
-                            .instrument(fetch_span)
-                            .await?;
+                        let answer =
+                            LogReader::stateless_fetch(&self.storage, &prefix, fragment).await?;
                         let cache_value = CachedBytes {
                             bytes: Clone::clone(&*answer),
                         };
-                        let insert_span = tracing::info_span!("cache insert");
-                        cache
-                            .insert(cache_key, cache_value)
-                            .instrument(insert_span)
-                            .await;
+                        cache.insert(cache_key, cache_value).await;
                         Ok(answer)
                     } else {
-                        let fetch_span = tracing::info_span!("fragment fetch");
-                        LogReader::stateless_fetch(&self.storage, &prefix, fragment)
-                            .instrument(fetch_span)
-                            .await
+                        LogReader::stateless_fetch(&self.storage, &prefix, fragment).await
                     }
                 })
                 .collect::<Vec<_>>();
@@ -2021,6 +2014,48 @@ impl LogServer {
         .instrument(span)
         .await
     }
+
+    async fn purge_from_cache(
+        &self,
+        request: Request<PurgeFromCacheRequest>,
+    ) -> Result<Response<PurgeFromCacheResponse>, Status> {
+        let span = wrap_span_with_parent_context(
+            tracing::trace_span!("PurgeFromCache",),
+            request.metadata(),
+        );
+        let purge = request.into_inner();
+        async move {
+            let key = match purge.entry_to_evict {
+                Some(EntryToEvict::CursorForCollectionId(x)) => {
+                    let collection_id = Uuid::parse_str(&x)
+                        .map(CollectionUuid)
+                        .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                    Some(cache_key_for_cursor(collection_id, &COMPACTION))
+                }
+                Some(EntryToEvict::ManifestForCollectionId(x)) => {
+                    let collection_id = Uuid::parse_str(&x)
+                        .map(CollectionUuid)
+                        .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                    Some(cache_key_for_manifest(collection_id))
+                }
+                Some(EntryToEvict::Fragment(f)) => {
+                    let collection_id = Uuid::parse_str(&f.collection_id)
+                        .map(CollectionUuid)
+                        .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                    Some(cache_key_for_fragment(collection_id, &f.fragment_path))
+                }
+                None => None,
+            };
+            if let Some(key) = key {
+                if let Some(cache) = self.cache.as_ref() {
+                    cache.remove(&key).await;
+                }
+            }
+            Ok(Response::new(PurgeFromCacheResponse {}))
+        }
+        .instrument(span)
+        .await
+    }
 }
 
 struct LogServerWrapper {
@@ -2121,6 +2156,13 @@ impl LogService for LogServerWrapper {
     ) -> Result<Response<GarbageCollectPhase2Response>, Status> {
         self.log_server.garbage_collect_phase2(request).await
     }
+
+    async fn purge_from_cache(
+        &self,
+        request: Request<PurgeFromCacheRequest>,
+    ) -> Result<Response<PurgeFromCacheResponse>, Status> {
+        self.log_server.purge_from_cache(request).await
+    }
 }
 
 fn parquet_to_records(parquet: Arc<Vec<u8>>) -> Result<Vec<(LogPosition, Vec<u8>)>, Status> {
@@ -2198,6 +2240,9 @@ impl LogServerWrapper {
             .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
             .await;
 
+        let max_encoding_message_size = log_server.config.max_encoding_message_size;
+        let max_decoding_message_size = log_server.config.max_decoding_message_size;
+
         let wrapper = LogServerWrapper {
             log_server: Arc::new(log_server),
         };
@@ -2205,7 +2250,9 @@ impl LogServerWrapper {
         let background =
             tokio::task::spawn(async move { background_server.background_task().await });
         let server = Server::builder().add_service(health_service).add_service(
-            chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper),
+            chroma_types::chroma_proto::log_service_server::LogServiceServer::new(wrapper)
+                .max_decoding_message_size(max_decoding_message_size)
+                .max_encoding_message_size(max_encoding_message_size),
         );
 
         let server = server.serve_with_shutdown(addr, async {
@@ -2242,6 +2289,13 @@ fn default_endpoint() -> String {
 
 fn default_otel_service_name() -> String {
     "rust-log-service".to_string()
+}
+
+fn default_otel_filters() -> Vec<OtelFilter> {
+    vec![OtelFilter {
+        crate_name: "chroma_log_service".to_string(),
+        filter_level: OtelFilterLevel::Trace,
+    }]
 }
 
 fn default_port() -> u16 {
@@ -2323,6 +2377,8 @@ pub struct OpenTelemetryConfig {
     pub endpoint: String,
     #[serde(default = "default_otel_service_name")]
     pub service_name: String,
+    #[serde(default = "default_otel_filters")]
+    pub filters: Vec<OtelFilter>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -2353,6 +2409,10 @@ pub struct LogServerConfig {
     pub timeout_us: u64,
     #[serde(default)]
     pub proxy_to: Option<GrpcLogConfig>,
+    #[serde(default = "LogServerConfig::default_max_encoding_message_size")]
+    pub max_encoding_message_size: usize,
+    #[serde(default = "LogServerConfig::default_max_decoding_message_size")]
+    pub max_decoding_message_size: usize,
 }
 
 impl LogServerConfig {
@@ -2384,6 +2444,14 @@ impl LogServerConfig {
     fn default_timeout_us() -> u64 {
         86_400_000_000
     }
+
+    fn default_max_encoding_message_size() -> usize {
+        32_000_000
+    }
+
+    fn default_max_decoding_message_size() -> usize {
+        32_000_000
+    }
 }
 
 impl Default for LogServerConfig {
@@ -2402,6 +2470,8 @@ impl Default for LogServerConfig {
             rollup_interval: Self::default_rollup_interval(),
             timeout_us: Self::default_timeout_us(),
             proxy_to: None,
+            max_encoding_message_size: Self::default_max_encoding_message_size(),
+            max_decoding_message_size: Self::default_max_decoding_message_size(),
         }
     }
 }
@@ -2477,7 +2547,11 @@ pub async fn log_entrypoint() {
     let registry = chroma_config::registry::Registry::new();
     if let Some(otel_config) = &config.opentelemetry {
         eprintln!("enabling tracing");
-        chroma_tracing::init_otel_tracing(&otel_config.service_name, &otel_config.endpoint);
+        chroma_tracing::init_otel_tracing(
+            &otel_config.service_name,
+            &otel_config.filters,
+            &otel_config.endpoint,
+        );
     } else {
         eprintln!("tracing disabled");
     }
@@ -3283,6 +3357,7 @@ mod tests {
         let config = OpenTelemetryConfig {
             endpoint: default_endpoint(),
             service_name: default_otel_service_name(),
+            filters: default_otel_filters(),
         };
         assert_eq!("http://otel-collector:4317", config.endpoint);
         assert_eq!("rust-log-service", config.service_name);

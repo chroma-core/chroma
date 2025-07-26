@@ -56,7 +56,7 @@ export const processCreateCollectionConfig = async ({
   embeddingFunction,
 }: {
   configuration?: CreateCollectionConfiguration;
-  embeddingFunction?: EmbeddingFunction;
+  embeddingFunction?: EmbeddingFunction | null;
 }) => {
   if (configuration?.hnsw && configuration?.spann) {
     throw new ChromaValueError(
@@ -64,11 +64,14 @@ export const processCreateCollectionConfig = async ({
     );
   }
 
-  const embeddingFunctionConfiguration =
-    serializeEmbeddingFunction({
-      embeddingFunction,
-      configEmbeddingFunction: configuration?.embeddingFunction,
-    }) || (await getDefaultEFConfig());
+  let embeddingFunctionConfiguration = serializeEmbeddingFunction({
+    embeddingFunction: embeddingFunction ?? undefined,
+    configEmbeddingFunction: configuration?.embeddingFunction,
+  });
+
+  if (!embeddingFunctionConfiguration && embeddingFunction !== null) {
+    embeddingFunctionConfiguration = await getDefaultEFConfig();
+  }
 
   return {
     ...(configuration || {}),
