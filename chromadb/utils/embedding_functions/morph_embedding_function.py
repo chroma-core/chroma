@@ -34,7 +34,8 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
             import openai
         except ImportError:
             raise ValueError(
-                "The openai python package is not installed. Please install it with `pip install openai`"
+                "The openai python package is not installed. Please install it with `pip install openai`. "
+                "Note: Morph uses the OpenAI client library for API communication."
             )
 
         if api_key is not None:
