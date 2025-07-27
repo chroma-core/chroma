@@ -22,6 +22,7 @@ import voyageaiSchema from "../../../../../../schemas/embedding_functions/voyage
 import cloudflareWorkersAiSchema from "../../../../../../schemas/embedding_functions/cloudflare_workers_ai.json";
 import togetherAiSchema from "../../../../../../schemas/embedding_functions/together_ai.json";
 import mistralSchema from "../../../../../../schemas/embedding_functions/mistral.json";
+import morphSchema from "../../../../../../schemas/embedding_functions/morph.json";
 import Ajv from "ajv";
 
 // Define a common interface for all schemas
@@ -68,6 +69,7 @@ const schemaMap = {
   "cloudflare-worker-ai": cloudflareWorkersAiSchema as Schema,
   "together-ai": togetherAiSchema as Schema,
   mistral: mistralSchema as Schema,
+  morph: morphSchema as Schema,
 };
 
 /**

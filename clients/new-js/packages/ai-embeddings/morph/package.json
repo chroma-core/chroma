@@ -9,8 +9,11 @@
         "clean": "rm -rf dist",
         "test": "jest"
     },
+    "peerDependencies": {
+        "chromadb": "workspace:^"
+    },
     "dependencies": {
-        "@chroma-core/common": "workspace:*",
+        "@chroma-core/ai-embeddings-common": "workspace:^",
         "openai": "^4.0.0"
     },
     "devDependencies": {
