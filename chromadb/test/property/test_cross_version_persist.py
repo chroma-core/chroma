@@ -179,7 +179,7 @@ def persist_generated_data_with_old_version(
 ) -> None:
     try:
         old_module = switch_to_version(version, VERSIONED_MODULES)
-        # In 0.7.0 we switch to Rust client. The old versions are using the the python SegmentAPI client
+        # In 0.7.0 we switch to Rust client. The old versions are using the python SegmentAPI client
         if "CHROMA_RUST_BINDINGS_TEST_ONLY" in os.environ and packaging_version.Version(
             version
         ) < packaging_version.Version("0.7.0"):
