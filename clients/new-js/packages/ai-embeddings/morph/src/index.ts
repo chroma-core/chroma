@@ -56,5 +56,3 @@ export class MorphEmbeddingFunction implements EmbeddingFunction {
         }
     }
 }
-
-export default MorphEmbeddingFunction; 
