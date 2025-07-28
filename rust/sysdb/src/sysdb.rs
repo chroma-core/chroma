@@ -1431,12 +1431,24 @@ pub enum FlushCompactionError {
 impl ChromaError for FlushCompactionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            FlushCompactionError::FailedToFlushCompaction(_) => ErrorCodes::Internal,
+            FlushCompactionError::FailedToFlushCompaction(status) => {
+                if std::convert::Into::<chroma_error::ErrorCodes>::into(status.code())
+                    == ErrorCodes::FailedPrecondition
+                {
+                    ErrorCodes::FailedPrecondition
+                } else {
+                    ErrorCodes::Internal
+                }
+            }
             FlushCompactionError::SegmentFlushInfoConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::FlushCompactionResponseConversionError(_) => ErrorCodes::Internal,
             FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
             FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,
         }
+    }
+
+    fn should_trace_error(&self) -> bool {
+        self.code() == ErrorCodes::Internal
     }
 }
 
