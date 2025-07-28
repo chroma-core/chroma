@@ -617,6 +617,19 @@ impl Manifest {
                 .into());
             }
         }
+        if let Some(initial_offset) = self.initial_offset {
+            let oldest_timestamp = self.oldest_timestamp();
+            if initial_offset != oldest_timestamp {
+                return Err(ScrubError::CorruptManifest {
+                    manifest: format!("{:?}", self),
+                    what: format!(
+                        "expected initial offset to be equal to oldest timestamp when present: gap {:?} != {:?}",
+                        initial_offset, oldest_timestamp,
+                    ),
+                }
+                .into());
+            }
+        }
         // TODO(rescrv):  Check the sequence numbers for sequentiality.
         Ok(ScrubSuccess {
             calculated_setsum,
@@ -814,6 +827,8 @@ impl Manifest {
         for to_drop in garbage.snapshots_to_drop.iter() {
             if let Some(index) = new.snapshots.iter().position(|s| s == to_drop) {
                 new.snapshots.remove(index);
+            } else {
+                return Err(Error::GarbageCollectionPrecondition(to_drop.clone().into()));
             }
         }
         // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
@@ -824,7 +839,7 @@ impl Manifest {
                 .position(|f| f.seq_no == FragmentSeqNo(seq_no))
             {
                 new.fragments.remove(index);
-            }
+            } // no check for precondition because fragment could be in snapshot
         }
         if let Some(snap) = garbage.snapshot_for_root.take() {
             if !new.snapshots.contains(&snap) {

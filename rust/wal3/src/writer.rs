@@ -778,7 +778,26 @@ impl OnceLogWriter {
                 match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
                     .await
                 {
-                    Ok(Some((garbage, e_tag))) => Some((garbage, e_tag)),
+                    Ok(Some((garbage, e_tag))) => {
+                        if garbage.is_empty()
+                            || self.manifest_manager.garbage_applies_cleanly(&garbage)
+                        {
+                            Some((garbage, e_tag))
+                        } else if let Some(e_tag) = e_tag {
+                            garbage
+                                .reset(
+                                    &self.options.throttle_manifest,
+                                    &self.storage,
+                                    &self.prefix,
+                                    &e_tag,
+                                )
+                                .await?;
+                            self.manifest_manager.heartbeat().await?;
+                            continue;
+                        } else {
+                            todo!();
+                        }
+                    }
                     Ok(None) => None,
                     Err(err) => {
                         return Err(err);
@@ -808,7 +827,9 @@ impl OnceLogWriter {
                 )
                 .await
             {
-                Ok(_) => return Ok(true),
+                Ok(_) => {
+                    return Ok(true);
+                }
                 Err(Error::LogContentionFailure)
                 | Err(Error::LogContentionRetry)
                 | Err(Error::LogContentionDurable) => {}

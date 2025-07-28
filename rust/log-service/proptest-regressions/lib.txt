@@ -10,3 +10,4 @@ cc 85a395fbfca69e7c9197fce89252b273c98389e3f5a773c443f405639f137e49 # shrinks to
 cc 9fbbfa4c87cfe3d41253eadb2bc048aa36bc939208cbe23e3ee5eb8094df91d4 # shrinks to read_offset = 1, batch_size = 1, operations = [OperationRecord { id: "", document: None, embedding: Some("[...]"), metadata: None, operation: Add }]
 cc ba6cef35853bca82d7527a7f42b2dbb8a6d60f3084f249993b56cf945fd83b0e # shrinks to read_offset = 1, batch_size = 1, operations = [OperationRecord { id: "", document: None, embedding: Some("[...]"), metadata: None, operation: Add }]
 cc bec924432fdfb2bd91273126b0cd30300a6988be3bbb3cf4ceb928eb8a37bacd # shrinks to initial_operations = [], source_operations = [], fork_operations = []
+cc e0d1c81368116e52cee20a4f68b1dd6e72588e14e26dfefad7d219f2edbbea8e # shrinks to operations_before_seal = [], operations_after_migrate = [OperationRecord { id: "", document: Some("..."), embedding: Some("[...]"), metadata: None, operation: Add }]
