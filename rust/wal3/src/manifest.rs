@@ -359,10 +359,10 @@ impl Manifest {
         writer: &str,
     ) -> Option<Snapshot> {
         let writer = writer.to_string();
-        let mut setsum = Setsum::default();
         let mut snapshot_depth = self.snapshots.iter().map(|s| s.depth).max().unwrap_or(0);
         while snapshot_depth > 0 {
             let mut snapshots = vec![];
+            let mut setsum = Setsum::default();
             for snapshot in self.snapshots.iter().rev() {
                 if snapshot.depth < snapshot_depth {
                     continue;
@@ -850,6 +850,10 @@ impl Manifest {
             return Err(Error::CorruptManifest(
                 "Manifest corruption detected after GC: missing first log to keep".to_string(),
             ));
+        }
+        // Align initial offset with the first available log offset
+        if new.oldest_timestamp() < garbage.first_to_keep {
+            new.initial_offset = Some(new.oldest_timestamp());
         }
         if new.next_write_timestamp() != self.next_write_timestamp() {
             tracing::error!("Manifest after garbage collection has a different max log position: expected next log position to be {:?}, but got {:?}", self.next_write_timestamp(), new.next_write_timestamp());
