@@ -92,6 +92,9 @@ impl GarbageCollectorConfig {
         if std::path::Path::new(path).exists() {
             f = figment::Figment::from(Yaml::file(path)).merge(f);
         }
+        if let Ok(config) = f.focus("garbage_collector").extract() {
+            return config;
+        }
         let res = f.extract();
         match res {
             Ok(config) => config,
