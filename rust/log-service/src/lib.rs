@@ -1966,6 +1966,13 @@ impl LogServer {
         );
         let gc2 = request.into_inner();
         async move {
+            fn handle_error_properly(err: wal3::Error) -> Status {
+                if let wal3::Error::GarbageCollectionPrecondition(what) = err {
+                    Status::failed_precondition(format!("retry from the top because of a race: {what}"))
+                } else {
+                    Status::unknown(err.to_string())
+                }
+            }
             match gc2.log_to_collect {
                 Some(LogToCollect::CollectionId(x)) => {
                     let collection_id = Uuid::parse_str(&x)
@@ -1986,12 +1993,12 @@ impl LogServer {
                         mark_dirty,
                     )
                     .await
-                    .map_err(|err| Status::unknown(err.to_string()))?;
+                    .map_err(handle_error_properly)?;
                     log.garbage_collect_phase2_update_manifest(
                         &GarbageCollectionOptions::default(),
                     )
                     .await
-                    .map_err(|err| Status::unknown(err.to_string()))?;
+                    .map_err(handle_error_properly)?;
                     Ok(Response::new(GarbageCollectPhase2Response {}))
                 }
                 Some(LogToCollect::DirtyLog(host)) => {
@@ -3713,7 +3720,9 @@ mod tests {
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
         let writer_options = LogWriterOptions {
             snapshot_manifest: SnapshotOptions {
-                snapshot_rollover_threshold: 3,
+                // We set a snapshot rollover threshold that's high enough that the test won't go
+                // on forever due to a race, but also so that we stress the conditions.
+                snapshot_rollover_threshold: 10,
                 fragment_rollover_threshold: 3,
             },
             throttle_fragment: ThrottleOptions {
@@ -3912,42 +3921,50 @@ mod tests {
         collection_id: CollectionUuid,
         first_log_position_to_keep: u64,
     ) {
-        let writer = GarbageCollector::open(
-            server.config.writer.clone(),
-            server.storage.clone(),
-            &collection_id.storage_prefix_for_log(),
-            "proptest garbage collection service",
-        )
-        .await
-        .expect("Garbage collector should be initializable");
-        if let Err(err) = writer
-            .garbage_collect_phase1_compute_garbage(
-                &Default::default(),
-                Some(LogPosition::from_offset(first_log_position_to_keep)),
+        'to_the_top: loop {
+            let writer = GarbageCollector::open(
+                server.config.writer.clone(),
+                server.storage.clone(),
+                &collection_id.storage_prefix_for_log(),
+                "proptest garbage collection service",
             )
             .await
-        {
-            println!("Log GC phase 1 error: {err}");
-            return;
-        }
-        if let Err(err) = server
-            .garbage_collect_phase2(
-                GarbageCollectPhase2Request {
-                    log_to_collect: Some(LogToCollect::CollectionId(collection_id.to_string())),
+            .expect("Garbage collector should be initializable");
+            if let Err(err) = writer
+                .garbage_collect_phase1_compute_garbage(
+                    &Default::default(),
+                    Some(LogPosition::from_offset(first_log_position_to_keep)),
+                )
+                .await
+            {
+                panic!("Log GC phase 1 error: {err}");
+            }
+            if let Err(err) = server
+                .garbage_collect_phase2(
+                    GarbageCollectPhase2Request {
+                        log_to_collect: Some(LogToCollect::CollectionId(collection_id.to_string())),
+                    }
+                    .into_request(),
+                )
+                .await
+            {
+                if matches!(
+                    err.code().into(),
+                    chroma_error::ErrorCodes::FailedPrecondition
+                ) {
+                    continue 'to_the_top;
+                } else {
+                    panic!("Log GC phase 2 error: {err}");
                 }
-                .into_request(),
-            )
-            .await
-        {
-            println!("Log GC phase 2 error: {err}");
-            return;
+            }
+            if let Err(err) = writer
+                .garbage_collect_phase3_delete_garbage(&Default::default())
+                .await
+            {
+                panic!("Log GC phase 3 error: {err}");
+            };
+            break;
         }
-        if let Err(err) = writer
-            .garbage_collect_phase3_delete_garbage(&Default::default())
-            .await
-        {
-            println!("Log GC phase 3 error: {err}");
-        };
     }
 
     fn test_push_pull_logs(

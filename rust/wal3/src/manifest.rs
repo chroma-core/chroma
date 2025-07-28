@@ -16,7 +16,7 @@ use setsum::Setsum;
 
 use crate::{
     Error, Fragment, FragmentSeqNo, Garbage, LogPosition, LogWriterOptions, ScrubError,
-    ScrubSuccess, SnapshotOptions, ThrottleOptions,
+    ScrubSuccess, SnapshotOptions, SnapshotPointerOrFragmentSeqNo, ThrottleOptions,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -583,9 +583,9 @@ impl Manifest {
             return Err(ScrubError::CorruptManifest{
                 manifest: format!("{:?}", self),
                 what: format!(
-                "expected manifest setsum does not match observed contents: expected:{} != observed:{}",
+                "expected manifest setsum does not match observed contents: expected:{} != observed:{}+{}",
                 self.setsum.hexdigest(),
-                calculated_setsum.hexdigest()
+                calculated_setsum.hexdigest(), self.collected.hexdigest(),
             )}.into());
         }
         for (lhs, rhs) in std::iter::zip(self.snapshots.iter(), self.snapshots.iter().skip(1)) {
@@ -619,6 +619,19 @@ impl Manifest {
                     what: format!(
                         "expected snapshots-fragments to be sequential within the manifest: gap {:?} -> {:?}",
                         snap.limit, frag.start,
+                    ),
+                }
+                .into());
+            }
+        }
+        if let Some(initial_offset) = self.initial_offset {
+            let oldest_timestamp = self.oldest_timestamp();
+            if initial_offset != oldest_timestamp {
+                return Err(ScrubError::CorruptManifest {
+                    manifest: format!("{:?}", self),
+                    what: format!(
+                        "expected initial offset to be equal to oldest timestamp when present: gap {:?} != {:?}",
+                        initial_offset, oldest_timestamp,
                     ),
                 }
                 .into());
@@ -807,7 +820,13 @@ impl Manifest {
 
     /// Apply the destructive operation specified by the Garbage struct.
     #[allow(clippy::result_large_err)]
-    pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Option<Self>, Error> {
+    pub fn apply_garbage(&self, garbage: Garbage) -> Result<Option<Self>, Error> {
+        if garbage.is_empty() {
+            return Err(Error::GarbageCollectionPrecondition(
+                SnapshotPointerOrFragmentSeqNo::Stringy("cannot apply empty garbage".to_string()),
+            ));
+        }
+        let mut setsum_to_discard = Setsum::default();
         if garbage.fragments_to_drop_start > garbage.fragments_to_drop_limit {
             return Err(Error::GarbageCollection(format!(
                 "Garbage has start > limit: {:?} > {:?}",
@@ -821,6 +840,7 @@ impl Manifest {
         for to_drop in garbage.snapshots_to_drop.iter() {
             if let Some(index) = new.snapshots.iter().position(|s| s == to_drop) {
                 new.snapshots.remove(index);
+                setsum_to_discard += to_drop.setsum;
             }
         }
         // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
@@ -830,13 +850,25 @@ impl Manifest {
                 .iter()
                 .position(|f| f.seq_no == FragmentSeqNo(seq_no))
             {
+                setsum_to_discard += new.fragments[index].setsum;
                 new.fragments.remove(index);
             }
         }
-        if let Some(snap) = garbage.snapshot_for_root.take() {
-            if !new.snapshots.contains(&snap) {
-                new.snapshots.insert(0, snap);
+        let mut root_setsum = Setsum::default();
+        if let Some(snap) = garbage.snapshot_for_root.as_ref() {
+            if !new.snapshots.contains(snap) {
+                root_setsum = snap.setsum;
+                new.snapshots.insert(0, snap.clone());
             }
+        }
+        if setsum_to_discard - root_setsum != garbage.setsum_to_discard {
+            return Err(Error::GarbageCollectionPrecondition(
+                SnapshotPointerOrFragmentSeqNo::Stringy(format!(
+                    "Setsum mismatch: {} != {}",
+                    setsum_to_discard.hexdigest(),
+                    garbage.setsum_to_discard.hexdigest()
+                )),
+            ));
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);

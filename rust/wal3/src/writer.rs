@@ -761,7 +761,6 @@ impl OnceLogWriter {
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<bool, Error> {
-        self.manifest_manager.heartbeat().await?;
         let cutoff = self.garbage_collection_cutoff().await?;
         let cutoff = if let Some(keep_at_least) = keep_at_least {
             keep_at_least.min(cutoff)
@@ -774,16 +773,39 @@ impl OnceLogWriter {
             if attempts > 3 {
                 return Err(Error::LogContentionFailure);
             }
-            let garbage_and_e_tag =
-                match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix)
-                    .await
-                {
-                    Ok(Some((garbage, e_tag))) => Some((garbage, e_tag)),
-                    Ok(None) => None,
-                    Err(err) => {
-                        return Err(err);
+            let garbage_and_e_tag = match Garbage::load(
+                &self.options.throttle_manifest,
+                &self.storage,
+                &self.prefix,
+            )
+            .await
+            {
+                Ok(Some((garbage, e_tag))) => {
+                    if garbage.is_empty() || self.manifest_manager.garbage_applies_cleanly(&garbage)
+                    {
+                        Some((garbage, e_tag))
+                    } else if let Some(e_tag) = e_tag {
+                        tracing::info!("resetting garbage because a concurrent snapshot write invalidated prior garbage");
+                        garbage
+                            .reset(
+                                &self.options.throttle_manifest,
+                                &self.storage,
+                                &self.prefix,
+                                &e_tag,
+                            )
+                            .await?;
+                        continue;
+                    } else {
+                        return Err(Error::GarbageCollection(
+                            "non-empty garbage without ETag".to_string(),
+                        ));
                     }
-                };
+                }
+                Ok(None) => None,
+                Err(err) => {
+                    return Err(err);
+                }
+            };
             let e_tag = if let Some((garbage, e_tag)) = garbage_and_e_tag {
                 if !garbage.is_empty() {
                     return Ok(true);
@@ -832,6 +854,7 @@ impl OnceLogWriter {
         &self,
         _options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
+        self.manifest_manager.heartbeat().await?;
         let (garbage, _) =
             match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix).await
             {
