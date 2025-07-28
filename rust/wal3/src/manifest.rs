@@ -363,12 +363,19 @@ impl Manifest {
         while snapshot_depth > 0 {
             let mut snapshots = vec![];
             let mut setsum = Setsum::default();
-            for snapshot in self.snapshots.iter().filter(|s| s.depth == snapshot_depth) {
-                if snapshots.len() < snapshot_options.snapshot_rollover_threshold {
-                    setsum += snapshot.setsum;
+            for snapshot in self.snapshots.iter().rev() {
+                if snapshot.depth < snapshot_depth {
+                    continue;
+                } else if snapshot.depth == snapshot_depth
+                    && snapshots.len() < snapshot_options.snapshot_rollover_threshold
+                {
                     snapshots.push(snapshot.clone());
+                    setsum += snapshot.setsum;
+                } else {
+                    break;
                 }
             }
+            snapshots.reverse();
             if snapshots.len() >= snapshot_options.snapshot_rollover_threshold {
                 if let Some(snap) = snapshots.iter().min_by_key(|s| s.start) {
                     if !self.snapshots.is_empty()
@@ -843,6 +850,10 @@ impl Manifest {
             return Err(Error::CorruptManifest(
                 "Manifest corruption detected after GC: missing first log to keep".to_string(),
             ));
+        }
+        // Align initial offset with the first available log offset
+        if new.oldest_timestamp() < garbage.first_to_keep {
+            new.initial_offset = Some(new.oldest_timestamp());
         }
         if new.next_write_timestamp() != self.next_write_timestamp() {
             tracing::error!("Manifest after garbage collection has a different max log position: expected next log position to be {:?}, but got {:?}", self.next_write_timestamp(), new.next_write_timestamp());

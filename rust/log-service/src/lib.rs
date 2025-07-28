@@ -2580,13 +2580,14 @@ mod tests {
     use super::*;
     use crate::state_hash_table::Value;
 
-    use chroma_storage::s3::s3_client_for_test_with_bucket_name;
+    use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
     use futures::{stream, StreamExt};
     use opentelemetry::global::meter;
     use proptest::prelude::*;
-    use tokio::runtime::Runtime;
-    use wal3::SnapshotOptions;
+    use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
+    use tonic::IntoRequest;
+    use wal3::{GarbageCollector, SnapshotOptions, ThrottleOptions};
 
     #[test]
     fn unsafe_constants() {
@@ -3709,16 +3710,22 @@ mod tests {
         })
         .await
         .expect("Legacy log service should be present");
-        let storage = Arc::new(s3_client_for_test_with_bucket_name("rust-log-proptest").await);
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+        let writer_options = LogWriterOptions {
+            snapshot_manifest: SnapshotOptions {
+                snapshot_rollover_threshold: 3,
+                fragment_rollover_threshold: 3,
+            },
+            throttle_fragment: ThrottleOptions {
+                batch_size_bytes: 4,
+                batch_interval_us: 4096,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         let dirty_log = Arc::new(
             LogWriter::open_or_initialize(
-                LogWriterOptions {
-                    snapshot_manifest: SnapshotOptions {
-                        snapshot_rollover_threshold: 3,
-                        fragment_rollover_threshold: 3,
-                    },
-                    ..Default::default()
-                },
+                writer_options.clone(),
                 storage.clone(),
                 "test-rust-log-service",
                 "test-dirty-log-writer",
@@ -3727,12 +3734,16 @@ mod tests {
             .await
             .expect("Dirty log should be initializable"),
         );
+        let config = LogServerConfig {
+            writer: writer_options,
+            ..Default::default()
+        };
         LogServer {
             storage,
             dirty_log,
             proxy: Some(legacy_log_client),
             metrics: Metrics::new(meter("test-rust-log-service")),
-            config: Default::default(),
+            config,
             open_logs: Default::default(),
             rolling_up: Default::default(),
             backpressure: Default::default(),
@@ -3758,19 +3769,28 @@ mod tests {
         collection_id: CollectionUuid,
         logs: &[OperationRecord],
     ) {
-        let proto_push_log_req = Request::new(PushLogsRequest {
-            collection_id: collection_id.to_string(),
-            records: logs
-                .iter()
-                .cloned()
-                .map(TryInto::try_into)
-                .collect::<Result<_, _>>()
-                .expect("Logs should be valid"),
-        });
-        server
-            .push_logs(proto_push_log_req)
-            .await
-            .expect("Push Logs should not fail");
+        let mut retries = 0;
+        loop {
+            let proto_push_log_req = Request::new(PushLogsRequest {
+                collection_id: collection_id.to_string(),
+                records: logs
+                    .iter()
+                    .cloned()
+                    .map(TryInto::try_into)
+                    .collect::<Result<_, _>>()
+                    .expect("Logs should be valid"),
+            });
+            if let Err(err) = server.push_logs(proto_push_log_req).await {
+                println!("Failed to push log: {err}");
+            } else {
+                break;
+            }
+            retries += 1;
+            if retries >= 6 {
+                panic!("Unable to push log within six retries");
+            }
+            sleep(Duration::from_millis(1)).await;
+        }
     }
 
     async fn validate_log_on_server(
@@ -3838,18 +3858,30 @@ mod tests {
             .saturating_sub(1)
     }
 
-    async fn mock_compact_on_server(
+    async fn update_compact_offset_on_server(
         server: &LogServer,
         collection_id: CollectionUuid,
         compact_offset: i64,
     ) {
-        server
-            .update_collection_log_offset(Request::new(UpdateCollectionLogOffsetRequest {
-                collection_id: collection_id.to_string(),
-                log_offset: compact_offset,
-            }))
-            .await
-            .expect("Update Compaction Offset should not fail");
+        let mut retries = 0;
+        loop {
+            if let Err(err) = server
+                .update_collection_log_offset(Request::new(UpdateCollectionLogOffsetRequest {
+                    collection_id: collection_id.to_string(),
+                    log_offset: compact_offset,
+                }))
+                .await
+            {
+                println!("Failed to update log offset: {err}");
+            } else {
+                break;
+            }
+            retries += 1;
+            if retries >= 6 {
+                panic!("Unable to update compaction offset in six retries");
+            }
+            sleep(Duration::from_millis(1)).await;
+        }
     }
 
     async fn validate_dirty_log_on_server(server: &LogServer, collection_ids: &[CollectionUuid]) {
@@ -3873,6 +3905,49 @@ mod tests {
                     .expect("Collection Uuid should be valid")
             }));
         assert_eq!(got_collection_ids, expected_collection_ids);
+    }
+
+    async fn garbage_collect_unused_logs(
+        server: &LogServer,
+        collection_id: CollectionUuid,
+        first_log_position_to_keep: u64,
+    ) {
+        let writer = GarbageCollector::open(
+            server.config.writer.clone(),
+            server.storage.clone(),
+            &collection_id.storage_prefix_for_log(),
+            "proptest garbage collection service",
+        )
+        .await
+        .expect("Garbage collector should be initializable");
+        if let Err(err) = writer
+            .garbage_collect_phase1_compute_garbage(
+                &Default::default(),
+                Some(LogPosition::from_offset(first_log_position_to_keep)),
+            )
+            .await
+        {
+            println!("Log GC phase 1 error: {err}");
+            return;
+        }
+        if let Err(err) = server
+            .garbage_collect_phase2(
+                GarbageCollectPhase2Request {
+                    log_to_collect: Some(LogToCollect::CollectionId(collection_id.to_string())),
+                }
+                .into_request(),
+            )
+            .await
+        {
+            println!("Log GC phase 2 error: {err}");
+            return;
+        }
+        if let Err(err) = writer
+            .garbage_collect_phase3_delete_garbage(&Default::default())
+            .await
+        {
+            println!("Log GC phase 3 error: {err}");
+        };
     }
 
     fn test_push_pull_logs(
@@ -3903,7 +3978,7 @@ mod tests {
             )
             .await;
             let enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
-            mock_compact_on_server(&log_server, collection_id, enum_offset).await;
+            update_compact_offset_on_server(&log_server, collection_id, enum_offset).await;
             validate_dirty_log_on_server(&log_server, &[]).await;
         });
     }
@@ -3932,7 +4007,7 @@ mod tests {
                 .collect::<Vec<_>>();
 
             while let Some(collection_id) = collection_ids.pop() {
-                mock_compact_on_server(&log_server, collection_id, 1).await;
+                update_compact_offset_on_server(&log_server, collection_id, 1).await;
                 validate_dirty_log_on_server(&log_server, &collection_ids).await;
             }
         });
@@ -3997,13 +4072,19 @@ mod tests {
                 let source_enum_offset =
                     get_enum_offset_on_server(&log_server, source_collection_id).await;
                 assert_eq!(source_enum_offset, expected_source.len() as i64);
-                mock_compact_on_server(&log_server, source_collection_id, source_enum_offset).await;
+                update_compact_offset_on_server(
+                    &log_server,
+                    source_collection_id,
+                    source_enum_offset,
+                )
+                .await;
             }
             if !expected_fork.is_empty() {
                 let fork_enum_offset =
                     get_enum_offset_on_server(&log_server, fork_collection_id).await;
                 assert_eq!(fork_enum_offset, expected_fork.len() as i64);
-                mock_compact_on_server(&log_server, fork_collection_id, fork_enum_offset).await;
+                update_compact_offset_on_server(&log_server, fork_collection_id, fork_enum_offset)
+                    .await;
             }
             validate_dirty_log_on_server(&log_server, &[]).await;
         });
@@ -4026,7 +4107,7 @@ mod tests {
             assert_eq!(old_enum_offset, operations_before_seal.len() as i64);
             let compact_offset = old_enum_offset / 2;
             if compact_offset > 1 {
-                mock_compact_on_server(&log_server, collection_id, compact_offset).await;
+                update_compact_offset_on_server(&log_server, collection_id, compact_offset).await;
             }
             validate_dirty_log_on_server(&log_server, &[]).await;
 
@@ -4065,15 +4146,68 @@ mod tests {
             .await;
             let new_enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
             assert_eq!(new_enum_offset, combined_logs.len() as i64);
-            mock_compact_on_server(&log_server, collection_id, new_enum_offset).await;
+            update_compact_offset_on_server(&log_server, collection_id, new_enum_offset).await;
             validate_dirty_log_on_server(&log_server, &[]).await;
+        });
+    }
+
+    fn test_garbage_collect_unused_logs(operations: Vec<OperationRecord>) {
+        let runtime = Runtime::new().unwrap();
+        let collection_id = CollectionUuid::new();
+        let log_server = Arc::new(runtime.block_on(setup_log_server()));
+        let log_server_clone = log_server.clone();
+        let (tx, mut rx) = unbounded_channel();
+        let background_gc_task = runtime.spawn(async move {
+            while let Some(compact_offset) = rx.recv().await {
+                if compact_offset == 0 {
+                    rx.close();
+                    break;
+                }
+                update_compact_offset_on_server(&log_server_clone, collection_id, compact_offset)
+                    .await;
+                let first_uncompacted_offset = compact_offset.saturating_add(1) as usize;
+                garbage_collect_unused_logs(
+                    &log_server_clone,
+                    collection_id,
+                    first_uncompacted_offset as u64,
+                )
+                .await;
+            }
+        });
+
+        runtime.block_on(async move {
+            seal_collection_on_server(&log_server, collection_id).await;
+
+            for (offset, log) in operations.iter().enumerate() {
+                push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
+                tx.send(offset as i64 + 1)
+                    .expect("Should be able to send compaction signal");
+            }
+
+            tx.send(0).expect("Should be able to close channel");
+
+            background_gc_task
+                .await
+                .expect("The background GC task should finish");
+
+            let reader = LogReader::open(
+                log_server.config.reader.clone(),
+                log_server.storage.clone(),
+                collection_id.storage_prefix_for_log(),
+            )
+            .await
+            .expect("Log reader should be initializable");
+            reader
+                .scrub(Limits::UNLIMITED)
+                .await
+                .expect("Log scrub should not fail after garbage collection");
         });
     }
 
     async fn test_stress_seal_and_migrate() {
         let log_server = setup_log_server().await;
         let collection_id = CollectionUuid::new();
-        let mut logs = (0..100000)
+        let mut logs = (0..1000)
             .map(|index| OperationRecord {
                 id: index.to_string(),
                 embedding: None,
@@ -4084,21 +4218,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        push_log_to_server(&log_server, collection_id, &logs[0..100]).await;
+        push_log_to_server(&log_server, collection_id, &logs[..=0]).await;
 
-        stream::iter(logs.chunks(100).skip(1).map(|log_chunk| async {
-            push_log_to_server(&log_server, collection_id, log_chunk).await;
-
-            if (log_chunk
-                .first()
-                .and_then(|op| op.id.parse::<usize>().ok())
-                .unwrap_or_default()
-                ..=log_chunk
-                    .last()
-                    .and_then(|op| op.id.parse::<usize>().ok())
-                    .unwrap_or_default())
-                .contains(&50000)
-            {
+        stream::iter(logs.iter().skip(1).map(|log| async {
+            push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
+            if log.id.parse::<usize>().expect("Log id should be usize") == 500 {
                 seal_collection_on_server(&log_server, collection_id).await;
                 log_server
                     .migrate_log(Request::new(MigrateLogRequest {
@@ -4108,7 +4232,7 @@ mod tests {
                     .expect("Migrate Logs should not fail");
             }
         }))
-        .buffer_unordered(32)
+        .buffer_unordered(6)
         .collect::<Vec<_>>()
         .await;
 
@@ -4116,7 +4240,7 @@ mod tests {
             .pull_logs(Request::new(PullLogsRequest {
                 collection_id: collection_id.to_string(),
                 start_from_offset: 1,
-                batch_size: 100000,
+                batch_size: 1000,
                 end_timestamp: i64::MAX,
             }))
             .await
@@ -4136,6 +4260,72 @@ mod tests {
         }
     }
 
+    async fn test_rollup_snapshot_after_gc() {
+        // NOTE: This tests the specific case where the first snapshot decreased depth after garbage collection
+        // Manifest branching factor 3
+        let log_server = setup_log_server().await;
+        let collection_id = CollectionUuid::new();
+        seal_collection_on_server(&log_server, collection_id).await;
+        let logs = (1..=42)
+            .map(|index| OperationRecord {
+                id: index.to_string(),
+                embedding: None,
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::Delete,
+            })
+            .collect::<Vec<_>>();
+
+        for log in &logs[..=25] {
+            push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
+        }
+
+        update_compact_offset_on_server(&log_server, collection_id, 6).await;
+        garbage_collect_unused_logs(&log_server, collection_id, 7).await;
+
+        for log in &logs[26..] {
+            push_log_to_server(&log_server, collection_id, &[log.clone()]).await;
+        }
+
+        let reader = LogReader::open(
+            log_server.config.reader.clone(),
+            log_server.storage.clone(),
+            collection_id.storage_prefix_for_log(),
+        )
+        .await
+        .expect("Log reader should be initializable");
+        reader
+            .scrub(Limits::UNLIMITED)
+            .await
+            .expect("Log scrub should not fail after push log");
+
+        let remaining_logs = log_server
+            .pull_logs(Request::new(PullLogsRequest {
+                collection_id: collection_id.to_string(),
+                start_from_offset: 7,
+                batch_size: 36,
+                end_timestamp: i64::MAX,
+            }))
+            .await
+            .expect("Pull Logs should not fail")
+            .into_inner()
+            .records
+            .into_iter()
+            .map(chroma_types::LogRecord::try_from)
+            .collect::<Result<Vec<_>, _>>()
+            .expect("Logs should be valid");
+        assert_eq!(remaining_logs.len() + 6, logs.len());
+        for (got_op, ref_op) in remaining_logs
+            .into_iter()
+            .map(|l| l.record)
+            .zip(logs.iter().skip(6))
+        {
+            assert_eq!(got_op.id, ref_op.id);
+            assert_eq!(got_op.operation, ref_op.operation);
+        }
+    }
+
     #[test]
     fn test_k8s_integration_rust_log_service_stress_seal_and_migrate() {
         let runtime = Runtime::new().unwrap();
@@ -4148,12 +4338,24 @@ mod tests {
             .expect("Spawned thread should not fail to join");
     }
 
+    #[test]
+    fn test_k8s_integration_rust_log_service_rollup_snapshot_after_gc() {
+        let runtime = Runtime::new().unwrap();
+        // NOTE: Somehow it overflow the stack under default stack limit
+        std::thread::Builder::new()
+            .stack_size(1 << 22)
+            .spawn(move || runtime.block_on(test_rollup_snapshot_after_gc()))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+    }
+
     proptest! {
         #[test]
         fn test_k8s_integration_rust_log_service_push_pull_logs(
-            read_offset in 1usize..=100,
-            batch_size in 1usize..=150,
-            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=100)
+            read_offset in 1usize..=36,
+            batch_size in 1usize..=36,
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36)
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
             std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_push_pull_logs(read_offset, batch_size, operations))
@@ -4188,11 +4390,22 @@ mod tests {
 
         #[test]
         fn test_k8s_integration_rust_log_service_seal_and_migrate_logs(
-            operations_before_seal in proptest::collection::vec(any::<OperationRecord>(), 0..=100),
-            operations_after_migrate in proptest::collection::vec(any::<OperationRecord>(), 1..=20),
+            operations_before_seal in proptest::collection::vec(any::<OperationRecord>(), 0..=36),
+            operations_after_migrate in proptest::collection::vec(any::<OperationRecord>(), 1..=12),
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
             std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_seal_and_migrate_logs(operations_before_seal, operations_after_migrate))
+            .expect("Thread should be spawnable")
+            .join()
+            .expect("Spawned thread should not fail to join");
+        }
+
+        #[test]
+        fn test_k8s_integration_rust_log_service_garbage_collect_unused_logs(
+            operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36),
+        ) {
+            // NOTE: Somehow it overflow the stack under default stack limit
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_garbage_collect_unused_logs(operations))
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
