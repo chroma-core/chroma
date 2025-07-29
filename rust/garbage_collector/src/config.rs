@@ -90,7 +90,8 @@ impl GarbageCollectorConfig {
             k => k.as_str().replace("__", ".").into(),
         }));
         if std::path::Path::new(path).exists() {
-            f = figment::Figment::from(Yaml::file(path)).merge(f);
+            let yaml = figment::Figment::from(Yaml::file(path));
+            f = yaml.clone().merge(yaml.focus("garbage_collector")).merge(f);
         }
         let res = f.extract();
         match res {

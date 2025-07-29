@@ -1,8 +1,6 @@
 # Default values for distributed-chroma.
 # Strongly prefer single quotes.
-
 namespace: 'chroma'
-
 rustFrontendService:
   image:
     repository: 'rust-frontend-service'
@@ -15,15 +13,14 @@ rustFrontendService:
     requests:
       cpu: '1000m'
       memory: '512Mi'
-
 sysdb:
   image:
     repository: 'sysdb'
     tag: 'latest'
   replicaCount: 1
   env:
-  - name: OPTL_TRACING_ENDPOINT
-    value: 'value: "jaeger:4317"'
+    - name: OPTL_TRACING_ENDPOINT
+      value: 'value: "jaeger:4317"'
   resources:
     limits:
       cpu: '2000m'
@@ -32,21 +29,17 @@ sysdb:
       cpu: '1000m'
       memory: '512Mi'
   flags:
-
-
 logService:
   image:
     repository: 'logservice'
     tag: 'latest'
   env:
-  - name: OPTL_TRACING_ENDPOINT
-    value: 'value: "otel-collector:4317"'
-  - name: SYSDB_CONN
-    value: 'value: "sysdb.chroma:50051"'
+    - name: OPTL_TRACING_ENDPOINT
+      value: 'value: "otel-collector:4317"'
+    - name: SYSDB_CONN
+      value: 'value: "sysdb.chroma:50051"'
   flags:
   replicaCount: 1
-
-
 rustLogService:
   image:
     repository: 'rust-log-service'
@@ -54,7 +47,6 @@ rustLogService:
   cache:
     hostPath: '/local/cache/chroma-log-service'
     mountPath: '/cache/'
-
 queryService:
   image:
     repository: 'query-service'
@@ -64,7 +56,6 @@ queryService:
     hostPath: '/local/cache/chroma-query-service'
     mountPath: '/cache/'
   replicaCount: 2
-
 compactionService:
   image:
     repository: 'compaction-service'
@@ -74,7 +65,6 @@ compactionService:
     hostPath: '/local/cache/chroma-compaction-service'
     mountPath: '/cache/'
   replicaCount: 1
-
 sysdbMigration:
   image:
     repository: 'sysdb-migration'
@@ -85,15 +75,13 @@ sysdbMigration:
   port: 5432
   dbName: sysdb
   sslmode: disable
-
 logServiceMigration:
   image:
     repository: 'logservice-migration'
     tag: 'latest'
   env:
-  - name: CHROMA_DB_LOG_URL
-    value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'
-
+    - name: CHROMA_DB_LOG_URL
+      value: 'value: "postgresql://chroma:chroma@postgres.chroma.svc.cluster.local:5432/log?sslmode=disable"'
 # Add the garbage collector configuration
 garbageCollector:
   image:
@@ -110,41 +98,3 @@ garbageCollector:
   cache:
     hostPath: '/local/cache/chroma-garbage-collector'
     mountPath: '/cache/'
-  configuration: |
-    service_name: "garbage-collector"
-    otel_endpoint: "http://otel-collector:4317"
-    otel_filters:
-      - crate_name: "garbage_collector"
-        filter_level: "debug"
-    relative_cutoff_time_seconds: 60 # GC all versions created at time < now() - relative_cutoff_time_seconds (1 minute)
-    max_collections_to_gc: 1000
-    gc_interval_mins: 1
-    disallow_collections: []
-    default_mode: "deletev2"
-    sysdb_config:
-      host: "sysdb.chroma"
-      port: 50051
-      connect_timeout_ms: 60000
-      request_timeout_ms: 60000
-    dispatcher_config:
-      num_worker_threads: 4
-      dispatcher_queue_size: 100
-      worker_queue_size: 100
-    storage_config:
-      s3:
-        bucket: "chroma-storage"
-    assignment_policy:
-      rendezvous_hashing:
-        hasher: Murmur3
-    memberlist_provider:
-      custom_resource:
-        kube_namespace: "chroma"
-        memberlist_name: "garbage-collection-service-memberlist"
-        queue_size: 100
-    log:
-      grpc:
-        host: "logservice.chroma"
-        port: 50051
-        connect_timeout_ms: 5000
-        request_timeout_ms: 5000
-        alt_host: "rust-log-service.chroma"
