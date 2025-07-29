@@ -481,9 +481,11 @@ impl AdmissionControlledS3Storage {
                         let fetched = AdmissionControlledS3Storage::execute_fetch(fetch_fn, res)
                             .await
                             .map(|(r, e_tag)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tag));
-                        let mut requests = outstanding_read_requests.lock().await;
+
+                        // Clean up the requests map entry.
                         // SAFETY(hammadb): We just created this entry above, and only this task remove it,
                         // so it must exist.
+                        let mut requests = outstanding_read_requests.lock().await;
                         let mut inflight = requests.remove(&key_clone).expect("Key must exist");
                         drop(requests);
                         for output_tx in inflight.senders.drain(..) {
