@@ -449,7 +449,7 @@ impl BlockManager {
         let num_get_requests_metric_clone = self.block_metrics.num_get_requests.clone();
 
         let res = self.storage
-            .fetch(&key, GetOptions::new(priority), |bytes| async move {
+            .fetch(&key, GetOptions::new(priority), move |bytes| async move {
                 let bytes = match bytes {
                     Ok(bytes) => bytes,
                     Err(e) => {
