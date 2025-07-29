@@ -466,14 +466,14 @@ impl Bindings {
     }
 
     #[pyo3(
-        signature = (collection_id, ids, embeddings = None, metadatas = None, documents = None, uris = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (collection_id, ids, embeddings, metadatas = None, documents = None, uris = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     #[allow(clippy::too_many_arguments)]
     fn upsert(
         &self,
         collection_id: String,
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,

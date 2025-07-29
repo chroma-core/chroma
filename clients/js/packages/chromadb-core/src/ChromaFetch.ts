@@ -16,9 +16,9 @@ import { FetchAPI } from "./generated";
 function isOfflineError(error: any): boolean {
   return Boolean(
     (error?.name === "TypeError" || error?.name === "FetchError") &&
-    (error.message?.includes("fetch failed") ||
-      error.message?.includes("Failed to fetch") ||
-      error.message?.includes("ENOTFOUND")),
+      (error.message?.includes("fetch failed") ||
+        error.message?.includes("Failed to fetch") ||
+        error.message?.includes("ENOTFOUND")),
   );
 }
 
@@ -78,10 +78,8 @@ export const chromaFetch: FetchAPI = async (
         case 422:
           if (
             respBody?.message &&
-            (
-              respBody?.message.startsWith("Quota exceeded") ||
-              respBody?.message.startsWith("Billing limit exceeded")
-            )
+            (respBody?.message.startsWith("Quota exceeded") ||
+              respBody?.message.startsWith("Billing limit exceeded"))
           ) {
             throw new ChromaQuotaExceededError(respBody?.message);
           }
