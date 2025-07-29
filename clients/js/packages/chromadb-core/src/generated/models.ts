@@ -18,12 +18,12 @@ export namespace Api {
     embeddings: Api.EmbeddingsPayload;
     ids: string[];
     metadatas?:
-    | ({ [name: string]: boolean | number | number | string } | null)[]
-    | null;
+      | ({ [name: string]: boolean | number | number | string } | null)[]
+      | null;
     uris?: (string | null)[] | null;
   }
 
-  export interface AddCollectionRecordsResponse { }
+  export interface AddCollectionRecordsResponse {}
 
   export interface ChecklistResponse {
     /**
@@ -81,13 +81,13 @@ export namespace Api {
     name: string;
   }
 
-  export interface CreateDatabaseResponse { }
+  export interface CreateDatabaseResponse {}
 
   export interface CreateTenantPayload {
     name: string;
   }
 
-  export interface CreateTenantResponse { }
+  export interface CreateTenantResponse {}
 
   export interface Database {
     id: string;
@@ -99,9 +99,9 @@ export namespace Api {
     ids?: string[] | null;
   }
 
-  export interface DeleteCollectionRecordsResponse { }
+  export interface DeleteCollectionRecordsResponse {}
 
-  export interface DeleteDatabaseResponse { }
+  export interface DeleteDatabaseResponse {}
 
   export type EmbeddingFunctionConfiguration =
     | Api.EmbeddingFunctionConfiguration.ObjectValue
@@ -180,8 +180,8 @@ export namespace Api {
     ids: string[];
     include: Api.Include[];
     metadatas?:
-    | ({ [name: string]: boolean | number | number | string } | null)[]
-    | null;
+      | ({ [name: string]: boolean | number | number | string } | null)[]
+      | null;
     uris?: (string | null)[] | null;
   }
 
@@ -270,8 +270,8 @@ export namespace Api {
     ids: string[][];
     include: Api.Include[];
     metadatas?:
-    | ({ [name: string]: boolean | number | number | string } | null)[][]
-    | null;
+      | ({ [name: string]: boolean | number | number | string } | null)[][]
+      | null;
     uris?: (string | null)[][] | null;
   }
 
@@ -351,14 +351,14 @@ export namespace Api {
     embeddings?: Api.UpdateEmbeddingsPayload | null;
     ids: string[];
     metadatas?:
-    | ({ [name: string]: boolean | number | number | string } | null)[]
-    | null;
+      | ({ [name: string]: boolean | number | number | string } | null)[]
+      | null;
     uris?: (string | null)[] | null;
   }
 
-  export interface UpdateCollectionRecordsResponse { }
+  export interface UpdateCollectionRecordsResponse {}
 
-  export interface UpdateCollectionResponse { }
+  export interface UpdateCollectionResponse {}
 
   export type UpdateEmbeddingsPayload = (number[] | null)[] | (string | null)[];
 
@@ -420,12 +420,12 @@ export namespace Api {
     embeddings: Api.EmbeddingsPayload;
     ids: string[];
     metadatas?:
-    | ({ [name: string]: boolean | number | number | string } | null)[]
-    | null;
+      | ({ [name: string]: boolean | number | number | string } | null)[]
+      | null;
     uris?: (string | null)[] | null;
   }
 
-  export interface UpsertCollectionRecordsResponse { }
+  export interface UpsertCollectionRecordsResponse {}
 
   export interface Vec2 {
     configuration_json: Api.CollectionConfiguration;
