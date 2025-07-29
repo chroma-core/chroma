@@ -286,7 +286,10 @@ impl HnswIndexProvider {
                     tracing::info!("Loading hnsw index file: {} into directory", key);
                     let bytes_res = self
                         .storage
-                        .get_parallel(&key, GetOptions::new(StorageRequestPriority::P0))
+                        .get(
+                            &key,
+                            GetOptions::new(StorageRequestPriority::P0).with_parallelism(),
+                        )
                         .await;
                     let bytes_read;
                     let buf = match bytes_res {

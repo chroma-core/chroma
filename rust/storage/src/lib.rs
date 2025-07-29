@@ -223,7 +223,7 @@ impl Storage {
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
             Storage::ObjectStore(object_store) => Ok(object_store.get(key).await?),
-            Storage::S3(s3) => s3.get(key).await,
+            Storage::S3(s3) => s3.get(key, options).await,
             Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage.get(key, options).await
@@ -278,23 +278,6 @@ impl Storage {
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage
                     .get_with_e_tag(key, options)
-                    .await
-            }
-        }
-    }
-
-    pub async fn get_parallel(
-        &self,
-        key: &str,
-        options: GetOptions,
-    ) -> Result<Arc<Vec<u8>>, StorageError> {
-        match self {
-            Storage::ObjectStore(object_store) => object_store.get_parallel(key).await,
-            Storage::S3(s3) => s3.get_parallel(key).await.map(|res| res.0),
-            Storage::Local(local) => local.get(key).await,
-            Storage::AdmissionControlledS3(admission_controlled_storage) => {
-                admission_controlled_storage
-                    .get_parallel(key.to_string(), options)
                     .await
             }
         }
@@ -481,6 +464,9 @@ impl PutOptions {
 pub struct GetOptions {
     priority: StorageRequestPriority,
     requires_strong_consistency: bool,
+    // If the underlying storage system would benefit from parallel requests
+    // this requests parallel loading of the object.
+    request_parallelism: bool,
 }
 
 impl GetOptions {
@@ -488,11 +474,17 @@ impl GetOptions {
         Self {
             priority,
             requires_strong_consistency: false,
+            request_parallelism: false,
         }
     }
 
     pub fn with_strong_consistency(mut self) -> Self {
         self.requires_strong_consistency = true;
+        self
+    }
+
+    pub fn with_parallelism(mut self) -> Self {
+        self.request_parallelism = true;
         self
     }
 }
