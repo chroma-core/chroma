@@ -33,11 +33,8 @@ pub type DeleteUnusedLogsOutput = ();
 
 #[derive(Debug, Error)]
 pub enum DeleteUnusedLogsError {
-    #[error("failed to garbage collect in wal3 for {collection_id}: {err}")]
-    Wal3 {
-        collection_id: CollectionUuid,
-        err: wal3::Error,
-    },
+    #[error(transparent)]
+    Wal3(#[from] wal3::Error),
     #[error(transparent)]
     Gc(#[from] chroma_log::GarbageCollectError),
 }
@@ -71,7 +68,6 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
             let mut log_gc_futures = Vec::with_capacity(input.collections_to_garbage_collect.len());
             for (collection_id, minimum_log_offset_to_keep) in &input.collections_to_garbage_collect
             {
-                let collection_id = *collection_id;
                 let storage_clone = storage_arc.clone();
                 let mut logs = self.logs.clone();
                 log_gc_futures.push(async move {
@@ -87,7 +83,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                         Err(wal3::Error::UninitializedLog) => return Ok(()),
                         Err(err) => {
                             tracing::error!("Unable to initialize log writer for collection [{collection_id}]: {err}");
-                            return Err(DeleteUnusedLogsError::Wal3{ collection_id, err})
+                            return Err(DeleteUnusedLogsError::Wal3(err))
                         }
                     };
                     // See README.md in wal3 for a description of why this happens in three phases.
@@ -96,10 +92,10 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                         Ok(false) => return Ok(()),
                         Err(err) => {
                             tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
-                            return Err(DeleteUnusedLogsError::Wal3{ collection_id, err});
+                            return Err(DeleteUnusedLogsError::Wal3(err));
                         }
                     };
-                    if let Err(err) = logs.garbage_collect_phase2(collection_id).await {
+                    if let Err(err) = logs.garbage_collect_phase2(*collection_id).await {
                         tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
                         return Err(DeleteUnusedLogsError::Gc(err));
                     };
@@ -107,7 +103,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                         CleanupMode::Delete | CleanupMode::DeleteV2 => {
                             if let Err(err) = writer.garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default()).await {
                                 tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
-                                return Err(DeleteUnusedLogsError::Wal3{ collection_id, err});
+                                return Err(DeleteUnusedLogsError::Wal3(err));
                             };
                         }
                         mode => {
@@ -129,7 +125,6 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                     let mut log_destroy_futures =
                         Vec::with_capacity(input.collections_to_destroy.len());
                     for collection_id in &input.collections_to_destroy {
-                        let collection_id = *collection_id;
                         let storage_clone = storage_arc.clone();
                         log_destroy_futures.push(async move {
                             match wal3::destroy(storage_clone, &collection_id.storage_prefix_for_log())
@@ -140,7 +135,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                                     tracing::error!(
                                         "Unable to destroy log for collection [{collection_id}]: {err:?}"
                                     );
-                                    Err(DeleteUnusedLogsError::Wal3{ collection_id, err})
+                                    Err(DeleteUnusedLogsError::Wal3(err))
                                 }
                             }
                         })
