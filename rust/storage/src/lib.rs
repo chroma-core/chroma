@@ -238,7 +238,7 @@ impl Storage {
         fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Option<ETag>), StorageError>
     where
-        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut + Send + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {

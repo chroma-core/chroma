@@ -15,7 +15,7 @@ object_store = { version = "0.11", features = ["aws"] }
 
 async-trait = { workspace = true }
 futures = { workspace = true }
-rand = { workspace = true}
+rand = { workspace = true }
 serde = { workspace = true }
 tempfile = { workspace = true }
 thiserror.workspace = true
