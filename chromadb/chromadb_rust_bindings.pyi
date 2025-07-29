@@ -145,7 +145,7 @@ class Bindings:
         self,
         collection_id: str,
         ids: IDs,
-        embeddings: Optional[Embeddings] = None,
+        embeddings: Embeddings,
         metadatas: Optional[Metadatas] = None,
         documents: Optional[Documents] = None,
         uris: Optional[URIs] = None,
