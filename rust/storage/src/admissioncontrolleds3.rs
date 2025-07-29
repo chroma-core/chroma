@@ -72,7 +72,7 @@ impl Default for AdmissionControlledS3StorageMetrics {
                 .build(),
             nac_lock_wait_duration_us: meter
                 .u64_histogram("nac_lock_wait_duration_us")
-                .with_description("Duration of waiting for the lock in microseconds")
+                .with_description("Duration spent holding the lock in microseconds")
                 .with_unit("us")
                 .build(),
             nac_outstanding_read_requests: meter
@@ -107,7 +107,7 @@ struct InflightRequest {
 
 impl InflightRequest {
     // Not thread safe.
-    async fn update_priority(
+    async fn maybe_update_priority(
         &self,
         priority: StorageRequestPriority,
         update_priority_counter: Counter<u64>,
@@ -319,7 +319,7 @@ impl AdmissionControlledS3Storage {
         fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Option<ETag>), StorageError>
     where
-        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut + Send + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
@@ -367,7 +367,7 @@ impl AdmissionControlledS3Storage {
         fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Option<ETag>), StorageError>
     where
-        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut,
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut + Send + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
@@ -388,12 +388,13 @@ impl AdmissionControlledS3Storage {
                 .fetch_sub(1, Ordering::Relaxed);
             return Self::execute_fetch(fetch_fn, res).await;
         }
+
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
         // request to S3.
         let any_res;
         {
-            let _stopwatch = Stopwatch::new(
+            let lock_held_duration = Stopwatch::new(
                 &self.metrics.nac_lock_wait_duration_us,
                 &self.metrics.hostname_attribute,
                 chroma_tracing::util::StopWatchUnit::Micros,
@@ -406,7 +407,7 @@ impl AdmissionControlledS3Storage {
                         .add(1, &self.metrics.hostname_attribute);
                     // Update the priority if the new request has higher priority.
                     inflight_req
-                        .update_priority(
+                        .maybe_update_priority(
                             options.priority,
                             self.metrics.nac_priority_increase_sent.clone(),
                             &self.metrics.hostname_attribute,
@@ -417,6 +418,7 @@ impl AdmissionControlledS3Storage {
                     // can make progress.
                     inflight_req.senders.push(output_tx);
                     drop(requests);
+                    drop(lock_held_duration);
                     output_rx.await.map_err(|e| {
                         tracing::error!("Unexpected channel closure: {}", e);
                         StorageError::Generic {
@@ -427,60 +429,83 @@ impl AdmissionControlledS3Storage {
                 None => {
                     let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
                     let (priority_tx, priority_rx) = tokio::sync::mpsc::channel(100);
+                    let (output_tx, output_rx) = tokio::sync::oneshot::channel();
                     requests.insert(
                         key.to_string(),
                         InflightRequest {
                             priority: atomic_priority.clone(),
                             priority_upgrade_channel: Some(priority_tx),
-                            // The driving task is not a waiter
-                            senders: vec![],
+                            senders: vec![output_tx],
                         },
                     );
-                    // Release the lock before running the network request
+                    // Release the lock before spawning the network request task
                     drop(requests);
-                    let res = match is_parallel {
-                        true => {
+                    drop(lock_held_duration);
+
+                    // Clones for the spawned task.
+                    let read_requests_waiting_for_token =
+                        self.metrics.read_requests_waiting_for_token.clone();
+                    let nac_read_requests_waiting_for_token =
+                        self.metrics.nac_read_requests_waiting_for_token.clone();
+                    let hostname_attr = self.metrics.hostname_attribute.clone();
+                    let storage_clone = self.storage.clone();
+                    let rate_limiter_clone = self.rate_limiter.clone();
+                    let outstanding_read_requests = self.outstanding_read_requests.clone();
+                    let key_clone = key.to_string();
+
+                    // NOTE(hammadb): If the upstream request gets cancelled, we still
+                    // finish the request once it has been spawned, if its cancelled
+                    // before it has been spawned, then the task will never run.
+                    tokio::spawn(async move {
+                        let res = if is_parallel {
                             AdmissionControlledS3Storage::parallel_fetch(
-                                self.storage.clone(),
-                                self.rate_limiter.clone(),
-                                key.to_string(),
+                                storage_clone,
+                                rate_limiter_clone,
+                                key_clone.clone(),
                                 atomic_priority,
-                                self.metrics.read_requests_waiting_for_token.clone(),
-                                self.metrics.nac_read_requests_waiting_for_token.clone(),
-                                self.metrics.hostname_attribute.clone(),
+                                read_requests_waiting_for_token,
+                                nac_read_requests_waiting_for_token,
+                                hostname_attr,
                             )
                             .await
-                        }
-                        false => {
+                        } else {
                             AdmissionControlledS3Storage::read_from_storage(
-                                self.storage.clone(),
-                                self.rate_limiter.clone(),
-                                key.to_string(),
+                                storage_clone,
+                                rate_limiter_clone,
+                                key_clone.clone(),
                                 atomic_priority,
                                 Some(priority_rx),
-                                self.metrics.read_requests_waiting_for_token.clone(),
-                                self.metrics.nac_read_requests_waiting_for_token.clone(),
-                                self.metrics.hostname_attribute.clone(),
+                                read_requests_waiting_for_token,
+                                nac_read_requests_waiting_for_token,
+                                hostname_attr,
                             )
                             .await
-                        }
-                    };
-                    let fetched = Self::execute_fetch(fetch_fn, res)
-                        .await
-                        .map(|(r, e_tag)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tag));
-                    let mut requests = self.outstanding_read_requests.lock().await;
-                    // SAFETY(hammadb): We just created this entry above, so it must exist.
-                    let mut inflight = requests.remove(key).expect("Key must exist");
-                    drop(requests);
-                    for output_tx in inflight.senders.drain(..) {
-                        output_tx.send(fetched.clone()).map_err(|_| {
-                            tracing::error!("Unexpected channel closure");
-                            StorageError::Message {
-                                message: "Failed to send response to waiting task".to_string(),
+                        };
+                        let fetched = AdmissionControlledS3Storage::execute_fetch(fetch_fn, res)
+                            .await
+                            .map(|(r, e_tag)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tag));
+
+                        // Clean up the requests map entry.
+                        // SAFETY(hammadb): We just created this entry above, and only this task remove it,
+                        // so it must exist.
+                        let mut requests = outstanding_read_requests.lock().await;
+                        let mut inflight = requests.remove(&key_clone).expect("Key must exist");
+                        drop(requests);
+                        for output_tx in inflight.senders.drain(..) {
+                            match output_tx.send(fetched.clone()) {
+                                Ok(_) => {}
+                                Err(_) => {
+                                    tracing::error!("Unexpected channel closure, the calling task must have been dropped");
+                                }
                             }
-                        })?;
-                    }
-                    fetched?
+                        }
+                    });
+                    output_rx.await.map_err(|e| {
+                        tracing::error!("Unexpected channel closure: {}", e);
+                        StorageError::Generic {
+                            source: Arc::new(e),
+                        }
+                    })??
                 }
             };
         }
