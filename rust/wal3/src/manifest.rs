@@ -16,7 +16,7 @@ use setsum::Setsum;
 
 use crate::{
     Error, Fragment, FragmentSeqNo, Garbage, LogPosition, LogWriterOptions, ScrubError,
-    ScrubSuccess, SnapshotOptions, ThrottleOptions,
+    ScrubSuccess, SnapshotOptions, SnapshotPointerOrFragmentSeqNo, ThrottleOptions,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -567,6 +567,27 @@ impl Manifest {
             .find(|f| f.limit.offset() >= position.offset())
     }
 
+    /// Round down to the nearest boundary so that the given log position will not bisect a
+    /// snapshot or fragment in the manifest.  If the given log position does not overlap any
+    /// snapshot or fragment, None will be returned.
+    pub fn round_to_boundary(&self, position: LogPosition) -> Option<LogPosition> {
+        for snapshot in self.snapshots.iter() {
+            if LogPosition::contains_offset(snapshot.start, snapshot.limit, position.offset) {
+                return Some(snapshot.start);
+            }
+        }
+        for fragment in self.fragments.iter() {
+            if LogPosition::contains_offset(fragment.start, fragment.limit, position.offset) {
+                return Some(fragment.start);
+            }
+        }
+        if position == self.next_write_timestamp() {
+            Some(position)
+        } else {
+            None
+        }
+    }
+
     /// Scrub the manifest without doing I/O.
     pub fn scrub(&self) -> Result<ScrubSuccess, Box<ScrubError>> {
         let mut calculated_setsum = Setsum::default();
@@ -583,9 +604,9 @@ impl Manifest {
             return Err(ScrubError::CorruptManifest{
                 manifest: format!("{:?}", self),
                 what: format!(
-                "expected manifest setsum does not match observed contents: expected:{} != observed:{}",
+                "expected manifest setsum does not match observed contents: expected:{} != observed:{}+{}",
                 self.setsum.hexdigest(),
-                calculated_setsum.hexdigest()
+                calculated_setsum.hexdigest(), self.collected.hexdigest(),
             )}.into());
         }
         for (lhs, rhs) in std::iter::zip(self.snapshots.iter(), self.snapshots.iter().skip(1)) {
@@ -619,6 +640,19 @@ impl Manifest {
                     what: format!(
                         "expected snapshots-fragments to be sequential within the manifest: gap {:?} -> {:?}",
                         snap.limit, frag.start,
+                    ),
+                }
+                .into());
+            }
+        }
+        if let Some(initial_offset) = self.initial_offset {
+            let oldest_timestamp = self.oldest_timestamp();
+            if initial_offset != oldest_timestamp {
+                return Err(ScrubError::CorruptManifest {
+                    manifest: format!("{:?}", self),
+                    what: format!(
+                        "expected initial offset to be equal to oldest timestamp when present: gap {:?} != {:?}",
+                        initial_offset, oldest_timestamp,
                     ),
                 }
                 .into());
@@ -807,7 +841,13 @@ impl Manifest {
 
     /// Apply the destructive operation specified by the Garbage struct.
     #[allow(clippy::result_large_err)]
-    pub fn apply_garbage(&self, mut garbage: Garbage) -> Result<Option<Self>, Error> {
+    pub fn apply_garbage(&self, garbage: Garbage) -> Result<Option<Self>, Error> {
+        if garbage.is_empty() {
+            return Err(Error::GarbageCollectionPrecondition(
+                SnapshotPointerOrFragmentSeqNo::Stringy("cannot apply empty garbage".to_string()),
+            ));
+        }
+        let mut setsum_to_discard = Setsum::default();
         if garbage.fragments_to_drop_start > garbage.fragments_to_drop_limit {
             return Err(Error::GarbageCollection(format!(
                 "Garbage has start > limit: {:?} > {:?}",
@@ -821,6 +861,7 @@ impl Manifest {
         for to_drop in garbage.snapshots_to_drop.iter() {
             if let Some(index) = new.snapshots.iter().position(|s| s == to_drop) {
                 new.snapshots.remove(index);
+                setsum_to_discard += to_drop.setsum;
             }
         }
         // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
@@ -830,13 +871,25 @@ impl Manifest {
                 .iter()
                 .position(|f| f.seq_no == FragmentSeqNo(seq_no))
             {
+                setsum_to_discard += new.fragments[index].setsum;
                 new.fragments.remove(index);
             }
         }
-        if let Some(snap) = garbage.snapshot_for_root.take() {
-            if !new.snapshots.contains(&snap) {
-                new.snapshots.insert(0, snap);
+        let mut root_setsum = Setsum::default();
+        if let Some(snap) = garbage.snapshot_for_root.as_ref() {
+            if !new.snapshots.contains(snap) {
+                root_setsum = snap.setsum;
+                new.snapshots.insert(0, snap.clone());
             }
+        }
+        if setsum_to_discard - root_setsum != garbage.setsum_to_discard {
+            return Err(Error::GarbageCollectionPrecondition(
+                SnapshotPointerOrFragmentSeqNo::Stringy(format!(
+                    "Setsum mismatch: {} != {}",
+                    setsum_to_discard.hexdigest(),
+                    garbage.setsum_to_discard.hexdigest()
+                )),
+            ));
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);
@@ -850,10 +903,6 @@ impl Manifest {
             return Err(Error::CorruptManifest(
                 "Manifest corruption detected after GC: missing first log to keep".to_string(),
             ));
-        }
-        // Align initial offset with the first available log offset
-        if new.oldest_timestamp() < garbage.first_to_keep {
-            new.initial_offset = Some(new.oldest_timestamp());
         }
         if new.next_write_timestamp() != self.next_write_timestamp() {
             tracing::error!("Manifest after garbage collection has a different max log position: expected next log position to be {:?}, but got {:?}", self.next_write_timestamp(), new.next_write_timestamp());

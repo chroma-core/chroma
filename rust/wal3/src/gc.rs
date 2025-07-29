@@ -64,6 +64,11 @@ impl Garbage {
         snapshots: &dyn SnapshotCache,
         first_to_keep: LogPosition,
     ) -> Result<Option<Self>, Error> {
+        let Some(first_to_keep) = manifest.round_to_boundary(first_to_keep) else {
+            return Err(Error::CorruptGarbage(
+                "First to keep does not overlap manifest.".to_string(),
+            ));
+        };
         let dropped_snapshots = manifest
             .snapshots
             .iter()

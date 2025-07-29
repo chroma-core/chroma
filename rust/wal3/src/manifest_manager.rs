@@ -9,7 +9,7 @@ use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
     unprefixed_fragment_path, Error, Fragment, FragmentSeqNo, GarbageCollectionOptions,
-    LogPosition, SnapshotCache, SnapshotOptions, ThrottleOptions,
+    LogPosition, SnapshotCache, SnapshotOptions, SnapshotPointerOrFragmentSeqNo, ThrottleOptions,
 };
 
 ////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
@@ -93,13 +93,21 @@ impl Staging {
         }
         self.last_batch = Instant::now();
         let snapshot = if let Some((garbage, notifier)) = self.garbage.take() {
-            notifiers.push(notifier);
             match new_manifest.apply_garbage(garbage) {
-                Ok(Some(manifest)) => new_manifest = manifest,
+                Ok(Some(manifest)) => {
+                    notifiers.push(notifier);
+                    new_manifest = manifest
+                }
                 Ok(None) => {
                     tracing::error!("given empty garbage that did not apply");
+                    let _ = notifier.send(Some(Error::GarbageCollectionPrecondition(
+                        SnapshotPointerOrFragmentSeqNo::Stringy(
+                            "given empty garbage that did not apply".to_string(),
+                        ),
+                    )));
                 }
                 Err(err) => {
+                    notifiers.push(notifier);
                     tracing::error!("could not apply garabage: {err:?}");
                     for notifier in notifiers {
                         let _ = notifier.send(Some(err.clone()));
@@ -199,6 +207,8 @@ pub struct ManifestManager {
     writer: String,
     /// Staging area for manifests to be written.
     staging: Mutex<Staging>,
+    /// Only one thread doing work at a time.
+    do_work_mutex: tokio::sync::Mutex<()>,
 }
 
 impl ManifestManager {
@@ -229,6 +239,7 @@ impl ManifestManager {
             last_batch: Instant::now(),
             tearing_down: false,
         });
+        let do_work_mutex = tokio::sync::Mutex::new(());
         Ok(Self {
             throttle,
             snapshot,
@@ -236,6 +247,7 @@ impl ManifestManager {
             prefix,
             writer,
             staging,
+            do_work_mutex,
         })
     }
 
@@ -353,6 +365,14 @@ impl ManifestManager {
         }
     }
 
+    pub fn garbage_applies_cleanly(&self, garbage: &Garbage) -> bool {
+        let latest = {
+            let staging = self.staging.lock().unwrap();
+            staging.stable.manifest.clone()
+        };
+        matches!(latest.apply_garbage(garbage.clone()), Ok(Some(_)))
+    }
+
     // Given garbage that has already been written to S3, apply the garbage collection to this
     // manifest.
     pub async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error> {
@@ -386,6 +406,7 @@ impl ManifestManager {
     }
 
     async fn do_work(&self) {
+        let _guard = self.do_work_mutex.lock().await;
         let mut iters = 0;
         for i in 0..u64::MAX {
             iters = i + 1;
