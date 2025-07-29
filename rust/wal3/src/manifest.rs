@@ -567,6 +567,27 @@ impl Manifest {
             .find(|f| f.limit.offset() >= position.offset())
     }
 
+    /// Round down to the nearest boundary so that the given log position will not bisect a
+    /// snapshot or fragment in the manifest.  If the given log position does not overlap any
+    /// snapshot or fragment, None will be returned.
+    pub fn round_to_boundary(&self, position: LogPosition) -> Option<LogPosition> {
+        for snapshot in self.snapshots.iter() {
+            if LogPosition::contains_offset(snapshot.start, snapshot.limit, position.offset) {
+                return Some(snapshot.start);
+            }
+        }
+        for fragment in self.fragments.iter() {
+            if LogPosition::contains_offset(fragment.start, fragment.limit, position.offset) {
+                return Some(fragment.start);
+            }
+        }
+        if position == self.next_write_timestamp() {
+            Some(position)
+        } else {
+            None
+        }
+    }
+
     /// Scrub the manifest without doing I/O.
     pub fn scrub(&self) -> Result<ScrubSuccess, Box<ScrubError>> {
         let mut calculated_setsum = Setsum::default();
@@ -882,10 +903,6 @@ impl Manifest {
             return Err(Error::CorruptManifest(
                 "Manifest corruption detected after GC: missing first log to keep".to_string(),
             ));
-        }
-        // Align initial offset with the first available log offset
-        if new.oldest_timestamp() < garbage.first_to_keep {
-            new.initial_offset = Some(new.oldest_timestamp());
         }
         if new.next_write_timestamp() != self.next_write_timestamp() {
             tracing::error!("Manifest after garbage collection has a different max log position: expected next log position to be {:?}, but got {:?}", self.next_write_timestamp(), new.next_write_timestamp());
