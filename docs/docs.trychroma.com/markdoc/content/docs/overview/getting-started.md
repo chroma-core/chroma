@@ -188,7 +188,7 @@ You can query the collection with a list of query texts, and Chroma will return 
 {% Tab label="python" %}
 ```python
 results = collection.query(
-    query_texts=["This is a query document about hawaii"], # Chroma will embed this for you
+    query_texts=["This is a query document about Hawaii"], # Chroma will embed this for you
     n_results=2 # how many results to return
 )
 print(results)
@@ -199,7 +199,7 @@ print(results)
 {% Tab label="typescript" %}
 ```typescript
 const results = await collection.query({
-    queryTexts: ["This is a query document about hawaii"], // Chroma will embed this for you
+    queryTexts: ["This is a query document about Hawaii"], // Chroma will embed this for you
     nResults: 2, // how many results to return
 });
 
@@ -213,7 +213,7 @@ If `n_results` is not provided, Chroma will return 10 results by default. Here w
 
 ### 6. Inspect Results
 
-From the above - you can see that our query about `hawaii` is semantically most similar to the document about `pineapple`.
+From the above - you can see that our query about `Hawaii` is semantically most similar to the document about `pineapple`.
 
 {% TabbedCodeBlock %}
 
@@ -259,7 +259,7 @@ From the above - you can see that our query about `hawaii` is semantically most 
 
 ### 7. Try it out yourself
 
-What if we tried querying with `"This is a document about florida"`? Here is a full example.
+What if we tried querying with `"This is a document about Florida"`? Here is a full example.
 
 {% TabbedCodeBlock %}
 
@@ -281,7 +281,7 @@ collection.upsert(
 )
 
 results = collection.query(
-    query_texts=["This is a query document about florida"], # Chroma will embed this for you
+    query_texts=["This is a query document about Florida"], # Chroma will embed this for you
     n_results=2 # how many results to return
 )
 
@@ -309,7 +309,7 @@ await collection.upsert({
 });
 
 const results = await collection.query({
-    queryTexts: ["This is a query document about florida"], // Chroma will embed this for you
+    queryTexts: ["This is a query document about Florida"], // Chroma will embed this for you
     nResults: 2, // how many results to return
 });
 
