@@ -72,7 +72,7 @@ impl Default for AdmissionControlledS3StorageMetrics {
                 .build(),
             nac_lock_wait_duration_us: meter
                 .u64_histogram("nac_lock_wait_duration_us")
-                .with_description("Duration spent holdiing the lock in microseconds")
+                .with_description("Duration spent holding the lock in microseconds")
                 .with_unit("us")
                 .build(),
             nac_outstanding_read_requests: meter
