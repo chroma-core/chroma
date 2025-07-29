@@ -843,12 +843,6 @@ impl SpannIndexWriter {
     ) -> Result<(), SpannIndexWriterError> {
         // Don't reassign if outdated by now.
         if self.is_outdated(doc_offset_id, doc_version).await? {
-            tracing::debug!(
-                "Outdated point {} for reassignment version {} current head id {}",
-                doc_offset_id,
-                doc_version,
-                prev_head_id
-            );
             return Ok(());
         }
         // RNG query to find the nearest heads.
@@ -871,12 +865,6 @@ impl SpannIndexWriter {
                 .get(&doc_offset_id)
                 .ok_or(SpannIndexWriterError::VersionNotFound)?;
             if Self::is_deleted(*current_version) || doc_version < *current_version {
-                tracing::debug!(
-                    "Outdated point {} for reassignment version {} current head id {}",
-                    doc_offset_id,
-                    doc_version,
-                    prev_head_id
-                );
                 return Ok(());
             }
             next_version = *current_version + 1;
@@ -890,21 +878,8 @@ impl SpannIndexWriter {
             .zip(nearest_head_embeddings.into_iter())
         {
             if self.is_outdated(doc_offset_id, next_version).await? {
-                tracing::debug!(
-                    "Outdated point {} for reassignment version {} current head id {}",
-                    doc_offset_id,
-                    doc_version,
-                    prev_head_id
-                );
                 return Ok(());
             }
-            tracing::debug!(
-                "Reassigning {} to head {} incremented version {} current head id {}",
-                doc_offset_id,
-                nearest_head_id,
-                next_version,
-                prev_head_id
-            );
             self.stats
                 .num_reassigns
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1074,12 +1049,6 @@ impl SpannIndexWriter {
         {
             let write_guard = self.posting_list_partitioned_mutex.lock(&head_id).await;
             if self.is_head_deleted(head_id as usize).await? {
-                tracing::info!(
-                    "Head {} got concurrently deleted for adding point {} at version {}. Reassigning now",
-                    head_id,
-                    id,
-                    version
-                );
                 if self.is_outdated(id, version).await? {
                     return Ok(());
                 }
@@ -1180,10 +1149,6 @@ impl SpannIndexWriter {
             self.stats
                 .num_splits
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            tracing::debug!(
-                "Splitting posting list of head {} since it exceeds threshold in lieu of appending point {} at version {}",
-                head_id, id, version
-            );
             // Otherwise split the posting list.
             local_indices.truncate(up_to_date_index);
             // Shuffle local_indices.
@@ -1280,10 +1245,6 @@ impl SpannIndexWriter {
                             .distance(&clustering_output.cluster_centers[k], &head_embedding)
                             < 1e-6
                     {
-                        tracing::debug!(
-                            "One of the heads remains the same id {} after splitting in lieu of adding point {} at version {}",
-                            head_id, id, version
-                        );
                         same_head = true;
                         let posting_list = SpannPostingList {
                             doc_offset_ids: &new_doc_offset_ids[k],
@@ -1311,10 +1272,6 @@ impl SpannIndexWriter {
                         let next_id = self
                             .next_head_id
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        tracing::debug!(
-                            "Creating new head {}, old head {} in lieu of adding point {} at version {}",
-                            next_id, head_id, id, version
-                        );
                         let posting_list = SpannPostingList {
                             doc_offset_ids: &new_doc_offset_ids[k],
                             doc_versions: &new_doc_versions[k],
@@ -1342,7 +1299,6 @@ impl SpannIndexWriter {
                         let hnsw_len = hnsw_write_guard.hnsw_index.len_with_deleted();
                         let hnsw_capacity = hnsw_write_guard.hnsw_index.capacity();
                         if hnsw_len + 1 > hnsw_capacity {
-                            tracing::info!("Resizing hnsw index to {}", hnsw_capacity * 2);
                             hnsw_write_guard
                                 .hnsw_index
                                 .resize(hnsw_capacity * 2)
@@ -1372,12 +1328,6 @@ impl SpannIndexWriter {
                     }
                 }
                 if !same_head {
-                    tracing::debug!(
-                        "Deleting head {} after splitting in lieu of adding point {} at version {}",
-                        head_id,
-                        id,
-                        version
-                    );
                     // Delete the old head
                     let hnsw_write_guard = self.hnsw_index.inner.write();
                     hnsw_write_guard
@@ -1425,20 +1375,9 @@ impl SpannIndexWriter {
         // It's fine to create new centers for each of them since the number of such points
         // will be very small and we can also run GC to merge them later if needed.
         if ids.is_empty() {
-            tracing::info!(
-                "No nearby heads found for adding {} at version {}. Creating a new head",
-                id,
-                version
-            );
             let next_id = self
                 .next_head_id
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            tracing::debug!(
-                "Created new head {} in lieu of adding point {} at version {}",
-                next_id,
-                id,
-                version
-            );
             // First add to postings list then to hnsw. This order is important
             // to ensure that if and when the center is discoverable, it also exists
             // in the postings list. Otherwise, it will be a dangling center.
@@ -1465,7 +1404,6 @@ impl SpannIndexWriter {
                 let hnsw_len = write_guard.hnsw_index.len_with_deleted();
                 let hnsw_capacity = write_guard.hnsw_index.capacity();
                 if hnsw_len + 1 > hnsw_capacity {
-                    tracing::info!("Resizing hnsw index to {}", hnsw_capacity * 2);
                     write_guard
                         .hnsw_index
                         .resize(hnsw_capacity * 2)
@@ -1712,7 +1650,6 @@ impl SpannIndexWriter {
                 return Ok(());
             }
             if source_cluster_len == 0 {
-                tracing::info!("Posting list of {} is empty. Deleting from hnsw", head_id);
                 // Delete from hnsw.
                 let hnsw_write_guard = self.hnsw_index.inner.write();
                 hnsw_write_guard.hnsw_index.delete(head_id).map_err(|e| {
@@ -1976,7 +1913,6 @@ impl SpannIndexWriter {
                 let hnsw_len = clean_hnsw_write_guard.hnsw_index.len_with_deleted();
                 let hnsw_capacity = clean_hnsw_write_guard.hnsw_index.capacity();
                 if hnsw_len + 1 > hnsw_capacity {
-                    tracing::info!("Resizing hnsw index to {}", hnsw_capacity * 2);
                     clean_hnsw_write_guard
                         .hnsw_index
                         .resize(hnsw_capacity * 2)
@@ -2045,7 +1981,6 @@ impl SpannIndexWriter {
                     SpannIndexWriterError::HnswIndexSearchError(e)
                 })?
                 .ok_or(SpannIndexWriterError::HeadNotFound)?;
-            tracing::debug!("Garbage collecting head {}", head_id);
             self.garbage_collect_head(*head_id, &head_embedding).await?;
         }
         Ok(())
