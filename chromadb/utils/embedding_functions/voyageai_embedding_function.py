@@ -1,12 +1,23 @@
-from chromadb.api.types import EmbeddingFunction, Space, Embeddings, Documents
+from chromadb.api.types import (
+    EmbeddingFunction,
+    Space,
+    Embeddings,
+    Embeddable,
+    Image,
+    Document,
+    is_image,
+    is_document,
+)
+
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 import os
 import numpy as np
 import warnings
+import importlib
 
 
-class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
+class VoyageAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to generate embeddings for a list of texts using the VoyageAI API.
     """
@@ -18,6 +29,8 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         api_key_env_var: str = "CHROMA_VOYAGE_API_KEY",
         input_type: Optional[str] = None,
         truncation: bool = True,
+        dimensions: Optional[int] = None,
+        embedding_type: Optional[str] = None,
     ):
         """
         Initialize the VoyageAIEmbeddingFunction.
@@ -40,6 +53,13 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 "The voyageai python package is not installed. Please install it with `pip install voyageai`"
             )
 
+        try:
+            self._PILImage = importlib.import_module("PIL.Image")
+        except ImportError:
+            raise ValueError(
+                "The PIL python package is not installed. Please install it with `pip install pillow`"
+            )
+
         if api_key is not None:
             warnings.warn(
                 "Direct api_key configuration will not be persisted. "
@@ -55,29 +75,75 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         self.model_name = model_name
         self.input_type = input_type
         self.truncation = truncation
+        self.dimensions = dimensions
+        self.embedding_type = embedding_type
         self._client = voyageai.Client(api_key=self.api_key)
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
-        Generate embeddings for the given documents.
+        Generate embeddings for the given documents or images.
 
         Args:
-            input: Documents to generate embeddings for.
+            input: Documents or images to generate embeddings for.
 
         Returns:
-            Embeddings for the documents.
+            Embeddings for the documents or images.
         """
-        embeddings = self._client.embed(
-            texts=input,
-            model=self.model_name,
-            input_type=self.input_type,
-            truncation=self.truncation,
-        )
+        if self._is_context_model():
+            embeddings = (
+                self._client.contextualized_embed(
+                    inputs=[input],
+                    model=self.model_name,
+                    input_type=self.input_type,
+                    output_dimension=self.dimensions,
+                )
+                .results[0]
+                .embeddings
+            )
+        elif self._is_multimodal_model():
+            embeddings = self._client.multimodal_embed(
+                inputs=[[self.convert(i)] for i in input],
+                model=self.model_name,
+                input_type=self.input_type,
+                truncation=self.truncation,
+            ).embeddings
+        else:
+            embeddings = self._client.embed(
+                texts=input,
+                model=self.model_name,
+                input_type=self.input_type,
+                truncation=self.truncation,
+                output_dimension=self.dimensions,
+            ).embeddings
 
         # Convert to numpy arrays
-        return [
-            np.array(embedding, dtype=np.float32) for embedding in embeddings.embeddings
-        ]
+        return [np.array(embedding, dtype=np.float32) for embedding in embeddings]
+
+    def convert(self, embeddable: Union[Image, Document]) -> Any:
+        if is_document(embeddable):
+            return embeddable
+        elif is_image(embeddable):
+            # Convert to numpy array and ensure proper dtype for PIL
+            image_array = np.array(embeddable)
+
+            # Convert to uint8 if not already, clipping values to valid range
+            if image_array.dtype != np.uint8:
+                # Normalize to 0-255 range if values are outside uint8 range
+                if image_array.max() > 255 or image_array.min() < 0:
+                    image_array = np.clip(image_array, 0, 255)
+                image_array = image_array.astype(np.uint8)
+
+            return self._PILImage.fromarray(image_array)
+        else:
+            return None
+
+    def _is_context_model(self) -> bool:
+        """Check if the model is a contextualized embedding model."""
+        return "context" in self.model_name
+
+    def _is_multimodal_model(self) -> bool:
+        """Check if the model is a contextualized embedding model."""
+        return "multimodal" in self.model_name
 
     @staticmethod
     def name() -> str:
@@ -90,7 +156,7 @@ class VoyageAIEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
         input_type = config.get("input_type")
