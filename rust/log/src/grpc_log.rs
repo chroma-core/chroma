@@ -25,6 +25,7 @@ use std::time::Duration;
 use thiserror::Error;
 use tonic::transport::Endpoint;
 use tower::ServiceBuilder;
+use tracing::Level;
 use uuid::Uuid;
 
 use crate::GarbageCollectError;
@@ -479,7 +480,9 @@ impl GrpcLog {
             .map_err(|err| {
                 if err.code() == ErrorCodes::Unavailable.into()
                     || err.code() == ErrorCodes::AlreadyExists.into()
+                    || err.code() == ErrorCodes::ResourceExhausted.into()
                 {
+                    tracing::event!(Level::INFO, name = "backoff reason", error =? err);
                     GrpcPushLogsError::Backoff
                 } else {
                     err.into()
