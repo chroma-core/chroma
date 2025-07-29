@@ -389,6 +389,9 @@ impl AdmissionControlledS3Storage {
             return Self::execute_fetch(fetch_fn, res).await;
         }
 
+        // If there is a duplicate request and the original request finishes
+        // before we look it up in the map below then we will end up with another
+        // request to S3.
         let any_res;
         {
             let lock_held_duration = Stopwatch::new(
