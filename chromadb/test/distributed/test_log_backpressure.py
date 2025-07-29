@@ -38,16 +38,17 @@ def test_log_backpressure(
     print('backpressuring for', collection.id)
 
     excepted = False
-    try:
-        # Add RECORDS records, where each embedding has 3 dimensions randomly generated between 0 and 1
-        for i in range(0, RECORDS, BATCH_SIZE):
-            ids = []
-            embeddings = []
-            ids.extend([str(x) for x in range(i, i + BATCH_SIZE)])
-            embeddings.extend([np.random.rand(1, 3)[0] for x in range(i, i + BATCH_SIZE)])
+    # Add RECORDS records, where each embedding has 3 dimensions randomly generated between 0 and 1
+    for i in range(0, RECORDS, BATCH_SIZE):
+        ids = []
+        embeddings = []
+        ids.extend([str(x) for x in range(i, i + BATCH_SIZE)])
+        embeddings.extend([np.random.rand(1, 3)[0] for x in range(i, i + BATCH_SIZE)])
+        try:
             collection.add(ids=ids, embeddings=embeddings)
-    except Exception as x:
-        print(f"Caught exception:\n{x}")
-        if 'log needs compaction' in str(x):
-            excepted = True
+        except Exception as x:
+            print(f"Caught exception:\n{x}")
+            if 'Backoff and retry' in str(x):
+                excepted = True
+                break
     assert excepted, "Expected an exception to be thrown."

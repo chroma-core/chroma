@@ -62,6 +62,8 @@ impl ChromaError for GrpcPullLogsError {
 pub enum GrpcPushLogsError {
     #[error("Please backoff exponentially and retry")]
     Backoff,
+    #[error("Please backoff exponentially and retry: log needs compaction")]
+    BackoffCompaction,
     #[error("The log is sealed.  No writes can happen.")]
     Sealed,
     #[error("Failed to push logs: {0}")]
@@ -76,6 +78,7 @@ impl ChromaError for GrpcPushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
             GrpcPushLogsError::Backoff => ErrorCodes::AlreadyExists,
+            GrpcPushLogsError::BackoffCompaction => ErrorCodes::AlreadyExists,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
             GrpcPushLogsError::Sealed => ErrorCodes::FailedPrecondition,
@@ -480,10 +483,12 @@ impl GrpcLog {
             .map_err(|err| {
                 if err.code() == ErrorCodes::Unavailable.into()
                     || err.code() == ErrorCodes::AlreadyExists.into()
-                    || err.code() == ErrorCodes::ResourceExhausted.into()
                 {
                     tracing::event!(Level::INFO, name = "backoff reason", error =? err);
                     GrpcPushLogsError::Backoff
+                } else if err.code() == ErrorCodes::ResourceExhausted.into() {
+                    tracing::event!(Level::INFO, name = "backoff reason", error =? err);
+                    GrpcPushLogsError::BackoffCompaction
                 } else {
                     err.into()
                 }
