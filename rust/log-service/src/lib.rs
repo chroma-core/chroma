@@ -1978,6 +1978,7 @@ impl LogServer {
                     let collection_id = Uuid::parse_str(&x)
                         .map(CollectionUuid)
                         .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+                    tracing::event!(Level::INFO, collection_id =? collection_id);
                     let prefix = collection_id.storage_prefix_for_log();
                     let key = LogKey { collection_id };
                     let mark_dirty = MarkDirty {
@@ -2007,6 +2008,7 @@ impl LogServer {
                             format!("can only perform gc phase 2 on our own dirty log:  I am {}, but was asked for {}", self.config.my_member_id, host),
                         ));
                     }
+                    tracing::event!(Level::INFO, host =? host);
                     self.dirty_log
                         .garbage_collect_phase2_update_manifest(
                             &GarbageCollectionOptions::default(),
