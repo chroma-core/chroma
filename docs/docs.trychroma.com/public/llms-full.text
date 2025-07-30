@@ -600,7 +600,7 @@ await collection.add({
 
 If you add a record with an ID that already exists in the collection, it will be ignored and no exception will be raised. This means that if a batch add operation fails, you can safely run it again.
 
-Alternatively, you can supply a list of document-associated `embeddings` directly, and Chroma will store the associated documents without embedding them itself. Note that in this case there will be no guarantee that the embedding is the representation of the document.
+Alternatively, you can supply a list of document-associated `embeddings` directly, and Chroma will store the associated documents without embedding them itself. Note that in this case there will be no guarantee that the embedding is a representation of the document.
 
 {% TabbedCodeBlock %}
 
