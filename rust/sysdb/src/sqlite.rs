@@ -373,7 +373,9 @@ impl SqliteSysDb {
             let collections = collections.unwrap();
             let collection = collections.into_iter().next().unwrap();
             let mut existing_configuration = collection.config;
-            existing_configuration.update(&configuration);
+            existing_configuration
+                .update(&configuration)
+                .map_err(|e| UpdateCollectionError::Internal(e.boxed()))?;
             configuration_json_str = Some(
                 serde_json::to_string(&existing_configuration)
                     .map_err(UpdateCollectionError::Configuration)?,
@@ -1362,6 +1364,7 @@ mod tests {
                     }),
                     spann: None,
                     embedding_function: None,
+                    schema: None,
                 }),
             )
             .await

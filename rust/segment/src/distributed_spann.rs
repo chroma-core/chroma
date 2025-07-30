@@ -659,6 +659,7 @@ mod test {
             config: chroma_types::InternalCollectionConfiguration {
                 vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
                 embedding_function: None,
+                schema: None,
             },
             metadata: None,
             dimension: None,
@@ -893,6 +894,7 @@ mod test {
             config: InternalCollectionConfiguration {
                 vector_index: chroma_types::VectorIndexConfiguration::Spann(params),
                 embedding_function: None,
+                schema: None,
             },
             ..Default::default()
         };

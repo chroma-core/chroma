@@ -67,7 +67,14 @@ export namespace Api {
   export interface CollectionConfiguration {
     embedding_function?: Api.EmbeddingFunctionConfiguration | null;
     hnsw?: Api.HnswConfiguration | null;
+    schema?: {
+      [name: string]: { [name: string]: Api.CollectionSchema };
+    } | null;
     spann?: Api.SpannConfiguration | null;
+  }
+
+  export interface CollectionSchema {
+    metadata_index: boolean;
   }
 
   export interface CreateCollectionPayload {
@@ -335,6 +342,9 @@ export namespace Api {
   export interface UpdateCollectionConfiguration {
     embedding_function?: Api.EmbeddingFunctionConfiguration | null;
     hnsw?: Api.UpdateHnswConfiguration | null;
+    schema?: {
+      [name: string]: { [name: string]: Api.CollectionSchema };
+    } | null;
     spann?: Api.UpdateSpannConfiguration | null;
   }
 
