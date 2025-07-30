@@ -4,6 +4,7 @@ use chroma_index::spann::types::SpannPosting;
 use chroma_segment::distributed_spann::SpannSegmentReader;
 use chroma_system::{Operator, OperatorType};
 use thiserror::Error;
+use tracing::Instrument;
 
 #[derive(Debug)]
 pub(crate) struct SpannFetchPlInput<'referred_data> {
@@ -58,6 +59,10 @@ impl<'referred_data> Operator<SpannFetchPlInput<'referred_data>, SpannFetchPlOut
             Some(reader) => {
                 let posting_list = reader
                     .fetch_posting_list(input.head_id)
+                    .instrument(tracing::info_span!(
+                        parent: tracing::Span::current(),
+                        "Fetch single posting list in SpannFetchPlOperator",
+                    ))
                     .await
                     .map_err(|_| SpannFetchPlError::SpannSegmentReaderError)?;
                 Ok(SpannFetchPlOutput {

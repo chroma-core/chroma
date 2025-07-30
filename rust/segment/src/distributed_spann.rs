@@ -28,6 +28,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Formatter;
 use thiserror::Error;
+use tracing::Instrument;
 
 #[derive(Clone)]
 pub struct SpannSegmentWriter {

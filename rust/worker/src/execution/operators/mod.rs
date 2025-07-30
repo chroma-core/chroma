@@ -11,6 +11,7 @@ pub(super) mod spann_fetch_pl;
 pub mod fetch_log;
 pub mod filter;
 pub mod get_collection_and_segments;
+pub mod io_group_operator;
 pub mod knn_hnsw;
 pub mod knn_log;
 pub mod knn_merge;
