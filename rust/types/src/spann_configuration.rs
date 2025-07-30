@@ -106,7 +106,7 @@ pub struct InternalSpannConfiguration {
     #[serde(default = "default_write_rng_epsilon")]
     pub write_rng_epsilon: f32,
     #[serde(default = "default_split_threshold")]
-    #[validate(range(min = 100, max = 200))]
+    #[validate(range(min = 25, max = 200))]
     pub split_threshold: u32,
     #[serde(default = "default_num_samples_kmeans")]
     pub num_samples_kmeans: usize,
@@ -116,7 +116,7 @@ pub struct InternalSpannConfiguration {
     #[validate(range(max = 64))]
     pub reassign_neighbor_count: u32,
     #[serde(default = "default_merge_threshold")]
-    #[validate(range(min = 50, max = 100))]
+    #[validate(range(min = 12, max = 100))]
     pub merge_threshold: u32,
     #[serde(default = "default_num_centers_to_merge_to")]
     #[validate(range(max = 8))]
