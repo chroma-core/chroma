@@ -11,6 +11,7 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::CollectionUuid;
 use futures::future::try_join_all;
 use thiserror::Error;
+use tracing::Level;
 use wal3::{GarbageCollectionOptions, GarbageCollector, LogPosition, LogWriterOptions};
 
 use crate::types::CleanupMode;
@@ -101,6 +102,10 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                     // The configuration is
                     // enable_dangerous_option_to_ignore_min_versions_for_wal3.  Its default is
                     // false.  Setting it to true enables this loop to skip the min_log_offset.
+                    //
+                    // To remove this hack, search for the warning below, and then make every
+                    // collection that appears with that warning compact min-versions-to-keep
+                    // times.
                     let mut min_log_offset = Some(*minimum_log_offset_to_keep);
                     for _ in 0..if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 { 2 } else { 1 } {
                         // See README.md in wal3 for a description of why this happens in three phases.
@@ -109,7 +114,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             Ok(false) => return Ok(()),
                             Err(wal3::Error::CorruptGarbage(c)) if c.starts_with("First to keep does not overlap manifest") => {
                                 if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 {
-                                    tracing::warn!("encountered enable_dangerous_option_to_ignore_min_versions_for_wal3 path");
+                                    tracing::event!(Level::WARN, name = "encountered enable_dangerous_option_to_ignore_min_versions_for_wal3 path", collection_id =? collection_id);
                                     min_log_offset.take();
                                 }
                             }
