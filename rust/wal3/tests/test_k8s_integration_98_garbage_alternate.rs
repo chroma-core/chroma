@@ -93,7 +93,7 @@ async fn garbage_collector_thread(
             {
                 Ok(()) => break,
                 Err(Error::CorruptGarbage(m))
-                    if m == "First to keep does not overlap manifest." =>
+                    if m.starts_with("First to keep does not overlap manifest") =>
                 {
                     println!("gc sees cursor ahead of manifest; only a problem if looping");
                     tokio::time::sleep(Duration::from_millis(100)).await;
