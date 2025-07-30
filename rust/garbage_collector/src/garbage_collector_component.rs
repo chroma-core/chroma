@@ -116,6 +116,7 @@ impl GarbageCollector {
         collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
         collection: CollectionToGcInfo,
         cleanup_mode: CleanupMode,
+        enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
     ) -> Result<GarbageCollectorResponse, GarbageCollectCollectionError> {
         let dispatcher = self
             .dispatcher
@@ -149,6 +150,7 @@ impl GarbageCollector {
                     cleanup_mode,
                     self.config.min_versions_to_keep,
                     enable_log_gc,
+                    enable_dangerous_option_to_ignore_min_versions_for_wal3,
                 );
 
             let started_at = SystemTime::now();
@@ -419,6 +421,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 collection_soft_delete_absolute_cutoff_time,
                 collection,
                 cleanup_mode,
+                self.config.enable_dangerous_option_to_ignore_min_versions_for_wal3,
             )
             .instrument(instrumented_span)
         })
@@ -750,6 +753,7 @@ mod tests {
             enable_log_gc_for_tenant: Vec::new(),
             enable_log_gc_for_tenant_threshold: "tenant-ffffffff-ffff-ffff-ffff-ffffffffffff"
                 .to_string(),
+            enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
         };
         let registry = Registry::new();
 
@@ -880,6 +884,7 @@ mod tests {
             enable_log_gc_for_tenant: Vec::new(),
             enable_log_gc_for_tenant_threshold: "tenant-threshold".to_string(),
             log: LogConfig::default(),
+            enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
         };
         let registry = Registry::new();
 

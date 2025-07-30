@@ -21,6 +21,7 @@ pub struct DeleteUnusedLogsOperator {
     pub mode: CleanupMode,
     pub storage: Storage,
     pub logs: Log,
+    pub enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -90,15 +91,34 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             return Err(DeleteUnusedLogsError::Wal3{ collection_id, err})
                         }
                     };
-                    // See README.md in wal3 for a description of why this happens in three phases.
-                    match writer.garbage_collect_phase1_compute_garbage(&GarbageCollectionOptions::default(), Some(*minimum_log_offset_to_keep)).await {
-                        Ok(true) => {},
-                        Ok(false) => return Ok(()),
-                        Err(err) => {
-                            tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
-                            return Err(DeleteUnusedLogsError::Wal3{ collection_id, err});
-                        }
-                    };
+                    // NOTE(rescrv):  Once upon a time, we had a bug where we would not pass the
+                    // min log offset into the wal3 garbage collect process.  For disaster
+                    // recovery, we need to keep N versions per the config, but the collections
+                    // (staging only) were collected up to the most recent version.  The fix is
+                    // this hack to allow a corrupt garbage error to be masked iff the appropriate
+                    // configuration value is set.
+                    //
+                    // The configuration is
+                    // enable_dangerous_option_to_ignore_min_versions_for_wal3.  Its default is
+                    // false.  Setting it to true enables this loop to skip the min_log_offset.
+                    let mut min_log_offset = Some(*minimum_log_offset_to_keep);
+                    for _ in 0..if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 { 2 } else { 1 } {
+                        // See README.md in wal3 for a description of why this happens in three phases.
+                        match writer.garbage_collect_phase1_compute_garbage(&GarbageCollectionOptions::default(), min_log_offset).await {
+                            Ok(true) => {},
+                            Ok(false) => return Ok(()),
+                            Err(wal3::Error::CorruptGarbage(c)) if c.starts_with("First to keep does not overlap manifest") => {
+                                if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 {
+                                    tracing::warn!("encountered enable_dangerous_option_to_ignore_min_versions_for_wal3 path");
+                                    min_log_offset.take();
+                                }
+                            }
+                            Err(err) => {
+                                tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
+                                return Err(DeleteUnusedLogsError::Wal3{ collection_id, err});
+                            }
+                        };
+                    }
                     if let Err(err) = logs.garbage_collect_phase2(collection_id).await {
                         tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
                         return Err(DeleteUnusedLogsError::Gc(err));

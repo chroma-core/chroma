@@ -84,6 +84,8 @@ pub struct GarbageCollectorOrchestrator {
 
     num_files_deleted: u32,
     num_versions_deleted: u32,
+
+    enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -103,6 +105,7 @@ impl GarbageCollectorOrchestrator {
         cleanup_mode: CleanupMode,
         min_versions_to_keep: u32,
         enable_log_gc: bool,
+        enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
     ) -> Self {
         Self {
             collection_id,
@@ -135,6 +138,8 @@ impl GarbageCollectorOrchestrator {
 
             num_files_deleted: 0,
             num_versions_deleted: 0,
+
+            enable_dangerous_option_to_ignore_min_versions_for_wal3,
         }
     }
 }
@@ -524,6 +529,8 @@ impl GarbageCollectorOrchestrator {
                 mode: self.cleanup_mode,
                 storage: self.storage.clone(),
                 logs: self.logs.clone(),
+                enable_dangerous_option_to_ignore_min_versions_for_wal3: self
+                    .enable_dangerous_option_to_ignore_min_versions_for_wal3,
             }),
             DeleteUnusedLogsInput {
                 collections_to_destroy,
@@ -1209,6 +1216,7 @@ mod tests {
             crate::types::CleanupMode::Delete,
             1,
             true,
+            false,
         );
         let result = orchestrator.run(system).await;
         assert!(result.is_err());
