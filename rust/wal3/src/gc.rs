@@ -65,9 +65,9 @@ impl Garbage {
         first_to_keep: LogPosition,
     ) -> Result<Option<Self>, Error> {
         let Some(first_to_keep) = manifest.round_to_boundary(first_to_keep) else {
-            return Err(Error::CorruptGarbage(
-                "First to keep does not overlap manifest.".to_string(),
-            ));
+            return Err(Error::CorruptGarbage(format!(
+                "First to keep does not overlap manifest (first_to_keep={first_to_keep:?})"
+            )));
         };
         let dropped_snapshots = manifest
             .snapshots
