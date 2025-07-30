@@ -13,7 +13,7 @@ use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
 use super::StorageConfigError;
 use super::{DeleteOptions, PutOptions};
-use crate::{ETag, StorageError};
+use crate::{ETag, GetOptions, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
@@ -310,10 +310,7 @@ impl S3Storage {
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
-    pub(super) async fn get_parallel(
-        &self,
-        key: &str,
-    ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+    async fn get_parallel(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let (content_length, ranges, e_tag) = self.get_key_ranges(key).await?;
 
         // .buffer_unordered() below will hang if the range is empty (https://github.com/rust-lang/futures-rs/issues/2740), so we short-circuit here
@@ -368,7 +365,10 @@ impl S3Storage {
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
-    pub async fn get(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
+    pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
+        if options.request_parallelism {
+            return self.get_parallel(key).await.map(|(buf, _)| buf);
+        }
         self.get_with_e_tag(key).await.map(|(buf, _)| buf)
     }
 
@@ -1037,7 +1037,7 @@ mod tests {
             .await
             .unwrap();
 
-        let buf = storage.get("test").await.unwrap();
+        let buf = storage.get("test", GetOptions::default()).await.unwrap();
         let buf = String::from_utf8(buf.to_vec()).unwrap();
         assert_eq!(buf, test_data);
     }
@@ -1088,7 +1088,7 @@ mod tests {
             .await
             .unwrap();
 
-        let buf = storage.get("test").await.unwrap();
+        let buf = storage.get("test", GetOptions::default()).await.unwrap();
         let file_contents = std::fs::read(temp_file.path()).unwrap();
         assert_eq!(buf, file_contents.into());
     }
@@ -1325,7 +1325,10 @@ mod tests {
             .await
             .unwrap();
         storage.copy("test/00", "test2/00").await.unwrap();
-        let bytes = storage.get("test2/00").await.unwrap();
+        let bytes = storage
+            .get("test2/00", GetOptions::default())
+            .await
+            .unwrap();
         assert_eq!("ABC123XYZ".as_bytes(), bytes.as_slice());
     }
 

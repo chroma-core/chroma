@@ -296,16 +296,6 @@ impl AdmissionControlledS3Storage {
         // Permit gets dropped here due to RAII.
     }
 
-    pub async fn get_parallel(
-        &self,
-        key: String,
-        options: GetOptions,
-    ) -> Result<Arc<Vec<u8>>, StorageError> {
-        self.get_with_e_tag_internal::<_, _, _>(&key, options, true, |r| async move { r })
-            .await
-            .map(|(bytes, _e_tag)| bytes)
-    }
-
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
         self.get_with_e_tag(key, options)
             .await
@@ -323,8 +313,7 @@ impl AdmissionControlledS3Storage {
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
-        self.get_with_e_tag_internal(key, options, false, fetch_fn)
-            .await
+        self.get_with_e_tag_internal(key, options, fetch_fn).await
     }
 
     pub async fn get_with_e_tag(
@@ -332,7 +321,7 @@ impl AdmissionControlledS3Storage {
         key: &str,
         options: GetOptions,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        self.get_with_e_tag_internal::<_, _, _>(key, options, false, |r| async move { r })
+        self.get_with_e_tag_internal::<_, _, _>(key, options, |r| async move { r })
             .await
     }
 
@@ -361,9 +350,6 @@ impl AdmissionControlledS3Storage {
         &self,
         key: &str,
         options: GetOptions,
-        // TODO: remove is_parallel and move it into GetOptions, refactor all callers
-        // to use the new options instead of special methods.
-        is_parallel: bool,
         fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Option<ETag>), StorageError>
     where
@@ -388,6 +374,7 @@ impl AdmissionControlledS3Storage {
                 .fetch_sub(1, Ordering::Relaxed);
             return Self::execute_fetch(fetch_fn, res).await;
         }
+        let is_parallel = options.request_parallelism;
 
         // If there is a duplicate request and the original request finishes
         // before we look it up in the map below then we will end up with another
@@ -992,7 +979,7 @@ mod tests {
 
         // Parallel fetch.
         let buf = admission_controlled_storage
-            .get_parallel(test_data_key, GetOptions::default())
+            .get(&test_data_key, GetOptions::default().with_parallelism())
             .await
             .unwrap();
 
