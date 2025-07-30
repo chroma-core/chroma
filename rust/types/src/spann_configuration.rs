@@ -197,7 +197,7 @@ impl Default for SpannConfiguration {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, Validate, PartialEq, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateSpannConfiguration {

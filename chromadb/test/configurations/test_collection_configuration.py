@@ -281,6 +281,16 @@ def test_hnsw_configuration_updates(client: ClientAPI) -> None:
             assert hnsw_config.get("ef_construction") == 100
             assert hnsw_config.get("max_neighbors") == 16
 
+    coll = client.get_collection(name="test_updates")
+    loaded_config = coll.configuration_json
+    if loaded_config and isinstance(loaded_config, dict):
+        hnsw_config = loaded_config.get("hnsw", {})
+        if isinstance(hnsw_config, dict):
+            assert hnsw_config.get("ef_search") == 20
+            assert hnsw_config.get("space") == "cosine"
+            assert hnsw_config.get("ef_construction") == 100
+            assert hnsw_config.get("max_neighbors") == 16
+
 
 def test_configuration_persistence(client_factories: "ClientFactories") -> None:
     """Test configuration persistence across client restarts"""
@@ -712,6 +722,15 @@ def test_configuration_spann_updates(client: ClientAPI) -> None:
             # Original values should remain unchanged
             assert spann_config.get("space") == "cosine"
 
+    coll = client.get_collection("test_spann_updates")
+    loaded_config = coll.configuration_json
+    if loaded_config and isinstance(loaded_config, dict):
+        spann_config = loaded_config.get("spann", {})
+        if isinstance(spann_config, dict):
+            assert spann_config.get("ef_search") == 150
+            assert spann_config.get("search_nprobe") == 20
+            assert spann_config.get("space") == "cosine"
+
 
 @pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
 def test_spann_update_from_json(client: ClientAPI) -> None:
@@ -743,6 +762,21 @@ def test_spann_update_from_json(client: ClientAPI) -> None:
     coll.modify(configuration=update_config)
 
     # Verify updates were applied
+    loaded_config = coll.configuration_json
+    if loaded_config and isinstance(loaded_config, dict):
+        spann_config = loaded_config.get("spann", {})
+        if isinstance(spann_config, dict):
+            # Updated values
+            assert spann_config.get("ef_search") == 200
+            assert spann_config.get("search_nprobe") == 15
+
+            # Unchanged values
+            assert spann_config.get("space") == "cosine"
+            assert spann_config.get("ef_construction") == 150
+            assert spann_config.get("max_neighbors") == 12
+            assert spann_config.get("write_nprobe") == 20
+
+    coll = client.get_collection("test_spann_json_update")
     loaded_config = coll.configuration_json
     if loaded_config and isinstance(loaded_config, dict):
         spann_config = loaded_config.get("spann", {})

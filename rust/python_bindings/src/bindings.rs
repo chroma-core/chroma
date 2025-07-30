@@ -19,9 +19,9 @@ use chroma_types::{
     CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
     DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
     GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
-    InternalCollectionConfiguration, KnnIndex, ListCollectionsRequest, ListDatabasesRequest,
-    Metadata, QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRequest,
-    UpdateMetadata, WrappedSerdeJsonError,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, KnnIndex,
+    ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
 };
 use pyo3::{exceptions::PyValueError, pyclass, pyfunction, pymethods, types::PyAnyMethods, Python};
 use std::time::SystemTime;
@@ -344,11 +344,16 @@ impl Bindings {
             None => None,
         };
 
+        let configuration = match configuration_json {
+            Some(c) => Some(InternalUpdateCollectionConfiguration::try_from(c)?),
+            None => None,
+        };
+
         let request = UpdateCollectionRequest::try_new(
             collection_id,
             new_name,
             new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),
-            configuration_json,
+            configuration,
         )?;
 
         let mut frontend = self.frontend.clone();
