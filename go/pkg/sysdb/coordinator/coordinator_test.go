@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -729,7 +730,13 @@ func (suite *APIsTestSuite) TestGetOrCreateCollectionsTwice() {
 	suite.NoError(err)
 
 	// There should be exactly one version file
-	suite.Equal(1, len(objects.Contents))
+	numVersionFiles := 0
+	for _, object := range objects.Contents {
+		if strings.Contains(*object.Key, "versionfile") && strings.Contains(*object.Key, id.String()) {
+			numVersionFiles++
+		}
+	}
+	suite.Equal(1, numVersionFiles)
 
 	// The version file should not have been modified after the first creation
 	suite.NotNil(objects.Contents[0].LastModified)
