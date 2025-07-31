@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
@@ -689,20 +691,49 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 }
 
 func (suite *APIsTestSuite) TestGetOrCreateCollectionsTwice() {
-	// GetOrCreateCollection already existing collection returns false for created
 	ctx := context.Background()
-	coll := suite.sampleCollections[0]
-	_, created, err := suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
-		ID:           coll.ID,
-		Name:         coll.Name,
-		Metadata:     coll.Metadata,
-		Dimension:    coll.Dimension,
+
+	id := types.NewUniqueID()
+	name := "test_get_or_create_collection_twice"
+
+	_, created, err := suite.coordinator.CreateCollectionAndSegments(ctx, &model.CreateCollection{
+		ID:           id,
+		Name:         name,
+		Metadata:     suite.sampleCollections[0].Metadata,
+		Dimension:    suite.sampleCollections[0].Dimension,
 		GetOrCreate:  true,
-		TenantID:     coll.TenantID,
-		DatabaseName: coll.DatabaseName,
-	})
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}, []*model.Segment{})
+	suite.NoError(err)
+	suite.True(created)
+
+	now := time.Now()
+
+	_, created, err = suite.coordinator.CreateCollectionAndSegments(ctx, &model.CreateCollection{
+		ID:           id,
+		Name:         name,
+		Metadata:     suite.sampleCollections[0].Metadata,
+		Dimension:    suite.sampleCollections[0].Dimension,
+		GetOrCreate:  true,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}, []*model.Segment{})
 	suite.NoError(err)
 	suite.False(created)
+
+	objects, err := suite.s3MetaStore.S3.ListObjects(context.Background(), &s3.ListObjectsInput{
+		Bucket: aws.String(suite.s3MetaStore.BucketName),
+		Prefix: aws.String(""),
+	})
+	suite.NoError(err)
+
+	// There should be exactly one version file
+	suite.Equal(1, len(objects.Contents))
+
+	// The version file should not have been modified after the first creation
+	suite.NotNil(objects.Contents[0].LastModified)
+	suite.True(objects.Contents[0].LastModified.Before(now), "Version file was modified after the first creation")
 }
 
 func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {

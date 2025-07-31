@@ -1314,8 +1314,7 @@ func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollec
 	var resultCollection *model.Collection
 	created := false
 
-	existingCollections, err := tc.metaDomain.CollectionDb(ctx).GetCollections(
-		[]string{}, &createCollection.Name, createCollection.TenantID, createCollection.DatabaseName, nil, nil, false)
+	existingCollections, err := tc.metaDomain.CollectionDb(ctx).GetCollections(nil, &createCollection.Name, createCollection.TenantID, createCollection.DatabaseName, nil, nil, false)
 
 	if err != nil {
 		log.Error("error getting existing collection", zap.Error(err))
