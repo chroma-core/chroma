@@ -67,6 +67,8 @@ pub(super) struct GarbageCollectorConfig {
     #[serde(default = "GarbageCollectorConfig::enable_log_gc_for_tenant_threshold")]
     pub enable_log_gc_for_tenant_threshold: String,
     pub log: LogConfig,
+    #[serde(default)]
+    pub enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
 }
 
 impl GarbageCollectorConfig {
