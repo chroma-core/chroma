@@ -1314,13 +1314,24 @@ func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollec
 	var resultCollection *model.Collection
 	created := false
 
+	existingCollections, err := tc.metaDomain.CollectionDb(ctx).GetCollections(
+		[]string{}, &createCollection.Name, createCollection.TenantID, createCollection.DatabaseName, nil, nil, false)
+
+	if err != nil {
+		log.Error("error getting existing collection", zap.Error(err))
+		return nil, false, err
+	}
+	if len(existingCollections) > 0 {
+		log.Info("collection already exists, skipping creation")
+		return convertCollectionToModel(existingCollections)[0], false, nil
+	}
+
 	// Create the first Version file in S3.
 	// If the transaction below fails, then there will be an orphan file in S3.
 	// This orphan file will not affect new collection creations.
 	// An alternative approach is to create this file after the transaction is committed.
 	// and let FlushCollectionCompaction do any repair work if first version file is missing.
 	versionFileName := ""
-	var err error
 	if tc.versionFileEnabled {
 		databases, err := tc.metaDomain.DatabaseDb(ctx).GetDatabases(createCollection.TenantID, createCollection.DatabaseName)
 		if err != nil {
