@@ -691,6 +691,37 @@ impl GrpcLog {
         }
     }
 
+    pub(super) async fn update_collection_log_offset_on_every_node(
+        &mut self,
+        collection_id: CollectionUuid,
+        new_offset: i64,
+    ) -> Result<(), GrpcUpdateCollectionLogOffsetError> {
+        let Some(assigner) = self.alt_client_assigner.as_mut() else {
+            return Ok(());
+        };
+        let mut res = Ok(());
+        for client in assigner.all().into_iter() {
+            let mut client = client.clone();
+            let request = client.update_collection_log_offset(
+                chroma_proto::UpdateCollectionLogOffsetRequest {
+                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                    collection_id: collection_id.0.to_string(),
+                    log_offset: new_offset,
+                },
+            );
+            let response = request.await;
+            match response {
+                Ok(_) => {}
+                Err(e) => {
+                    res = Err(
+                        GrpcUpdateCollectionLogOffsetError::FailedToUpdateCollectionLogOffset(e),
+                    );
+                }
+            }
+        }
+        res
+    }
+
     pub(super) async fn purge_dirty_for_collection(
         &mut self,
         collection_ids: Vec<CollectionUuid>,

@@ -90,6 +90,7 @@ pub(crate) struct Scheduler {
     oneoff_collections: HashSet<CollectionUuid>,
     disabled_collections: HashSet<CollectionUuid>,
     deleted_collections: HashSet<CollectionUuid>,
+    collections_needing_repair: HashMap<CollectionUuid, i64>,
     in_progress_jobs: HashMap<CollectionUuid, InProgressJob>,
     job_expiry_seconds: u64,
     failing_jobs: HashMap<CollectionUuid, FailedJob>,
@@ -130,6 +131,7 @@ impl Scheduler {
             oneoff_collections: HashSet::new(),
             disabled_collections,
             deleted_collections: HashSet::new(),
+            collections_needing_repair: HashMap::new(),
             in_progress_jobs: HashMap::new(),
             job_expiry_seconds,
             failing_jobs: HashMap::new(),
@@ -149,6 +151,15 @@ impl Scheduler {
 
     pub(crate) fn drain_deleted_collections(&mut self) -> Vec<CollectionUuid> {
         self.deleted_collections.drain().collect()
+    }
+
+    pub(crate) fn drain_collections_requiring_repair(&mut self) -> Vec<(CollectionUuid, i64)> {
+        self.collections_needing_repair.drain().collect()
+    }
+
+    pub(crate) fn require_repair(&mut self, collection_id: CollectionUuid, offset_in_sysdb: i64) {
+        self.collections_needing_repair
+            .insert(collection_id, offset_in_sysdb);
     }
 
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
