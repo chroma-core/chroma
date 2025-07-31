@@ -1487,7 +1487,7 @@ async fn collection_update(
 #[derive(Deserialize, Debug, Clone, ToSchema, Serialize)]
 pub struct UpsertCollectionRecordsPayload {
     ids: Vec<String>,
-    embeddings: Option<EmbeddingsPayload>,
+    embeddings: EmbeddingsPayload,
     documents: Option<Vec<Option<String>>>,
     uris: Option<Vec<Option<String>>>,
     metadatas: Option<Vec<Option<UpdateMetadata>>>,
@@ -1543,13 +1543,8 @@ async fn collection_upsert(
         .map(|val| val.to_string());
     let mut quota_payload = QuotaPayload::new(Action::Upsert, tenant.clone(), api_token);
     quota_payload = quota_payload.with_ids(&payload.ids);
-    let payload_embeddings: Option<Vec<Vec<f32>>> = match payload.embeddings {
-        Some(embeddings) => Some(decode_embeddings(embeddings)?),
-        None => None,
-    };
-    if let Some(embeddings) = payload_embeddings.as_ref() {
-        quota_payload = quota_payload.with_add_embeddings(embeddings);
-    }
+    let payload_embeddings: Vec<Vec<f32>> = decode_embeddings(payload.embeddings)?;
+    quota_payload = quota_payload.with_add_embeddings(&payload_embeddings);
     if let Some(metadatas) = &payload.metadatas {
         quota_payload = quota_payload.with_update_metadatas(metadatas);
     }

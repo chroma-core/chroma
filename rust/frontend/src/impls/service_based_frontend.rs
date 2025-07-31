@@ -887,13 +887,16 @@ impl ServiceBasedFrontend {
             ..
         }: UpsertCollectionRecordsRequest,
     ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
-        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
-            Some(embedding.len())
-        })
+        self.validate_embedding(
+            collection_id,
+            Some(&embeddings),
+            true,
+            |embedding: &Vec<f32>| Some(embedding.len()),
+        )
         .await
         .map_err(|err| err.boxed())?;
 
-        let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
+        let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
         let (records, log_size_bytes) = to_records(
             ids,

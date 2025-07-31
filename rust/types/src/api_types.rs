@@ -967,7 +967,7 @@ pub struct AddCollectionRecordsRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
-    #[validate(custom(function = "Self::validate_embeddings"))]
+    #[validate(custom(function = "validate_embeddings"))]
     pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
@@ -999,14 +999,14 @@ impl AddCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+}
 
-    fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
-        if embeddings.iter().any(|e| e.is_empty()) {
-            return Err(ValidationError::new("embedding_minimum_dimensions")
-                .with_message("Each embedding must have at least 1 dimension".into()));
-        }
-        Ok(())
+fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
+    if embeddings.iter().any(|e| e.is_empty()) {
+        return Err(ValidationError::new("embedding_minimum_dimensions")
+            .with_message("Each embedding must have at least 1 dimension".into()));
     }
+    Ok(())
 }
 
 #[derive(Serialize, ToSchema, Default, Deserialize)]
@@ -1103,7 +1103,8 @@ pub struct UpsertCollectionRecordsRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
-    pub embeddings: Option<Vec<Vec<f32>>>,
+    #[validate(custom(function = "validate_embeddings"))]
+    pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
@@ -1116,7 +1117,7 @@ impl UpsertCollectionRecordsRequest {
         database_name: String,
         collection_id: CollectionUuid,
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
