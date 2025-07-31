@@ -731,16 +731,18 @@ func (suite *APIsTestSuite) TestGetOrCreateCollectionsTwice() {
 
 	// There should be exactly one version file
 	numVersionFiles := 0
+	var versionFileLastModified *time.Time
 	for _, object := range objects.Contents {
 		if strings.Contains(*object.Key, "versionfile") && strings.Contains(*object.Key, id.String()) {
 			numVersionFiles++
+			suite.NotNil(object.LastModified, "Version file should have a LastModified timestamp")
+			versionFileLastModified = object.LastModified
 		}
 	}
 	suite.Equal(1, numVersionFiles)
 
 	// The version file should not have been modified after the first creation
-	suite.NotNil(objects.Contents[0].LastModified)
-	suite.True(objects.Contents[0].LastModified.Before(now), "Version file was modified after the first creation")
+	suite.True(versionFileLastModified.Before(now), "Version file was modified after the first creation")
 }
 
 func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
