@@ -306,6 +306,7 @@ impl CompactionManager {
                             self.scheduler
                                 .require_repair(resp.collection_id, *witnessed_offset_in_sysdb);
                             self.scheduler.succeed_collection(resp.collection_id);
+                        }
                     }
                 },
                 Err(_) => {
