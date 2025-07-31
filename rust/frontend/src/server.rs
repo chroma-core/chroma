@@ -445,11 +445,41 @@ async fn heartbeat(
     )
 )]
 async fn pre_flight_checks(
+    headers: HeaderMap,
     State(server): State<FrontendServer>,
 ) -> Result<Json<ChecklistResponse>, ServerError> {
     server.metrics.pre_flight_checks.add(1, &[]);
+
+    let api_token = headers
+        .get("x-chroma-token")
+        .map(|val| val.to_str().unwrap_or_default())
+        .map(|val| val.to_string());
+
+    // Only use quota enforcement if we have an API token
+    let max_batch_size = if api_token.is_some() {
+        let identity = server.auth.get_user_identity(&headers).await?;
+        let tenant = identity.tenant;
+
+        // create quota payload to check num records limit
+        let quota_payload = QuotaPayload::new(Action::Add, tenant.clone(), api_token);
+
+        // Try quota enforcement
+        let quota_overrides = server.quota_enforcer.enforce(&quota_payload).await?;
+
+        let max_batch_size = match quota_overrides {
+            Some(overrides) => Some(overrides.limit),
+            None => Some(server.frontend.clone().get_max_batch_size()),
+        }
+        .unwrap_or(server.frontend.clone().get_max_batch_size());
+
+        max_batch_size
+    } else {
+        // no api key, use existing solution
+        server.frontend.clone().get_max_batch_size()
+    };
+
     Ok(Json(ChecklistResponse {
-        max_batch_size: server.frontend.clone().get_max_batch_size(),
+        max_batch_size,
         supports_base64_encoding: true,
     }))
 }
