@@ -27,10 +27,19 @@ impl HnswProviderConfig {
     }
 }
 
-fn default_garbage_collection() -> PlGarbageCollectionConfig {
+fn default_pl_garbage_collection() -> PlGarbageCollectionConfig {
     PlGarbageCollectionConfig {
         enabled: false,
         policy: PlGarbageCollectionPolicyConfig::RandomSample(RandomSamplePolicyConfig::default()),
+    }
+}
+
+fn default_hnsw_garbage_collection() -> HnswGarbageCollectionConfig {
+    HnswGarbageCollectionConfig {
+        enabled: false,
+        policy: HnswGarbageCollectionPolicyConfig::DeletePercentage(
+            DeletePercentageThresholdPolicyConfig::default(),
+        ),
     }
 }
 
@@ -58,8 +67,9 @@ impl Default for PlGarbageCollectionPolicyConfig {
 pub struct SpannProviderConfig {
     #[serde(default = "default_pl_block_size")]
     pub pl_block_size: usize,
-    #[serde(default = "default_garbage_collection")]
+    #[serde(default = "default_pl_garbage_collection")]
     pub pl_garbage_collection: PlGarbageCollectionConfig,
+    #[serde(default = "default_hnsw_garbage_collection")]
     pub hnsw_garbage_collection: HnswGarbageCollectionConfig,
     #[serde(default = "default_adaptive_search_nprobe")]
     pub adaptive_search_nprobe: bool,
@@ -85,6 +95,12 @@ impl Default for RandomSamplePolicyConfig {
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct DeletePercentageThresholdPolicyConfig {
     pub threshold: f32,
+}
+
+impl Default for DeletePercentageThresholdPolicyConfig {
+    fn default() -> Self {
+        DeletePercentageThresholdPolicyConfig { threshold: 0.1 }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
