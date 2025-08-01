@@ -64,6 +64,9 @@ from chromadb.utils.embedding_functions.together_ai_embedding_function import (
 from chromadb.utils.embedding_functions.mistral_embedding_function import (
     MistralEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.runpod_embedding_function import (
+    RunPodEmbeddingFunction,
+)
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -94,6 +97,7 @@ _all_classes: Set[str] = {
     "BasetenEmbeddingFunction",
     "CloudflareWorkersAIEmbeddingFunction",
     "TogetherAIEmbeddingFunction",
+    "RunPodEmbeddingFunction",
     "DefaultEmbeddingFunction",
 }
 
@@ -156,6 +160,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "default": DefaultEmbeddingFunction,
     "cloudflare_workers_ai": CloudflareWorkersAIEmbeddingFunction,
     "together_ai": TogetherAIEmbeddingFunction,
+    "runpod": RunPodEmbeddingFunction,
 }
 
 
@@ -241,6 +246,7 @@ __all__ = [
     "AmazonBedrockEmbeddingFunction",
     "ChromaLangchainEmbeddingFunction",
     "TogetherAIEmbeddingFunction",
+    "RunPodEmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",
