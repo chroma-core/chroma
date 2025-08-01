@@ -52,6 +52,11 @@ def test_morph_embedding_function_with_custom_parameters() -> None:
 
 def test_morph_embedding_function_config_roundtrip() -> None:
     """Test that Morph embedding function configuration can be saved and restored."""
+    try:
+        import openai
+    except ImportError:
+        pytest.skip("openai package not installed")
+
     ef = MorphEmbeddingFunction(
         model_name="morph-embedding-v2",
         api_base="https://api.morphllm.com/v1",
@@ -89,6 +94,11 @@ def test_morph_embedding_function_name() -> None:
 
 def test_morph_embedding_function_spaces() -> None:
     """Test that Morph embedding function supports expected spaces."""
+    try:
+        import openai
+    except ImportError:
+        pytest.skip("openai package not installed")
+
     ef = MorphEmbeddingFunction(
         model_name="morph-embedding-v2",
         api_key_env_var="MORPH_API_KEY"
