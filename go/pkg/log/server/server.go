@@ -153,6 +153,10 @@ func (s *logServer) UpdateCollectionLogOffset(ctx context.Context, req *logservi
 	return
 }
 
+func (s *logServer) RollbackCollectionLogOffset(ctx context.Context, req *logservicepb.UpdateCollectionLogOffsetRequest) (res *logservicepb.UpdateCollectionLogOffsetResponse, err error) {
+	return
+}
+
 func (s *logServer) PurgeDirtyForCollection(ctx context.Context, req *logservicepb.PurgeDirtyForCollectionRequest) (res *logservicepb.PurgeDirtyForCollectionResponse, err error) {
 	return
 }

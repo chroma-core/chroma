@@ -30,7 +30,7 @@ func (s *collectionDb) DeleteAll() error {
 func (s *collectionDb) GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*dbmodel.Collection, error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, collections.tenant, collections.version, collections.version_file_name, NULLIF(collections.root_collection_id, '') AS root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
+		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, collections.tenant, collections.version, collections.version_file_name, collections.log_position, NULLIF(collections.root_collection_id, '') AS root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("collections.id = ?", collectionID)
 

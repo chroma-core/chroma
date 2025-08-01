@@ -727,10 +727,13 @@ impl LogServer {
             )
         })?;
 
-        self._update_collection_log_offset(Request::new(UpdateCollectionLogOffsetRequest {
-            collection_id: collection_id.to_string(),
-            log_offset: start as i64 - 1,
-        }))
+        self._update_collection_log_offset(
+            Request::new(UpdateCollectionLogOffsetRequest {
+                collection_id: collection_id.to_string(),
+                log_offset: start as i64 - 1,
+            }),
+            false,
+        )
         .await?;
         // Set it up so that once we release the mutex, the next person won't do I/O and will
         // immediately be able to push logs.
@@ -829,6 +832,7 @@ impl LogServer {
     async fn _update_collection_log_offset(
         &self,
         request: Request<UpdateCollectionLogOffsetRequest>,
+        allow_rollback: bool,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
         let request = request.into_inner();
         let adjusted_log_offset = request.log_offset + 1;
@@ -867,7 +871,7 @@ impl LogServer {
         })?;
         let default = Cursor::default();
         let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
-        if cursor.position.offset() > adjusted_log_offset as u64 {
+        if !allow_rollback && cursor.position.offset() > adjusted_log_offset as u64 {
             return Ok(Response::new(UpdateCollectionLogOffsetResponse {}));
         }
         let cursor = Cursor {
@@ -1659,7 +1663,33 @@ impl LogServer {
             let key = LogKey { collection_id };
             let handle = self.open_logs.get_or_create_state(key);
             let mut _active = handle.active.lock().await;
-            self._update_collection_log_offset(Request::new(request))
+            self._update_collection_log_offset(Request::new(request), false)
+                .await
+        }
+        .instrument(span)
+        .await
+    }
+
+    async fn rollback_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        let span = wrap_span_with_parent_context(
+            tracing::trace_span!("UpdateCollectionLogOffset",),
+            request.metadata(),
+        );
+
+        async move {
+            let request = request.into_inner();
+            let collection_id = Uuid::parse_str(&request.collection_id)
+                .map(CollectionUuid)
+                .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+
+            // Grab a lock on the state for this key, so that a racing initialize won't do anything.
+            let key = LogKey { collection_id };
+            let handle = self.open_logs.get_or_create_state(key);
+            let mut _active = handle.active.lock().await;
+            self._update_collection_log_offset(Request::new(request), true)
                 .await
         }
         .instrument(span)
@@ -2108,6 +2138,15 @@ impl LogService for LogServerWrapper {
         request: Request<UpdateCollectionLogOffsetRequest>,
     ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
         self.log_server.update_collection_log_offset(request).await
+    }
+
+    async fn rollback_collection_log_offset(
+        &self,
+        request: Request<UpdateCollectionLogOffsetRequest>,
+    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
+        self.log_server
+            .rollback_collection_log_offset(request)
+            .await
     }
 
     async fn purge_dirty_for_collection(

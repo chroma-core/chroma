@@ -193,4 +193,7 @@ service LogService {
   rpc GarbageCollectPhase2(GarbageCollectPhase2Request) returns (GarbageCollectPhase2Response) {}
   // This endpoint will purge from cache the specified items.
   rpc PurgeFromCache(PurgeFromCacheRequest) returns (PurgeFromCacheResponse) {}
+  // Similar to UpdateCollectionLogOffset, but allows the offset to go back in time.
+  // Uses the exact same request/response types as UpdateCollectionLogOffset by design.
+  rpc RollbackCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
 }
