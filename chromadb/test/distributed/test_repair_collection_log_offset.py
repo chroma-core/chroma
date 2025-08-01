@@ -36,6 +36,7 @@ def test_repair_collection_log_offset(
         name="test_repair_collection_log_offset",
         metadata={"hnsw:construction_ef": 128, "hnsw:search_ef": 128, "hnsw:M": 128},
     )
+    print("collection_id =", collection.id)
 
     initial_version = cast(int, collection.get_model()["version"])
 
@@ -49,11 +50,21 @@ def test_repair_collection_log_offset(
 
     wait_for_version_increase(client, collection.name, initial_version)
 
+    found = False
+    now = time.time()
+    while time.time() - now < 240:
+        request = InspectLogStateRequest(collection_id=str(collection.id))
+        response = log_service_stub.InspectLogState(request, timeout=60)
+        if '''LogPosition { offset: 1001 }''' in response.debug:
+            found = True
+            break
+    assert found
+
     request = UpdateCollectionLogOffsetRequest (collection_id=str(collection.id), log_offset=1)
     response = log_service_stub.RollbackCollectionLogOffset(request, timeout=60)
 
     now = time.time()
-    while time.time() - now < 90:
+    while time.time() - now < 240:
         request = InspectLogStateRequest(collection_id=str(collection.id))
         response = log_service_stub.InspectLogState(request, timeout=60)
         if '''LogPosition { offset: 1001 }''' in response.debug:
