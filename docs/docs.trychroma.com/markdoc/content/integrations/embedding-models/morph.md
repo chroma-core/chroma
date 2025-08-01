@@ -5,13 +5,7 @@ id: morph
 
 # Morph
 
-Chroma provides a convenient wrapper around Morph's embedding API. This embedding function runs remotely on Morph's servers and requires an API key. You can get an API key by signing up for an account at [Morph](https://morphllm.com/).
-
-Morph embeddings are optimized to be state-of-the-art for code and are specifically designed for functional units like Syntax Tree Nodes (functions, classes, etc.) rather than arbitrary text chunks.
-
-{% Banner type="tip" %}
-Visit Morph's [embedding documentation](https://docs.morphllm.com/api-reference/endpoint/embedding) for more information on their code-optimized embedding models.
-{% /Banner %}
+Chroma provides a convenient wrapper around Morph's embedding API. This embedding function runs remotely on Morph's servers and requires an API key. You can get an API key by signing up for an account at [Morph](https://morphllm.com/?utm_source=docs.trychroma.com).
 
 {% Tabs %}
 
@@ -21,98 +15,87 @@ This embedding function relies on the `openai` python package, which you can ins
 
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
-
-# Set your API key as an environment variable
-import os
-os.environ["MORPH_API_KEY"] = "your-morph-api-key"
-
 morph_ef = embedding_functions.MorphEmbeddingFunction(
+    api_key="YOUR_API_KEY",  # or set MORPH_API_KEY environment variable
     model_name="morph-embedding-v2"
 )
-
-# Use with code snippets for optimal performance
-code_snippets = [
-    "def calculate_sum(a, b):\n    return a + b",
-    "class User:\n    def __init__(self, name):\n        self.name = name"
-]
-
-embeddings = morph_ef(code_snippets)
-```
-
-You can also specify additional parameters:
-
-```python
-morph_ef = embedding_functions.MorphEmbeddingFunction(
-    model_name="morph-embedding-v2",
-    api_base="https://api.morphllm.com/v1",  # Default base URL
-    encoding_format="float",  # Default format
-    api_key_env_var="MORPH_API_KEY"  # Default env var
-)
+morph_ef(input=["def calculate_sum(a, b):\n    return a + b", "class User:\n    def __init__(self, name):\n        self.name = name"])
 ```
 
 {% /Tab %}
 
 {% Tab label="typescript" %}
 
-You can use Morph embeddings in TypeScript by installing the OpenAI package and configuring it for Morph's API:
-
 ```typescript
-// npm install openai
+// npm install @chroma-core/morph
 
-import { OpenAI } from 'openai';
+import { MorphEmbeddingFunction } from '@chroma-core/morph';
 
-const client = new OpenAI({
-    apiKey: process.env.MORPH_API_KEY,
-    baseURL: 'https://api.morphllm.com/v1'
-});
+const embedder = new MorphEmbeddingFunction({
+    api_key: "apiKey",  // or set MORPH_API_KEY environment variable
+    model_name: "morph-embedding-v2"
+})
 
-async function generateEmbeddings(codeSnippets: string[]) {
-    const response = await client.embeddings.create({
-        model: "morph-embedding-v2",
-        input: codeSnippets
-    });
+// use directly
+const embeddings = embedder.generate(["function calculate(a, b) { return a + b; }", "class User { constructor(name) { this.name = name; } }"])
 
-    return response.data.map(item => item.embedding);
-}
-
-// Use with code snippets for optimal performance
-const codeSnippets = [
-    "function calculateSum(a, b) { return a + b; }",
-    "class User { constructor(name) { this.name = name; } }"
-];
-
-const embeddings = await generateEmbeddings(codeSnippets);
+// pass documents to query for .add and .query
+const collection = await client.createCollection({name: "name", embeddingFunction: embedder})
+const collectionGet = await client.getCollection({name: "name", embeddingFunction: embedder})
 ```
 
 {% /Tab %}
 
 {% /Tabs %}
 
-## Key Features
+### Code example
 
-- **Code-Optimized**: Specifically designed for code embeddings and functional units
-- **OpenAI-Compatible**: Uses the standard OpenAI SDK with Morph's API endpoint
-- **High Performance**: State-of-the-art embeddings for code similarity and search
-- **Batch Processing**: Supports multiple inputs in a single API call
-- **Flexible Input**: Works with various programming languages and code structures
+{% TabbedCodeBlock %}
 
-## Best Practices
+{% Tab label="python" %}
 
-1. **Functional Units**: Morph embeddings work best with complete functional units (functions, classes, methods) rather than arbitrary code fragments
-2. **Syntax Tree Nodes**: Consider using Morph's SDK for automatic syntax tree parsing and embedding
-3. **Code Similarity**: Ideal for code search, duplicate detection, and similarity analysis
-4. **Mixed Content**: Can handle both code and natural language, making it versatile for documentation and comments
+```python
+morph_ef = embedding_functions.MorphEmbeddingFunction(
+    api_key="YOUR_API_KEY",  # or set MORPH_API_KEY environment variable
+    model_name="morph-embedding-v2"
+)
 
-## Environment Variables
+# Works with code in various languages
+code_examples = [
+    "def fibonacci(n):\n    if n <= 1:\n        return n\n    return fibonacci(n-1) + fibonacci(n-2)",
+    "public class HelloWorld {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, World!\");\n    }\n}",
+    "const greeting = (name: string): string => {\n    return `Hello, ${name}!`;\n}",
+    "SELECT users.name, COUNT(orders.id) as order_count\nFROM users\nLEFT JOIN orders ON users.id = orders.user_id\nGROUP BY users.id"
+]
 
-Set your Morph API key as an environment variable:
-
-```bash
-export MORPH_API_KEY="your-morph-api-key"
+morph_ef(input=code_examples)
 ```
 
-## API Reference
+{% /Tab %}
 
-For more information about Morph's embedding models and API, visit:
-- [Morph Embedding API Documentation](https://docs.morphllm.com/api-reference/endpoint/embedding)
-- [Morph Website](https://morphllm.com/)
+{% Tab label="typescript" %}
+
+```typescript
+import { MorphEmbeddingFunction } from '@chroma-core/morph';
+
+const embedder = new MorphEmbeddingFunction({
+    api_key: "apiKey",  // or set MORPH_API_KEY environment variable
+    model_name: "morph-embedding-v2"
+})
+
+// Works with code in various languages
+const codeExamples = [
+    "function fibonacci(n) { if (n <= 1) return n; return fibonacci(n-1) + fibonacci(n-2); }",
+    "public class HelloWorld { public static void main(String[] args) { System.out.println(\"Hello, World!\"); } }",
+    "const greeting = (name: string): string => { return `Hello, ${name}!`; }",
+    "SELECT users.name, COUNT(orders.id) as order_count FROM users LEFT JOIN orders ON users.id = orders.user_id GROUP BY users.id"
+]
+
+const embeddings = embedder.generate(codeExamples)
+```
+
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
+
+For further details on Morph's models check the [documentation](https://docs.morphllm.com/api-reference/endpoint/embedding?utm_source=docs.trychroma.com).
