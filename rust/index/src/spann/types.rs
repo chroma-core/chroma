@@ -51,6 +51,25 @@ pub struct GarbageCollectionContext {
     hnsw_context: HnswGarbageCollectionContext,
 }
 
+impl GarbageCollectionContext {
+    pub async fn new(registry: Registry) -> Result<Self, Box<dyn ChromaError>> {
+        let pl_context = PlGarbageCollectionContext::try_from_config(
+            &PlGarbageCollectionConfig::default(),
+            &registry,
+        )
+        .await?;
+        let hnsw_context = HnswGarbageCollectionContext::try_from_config(
+            &HnswGarbageCollectionConfig::default(),
+            &registry,
+        )
+        .await?;
+        Ok(GarbageCollectionContext {
+            pl_context,
+            hnsw_context,
+        })
+    }
+}
+
 #[async_trait::async_trait]
 impl Configurable<(PlGarbageCollectionConfig, HnswGarbageCollectionConfig)>
     for GarbageCollectionContext
@@ -2453,6 +2472,8 @@ pub enum SpannIndexReaderError {
     ScanHnswError(#[source] Box<dyn ChromaError>),
     #[error("Data inconsistency error")]
     DataInconsistencyError,
+    #[error("Error performing rng query {0}")]
+    RngError(#[from] RngQueryError),
 }
 
 impl ChromaError for SpannIndexReaderError {
@@ -2468,6 +2489,7 @@ impl ChromaError for SpannIndexReaderError {
             Self::VersionsMapNotFound => ErrorCodes::NotFound,
             Self::ScanHnswError(e) => e.code(),
             Self::DataInconsistencyError => ErrorCodes::Internal,
+            Self::RngError(e) => e.code(),
         }
     }
 }
@@ -2484,6 +2506,8 @@ pub struct SpannIndexReader<'me> {
     pub hnsw_index: HnswIndexRef,
     pub versions_map: BlockfileReader<'me, u32, u32>,
     pub dimensionality: usize,
+    pub adaptive_search_nprobe: bool,
+    pub params: InternalSpannConfiguration,
 }
 
 impl<'me> SpannIndexReader<'me> {
@@ -2564,6 +2588,8 @@ impl<'me> SpannIndexReader<'me> {
         versions_map_blockfile_id: Option<&Uuid>,
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
+        adaptive_search_nprobe: bool,
+        params: InternalSpannConfiguration,
     ) -> Result<SpannIndexReader<'me>, SpannIndexReaderError> {
         let hnsw_reader = match hnsw_id {
             Some(hnsw_id) => {
@@ -2602,6 +2628,8 @@ impl<'me> SpannIndexReader<'me> {
             hnsw_index: hnsw_reader,
             versions_map: versions_map_reader,
             dimensionality,
+            adaptive_search_nprobe,
+            params,
         })
     }
 
@@ -2628,6 +2656,42 @@ impl<'me> SpannIndexReader<'me> {
             })?
             .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
         Ok(Self::is_version_outdated(actual_version, doc_version))
+    }
+
+    pub fn determine_search_nprobe(&self, collection_num_records_post_compaction: usize) -> u32 {
+        if self.adaptive_search_nprobe {
+            if collection_num_records_post_compaction <= 10000 {
+                4
+            } else if collection_num_records_post_compaction <= 100000 {
+                8
+            } else if collection_num_records_post_compaction <= 500000 {
+                16
+            } else if collection_num_records_post_compaction <= 1000000 {
+                32
+            } else {
+                64
+            }
+        } else {
+            self.params.search_nprobe
+        }
+    }
+
+    pub async fn rng_query(
+        &self,
+        normalized_query: &[f32],
+        collection_num_records_post_compaction: usize,
+    ) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), SpannIndexReaderError> {
+        let r = rng_query(
+            normalized_query,
+            self.hnsw_index.clone(),
+            self.determine_search_nprobe(collection_num_records_post_compaction) as usize,
+            self.params.search_rng_epsilon,
+            self.params.search_rng_factor,
+            self.params.space.clone().into(),
+            false,
+        )
+        .await?;
+        Ok(r)
     }
 
     pub async fn fetch_posting_list(
@@ -4133,7 +4197,7 @@ mod tests {
                 prefix_path,
                 dimensionality,
                 &blockfile_provider,
-                params,
+                params.clone(),
                 gc_context,
                 pl_block_size,
                 SpannMetrics::default(),
@@ -4178,6 +4242,8 @@ mod tests {
                 Some(&paths.versions_map_id),
                 &blockfile_provider,
                 prefix_path,
+                true,
+                params,
             )
             .await
             .expect("Error creating spann index reader");
@@ -4249,7 +4315,7 @@ mod tests {
                 prefix_path,
                 dimensionality,
                 &blockfile_provider,
-                params,
+                params.clone(),
                 gc_context,
                 pl_block_size,
                 SpannMetrics::default(),
@@ -4316,6 +4382,8 @@ mod tests {
                 Some(&paths.versions_map_id),
                 &blockfile_provider,
                 prefix_path,
+                true,
+                params,
             )
             .await
             .expect("Error creating spann index reader");
@@ -4442,6 +4510,8 @@ mod tests {
                 versions_map_path.as_ref(),
                 &blockfile_provider,
                 prefix_path,
+                true,
+                params.clone(),
             )
             .await
             .expect("Error creating spann index reader");
@@ -4595,6 +4665,8 @@ mod tests {
                 versions_map_path.as_ref(),
                 &blockfile_provider,
                 prefix_path,
+                true,
+                params.clone(),
             )
             .await
             .expect("Error creating spann index reader");
@@ -4894,6 +4966,8 @@ mod tests {
                 versions_map_path.as_ref(),
                 &blockfile_provider,
                 prefix_path,
+                true,
+                params.clone(),
             )
             .await
             .expect("Error creating spann index reader");
@@ -4937,7 +5011,7 @@ mod tests {
                 prefix_path,
                 dimensionality,
                 &blockfile_provider,
-                params,
+                params.clone(),
                 gc_context,
                 pl_block_size,
                 SpannMetrics::default(),
@@ -4970,6 +5044,8 @@ mod tests {
                 versions_map_path.as_ref(),
                 &blockfile_provider,
                 prefix_path,
+                true,
+                params,
             )
             .await
             .expect("Error creating spann index reader");

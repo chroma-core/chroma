@@ -9,6 +9,7 @@ pub(crate) struct SpannCentersSearchInput<'referred_data> {
     pub(crate) reader: Option<SpannSegmentReader<'referred_data>>,
     // Assumes that query is already normalized in case of cosine.
     pub(crate) normalized_query: Vec<f32>,
+    pub(crate) collection_num_records_post_compaction: usize,
 }
 
 #[derive(Debug)]
@@ -50,7 +51,10 @@ impl<'referred_data> Operator<SpannCentersSearchInput<'referred_data>, SpannCent
             Some(reader) => {
                 // Use the reader to query the centers.
                 let res = reader
-                    .rng_query(&input.normalized_query)
+                    .rng_query(
+                        &input.normalized_query,
+                        input.collection_num_records_post_compaction,
+                    )
                     .await
                     .map_err(|_| SpannCentersSearchError::RngQueryError)?;
                 Ok(SpannCentersSearchOutput { center_ids: res.0 })

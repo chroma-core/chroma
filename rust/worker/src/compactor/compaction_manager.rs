@@ -842,9 +842,10 @@ mod tests {
         let spann_provider = SpannProvider {
             hnsw_provider: hnsw_provider.clone(),
             blockfile_provider: blockfile_provider.clone(),
-            garbage_collection_context: Some(gc_context),
+            garbage_collection_context: gc_context,
             metrics: SpannMetrics::default(),
-            pl_block_size: Some(5 * 1024 * 1024),
+            pl_block_size: 5 * 1024 * 1024,
+            adaptive_search_nprobe: true,
         };
         let system = System::new();
         let mut manager = CompactionManager::new(

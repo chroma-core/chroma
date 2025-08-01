@@ -93,7 +93,7 @@ mod tests {
     /// The unit tests for `SourceRecordSegmentOperator` uses the following test data
     /// It generates 100 log records and compact them
     async fn setup_source_input() -> SourceRecordSegmentInput {
-        let mut test_segment = TestDistributedSegment::default();
+        let mut test_segment = TestDistributedSegment::new().await;
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;

@@ -38,6 +38,10 @@ fn default_pl_block_size() -> usize {
     5 * 1024 * 1024
 }
 
+fn default_adaptive_search_nprobe() -> bool {
+    true
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize)]
 pub enum PlGarbageCollectionPolicyConfig {
     #[serde(rename = "random_sample")]
@@ -57,6 +61,8 @@ pub struct SpannProviderConfig {
     #[serde(default = "default_garbage_collection")]
     pub pl_garbage_collection: PlGarbageCollectionConfig,
     pub hnsw_garbage_collection: HnswGarbageCollectionConfig,
+    #[serde(default = "default_adaptive_search_nprobe")]
+    pub adaptive_search_nprobe: bool,
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]

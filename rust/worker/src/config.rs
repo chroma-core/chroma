@@ -1,4 +1,5 @@
 use chroma_config::assignment;
+use chroma_index::config::SpannProviderConfig;
 use chroma_sysdb::SysDbConfig;
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use figment::providers::{Env, Format, Yaml};
@@ -138,6 +139,8 @@ pub struct QueryServiceConfig {
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
     #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
+    #[serde(default)]
+    pub spann_provider: SpannProviderConfig,
     #[serde(default)]
     pub jemalloc_pprof_server_port: Option<u16>,
 }

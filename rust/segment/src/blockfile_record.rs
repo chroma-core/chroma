@@ -1038,7 +1038,7 @@ mod tests {
             .enable_all()
             .build()
             .expect("Runtime creation should not fail");
-        let test_segment = runtime.block_on(async { TestDistributedSegment::default() });
+        let test_segment = runtime.block_on(async { TestDistributedSegment::new().await });
         let record_segment_writer = runtime
             .block_on(RecordSegmentWriter::from_segment(
                 &test_segment.collection.tenant,

@@ -216,7 +216,7 @@ fn bench_regex(criterion: &mut Criterion) {
                 }
             })
             .collect::<Vec<_>>();
-        let mut segment = TestDistributedSegment::default();
+        let mut segment = TestDistributedSegment::new().await;
         for (idx, batch) in logs.chunks(LOG_CHUNK_SIZE).enumerate().progress() {
             segment
                 .compact_log(Chunk::new(batch.into()), idx * LOG_CHUNK_SIZE)

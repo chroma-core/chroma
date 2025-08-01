@@ -180,6 +180,7 @@ impl Orchestrator for SpannKnnOrchestrator {
             &self.blockfile_provider,
             &self.spann_provider.hnsw_provider,
             self.knn_filter_output.dimension,
+            self.spann_provider.adaptive_search_nprobe,
         )
         .await;
         match reader_res {
@@ -191,6 +192,10 @@ impl Orchestrator for SpannKnnOrchestrator {
                     SpannCentersSearchInput {
                         reader: Some(reader),
                         normalized_query: self.normalized_query_emb.clone(),
+                        collection_num_records_post_compaction: self
+                            .collection
+                            .total_records_post_compaction
+                            as usize,
                     },
                     ctx.receiver(),
                     self.context.task_cancellation_token.clone(),
