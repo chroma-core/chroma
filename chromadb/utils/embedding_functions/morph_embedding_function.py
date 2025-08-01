@@ -13,11 +13,11 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
         model_name: str = "morph-embedding-v2",
         api_base: str = "https://api.morphllm.com/v1",
         encoding_format: str = "float",
-        api_key_env_var: str = "CHROMA_MORPH_API_KEY",
+        api_key_env_var: str = "MORPH_API_KEY",
     ):
         """
         Initialize the MorphEmbeddingFunction.
-        
+
         Args:
             api_key (str, optional): The API key for the Morph API. If not provided,
                 it will be read from the environment variable specified by api_key_env_var.
@@ -28,7 +28,7 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
             encoding_format (str, optional): The format for embeddings (float or base64).
                 Defaults to "float".
             api_key_env_var (str, optional): Environment variable name that contains your API key.
-                Defaults to "CHROMA_MORPH_API_KEY".
+                Defaults to "MORPH_API_KEY".
         """
         try:
             import openai
@@ -63,10 +63,10 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
     def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
-        
+
         Args:
             input: Documents to generate embeddings for.
-            
+
         Returns:
             Embeddings for the documents.
         """
@@ -144,4 +144,4 @@ class MorphEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config_schema(config, "morph") 
+        validate_config_schema(config, "morph")

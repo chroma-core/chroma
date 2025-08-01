@@ -24,7 +24,7 @@ import chromadb.utils.embedding_functions as embedding_functions
 
 # Set your API key as an environment variable
 import os
-os.environ["CHROMA_MORPH_API_KEY"] = "your-morph-api-key"
+os.environ["MORPH_API_KEY"] = "your-morph-api-key"
 
 morph_ef = embedding_functions.MorphEmbeddingFunction(
     model_name="morph-embedding-v2"
@@ -46,7 +46,7 @@ morph_ef = embedding_functions.MorphEmbeddingFunction(
     model_name="morph-embedding-v2",
     api_base="https://api.morphllm.com/v1",  # Default base URL
     encoding_format="float",  # Default format
-    api_key_env_var="CHROMA_MORPH_API_KEY"  # Default env var
+    api_key_env_var="MORPH_API_KEY"  # Default env var
 )
 ```
 
@@ -62,7 +62,7 @@ You can use Morph embeddings in TypeScript by installing the OpenAI package and 
 import { OpenAI } from 'openai';
 
 const client = new OpenAI({
-    apiKey: process.env.CHROMA_MORPH_API_KEY,
+    apiKey: process.env.MORPH_API_KEY,
     baseURL: 'https://api.morphllm.com/v1'
 });
 
@@ -71,7 +71,7 @@ async function generateEmbeddings(codeSnippets: string[]) {
         model: "morph-embedding-v2",
         input: codeSnippets
     });
-    
+
     return response.data.map(item => item.embedding);
 }
 
@@ -108,11 +108,11 @@ const embeddings = await generateEmbeddings(codeSnippets);
 Set your Morph API key as an environment variable:
 
 ```bash
-export CHROMA_MORPH_API_KEY="your-morph-api-key"
+export MORPH_API_KEY="your-morph-api-key"
 ```
 
 ## API Reference
 
 For more information about Morph's embedding models and API, visit:
 - [Morph Embedding API Documentation](https://docs.morphllm.com/api-reference/endpoint/embedding)
-- [Morph Website](https://morphllm.com/) 
+- [Morph Website](https://morphllm.com/)
