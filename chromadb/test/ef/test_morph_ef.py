@@ -1,5 +1,6 @@
 import os
 import pytest
+import numpy as np
 from chromadb.utils.embedding_functions.morph_embedding_function import (
     MorphEmbeddingFunction,
 )
@@ -23,7 +24,7 @@ def test_morph_embedding_function_with_api_key() -> None:
     embeddings = ef(code_snippets)
     assert embeddings is not None
     assert len(embeddings) == 2
-    assert all(isinstance(emb, list) for emb in embeddings)
+    assert all(isinstance(emb, np.ndarray) for emb in embeddings)
     assert all(len(emb) > 0 for emb in embeddings)
 
 
@@ -45,7 +46,7 @@ def test_morph_embedding_function_with_custom_parameters() -> None:
     embeddings = ef(code_snippet)
     assert embeddings is not None
     assert len(embeddings) == 1
-    assert isinstance(embeddings[0], list)
+    assert isinstance(embeddings[0], np.ndarray)
     assert len(embeddings[0]) > 0
 
 
