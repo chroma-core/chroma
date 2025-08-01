@@ -212,9 +212,14 @@ impl ChromaError for CompactionError {
 }
 
 #[derive(Debug)]
-pub struct CompactionResponse {
-    #[allow(dead_code)]
-    pub(crate) collection_id: CollectionUuid,
+pub enum CompactionResponse {
+    Success {
+        collection_id: CollectionUuid,
+    },
+    RequireCompactionOffsetRepair {
+        collection_id: CollectionUuid,
+        witnessed_offset_in_sysdb: i64,
+    },
 }
 
 impl CompactOrchestrator {
@@ -875,16 +880,24 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CompactOrchestrator 
             }
             None => {
                 tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
-                // TODO(hammadb): We can repair the log service's understanding of the offset here, as this only happens
-                // when the log service is not up to date on the latest compacted offset, which leads it to schedule an already
-                // compacted collection.
-                self.terminate_with_result(
-                    Ok(CompactionResponse {
-                        collection_id: self.collection_id,
-                    }),
-                    ctx,
-                )
-                .await;
+                if let Some(collection) = self.collection.get() {
+                    self.terminate_with_result(
+                        Ok(CompactionResponse::RequireCompactionOffsetRepair {
+                            collection_id: collection.collection_id,
+                            witnessed_offset_in_sysdb: collection.log_position,
+                        }),
+                        ctx,
+                    )
+                    .await;
+                } else {
+                    self.terminate_with_result(
+                        Err(CompactionError::InvariantViolation(
+                            "self.collection not set",
+                        )),
+                        ctx,
+                    )
+                    .await;
+                }
                 return;
             }
         }
@@ -1099,7 +1112,7 @@ impl Handler<TaskResult<RegisterOutput, RegisterError>> for CompactOrchestrator 
             message
                 .into_inner()
                 .map_err(|e| e.into())
-                .map(|_| CompactionResponse {
+                .map(|_| CompactionResponse::Success {
                     collection_id: self.collection_id,
                 }),
             ctx,
