@@ -1685,6 +1685,7 @@ impl LogServer {
                 .map(CollectionUuid)
                 .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
 
+            tracing::event!(Level::ERROR, name = "abuse of error to force a log: rolling back collection log offset", collection_id =? collection_id);
             // Grab a lock on the state for this key, so that a racing initialize won't do anything.
             let key = LogKey { collection_id };
             let handle = self.open_logs.get_or_create_state(key);

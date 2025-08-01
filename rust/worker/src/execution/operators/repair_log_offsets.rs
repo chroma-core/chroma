@@ -7,6 +7,7 @@ use chroma_system::{Operator, OperatorType};
 use chroma_types::CollectionUuid;
 use thiserror::Error;
 use tokio::time::{error::Elapsed, timeout};
+use tracing::Level;
 
 /// The `RepairLogOffsets` operator to call update_collection_log_offset on every RLS node when
 /// there's a condition where it reads zero records.
@@ -65,6 +66,7 @@ impl Operator<RepairLogOffsetsInput, RepairLogOffsetsOutput> for RepairLogOffset
         input: &RepairLogOffsetsInput,
     ) -> Result<RepairLogOffsetsOutput, RepairLogOffsetsError> {
         for (collection_id, offset) in input.log_offsets_to_repair.iter().cloned() {
+            tracing::event!(Level::INFO, name = "repairing log offset", collection_id =? collection_id, offset =? offset);
             timeout(
                 self.timeout,
                 self.log_client
