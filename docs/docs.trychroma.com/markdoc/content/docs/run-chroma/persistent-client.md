@@ -4,6 +4,12 @@
 
 {% Tab label="python" %}
 
+To run a Chroma server locally that will persist your data, install Chroma via `pip`:
+
+```terminal
+pip install chromadb
+```
+
 You can configure Chroma to save and load the database from your local machine, using the `PersistentClient`. 
 
 Data will be persisted automatically and loaded on start (if it exists).
@@ -22,11 +28,35 @@ The `path` is where Chroma will store its database files on disk, and load them 
 
 To connect with the JS/TS client, you must connect to a Chroma server. 
 
-To run a Chroma server locally that will persist your data, install Chroma via `pip`:
+To run a Chroma server locally that will persist your data, install Chroma:
 
+{% TabbedUseCaseCodeBlock language="Terminal" %}
+
+{% Tab label="npm" %}
 ```terminal
-pip install chromadb
+npm install chromadb
 ```
+{% /Tab %}
+
+{% Tab label="pnpm" %}
+```terminal
+pnpm add chromadb
+```
+{% /Tab %}
+
+{% Tab label="yarn" %}
+```terminal
+yarn add chromadb
+```
+{% /Tab %}
+
+{% Tab label="bun" %}
+```terminal
+bun add chromadb
+```
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
 
 And run the server using our CLI:
 
