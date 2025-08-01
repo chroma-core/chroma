@@ -39,7 +39,7 @@ const embedder = new MorphEmbeddingFunction({
 // use directly
 const embeddings = embedder.generate(["function calculate(a, b) { return a + b; }", "class User { constructor(name) { this.name = name; } }"])
 
-// pass documents to query for .add and .query
+// pass documents to the .add and .query methods
 const collection = await client.createCollection({name: "name", embeddingFunction: embedder})
 const collectionGet = await client.getCollection({name: "name", embeddingFunction: embedder})
 ```
