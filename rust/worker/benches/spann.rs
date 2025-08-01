@@ -142,13 +142,15 @@ fn add_to_index_and_get_reader<'a>(
                 Some(&paths.hnsw_id),
                 &hnsw_provider,
                 &collection_id,
-                params.space.into(),
+                params.clone().space.into(),
                 dimensionality,
                 ef_search,
                 Some(&paths.pl_id),
                 Some(&paths.versions_map_id),
                 &blockfile_provider,
                 prefix_path,
+                true,
+                params,
             )
             .await
             .expect("Error creating spann index reader"),

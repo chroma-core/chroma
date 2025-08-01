@@ -2322,7 +2322,7 @@ mod test {
                 },
             })
             .collect::<Vec<_>>();
-        let mut segments = TestDistributedSegment::new_with_dimension(2);
+        let mut segments = TestDistributedSegment::new_with_dimension(2).await;
         segments.compact_log(Chunk::new(logs.into()), 0).await;
         let metadata_segment_reader = MetadataSegmentReader::from_segment(
             &segments.metadata_segment,
