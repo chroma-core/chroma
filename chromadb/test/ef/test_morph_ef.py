@@ -105,8 +105,6 @@ def test_morph_embedding_function_spaces() -> None:
 
 def test_morph_embedding_function_validate_config() -> None:
     """Test that Morph embedding function validates configuration correctly."""
-    from chromadb.utils.embedding_functions.schemas import validate_config_schema
-
     # Valid configuration
     valid_config = {
         "model_name": "morph-embedding-v2",
