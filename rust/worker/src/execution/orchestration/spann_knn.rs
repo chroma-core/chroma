@@ -196,6 +196,7 @@ impl Orchestrator for SpannKnnOrchestrator {
                             .collection
                             .total_records_post_compaction
                             as usize,
+                        k: self.k,
                     },
                     ctx.receiver(),
                     self.context.task_cancellation_token.clone(),

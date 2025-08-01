@@ -2658,8 +2658,14 @@ impl<'me> SpannIndexReader<'me> {
         Ok(Self::is_version_outdated(actual_version, doc_version))
     }
 
-    pub fn determine_search_nprobe(&self, collection_num_records_post_compaction: usize) -> u32 {
-        if self.adaptive_search_nprobe {
+    pub fn determine_search_nprobe(
+        &self,
+        collection_num_records_post_compaction: usize,
+        k: usize,
+    ) -> u32 {
+        // Query at least 20x more points than k.
+        let min_nprobe = ((k * 20) as f64 / self.params.split_threshold as f64).ceil() as u32;
+        let optimal_nprobe = if self.adaptive_search_nprobe {
             if collection_num_records_post_compaction <= 10000 {
                 4
             } else if collection_num_records_post_compaction <= 100000 {
@@ -2673,18 +2679,21 @@ impl<'me> SpannIndexReader<'me> {
             }
         } else {
             self.params.search_nprobe
-        }
+        };
+
+        optimal_nprobe.max(min_nprobe)
     }
 
     pub async fn rng_query(
         &self,
         normalized_query: &[f32],
         collection_num_records_post_compaction: usize,
+        k: usize,
     ) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), SpannIndexReaderError> {
         let r = rng_query(
             normalized_query,
             self.hnsw_index.clone(),
-            self.determine_search_nprobe(collection_num_records_post_compaction) as usize,
+            self.determine_search_nprobe(collection_num_records_post_compaction, k) as usize,
             self.params.search_rng_epsilon,
             self.params.search_rng_factor,
             self.params.space.clone().into(),

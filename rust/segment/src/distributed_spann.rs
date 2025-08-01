@@ -563,9 +563,10 @@ impl<'me> SpannSegmentReader<'me> {
         &self,
         normalized_query: &[f32],
         collection_num_records_post_compaction: usize,
+        k: usize,
     ) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), SpannSegmentReaderError> {
         self.index_reader
-            .rng_query(normalized_query, collection_num_records_post_compaction)
+            .rng_query(normalized_query, collection_num_records_post_compaction, k)
             .await
             .map_err(|e| {
                 tracing::error!("Error performing rng query: {:?}", e);
