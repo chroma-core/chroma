@@ -39,7 +39,6 @@ def test_repair_collection_log_offset(
 
     initial_version = cast(int, collection.get_model()["version"])
 
-    excepted = False
     # Add RECORDS records, where each embedding has 3 dimensions randomly generated between 0 and 1
     for i in range(0, RECORDS, BATCH_SIZE):
         ids = []
