@@ -18,7 +18,7 @@ fn default_search_rng_epsilon() -> f32 {
 }
 
 fn default_write_nprobe() -> u32 {
-    64
+    32
 }
 
 fn default_write_rng_factor() -> f32 {
@@ -26,11 +26,11 @@ fn default_write_rng_factor() -> f32 {
 }
 
 fn default_write_rng_epsilon() -> f32 {
-    10.0
+    5.0
 }
 
 fn default_split_threshold() -> u32 {
-    200
+    50
 }
 
 fn default_num_samples_kmeans() -> usize {
@@ -46,7 +46,7 @@ fn default_reassign_neighbor_count() -> u32 {
 }
 
 fn default_merge_threshold() -> u32 {
-    100
+    25
 }
 
 fn default_num_centers_to_merge_to() -> u32 {
