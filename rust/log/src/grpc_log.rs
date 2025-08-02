@@ -15,6 +15,7 @@ use chroma_memberlist::memberlist_provider::{
     CustomResourceMemberlistProvider, MemberlistProvider,
 };
 use chroma_system::System;
+use chroma_tracing::GrpcTraceService;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
 use chroma_types::{
@@ -23,7 +24,7 @@ use chroma_types::{
 use std::fmt::Debug;
 use std::time::Duration;
 use thiserror::Error;
-use tonic::transport::Endpoint;
+use tonic::transport::{Channel, Endpoint};
 use tower::ServiceBuilder;
 use tracing::Level;
 use uuid::Uuid;
@@ -241,29 +242,10 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
         let (my_config, system) = my_config;
         let host = &my_config.host;
         let port = &my_config.port;
-        let max_encoding_message_size = my_config.max_encoding_message_size;
-        let max_decoding_message_size = my_config.max_decoding_message_size;
         let connection_string = format!("http://{}:{}", host, port);
-        let client_for_conn_str =
-            |connection_string: String| -> Result<LogServiceClient<_>, Box<dyn ChromaError>> {
-                tracing::info!("Connecting to log service at {}", connection_string);
-                let endpoint_res = match Endpoint::from_shared(connection_string) {
-                    Ok(endpoint) => endpoint,
-                    Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
-                };
-                let endpoint_res = endpoint_res
-                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
-                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
-                let channel = endpoint_res.connect_lazy();
-                let channel = ServiceBuilder::new()
-                    .layer(chroma_tracing::GrpcTraceLayer)
-                    .service(channel);
-                let client = LogServiceClient::new(channel)
-                    .max_encoding_message_size(max_encoding_message_size)
-                    .max_decoding_message_size(max_decoding_message_size);
-                Ok(client)
-            };
-        let client = client_for_conn_str(connection_string)?;
+        let client = client_for_conn_str(connection_string, my_config.clone())
+            .await
+            .map_err(|err| Box::new(GrpcLogError::FailedToConnect(err)) as Box<dyn ChromaError>)?;
 
         // Alt client manager setup
         let assignment_policy =
@@ -298,6 +280,25 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
     }
 }
 
+async fn client_for_conn_str(
+    connection_string: String,
+    my_config: GrpcLogConfig,
+) -> Result<LogServiceClient<GrpcTraceService<Channel>>, tonic::transport::Error> {
+    tracing::info!("Connecting to log service at {}", connection_string);
+    let endpoint_res = Endpoint::from_shared(connection_string)?;
+    let endpoint_res = endpoint_res
+        .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
+        .timeout(Duration::from_millis(my_config.request_timeout_ms));
+    let channel = endpoint_res.connect().await?;
+    let channel = ServiceBuilder::new()
+        .layer(chroma_tracing::GrpcTraceLayer)
+        .service(channel);
+    let client = LogServiceClient::new(channel)
+        .max_encoding_message_size(my_config.max_encoding_message_size)
+        .max_decoding_message_size(my_config.max_decoding_message_size);
+    Ok(client)
+}
+
 impl GrpcLog {
     // NOTE(rescrv) This is a transient hack, so the code duplication is not worth eliminating.
     pub async fn primary_client_from_config(
@@ -308,29 +309,10 @@ impl GrpcLog {
     > {
         let host = &my_config.host;
         let port = &my_config.port;
-        let max_encoding_message_size = my_config.max_encoding_message_size;
-        let max_decoding_message_size = my_config.max_decoding_message_size;
         let connection_string = format!("http://{}:{}", host, port);
-        let client_for_conn_str =
-            |connection_string: String| -> Result<LogServiceClient<_>, Box<dyn ChromaError>> {
-                tracing::info!("Connecting to log service at {}", connection_string);
-                let endpoint_res = match Endpoint::from_shared(connection_string) {
-                    Ok(endpoint) => endpoint,
-                    Err(e) => return Err(Box::new(GrpcLogError::FailedToConnect(e))),
-                };
-                let endpoint_res = endpoint_res
-                    .connect_timeout(Duration::from_millis(my_config.connect_timeout_ms))
-                    .timeout(Duration::from_millis(my_config.request_timeout_ms));
-                let channel = endpoint_res.connect_lazy();
-                let channel = ServiceBuilder::new()
-                    .layer(chroma_tracing::GrpcTraceLayer)
-                    .service(channel);
-                let client = LogServiceClient::new(channel)
-                    .max_encoding_message_size(max_encoding_message_size)
-                    .max_decoding_message_size(max_decoding_message_size);
-                Ok(client)
-            };
-        client_for_conn_str(connection_string)
+        client_for_conn_str(connection_string, my_config.clone())
+            .await
+            .map_err(|err| Box::new(GrpcLogError::FailedToConnect(err)) as Box<dyn ChromaError>)
     }
 
     fn client_is_on_alt_log(to_evaluate: CollectionUuid, alt_host_threshold: Option<&str>) -> bool {

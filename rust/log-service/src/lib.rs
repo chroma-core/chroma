@@ -1062,7 +1062,7 @@ impl LogServer {
             .unwrap_or(&default)
             .clone();
         tracing::info!("cursoring from {cursor:?}");
-        let dirty_fragments = reader
+        let dirty_fragments = match reader
             .scan(
                 cursor.position,
                 Limits {
@@ -1071,7 +1071,25 @@ impl LogServer {
                     max_records: None,
                 },
             )
-            .await?;
+            .await
+        {
+            Ok(dirty_fragments) => dirty_fragments,
+            Err(wal3::Error::UninitializedLog) => {
+                let last_record_witnessed = cursor.position;
+                let rollups = HashMap::default();
+                let rollup = Rollup {
+                    witness,
+                    cursor,
+                    last_record_witnessed,
+                    rollups,
+                };
+                tracing::info!("empty dirty log");
+                return Ok(rollup);
+            }
+            Err(e) => {
+                return Err(Error::Wal3(e));
+            }
+        };
         if dirty_fragments.is_empty() {
             let last_record_witnessed = cursor.position;
             let rollups = HashMap::default();

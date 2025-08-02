@@ -6,7 +6,7 @@ use chroma_blockstore::RootManager;
 use chroma_cache::nop::NopCache;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
-use chroma_log::config::LogConfig;
+use chroma_log::config::{GrpcLogConfig, LogConfig};
 use chroma_log::Log;
 use chroma_storage::s3::s3_client_for_test_with_bucket_name;
 use chroma_storage::{DeleteOptions, GetOptions, Storage};
@@ -117,7 +117,13 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 .await
                 .unwrap();
             let system = System::new();
-            let logs = Log::try_from_config(&(LogConfig::default(), system), &registry)
+            let log_config = LogConfig::Grpc(GrpcLogConfig {
+                host: "localhost".to_string(),
+                port: 50054,
+                alt_host: Some("localhost".to_string()),
+                ..Default::default()
+            });
+            let logs = Log::try_from_config(&(log_config, system), &registry)
                 .await
                 .unwrap();
 

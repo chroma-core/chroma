@@ -1594,6 +1594,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
 #[cfg(test)]
 mod tests {
     use chroma_config::registry::Registry;
+    use chroma_log::config::{GrpcLogConfig, LogConfig};
     use chroma_sysdb::GrpcSysDbConfig;
     use chroma_types::Collection;
     use uuid::Uuid;
@@ -1659,7 +1660,12 @@ mod tests {
             segment_manager: None,
             sysdb: Default::default(),
             collections_with_segments_provider: Default::default(),
-            log: Default::default(),
+            log: LogConfig::Grpc(GrpcLogConfig {
+                host: "localhost".to_string(),
+                port: 50054,
+                alt_host: Some("localhost".to_string()),
+                ..Default::default()
+            }),
             executor: ExecutorConfig::Distributed(DistributedExecutorConfig {
                 connections_per_node: 128,
                 replication_factor: 2,
