@@ -547,7 +547,7 @@ mod tests {
 
     use super::*;
     use crate::helper::ChromaGrpcClients;
-    use chroma_log::config::LogConfig;
+    use chroma_log::config::{GrpcLogConfig, LogConfig};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::s3_config_for_localhost_with_bucket_name;
     use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig};
@@ -749,7 +749,12 @@ mod tests {
             port: 50055,
             root_cache_config: Default::default(),
             jemalloc_pprof_server_port: None,
-            log: LogConfig::default(),
+            log: LogConfig::Grpc(GrpcLogConfig {
+                host: "localhost".to_string(),
+                port: 50054,
+                alt_host: Some("localhost".to_string()),
+                ..Default::default()
+            }),
             enable_log_gc_for_tenant: Vec::new(),
             enable_log_gc_for_tenant_threshold: "tenant-ffffffff-ffff-ffff-ffff-ffffffffffff"
                 .to_string(),
@@ -883,7 +888,12 @@ mod tests {
             jemalloc_pprof_server_port: None,
             enable_log_gc_for_tenant: Vec::new(),
             enable_log_gc_for_tenant_threshold: "tenant-threshold".to_string(),
-            log: LogConfig::default(),
+            log: LogConfig::Grpc(GrpcLogConfig {
+                host: "localhost".to_string(),
+                port: 50054,
+                alt_host: Some("localhost".to_string()),
+                ..Default::default()
+            }),
             enable_dangerous_option_to_ignore_min_versions_for_wal3: false,
         };
         let registry = Registry::new();
@@ -1087,7 +1097,12 @@ mod tests {
             enable_log_gc_for_tenant: Vec::new(),
             enable_log_gc_for_tenant_threshold:
                 "tenant-delete-mode-ffffffff-ffff-ffff-ffff-ffffffffffff".to_string(),
-            log: LogConfig::default(),
+            log: LogConfig::Grpc(GrpcLogConfig {
+                host: "localhost".to_string(),
+                port: 50054,
+                alt_host: Some("localhost".to_string()),
+                ..Default::default()
+            }),
             ..Default::default()
         };
         let registry = Registry::new();
