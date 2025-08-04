@@ -64,11 +64,6 @@ impl Garbage {
         snapshots: &dyn SnapshotCache,
         first_to_keep: LogPosition,
     ) -> Result<Option<Self>, Error> {
-        let Some(first_to_keep) = manifest.round_to_boundary(first_to_keep) else {
-            return Err(Error::CorruptGarbage(format!(
-                "First to keep does not overlap manifest (first_to_keep={first_to_keep:?})"
-            )));
-        };
         let dropped_snapshots = manifest
             .snapshots
             .iter()
@@ -467,6 +462,7 @@ impl Garbage {
                 snapshots_to_keep.is_empty() && fragments_to_keep.is_empty(),
                 "guaranteed by first condition of block"
             );
+            self.snapshots_to_drop.push(ptr.clone());
         }
         for frag in fragments_to_drop.iter() {
             drop_acc += self.drop_fragment(frag, first)?;
