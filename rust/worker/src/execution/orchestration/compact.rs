@@ -1155,7 +1155,7 @@ mod tests {
             .expect("Should be able to initialize dispatcher");
         let dispatcher_handle = system.start_component(dispatcher);
         let mut sysdb = SysDb::Test(TestSysDb::new());
-        let test_segments = TestDistributedSegment::default();
+        let test_segments = TestDistributedSegment::new().await;
         let collection_id = test_segments.collection.collection_id;
         sysdb
             .create_collection(

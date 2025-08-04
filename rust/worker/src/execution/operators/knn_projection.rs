@@ -118,7 +118,7 @@ mod tests {
     async fn setup_knn_projection_input(
         record_distances: Vec<RecordDistance>,
     ) -> (TestDistributedSegment, KnnProjectionInput) {
-        let mut test_segment = TestDistributedSegment::default();
+        let mut test_segment = TestDistributedSegment::new().await;
         test_segment
             .populate_with_generator(100, upsert_generator)
             .await;

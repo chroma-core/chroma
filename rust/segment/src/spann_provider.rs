@@ -9,18 +9,16 @@ use chroma_index::{
 };
 use chroma_types::{Collection, Segment};
 
-use crate::distributed_spann::{
-    SpannSegmentReader, SpannSegmentReaderError, SpannSegmentWriter, SpannSegmentWriterError,
-};
+use crate::distributed_spann::{SpannSegmentWriter, SpannSegmentWriterError};
 
 #[derive(Debug, Clone)]
 pub struct SpannProvider {
     pub hnsw_provider: HnswIndexProvider,
     pub blockfile_provider: BlockfileProvider,
-    // Option because reader does not need it.
-    pub garbage_collection_context: Option<GarbageCollectionContext>,
+    pub garbage_collection_context: GarbageCollectionContext,
     pub metrics: SpannMetrics,
-    pub pl_block_size: Option<usize>,
+    pub pl_block_size: usize,
+    pub adaptive_search_nprobe: bool,
 }
 
 #[async_trait]
@@ -40,52 +38,29 @@ impl Configurable<(HnswIndexProvider, BlockfileProvider, SpannProviderConfig)> f
         Ok(SpannProvider {
             hnsw_provider: config.0.clone(),
             blockfile_provider: config.1.clone(),
-            garbage_collection_context: Some(garbage_collection_context),
+            garbage_collection_context,
             metrics: SpannMetrics::default(),
-            pl_block_size: Some(config.2.pl_block_size),
+            pl_block_size: config.2.pl_block_size,
+            adaptive_search_nprobe: config.2.adaptive_search_nprobe,
         })
     }
 }
 
 impl SpannProvider {
-    pub async fn read(
-        &self,
-        collection: &Collection,
-        segment: &Segment,
-        dimensionality: usize,
-    ) -> Result<SpannSegmentReader<'_>, SpannSegmentReaderError> {
-        SpannSegmentReader::from_segment(
-            collection,
-            segment,
-            &self.blockfile_provider,
-            &self.hnsw_provider,
-            dimensionality,
-        )
-        .await
-    }
-
     pub async fn write(
         &self,
         collection: &Collection,
         segment: &Segment,
         dimensionality: usize,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
-        let gc_context = self
-            .garbage_collection_context
-            .as_ref()
-            .ok_or(SpannSegmentWriterError::InvalidArgument)?;
-        let pl_block_size = *self
-            .pl_block_size
-            .as_ref()
-            .ok_or(SpannSegmentWriterError::InvalidArgument)?;
         SpannSegmentWriter::from_segment(
             collection,
             segment,
             &self.blockfile_provider,
             &self.hnsw_provider,
             dimensionality,
-            gc_context.clone(),
-            pl_block_size,
+            self.garbage_collection_context.clone(),
+            self.pl_block_size,
             self.metrics.clone(),
         )
         .await

@@ -133,11 +133,11 @@ mod tests {
 
     /// The unit tests for `Knn` log operator uses 100 log records
     /// with random embeddings
-    fn setup_knn_log_input(
+    async fn setup_knn_log_input(
         metric: DistanceFunction,
         log_offset_ids: SignedRoaringBitmap,
     ) -> KnnLogInput {
-        let test_segment = TestDistributedSegment::default();
+        let test_segment = TestDistributedSegment::new().await;
         KnnLogInput {
             logs: upsert_generator.generate_chunk(1..=100),
             blockfile_provider: test_segment.blockfile_provider,
@@ -150,7 +150,7 @@ mod tests {
     #[tokio::test]
     async fn test_simple_euclidean() {
         let knn_log_input =
-            setup_knn_log_input(DistanceFunction::Euclidean, SignedRoaringBitmap::full());
+            setup_knn_log_input(DistanceFunction::Euclidean, SignedRoaringBitmap::full()).await;
 
         let knn_operator = Knn {
             embedding: random_embedding(TEST_EMBEDDING_DIMENSION),
@@ -189,7 +189,7 @@ mod tests {
     #[tokio::test]
     async fn test_overfetch() {
         let knn_log_input =
-            setup_knn_log_input(DistanceFunction::Euclidean, SignedRoaringBitmap::full());
+            setup_knn_log_input(DistanceFunction::Euclidean, SignedRoaringBitmap::full()).await;
 
         let knn_operator = Knn {
             embedding: random_embedding(TEST_EMBEDDING_DIMENSION),
@@ -232,7 +232,8 @@ mod tests {
             SignedRoaringBitmap::Exclude(
                 (1..=100).filter(|offset_id| offset_id % 2 == 0).collect(),
             ),
-        );
+        )
+        .await;
 
         let knn_operator = Knn {
             embedding: random_embedding(TEST_EMBEDDING_DIMENSION),

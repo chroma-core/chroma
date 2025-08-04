@@ -12,12 +12,9 @@ use chroma_index::spann::types::SpannMetrics;
 use chroma_index::spann::types::{
     SpannIndexFlusher, SpannIndexReader, SpannIndexReaderError, SpannIndexWriterError, SpannPosting,
 };
-use chroma_index::spann::utils::rng_query;
-use chroma_index::spann::utils::RngQueryError;
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
 use chroma_types::Collection;
-use chroma_types::InternalSpannConfiguration;
 use chroma_types::SegmentUuid;
 use chroma_types::HNSW_PATH;
 use chroma_types::MAX_HEAD_ID_BF_PATH;
@@ -415,7 +412,7 @@ pub enum SpannSegmentReaderError {
     #[error("Error fetching posting list for key {0}")]
     KeyReadError(#[source] SpannIndexReaderError),
     #[error("Error performing rng query {0}")]
-    RngError(#[from] RngQueryError),
+    RngError(#[source] SpannIndexReaderError),
     #[error("Prefix paths do not match")]
     InvalidPrefixPath,
 }
@@ -443,7 +440,6 @@ pub struct SpannSegmentReader<'me> {
     pub index_reader: SpannIndexReader<'me>,
     #[allow(dead_code)]
     id: SegmentUuid,
-    pub params: InternalSpannConfiguration,
 }
 
 impl<'me> SpannSegmentReader<'me> {
@@ -453,6 +449,7 @@ impl<'me> SpannSegmentReader<'me> {
         blockfile_provider: &BlockfileProvider,
         hnsw_provider: &HnswIndexProvider,
         dimensionality: usize,
+        adaptive_search_nprobe: bool,
     ) -> Result<SpannSegmentReader<'me>, SpannSegmentReaderError> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentReaderError::InvalidArgument);
@@ -526,6 +523,8 @@ impl<'me> SpannSegmentReader<'me> {
             versions_map_id.as_ref(),
             blockfile_provider,
             &prefix_path,
+            adaptive_search_nprobe,
+            params,
         )
         .await
         {
@@ -544,7 +543,6 @@ impl<'me> SpannSegmentReader<'me> {
         Ok(SpannSegmentReader {
             index_reader,
             id: segment.id,
-            params,
         })
     }
 
@@ -564,18 +562,16 @@ impl<'me> SpannSegmentReader<'me> {
     pub async fn rng_query(
         &self,
         normalized_query: &[f32],
+        collection_num_records_post_compaction: usize,
+        k: usize,
     ) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), SpannSegmentReaderError> {
-        let r = rng_query(
-            normalized_query,
-            self.index_reader.hnsw_index.clone(),
-            self.params.search_nprobe as usize,
-            self.params.search_rng_epsilon,
-            self.params.search_rng_factor,
-            self.params.space.clone().into(),
-            false,
-        )
-        .await?;
-        Ok(r)
+        self.index_reader
+            .rng_query(normalized_query, collection_num_records_post_compaction, k)
+            .await
+            .map_err(|e| {
+                tracing::error!("Error performing rng query: {:?}", e);
+                SpannSegmentReaderError::RngError(e)
+            })
     }
 }
 
@@ -978,6 +974,7 @@ mod test {
             &blockfile_provider,
             &hnsw_provider,
             3,
+            true,
         )
         .await
         .expect("Error creating segment reader");

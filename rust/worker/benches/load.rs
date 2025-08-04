@@ -12,7 +12,7 @@ use worker::execution::operators::fetch_log::FetchLogOperator;
 const DATA_CHUNK_SIZE: usize = 10000;
 
 pub async fn sift1m_segments() -> TestDistributedSegment {
-    let mut segments = TestDistributedSegment::default();
+    let mut segments = TestDistributedSegment::new().await;
     let mut sift1m = Sift1MData::init()
         .await
         .expect("Should be able to download Sift1M data");

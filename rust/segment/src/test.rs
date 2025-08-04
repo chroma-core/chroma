@@ -5,10 +5,13 @@ use super::{
     distributed_hnsw::DistributedHNSWSegmentWriter, types::materialize_logs,
 };
 use chroma_blockstore::{provider::BlockfileProvider, test_arrow_blockfile_provider};
+use chroma_config::registry::Registry;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::ChromaError;
 use chroma_index::{
-    hnsw_provider::HnswIndexProvider, spann::types::SpannMetrics, test_hnsw_index_provider,
+    hnsw_provider::HnswIndexProvider,
+    spann::types::{GarbageCollectionContext, SpannMetrics},
+    test_hnsw_index_provider,
 };
 use chroma_types::{
     operator::{
@@ -44,11 +47,14 @@ pub struct TestDistributedSegment {
 }
 
 impl TestDistributedSegment {
-    pub fn new_with_dimension(dimension: usize) -> Self {
+    pub async fn new_with_dimension(dimension: usize) -> Self {
         let collection = Collection::test_collection(dimension as i32);
         let collection_uuid = collection.collection_id;
         let (blockfile_dir, blockfile_provider) = test_arrow_blockfile_provider(2 << 22);
         let (hnsw_dir, hnsw_provider) = test_hnsw_index_provider();
+        let garbage_collection_context = GarbageCollectionContext::new(Registry::new())
+            .await
+            .expect("Expected to construct gc context for spann");
 
         Self {
             temp_dirs: vec![blockfile_dir, hnsw_dir],
@@ -57,9 +63,10 @@ impl TestDistributedSegment {
             spann_provider: SpannProvider {
                 hnsw_provider,
                 blockfile_provider,
-                garbage_collection_context: None,
+                garbage_collection_context,
                 metrics: SpannMetrics::default(),
-                pl_block_size: Some(5 * 1024 * 1024),
+                pl_block_size: 5 * 1024 * 1024,
+                adaptive_search_nprobe: true,
             },
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
@@ -157,9 +164,9 @@ impl From<&TestDistributedSegment> for CollectionAndSegments {
     }
 }
 
-impl Default for TestDistributedSegment {
-    fn default() -> Self {
-        Self::new_with_dimension(128)
+impl TestDistributedSegment {
+    pub async fn new() -> Self {
+        Self::new_with_dimension(128).await
     }
 }
 
