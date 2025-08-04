@@ -9,7 +9,8 @@ use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable, FinishRequest,
     FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
-    MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes, WriteAction,
+    MeterEvent, MeteredFutureExt, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes,
+    WriteAction,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
@@ -1081,6 +1082,7 @@ impl ServiceBasedFrontend {
 
         self.log_client
             .push_logs(&tenant_id, collection_id, records)
+            .meter(collection_write_context_container.clone())
             .await
             .map_err(|err| {
                 if err.code() == ErrorCodes::Unavailable {
@@ -1089,6 +1091,9 @@ impl ServiceBasedFrontend {
                     DeleteCollectionRecordsError::Internal(Box::new(err) as _)
                 }
             })?;
+
+        // Need to re-enter the context after calling .await
+        collection_write_context_container.enter();
 
         // Attach metadata to the write context
         chroma_metering::with_current(|context| {
