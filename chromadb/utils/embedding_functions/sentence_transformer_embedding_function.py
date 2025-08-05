@@ -79,11 +79,11 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
         model_name = config.get("model_name")
-        device = config.get("device")
+        device = config.get("device", None) # If None, delegate to SentenceTransformer to determine the device
         normalize_embeddings = config.get("normalize_embeddings")
         kwargs = config.get("kwargs", {})
 
-        if model_name is None or device is None or normalize_embeddings is None:
+        if model_name is None or normalize_embeddings is None:
             assert False, "This code should not be reached"
 
         return SentenceTransformerEmbeddingFunction(
