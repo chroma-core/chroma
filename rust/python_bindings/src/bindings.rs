@@ -3,6 +3,7 @@ use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
+    config::TelemetryConfig,
     executor::config::{ExecutorConfig, LocalExecutorConfig},
     get_collection_with_segments_provider::{
         CacheInvalidationRetryConfig, CollectionsWithSegmentsProviderConfig,
@@ -66,12 +67,14 @@ pub fn cli(py_args: Option<Vec<String>>) -> ChromaPyResult<()> {
 #[pymethods]
 impl Bindings {
     #[new]
-    #[pyo3(signature = (allow_reset, sqlite_db_config, hnsw_cache_size, persist_path=None))]
+    #[pyo3(signature = (allow_reset, sqlite_db_config, hnsw_cache_size, user_id, persist_path=None, anonymized_telemetry=true))]
     pub fn py_new(
         allow_reset: bool,
         sqlite_db_config: SqliteDBConfig,
         hnsw_cache_size: usize,
+        user_id: String,
         persist_path: Option<String>,
+        anonymized_telemetry: bool,
     ) -> ChromaPyResult<Self> {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let _guard = runtime.enter();
@@ -79,6 +82,14 @@ impl Bindings {
         let registry = Registry::new();
 
         //////////////////////////// Frontend Setup ////////////////////////////
+
+        // Get version dynamically
+        let version = Python::with_gil(|py| {
+            py.import("chromadb")
+                .and_then(|chromadb| chromadb.getattr("__version__"))
+                .and_then(|version| version.extract::<String>())
+                .unwrap_or_else(|_| "unknown".to_string())
+        });
 
         let cache_config = FoyerCacheConfig {
             capacity: hnsw_cache_size,
@@ -112,6 +123,13 @@ impl Bindings {
         let executor_config = ExecutorConfig::Local(LocalExecutorConfig {});
 
         let knn_index = KnnIndex::Hnsw;
+        // Telemetry Configuration with anonymized_telemetry setting
+        let telemetry_config = TelemetryConfig {
+            user_id: Some(user_id),
+            is_server: false,
+            chroma_version: Some(version),
+            anonymized_telemetry: Some(anonymized_telemetry),
+        };
 
         let frontend_config = FrontendConfig {
             allow_reset,
@@ -124,6 +142,7 @@ impl Bindings {
             default_knn_index: knn_index,
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
+            telemetry: Some(telemetry_config),
         };
 
         let frontend = runtime.block_on(async {
