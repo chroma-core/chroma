@@ -23,8 +23,7 @@ class SentenceTransformerEmbeddingFunction(EmbeddingFunction[Documents]):
 
         Args:
             model_name (str, optional): Identifier of the SentenceTransformer model, defaults to "all-MiniLM-L6-v2"
-            device (str, optional) – Device (like “cuda”, “cpu”, “mps”, “npu”) that should be used for computation. If None, checks if a GPU can be used.
-                Mirroring, and delegating to the default behavior of SentenceTransformer.
+            device (str, optional): Device to use for computation (e.g. "cpu", "cuda", "mps"). If None, `sentence-transformers` will select the best available device.
             normalize_embeddings (bool, optional): Whether to normalize returned vectors, defaults to False
             **kwargs: Additional arguments to pass to the SentenceTransformer model.
         """
