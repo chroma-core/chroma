@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
-use wal3::{FragmentSeqNo, LogWriter, LogWriterOptions, Manifest};
+use wal3::{FragmentSeqNo, LogPosition, LogWriter, LogWriterOptions, Manifest};
 
 mod common;
 
@@ -87,6 +87,9 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
             writer: "test writer".to_string(),
             snapshots: vec![SnapshotCondition {
                 depth: 1,
+                start: LogPosition::from_offset(1),
+                limit: LogPosition::from_offset(2),
+                num_bytes: 1044,
                 writer: "test writer".to_string(),
                 snapshots: vec![],
                 fragments: vec![fragment1.clone()],
@@ -119,12 +122,18 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
             snapshots: vec![
                 SnapshotCondition {
                     depth: 1,
+                    start: LogPosition::from_offset(1),
+                    limit: LogPosition::from_offset(2),
+                    num_bytes: 1044,
                     writer: "test writer".to_string(),
                     snapshots: vec![],
                     fragments: vec![fragment1.clone()],
                 },
                 SnapshotCondition {
                     depth: 1,
+                    start: LogPosition::from_offset(2),
+                    limit: LogPosition::from_offset(3),
+                    num_bytes: 1044,
                     writer: "test writer".to_string(),
                     snapshots: vec![],
                     fragments: vec![fragment2.clone()],
