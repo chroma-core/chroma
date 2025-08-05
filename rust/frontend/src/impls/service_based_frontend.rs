@@ -1071,7 +1071,6 @@ impl ServiceBasedFrontend {
                 collection_id.0.to_string(),
                 WriteAction::Delete,
             ));
-        collection_write_context_container.enter();
 
         // Closure for write context operations
         (async {

@@ -364,7 +364,6 @@ async fn test_nested_function_creates_new_context() {
         // Create a new context in the child function
         let child_context_container =
             metering::create::<metering::TestContextB>(metering::TestContextB::default());
-        child_context_container.enter();
 
         // Call another async function to which we want to supply the child context. This has to be done in a closure
         // because the parent's future only knows about the parent's context
