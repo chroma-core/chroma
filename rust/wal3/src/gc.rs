@@ -472,6 +472,10 @@ impl Garbage {
             self.snapshots_to_drop.push(ptr.clone());
             self.snapshots_to_make.push(new_snapshot);
         } else {
+            // NOTE(rescrv):  The pointer is the same as the new snapshot or they differ and both
+            // fragments and snapshots were empty.  I can reason to say that the latter case is
+            // impossible (a half open interval necessary to make that happen will never match the
+            // replace condition), so the only case that can happen is the former.
             new_snapshot_pointer = Some(ptr.clone());
         }
         for frag in fragments_to_drop.iter() {
