@@ -9,7 +9,8 @@ use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable, FinishRequest,
     FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
-    MeterEvent, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes, WriteAction,
+    MeterEvent, MeteredFutureExt, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes,
+    WriteAction,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
@@ -1070,30 +1071,39 @@ impl ServiceBasedFrontend {
                 collection_id.0.to_string(),
                 WriteAction::Delete,
             ));
+
+        // Closure for write context operations
+        (async {
+            if records.is_empty() {
+                tracing::debug!("Bailing because no records were found");
+                return Ok::<_, DeleteCollectionRecordsError>(DeleteCollectionRecordsResponse {});
+            }
+
+            let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
+
+            self.log_client
+                .push_logs(&tenant_id, collection_id, records)
+                .await
+                .map_err(|err| {
+                    if err.code() == ErrorCodes::Unavailable {
+                        DeleteCollectionRecordsError::Backoff
+                    } else {
+                        DeleteCollectionRecordsError::Internal(Box::new(err) as _)
+                    }
+                })?;
+
+            // Attach metadata to the write context
+            chroma_metering::with_current(|context| {
+                context.log_size_bytes(log_size_bytes);
+            });
+
+            Ok(DeleteCollectionRecordsResponse {})
+        })
+        .meter(collection_write_context_container.clone())
+        .await?;
+
+        // Need to re-enter the write context before attempting to close
         collection_write_context_container.enter();
-
-        if records.is_empty() {
-            tracing::debug!("Bailing because no records were found");
-            return Ok(DeleteCollectionRecordsResponse {});
-        }
-
-        let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
-
-        self.log_client
-            .push_logs(&tenant_id, collection_id, records)
-            .await
-            .map_err(|err| {
-                if err.code() == ErrorCodes::Unavailable {
-                    DeleteCollectionRecordsError::Backoff
-                } else {
-                    DeleteCollectionRecordsError::Internal(Box::new(err) as _)
-                }
-            })?;
-
-        // Attach metadata to the write context
-        chroma_metering::with_current(|context| {
-            context.log_size_bytes(log_size_bytes);
-        });
 
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionWriteContext>() {
