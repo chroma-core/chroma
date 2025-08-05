@@ -598,7 +598,7 @@ impl Block {
 
 impl chroma_cache::Weighted for Block {
     fn weight(&self) -> usize {
-        ((self.get_size() as f32 / MIB as f32).ceil() as usize).min(1)
+        ((self.get_size() as f32 / MIB as f32).ceil() as usize).max(1)
     }
 }
 
