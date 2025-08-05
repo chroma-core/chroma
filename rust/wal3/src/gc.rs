@@ -472,7 +472,7 @@ impl Garbage {
             self.snapshots_to_drop.push(ptr.clone());
             self.snapshots_to_make.push(new_snapshot);
         } else {
-            new_snapshot_pointer = Some(new_snapshot.to_pointer());
+            new_snapshot_pointer = Some(ptr.clone());
         }
         for frag in fragments_to_drop.iter() {
             drop_acc += self.drop_fragment(frag, first, first_to_keep)?;
