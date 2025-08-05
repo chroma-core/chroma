@@ -13,6 +13,7 @@ use arrow::{
     array::{Array, StringArray},
     record_batch::RecordBatch,
 };
+use chroma_cache::foyer::MIB;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::de::Error as DeError;
 use serde::ser::Error as SerError;
@@ -597,7 +598,7 @@ impl Block {
 
 impl chroma_cache::Weighted for Block {
     fn weight(&self) -> usize {
-        self.get_size()
+        self.get_size() / MIB
     }
 }
 
