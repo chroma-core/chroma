@@ -42,6 +42,29 @@ impl Debug for BlockfileProvider {
         }
     }
 }
+pub trait ReadKey<'a>:
+    Key
+    + Into<KeyWrapper>
+    + TryFrom<&'a KeyWrapper, Error = InvalidKeyConversion>
+    + ArrowReadableKey<'a>
+    + Sync
+    + 'a
+{
+}
+
+pub trait ReadValue<'a>: Value + Readable<'a> + ArrowReadableValue<'a> + Sync + 'a {}
+
+impl<'a, T> ReadKey<'a> for T where
+    T: Key
+        + Into<KeyWrapper>
+        + TryFrom<&'a KeyWrapper, Error = InvalidKeyConversion>
+        + ArrowReadableKey<'a>
+        + Sync
+        + 'a
+{
+}
+
+impl<'a, T> ReadValue<'a> for T where T: Value + Readable<'a> + ArrowReadableValue<'a> + Sync + 'a {}
 
 impl BlockfileProvider {
     pub fn new_memory() -> Self {
@@ -62,16 +85,7 @@ impl BlockfileProvider {
         ))
     }
 
-    pub async fn read<
-        'new,
-        K: Key
-            + Into<KeyWrapper>
-            + TryFrom<&'new KeyWrapper, Error = InvalidKeyConversion>
-            + ArrowReadableKey<'new>
-            + Sync
-            + 'new,
-        V: Value + Readable<'new> + ArrowReadableValue<'new> + Sync + 'new,
-    >(
+    pub async fn read<'new, K: ReadKey<'new>, V: ReadValue<'new>>(
         &self,
         options: BlockfileReaderOptions,
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
