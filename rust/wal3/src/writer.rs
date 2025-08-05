@@ -854,7 +854,6 @@ impl OnceLogWriter {
         &self,
         _options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
-        self.manifest_manager.heartbeat().await?;
         let (garbage, _) =
             match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix).await
             {
