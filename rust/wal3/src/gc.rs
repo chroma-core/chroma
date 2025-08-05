@@ -62,7 +62,7 @@ impl Garbage {
         manifest: &Manifest,
         throttle: &ThrottleOptions,
         snapshots: &dyn SnapshotCache,
-        first_to_keep: LogPosition,
+        mut first_to_keep: LogPosition,
     ) -> Result<Option<Self>, Error> {
         let dropped_snapshots = manifest
             .snapshots
@@ -97,30 +97,41 @@ impl Garbage {
         let mut drop_acc = Setsum::default();
         for snap in dropped_snapshots {
             drop_acc += ret
-                .drop_snapshot(storage, prefix, snap, throttle, snapshots, &mut first)
+                .drop_snapshot(
+                    storage,
+                    prefix,
+                    snap,
+                    throttle,
+                    snapshots,
+                    &mut first,
+                    &mut first_to_keep,
+                )
                 .await?;
         }
         for frag in dropped_fragments {
-            drop_acc += ret.drop_fragment(frag, &mut first)?;
+            drop_acc += ret.drop_fragment(frag, &mut first, &mut first_to_keep)?;
         }
         for snap in replaced_snapshots {
-            drop_acc += ret
+            let (drop_delta, root) = ret
                 .replace_snapshot(
                     storage,
                     prefix,
                     snap,
                     throttle,
                     snapshots,
-                    first_to_keep,
+                    &mut first_to_keep,
                     &mut first,
                 )
                 .await?;
+            drop_acc += drop_delta;
+            ret.snapshot_for_root = root;
         }
         if drop_acc != ret.setsum_to_discard {
             return Err(Error::ScrubError(Box::new(ScrubError::CorruptGarbage(
                 "setsums don't balance".to_string(),
             ))));
         }
+        ret.first_to_keep = first_to_keep;
         if !first {
             Ok(Some(ret))
         } else {
@@ -264,7 +275,12 @@ impl Garbage {
         Ok(())
     }
 
-    pub fn drop_fragment(&mut self, frag: &Fragment, first: &mut bool) -> Result<Setsum, Error> {
+    pub fn drop_fragment(
+        &mut self,
+        frag: &Fragment,
+        first: &mut bool,
+        first_to_keep: &mut LogPosition,
+    ) -> Result<Setsum, Error> {
         if self.fragments_to_drop_limit != frag.seq_no && !*first {
             return Err(Error::ScrubError(Box::new(ScrubError::Internal(
                 "fragment sequence numbers collected out of order".to_string(),
@@ -276,9 +292,11 @@ impl Garbage {
         self.fragments_to_drop_limit = frag.seq_no + 1;
         self.setsum_to_discard += frag.setsum;
         *first = false;
+        *first_to_keep = frag.limit;
         Ok(frag.setsum)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn drop_snapshot(
         &mut self,
         storage: &Storage,
@@ -287,6 +305,7 @@ impl Garbage {
         throttle: &ThrottleOptions,
         snapshot_cache: &dyn SnapshotCache,
         first: &mut bool,
+        first_to_keep: &mut LogPosition,
     ) -> Result<Setsum, Error> {
         let snapshot = match snapshot_cache.get(ptr).await? {
             Some(snapshot) => snapshot,
@@ -309,11 +328,12 @@ impl Garbage {
                 throttle,
                 snapshot_cache,
                 first,
+                first_to_keep,
             ))
             .await?;
         }
         for frag in snapshot.fragments.iter() {
-            drop_acc += self.drop_fragment(frag, first)?;
+            drop_acc += self.drop_fragment(frag, first, first_to_keep)?;
         }
         if drop_acc == snapshot.setsum {
             self.snapshots_to_drop.push(ptr.clone());
@@ -336,9 +356,9 @@ impl Garbage {
         ptr: &SnapshotPointer,
         throttle: &ThrottleOptions,
         snapshot_cache: &dyn SnapshotCache,
-        first_to_keep: LogPosition,
+        first_to_keep: &mut LogPosition,
         first: &mut bool,
-    ) -> Result<Setsum, Error> {
+    ) -> Result<(Setsum, Option<SnapshotPointer>), Error> {
         let snapshot = match snapshot_cache.get(ptr).await? {
             Some(snapshot) => snapshot,
             None => match Snapshot::load(throttle, storage, prefix, ptr).await? {
@@ -357,16 +377,16 @@ impl Garbage {
         let mut snapshots_to_keep = vec![];
         let mut snapshots_to_split = vec![];
         for frag in snapshot.fragments.iter() {
-            if frag.limit <= first_to_keep {
+            if frag.limit <= *first_to_keep {
                 fragments_to_drop.push(frag);
             } else {
                 fragments_to_keep.push(frag.clone());
             }
         }
         for snap in snapshot.snapshots.iter() {
-            if snap.limit <= first_to_keep {
+            if snap.limit <= *first_to_keep {
                 snapshots_to_drop.push(snap);
-            } else if (snap.start..snap.limit).contains(&first_to_keep) {
+            } else if (snap.start..snap.limit).contains(first_to_keep) {
                 snapshots_to_split.push(snap.clone());
             } else {
                 snapshots_to_keep.push(snap.clone());
@@ -396,13 +416,21 @@ impl Garbage {
         let mut drop_acc = Setsum::default();
         for snap in snapshots_to_drop.iter() {
             drop_acc += self
-                .drop_snapshot(storage, prefix, snap, throttle, snapshot_cache, first)
+                .drop_snapshot(
+                    storage,
+                    prefix,
+                    snap,
+                    throttle,
+                    snapshot_cache,
+                    first,
+                    first_to_keep,
+                )
                 .await?;
         }
-        let mut different = false;
+        let new_snapshot_pointer;
         // SAFETY(rescrv):  This has 0 or 1 elements by the snapshot balance check above.
         if let Some(to_split) = snapshots_to_split.pop() {
-            drop_acc += Box::pin(self.replace_snapshot(
+            let (drop_delta, new_child) = Box::pin(self.replace_snapshot(
                 storage,
                 prefix,
                 &to_split,
@@ -412,62 +440,44 @@ impl Garbage {
                 first,
             ))
             .await?;
-            if let Some(child) = self.snapshot_for_root.take() {
-                different = child != to_split;
-                snapshots_to_keep.insert(0, child);
+            drop_acc += drop_delta;
+            if let Some(new_child) = new_child {
+                snapshots_to_keep.insert(0, new_child);
             }
         }
-        if different
-            || !fragments_to_keep.is_empty()
-            || snapshots_to_keep.len() + fragments_to_keep.len() > 1
+        let snapshots = snapshots_to_keep;
+        let fragments = fragments_to_keep;
+        let setsum = snapshots
+            .iter()
+            .map(|s| s.setsum)
+            .fold(Setsum::default(), Setsum::add)
+            + fragments
+                .iter()
+                .map(|f| f.setsum)
+                .fold(Setsum::default(), Setsum::add);
+        let path = unprefixed_snapshot_path(setsum);
+        let depth = snapshots.iter().map(|s| s.depth).max().unwrap_or(0) + 1;
+        let new_snapshot = Snapshot {
+            path,
+            setsum,
+            depth,
+            snapshots,
+            fragments,
+            writer: "garbage collection".to_string(),
+        };
+        if new_snapshot.to_pointer() != *ptr
+            && (!new_snapshot.fragments.is_empty() || !new_snapshot.snapshots.is_empty())
         {
-            if different || !fragments_to_drop.is_empty() || !snapshots_to_drop.is_empty() {
-                let snapshots = snapshots_to_keep;
-                let fragments = fragments_to_keep;
-                let setsum = snapshots
-                    .iter()
-                    .map(|s| s.setsum)
-                    .fold(Setsum::default(), Setsum::add)
-                    + fragments
-                        .iter()
-                        .map(|f| f.setsum)
-                        .fold(Setsum::default(), Setsum::add);
-                let path = unprefixed_snapshot_path(setsum);
-                let depth = snapshots.iter().map(|s| s.depth).max().unwrap_or(0) + 1;
-                let snapshot = Snapshot {
-                    path,
-                    setsum,
-                    depth,
-                    snapshots,
-                    fragments,
-                    writer: "garbage collection".to_string(),
-                };
-                self.snapshots_to_drop.push(ptr.clone());
-                self.snapshot_for_root = Some(snapshot.to_pointer());
-                self.snapshots_to_make.push(snapshot);
-            } else {
-                self.snapshot_for_root = Some(ptr.clone());
-            }
-        } else if let Some(snap) = snapshots_to_keep.last() {
-            assert_eq!(
-                1,
-                snapshots_to_keep.len(),
-                "snapshots_to_keep.len() > 1 would trip above condition"
-            );
-            assert!(fragments_to_keep.is_empty(), "ensured by first condition");
+            new_snapshot_pointer = Some(new_snapshot.to_pointer());
             self.snapshots_to_drop.push(ptr.clone());
-            self.snapshot_for_root = Some(snap.clone());
+            self.snapshots_to_make.push(new_snapshot);
         } else {
-            assert!(
-                snapshots_to_keep.is_empty() && fragments_to_keep.is_empty(),
-                "guaranteed by first condition of block"
-            );
-            self.snapshots_to_drop.push(ptr.clone());
+            new_snapshot_pointer = Some(new_snapshot.to_pointer());
         }
         for frag in fragments_to_drop.iter() {
-            drop_acc += self.drop_fragment(frag, first)?;
+            drop_acc += self.drop_fragment(frag, first, first_to_keep)?;
         }
-        Ok(drop_acc)
+        Ok((drop_acc, new_snapshot_pointer))
     }
 
     /// Only call this function if you know what bug you are fixing.  The code documents the bug,

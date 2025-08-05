@@ -92,7 +92,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_one_level(
 
     // Set cutoff at position 10, which should trigger splitting the nested snapshot
     // that spans from 8 to 15
-    let first_to_keep = LogPosition::from_offset(10);
+    let mut first_to_keep = LogPosition::from_offset(10);
 
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
 
@@ -114,11 +114,12 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_one_level(
             &nested_ptr,
             &ThrottleOptions::default(),
             &cache,
-            first_to_keep,
+            &mut first_to_keep,
             &mut true,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .0;
 
     assert_eq!(
         Setsum::from_hexdigest("00000000aaaaaaaa000000000000000000000000000000000000000000000000")
@@ -194,7 +195,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level(
 
     // Set cutoff at position 10, which should trigger splitting the nested snapshot
     // that spans from 8 to 15
-    let first_to_keep = LogPosition::from_offset(10);
+    let mut first_to_keep = LogPosition::from_offset(10);
 
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
 
@@ -216,11 +217,12 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level(
             &parent_ptr,
             &ThrottleOptions::default(),
             &cache,
-            first_to_keep,
+            &mut first_to_keep,
             &mut true,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .0;
 
     assert_eq!(
         Setsum::from_hexdigest("00000000aaaaaaaa000000000000000000000000000000000000000000000000")
@@ -272,7 +274,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_leve
 
     // Set cutoff at position 10, which should trigger splitting the nested snapshot
     // that spans from 8 to 15
-    let first_to_keep = LogPosition::from_offset(10);
+    let mut first_to_keep = LogPosition::from_offset(10);
 
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
 
@@ -294,11 +296,12 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_leve
             &parent_ptr,
             &ThrottleOptions::default(),
             &cache,
-            first_to_keep,
+            &mut first_to_keep,
             &mut true,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .0;
 
     assert_eq!(
         Setsum::from_hexdigest("00000000aaaaaaaa000000000000000000000000000000000000000000000000")
@@ -360,7 +363,9 @@ fn test_k8s_integration_test_k8s_integration_drop_frag() {
         first_to_keep: LogPosition::from_offset(10),
     };
 
-    let dropped_setsum = garbage.drop_fragment(&fragment, &mut true).unwrap();
+    let dropped_setsum = garbage
+        .drop_fragment(&fragment, &mut true, &mut LogPosition::default())
+        .unwrap();
 
     // Should return the same setsum
     assert_eq!(setsum, dropped_setsum);
@@ -433,6 +438,7 @@ async fn test_k8s_integration_drop_snapshot() {
             &ThrottleOptions::default(),
             &cache,
             &mut true,
+            &mut LogPosition::default(),
         )
         .await
         .unwrap();
@@ -481,7 +487,7 @@ async fn test_k8s_integration_replace_snapshot_flat() {
     cache.snapshots.lock().unwrap().push(snapshot.clone());
 
     let snapshot_ptr = snapshot.to_pointer();
-    let first_to_keep = LogPosition::from_offset(10); // Keep fragments starting from offset 10
+    let mut first_to_keep = LogPosition::from_offset(10); // Keep fragments starting from offset 10
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -500,11 +506,12 @@ async fn test_k8s_integration_replace_snapshot_flat() {
             &snapshot_ptr,
             &ThrottleOptions::default(),
             &cache,
-            first_to_keep,
+            &mut first_to_keep,
             &mut true,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .0;
 
     // Should return the setsum of the dropped fragment
     assert_eq!(frag1_setsum, dropped_setsum);
@@ -589,7 +596,7 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
         .push(parent_snapshot.clone());
 
     let snapshot_ptr = parent_snapshot.to_pointer();
-    let first_to_keep = LogPosition::from_offset(12); // Keep snapshots starting from offset 12
+    let mut first_to_keep = LogPosition::from_offset(12); // Keep snapshots starting from offset 12
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -608,11 +615,12 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
             &snapshot_ptr,
             &ThrottleOptions::default(),
             &cache,
-            first_to_keep,
+            &mut first_to_keep,
             &mut true,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .0;
 
     // Should return the setsum of the dropped snapshot
     assert_eq!(frag1_setsum, dropped_setsum);
@@ -663,7 +671,7 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
     cache.snapshots.lock().unwrap().push(snapshot.clone());
 
     let snapshot_ptr = snapshot.to_pointer();
-    let first_to_keep = LogPosition::from_offset(12); // Keep fragments starting from offset 12
+    let mut first_to_keep = LogPosition::from_offset(12); // Keep fragments starting from offset 12
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -682,11 +690,12 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
             &snapshot_ptr,
             &ThrottleOptions::default(),
             &cache,
-            first_to_keep,
+            &mut first_to_keep,
             &mut true,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .0;
 
     // Should return the setsum of the dropped fragments
     assert_eq!(frag1_setsum + frag2_setsum, dropped_setsum);
@@ -762,7 +771,7 @@ async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
         .push(interior_snapshot.clone());
 
     let snapshot_ptr = interior_snapshot.to_pointer();
-    let first_to_keep = LogPosition::from_offset(12); // Keep snapshots starting from offset 12
+    let mut first_to_keep = LogPosition::from_offset(12); // Keep snapshots starting from offset 12
 
     let mut garbage = Garbage {
         snapshots_to_drop: vec![],
@@ -781,11 +790,12 @@ async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
             &snapshot_ptr,
             &ThrottleOptions::default(),
             &cache,
-            first_to_keep,
+            &mut first_to_keep,
             &mut true,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .0;
 
     // Should return the setsum of the dropped left leaf
     assert_eq!(frag1_setsum, dropped_setsum);
