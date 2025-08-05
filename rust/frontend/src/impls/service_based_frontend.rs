@@ -1073,32 +1073,38 @@ impl ServiceBasedFrontend {
             ));
         collection_write_context_container.enter();
 
-        if records.is_empty() {
-            tracing::debug!("Bailing because no records were found");
-            return Ok(DeleteCollectionRecordsResponse {});
-        }
+        // Closure for write context operations
+        (async {
+            if records.is_empty() {
+                tracing::debug!("Bailing because no records were found");
+                return Ok::<_, DeleteCollectionRecordsError>(DeleteCollectionRecordsResponse {});
+            }
 
-        let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
+            let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
-        self.log_client
-            .push_logs(&tenant_id, collection_id, records)
-            .meter(collection_write_context_container.clone())
-            .await
-            .map_err(|err| {
-                if err.code() == ErrorCodes::Unavailable {
-                    DeleteCollectionRecordsError::Backoff
-                } else {
-                    DeleteCollectionRecordsError::Internal(Box::new(err) as _)
-                }
-            })?;
+            self.log_client
+                .push_logs(&tenant_id, collection_id, records)
+                .await
+                .map_err(|err| {
+                    if err.code() == ErrorCodes::Unavailable {
+                        DeleteCollectionRecordsError::Backoff
+                    } else {
+                        DeleteCollectionRecordsError::Internal(Box::new(err) as _)
+                    }
+                })?;
 
-        // Need to re-enter the context after calling .await
+            // Attach metadata to the write context
+            chroma_metering::with_current(|context| {
+                context.log_size_bytes(log_size_bytes);
+            });
+
+            Ok(DeleteCollectionRecordsResponse {})
+        })
+        .meter(collection_write_context_container.clone())
+        .await?;
+
+        // Need to re-enter the write context before attempting to close
         collection_write_context_container.enter();
-
-        // Attach metadata to the write context
-        chroma_metering::with_current(|context| {
-            context.log_size_bytes(log_size_bytes);
-        });
 
         // TODO: Submit event after the response is sent
         match chroma_metering::close::<CollectionWriteContext>() {
