@@ -864,16 +864,11 @@ impl OnceLogWriter {
                 }
             };
         if !garbage.is_empty() {
-            match self.manifest_manager.apply_garbage(garbage.clone()).await {
-                Ok(_) => {}
-                Err(err @ Error::GarbageCollectionPrecondition(_)) => {
+            self.manifest_manager.apply_garbage(garbage.clone()).await.inspect_err(|err| {
+                if let Error::GarbageCollectionPrecondition(_) = err {
                     tracing::event!(Level::ERROR, name = "garbage collection precondition failed", manifest =? self.manifest_manager.latest(), garbage =? garbage);
-                    return Err(err);
                 }
-                Err(err) => {
-                    return Err(err);
-                }
-            }
+            })?;
         }
         Ok(())
     }
