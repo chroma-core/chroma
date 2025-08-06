@@ -383,7 +383,6 @@ def fastapi_ssl() -> Generator[System, None, None]:
 
 @pytest.fixture()
 def basic_http_client() -> Generator[System, None, None]:
-    print("(Sanket-temp) Using basic_http_client")
     port = 8000
     host = "localhost"
 
@@ -902,9 +901,7 @@ def create_isolated_database(client: ClientAPI) -> None:
 
     admin = AdminClient(admin_settings)
     database = "test_" + str(uuid.uuid4())
-    print("(Sanket-temp) Now creating database")
     admin.create_database(database)
-    print("(Sanket-temp) Created database")
     client.set_database(database)
 
 

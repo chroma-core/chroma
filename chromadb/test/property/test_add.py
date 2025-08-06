@@ -134,7 +134,6 @@ def _test_add(
 ) -> None:
     create_isolated_database(client)
 
-    print("(Sanket-temp) Now creating collection")
     # TODO: Generative embedding functions
     coll = client.create_collection(
         name=collection.name,
@@ -154,7 +153,6 @@ def _test_add(
         metadatas=cast(Metadatas, record_set["metadatas"]),
         documents=cast(List[str], record_set["documents"]),
     ):
-        print("(Sanket-temp) Adding batch of size", len(batch[0]))
         coll.add(*batch)
     # Only wait for compaction if the size of the collection is
     # some minimal size
