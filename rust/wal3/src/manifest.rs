@@ -1662,7 +1662,8 @@ mod tests {
             acc_bytes: 6606733560,
             snapshots: vec![],
             fragments: vec![Fragment {
-                path: "log/Bucket=00000000002f2000/FragmentSeqNo=00000000002f2372.parquet".to_string(),
+                path: "log/Bucket=00000000002f2000/FragmentSeqNo=00000000002f2372.parquet"
+                    .to_string(),
                 seq_no: FragmentSeqNo(3089266),
                 start: LogPosition { offset: 5566918 },
                 limit: LogPosition { offset: 5566919 },
@@ -1676,7 +1677,7 @@ mod tests {
             initial_seq_no: Some(FragmentSeqNo(3089266)),
         };
 
-        // Case 1: fragments_to_drop_limit < initial_seq_no, no snapshots to drop/make
+        // Case 1: fragments_to_drop_limit <= initial_seq_no, no snapshots to drop/make
         let garbage = Garbage {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
@@ -1692,7 +1693,10 @@ mod tests {
 
         let result = manifest.apply_garbage(garbage.clone());
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Expected None when no work to do");
+        assert!(
+            result.unwrap().is_none(),
+            "Expected None when no work to do"
+        );
 
         // Case 2: fragments_to_drop_limit < initial_seq_no, no snapshots to drop/make
         let garbage_below_initial = Garbage {
@@ -1702,6 +1706,9 @@ mod tests {
 
         let result = manifest.apply_garbage(garbage_below_initial);
         assert!(result.is_ok());
-        assert!(result.unwrap().is_none(), "Expected None when fragments_to_drop_limit < initial_seq_no");
+        assert!(
+            result.unwrap().is_none(),
+            "Expected None when fragments_to_drop_limit < initial_seq_no"
+        );
     }
 }
