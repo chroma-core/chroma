@@ -15,7 +15,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 use std::time::Duration;
 
-const MIB: usize = 1024 * 1024;
+pub const MIB: usize = 1024 * 1024;
 
 const fn default_capacity() -> usize {
     1048576

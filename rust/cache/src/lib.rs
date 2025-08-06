@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod async_partitioned_mutex;
-mod foyer;
+pub mod foyer;
 pub mod nop;
 mod unbounded;
 
