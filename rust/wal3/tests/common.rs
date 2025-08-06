@@ -4,7 +4,9 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 extern crate wal3;
 
-use wal3::{FragmentSeqNo, LogPosition, Manifest, Snapshot, ThrottleOptions};
+use wal3::{
+    FragmentSeqNo, Garbage, LogPosition, Manifest, Snapshot, SnapshotPointer, ThrottleOptions,
+};
 
 ///////////////////////////////////////////// Condition ////////////////////////////////////////////
 
@@ -14,6 +16,7 @@ pub enum Condition {
     Manifest(ManifestCondition),
     Snapshot(SnapshotCondition),
     Fragment(FragmentCondition),
+    Garbage(GarbageCondition),
 }
 
 ///////////////////////////////////////// ManifestCondition ////////////////////////////////////////
@@ -38,6 +41,7 @@ impl ManifestCondition {
             assert_eq!(self.writer, manifest.writer);
             assert_eq!(self.snapshots.len(), manifest.snapshots.len());
             for (expected, actual) in self.snapshots.iter().zip(manifest.snapshots.iter()) {
+                println!("snapshot:\nexpected={expected:#?}\nactual={actual:#?}");
                 assert_eq!(expected.depth, actual.depth);
                 expected
                     .assert(storage, prefix, &actual.path_to_snapshot)
@@ -64,6 +68,9 @@ impl ManifestCondition {
 pub struct SnapshotCondition {
     pub depth: u8,
     pub writer: String,
+    pub start: LogPosition,
+    pub limit: LogPosition,
+    pub num_bytes: u64,
     pub snapshots: Vec<SnapshotCondition>,
     pub fragments: Vec<FragmentCondition>,
 }
@@ -79,6 +86,8 @@ impl SnapshotCondition {
             .expect("post condition expects snapshot to parse as json");
         assert_eq!(self.depth, snapshot.depth);
         assert_eq!(self.writer, snapshot.writer);
+        assert_eq!(self.start, snapshot.minimum_log_position());
+        assert_eq!(self.limit, snapshot.limiting_log_position());
         assert_eq!(self.snapshots.len(), snapshot.snapshots.len());
         assert_eq!(self.fragments.len(), snapshot.fragments.len());
         for (expected, actual) in self.fragments.iter().zip(snapshot.fragments.iter()) {
@@ -88,6 +97,13 @@ impl SnapshotCondition {
             assert_eq!(expected.limit, actual.limit.offset());
             assert_eq!(expected.num_bytes as u64, actual.num_bytes);
         }
+    }
+
+    pub fn assert_snapshot_pointer(&self, snapshot: &SnapshotPointer) {
+        assert_eq!(self.depth, snapshot.depth);
+        assert_eq!(self.start, snapshot.start);
+        assert_eq!(self.limit, snapshot.limit);
+        assert_eq!(self.num_bytes, snapshot.num_bytes);
     }
 }
 
@@ -151,6 +167,78 @@ impl FragmentCondition {
     }
 }
 
+///////////////////////////////////////// GarbageCondition /////////////////////////////////////////
+
+#[derive(Clone, Debug)]
+pub struct GarbageCondition {
+    pub snapshots_to_drop: Vec<SnapshotCondition>,
+    pub snapshots_to_make: Vec<SnapshotCondition>,
+    pub snapshot_for_root: Option<SnapshotCondition>,
+    pub fragments_to_drop_start: FragmentSeqNo,
+    pub fragments_to_drop_limit: FragmentSeqNo,
+    pub first_to_keep: LogPosition,
+}
+
+impl GarbageCondition {
+    pub async fn assert(&self, storage: &Storage, prefix: &str) {
+        println!("asserting garbage condition {self:#?}");
+        let garbage = Garbage::load(&ThrottleOptions::default(), storage, prefix)
+            .await
+            .unwrap();
+        let (garbage, _) = garbage.expect("should have a garbage file");
+        println!("garbage is {garbage:#?}");
+        assert_eq!(
+            garbage.fragments_to_drop_start,
+            self.fragments_to_drop_start
+        );
+        assert_eq!(
+            garbage.fragments_to_drop_limit,
+            self.fragments_to_drop_limit
+        );
+        assert_eq!(garbage.first_to_keep, self.first_to_keep);
+        match (
+            self.snapshot_for_root.as_ref(),
+            garbage.snapshot_for_root.as_ref(),
+        ) {
+            (Some(lhs), Some(rhs)) => {
+                println!("Considering snapshot pointer\n{:#?}\n{:#?}", lhs, rhs);
+                lhs.assert_snapshot_pointer(rhs);
+            }
+            (None, None) => {}
+            (Some(_), None) => {
+                panic!("snapshot for root expected, but not set")
+            }
+            (None, Some(_)) => {
+                panic!("snapshot for root unexpected, but set")
+            }
+        };
+        eprintln!(
+            "expected: {:#?}\nreturned: {:#?}",
+            self.snapshots_to_drop, garbage.snapshots_to_drop
+        );
+        assert_eq!(
+            garbage.snapshots_to_drop.len(),
+            self.snapshots_to_drop.len()
+        );
+        for (lhs, rhs) in std::iter::zip(
+            garbage.snapshots_to_drop.iter(),
+            self.snapshots_to_drop.iter(),
+        ) {
+            rhs.assert_snapshot_pointer(lhs);
+        }
+        assert_eq!(
+            garbage.snapshots_to_make.len(),
+            self.snapshots_to_make.len()
+        );
+        for (lhs, rhs) in std::iter::zip(
+            garbage.snapshots_to_make.iter(),
+            self.snapshots_to_make.iter(),
+        ) {
+            rhs.assert_snapshot_pointer(&lhs.to_pointer());
+        }
+    }
+}
+
 ///////////////////////////////////////// assert_conditions ////////////////////////////////////////
 
 pub async fn assert_conditions(storage: &Storage, prefix: &str, postconditions: &[Condition]) {
@@ -176,6 +264,9 @@ pub async fn assert_conditions(storage: &Storage, prefix: &str, postconditions: 
                 // it'll get tested there.
             }
             Condition::Fragment(postcondition) => {
+                postcondition.assert(storage, prefix).await;
+            }
+            Condition::Garbage(postcondition) => {
                 postcondition.assert(storage, prefix).await;
             }
         }
