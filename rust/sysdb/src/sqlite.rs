@@ -9,12 +9,12 @@ use chroma_sqlite::table;
 use chroma_types::{
     Collection, CollectionAndSegments, CollectionMetadataUpdate, CollectionUuid,
     CreateCollectionError, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseResponse,
-    CreateTenantError, CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
-    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
-    ListDatabasesError, Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope,
-    SegmentType, SegmentUuid, UpdateCollectionConfiguration, UpdateCollectionError,
-    UpdateTenantError, UpdateTenantResponse,
+    CreateTenantError, CreateTenantResponse, Database, DatabaseUuid, DeleteCollectionError,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionWithSegmentsError,
+    GetCollectionsError, GetDatabaseError, GetSegmentsError, GetTenantError, GetTenantResponse,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListDatabasesError,
+    Metadata, MetadataValue, ResetError, ResetResponse, Segment, SegmentScope, SegmentType,
+    SegmentUuid, UpdateCollectionError, UpdateTenantError, UpdateTenantResponse,
 };
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
