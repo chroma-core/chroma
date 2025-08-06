@@ -125,6 +125,22 @@ importers:
       voyageai:
         specifier: ^0.0.3-1
         version: 0.0.3-1
+    optionalDependencies:
+      chromadb-js-bindings-darwin-arm64:
+        specifier: ^0.1.3
+        version: 0.1.3
+      chromadb-js-bindings-darwin-x64:
+        specifier: ^0.1.3
+        version: 0.1.3
+      chromadb-js-bindings-linux-arm64-gnu:
+        specifier: ^0.1.3
+        version: 0.1.3
+      chromadb-js-bindings-linux-x64-gnu:
+        specifier: ^0.1.3
+        version: 0.1.3
+      chromadb-js-bindings-win32-x64-msvc:
+        specifier: ^0.1.3
+        version: 0.1.3
     devDependencies:
       "@internal/chromadb-core":
         specifier: workspace:*
@@ -2633,6 +2649,51 @@ packages:
       {
         integrity: sha512-odCiCzZ5jqNI0sS6RcRxObx8gM7aCPULQkdWw/OgqIGdIUOKUj9b8jDElLbZ6feMKNB0MSQhtXi0P8QEeVO75w==,
       }
+
+  chromadb-js-bindings-darwin-arm64@0.1.3:
+    resolution:
+      {
+        integrity: sha512-TZq90O3QuVSfMZcYXWP8juP9q7O7ebSz7PsewW2deVJd3aihOnVxpZtxfwlFKYEDiWz5XwArL6xLBbKNYZGnLA==,
+      }
+    engines: { node: ">= 10" }
+    cpu: [arm64]
+    os: [darwin]
+
+  chromadb-js-bindings-darwin-x64@0.1.3:
+    resolution:
+      {
+        integrity: sha512-ynIKTgcJ89YAhuGjp5E39E/gsjJ4IgRpGzVrsYSYfx4K449LaIx0yUdFsxx/QoY0Q5/AJDgUH6dG5DXgYg5LxA==,
+      }
+    engines: { node: ">= 10" }
+    cpu: [x64]
+    os: [darwin]
+
+  chromadb-js-bindings-linux-arm64-gnu@0.1.3:
+    resolution:
+      {
+        integrity: sha512-RLReKrGYygGbKWgh3Y9nGevl2/8/QXr6QHB8f03CbfogKwk7NGPjblO6O1P4gQMxU+b9kRldDWBOZbsvIlJt9g==,
+      }
+    engines: { node: ">= 10" }
+    cpu: [arm64]
+    os: [linux]
+
+  chromadb-js-bindings-linux-x64-gnu@0.1.3:
+    resolution:
+      {
+        integrity: sha512-YMY4A0tYbmsiyV7ASS+aL7cp+QdoFpC6Q4AjBgpA9+Lh131eli0xIqrnwe3/YF5SkcAKK/1GcNXqSzx8P3eVLQ==,
+      }
+    engines: { node: ">= 10" }
+    cpu: [x64]
+    os: [linux]
+
+  chromadb-js-bindings-win32-x64-msvc@0.1.3:
+    resolution:
+      {
+        integrity: sha512-smVxJRVhUPPTW2G8mu4GizCvrcii3F1ZPp8CbNMvgWJhYi98CWN9KV3df3b12xRt76tIWIF/Lp5TgZfPnk4pmQ==,
+      }
+    engines: { node: ">= 10" }
+    cpu: [x64]
+    os: [win32]
 
   ci-info@3.9.0:
     resolution:
@@ -8263,6 +8324,21 @@ snapshots:
       sharp: 0.32.6
     optionalDependencies:
       onnxruntime-node: 1.14.0
+
+  chromadb-js-bindings-darwin-arm64@0.1.3:
+    optional: true
+
+  chromadb-js-bindings-darwin-x64@0.1.3:
+    optional: true
+
+  chromadb-js-bindings-linux-arm64-gnu@0.1.3:
+    optional: true
+
+  chromadb-js-bindings-linux-x64-gnu@0.1.3:
+    optional: true
+
+  chromadb-js-bindings-win32-x64-msvc@0.1.3:
+    optional: true
 
   ci-info@3.9.0: {}
 
