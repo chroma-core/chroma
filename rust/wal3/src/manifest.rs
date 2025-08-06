@@ -847,6 +847,15 @@ impl Manifest {
                 SnapshotPointerOrFragmentSeqNo::Stringy("cannot apply empty garbage".to_string()),
             ));
         }
+        if garbage.fragments_to_drop_limit <= self.initial_seq_no.unwrap_or(FragmentSeqNo::BEGIN)
+            && !garbage
+                .snapshots_to_drop
+                .iter()
+                .any(|snap| self.snapshots.contains(snap))
+            && garbage.snapshots_to_make.is_empty()
+        {
+            return Ok(None);
+        }
         let mut setsum_to_discard = Setsum::default();
         if garbage.fragments_to_drop_start > garbage.fragments_to_drop_limit {
             return Err(Error::GarbageCollection(format!(
@@ -1634,5 +1643,65 @@ mod tests {
 
         let result = manifest.apply_garbage(valid_garbage_less);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn apply_garbage_early_return_when_no_work_to_do() {
+        // Test the new early return condition: when fragments_to_drop_limit <= initial_seq_no
+        // and there are no snapshots to drop/make, return Ok(None)
+        let manifest = Manifest {
+            writer: "test_writer".to_string(),
+            setsum: Setsum::from_hexdigest(
+                "9eabcf03849e73854ebd6c80795d0fe4fbbbe4320151a011db9daf7419624dca",
+            )
+            .unwrap(),
+            collected: Setsum::from_hexdigest(
+                "8ab5679e202200027046c6b42d7ca4605004c8de3e3988ce3240212c9fa269cd",
+            )
+            .unwrap(),
+            acc_bytes: 6606733560,
+            snapshots: vec![],
+            fragments: vec![Fragment {
+                path: "log/Bucket=00000000002f2000/FragmentSeqNo=00000000002f2372.parquet".to_string(),
+                seq_no: FragmentSeqNo(3089266),
+                start: LogPosition { offset: 5566918 },
+                limit: LogPosition { offset: 5566919 },
+                num_bytes: 2116,
+                setsum: Setsum::from_hexdigest(
+                    "0ff66765647c73839d76a6cb4ce16a8340b71c543c171843a95d8e48c1bee3fc",
+                )
+                .unwrap(),
+            }],
+            initial_offset: Some(LogPosition { offset: 5566918 }),
+            initial_seq_no: Some(FragmentSeqNo(3089266)),
+        };
+
+        // Case 1: fragments_to_drop_limit < initial_seq_no, no snapshots to drop/make
+        let garbage = Garbage {
+            snapshots_to_drop: vec![],
+            snapshots_to_make: vec![],
+            snapshot_for_root: None,
+            fragments_to_drop_start: FragmentSeqNo(3089257),
+            fragments_to_drop_limit: FragmentSeqNo(3089266), // Equal to initial_seq_no
+            setsum_to_discard: Setsum::from_hexdigest(
+                "7287d2d717e35117811f1afb7c5e8dd6517417dcbc5ad195dabbafaca6df9ef3",
+            )
+            .unwrap(),
+            first_to_keep: LogPosition { offset: 5566918 },
+        };
+
+        let result = manifest.apply_garbage(garbage.clone());
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none(), "Expected None when no work to do");
+
+        // Case 2: fragments_to_drop_limit < initial_seq_no, no snapshots to drop/make
+        let garbage_below_initial = Garbage {
+            fragments_to_drop_limit: FragmentSeqNo(3089265), // Less than initial_seq_no
+            ..garbage.clone()
+        };
+
+        let result = manifest.apply_garbage(garbage_below_initial);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none(), "Expected None when fragments_to_drop_limit < initial_seq_no");
     }
 }
