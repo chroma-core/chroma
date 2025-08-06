@@ -57,8 +57,9 @@ collection.add(
 results = collection.query(
     query_texts=["This is a query document"],
     n_results=2,
-    # where={"metadata_field": "is_equal_to_this"}, # optional filter
-    # where_document={"$contains":"search_string"}  # optional filter
+    # where={"metadata_field": "is_equal_to_this"}, # optional metadata filtering
+    # where_document={"$contains":"search_string"}  # optional full-text search
+    # where_document={"$regex":"[A-Z].*"}           # optional regex search
 )
 ```
 
