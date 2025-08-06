@@ -37,7 +37,7 @@ enum Command {
     Profile(ProfileCommand),
     #[command(about = "Start a local Chroma server", long_about = None)]
     Run(RunArgs),
-    #[command(about = "Open Chroma Discord support", long_about = None)]
+    #[command(about = "Open the Chroma Discord", long_about = None)]
     Support,
     #[command(about = "Check for Chroma CLI updates", long_about = None)]
     Update,
