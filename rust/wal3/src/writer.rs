@@ -11,7 +11,7 @@ use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use setsum::Setsum;
-use tracing::Instrument;
+use tracing::{Instrument, Level};
 
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
@@ -864,7 +864,11 @@ impl OnceLogWriter {
                 }
             };
         if !garbage.is_empty() {
-            self.manifest_manager.apply_garbage(garbage.clone()).await?;
+            self.manifest_manager.apply_garbage(garbage.clone()).await.inspect_err(|err| {
+                if let Error::GarbageCollectionPrecondition(_) = err {
+                    tracing::event!(Level::ERROR, name = "garbage collection precondition failed", manifest =? self.manifest_manager.latest(), garbage =? garbage);
+                }
+            })?;
         }
         Ok(())
     }
