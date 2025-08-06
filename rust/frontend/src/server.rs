@@ -432,12 +432,6 @@ async fn heartbeat(
     State(server): State<FrontendServer>,
 ) -> Result<Json<HeartbeatResponse>, ServerError> {
     server.metrics.heartbeat.add(1, &[]);
-    let mut v = vec![0u8; 4];
-    unsafe {
-        let ptr = v.as_mut_ptr();
-        // Intentionally write out of bounds (index 4 is 1 past end)
-        *ptr.add(4) = 42;
-    }
     Ok(Json(server.frontend.heartbeat().await?))
 }
 
