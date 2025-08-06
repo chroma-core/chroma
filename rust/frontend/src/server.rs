@@ -2,7 +2,7 @@ use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{header::HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router, ServiceExt,
 };
 use chroma_metering::{
@@ -18,10 +18,10 @@ use chroma_types::{
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
     GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
     GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
-    QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
+    InternalCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateMetadata, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -102,6 +102,7 @@ pub struct Metrics {
     get_user_identity: Counter<u64>,
     create_tenant: Counter<u64>,
     get_tenant: Counter<u64>,
+    update_tenant: Counter<u64>,
     list_databases: Counter<u64>,
     create_database: Counter<u64>,
     get_database: Counter<u64>,
@@ -133,6 +134,7 @@ impl Metrics {
             get_user_identity: meter.u64_counter("get_user_identity").build(),
             create_tenant: meter.u64_counter("create_tenant").build(),
             get_tenant: meter.u64_counter("get_tenant").build(),
+            update_tenant: meter.u64_counter("update_tenant").build(),
             list_databases: meter.u64_counter("list_databases").build(),
             create_database: meter.u64_counter("create_database").build(),
             get_database: meter.u64_counter("get_database").build(),
@@ -231,7 +233,8 @@ impl FrontendServer {
             .route("/api/v2/version", get(version))
             .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/tenants", post(create_tenant))
-            .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
+            .route("/api/v2/tenants/{tenant}", get(get_tenant))
+            .route("/api/v2/tenants/{tenant}", patch(update_tenant))
             .route(
                 "/api/v2/tenants/{tenant}/databases",
                 get(list_databases).post(create_database),
@@ -554,12 +557,12 @@ async fn create_tenant(
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
-/// Returns an existing tenant by name.
+/// Returns an existing tenant by ID.
 #[utoipa::path(
     get,
-    path = "/api/v2/tenants/{tenant_name}",
+    path = "/api/v2/tenants/{tenant}",
     params(
-        ("tenant_name" = String, Path, description = "Tenant name or ID to retrieve")
+        ("tenant" = String, Path, description = "ID of the tenant to retrieve")
     ),
     responses(
         (status = 200, description = "Tenant found", body = GetTenantResponse),
@@ -570,24 +573,68 @@ async fn create_tenant(
 )]
 async fn get_tenant(
     headers: HeaderMap,
-    Path(name): Path<String>,
+    Path(tenant): Path<String>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetTenantResponse>, ServerError> {
     server.metrics.get_tenant.add(1, &[]);
-    tracing::info!(name: "get_tenant", tenant_name = %name);
+    tracing::info!(name: "get_tenant", tenant = %tenant);
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::GetTenant,
             AuthzResource {
-                tenant: Some(name.clone()),
+                tenant: Some(tenant.clone()),
                 database: None,
                 collection: None,
             },
         )
         .await?;
-    let request = GetTenantRequest::try_new(name)?;
+    let request = GetTenantRequest::try_new(tenant)?;
     Ok(Json(server.frontend.get_tenant(request).await?))
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug)]
+pub struct UpdateTenantPayload {
+    pub resource_name: String,
+}
+
+/// Updates an existing tenant by ID.
+#[utoipa::path(
+    patch,
+    path = "/api/v2/tenants/{tenant}",
+    params(
+        ("tenant" = String, Path, description = "ID of the tenant to update")
+    ),
+    request_body = UpdateTenantPayload,
+    responses(
+        (status = 200, description = "Tenant updated successfully", body = UpdateTenantResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Tenant not found", body = ErrorResponse),
+        (status = 409, description = "Tenant resource name already set", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
+async fn update_tenant(
+    headers: HeaderMap,
+    Path(tenant): Path<String>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<UpdateTenantPayload>,
+) -> Result<Json<UpdateTenantResponse>, ServerError> {
+    server.metrics.update_tenant.add(1, &[]);
+    tracing::info!(name: "update_tenant", tenant = %tenant);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::UpdateTenant,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
+    let request = UpdateTenantRequest::try_new(tenant, payload.resource_name)?;
+    Ok(Json(server.frontend.update_tenant(request).await?))
 }
 
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
@@ -2065,6 +2112,7 @@ impl Modify for ChromaTokenSecurityAddon {
         get_user_identity,
         create_tenant,
         get_tenant,
+        update_tenant,
         list_databases,
         create_database,
         get_database,

@@ -3,6 +3,7 @@ use chroma_types::{
     CollectionAndSegments, CollectionUuid, CountForksError, Database, FlushCompactionResponse,
     GetCollectionSizeError, GetCollectionWithSegmentsError, GetSegmentsError, ListDatabasesError,
     ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant,
+    UpdateTenantError, UpdateTenantResponse,
 };
 use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
@@ -38,6 +39,7 @@ struct Inner {
     collections: HashMap<CollectionUuid, Collection>,
     segments: HashMap<SegmentUuid, Segment>,
     tenant_last_compaction_time: HashMap<String, i64>,
+    tenant_resource_names: HashMap<String, String>,
     collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
     soft_deleted_collections: HashSet<CollectionUuid>,
     #[derivative(Debug = "ignore")]
@@ -53,6 +55,7 @@ impl TestSysDb {
                 collections: HashMap::new(),
                 segments: HashMap::new(),
                 tenant_last_compaction_time: HashMap::new(),
+                tenant_resource_names: HashMap::new(),
                 collection_to_version_file: HashMap::new(),
                 soft_deleted_collections: HashSet::new(),
                 storage: None,
@@ -623,5 +626,15 @@ impl TestSysDb {
             }
         }
         Ok(statuses)
+    }
+
+    pub(crate) async fn update_tenant(
+        &mut self,
+        tenant_id: String,
+        resource_name: String,
+    ) -> Result<UpdateTenantResponse, UpdateTenantError> {
+        let mut inner = self.inner.lock();
+        inner.tenant_resource_names.insert(tenant_id, resource_name);
+        Ok(UpdateTenantResponse {})
     }
 }
