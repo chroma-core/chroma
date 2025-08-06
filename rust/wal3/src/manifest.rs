@@ -860,8 +860,10 @@ impl Manifest {
         let mut new = self.clone();
         for to_drop in garbage.snapshots_to_drop.iter() {
             if let Some(index) = new.snapshots.iter().position(|s| s == to_drop) {
+                if Some(to_drop) != garbage.snapshot_for_root.as_ref() {
+                    setsum_to_discard += to_drop.setsum;
+                }
                 new.snapshots.remove(index);
-                setsum_to_discard += to_drop.setsum;
             }
         }
         // TODO(rescrv):  When Step stabilizes, revisit this ugliness.

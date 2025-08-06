@@ -2608,20 +2608,24 @@ impl<'me> SpannIndexReader<'me> {
                 return Err(SpannIndexReaderError::UninitializedIndex);
             }
         };
-        let postings_list_reader = match pl_blockfile_id {
-            Some(pl_id) => {
-                Self::posting_list_reader_from_id(pl_id, blockfile_provider, prefix_path).await?
-            }
-            None => return Err(SpannIndexReaderError::UninitializedIndex),
-        };
 
-        let versions_map_reader = match versions_map_blockfile_id {
-            Some(versions_id) => {
-                Self::versions_map_reader_from_id(versions_id, blockfile_provider, prefix_path)
-                    .await?
-            }
-            None => return Err(SpannIndexReaderError::UninitializedIndex),
-        };
+        let (postings_list_reader, versions_map_reader) =
+            match (pl_blockfile_id, versions_map_blockfile_id) {
+                (Some(pl_id), Some(versions_id)) => {
+                    let (pl_result, vm_result) = tokio::join!(
+                        Self::posting_list_reader_from_id(pl_id, blockfile_provider, prefix_path),
+                        Self::versions_map_reader_from_id(
+                            versions_id,
+                            blockfile_provider,
+                            prefix_path
+                        )
+                    );
+                    (pl_result?, vm_result?)
+                }
+                (None, _) | (_, None) => {
+                    return Err(SpannIndexReaderError::UninitializedIndex);
+                }
+            };
 
         Ok(Self {
             posting_lists: postings_list_reader,
@@ -2666,9 +2670,7 @@ impl<'me> SpannIndexReader<'me> {
         // Query at least 20x more points than k.
         let min_nprobe = ((k * 20) as f64 / self.params.split_threshold as f64).ceil() as u32;
         let optimal_nprobe = if self.adaptive_search_nprobe {
-            if collection_num_records_post_compaction <= 100000 {
-                8
-            } else if collection_num_records_post_compaction <= 500000 {
+            if collection_num_records_post_compaction <= 500000 {
                 16
             } else if collection_num_records_post_compaction <= 1000000 {
                 32

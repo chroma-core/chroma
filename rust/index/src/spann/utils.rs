@@ -542,7 +542,15 @@ pub async fn rng_query(
             .query(normalized_query, k, &allowed_ids, &disallowed_ids)
             .map_err(|_| RngQueryError::HnswSearchError)?;
         for (id, distance) in ids.iter().zip(distances.iter()) {
-            if !apply_rng_rule || *distance <= (1_f32 + rng_epsilon) * distances[0] {
+            let within_epsilon = if distances[0] < 0.0 && *distance < 0.0 {
+                // Both negative: reverse the comparison
+                *distance >= (1_f32 + rng_epsilon) * distances[0]
+            } else {
+                // At least one is non-negative: use normal comparison
+                *distance <= (1_f32 + rng_epsilon) * distances[0]
+            };
+
+            if !apply_rng_rule || within_epsilon {
                 nearby_ids.push(*id);
                 nearby_distances.push(*distance);
             }
@@ -572,7 +580,16 @@ pub async fn rng_query(
         let mut rng_accepted = true;
         for nbr_embedding in res_embeddings.iter() {
             let dist = distance_function.distance(&embedding[..], &nbr_embedding[..]);
-            if rng_factor * dist <= *distance {
+
+            let fails_check = if dist < 0.0 && *distance < 0.0 {
+                // Both negative: reverse the comparison
+                rng_factor * dist >= *distance
+            } else {
+                // At least one is non-negative: use normal comparison
+                rng_factor * dist <= *distance
+            };
+
+            if fails_check {
                 rng_accepted = false;
                 break;
             }
