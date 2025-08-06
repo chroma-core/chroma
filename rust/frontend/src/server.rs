@@ -233,8 +233,8 @@ impl FrontendServer {
             .route("/api/v2/version", get(version))
             .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/tenants", post(create_tenant))
-            .route("/api/v2/tenants/{tenant}", get(get_tenant))
-            .route("/api/v2/tenants/{tenant}", patch(update_tenant))
+            .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
+            .route("/api/v2/tenants/{tenant_name}", patch(update_tenant))
             .route(
                 "/api/v2/tenants/{tenant}/databases",
                 get(list_databases).post(create_database),
