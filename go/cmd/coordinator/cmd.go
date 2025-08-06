@@ -43,6 +43,7 @@ func init() {
 	Cmd.Flags().IntVar(&conf.DBConfig.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")
 	Cmd.Flags().IntVar(&conf.DBConfig.MaxOpenConns, "max-open-conns", 10, "MetaTable max open connections")
 	Cmd.Flags().StringVar(&conf.DBConfig.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
+	Cmd.Flags().BoolVar(&conf.DBConfig.EnableOptimizedCollectionQueries, "enable-optimized-collection-queries", false, "Enable optimized collection queries with CTE (off by default)")
 
 	// Memberlist
 	Cmd.Flags().StringVar(&conf.KubernetesNamespace, "kubernetes-namespace", "chroma", "Kubernetes namespace")

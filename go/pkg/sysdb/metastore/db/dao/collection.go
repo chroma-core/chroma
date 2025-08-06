@@ -2,10 +2,12 @@ package dao
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm/clause"
 
@@ -177,7 +179,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 	}
 
 	query := s.db.Table("collections").
-		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
+		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id AS database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Order("collections.created_at ASC")
 
@@ -202,8 +204,26 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 	}
 	if offset != nil {
 		query = query.Offset(int(*offset))
-
 	}
+
+	// Use optimized CTE query only if feature flag is enabled
+	if dbcore.IsOptimizedCollectionQueriesEnabled() && databaseName != "" && tenantID != "" {
+		var dummy []Result
+		stmt := query.Session(&gorm.Session{DryRun: true}).Find(&dummy).Statement
+		sqlString := stmt.SQL.String()
+		vars := stmt.Vars
+
+		cte := fmt.Sprintf(`WITH db AS (
+			SELECT id
+			FROM databases
+			WHERE name = $%d AND tenant_id = $%d
+		)`, len(vars)+1, len(vars)+2)
+
+		fullSQL := cte + `SELECT * FROM (` + sqlString + `) p WHERE p.database_id = (SELECT id FROM db)`
+		vars = append([]interface{}{databaseName, tenantID}, vars...)
+		query = s.db.Raw(fullSQL, vars...)
+	}
+
 	var results []Result
 	err = s.db.Table("(?) as ci", query).
 		Select(`
