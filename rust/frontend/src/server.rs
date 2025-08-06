@@ -557,12 +557,12 @@ async fn create_tenant(
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
-/// Returns an existing tenant by ID.
+/// Returns an existing tenant by name.
 #[utoipa::path(
     get,
-    path = "/api/v2/tenants/{tenant}",
+    path = "/api/v2/tenants/{tenant_name}",
     params(
-        ("tenant" = String, Path, description = "ID of the tenant to retrieve")
+        ("tenant_name" = String, Path, description = "Tenant to retrieve")
     ),
     responses(
         (status = 200, description = "Tenant found", body = GetTenantResponse),
@@ -573,23 +573,23 @@ async fn create_tenant(
 )]
 async fn get_tenant(
     headers: HeaderMap,
-    Path(tenant): Path<String>,
+    Path(name): Path<String>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<GetTenantResponse>, ServerError> {
     server.metrics.get_tenant.add(1, &[]);
-    tracing::info!(name: "get_tenant", tenant = %tenant);
+    tracing::info!(name: "get_tenant", tenant_name = %name);
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::GetTenant,
             AuthzResource {
-                tenant: Some(tenant.clone()),
+                tenant: Some(name.clone()),
                 database: None,
                 collection: None,
             },
         )
         .await?;
-    let request = GetTenantRequest::try_new(tenant)?;
+    let request = GetTenantRequest::try_new(name)?;
     Ok(Json(server.frontend.get_tenant(request).await?))
 }
 
@@ -598,12 +598,12 @@ pub struct UpdateTenantPayload {
     pub resource_name: String,
 }
 
-/// Updates an existing tenant by ID.
+/// Updates an existing tenant by name.
 #[utoipa::path(
     patch,
-    path = "/api/v2/tenants/{tenant}",
+    path = "/api/v2/tenants/{tenant_name}",
     params(
-        ("tenant" = String, Path, description = "ID of the tenant to update")
+        ("tenant_name" = String, Path, description = "Tenant to update")
     ),
     request_body = UpdateTenantPayload,
     responses(
@@ -616,24 +616,24 @@ pub struct UpdateTenantPayload {
 )]
 async fn update_tenant(
     headers: HeaderMap,
-    Path(tenant): Path<String>,
+    Path(name): Path<String>,
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateTenantPayload>,
 ) -> Result<Json<UpdateTenantResponse>, ServerError> {
     server.metrics.update_tenant.add(1, &[]);
-    tracing::info!(name: "update_tenant", tenant = %tenant);
+    tracing::info!(name: "update_tenant", tenant_name = %name);
     server
         .authenticate_and_authorize(
             &headers,
             AuthzAction::UpdateTenant,
             AuthzResource {
-                tenant: Some(tenant.clone()),
+                tenant: Some(name.clone()),
                 database: None,
                 collection: None,
             },
         )
         .await?;
-    let request = UpdateTenantRequest::try_new(tenant, payload.resource_name)?;
+    let request = UpdateTenantRequest::try_new(name, payload.resource_name)?;
     Ok(Json(server.frontend.update_tenant(request).await?))
 }
 
