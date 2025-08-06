@@ -2670,9 +2670,7 @@ impl<'me> SpannIndexReader<'me> {
         // Query at least 20x more points than k.
         let min_nprobe = ((k * 20) as f64 / self.params.split_threshold as f64).ceil() as u32;
         let optimal_nprobe = if self.adaptive_search_nprobe {
-            if collection_num_records_post_compaction <= 100000 {
-                8
-            } else if collection_num_records_post_compaction <= 500000 {
+            if collection_num_records_post_compaction <= 500000 {
                 16
             } else if collection_num_records_post_compaction <= 1000000 {
                 32
