@@ -1,2 +1,0 @@
-[console_scripts]
-chroma=chromadb.cli.cli:app
