@@ -567,13 +567,7 @@ const packEmbedding = (embedding: number[]): ArrayBuffer => {
   return buffer;
 };
 
-export const optionalEmbeddingsToBase64Bytes = (
-  embeddings: number[][] | undefined,
-) => {
-  if (!embeddings) {
-    return undefined;
-  }
-
+export const embeddingsToBase64Bytes = (embeddings: number[][]) => {
   return embeddings.map((embedding) => {
     const buffer = packEmbedding(embedding);
 
