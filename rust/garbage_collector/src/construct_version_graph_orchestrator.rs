@@ -205,10 +205,8 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
         self.result_channel = Some(sender);
     }
 
-    fn take_result_channel(&mut self) -> Sender<Result<Self::Output, Self::Error>> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(&mut self) -> Option<Sender<Result<Self::Output, Self::Error>>> {
+        self.result_channel.take()
     }
 }
 

@@ -285,10 +285,8 @@ impl Orchestrator for KnnFilterOrchestrator {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<KnnFilterResult> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(&mut self) -> Option<Sender<KnnFilterResult>> {
+        self.result_channel.take()
     }
 }
 

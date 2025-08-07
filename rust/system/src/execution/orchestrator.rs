@@ -90,7 +90,7 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     fn set_result_channel(&mut self, sender: Sender<Result<Self::Output, Self::Error>>);
 
     /// Takes the result channel of the orchestrator. The channel should have been set when this is invoked
-    fn take_result_channel(&mut self) -> Sender<Result<Self::Output, Self::Error>>;
+    fn take_result_channel(&mut self) -> Option<Sender<Result<Self::Output, Self::Error>>>;
 
     async fn default_terminate_with_result(
         &mut self,
@@ -105,9 +105,19 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         };
 
         let channel = self.take_result_channel();
-        if channel.send(res).is_err() {
-            tracing::error!("Error sending result for {}", Self::name());
-        };
+        match channel {
+            Some(channel) => {
+                if channel.send(res).is_err() {
+                    tracing::error!("Error sending result for {}", Self::name());
+                }
+            }
+            None => {
+                tracing::error!(
+                    "No result channel set for {}. Cannot send result.",
+                    Self::name()
+                );
+            }
+        }
 
         if cancel {
             ctx.cancellation_token.cancel();
@@ -135,9 +145,19 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         };
 
         let channel = self.take_result_channel();
-        if channel.send(res).is_err() {
-            tracing::error!("Error sending result for {}", Self::name());
-        };
+        match channel {
+            Some(channel) => {
+                if channel.send(res).is_err() {
+                    tracing::error!("Error sending result for {}", Self::name());
+                }
+            }
+            None => {
+                tracing::error!(
+                    "No result channel set for {}. Cannot send result.",
+                    Self::name()
+                );
+            }
+        }
 
         if cancel {
             ctx.cancellation_token.cancel();
@@ -184,9 +204,19 @@ impl<O: Orchestrator> Component for O {
         let channel = self.take_result_channel();
         let error = PanicError::new(panic_value);
 
-        if channel.send(Err(O::Error::from(error))).is_err() {
-            tracing::error!("Error reporting panic to {}", Self::name());
-        };
+        match channel {
+            Some(channel) => {
+                if channel.send(Err(error.into())).is_err() {
+                    tracing::error!("Error reporting panic to {}", Self::name());
+                }
+            }
+            None => {
+                tracing::error!(
+                    "No result channel set for {}. Cannot report panic.",
+                    Self::name()
+                );
+            }
+        }
     }
 }
 
@@ -300,10 +330,8 @@ mod tests {
             self.result_channel = Some(sender);
         }
 
-        fn take_result_channel(&mut self) -> Sender<Result<Self::Output, Self::Error>> {
-            self.result_channel
-                .take()
-                .expect("Result channel should be set")
+        fn take_result_channel(&mut self) -> Option<Sender<Result<Self::Output, Self::Error>>> {
+            self.result_channel.take()
         }
     }
 
