@@ -139,6 +139,10 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
                         if let Some(reader) = &record_segment_reader {
                             let record = reader
                                 .get_data_for_offset_id(*offset_id)
+                                .instrument(tracing::trace_span!(
+                                    parent: Span::current(), "Get DataRecord for offset",
+                                    offset_id = *offset_id
+                                ))
                                 .await?
                                 .ok_or(ProjectionError::RecordSegmentPhantomRecord(*offset_id))?;
                             ProjectionRecord {

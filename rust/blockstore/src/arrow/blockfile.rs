@@ -23,6 +23,7 @@ use std::mem::transmute;
 use std::ops::RangeBounds;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
+use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -625,14 +626,19 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             .sparse_index
             .get_block_ids_range(prefix_range.clone());
 
-        let block_futures = block_ids.into_iter().map(|block_id| async move {
-            match self.get_block(block_id, StorageRequestPriority::P0).await {
-                Ok(Some(block)) => Ok(block),
-                Ok(None) => {
-                    Err(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)
+        let block_futures = block_ids.into_iter().map(|block_id| {
+            async move {
+                match self.get_block(block_id, StorageRequestPriority::P0).await {
+                    Ok(Some(block)) => Ok(block),
+                    Ok(None) => {
+                        Err(Box::new(ArrowBlockfileError::BlockNotFound) as Box<dyn ChromaError>)
+                    }
+                    Err(e) => Err(Box::new(e) as Box<dyn ChromaError>),
                 }
-                Err(e) => Err(Box::new(e) as Box<dyn ChromaError>),
             }
+            .instrument(
+                tracing::trace_span!(parent: Span::current(), "Fetching block", block_id = %block_id),
+            )
         });
 
         let blocks = try_join_all(block_futures).await?;
