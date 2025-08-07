@@ -5,6 +5,7 @@ import {
   CollectionMetadata,
   GetResult,
   Metadata,
+  PreparedRecordSet,
   QueryRecordSet,
   QueryResult,
   RecordSet,
@@ -22,8 +23,8 @@ import {
   validateWhereDocument,
   validateNResults,
   validateMetadata,
-  optionalEmbeddingsToBase64Bytes,
   validateMaxBatchSize,
+  embeddingsToBase64Bytes,
 } from "./utils";
 import { createClient } from "@hey-api/client-fetch";
 import { ChromaValueError } from "./errors";
@@ -293,13 +294,13 @@ export class CollectionImpl implements Collection {
 
   private async prepareRecords({
     recordSet,
-    maxBatchSize,
     update = false,
   }: {
     recordSet: RecordSet;
-    maxBatchSize: number;
     update?: boolean;
   }) {
+    const maxBatchSize = await this.chromaClient.getMaxBatchSize();
+
     validateRecordSetLengthConsistency(recordSet);
     validateIDs(recordSet.ids);
     validateBaseRecordSet({ recordSet, update });
@@ -308,6 +309,17 @@ export class CollectionImpl implements Collection {
     if (!recordSet.embeddings && recordSet.documents) {
       recordSet.embeddings = await this.embed(recordSet.documents);
     }
+
+    const preparedRecordSet: PreparedRecordSet = { ...recordSet };
+
+    const base64Supported = await this.chromaClient.supportsBase64Encoding();
+    if (base64Supported && recordSet.embeddings) {
+      preparedRecordSet.embeddings = embeddingsToBase64Bytes(
+        recordSet.embeddings,
+      );
+    }
+
+    return preparedRecordSet;
   }
 
   private validateGet(
@@ -396,25 +408,17 @@ export class CollectionImpl implements Collection {
       uris,
     };
 
-    const maxBatchSize = await this.chromaClient.getMaxBatchSize();
-
-    await this.prepareRecords({ recordSet, maxBatchSize });
-
-    const supportsBase64Encoding =
-      await this.chromaClient.supportsBase64Encoding();
-    const embeddingsBase64 = supportsBase64Encoding
-      ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings)
-      : recordSet.embeddings;
+    const preparedRecordSet = await this.prepareRecords({ recordSet });
 
     await Api.collectionAdd({
       client: this.apiClient,
       path: await this.path(),
       body: {
-        ids: recordSet.ids,
-        embeddings: embeddingsBase64,
-        documents: recordSet.documents,
-        metadatas: recordSet.metadatas,
-        uris: recordSet.uris,
+        ids: preparedRecordSet.ids,
+        embeddings: preparedRecordSet.embeddings,
+        documents: preparedRecordSet.documents,
+        metadatas: preparedRecordSet.metadatas,
+        uris: preparedRecordSet.uris,
       },
     });
   }
@@ -612,25 +616,20 @@ export class CollectionImpl implements Collection {
       uris,
     };
 
-    const maxBatchSize = await this.chromaClient.getMaxBatchSize();
-
-    await this.prepareRecords({ recordSet, maxBatchSize, update: true });
-
-    const supportsBase64Encoding =
-      await this.chromaClient.supportsBase64Encoding();
-    const embeddingsBase64 = supportsBase64Encoding
-      ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings)
-      : recordSet.embeddings;
+    const preparedRecordSet = await this.prepareRecords({
+      recordSet,
+      update: true,
+    });
 
     await Api.collectionUpdate({
       client: this.apiClient,
       path: await this.path(),
       body: {
-        ids: recordSet.ids,
-        embeddings: embeddingsBase64,
-        metadatas: recordSet.metadatas,
-        uris: recordSet.uris,
-        documents: recordSet.documents,
+        ids: preparedRecordSet.ids,
+        embeddings: preparedRecordSet.embeddings,
+        metadatas: preparedRecordSet.metadatas,
+        uris: preparedRecordSet.uris,
+        documents: preparedRecordSet.documents,
       },
     });
   }
@@ -656,24 +655,20 @@ export class CollectionImpl implements Collection {
       uris,
     };
 
-    const maxBatchSize = await this.chromaClient.getMaxBatchSize();
-    await this.prepareRecords({ recordSet, maxBatchSize, update: true });
-
-    const supportsBase64Encoding =
-      await this.chromaClient.supportsBase64Encoding();
-    const embeddingsBase64 = supportsBase64Encoding
-      ? optionalEmbeddingsToBase64Bytes(recordSet.embeddings)
-      : recordSet.embeddings;
+    const preparedRecordSet = await this.prepareRecords({
+      recordSet,
+      update: true,
+    });
 
     await Api.collectionUpsert({
       client: this.apiClient,
       path: await this.path(),
       body: {
-        ids: recordSet.ids,
-        embeddings: embeddingsBase64,
-        metadatas: recordSet.metadatas,
-        uris: recordSet.uris,
-        documents: recordSet.documents,
+        ids: preparedRecordSet.ids,
+        embeddings: preparedRecordSet.embeddings,
+        metadatas: preparedRecordSet.metadatas,
+        uris: preparedRecordSet.uris,
+        documents: preparedRecordSet.documents,
       },
     });
   }

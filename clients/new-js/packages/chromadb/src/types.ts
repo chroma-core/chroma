@@ -50,6 +50,10 @@ export interface RecordSet extends BaseRecordSet {
   ids: string[];
 }
 
+export interface PreparedRecordSet extends Omit<RecordSet, "embeddings"> {
+  embeddings?: number[][] | string[];
+}
+
 export const recordSetFields = [...baseRecordSetFields, "ids"];
 
 /**
