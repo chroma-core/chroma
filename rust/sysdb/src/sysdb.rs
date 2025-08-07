@@ -1432,9 +1432,7 @@ impl ChromaError for FlushCompactionError {
     fn code(&self) -> ErrorCodes {
         match self {
             FlushCompactionError::FailedToFlushCompaction(status) => {
-                if std::convert::Into::<chroma_error::ErrorCodes>::into(status.code())
-                    == ErrorCodes::FailedPrecondition
-                {
+                if status.code() == Code::FailedPrecondition {
                     ErrorCodes::FailedPrecondition
                 } else {
                     ErrorCodes::Internal
@@ -1477,5 +1475,20 @@ impl ChromaError for DeleteCollectionVersionError {
         match self {
             DeleteCollectionVersionError::FailedToDeleteVersion(e) => e.code().into(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tonic::Status;
+
+    use super::*;
+
+    #[test]
+    fn flush_compaction_error() {
+        let fce = FlushCompactionError::FailedToFlushCompaction(Status::failed_precondition(
+            "collection soft deleted",
+        ));
+        assert!(!fce.should_trace_error());
     }
 }
