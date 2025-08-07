@@ -74,6 +74,7 @@ pub struct Dispatcher {
 struct DispatcherMetrics {
     worker_queue_depth: opentelemetry::metrics::Histogram<u64>,
     io_task_depth: opentelemetry::metrics::Histogram<u64>,
+    aborted_tasks: opentelemetry::metrics::Counter<u64>,
 }
 
 impl Default for DispatcherMetrics {
@@ -87,6 +88,10 @@ impl Default for DispatcherMetrics {
             io_task_depth: meter
                 .u64_histogram("io_task_depth")
                 .with_description("The depth of the IO task queue")
+                .build(),
+            aborted_tasks: meter
+                .u64_counter("aborted_tasks")
+                .with_description("The total number of tasks that were aborted due to queue limits")
                 .build(),
         }
     }
@@ -144,6 +149,13 @@ impl Dispatcher {
                 loop {
                     if witness == 0 {
                         task.abort().await;
+                        self.metrics.aborted_tasks.add(
+                            1,
+                            &[
+                                opentelemetry::KeyValue::new("task", task.get_name()),
+                                opentelemetry::KeyValue::new("type", "io"),
+                            ],
+                        );
                         return;
                     }
                     match self.active_io_tasks.compare_exchange(
@@ -182,6 +194,13 @@ impl Dispatcher {
                     None => {
                         if self.task_queue.len() >= self.config.task_queue_limit {
                             task.abort().await;
+                            self.metrics.aborted_tasks.add(
+                                1,
+                                &[
+                                    opentelemetry::KeyValue::new("task", task.get_name()),
+                                    opentelemetry::KeyValue::new("type", "other"),
+                                ],
+                            );
                         } else {
                             self.task_queue.push_back((task, span));
                         }
