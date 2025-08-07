@@ -11,6 +11,12 @@ Chroma Cloud charges **$2.50 per logical GiB** written via an add, update, or up
 - A *logical GiB* is the raw, uncompressed size of the data you send to Chroma—regardless of how it's stored or indexed internally.
 - You are only billed once per write, not for background compactions or reindexing.
 
+## Forking
+
+- Forking a collection costs **$0.03 per fork request**.
+- Forks are copy-on-write. You only pay for incremental storage written after the fork; unchanged data remains shared.
+- Forking is available on Chroma Cloud. Learn more on the [Collection Forking](./collection-forking) page.
+
 ## Reads
 
 Read costs are based on both the amount of data scanned and the volume of data returned:
@@ -40,7 +46,7 @@ collection.query(
 {% Tab label="typescript" %}
 ```typescript
 await collection.query(
-   queryEmbeddings=[[1.0, 2.3, 1.1, ...]], 
+   queryEmbeddings=[[1.0, 2.3, 1.1, ...]],
    whereDocument={"$contains": "hello world"}
 )
 ```
