@@ -2,6 +2,8 @@
 pub mod grpc_tower;
 pub mod init_tracer;
 pub mod util;
+mod wrapped_metric_exporter;
+mod wrapped_span_exporter;
 
 #[cfg(feature = "grpc")]
 pub use grpc_tower::*;
