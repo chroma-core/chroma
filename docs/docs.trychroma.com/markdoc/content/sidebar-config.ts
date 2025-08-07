@@ -126,6 +126,7 @@ const sidebarConfig: AppSection[] = [
     pages: [
       { id: "getting-started", name: "Getting Started" },
       { id: "pricing", name: "Pricing" },
+      { id: "collection-forking", name: "Collection Forking" },
       { id: "quotas-limits", name: "Quotas & Limits" },
     ],
   },

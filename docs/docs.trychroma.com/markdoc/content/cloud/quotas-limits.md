@@ -19,7 +19,10 @@ Most quotas can be increased upon request, once a clear need has been demonstrat
 | Maximum number of concurrent reads per collection | 5 |
 | Maximum number of concurrent writes per collection | 5 |
 | Maximum number of collections | 1,000,000 |
+| Maximum fork edges from root | 4,096 |
 
 These limits apply per request or per collection as appropriate. For example, concurrent read/write limits are tracked independently per collection, and full-text query limits apply to the length of the input string, not the number of documents searched.
+
+For details about the fork edges limit and quota error handling when forking, see [Collection Forking](./collection-forking).
 
 If you expect to approach these limits, we recommend reaching out early so we can ensure your account is configured accordingly.
