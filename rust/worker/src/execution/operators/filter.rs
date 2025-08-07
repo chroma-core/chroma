@@ -245,15 +245,21 @@ impl<'me> MetadataProvider<'me> {
                             Some(offset_ids)
                                 if offset_ids.len() < rec_reader.count().await? as u64 / 10 =>
                             {
-                                let fetch_futures: Vec<_> = offset_ids
-                                    .into_iter()
-                                    .map(|id| async move {
+                                let fetch_futures: Vec<_> =
+                                    offset_ids
+                                        .into_iter()
+                                        .map(|id| {
+                                            async move {
                                         let data = rec_reader.get_data_for_offset_id(id).await?;
                                         Ok::<(u32, Option<DataRecord>), Box<dyn ChromaError>>((
                                             id, data,
                                         ))
-                                    })
-                                    .collect();
+                                    }.instrument(tracing::trace_span!(parent: Span::current(),
+                                        "DataRecord fetch for offset id",
+                                        offset_id = %id
+                                    ))
+                                        })
+                                        .collect();
                                 let data_results = try_join_all(fetch_futures).await?;
                                 for (id, data_opt) in data_results {
                                     if data_opt.is_some_and(|rec| {
@@ -501,11 +507,9 @@ impl Operator<FilterInput, FilterOutput> for Filter {
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
         tracing::debug!(
-            "[{}]: Num log entries {:?}, metadata segment {:?}, record segment {:?}",
+            "[{}]: Num log entries {:?}",
             self.get_name(),
             input.logs.len(),
-            input.metadata_segment,
-            input.record_segment
         );
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
