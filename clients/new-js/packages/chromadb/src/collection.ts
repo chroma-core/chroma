@@ -6,6 +6,7 @@ import {
   GetResult,
   Metadata,
   PreparedRecordSet,
+  PreparedInsertRecordSet,
   QueryRecordSet,
   QueryResult,
   RecordSet,
@@ -292,13 +293,13 @@ export class CollectionImpl implements Collection {
     return await this._embeddingFunction.generate(documents);
   }
 
-  private async prepareRecords({
+  private async prepareRecords<T extends boolean = false>({
     recordSet,
-    update = false,
+    update = false as T,
   }: {
     recordSet: RecordSet;
-    update?: boolean;
-  }) {
+    update?: T;
+  }): Promise<T extends true ? PreparedRecordSet : PreparedInsertRecordSet> {
     const maxBatchSize = await this.chromaClient.getMaxBatchSize();
 
     validateRecordSetLengthConsistency(recordSet);
@@ -319,7 +320,7 @@ export class CollectionImpl implements Collection {
       );
     }
 
-    return preparedRecordSet;
+    return preparedRecordSet as T extends true ? PreparedRecordSet : PreparedInsertRecordSet;
   }
 
   private validateGet(
@@ -657,7 +658,6 @@ export class CollectionImpl implements Collection {
 
     const preparedRecordSet = await this.prepareRecords({
       recordSet,
-      update: true,
     });
 
     await Api.collectionUpsert({
