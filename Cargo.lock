@@ -1937,11 +1937,9 @@ dependencies = [
 name = "chroma-tracing"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "chroma-system",
  "fastrace",
  "fastrace-opentelemetry",
- "futures",
  "http 1.1.0",
  "opentelemetry",
  "opentelemetry-otlp",
