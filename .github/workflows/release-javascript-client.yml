@@ -114,8 +114,8 @@ jobs:
           payload: |
             channel: ${{ secrets.SLACK_CHANNEL_ID }}
             text: |
-              :x: *Release failure!*
+              :x: *JavaScript client release failure!*
               *Workflow:* ${{ github.workflow }}
               *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Ref:* <https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.tag }}|${{ steps.tag.outputs.tag }}>
               *Author:* ${{ github.actor }}
-              *Tag:* ${{ steps.tag.outputs.tag }}
