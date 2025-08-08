@@ -53,14 +53,14 @@ if config.tilt_subcommand == "ci":
   custom_build(
     'rust-log-service',
     'docker image tag rust-log-service:ci $EXPECTED_REF',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock', './.cargo'],
     disable_push=True
   )
 else:
   docker_build(
     'rust-log-service',
     '.',
-    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock", "./.cargo"],
     dockerfile='./rust/Dockerfile',
     target='log_service'
   )
@@ -101,14 +101,14 @@ if config.tilt_subcommand == "ci":
   custom_build(
     'rust-frontend-service',
     'docker image tag rust-frontend-service:ci $EXPECTED_REF',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock', './.cargo'],
     disable_push=True
   )
 else:
   docker_build(
     'rust-frontend-service',
     '.',
-    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock", "./.cargo"],
     dockerfile='./rust/Dockerfile',
     target='cli'
   )
@@ -117,14 +117,14 @@ if config.tilt_subcommand == "ci":
   custom_build(
     'query-service',
     'docker image tag query-service:ci $EXPECTED_REF',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock', './.cargo'],
     disable_push=True
   )
 else:
   docker_build(
     'query-service',
     '.',
-    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock", "./.cargo"],
     dockerfile='./rust/Dockerfile',
     target='query_service'
   )
@@ -133,14 +133,14 @@ if config.tilt_subcommand == "ci":
   custom_build(
     'compaction-service',
     'docker image tag compactor-service:ci $EXPECTED_REF',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock', './.cargo'],
     disable_push=True
   )
 else:
   docker_build(
     'compaction-service',
     '.',
-    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock", "./.cargo"],
     dockerfile='./rust/Dockerfile',
     target='compaction_service'
   )
@@ -149,14 +149,14 @@ if config.tilt_subcommand == "ci":
   custom_build(
     'garbage-collector',
     'docker image tag garbage-collector:ci $EXPECTED_REF',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock', './.cargo'],
     disable_push=True
   )
 else:
   docker_build(
     'garbage-collector',
     '.',
-    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock", "./.cargo"],
     dockerfile='./rust/Dockerfile',
     target='garbage_collector'
   )
@@ -165,14 +165,14 @@ if config.tilt_subcommand == "ci":
   custom_build(
     'load-service',
     'docker image tag load-service:ci $EXPECTED_REF',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
+    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock', './.cargo'],
     disable_push=True
   )
 else:
   docker_build(
     'load-service',
     '.',
-    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
+    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock", "./.cargo"],
     dockerfile='./rust/Dockerfile',
     target='load_service'
   )

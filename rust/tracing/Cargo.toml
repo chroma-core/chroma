@@ -18,6 +18,7 @@ tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
+console-subscriber = { workspace = true }
 
 chroma-system = { workspace = true }
 

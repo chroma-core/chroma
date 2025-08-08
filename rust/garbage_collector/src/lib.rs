@@ -3,10 +3,7 @@ use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_memberlist::memberlist_provider::CustomResourceMemberlistProvider;
 use chroma_memberlist::memberlist_provider::MemberlistProvider;
 use chroma_system::{Dispatcher, System};
-use chroma_tracing::{
-    init_global_filter_layer, init_otel_layer, init_panic_tracing_hook, init_stdout_layer,
-    init_tracing,
-};
+use chroma_tracing::init_otel_tracing;
 use chroma_types::chroma_proto::garbage_collector_server::GarbageCollectorServer;
 use config::GarbageCollectorConfig;
 use garbage_collector_component::GarbageCollector;
@@ -64,13 +61,11 @@ pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::e
         spawn_pprof_server(port, shutdown_channel.1).await;
     }
 
-    let tracing_layers = vec![
-        init_global_filter_layer(&config.otel_filters),
-        init_otel_layer(&config.service_name, &config.otel_endpoint),
-        init_stdout_layer(),
-    ];
-    init_tracing(tracing_layers);
-    init_panic_tracing_hook();
+    init_otel_tracing(
+        &config.service_name,
+        &config.otel_filters,
+        &config.otel_endpoint,
+    );
 
     info!("Loaded configuration successfully: {:#?}", config);
 
