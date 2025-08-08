@@ -229,10 +229,8 @@ impl Orchestrator for SpannKnnOrchestrator {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<Result<KnnProjectionOutput, KnnError>> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(&mut self) -> Option<Sender<Result<KnnProjectionOutput, KnnError>>> {
+        self.result_channel.take()
     }
 }
 

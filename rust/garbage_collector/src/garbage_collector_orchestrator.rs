@@ -217,10 +217,8 @@ impl Orchestrator for GarbageCollectorOrchestrator {
 
     fn take_result_channel(
         &mut self,
-    ) -> Sender<Result<GarbageCollectorResponse, GarbageCollectorError>> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    ) -> Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>> {
+        self.result_channel.take()
     }
 }
 

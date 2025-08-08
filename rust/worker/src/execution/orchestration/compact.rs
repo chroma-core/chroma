@@ -607,10 +607,10 @@ impl Orchestrator for CompactOrchestrator {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<Result<CompactionResponse, CompactionError>> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(
+        &mut self,
+    ) -> Option<Sender<Result<CompactionResponse, CompactionError>>> {
+        self.result_channel.take()
     }
 
     async fn cleanup(&mut self) {
