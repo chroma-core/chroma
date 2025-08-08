@@ -5,7 +5,7 @@
 Forking lets you create a new collection from an existing one instantly, using copy-on-write under the hood. The forked collection initially shares its data with the source and only incurs additional storage for incremental changes you make afterward.
 
 {% Banner type="tip" %}
-Forking is available in Chroma Cloud only. The file system on single-node Chroma does not support forking — see [Single-Node Chroma: Performance and Limitations](../guides/deploy/performance). Chroma Cloud uses block storage that enables true copy-on-write semantics.
+**Forking is available in Chroma Cloud only.** The file system on single-node Chroma does not support forking — see [Single-Node Chroma: Performance and Limitations](../guides/deploy/performance). Chroma Cloud uses block storage that enables true copy-on-write semantics.
 {% /Banner %}
 
 ## How it works
@@ -51,7 +51,7 @@ await forkedCollection.add({
 
 {% /TabbedCodeBlock %}
 
-In this notebook you can find a comprehensive demo, where we index a codebase in a Chroma collection, and use forking to efficiently create collections for new branches: [Forking notebook](https://github.com/chroma-core/chroma/blob/main/examples/advanced/forking.ipynb).
+[In this notebook](https://github.com/chroma-core/chroma/blob/main/examples/advanced/forking.ipynb) you can find a comprehensive demo, where we index a codebase in a Chroma collection, and use forking to efficiently create collections for new branches.
 
 ## Pricing
 
@@ -60,7 +60,12 @@ In this notebook you can find a comprehensive demo, where we index a codebase in
 
 ## Quotas and errors
 
-Forking is subject to a limit on the total number of fork edges from the root. This counts every edge in the fork graph from the root collection (e.g., A→B→C is 2; A→[B, C], B→D is 3). The current default limit is **4,096**. If you exceed it, the fork request returns a quota error for the `NUM_FORKS` rule — catch it and fall back to creating a new collection with a full copy.
+ Chroma limits the number of fork edges in your fork tree. Every time you call "fork", a new edge is created from the parent to the child.  The count includes edges created by forks on the root collection and on any of its descendants; see the diagram below. The current default limit is **4,096** edges per tree. If you delete a collection, its edge remains in the tree and still counts.
+
+If you exceed the limit, the request returns a quota error for the `NUM_FORKS` rule. In that case, create a new collection with a full copy to start a fresh root.
+
+{% MarkdocImage lightSrc="/fork-edges-light.png" darkSrc="/fork-edges-dark.png" alt="Fork edges diagram" /%}
+
 
 ## When to use forking
 
