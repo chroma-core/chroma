@@ -2,7 +2,7 @@ use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{header::HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router, ServiceExt,
 };
 use chroma_metering::{
@@ -21,7 +21,8 @@ use chroma_types::{
     InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
     QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateMetadata, UpsertCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -102,6 +103,7 @@ pub struct Metrics {
     get_user_identity: Counter<u64>,
     create_tenant: Counter<u64>,
     get_tenant: Counter<u64>,
+    update_tenant: Counter<u64>,
     list_databases: Counter<u64>,
     create_database: Counter<u64>,
     get_database: Counter<u64>,
@@ -133,6 +135,7 @@ impl Metrics {
             get_user_identity: meter.u64_counter("get_user_identity").build(),
             create_tenant: meter.u64_counter("create_tenant").build(),
             get_tenant: meter.u64_counter("get_tenant").build(),
+            update_tenant: meter.u64_counter("update_tenant").build(),
             list_databases: meter.u64_counter("list_databases").build(),
             create_database: meter.u64_counter("create_database").build(),
             get_database: meter.u64_counter("get_database").build(),
@@ -232,6 +235,7 @@ impl FrontendServer {
             .route("/api/v2/auth/identity", get(get_user_identity))
             .route("/api/v2/tenants", post(create_tenant))
             .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
+            .route("/api/v2/tenants/{tenant_name}", patch(update_tenant))
             .route(
                 "/api/v2/tenants/{tenant}/databases",
                 get(list_databases).post(create_database),
@@ -559,7 +563,7 @@ async fn create_tenant(
     get,
     path = "/api/v2/tenants/{tenant_name}",
     params(
-        ("tenant_name" = String, Path, description = "Tenant name or ID to retrieve")
+        ("tenant_name" = String, Path, description = "Tenant to retrieve")
     ),
     responses(
         (status = 200, description = "Tenant found", body = GetTenantResponse),
@@ -588,6 +592,50 @@ async fn get_tenant(
         .await?;
     let request = GetTenantRequest::try_new(name)?;
     Ok(Json(server.frontend.get_tenant(request).await?))
+}
+
+#[derive(Deserialize, Serialize, ToSchema, Debug)]
+pub struct UpdateTenantPayload {
+    pub resource_name: String,
+}
+
+/// Updates an existing tenant by name.
+#[utoipa::path(
+    patch,
+    path = "/api/v2/tenants/{tenant_name}",
+    params(
+        ("tenant_name" = String, Path, description = "Tenant to update")
+    ),
+    request_body = UpdateTenantPayload,
+    responses(
+        (status = 200, description = "Tenant updated successfully", body = UpdateTenantResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Tenant not found", body = ErrorResponse),
+        (status = 409, description = "Tenant resource name already set", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    )
+)]
+async fn update_tenant(
+    headers: HeaderMap,
+    Path(name): Path<String>,
+    State(mut server): State<FrontendServer>,
+    Json(payload): Json<UpdateTenantPayload>,
+) -> Result<Json<UpdateTenantResponse>, ServerError> {
+    server.metrics.update_tenant.add(1, &[]);
+    tracing::info!(name: "update_tenant", tenant_name = %name);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::UpdateTenant,
+            AuthzResource {
+                tenant: Some(name.clone()),
+                database: None,
+                collection: None,
+            },
+        )
+        .await?;
+    let request = UpdateTenantRequest::try_new(name, payload.resource_name)?;
+    Ok(Json(server.frontend.update_tenant(request).await?))
 }
 
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
@@ -2065,6 +2113,7 @@ impl Modify for ChromaTokenSecurityAddon {
         get_user_identity,
         create_tenant,
         get_tenant,
+        update_tenant,
         list_databases,
         create_database,
         get_database,

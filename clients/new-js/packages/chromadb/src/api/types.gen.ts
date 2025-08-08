@@ -121,6 +121,7 @@ export type GetResponse = {
 
 export type GetTenantResponse = {
     name: string;
+    resource_name?: string | null;
 };
 
 export type GetUserIdentityResponse = {
@@ -228,6 +229,14 @@ export type UpdateHnswConfiguration = {
 export type UpdateSpannConfiguration = {
     ef_search?: number | null;
     search_nprobe?: number | null;
+};
+
+export type UpdateTenantPayload = {
+    resource_name: string;
+};
+
+export type UpdateTenantResponse = {
+    [key: string]: unknown;
 };
 
 export type UpsertCollectionRecordsPayload = {
@@ -418,7 +427,7 @@ export type GetTenantData = {
     body?: never;
     path: {
         /**
-         * Tenant name or ID to retrieve
+         * Tenant to retrieve
          */
         tenant_name: string;
     };
@@ -451,6 +460,48 @@ export type GetTenantResponses = {
 };
 
 export type GetTenantResponse2 = GetTenantResponses[keyof GetTenantResponses];
+
+export type UpdateTenantData = {
+    body: UpdateTenantPayload;
+    path: {
+        /**
+         * Tenant to update
+         */
+        tenant_name: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant_name}';
+};
+
+export type UpdateTenantErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Tenant not found
+     */
+    404: ErrorResponse;
+    /**
+     * Tenant resource name already set
+     */
+    409: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type UpdateTenantError = UpdateTenantErrors[keyof UpdateTenantErrors];
+
+export type UpdateTenantResponses = {
+    /**
+     * Tenant updated successfully
+     */
+    200: UpdateTenantResponse;
+};
+
+export type UpdateTenantResponse2 = UpdateTenantResponses[keyof UpdateTenantResponses];
 
 export type ListDatabasesData = {
     body?: never;
