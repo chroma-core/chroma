@@ -121,10 +121,7 @@ export type GetResponse = {
 
 export type GetTenantResponse = {
     name: string;
-<<<<<<< HEAD
-=======
     resource_name?: string | null;
->>>>>>> f29619485 (generate js client)
 };
 
 export type GetUserIdentityResponse = {
@@ -134,7 +131,7 @@ export type GetUserIdentityResponse = {
 };
 
 export type HashMap = {
-    [key: string]: boolean | number | string | null;
+  [key: string]: boolean | number | string | null;
 };
 
 export type HeartbeatResponse = {
@@ -232,8 +229,6 @@ export type UpdateHnswConfiguration = {
 export type UpdateSpannConfiguration = {
     ef_search?: number | null;
     search_nprobe?: number | null;
-<<<<<<< HEAD
-=======
 };
 
 export type UpdateTenantPayload = {
@@ -242,7 +237,6 @@ export type UpdateTenantPayload = {
 
 export type UpdateTenantResponse = {
     [key: string]: unknown;
->>>>>>> f29619485 (generate js client)
 };
 
 export type UpsertCollectionRecordsPayload = {
@@ -1288,8 +1282,4 @@ export type VersionResponse = VersionResponses[keyof VersionResponses];
 
 export type ClientOptions = {
     baseUrl: 'http://127.0.0.1:8000' | (string & {});
-<<<<<<< HEAD
 };
-=======
-};
->>>>>>> f29619485 (generate js client)
