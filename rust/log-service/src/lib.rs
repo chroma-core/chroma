@@ -1475,18 +1475,21 @@ impl LogServer {
         &self,
         request: Request<PullLogsRequest>,
     ) -> Result<Response<PullLogsResponse>, Status> {
-        let span =
-            wrap_span_with_parent_context(tracing::trace_span!("PullLogs"), request.metadata());
+        let metadata = request.metadata().clone();
         let pull_logs = request.into_inner();
         let collection_id = Uuid::parse_str(&pull_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        async move {
-            tracing::info!(
+        let span = wrap_span_with_parent_context(
+            tracing::trace_span!(
+                "PullLogs",
                 collection_id = collection_id.to_string(),
                 start_from_offset = pull_logs.start_from_offset,
                 batch_size = pull_logs.batch_size,
-            );
+            ),
+            &metadata,
+        );
+        async move {
             let fragments = match self.read_fragments(collection_id, &pull_logs).await {
                 Ok(fragments) => fragments,
                 Err(wal3::Error::UninitializedLog) => {
@@ -1546,7 +1549,6 @@ impl LogServer {
             {
                 return Err(Status::not_found("Some entries have been purged"));
             }
-            tracing::info!("pulled {} records", records.len());
             Ok(Response::new(PullLogsResponse { records }))
         }
         .instrument(span)
