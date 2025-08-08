@@ -2,8 +2,6 @@
 // load/src/opentelemetry_config.rs file
 // Keep them in-sync manually.
 
-use crate::wrapped_metric_exporter::WrappedMetricExporter;
-use crate::wrapped_span_exporter::WrappedSpanExporter;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::{global, InstrumentationScope};
 use opentelemetry_otlp::WithExportConfig;
@@ -109,25 +107,22 @@ pub fn init_otel_layer(
     ]);
 
     // Prepare tracer.
-    let tracing_span_exporter: WrappedSpanExporter<_> = opentelemetry_otlp::SpanExporter::builder()
+    let tracing_span_exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_tonic()
         .with_endpoint(otel_endpoint)
         .build()
-        .expect("could not build span exporter for tracing")
-        .into();
+        .expect("could not build span exporter for tracing");
     let trace_config = opentelemetry_sdk::trace::Config::default().with_resource(resource.clone());
     let tracer_provider = opentelemetry_sdk::trace::TracerProvider::builder()
         .with_batch_exporter(tracing_span_exporter, opentelemetry_sdk::runtime::Tokio)
         .with_config(trace_config)
         .build();
     let tracer = tracer_provider.tracer(service_name.clone());
-    let fastrace_span_exporter: WrappedSpanExporter<_> =
-        opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic()
-            .with_endpoint(otel_endpoint)
-            .build()
-            .expect("could not build span exporter for fastrace")
-            .into();
+    let fastrace_span_exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint(otel_endpoint)
+        .build()
+        .expect("could not build span exporter for fastrace");
     fastrace::set_reporter(
         fastrace_opentelemetry::OpenTelemetryReporter::new(
             fastrace_span_exporter,
@@ -139,14 +134,13 @@ pub fn init_otel_layer(
     );
 
     // Prepare meter.
-    let metric_exporter: WrappedMetricExporter<_> = opentelemetry_otlp::MetricExporter::builder()
+    let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
         .with_tonic()
         .with_endpoint(
             std::env::var("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT").unwrap_or(otel_endpoint.clone()),
         )
         .build()
-        .expect("could not build metric exporter")
-        .into();
+        .expect("could not build metric exporter");
 
     let reader = opentelemetry_sdk::metrics::PeriodicReader::builder(
         metric_exporter,
