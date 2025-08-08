@@ -197,7 +197,7 @@ message GetCollectionsResponse {
 }
 
 message GetCollectionByResourceNameRequest {
-  string id = 1;
+  reserved 1;
   string tenant_resource_name = 2;
   string database = 3;
   string name = 4;
