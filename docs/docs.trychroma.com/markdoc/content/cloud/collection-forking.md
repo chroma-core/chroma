@@ -4,7 +4,7 @@
 
 Forking lets you create a new collection from an existing one instantly, using copy-on-write under the hood. The forked collection initially shares its data with the source and only incurs additional storage for incremental changes you make afterward.
 
-{% Banner type="info" %}
+{% Banner type="tip" %}
 Forking is available in Chroma Cloud only. The file system on single-node Chroma does not support forking — see [Single-Node Chroma: Performance and Limitations](../guides/deploy/performance). Chroma Cloud uses block storage that enables true copy-on-write semantics.
 {% /Banner %}
 
@@ -51,7 +51,7 @@ await forkedCollection.add({
 
 {% /TabbedCodeBlock %}
 
-For a longer end-to-end demo, see the advanced forking example in the Chroma repo: [Forking notebook](https://github.com/chroma-core/chroma/blob/main/examples/advanced/forking.ipynb).
+In this notebook you can find a comprehensive demo, where we index a codebase in a Chroma collection, and use forking to efficiently create collections for new branches: [Forking notebook](https://github.com/chroma-core/chroma/blob/main/examples/advanced/forking.ipynb).
 
 ## Pricing
 
@@ -66,10 +66,10 @@ Forking is subject to a limit on the total number of fork edges from the root. T
 
 - **Data versioning/checkpointing**: Maintain consistent snapshots as your data evolves.
 - **Git-like workflows**: For example, index a pull request by forking the main repository’s collection, then apply the diff to the fork. This saves both write and storage costs compared to re-ingesting the entire dataset.
-- **Experimentation**: Safely test schema changes, new embedding functions, or cleaning pipelines without touching production data.
+ - **Git-like workflows**: For example, index a branch by forking from its divergence point, then apply the diff to the fork. This saves both write and storage costs compared to re-ingesting the entire codebase.
 
 ## Notes
 
-- Forking is within the same database.
+- Your forked collections will belong to the same database as the source collection.
 
 
