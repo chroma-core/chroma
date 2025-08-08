@@ -7,11 +7,11 @@ WORKDIR /chroma
 
 RUN ARCH=$(uname -m) && \
   if [ "$ARCH" = "x86_64" ]; then \
-    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip; \
+  PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip; \
   elif [ "$ARCH" = "aarch64" ]; then \
-    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip; \
+  PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip; \
   else \
-    echo "Unsupported architecture: $ARCH" && exit 1; \
+  echo "Unsupported architecture: $ARCH" && exit 1; \
   fi && \
   curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/$PROTOC_ZIP && \
   unzip -o $PROTOC_ZIP -d /usr/local bin/protoc && \
@@ -23,6 +23,7 @@ RUN ARCH=$(uname -m) && \
 COPY idl/ idl/
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
+COPY .cargo/ .cargo/
 COPY rust/ rust/
 
 # Skip building these as they're not needed by images (and if Python bindings are built, the final binaries are unnecessarily linked against Python).
