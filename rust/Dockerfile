@@ -2,6 +2,7 @@ FROM rust:1.81.0 AS builder
 
 ARG RELEASE_MODE=
 ARG PROTOC_VERSION=31.1
+ARG ENABLE_AVX512=
 
 WORKDIR /chroma
 
@@ -30,6 +31,13 @@ ENV EXCLUDED_PACKAGES="chromadb_rust_bindings chromadb-js-bindings chroma-benchm
 
 RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
+  if [ "$ENABLE_AVX512" = "1" ]; then \
+    export CXXFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
+    export CFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
+    echo "Building with AVX512 optimizations for hnswlib"; \
+  else \
+    echo "Building without AVX512 optimizations"; \
+  fi && \
   if [ "$RELEASE_MODE" = "1" ]; then cargo build --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES) --release; else cargo build --workspace $(printf -- '--exclude %s ' $EXCLUDED_PACKAGES); fi && \
   # Move CLI binary
   if [ "$RELEASE_MODE" = "1" ]; then mv target/release/chroma ./chroma; else mv target/debug/chroma ./chroma; fi && \
