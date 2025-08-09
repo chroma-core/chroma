@@ -197,7 +197,7 @@ An `$or` operator will return results that match any of the filters in the list.
 {% Tab label="python" %}
 ```python
 {
-    "or": [
+    "$or": [
         {
             "metadata_field": {
                 <Operator>: <Value>
@@ -216,7 +216,7 @@ An `$or` operator will return results that match any of the filters in the list.
 {% Tab label="typescript" %}
 ```typescript
 {
-    "or": [
+    "$or": [
         {
             metadata_field: { <Operator>: <Value> }
         },
@@ -238,7 +238,7 @@ For example, here we get all records whose `color` metadata field is `red` or `b
 ```python
 collection.get(
     where={
-        "or": [
+        "$or": [
             {"color": "red"},
             {"color": "blue"},
         ]
@@ -251,7 +251,7 @@ collection.get(
 ```typescript
 await collection.get({
     where: {
-        "or": [
+        "$or": [
             { color: "red" },
             { color: "blue" },
         ]
