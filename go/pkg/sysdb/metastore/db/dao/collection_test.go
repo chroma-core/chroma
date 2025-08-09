@@ -71,7 +71,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 		suite.NoError(err)
 		suite.Equal(collectionID, scanedCollectionID)
 	}
-	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
+	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseId, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
@@ -99,7 +99,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.Equal(collectionID, collections[0].Collection.ID)
 
 	// Test when filtering by name
-	collections, err = suite.collectionDb.GetCollections(nil, &collectionName, suite.tenantName, suite.databaseName, nil, nil, false)
+	collections, err = suite.collectionDb.GetCollections(nil, &collectionName, suite.tenantName, suite.databaseId, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID, collections[0].Collection.ID)
@@ -108,7 +108,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	suite.NoError(err)
 
 	// Test order by. Collections are ordered by create time so collectionID2 should be second
-	allCollections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
+	allCollections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseId, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(allCollections, 2)
 	suite.Equal(collectionID, allCollections[0].Collection.ID)
@@ -117,18 +117,18 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_GetCollections() {
 	// Test limit and offset
 	limit := int32(1)
 	offset := int32(1)
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, nil, false)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseId, &limit, nil, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(allCollections[0].Collection.ID, collections[0].Collection.ID)
 
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset, false)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseId, &limit, &offset, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(allCollections[1].Collection.ID, collections[0].Collection.ID)
 
 	offset = int32(2)
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, &limit, &offset, false)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseId, &limit, &offset, false)
 	suite.NoError(err)
 	suite.Equal(len(collections), 0)
 
@@ -214,7 +214,7 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateLogPositionVersionTot
 
 func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 	// Ensure there are no collections from before.
-	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
+	collections, err := suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseId, nil, nil, false)
 	suite.NoError(err)
 	if len(collections) != 0 {
 		suite.FailNow(fmt.Sprintf(
@@ -244,14 +244,14 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_SoftDelete() {
 	suite.NoError(err)
 
 	// Verify normal get collections only returns non-deleted collection
-	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
+	collections, err = suite.collectionDb.GetCollections(nil, nil, suite.tenantName, suite.databaseId, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID2, collections[0].Collection.ID)
 	suite.Equal(collectionName2, *collections[0].Collection.Name)
 
 	// Verify getting soft deleted collections
-	collections, err = suite.collectionDb.GetSoftDeletedCollections(&collectionID1, "", suite.databaseName, 10)
+	collections, err = suite.collectionDb.GetSoftDeletedCollections(&collectionID1, suite.tenantName, suite.databaseId, 10)
 	suite.NoError(err)
 	suite.Len(collections, 1)
 	suite.Equal(collectionID1, collections[0].Collection.ID)

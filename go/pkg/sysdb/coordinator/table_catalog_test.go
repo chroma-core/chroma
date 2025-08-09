@@ -119,10 +119,23 @@ func TestCatalog_GetCollections(t *testing.T) {
 		},
 	}
 
+	// mock the database lookup
+	mockDatabaseDb := &mocks.IDatabaseDb{}
+	mockMetaDomain.On("DatabaseDb", context.Background()).Return(mockDatabaseDb)
+	mockDatabases := []*dbmodel.Database{
+		{
+			ID:       dbId.String(),
+			Name:     defaultDatabase,
+			TenantID: defaultTenant,
+		},
+	}
+	mockDatabaseDb.On("GetDatabases", defaultTenant, defaultDatabase).Return(mockDatabases, nil)
+
 	// mock the get collections method
-	mockMetaDomain.On("CollectionDb", context.Background()).Return(&mocks.ICollectionDb{})
+	mockCollectionDb := &mocks.ICollectionDb{}
+	mockMetaDomain.On("CollectionDb", context.Background()).Return(mockCollectionDb)
 	var n *int32
-	mockMetaDomain.CollectionDb(context.Background()).(*mocks.ICollectionDb).On("GetCollections", []string{*types.FromUniqueID(collectionID)}, &collectionName, common.DefaultTenant, common.DefaultDatabase, n, n, false).Return(collectionAndMetadataList, nil)
+	mockCollectionDb.On("GetCollections", []string{*types.FromUniqueID(collectionID)}, &collectionName, common.DefaultTenant, dbId.String(), n, n, false).Return(collectionAndMetadataList, nil)
 
 	// call the GetCollections method
 	collections, err := catalog.GetCollections(context.Background(), []types.UniqueID{collectionID}, &collectionName, defaultTenant, defaultDatabase, nil, nil, false)
