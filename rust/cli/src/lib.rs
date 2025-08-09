@@ -19,18 +19,29 @@ use colored::Colorize;
 
 #[derive(Subcommand, Debug)]
 enum Command {
+    #[command(about = "Browse Chroma collections", long_about = None)]
     Browse(BrowseArgs),
+    #[command(about = "Copy collection between local and Chroma Cloud", long_about = None)]
     Copy(CopyArgs),
+    #[command(about = "Manage Chroma Cloud databases", long_about = None)]
     #[command(subcommand)]
     Db(DbCommand),
+    #[command(about = "Open Chroma online documentation", long_about = None)]
     Docs,
+    #[command(about = "Install sample applications", long_about = None)]
     Install(InstallArgs),
+    #[command(about = "Log in to Chroma Cloud", long_about = None)]
     Login(LoginArgs),
+    #[command(about = "Manage Chroma Cloud profiles", long_about = None)]
     #[command(subcommand)]
     Profile(ProfileCommand),
+    #[command(about = "Start a local Chroma server", long_about = None)]
     Run(RunArgs),
+    #[command(about = "Open the Chroma Discord", long_about = None)]
     Support,
+    #[command(about = "Check for Chroma CLI updates", long_about = None)]
     Update,
+    #[command(about = "Vacuum a local Chroma persistent directory", long_about = None)]
     Vacuum(VacuumArgs),
 }
 
