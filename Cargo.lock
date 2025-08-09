@@ -3446,6 +3446,7 @@ dependencies = [
  "humantime",
  "itertools 0.13.0",
  "opentelemetry",
+ "parking_lot",
  "petgraph 0.8.1",
  "proptest",
  "proptest-derive 0.3.0",

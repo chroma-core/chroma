@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::operators::truncate_dirty_log::{
     TruncateDirtyLogError, TruncateDirtyLogOperator, TruncateDirtyLogOutput,
 };
@@ -17,15 +19,17 @@ use chroma_system::{
     wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
     TaskResult,
 };
+use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
+use parking_lot::Mutex;
 use std::{
     fmt::{Debug, Formatter},
     time::{Duration, SystemTime},
 };
 use thiserror::Error;
-use tracing::{span, Instrument, Span};
+use tracing::{span, Instrument, Level, Span};
 
 #[allow(dead_code)]
 pub(crate) struct GarbageCollector {
@@ -42,6 +46,7 @@ pub(crate) struct GarbageCollector {
     job_duration_ms_metric: Histogram<u64>,
     total_files_deleted_metric: Counter<u64>,
     total_versions_deleted_metric: Counter<u64>,
+    manual_collections: Mutex<HashSet<CollectionUuid>>,
 }
 
 impl Debug for GarbageCollector {
@@ -99,6 +104,7 @@ impl GarbageCollector {
                 .u64_counter("garbage_collector.total_versions_deleted")
                 .with_description("Total number of versions deleted during garbage collection")
                 .build(),
+            manual_collections: Mutex::new(HashSet::default()),
         }
     }
 
@@ -305,6 +311,16 @@ impl GarbageCollector {
             })
             .collect()
     }
+
+    fn manual_garbage_collection_request(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), GarbageCollectCollectionError> {
+        tracing::event!(Level::INFO, name = "manual garbage collection", collection_id =? collection_id);
+        let mut manual_collections = self.manual_collections.lock();
+        manual_collections.insert(collection_id);
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -313,6 +329,26 @@ impl Handler<Memberlist> for GarbageCollector {
 
     async fn handle(&mut self, message: Memberlist, _ctx: &ComponentContext<GarbageCollector>) {
         self.memberlist = message;
+    }
+}
+
+#[derive(Debug)]
+pub struct ManualGarbageCollectionRequest {
+    pub collection_id: CollectionUuid,
+}
+
+#[async_trait]
+impl Handler<ManualGarbageCollectionRequest> for GarbageCollector {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        req: ManualGarbageCollectionRequest,
+        _: &ComponentContext<GarbageCollector>,
+    ) {
+        if let Err(err) = self.manual_garbage_collection_request(req.collection_id) {
+            tracing::event!(Level::ERROR, name = "manual compaction failed", error =? err);
+        }
     }
 }
 
