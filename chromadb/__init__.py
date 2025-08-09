@@ -1,12 +1,15 @@
 from typing import Dict, Optional, Union
 import logging
 from chromadb.api.client import Client as ClientCreator
-from chromadb.api.client import AdminClient as AdminClientCreator
+from chromadb.api.client import (
+    AdminClient as AdminClientCreator,
+    AdminCloudClient as AdminCloudClientCreator,
+)
 from chromadb.api.async_client import AsyncClient as AsyncClientCreator
 from chromadb.auth.token_authn import TokenTransportHeader
 import chromadb.config
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings
-from chromadb.api import AdminAPI, AsyncClientAPI, ClientAPI
+from chromadb.api import AdminAPI, AsyncClientAPI, ClientAPI, AdminCloudAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
     CollectionMetadata,
@@ -27,6 +30,8 @@ from chromadb.api.types import (
     UpdateCollectionMetadata,
 )
 from pathlib import Path
+import warnings
+import os
 
 # Re-export types from chromadb.types
 __all__ = [
@@ -311,19 +316,36 @@ def CloudClient(
     Creates a client to connect to a tennant and database on the Chroma cloud.
 
     Args:
-        tenant: The tenant to use for this client.
         database: The database to use for this client.
         api_key: The api key to use for this client.
     """
+    if tenant is not None:
+        warnings.warn(
+            "The 'tenant' parameter is deprecated and will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    if cloud_port != 8000:
+        warnings.warn(
+            "The 'cloud_port' parameter is deprecated and will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+    if enable_ssl is not True:
+        warnings.warn(
+            "The 'enable_ssl' parameter is deprecated and will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     required_args = [
-        CloudClientArg(name="tenant", env_var="CHROMA_TENANT", value=tenant),
-        CloudClientArg(name="database", env_var="CHROMA_DATABASE", value=database),
         CloudClientArg(name="api_key", env_var="CHROMA_API_KEY", value=api_key),
     ]
 
-    # If any of tenant, database, or api_key is not provided, try to load it from the environment variable
+    # If api_key is not provided, try to load it from the environment variable
     if not all([arg.value for arg in required_args]):
-        import os
         for arg in required_args:
             arg.value = arg.value or os.environ.get(arg.env_var)
 
@@ -338,26 +360,49 @@ def CloudClient(
         settings = Settings()
 
     # Make sure paramaters are the correct types -- users can pass anything.
-    tenant = str(tenant)
-    database = str(database)
+    database = database or os.environ.get("CHROMA_DATABASE")
+    if database is not None:
+        database = str(database)
     api_key = str(api_key)
     cloud_host = str(cloud_host)
-    cloud_port = int(cloud_port)
-    enable_ssl = bool(enable_ssl)
 
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     settings.chroma_server_host = cloud_host
-    settings.chroma_server_http_port = cloud_port
-    # Always use SSL for cloud
-    settings.chroma_server_ssl_enabled = enable_ssl
+    settings.chroma_server_http_port = 443
+    settings.chroma_server_ssl_enabled = True
 
     settings.chroma_client_auth_provider = (
         "chromadb.auth.token_authn.TokenAuthClientProvider"
     )
     settings.chroma_client_auth_credentials = api_key
     settings.chroma_auth_token_transport_header = TokenTransportHeader.X_CHROMA_TOKEN
+    settings.chroma_overwrite_singleton_tenant_database_access_from_auth = True
 
-    return ClientCreator(tenant=tenant, database=database, settings=settings)
+    if database is None:
+        return ClientCreator(settings=settings, user_supplied_db=False, is_cloud=True)
+
+    return ClientCreator(database=database, settings=settings, is_cloud=True)
+
+
+def AdminCloudClient(
+    api_key: str,
+    settings: Optional[Settings] = None,
+    *,
+    cloud_host: str = "api.trychroma.com",
+) -> AdminCloudAPI:
+    if settings is None:
+        settings = Settings()
+    settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
+    settings.chroma_server_host = cloud_host
+    settings.chroma_server_http_port = 443
+    settings.chroma_server_ssl_enabled = True
+    settings.chroma_client_auth_provider = (
+        "chromadb.auth.token_authn.TokenAuthClientProvider"
+    )
+    settings.chroma_client_auth_credentials = api_key
+    settings.chroma_auth_token_transport_header = TokenTransportHeader.X_CHROMA_TOKEN
+    settings.chroma_overwrite_singleton_tenant_database_access_from_auth = True
+    return AdminCloudClientCreator(settings=settings)
 
 
 def Client(
