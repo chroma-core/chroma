@@ -762,6 +762,23 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum GetCollectionByResourceNameError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+}
+
+impl ChromaError for GetCollectionByResourceNameError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionByResourceNameError::Internal(err) => err.code(),
+            GetCollectionByResourceNameError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,

@@ -377,6 +377,21 @@ impl ServiceBasedFrontend {
             .map(|count| count as u32)
     }
 
+    /// Parse a collection name to see if it matches the pattern "<tenant_resource_name>/<database_name>/<collection_name>"
+    /// Returns Some((tenant_resource_name, database_name, collection_name)) if the pattern matches, None otherwise
+    fn parse_resource_name(&self, collection_name: &str) -> Option<(String, String, String)> {
+        let parts: Vec<&str> = collection_name.split(':').collect();
+        if parts.len() == 3 {
+            Some((
+                parts[0].to_string(),
+                parts[1].to_string(),
+                parts[2].to_string(),
+            ))
+        } else {
+            None
+        }
+    }
+
     pub async fn get_collection(
         &mut self,
         GetCollectionRequest {
@@ -386,20 +401,36 @@ impl ServiceBasedFrontend {
             ..
         }: GetCollectionRequest,
     ) -> Result<GetCollectionResponse, GetCollectionError> {
-        let mut collections = self
-            .sysdb_client
-            .get_collections(GetCollectionsOptions {
-                name: Some(collection_name.clone()),
-                tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
-                limit: Some(1),
-                ..Default::default()
-            })
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-        collections
-            .pop()
-            .ok_or(GetCollectionError::NotFound(collection_name))
+        if let Some((tenant_resource_name, database_name, collection_name)) =
+            self.parse_resource_name(&collection_name)
+        {
+            let collection = self
+                .sysdb_client
+                .get_collection_by_resource_name(
+                    tenant_resource_name,
+                    database_name,
+                    collection_name,
+                )
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+            Ok(collection)
+        } else {
+            let mut collections = self
+                .sysdb_client
+                .get_collections(GetCollectionsOptions {
+                    name: Some(collection_name.clone()),
+                    tenant: Some(tenant_id.clone()),
+                    database: Some(database_name.clone()),
+                    limit: Some(1),
+                    ..Default::default()
+                })
+                .await
+                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+            collections
+                .pop()
+                .ok_or(GetCollectionError::NotFound(collection_name))
+        }
     }
 
     pub async fn create_collection(
@@ -1756,5 +1787,37 @@ mod tests {
         assert!(segments
             .iter()
             .any(|s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD));
+    }
+
+    #[test]
+    fn test_parse_resource_name() {
+        let registry = Registry::new();
+        let system = System::new();
+        let config = FrontendConfig::sqlite_in_memory();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let frontend = rt
+            .block_on(ServiceBasedFrontend::try_from_config(
+                &(config, system),
+                &registry,
+            ))
+            .unwrap();
+
+        let result = frontend.parse_resource_name("tenant1/db1/coll1");
+        assert_eq!(
+            result,
+            Some((
+                "tenant1".to_string(),
+                "db1".to_string(),
+                "coll1".to_string()
+            ))
+        );
+
+        assert_eq!(frontend.parse_resource_name("tenant1/coll1"), None);
+        assert_eq!(frontend.parse_resource_name("tenant1"), None);
+        assert_eq!(
+            frontend.parse_resource_name("tenant1/db1/coll1/extra"),
+            None
+        );
+        assert_eq!(frontend.parse_resource_name(""), None);
     }
 }
