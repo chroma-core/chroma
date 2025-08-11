@@ -9,24 +9,28 @@ use chroma_segment::{
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{CollectionAndSegments, HnswParametersFromSegmentError, Segment, SegmentType};
+use chroma_types::{
+    operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, Segment, SegmentType,
+};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-    filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
+    filter::{FilterError, FilterInput, FilterOutput},
     knn_hnsw::KnnHnswError,
     knn_log::KnnLogError,
     knn_merge::KnnMergeError,
-    knn_projection::{KnnProjectionError, KnnProjectionOutput},
+    knn_projection::KnnProjectionError,
+    prefetch_segment::{
+        PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
+    },
     spann_bf_pl::SpannBfPlError,
     spann_centers_search::SpannCentersSearchError,
     spann_fetch_pl::SpannFetchPlError,
-    spann_knn_merge::SpannKnnMergeError,
 };
 
 #[derive(Error, Debug)]
@@ -61,8 +65,6 @@ pub enum KnnError {
     SpannFetchPl(#[from] SpannFetchPlError),
     #[error("Error running Spann Head Search Operator: {0}")]
     SpannHeadSearch(#[from] SpannCentersSearchError),
-    #[error("Error running Spann Knn Merge Operator")]
-    SpannKnnMerge(#[from] SpannKnnMergeError),
     #[error("Error creating spann segment reader: {0}")]
     SpannSegmentReaderCreationError(#[from] SpannSegmentReaderError),
     #[error("Invalid distance function")]
@@ -89,7 +91,6 @@ impl ChromaError for KnnError {
             KnnError::SpannBfPl(e) => e.code(),
             KnnError::SpannFetchPl(e) => e.code(),
             KnnError::SpannHeadSearch(e) => e.code(),
-            KnnError::SpannKnnMerge(_) => ErrorCodes::Internal,
             KnnError::InvalidDistanceFunction => ErrorCodes::InvalidArgument,
             KnnError::Aborted => ErrorCodes::ResourceExhausted,
             KnnError::SpannSegmentReaderCreationError(e) => e.code(),
@@ -159,8 +160,8 @@ type KnnFilterResult = Result<KnnFilterOutput, KnnError>;
 #[derive(Debug)]
 pub struct KnnFilterOrchestrator {
     // Orchestrator parameters
+    context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
-    dispatcher: ComponentHandle<Dispatcher>,
     hnsw_provider: HnswIndexProvider,
     queue: usize,
 
@@ -174,7 +175,7 @@ pub struct KnnFilterOrchestrator {
     fetched_logs: Option<FetchLogOutput>,
 
     // Pipelined operators
-    filter: FilterOperator,
+    filter: Filter,
 
     // Result channel
     result_channel: Option<Sender<KnnFilterResult>>,
@@ -188,11 +189,12 @@ impl KnnFilterOrchestrator {
         queue: usize,
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
-        filter: FilterOperator,
+        filter: Filter,
     ) -> Self {
+        let context = OrchestratorContext::new(dispatcher);
         Self {
+            context,
             blockfile_provider,
-            dispatcher,
             hnsw_provider,
             queue,
             collection_and_segments,
@@ -210,17 +212,69 @@ impl Orchestrator for KnnFilterOrchestrator {
     type Error = KnnError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        vec![(
-            wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver()),
-            Some(Span::current()),
-        )]
+        let mut tasks = vec![];
+        // prefetch spann segment
+        let prefetch_task = wrap(
+            Box::new(PrefetchSegmentOperator::new()),
+            PrefetchSegmentInput::new(
+                self.collection_and_segments.vector_segment.clone(),
+                self.blockfile_provider.clone(),
+            ),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        // Prefetch task is detached from the orchestrator
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.collection_and_segments.vector_segment.id);
+        tasks.push((prefetch_task, Some(prefetch_span)));
+
+        // prefetch record segment
+        let prefetch_record_segment_task = wrap(
+            Box::new(PrefetchSegmentOperator::new()),
+            PrefetchSegmentInput::new(
+                self.collection_and_segments.record_segment.clone(),
+                self.blockfile_provider.clone(),
+            ),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        // Prefetch task is detached from the orchestrator
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
+        tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
+
+        // Prefetch metadata segment.
+        let prefetch_metadata_task = wrap(
+            Box::new(PrefetchSegmentOperator::new()),
+            PrefetchSegmentInput::new(
+                self.collection_and_segments.metadata_segment.clone(),
+                self.blockfile_provider.clone(),
+            ),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
+        tasks.push((prefetch_metadata_task, Some(prefetch_span)));
+
+        // Fetch log task.
+        let fetch_log_task = wrap(
+            Box::new(self.fetch_log.clone()),
+            (),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        tasks.push((fetch_log_task, Some(Span::current())));
+
+        tasks
     }
 
     fn queue_size(&self) -> usize {
@@ -231,10 +285,21 @@ impl Orchestrator for KnnFilterOrchestrator {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<KnnFilterResult> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(&mut self) -> Option<Sender<KnnFilterResult>> {
+        self.result_channel.take()
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for KnnFilterOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
+        _: &ComponentContext<KnnFilterOrchestrator>,
+    ) {
+        // Nothing to do.
     }
 }
 
@@ -263,6 +328,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
                 record_segment: self.collection_and_segments.record_segment.clone(),
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         self.send(task, ctx, Some(Span::current())).await;
     }
@@ -372,6 +438,3 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
         self.terminate_with_result(Ok(output), ctx).await;
     }
 }
-
-pub(super) type KnnOutput = KnnProjectionOutput;
-pub(super) type KnnResult = Result<KnnOutput, KnnError>;

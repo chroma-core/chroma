@@ -8,7 +8,6 @@ name = "frontend_service"
 path = "src/bin/frontend_service.rs"
 
 [dependencies]
-bytes = { workspace = true }
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
@@ -24,22 +23,21 @@ thiserror = { workspace = true }
 tower-http = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
-regex = { workspace = true }
 futures = { workspace = true }
 backon = { workspace = true }
 tracing-opentelemetry = { workspace = true }
-tower = { version = "0.4.13", features = ["discover"] }
+tower = { workspace = true }
 mdac = { workspace = true }
 opentelemetry.workspace = true
 validator = { workspace = true }
 rust-embed = { workspace = true }
-
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
 chroma-error = { workspace = true, features = ["validator", "http"] }
 chroma-log = { workspace = true }
 chroma-memberlist = { workspace = true }
+chroma-metering = { workspace = true }
 chroma-segment = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-system = { workspace = true }
@@ -49,13 +47,21 @@ chroma-sqlite = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { version = "0.2.0", features = ["debug"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
+base64 = { workspace = true }
+strum = "0.27.1"
+strum_macros = "0.27.1"
 
 [dev-dependencies]
 reqwest = { workspace = true }
-random-port = { workspace = true }
 proptest = { workspace = true }
 proptest-state-machine = { workspace = true }
 chroma-types = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 worker = { workspace = true }
 ndarray = { workspace = true }
+criterion = { workspace = true }
+
+
+[[bench]]
+name="base64"
+harness = false

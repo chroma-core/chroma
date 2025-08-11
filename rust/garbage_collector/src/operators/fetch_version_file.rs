@@ -17,6 +17,7 @@ use chroma_types::CollectionUuid;
 use prost::Message;
 use std::fmt::{Debug, Formatter};
 use std::str::FromStr;
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Clone, Debug, Default)]
@@ -53,7 +54,7 @@ impl Debug for FetchVersionFileInput {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct FetchVersionFileOutput {
-    pub file: CollectionVersionFile,
+    pub file: Arc<CollectionVersionFile>,
     pub collection_id: CollectionUuid,
 }
 
@@ -128,7 +129,7 @@ impl Operator<FetchVersionFileInput, FetchVersionFileOutput> for FetchVersionFil
         .map_err(FetchVersionFileError::InvalidUuid)?;
 
         Ok(FetchVersionFileOutput {
-            file: version_file,
+            file: Arc::new(version_file),
             collection_id,
         })
     }
@@ -139,9 +140,7 @@ mod tests {
     use super::*;
     use chroma_config::registry;
     use chroma_config::Configurable;
-    use chroma_storage::config::{
-        ObjectStoreBucketConfig, ObjectStoreConfig, ObjectStoreType, StorageConfig,
-    };
+    use chroma_storage::s3_config_for_localhost_with_bucket_name;
     use chroma_storage::PutOptions;
     use chroma_types::chroma_proto::CollectionInfoImmutable;
     use chroma_types::chroma_proto::CollectionVersionHistory;
@@ -150,15 +149,7 @@ mod tests {
 
     async fn setup_test_storage() -> Storage {
         // Create storage config for Minio
-        let storage_config = StorageConfig::ObjectStore(ObjectStoreConfig {
-            bucket: ObjectStoreBucketConfig {
-                name: "chroma-storage".to_string(),
-                r#type: ObjectStoreType::Minio,
-            },
-            upload_part_size_bytes: 1024 * 1024,
-            download_part_size_bytes: 1024 * 1024,
-            max_concurrent_requests: 10,
-        });
+        let storage_config = s3_config_for_localhost_with_bucket_name("chroma-storage").await;
 
         // Add more detailed logging
         tracing::info!("Setting up test storage with config: {:?}", storage_config);
@@ -212,7 +203,7 @@ mod tests {
         let result = operator.run(&input).await.expect("Failed to run operator");
 
         // Verify the content
-        assert_eq!(result.file, test_file);
+        assert_eq!(result.file, test_file.into());
 
         // Cleanup - Note: object_store doesn't have a delete method,
         // but the test bucket should be cleaned up between test runs

@@ -3,19 +3,25 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::CollectionAndSegments;
+use chroma_types::{
+    operator::{Filter, GetResult, Limit, Projection, ProjectionOutput},
+    CollectionAndSegments,
+};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
-    filter::{FilterError, FilterInput, FilterOperator, FilterOutput},
-    limit::{LimitError, LimitInput, LimitOperator, LimitOutput},
+    filter::{FilterError, FilterInput, FilterOutput},
+    limit::{LimitError, LimitInput, LimitOutput},
     prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
-    projection::{ProjectionError, ProjectionInput, ProjectionOperator, ProjectionOutput},
+    prefetch_segment::{
+        PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
+    },
+    projection::{ProjectionError, ProjectionInput},
 };
 
 #[derive(Error, Debug)]
@@ -66,10 +72,6 @@ where
     }
 }
 
-type GetOutput = (ProjectionOutput, u64);
-
-type GetResult = Result<GetOutput, GetError>;
-
 /// The `GetOrchestrator` chains a sequence of operators in sequence to evaluate
 /// a `<collection>.get(...)` query from the user
 ///
@@ -119,9 +121,9 @@ type GetResult = Result<GetOutput, GetError>;
 #[derive(Debug)]
 pub struct GetOrchestrator {
     // Orchestrator parameters
-    blockfile_provider: BlockfileProvider,
-    dispatcher: ComponentHandle<Dispatcher>,
+    context: OrchestratorContext,
     queue: usize,
+    blockfile_provider: BlockfileProvider,
 
     // Collection segments
     collection_and_segments: CollectionAndSegments,
@@ -133,12 +135,12 @@ pub struct GetOrchestrator {
     fetched_logs: Option<FetchLogOutput>,
 
     // Pipelined operators
-    filter: FilterOperator,
-    limit: LimitOperator,
-    projection: ProjectionOperator,
+    filter: Filter,
+    limit: Limit,
+    projection: Projection,
 
     // Result channel
-    result_channel: Option<Sender<GetResult>>,
+    result_channel: Option<Sender<Result<GetResult, GetError>>>,
 }
 
 impl GetOrchestrator {
@@ -149,14 +151,15 @@ impl GetOrchestrator {
         queue: usize,
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
-        filter: FilterOperator,
-        limit: LimitOperator,
-        projection: ProjectionOperator,
+        filter: Filter,
+        limit: Limit,
+        projection: Projection,
     ) -> Self {
+        let context = OrchestratorContext::new(dispatcher);
         Self {
-            blockfile_provider,
-            dispatcher,
+            context,
             queue,
+            blockfile_provider,
             collection_and_segments,
             fetch_log,
             fetched_logs: None,
@@ -170,35 +173,84 @@ impl GetOrchestrator {
 
 #[async_trait]
 impl Orchestrator for GetOrchestrator {
-    type Output = GetOutput;
+    type Output = GetResult;
     type Error = GetError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        vec![(
-            wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver()),
-            Some(Span::current()),
-        )]
+        let mut tasks = vec![];
+        // prefetch record segment
+        let prefetch_record_segment_task = wrap(
+            Box::new(PrefetchSegmentOperator::new()),
+            PrefetchSegmentInput::new(
+                self.collection_and_segments.record_segment.clone(),
+                self.blockfile_provider.clone(),
+            ),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        // Prefetch task is detached from the orchestrator
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
+        tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
+
+        // Prefetch metadata segment.
+        let prefetch_metadata_task = wrap(
+            Box::new(PrefetchSegmentOperator::new()),
+            PrefetchSegmentInput::new(
+                self.collection_and_segments.metadata_segment.clone(),
+                self.blockfile_provider.clone(),
+            ),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
+        tasks.push((prefetch_metadata_task, Some(prefetch_span)));
+
+        // Fetch log task.
+        let fetch_log_task = wrap(
+            Box::new(self.fetch_log.clone()),
+            (),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        tasks.push((fetch_log_task, Some(Span::current())));
+
+        tasks
     }
 
     fn queue_size(&self) -> usize {
         self.queue
     }
 
-    fn set_result_channel(&mut self, sender: Sender<GetResult>) {
+    fn set_result_channel(&mut self, sender: Sender<Result<GetResult, GetError>>) {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<GetResult> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(&mut self) -> Option<Sender<Result<GetResult, GetError>>> {
+        self.result_channel.take()
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for GetOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _: TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>,
+        _: &ComponentContext<GetOrchestrator>,
+    ) {
+        // Nothing to do.
     }
 }
 
@@ -227,6 +279,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for GetOrchestrator {
                 record_segment: self.collection_and_segments.record_segment.clone(),
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         self.send(task, ctx, Some(Span::current())).await;
     }
@@ -259,6 +312,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for GetOrchestrator {
                 compact_offset_ids: output.compact_offset_ids,
             },
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         self.send(task, ctx, Some(Span::current())).await;
     }
@@ -294,13 +348,19 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             Box::new(PrefetchRecordOperator {}),
             input.clone(),
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
 
         if !self.send(prefetch_task, ctx, Some(Span::current())).await {
             return;
         }
 
-        let task = wrap(Box::new(self.projection.clone()), input, ctx.receiver());
+        let task = wrap(
+            Box::new(self.projection.clone()),
+            input,
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
         self.send(task, ctx, Some(Span::current())).await;
     }
 }
@@ -332,7 +392,7 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
             None => return,
         };
 
-        let fetch_log_size_bytes = self
+        let pulled_log_bytes = self
             .fetched_logs
             .as_ref()
             .expect("FetchLogOperator should have finished already")
@@ -340,7 +400,13 @@ impl Handler<TaskResult<ProjectionOutput, ProjectionError>> for GetOrchestrator 
             .map(|(l, _)| l.size_bytes())
             .sum();
 
-        self.terminate_with_result(Ok((output, fetch_log_size_bytes)), ctx)
-            .await;
+        self.terminate_with_result(
+            Ok(GetResult {
+                pulled_log_bytes,
+                result: output,
+            }),
+            ctx,
+        )
+        .await;
     }
 }

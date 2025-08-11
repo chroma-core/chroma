@@ -15,7 +15,7 @@
 export namespace Api {
   export interface AddCollectionRecordsPayload {
     documents?: (string | null)[] | null;
-    embeddings?: number[][] | null;
+    embeddings: Api.EmbeddingsPayload;
     ids: string[];
     metadatas?:
       | ({ [name: string]: boolean | number | number | string } | null)[]
@@ -32,6 +32,7 @@ export namespace Api {
      * minimum: 0
      */
     max_batch_size: number;
+    supports_base64_encoding: boolean;
   }
 
   export interface Collection {
@@ -145,6 +146,8 @@ export namespace Api {
     name: string;
   }
 
+  export type EmbeddingsPayload = number[][] | string[];
+
   export interface ErrorResponse {
     error: string;
     message: string;
@@ -184,6 +187,7 @@ export namespace Api {
 
   export interface GetTenantResponse {
     name: string;
+    resource_name?: string | null;
   }
 
   export interface GetUserIdentityResponse {
@@ -225,7 +229,7 @@ export namespace Api {
      * @memberof HnswConfiguration
      */
     resize_factor?: number | null;
-    space?: Api.HnswSpace;
+    space?: Api.HnswSpace | null;
     /**
      * @type {number | null}
      * @memberof HnswConfiguration
@@ -314,7 +318,7 @@ export namespace Api {
      * minimum: 0
      */
     search_nprobe?: number | null;
-    space?: Api.HnswSpace;
+    space?: Api.HnswSpace | null;
     /**
      * @type {number | null}
      * @memberof SpannConfiguration
@@ -332,7 +336,7 @@ export namespace Api {
   export interface UpdateCollectionConfiguration {
     embedding_function?: Api.EmbeddingFunctionConfiguration | null;
     hnsw?: Api.UpdateHnswConfiguration | null;
-    spann?: Api.SpannConfiguration | null;
+    spann?: Api.UpdateSpannConfiguration | null;
   }
 
   export interface UpdateCollectionPayload {
@@ -345,7 +349,7 @@ export namespace Api {
 
   export interface UpdateCollectionRecordsPayload {
     documents?: (string | null)[] | null;
-    embeddings?: (number[] | null)[] | null;
+    embeddings?: Api.UpdateEmbeddingsPayload | null;
     ids: string[];
     metadatas?:
       | ({ [name: string]: boolean | number | number | string } | null)[]
@@ -356,6 +360,8 @@ export namespace Api {
   export interface UpdateCollectionRecordsResponse {}
 
   export interface UpdateCollectionResponse {}
+
+  export type UpdateEmbeddingsPayload = (number[] | null)[] | (string | null)[];
 
   export interface UpdateHnswConfiguration {
     /**
@@ -395,9 +401,30 @@ export namespace Api {
     sync_threshold?: number | null;
   }
 
+  export interface UpdateSpannConfiguration {
+    /**
+     * @type {number | null}
+     * @memberof UpdateSpannConfiguration
+     * minimum: 0
+     */
+    ef_search?: number | null;
+    /**
+     * @type {number | null}
+     * @memberof UpdateSpannConfiguration
+     * minimum: 0
+     */
+    search_nprobe?: number | null;
+  }
+
+  export interface UpdateTenantPayload {
+    resource_name: string;
+  }
+
+  export interface UpdateTenantResponse {}
+
   export interface UpsertCollectionRecordsPayload {
     documents?: (string | null)[] | null;
-    embeddings?: number[][] | null;
+    embeddings: Api.EmbeddingsPayload;
     ids: string[];
     metadatas?:
       | ({ [name: string]: boolean | number | number | string } | null)[]

@@ -38,6 +38,7 @@ func convertCollectionToModel(collectionAndMetadataList []*dbmodel.CollectionAnd
 			IsDeleted:                  collectionAndMetadata.Collection.IsDeleted,
 			VersionFileName:            collectionAndMetadata.Collection.VersionFileName,
 			CreatedAt:                  collectionAndMetadata.Collection.CreatedAt,
+			UpdatedAt:                  collectionAndMetadata.Collection.UpdatedAt.Unix(),
 			DatabaseId:                 types.MustParse(collectionAndMetadata.Collection.DatabaseID),
 		}
 		collection.Metadata = convertCollectionMetadataToModel(collectionAndMetadata.CollectionMetadata)
@@ -217,7 +218,12 @@ func convertDatabaseToModel(dbDatabase *dbmodel.Database) *model.Database {
 }
 
 func convertTenantToModel(dbTenant *dbmodel.Tenant) *model.Tenant {
+	var resourceName *string
+	if dbTenant.ResourceName != nil {
+		resourceName = dbTenant.ResourceName
+	}
 	return &model.Tenant{
-		Name: dbTenant.ID,
+		Name:         dbTenant.ID,
+		ResourceName: resourceName,
 	}
 }

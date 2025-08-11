@@ -1,3 +1,4 @@
+use chroma_memberlist::config::CustomResourceMemberlistProviderConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Clone, Serialize, Debug)]
@@ -28,6 +29,10 @@ pub struct GrpcLogConfig {
     pub use_alt_for_collections: Vec<String>,
     #[serde(default = "Option::default")]
     pub alt_host_threshold: Option<String>,
+    #[serde(default = "GrpcLogConfig::default_memberlist_provider")]
+    pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+    #[serde(default = "GrpcLogConfig::default_assignment")]
+    pub assignment: chroma_config::assignment::config::AssignmentPolicyConfig,
 }
 
 impl GrpcLogConfig {
@@ -54,6 +59,24 @@ impl GrpcLogConfig {
     fn default_max_decoding_message_size() -> usize {
         32_000_000
     }
+
+    fn default_memberlist_provider() -> chroma_memberlist::config::MemberlistProviderConfig {
+        chroma_memberlist::config::MemberlistProviderConfig::CustomResource(
+            CustomResourceMemberlistProviderConfig {
+                kube_namespace: "chroma".to_string(),
+                memberlist_name: "rust-log-service-memberlist".to_string(),
+                queue_size: 100,
+            },
+        )
+    }
+
+    fn default_assignment() -> chroma_config::assignment::config::AssignmentPolicyConfig {
+        chroma_config::assignment::config::AssignmentPolicyConfig::RendezvousHashing(
+            chroma_config::assignment::config::RendezvousHashingAssignmentPolicyConfig {
+                hasher: chroma_config::assignment::config::HasherType::Murmur3,
+            },
+        )
+    }
 }
 
 impl Default for GrpcLogConfig {
@@ -69,6 +92,8 @@ impl Default for GrpcLogConfig {
             use_alt_for_tenants: vec![],
             use_alt_for_collections: vec![],
             alt_host_threshold: None,
+            memberlist_provider: GrpcLogConfig::default_memberlist_provider(),
+            assignment: GrpcLogConfig::default_assignment(),
         }
     }
 }

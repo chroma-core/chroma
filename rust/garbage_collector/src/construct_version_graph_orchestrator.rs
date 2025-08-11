@@ -1,16 +1,19 @@
-use crate::operators::{
-    fetch_lineage_file::{
-        FetchLineageFileError, FetchLineageFileInput, FetchLineageFileOperator,
-        FetchLineageFileOutput,
+use crate::{
+    operators::{
+        fetch_lineage_file::{
+            FetchLineageFileError, FetchLineageFileInput, FetchLineageFileOperator,
+            FetchLineageFileOutput,
+        },
+        fetch_version_file::{
+            FetchVersionFileError, FetchVersionFileInput, FetchVersionFileOperator,
+            FetchVersionFileOutput,
+        },
+        get_version_file_paths::{
+            GetVersionFilePathsError, GetVersionFilePathsInput, GetVersionFilePathsOperator,
+            GetVersionFilePathsOutput,
+        },
     },
-    fetch_version_file::{
-        FetchVersionFileError, FetchVersionFileInput, FetchVersionFileOperator,
-        FetchVersionFileOutput,
-    },
-    get_version_file_paths::{
-        GetVersionFilePathsError, GetVersionFilePathsInput, GetVersionFilePathsOperator,
-        GetVersionFilePathsOutput,
-    },
+    types::{VersionGraph, VersionGraphNode, VersionStatus},
 };
 use async_trait::async_trait;
 use base64::{prelude::BASE64_STANDARD, Engine};
@@ -19,7 +22,7 @@ use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid};
 use chrono::DateTime;
@@ -27,19 +30,11 @@ use petgraph::{dot::Dot, graph::DiGraph};
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
+    sync::Arc,
 };
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
-
-#[derive(Debug, Clone, Copy)]
-pub enum VersionStatus {
-    #[allow(dead_code)]
-    Alive {
-        created_at: DateTime<chrono::Utc>,
-    },
-    Deleted,
-}
 
 #[derive(Debug, Clone)]
 struct VersionDependency {
@@ -50,7 +45,7 @@ struct VersionDependency {
 
 #[derive(Debug)]
 pub struct ConstructVersionGraphOrchestrator {
-    dispatcher: ComponentHandle<Dispatcher>,
+    context: OrchestratorContext,
     result_channel:
         Option<Sender<Result<ConstructVersionGraphResponse, ConstructVersionGraphError>>>,
     storage: Storage,
@@ -61,7 +56,7 @@ pub struct ConstructVersionGraphOrchestrator {
     lineage_file_path: Option<String>,
 
     version_dependencies: Vec<VersionDependency>,
-    version_files: HashMap<CollectionUuid, CollectionVersionFile>,
+    version_files: HashMap<CollectionUuid, Arc<CollectionVersionFile>>,
     num_pending_tasks: usize,
 }
 
@@ -76,7 +71,7 @@ impl ConstructVersionGraphOrchestrator {
         lineage_file_path: Option<String>,
     ) -> Self {
         Self {
-            dispatcher,
+            context: OrchestratorContext::new(dispatcher),
             storage,
             sysdb,
             result_channel: None,
@@ -91,20 +86,10 @@ impl ConstructVersionGraphOrchestrator {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct VersionGraphNode {
-    pub collection_id: CollectionUuid,
-    pub version: i64,
-    #[allow(dead_code)]
-    pub status: VersionStatus,
-}
-
-pub type VersionGraph = DiGraph<VersionGraphNode, ()>;
-
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct ConstructVersionGraphResponse {
-    pub version_files: HashMap<CollectionUuid, CollectionVersionFile>,
+    pub version_files: HashMap<CollectionUuid, Arc<CollectionVersionFile>>,
     pub graph: VersionGraph,
 }
 
@@ -130,8 +115,10 @@ pub enum ConstructVersionGraphError {
     InvalidUuid(#[from] uuid::Error),
     #[error("Invalid timestamp: {0}")]
     InvalidTimestamp(i64),
-    #[error("Expected node not found while constructing graph")]
-    ExpectedNodeNotFound,
+    #[error("Expected node not found while constructing graph (collection {0}@v{1:?})")]
+    ExpectedNodeNotFound(CollectionUuid, Option<i64>),
+    #[error("Invariant violation: {0}")]
+    InvariantViolation(String),
 }
 
 impl<E> From<TaskError<E>> for ConstructVersionGraphError
@@ -159,7 +146,8 @@ impl ChromaError for ConstructVersionGraphError {
             ConstructVersionGraphError::FetchVersionFilePaths(err) => err.code(),
             ConstructVersionGraphError::InvalidUuid(_) => ErrorCodes::Internal,
             ConstructVersionGraphError::InvalidTimestamp(_) => ErrorCodes::InvalidArgument,
-            ConstructVersionGraphError::ExpectedNodeNotFound => ErrorCodes::Internal,
+            ConstructVersionGraphError::ExpectedNodeNotFound(_, _) => ErrorCodes::Internal,
+            ConstructVersionGraphError::InvariantViolation(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -170,14 +158,18 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
     type Error = ConstructVersionGraphError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        tracing::info!(
+        tracing::debug!(
             path = %self.version_file_path,
             "Creating initial fetch version file task"
         );
@@ -187,6 +179,7 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
                 Box::new(FetchVersionFileOperator {}),
                 FetchVersionFileInput::new(self.version_file_path.clone(), self.storage.clone()),
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             ),
             Some(Span::current()),
         )];
@@ -197,6 +190,7 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
                     Box::new(FetchLineageFileOperator {}),
                     FetchLineageFileInput::new(self.storage.clone(), lineage_file_path.clone()),
                     ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
                 ),
                 Some(Span::current()),
             ));
@@ -211,10 +205,8 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
         self.result_channel = Some(sender);
     }
 
-    fn take_result_channel(&mut self) -> Sender<Result<Self::Output, Self::Error>> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(&mut self) -> Option<Sender<Result<Self::Output, Self::Error>>> {
+        self.result_channel.take()
     }
 }
 
@@ -224,9 +216,11 @@ impl ConstructVersionGraphOrchestrator {
         ctx: &ComponentContext<ConstructVersionGraphOrchestrator>,
     ) -> Result<(), ConstructVersionGraphError> {
         if self.num_pending_tasks == 0 {
+            // This map will be used as a basis for building the graph
             let mut versions_by_collection_id: HashMap<CollectionUuid, Vec<(i64, VersionStatus)>> =
                 HashMap::new();
 
+            // Add all known versions from version files to map
             for (collection_id, version_file) in self.version_files.iter() {
                 if let Some(versions) = &version_file.version_history {
                     for version in versions.versions.iter() {
@@ -251,6 +245,7 @@ impl ConstructVersionGraphOrchestrator {
                 }
             }
 
+            // If any version appears as a version dependency (from the lineage file) but does not already exist in the map from the version files, the version must have been deleted.
             for dependency in self.version_dependencies.iter() {
                 let source_collection_id = dependency.source_collection_id;
                 let source_collection_version = dependency.source_collection_version;
@@ -272,6 +267,11 @@ impl ConstructVersionGraphOrchestrator {
                 versions.sort_unstable_by_key(|v| v.0);
             }
 
+            tracing::trace!(
+                "Versions by collection ID: {:#?}",
+                versions_by_collection_id
+            );
+
             let mut graph = DiGraph::new();
             for (collection_id, versions) in versions_by_collection_id.iter() {
                 let mut prev_node = None;
@@ -282,12 +282,14 @@ impl ConstructVersionGraphOrchestrator {
                         status: *status,
                     });
                     if let Some(prev) = prev_node {
+                        // Add edge between each successive pair of collection versions
                         graph.add_edge(prev, node, ());
                     }
                     prev_node = Some(node);
                 }
             }
 
+            // Add edges for forked collections
             for dependency in self.version_dependencies.iter() {
                 let source_node = graph
                     .node_indices()
@@ -296,7 +298,12 @@ impl ConstructVersionGraphOrchestrator {
                         node.collection_id == dependency.source_collection_id
                             && node.version == dependency.source_collection_version
                     })
-                    .ok_or(ConstructVersionGraphError::ExpectedNodeNotFound)?;
+                    .ok_or_else(|| {
+                        ConstructVersionGraphError::ExpectedNodeNotFound(
+                            dependency.source_collection_id,
+                            Some(dependency.source_collection_version),
+                        )
+                    })?;
 
                 let target_node = graph
                     .node_indices()
@@ -304,18 +311,32 @@ impl ConstructVersionGraphOrchestrator {
                         let node = graph.node_weight(*n).expect("node index should exist");
                         node.collection_id == dependency.target_collection_id
                     })
-                    .ok_or(ConstructVersionGraphError::ExpectedNodeNotFound)?;
+                    .ok_or_else(|| {
+                        ConstructVersionGraphError::ExpectedNodeNotFound(
+                            dependency.target_collection_id,
+                            None,
+                        )
+                    })?;
 
                 graph.add_edge(source_node, target_node, ());
             }
 
-            if tracing::level_enabled!(tracing::Level::DEBUG) {
+            if tracing::level_enabled!(tracing::Level::TRACE) {
                 let dot_viz = Dot::with_config(&graph, &[petgraph::dot::Config::EdgeNoLabel]);
                 let encoded = BASE64_STANDARD.encode(format!("{:?}", dot_viz));
-                tracing::debug!(base64_encoded_dot_graph = ?encoded, "Constructed graph.");
+                tracing::trace!(base64_encoded_dot_graph = ?encoded, "Constructed graph.");
             }
 
             tracing::trace!("Version files: {:#?}", self.version_files);
+
+            let components = petgraph::algo::connected_components(&graph);
+            if components != 1 {
+                // This is a defensive check, it should never happen
+                return Err(ConstructVersionGraphError::InvariantViolation(format!(
+                    "Graph is not fully connected, found {} components",
+                    components
+                )));
+            }
 
             self.terminate_with_result(
                 Ok(ConstructVersionGraphResponse {
@@ -430,6 +451,7 @@ impl Handler<TaskResult<FetchLineageFileOutput, FetchLineageFileError>>
                     self.sysdb.clone(),
                 ),
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             );
 
             if let Err(e) = self
@@ -475,6 +497,7 @@ impl Handler<TaskResult<GetVersionFilePathsOutput, GetVersionFilePathsError>>
                 Box::new(FetchVersionFileOperator {}),
                 version_file,
                 ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
             );
 
             if let Err(e) = self
@@ -550,7 +573,7 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn test_simple_graph() {
-        let storage = test_storage();
+        let (_storage_dir, storage) = test_storage();
 
         let system = System::new();
         let sysdb = SysDb::Test(TestSysDb::new());
@@ -592,7 +615,7 @@ mod tests {
     #[tokio::test]
     #[traced_test]
     async fn test_graph_with_lineage() {
-        let storage = test_storage();
+        let (_storage_dir, storage) = test_storage();
 
         let system = System::new();
         let mut sysdb = SysDb::Test(TestSysDb::new());
@@ -616,6 +639,28 @@ mod tests {
         let collection_id_b = CollectionUuid::new();
         let collection_id_c = CollectionUuid::new();
         let collection_id_d = CollectionUuid::new();
+
+        for collection_id in [
+            collection_id_a,
+            collection_id_b,
+            collection_id_c,
+            collection_id_d,
+        ] {
+            sysdb
+                .create_collection(
+                    "test_tenant".to_string(),
+                    "test_database".to_string(),
+                    collection_id,
+                    format!("test_collection_{}", collection_id),
+                    vec![],
+                    None,
+                    None,
+                    None,
+                    false,
+                )
+                .await
+                .unwrap();
+        }
 
         let version_file_a_path =
             create_version_file(collection_id_a, vec![0, 1], storage.clone()).await;

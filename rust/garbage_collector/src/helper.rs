@@ -2,11 +2,10 @@ use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::{
-    Collection, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
-    FilterOperator, GetCollectionWithSegmentsRequest, GetPlan, KnnOperator, KnnPlan,
-    KnnProjectionOperator, LimitOperator, ListCollectionVersionsRequest,
-    ListCollectionVersionsResponse, OperationRecord, ProjectionOperator, PushLogsRequest,
-    ScanOperator, Segment, SegmentScope, Vector,
+    CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, FilterOperator,
+    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetPlan, LimitOperator,
+    ListCollectionVersionsRequest, ListCollectionVersionsResponse, OperationRecord,
+    ProjectionOperator, PushLogsRequest, ScanOperator, Segment, SegmentScope, Vector,
 };
 use chroma_types::InternalCollectionConfiguration;
 use std::collections::HashMap;
@@ -163,73 +162,6 @@ impl ChromaGrpcClients {
         }
     }
 
-    #[allow(dead_code)]
-    pub async fn query_collection(
-        &mut self,
-        collection_id: &str,
-        query_embedding: Vec<f32>,
-    ) -> Result<Vec<(String, f32)>, Box<dyn std::error::Error>> {
-        // Convert f32 vector to bytes
-        let vector_bytes: Vec<u8> = query_embedding
-            .iter()
-            .flat_map(|&x| x.to_le_bytes().to_vec())
-            .collect();
-
-        let knn_plan = KnnPlan {
-            scan: Some(ScanOperator {
-                collection: Some(Collection {
-                    id: collection_id.to_string(),
-                    name: String::new(),
-                    database: String::new(),
-                    tenant: String::new(),
-                    dimension: Some(query_embedding.len() as i32),
-                    configuration_json_str: String::new(),
-                    metadata: None,
-                    log_position: 0,
-                    version: 0,
-                    total_records_post_compaction: 0,
-                    size_bytes_post_compaction: 0,
-                    last_compaction_time_secs: 0,
-                    version_file_path: None,
-                    root_collection_id: None,
-                    lineage_file_path: None,
-                }),
-                knn: None,
-                metadata: None,
-                record: None,
-            }),
-            filter: None,
-            knn: Some(KnnOperator {
-                embeddings: vec![Vector {
-                    dimension: query_embedding.len() as i32,
-                    vector: vector_bytes,
-                    encoding: 0,
-                }],
-                fetch: 2,
-            }),
-            projection: Some(KnnProjectionOperator {
-                projection: Some(ProjectionOperator {
-                    document: false,
-                    embedding: false,
-                    metadata: false,
-                }),
-                distance: true,
-            }),
-        };
-
-        let response = self.query_executor.knn(knn_plan).await?;
-        let results = response.into_inner().results;
-
-        let mut id_distances = Vec::new();
-        for result in results {
-            for record in result.records {
-                id_distances.push((record.record.unwrap().id, record.distance.unwrap_or(0.0)));
-            }
-        }
-
-        Ok(id_distances)
-    }
-
     pub async fn get_records(
         &mut self,
         collection_id: String,
@@ -383,6 +315,16 @@ impl ChromaGrpcClients {
         };
 
         let response = self.sysdb.list_collection_versions(request).await?;
+        Ok(response.into_inner())
+    }
+
+    pub async fn get_collection_with_segments(
+        &mut self,
+        collection_id: String,
+    ) -> Result<GetCollectionWithSegmentsResponse, Box<dyn std::error::Error>> {
+        let request = GetCollectionWithSegmentsRequest { id: collection_id };
+
+        let response = self.sysdb.get_collection_with_segments(request).await?;
         Ok(response.into_inner())
     }
 }

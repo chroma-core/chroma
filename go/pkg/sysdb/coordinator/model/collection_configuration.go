@@ -1,17 +1,12 @@
 package model
 
 type EmbeddingFunctionConfiguration struct {
-	Type   string                             `json:"type"`
-	Config *EmbeddingFunctionNewConfiguration `json:"config,omitempty"`
-}
-
-type EmbeddingFunctionNewConfiguration struct {
+	Type   string      `json:"type"`
 	Name   string      `json:"name"`
 	Config interface{} `json:"config"`
 }
 
 type VectorIndexConfiguration struct {
-	Type  string              `json:"type"`
 	Hnsw  *HnswConfiguration  `json:"hnsw,omitempty"`
 	Spann *SpannConfiguration `json:"spann,omitempty"`
 }
@@ -62,7 +57,6 @@ type InternalCollectionConfiguration struct {
 func DefaultHnswCollectionConfiguration() *InternalCollectionConfiguration {
 	return &InternalCollectionConfiguration{
 		VectorIndex: &VectorIndexConfiguration{
-			Type: "hnsw",
 			Hnsw: DefaultHnswConfiguration(),
 		},
 	}
@@ -119,7 +113,6 @@ type UpdateSpannConfiguration struct {
 }
 
 type UpdateVectorIndexConfiguration struct {
-	Type  string                    `json:"type"`
 	Hnsw  *UpdateHnswConfiguration  `json:"hnsw,omitempty"`
 	Spann *UpdateSpannConfiguration `json:"spann,omitempty"`
 }

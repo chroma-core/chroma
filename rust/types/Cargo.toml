@@ -28,7 +28,6 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
 chroma-error = { workspace = true, features = ["tonic", "validator"] }
-chroma-config = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.10"

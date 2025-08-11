@@ -70,7 +70,10 @@ impl InMemoryFrontend {
         request: chroma_types::GetTenantRequest,
     ) -> Result<chroma_types::GetTenantResponse, chroma_types::GetTenantError> {
         if self.inner.tenants.contains(&request.name) {
-            Ok(chroma_types::GetTenantResponse { name: request.name })
+            Ok(chroma_types::GetTenantResponse {
+                name: request.name,
+                resource_name: None,
+            })
         } else {
             Err(chroma_types::GetTenantError::NotFound(request.name))
         }
@@ -315,7 +318,7 @@ impl InMemoryFrontend {
             ..
         } = request;
 
-        let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
+        let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
         let (records, _) = to_records(
             ids,
@@ -411,7 +414,7 @@ impl InMemoryFrontend {
             ..
         } = request;
 
-        let embeddings = embeddings.map(|embeddings| embeddings.into_iter().map(Some).collect());
+        let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
         let (records, _) = to_records(
             ids,
@@ -664,6 +667,7 @@ impl InMemoryFrontend {
     pub fn healthcheck(&self) -> chroma_types::HealthCheckResponse {
         chroma_types::HealthCheckResponse {
             is_executor_ready: true,
+            is_log_client_ready: true,
         }
     }
 }
@@ -729,7 +733,7 @@ mod tests {
             collection.database.clone(),
             collection.collection_id,
             ids,
-            Some(embeddings),
+            embeddings,
             Some(documents),
             None,
             Some(metadatas),

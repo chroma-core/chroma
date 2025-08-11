@@ -1,3 +1,4 @@
+use crate::arrow::provider::BlockfileReaderOptions;
 use crate::arrow::root::RootReader;
 use crate::BlockfileWriterOptions;
 
@@ -41,6 +42,29 @@ impl Debug for BlockfileProvider {
         }
     }
 }
+pub trait ReadKey<'a>:
+    Key
+    + Into<KeyWrapper>
+    + TryFrom<&'a KeyWrapper, Error = InvalidKeyConversion>
+    + ArrowReadableKey<'a>
+    + Sync
+    + 'a
+{
+}
+
+pub trait ReadValue<'a>: Value + Readable<'a> + ArrowReadableValue<'a> + Sync + 'a {}
+
+impl<'a, T> ReadKey<'a> for T where
+    T: Key
+        + Into<KeyWrapper>
+        + TryFrom<&'a KeyWrapper, Error = InvalidKeyConversion>
+        + ArrowReadableKey<'a>
+        + Sync
+        + 'a
+{
+}
+
+impl<'a, T> ReadValue<'a> for T where T: Value + Readable<'a> + ArrowReadableValue<'a> + Sync + 'a {}
 
 impl BlockfileProvider {
     pub fn new_memory() -> Self {
@@ -61,22 +85,17 @@ impl BlockfileProvider {
         ))
     }
 
-    pub async fn read<
-        'new,
-        K: Key
-            + Into<KeyWrapper>
-            + TryFrom<&'new KeyWrapper, Error = InvalidKeyConversion>
-            + ArrowReadableKey<'new>
-            + Sync
-            + 'new,
-        V: Value + Readable<'new> + ArrowReadableValue<'new> + Sync + 'new,
-    >(
+    pub async fn read<'new, K: ReadKey<'new>, V: ReadValue<'new>>(
         &self,
-        id: &uuid::Uuid,
+        options: BlockfileReaderOptions,
     ) -> Result<BlockfileReader<'new, K, V>, Box<OpenError>> {
         match self {
-            BlockfileProvider::HashMapBlockfileProvider(provider) => provider.read::<K, V>(id),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => provider.read::<K, V>(id).await,
+            BlockfileProvider::HashMapBlockfileProvider(provider) => {
+                provider.read::<K, V>(options.id())
+            }
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                provider.read::<K, V>(options).await
+            }
         }
     }
 
@@ -102,12 +121,17 @@ impl BlockfileProvider {
         Ok(())
     }
 
-    pub async fn prefetch(&self, id: &uuid::Uuid) -> Result<usize, Box<dyn ChromaError>> {
+    pub async fn prefetch(
+        &self,
+        id: &uuid::Uuid,
+        prefix_path: &str,
+    ) -> Result<usize, Box<dyn ChromaError>> {
         match self {
             BlockfileProvider::HashMapBlockfileProvider(_) => unimplemented!(),
-            BlockfileProvider::ArrowBlockfileProvider(provider) => {
-                provider.prefetch(id).await.map_err(|e| Box::new(e) as _)
-            }
+            BlockfileProvider::ArrowBlockfileProvider(provider) => provider
+                .prefetch(id, prefix_path)
+                .await
+                .map_err(|e| Box::new(e) as _),
         }
     }
 }

@@ -1,10 +1,9 @@
-use std::iter::once;
-
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
-use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannMetrics};
+use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_log::Log;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
@@ -13,10 +12,10 @@ use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::{
     chroma_proto::{
+        self,
         query_executor_server::{QueryExecutor, QueryExecutorServer},
-        CountPlan, CountResult, GetPlan, GetResult, KnnBatchResult, KnnPlan,
     },
-    operator::Scan,
+    operator::{GetResult, KnnBatch, KnnBatchResult, KnnProjection, Scan},
     CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
@@ -27,19 +26,18 @@ use tracing::{trace_span, Instrument};
 use crate::{
     config::QueryServiceConfig,
     execution::{
-        operators::{fetch_log::FetchLogOperator, knn_projection::KnnProjectionOperator},
+        operators::fetch_log::FetchLogOperator,
         orchestration::{
             get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
             spann_knn::SpannKnnOrchestrator, CountOrchestrator,
         },
     },
-    utils::convert::{from_proto_knn, to_proto_knn_batch_result},
 };
 
 #[derive(Clone)]
 pub struct WorkerServer {
     // System
-    system: Option<System>,
+    system: System,
     // Component dependencies
     dispatcher: Option<ComponentHandle<Dispatcher>>,
     // Service dependencies
@@ -47,19 +45,22 @@ pub struct WorkerServer {
     _sysdb: SysDb,
     hnsw_index_provider: HnswIndexProvider,
     blockfile_provider: BlockfileProvider,
+    spann_provider: SpannProvider,
     port: u16,
+    jemalloc_pprof_server_port: Option<u16>,
     // config
     fetch_log_batch_size: u32,
 }
 
 #[async_trait]
-impl Configurable<QueryServiceConfig> for WorkerServer {
+impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
     async fn try_from_config(
-        config: &QueryServiceConfig,
+        config: &(QueryServiceConfig, System),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let (config, system) = config;
         let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
-        let log = Log::try_from_config(&config.log, registry).await?;
+        let log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let blockfile_provider = BlockfileProvider::try_from_config(
             &(config.blockfile_provider.clone(), storage.clone()),
@@ -71,14 +72,25 @@ impl Configurable<QueryServiceConfig> for WorkerServer {
             registry,
         )
         .await?;
+        let spann_provider = SpannProvider::try_from_config(
+            &(
+                hnsw_index_provider.clone(),
+                blockfile_provider.clone(),
+                config.spann_provider.clone(),
+            ),
+            registry,
+        )
+        .await?;
         Ok(WorkerServer {
             dispatcher: None,
-            system: None,
+            system: system.clone(),
             _sysdb: sysdb,
             log,
             hnsw_index_provider,
             blockfile_provider,
+            spann_provider,
             port: config.my_port,
+            jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
         })
     }
@@ -90,13 +102,19 @@ impl WorkerServer {
         println!("Worker listening on {}", addr);
 
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
-        health_reporter
-            .set_serving::<QueryExecutorServer<Self>>()
-            .await;
 
         let server = Server::builder()
             .add_service(health_service)
             .add_service(QueryExecutorServer::new(worker.clone()));
+
+        // Start pprof server
+        let mut pprof_shutdown_tx = None;
+        if let Some(port) = worker.jemalloc_pprof_server_port {
+            tracing::info!("Starting jemalloc pprof server on port {}", port);
+            let shutdown_channel = tokio::sync::oneshot::channel();
+            pprof_shutdown_tx = Some(shutdown_channel.0);
+            spawn_pprof_server(port, shutdown_channel.1).await;
+        }
 
         #[cfg(debug_assertions)]
         let server = server.add_service(
@@ -115,17 +133,38 @@ impl WorkerServer {
             tracing::info!("Received SIGTERM, shutting down");
         });
 
+        tokio::spawn(async move {
+            // Poll is-ready every ms until the server is ready
+            // We don't timeout here because we assume some upstream daemon like
+            // system will kill/restart us if we don't become ready in a reasonable time
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(1));
+            loop {
+                interval.tick().await;
+                if worker.is_ready() {
+                    break;
+                }
+            }
+            health_reporter
+                .set_serving::<QueryExecutorServer<WorkerServer>>()
+                .await;
+        });
+
         server.await?;
+
+        // Shutdown pprof server after server is finished shutting down
+        if let Some(shutdown_tx) = pprof_shutdown_tx {
+            let _ = shutdown_tx.send(());
+        }
 
         Ok(())
     }
 
-    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
-        self.dispatcher = Some(dispatcher);
+    fn is_ready(&self) -> bool {
+        self.log.is_ready()
     }
 
-    pub(crate) fn set_system(&mut self, system: System) {
-        self.system = Some(system);
+    pub(crate) fn set_dispatcher(&mut self, dispatcher: ComponentHandle<Dispatcher>) {
+        self.dispatcher = Some(dispatcher);
     }
 
     fn fetch_log(
@@ -148,8 +187,8 @@ impl WorkerServer {
 
     async fn orchestrate_count(
         &self,
-        count: Request<CountPlan>,
-    ) -> Result<Response<CountResult>, Status> {
+        count: Request<chroma_proto::CountPlan>,
+    ) -> Result<Response<chroma_proto::CountResult>, Status> {
         let scan = count
             .into_inner()
             .scan
@@ -167,8 +206,8 @@ impl WorkerServer {
             fetch_log,
         );
 
-        match count_orchestrator.run(self.clone_system()?).await {
-            Ok((count, pulled_log_bytes)) => Ok(Response::new(CountResult {
+        match count_orchestrator.run(self.system.clone()).await {
+            Ok((count, pulled_log_bytes)) => Ok(Response::new(chroma_proto::CountResult {
                 count,
                 pulled_log_bytes,
             })),
@@ -176,7 +215,10 @@ impl WorkerServer {
         }
     }
 
-    async fn orchestrate_get(&self, get: Request<GetPlan>) -> Result<Response<GetResult>, Status> {
+    async fn orchestrate_get(
+        &self,
+        get: Request<chroma_proto::GetPlan>,
+    ) -> Result<Response<chroma_proto::GetResult>, Status> {
         let get_inner = get.into_inner();
         let scan = get_inner
             .scan
@@ -209,8 +251,11 @@ impl WorkerServer {
             projection.into(),
         );
 
-        match get_orchestrator.run(self.clone_system()?).await {
-            Ok((result, pulled_log_bytes)) => Ok(Response::new(GetResult {
+        match get_orchestrator.run(self.system.clone()).await {
+            Ok(GetResult {
+                pulled_log_bytes,
+                result,
+            }) => Ok(Response::new(chroma_proto::GetResult {
                 records: result
                     .records
                     .into_iter()
@@ -224,10 +269,10 @@ impl WorkerServer {
 
     async fn orchestrate_knn(
         &self,
-        knn: Request<KnnPlan>,
-    ) -> Result<Response<KnnBatchResult>, Status> {
+        knn: Request<chroma_proto::KnnPlan>,
+    ) -> Result<Response<chroma_proto::KnnBatchResult>, Status> {
         let dispatcher = self.clone_dispatcher()?;
-        let system = self.clone_system()?;
+        let system = self.system.clone();
 
         let knn_inner = knn.into_inner();
 
@@ -250,11 +295,11 @@ impl WorkerServer {
         let projection = knn_inner
             .projection
             .ok_or(Status::invalid_argument("Invalid Projection Operator"))?;
-        let knn_projection = KnnProjectionOperator::try_from(projection)
+        let knn_projection = KnnProjection::try_from(projection)
             .map_err(|e| Status::invalid_argument(format!("Invalid Projection Operator: {}", e)))?;
 
         if knn.embeddings.is_empty() {
-            return Ok(Response::new(to_proto_knn_batch_result(0, Vec::new())?));
+            return Ok(Response::new(KnnBatchResult::default().try_into()?));
         }
 
         // If dimension is not set and segment is uninitialized, we assume
@@ -262,13 +307,13 @@ impl WorkerServer {
         if collection_and_segments.collection.dimension.is_none()
             && collection_and_segments.vector_segment.file_path.is_empty()
         {
-            return Ok(Response::new(to_proto_knn_batch_result(
-                0,
-                once(Default::default())
-                    .cycle()
-                    .take(knn.embeddings.len())
-                    .collect(),
-            )?));
+            return Ok(Response::new(
+                KnnBatchResult {
+                    pulled_log_bytes: 0,
+                    results: vec![Default::default(); knn.embeddings.len()],
+                }
+                .try_into()?,
+            ));
         }
 
         let vector_segment_type = collection_and_segments.vector_segment.r#type;
@@ -294,17 +339,11 @@ impl WorkerServer {
 
         if vector_segment_type == SegmentType::Spann {
             tracing::debug!("Running KNN on SPANN segment");
-            let spann_provider = SpannProvider {
-                hnsw_provider: self.hnsw_index_provider.clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
-                garbage_collection_context: None,
-                metrics: SpannMetrics::default(),
-            };
-            let knn_orchestrator_futures = from_proto_knn(knn)?
+            let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
                 .into_iter()
                 .map(|knn| {
                     SpannKnnOrchestrator::new(
-                        spann_provider.clone(),
+                        self.spann_provider.clone(),
                         dispatcher.clone(),
                         1000,
                         collection_and_segments.collection.clone(),
@@ -320,14 +359,17 @@ impl WorkerServer {
                 .try_collect::<Vec<_>>()
                 .await
             {
-                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(
-                    pulled_log_bytes,
-                    results,
-                )?)),
+                Ok(results) => Ok(Response::new(
+                    KnnBatchResult {
+                        pulled_log_bytes,
+                        results,
+                    }
+                    .try_into()?,
+                )),
                 Err(err) => Err(Status::new(err.code().into(), err.to_string())),
             }
         } else {
-            let knn_orchestrator_futures = from_proto_knn(knn)?
+            let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
                 .into_iter()
                 .map(|knn| {
                     KnnOrchestrator::new(
@@ -347,10 +389,13 @@ impl WorkerServer {
                 .try_collect::<Vec<_>>()
                 .await
             {
-                Ok(results) => Ok(Response::new(to_proto_knn_batch_result(
-                    pulled_log_bytes,
-                    results,
-                )?)),
+                Ok(results) => Ok(Response::new(
+                    KnnBatchResult {
+                        pulled_log_bytes,
+                        results,
+                    }
+                    .try_into()?,
+                )),
                 Err(err) => Err(Status::new(err.code().into(), err.to_string())),
             }
         }
@@ -362,18 +407,14 @@ impl WorkerServer {
             .ok_or(Status::internal("Dispatcher is not initialized"))
             .cloned()
     }
-
-    fn clone_system(&self) -> Result<System, Status> {
-        self.system
-            .as_ref()
-            .ok_or(Status::internal("System is not initialized"))
-            .cloned()
-    }
 }
 
 #[async_trait]
 impl QueryExecutor for WorkerServer {
-    async fn count(&self, count: Request<CountPlan>) -> Result<Response<CountResult>, Status> {
+    async fn count(
+        &self,
+        count: Request<chroma_proto::CountPlan>,
+    ) -> Result<Response<chroma_proto::CountResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
         let count_span = trace_span!("CountPlan",);
@@ -383,7 +424,10 @@ impl QueryExecutor for WorkerServer {
             .await
     }
 
-    async fn get(&self, get: Request<GetPlan>) -> Result<Response<GetResult>, Status> {
+    async fn get(
+        &self,
+        get: Request<chroma_proto::GetPlan>,
+    ) -> Result<Response<chroma_proto::GetResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
         let get_span = trace_span!("GetPlan",);
@@ -393,7 +437,10 @@ impl QueryExecutor for WorkerServer {
             .await
     }
 
-    async fn knn(&self, knn: Request<KnnPlan>) -> Result<Response<KnnBatchResult>, Status> {
+    async fn knn(
+        &self,
+        knn: Request<chroma_proto::KnnPlan>,
+    ) -> Result<Response<chroma_proto::KnnBatchResult>, Status> {
         // Note: We cannot write a middleware that instruments every service rpc
         // with a span because of https://github.com/hyperium/tonic/pull/1202.
         let knn_span = trace_span!("KnnPlan",);
@@ -441,11 +488,9 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use chroma_index::test_hnsw_index_provider;
     use chroma_log::in_memory_log::InMemoryLog;
     use chroma_segment::test::TestDistributedSegment;
     use chroma_sysdb::TestSysDb;
-    use chroma_system::system;
     use chroma_system::DispatcherConfig;
     use chroma_types::chroma_proto;
     #[cfg(debug_assertions)]
@@ -453,24 +498,26 @@ mod tests {
     use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
     use uuid::Uuid;
 
-    fn run_server() -> String {
+    async fn run_server() -> String {
         let sysdb = TestSysDb::new();
+        let system = System::new();
         let log = InMemoryLog::new();
-        let segments = TestDistributedSegment::default();
+        let segments = TestDistributedSegment::new().await;
         let port = random_port::PortPicker::new().random(true).pick().unwrap();
 
         let mut server = WorkerServer {
             dispatcher: None,
-            system: None,
+            system: system.clone(),
             _sysdb: SysDb::Test(sysdb),
             log: Log::InMemory(log),
-            hnsw_index_provider: test_hnsw_index_provider(),
+            hnsw_index_provider: segments.hnsw_provider,
             blockfile_provider: segments.blockfile_provider,
+            spann_provider: segments.spann_provider,
             port,
+            jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
         };
 
-        let system: system::System = system::System::new();
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 4,
             task_queue_limit: 10,
@@ -479,8 +526,6 @@ mod tests {
             active_io_tasks: 10,
         });
         let dispatcher_handle = system.start_component(dispatcher);
-
-        server.set_system(system);
         server.set_dispatcher(dispatcher_handle);
 
         tokio::spawn(async move {
@@ -492,6 +537,7 @@ mod tests {
 
     fn scan() -> chroma_proto::ScanOperator {
         let collection_id = Uuid::new_v4().to_string();
+        let database_id = Uuid::new_v4().to_string();
         chroma_proto::ScanOperator {
             collection: Some(chroma_proto::Collection {
                 id: collection_id.clone(),
@@ -501,6 +547,7 @@ mod tests {
                 dimension: None,
                 tenant: "test-tenant".to_string(),
                 database: "test-database".to_string(),
+                database_id: Some(database_id.clone()),
                 ..Default::default()
             }),
             knn: Some(chroma_proto::Segment {
@@ -533,7 +580,7 @@ mod tests {
     #[tokio::test]
     #[cfg(debug_assertions)]
     async fn gracefully_handles_panics() {
-        let mut client = DebugClient::connect(run_server()).await.unwrap();
+        let mut client = DebugClient::connect(run_server().await).await.unwrap();
 
         // Test response when handler panics
         let err_response = client.trigger_panic(Request::new(())).await.unwrap_err();
@@ -546,7 +593,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_count_plan() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         let mut scan_operator = scan();
         scan_operator.metadata = Some(chroma_proto::Segment {
             id: "invalid-metadata-segment-id".to_string(),
@@ -573,7 +622,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_get_plan() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         let mut scan_operator = scan();
         let request = chroma_proto::GetPlan {
             scan: Some(scan_operator.clone()),
@@ -658,7 +709,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_knn_plan_empty_embeddings() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         let response = executor.knn(gen_knn_request(None)).await;
         assert!(response.is_ok());
         assert_eq!(response.unwrap().into_inner().results.len(), 0);
@@ -666,7 +719,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_knn_plan_filter() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         let mut request = gen_knn_request(None);
         request.filter = None;
         let response = executor.knn(request).await;
@@ -681,7 +736,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_knn_plan_knn() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         let mut request = gen_knn_request(None);
         request.knn = None;
         let response = executor.knn(request).await;
@@ -697,7 +754,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_knn_plan_projection() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         let mut request = gen_knn_request(None);
         request.projection = None;
         let response = executor.knn(request).await;
@@ -728,7 +787,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_knn_plan_scan() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         let mut request = gen_knn_request(None);
         request.scan = None;
         let response = executor.knn(request).await;
@@ -743,7 +804,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_knn_plan_scan_collection() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         let mut scan = scan();
         scan.collection.as_mut().unwrap().id = "invalid-collection-id".to_string();
         let response = executor.knn(gen_knn_request(Some(scan))).await;
@@ -754,7 +817,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_knn_plan_scan_vector() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         // invalid vector uuid
         let mut scan_operator = scan();
         scan_operator.knn = Some(chroma_proto::Segment {
@@ -778,7 +843,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_knn_plan_scan_record() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         let mut scan_operator = scan();
         scan_operator.record = Some(chroma_proto::Segment {
             id: "invalid-record-segment-id".to_string(),
@@ -801,7 +868,9 @@ mod tests {
 
     #[tokio::test]
     async fn validate_knn_plan_scan_metadata() {
-        let mut executor = QueryExecutorClient::connect(run_server()).await.unwrap();
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
         let mut scan_operator = scan();
         scan_operator.metadata = Some(chroma_proto::Segment {
             id: "invalid-metadata-segment-id".to_string(),

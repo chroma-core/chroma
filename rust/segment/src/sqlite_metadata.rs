@@ -20,8 +20,8 @@ use chroma_types::{
     SetOperator, UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{
-    Alias, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, OnConflict, Query, SimpleExpr,
-    SqliteQueryBuilder, UpdateStatement,
+    Alias, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, LikeExpr, OnConflict, Query,
+    SimpleExpr, SqliteQueryBuilder, UpdateStatement,
 };
 use sea_query_binder::SqlxBinder;
 use sqlx::{Row, Sqlite, Transaction};
@@ -523,16 +523,35 @@ impl IntoSqliteExpr for DocumentExpression {
         let subq = Query::select()
             .column(EmbeddingFulltextSearch::Rowid)
             .from(EmbeddingFulltextSearch::Table)
-            .and_where(
-                Expr::col(EmbeddingFulltextSearch::StringValue)
-                    .like(format!("%{}%", self.pattern.replace("%", ""))),
-            )
+            .and_where(match self.operator {
+                DocumentOperator::Contains | DocumentOperator::NotContains => {
+                    Expr::col(EmbeddingFulltextSearch::StringValue).like(
+                        LikeExpr::new(format!(
+                            "%{}%",
+                            self.pattern
+                                .replace("\\", "\\\\") // escape user-provided backslashes
+                                .replace("%", "\\%") // escape % characters
+                                .replace("_", "\\_") // escape _ characters
+                        ))
+                        .escape('\\'),
+                    )
+                }
+                DocumentOperator::Regex | DocumentOperator::NotRegex => Expr::cust_with_exprs(
+                    "? REGEXP ?",
+                    [
+                        Expr::col(EmbeddingFulltextSearch::StringValue).into(),
+                        Expr::value(&self.pattern),
+                    ],
+                ),
+            })
             .to_owned();
         match self.operator {
-            DocumentOperator::Contains => Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq),
-            DocumentOperator::NotContains => Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq),
-            DocumentOperator::Regex => todo!("Implement Regex matching. The result must be a not-nullable boolean (use `<expr>.is(true)`)"),
-            DocumentOperator::NotRegex => todo!("Implement negated Regex matching. This must be exact opposite of Regex matching (use `<expr>.not()`)"),
+            DocumentOperator::Contains | DocumentOperator::Regex => {
+                Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
+            }
+            DocumentOperator::NotContains | DocumentOperator::NotRegex => {
+                Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
+            }
         }
     }
 }

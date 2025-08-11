@@ -80,7 +80,7 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, SoftDelete, suite.s3MetaStore, true)
+	c, err := NewCoordinator(ctx, suite.s3MetaStore, true)
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -111,7 +111,7 @@ func (suite *APIsTestSuite) TearDownTest() {
 func testCollection(t *rapid.T) {
 	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, HardDelete, nil, false)
+	c, err := NewCoordinator(ctx, nil, false)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -144,7 +144,7 @@ func testCollection(t *rapid.T) {
 			}
 			if err == nil {
 				// verify the correctness
-				collectionList, err := c.GetCollections(ctx, collection.ID, nil, common.DefaultTenant, common.DefaultDatabase, nil, nil)
+				collectionList, err := c.GetCollections(ctx, []types.UniqueID{collection.ID}, nil, common.DefaultTenant, common.DefaultDatabase, nil, nil, false)
 				if err != nil {
 					t.Fatalf("error getting collections: %v", err)
 				}
@@ -164,7 +164,7 @@ func testCollection(t *rapid.T) {
 func testSegment(t *rapid.T) {
 	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, HardDelete, nil, false)
+	c, err := NewCoordinator(ctx, nil, false)
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -323,7 +323,7 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 	// suite.Equal(len(segments), len(createdSegments))
 
 	// Verify the collection was created
-	result, err := suite.coordinator.GetCollections(ctx, newCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	result, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{newCollection.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(newCollection.ID, result[0].ID)
@@ -354,7 +354,7 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 
 	// Validate version file
 	suite.NotNil(collection.VersionFileName)
-	versionFile, err := suite.s3MetaStore.GetVersionFile(collection.VersionFileName)
+	versionFile, err := suite.s3MetaStore.GetVersionFile(context.Background(), collection.VersionFileName)
 	suite.NoError(err)
 	suite.NotNil(versionFile)
 	v0 := versionFile.VersionHistory.Versions[0]
@@ -380,7 +380,7 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 	suite.Error(err)
 
 	// Check that the collection was not created
-	collections, err := suite.coordinator.GetCollections(ctx, newCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	collections, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{newCollection.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Empty(collections)
 
@@ -402,7 +402,7 @@ func (suite *APIsTestSuite) TestCreateCollectionAndSegments() {
 // the APIs are working as expected. i.e. Get does not return deleted collections.
 func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	ctx := context.Background()
-	results, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
+	results, err := suite.coordinator.GetCollections(ctx, nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 
 	sort.Slice(results, func(i, j int) bool {
@@ -455,7 +455,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 
 	// Find by name
 	for _, collection := range suite.sampleCollections {
-		result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &collection.Name, suite.tenantName, suite.databaseName, nil, nil)
+		result, err := suite.coordinator.GetCollections(ctx, nil, &collection.Name, suite.tenantName, suite.databaseName, nil, nil, false)
 		suite.NoError(err)
 		suite.Equal(len(result), 1)
 		suite.Equal(collection.ID, result[0].ID)
@@ -468,7 +468,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 
 	// Find by id
 	for _, collection := range suite.sampleCollections {
-		result, err := suite.coordinator.GetCollections(ctx, collection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+		result, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{collection.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 		suite.NoError(err)
 		suite.Equal(len(result), 1)
 		suite.Equal(collection.ID, result[0].ID)
@@ -486,10 +486,10 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 		DatabaseName: suite.databaseName,
 		TenantID:     suite.tenantName,
 	}
-	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
+	err = suite.coordinator.SoftDeleteCollection(ctx, deleteCollection)
 	suite.NoError(err)
 
-	results, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
+	results, err = suite.coordinator.GetCollections(ctx, nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	result_ids := make([]types.UniqueID, len(results))
 	for i, result := range results {
@@ -503,12 +503,12 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	suite.NotContains(result_ids, c1.ID)
 	suite.Len(results, len(suite.sampleCollections)-1)
 	suite.ElementsMatch(result_ids, sample_ids[1:])
-	byIDResult, err := suite.coordinator.GetCollections(ctx, c1.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	byIDResult, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{c1.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Empty(byIDResult)
 
 	// Duplicate delete throws an exception
-	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
+	err = suite.coordinator.SoftDeleteCollection(ctx, deleteCollection)
 	suite.Error(err)
 
 	// Re-create the deleted collection
@@ -526,7 +526,7 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	suite.NoError(err)
 
 	// Verify collection was re-created
-	results, err = suite.coordinator.GetCollections(ctx, createCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	results, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{createCollection.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(results, 1)
 	suite.Equal(createCollection.ID, results[0].ID)
@@ -560,11 +560,11 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 		DatabaseName: suite.databaseName,
 		TenantID:     suite.tenantName,
 	}
-	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
+	err = suite.coordinator.SoftDeleteCollection(ctx, deleteCollection)
 	suite.NoError(err)
 
 	// Verify collection and segment were deleted
-	results, err = suite.coordinator.GetCollections(ctx, createCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	results, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{createCollection.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Empty(results)
 	// Segments will not be deleted since the collection is only soft deleted.
@@ -572,68 +572,11 @@ func (suite *APIsTestSuite) TestCreateGetDeleteCollections() {
 	segments, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, createCollection.ID)
 	suite.NoError(err)
 	suite.NotEmpty(segments)
-	suite.coordinator.deleteMode = HardDelete
-	err = suite.coordinator.DeleteCollection(ctx, deleteCollection)
+	err = suite.coordinator.FinishCollectionDeletion(ctx, deleteCollection)
 	suite.NoError(err)
 	segments, err = suite.coordinator.GetSegments(ctx, segment.ID, nil, nil, createCollection.ID)
 	suite.NoError(err)
 	suite.Empty(segments)
-
-	// Check for forward and backward compatibility with soft and hard delete.
-	// 1. Create a collection with soft delete enabled.
-	// 2. Delete the collection (i.e. it will be marked as is_deleted)
-	// 3. Disable soft delete.
-	// 4. Query for the deleted collection. It should not be found.
-	// 5. Enable soft delete.
-	// 6. Query for the deleted collection. It should be found.
-
-	suite.coordinator.deleteMode = SoftDelete
-	collectionId := types.NewUniqueID()
-	suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
-		ID:           collectionId,
-		Name:         "test_coll_fwd_bkwd_compat",
-		TenantID:     suite.tenantName,
-		DatabaseName: suite.databaseName,
-	})
-	suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
-		ID:           collectionId,
-		DatabaseName: suite.databaseName,
-		TenantID:     suite.tenantName,
-	})
-	collection, err := suite.coordinator.GetCollections(ctx, collectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
-	suite.NoError(err)
-	// Check that the collection is deleted
-	suite.Empty(collection)
-	// Toggle the mode.
-	suite.coordinator.deleteMode = HardDelete
-	collection, err = suite.coordinator.GetCollections(ctx, collectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
-	suite.NoError(err)
-	// Check that the collection is still deleted
-	suite.Empty(collection)
-	// Create a collection and delete while being in HardDelete mode.
-	anotherCollectionId := types.NewUniqueID()
-	suite.coordinator.CreateCollection(ctx, &model.CreateCollection{
-		ID:           anotherCollectionId,
-		Name:         "test_coll_fwd_bkwd_compat",
-		TenantID:     suite.tenantName,
-		DatabaseName: suite.databaseName,
-	})
-	suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
-		ID:           anotherCollectionId,
-		DatabaseName: suite.databaseName,
-		TenantID:     suite.tenantName,
-	})
-
-	// Toggle the mode.
-	suite.coordinator.deleteMode = SoftDelete
-	collection, err = suite.coordinator.GetCollections(ctx, collectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
-	suite.NoError(err)
-	// Check that the collection is still deleted
-	suite.Empty(collection)
-	collection, err = suite.coordinator.GetCollections(ctx, anotherCollectionId, nil, suite.tenantName, suite.databaseName, nil, nil)
-	suite.NoError(err)
-	// Check that another collection is still deleted
-	suite.Empty(collection)
 }
 
 func (suite *APIsTestSuite) TestCollectionSize() {
@@ -668,7 +611,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	suite.Equal(coll.Dimension, result.Dimension)
 	suite.Equal(coll.Metadata, result.Metadata)
 
-	resultList, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), &coll.Name, suite.tenantName, suite.databaseName, nil, nil)
+	resultList, err := suite.coordinator.GetCollections(ctx, nil, &coll.Name, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Equal(len(resultList), 1)
 	suite.Equal(coll.ID, resultList[0].ID)
@@ -690,7 +633,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	suite.Equal(coll.Dimension, result.Dimension)
 	suite.Equal(coll.Metadata, result.Metadata)
 
-	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	resultList, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{coll.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Equal(len(resultList), 1)
 	suite.Equal(coll.ID, resultList[0].ID)
@@ -713,7 +656,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	suite.Equal(coll.Dimension, result.Dimension)
 	suite.Equal(coll.Metadata, result.Metadata)
 
-	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	resultList, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{coll.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Equal(len(resultList), 1)
 	suite.Equal(coll.ID, resultList[0].ID)
@@ -734,7 +677,7 @@ func (suite *APIsTestSuite) TestUpdateCollections() {
 	suite.Equal(coll.Dimension, result.Dimension)
 	suite.Equal(coll.Metadata, result.Metadata)
 
-	resultList, err = suite.coordinator.GetCollections(ctx, coll.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	resultList, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{coll.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Equal(len(resultList), 1)
 	suite.Equal(coll.ID, resultList[0].ID)
@@ -815,7 +758,7 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 		Name: &newName1,
 	})
 	suite.NoError(err)
-	result, err := suite.coordinator.GetCollections(ctx, suite.sampleCollections[1].ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	result, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{suite.sampleCollections[1].ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(newName1, result[0].Name)
@@ -827,7 +770,7 @@ func (suite *APIsTestSuite) TestCreateUpdateWithDatabase() {
 	})
 	suite.NoError(err)
 	//suite.Equal(newName0, collection.Name)
-	result, err = suite.coordinator.GetCollections(ctx, suite.sampleCollections[0].ID, nil, suite.tenantName, newDatabaseName, nil, nil)
+	result, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{suite.sampleCollections[0].ID}, nil, suite.tenantName, newDatabaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(newName0, result[0].Name)
@@ -865,7 +808,7 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 		suite.NoError(err)
 		suite.sampleCollections[index] = collection
 	}
-	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, newDatabaseName, nil, nil)
+	result, err := suite.coordinator.GetCollections(ctx, nil, nil, suite.tenantName, newDatabaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Equal(len(suite.sampleCollections), len(result))
 	sort.Slice(result, func(i, j int) bool {
@@ -880,7 +823,7 @@ func (suite *APIsTestSuite) TestGetMultipleWithDatabase() {
 		suite.Equal(suite.sampleCollections[index].Metadata, collection.Metadata)
 	}
 
-	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, suite.databaseName, nil, nil)
+	result, err = suite.coordinator.GetCollections(ctx, nil, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Equal(len(suite.sampleCollections), len(result))
 
@@ -957,7 +900,7 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	expected := []*model.Collection{suite.sampleCollections[0]}
 	expected[0].TenantID = newTenantName
 	expected[0].DatabaseName = newDatabaseName
-	result, err := suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, newDatabaseName, nil, nil)
+	result, err := suite.coordinator.GetCollections(ctx, nil, nil, newTenantName, newDatabaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(expected[0].ID, result[0].ID)
@@ -970,7 +913,7 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 	expected = []*model.Collection{suite.sampleCollections[1]}
 	expected[0].TenantID = suite.tenantName
 	expected[0].DatabaseName = newDatabaseName
-	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, suite.tenantName, newDatabaseName, nil, nil)
+	result, err = suite.coordinator.GetCollections(ctx, nil, nil, suite.tenantName, newDatabaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(result, 1)
 	suite.Equal(expected[0].ID, result[0].ID)
@@ -982,7 +925,7 @@ func (suite *APIsTestSuite) TestCreateDatabaseWithTenants() {
 
 	// A new tenant DOES NOT have a default database. This does not error, instead 0
 	// results are returned
-	result, err = suite.coordinator.GetCollections(ctx, types.NilUniqueID(), nil, newTenantName, suite.databaseName, nil, nil)
+	result, err = suite.coordinator.GetCollections(ctx, nil, nil, newTenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Equal(0, len(result))
 
@@ -1310,7 +1253,6 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	ctx := context.Background()
 
 	// Test Hard Delete scenario
-	suite.coordinator.deleteMode = HardDelete
 	// Create test collection
 	testCollection2 := &model.CreateCollection{
 		ID:           types.NewUniqueID(),
@@ -1324,7 +1266,13 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.NoError(err)
 
 	// Hard delete the collection
-	err = suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
+	err = suite.coordinator.SoftDeleteCollection(ctx, &model.DeleteCollection{
+		ID:           testCollection2.ID,
+		TenantID:     testCollection2.TenantID,
+		DatabaseName: testCollection2.DatabaseName,
+	})
+	suite.NoError(err)
+	err = suite.coordinator.FinishCollectionDeletion(ctx, &model.DeleteCollection{
 		ID:           testCollection2.ID,
 		TenantID:     testCollection2.TenantID,
 		DatabaseName: testCollection2.DatabaseName,
@@ -1332,7 +1280,7 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.NoError(err)
 
 	// Verify collection is not returned in normal get
-	results, err := suite.coordinator.GetCollections(ctx, testCollection2.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	results, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{testCollection2.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Empty(results)
 
@@ -1343,7 +1291,6 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.Empty(softDeletedResults)
 
 	// Test Soft Delete scenario
-	suite.coordinator.deleteMode = SoftDelete
 	// Create a test collection
 	testCollection := &model.CreateCollection{
 		ID:           types.NewUniqueID(),
@@ -1357,7 +1304,7 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.NoError(err)
 
 	// Soft delete the collection
-	err = suite.coordinator.DeleteCollection(ctx, &model.DeleteCollection{
+	err = suite.coordinator.SoftDeleteCollection(ctx, &model.DeleteCollection{
 		ID:           testCollection.ID,
 		TenantID:     testCollection.TenantID,
 		DatabaseName: testCollection.DatabaseName,
@@ -1365,7 +1312,7 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.NoError(err)
 
 	// Verify collection is not returned in normal get
-	results, err = suite.coordinator.GetCollections(ctx, testCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	results, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{testCollection.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Empty(results)
 
@@ -1401,7 +1348,7 @@ func (suite *APIsTestSuite) TestSoftAndHardDeleteCollection() {
 	suite.NoError(err)
 
 	// Get the newly created collection to verify it exists
-	results, err = suite.coordinator.GetCollections(ctx, newTestCollection.ID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	results, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{newTestCollection.ID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Len(results, 1)
 	suite.Equal(newTestCollection.Name, results[0].Name)
@@ -1458,6 +1405,14 @@ func (suite *APIsTestSuite) TestCollectionVersioningWithMinio() {
 	})
 	suite.NoError(err)
 	suite.NotNil(flushInfo)
+
+	// Assert that num_versions is 2
+	type NumVersions struct {
+		NumVersions int64 `gorm:"column:num_versions"`
+	}
+	res := &NumVersions{}
+	suite.db.Select("num_versions").Table("collections").Find(&res, "id = ?", newCollection.ID.String())
+	suite.Equal(int64(2), res.NumVersions)
 
 	// TODO(rohitcp): Add these tests back once version file is enabled.
 	// Verify version file exists in S3
@@ -1611,7 +1566,7 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	// Check version file of forked collection
 	suite.Equal(collection.RootCollectionID, &sourceCreateCollection.ID)
 	suite.NotNil(collection.VersionFileName)
-	versionFile, err := suite.s3MetaStore.GetVersionFile(collection.VersionFileName)
+	versionFile, err := suite.s3MetaStore.GetVersionFile(context.Background(), collection.VersionFileName)
 	suite.NoError(err)
 	suite.NotNil(versionFile)
 	v0 := versionFile.VersionHistory.Versions[0]
@@ -1637,24 +1592,49 @@ func (suite *APIsTestSuite) TestForkCollection() {
 	suite.Error(err)
 
 	// Check that the collection was not created
-	collections, err := suite.coordinator.GetCollections(ctx, forkCollectionWithSameName.TargetCollectionID, nil, suite.tenantName, suite.databaseName, nil, nil)
+	collections, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{forkCollectionWithSameName.TargetCollectionID}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Empty(collections)
 
-	res, err := suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil)
+	res, err := suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, nil)
 	suite.NoError(err)
 	suite.NotEmpty(res)
 	suite.Equal(1, len(res))
 	// ListCollectionsToGc groups by fork trees and should always return the root of the tree
 	suite.Equal(forkCollectionWithSameName.SourceCollectionID, res[0].ID)
 
+	// Collection has 2 versions, so setting minVersionsIfAlive to 2 should return 1 collection
+	minVersionsIfAlive := uint64(2)
+	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive)
+	suite.NoError(err)
+	suite.Equal(1, len(res))
+
+	// Collection has 2 versions, so setting minVersionsIfAlive to 3 should return 0 collections
+	minVersionsIfAlive = uint64(3)
+	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive)
+	suite.NoError(err)
+	suite.Equal(0, len(res))
+
 	// Get source collection to grab lineage path and validate it exists
-	sourceCollection, err := suite.coordinator.GetCollections(ctx, sourceCreateCollection.ID, nil, sourceCreateCollection.TenantID, sourceCreateCollection.DatabaseName, nil, nil)
+	sourceCollection, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{sourceCreateCollection.ID}, nil, sourceCreateCollection.TenantID, sourceCreateCollection.DatabaseName, nil, nil, false)
 	suite.NoError(err)
 	suite.Equal(1, len(sourceCollection))
 	exists, err := suite.s3MetaStore.HasObjectWithPrefix(ctx, *sourceCollection[0].LineageFileName)
 	suite.NoError(err)
 	suite.True(exists, "Lineage file should exist in S3")
+
+	// If the collection is soft deleted, it should always be returned by ListCollectionsToGc, even if it does not meet the minVersionsIfAlive criteria
+	err = suite.coordinator.catalog.DeleteCollection(ctx, &model.DeleteCollection{
+		ID:           sourceCreateCollection.ID,
+		TenantID:     sourceCreateCollection.TenantID,
+		DatabaseName: sourceCreateCollection.DatabaseName,
+	}, true)
+	suite.NoError(err)
+
+	minVersionsIfAlive = uint64(3)
+	res, err = suite.coordinator.ListCollectionsToGc(ctx, nil, nil, nil, &minVersionsIfAlive)
+	suite.NoError(err)
+	suite.Equal(1, len(res))
 }
 
 func (suite *APIsTestSuite) TestBatchGetCollectionVersionFilePaths() {
@@ -1807,6 +1787,87 @@ func (suite *APIsTestSuite) TestCountForks() {
 		suite.NoError(err)
 		suite.Equal(uint64(10), count)
 	}
+}
+
+func (suite *APIsTestSuite) TestGetCollections() {
+	ctx := context.Background()
+
+	// Does not error if collection is not found
+	result, err := suite.coordinator.GetCollections(ctx, []types.UniqueID{types.NewUniqueID()}, nil, suite.tenantName, suite.databaseName, nil, nil, false)
+	suite.NoError(err)
+	suite.Len(result, 0)
+
+	createCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "collection_1",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	_, _, err = suite.coordinator.CreateCollectionAndSegments(ctx, createCollection, []*model.Segment{})
+	suite.NoError(err)
+
+	// Can fetch the collection by ID
+	result, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{createCollection.ID}, nil, createCollection.TenantID, createCollection.DatabaseName, nil, nil, false)
+	suite.NoError(err)
+	suite.Len(result, 1)
+	suite.Equal(createCollection.ID, result[0].ID)
+
+	// Soft delete collection
+	err = suite.coordinator.SoftDeleteCollection(ctx, &model.DeleteCollection{
+		ID:           createCollection.ID,
+		TenantID:     createCollection.TenantID,
+		DatabaseName: createCollection.DatabaseName,
+	})
+	suite.NoError(err)
+
+	// Is not returned when include soft deleted is false
+	result, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{createCollection.ID}, nil, createCollection.TenantID, createCollection.DatabaseName, nil, nil, false)
+	suite.NoError(err)
+	suite.Len(result, 0)
+
+	// Is returned when include soft deleted is true
+	result, err = suite.coordinator.GetCollections(ctx, []types.UniqueID{createCollection.ID}, nil, createCollection.TenantID, createCollection.DatabaseName, nil, nil, true)
+	suite.NoError(err)
+	suite.Len(result, 1)
+	suite.Equal(createCollection.ID, result[0].ID)
+}
+
+func (suite *APIsTestSuite) TestGetCollectionByResourceName() {
+	ctx := context.Background()
+
+	testCollection := &model.CreateCollection{
+		ID:           types.NewUniqueID(),
+		Name:         "test_collection_by_resource_name",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+
+	_, _, err := suite.coordinator.CreateCollection(ctx, testCollection)
+	suite.NoError(err)
+
+	tenantResourceName := "test_tenant_resource_name"
+	err = suite.coordinator.SetTenantResourceName(ctx, suite.tenantName, tenantResourceName)
+	suite.NoError(err)
+
+	collection, err := suite.coordinator.GetCollectionByResourceName(ctx, tenantResourceName, suite.databaseName, testCollection.Name)
+	suite.NoError(err)
+	suite.Equal(testCollection.ID, collection.ID)
+	suite.Equal(testCollection.Name, collection.Name)
+	suite.Equal(testCollection.TenantID, collection.TenantID)
+	suite.Equal(testCollection.DatabaseName, collection.DatabaseName)
+
+	_, err = suite.coordinator.GetCollectionByResourceName(ctx, tenantResourceName, suite.databaseName, "non_existent_collection")
+	suite.Error(err)
+	suite.True(errors.Is(err, common.ErrCollectionNotFound))
+
+	_, err = suite.coordinator.GetCollectionByResourceName(ctx, tenantResourceName, "non_existent_database", testCollection.Name)
+	suite.Error(err)
+	suite.True(errors.Is(err, common.ErrCollectionNotFound))
+
+	_, err = suite.coordinator.GetCollectionByResourceName(ctx, "non_existent_tenant_resource_name", suite.databaseName, testCollection.Name)
+	suite.Error(err)
+	suite.True(errors.Is(err, common.ErrCollectionNotFound))
 }
 
 func TestAPIsTestSuite(t *testing.T) {

@@ -127,6 +127,43 @@ impl SparseIndexWriter {
         }
     }
 
+    pub(super) fn apply_updates(
+        &self,
+        blocks_to_replace: Vec<(Uuid, Uuid)>,
+        blocks_to_add: Vec<(CompositeKey, Uuid)>,
+    ) -> Result<(), AddError> {
+        let mut lock_guard = self.data.lock();
+        for (old_block_id, new_block_id) in blocks_to_replace {
+            if let Some(old_start_key) = lock_guard.reverse.remove(&old_block_id) {
+                lock_guard.forward.remove(&old_start_key);
+                lock_guard
+                    .forward
+                    .insert(old_start_key.clone(), new_block_id);
+                lock_guard
+                    .reverse
+                    .insert(new_block_id, old_start_key.clone());
+                let old_count = lock_guard
+                    .counts
+                    .remove(&old_start_key)
+                    .expect("Invariant Violation, these maps are always in sync");
+                lock_guard.counts.insert(old_start_key, old_count);
+            }
+        }
+
+        for (start_key, block_id) in blocks_to_add {
+            if lock_guard.reverse.contains_key(&block_id) {
+                return Err(AddError::BlockIdExists);
+            }
+            lock_guard
+                .forward
+                .insert(SparseIndexDelimiter::Key(start_key.clone()), block_id);
+            lock_guard
+                .reverse
+                .insert(block_id, SparseIndexDelimiter::Key(start_key));
+        }
+        Ok(())
+    }
+
     pub(crate) fn add_block(
         &self,
         start_key: CompositeKey,
@@ -362,7 +399,47 @@ impl SparseIndexReader {
         result_uuids
     }
 
-    pub(super) fn get_block_ids_range<'prefix, 'referred_data, PrefixRange>(
+    pub(super) fn get_block_ids_for_prefixes(&self, mut prefixes: Vec<&str>) -> Vec<Uuid> {
+        prefixes.sort();
+        let mut result_uuids = Vec::new();
+        let block_start = self.data.forward.iter();
+        let block_end = block_start
+            .clone()
+            .skip(1)
+            .map(|(delim, _)| match delim {
+                SparseIndexDelimiter::Start => {
+                    unreachable!("The start delimiter should only appear in the first block")
+                }
+                SparseIndexDelimiter::Key(composite_key) => Some(composite_key.prefix.as_str()),
+            })
+            .chain([None]);
+        let mut prefix_iter = prefixes.into_iter().peekable();
+        for ((start_delim, block), end_prefix) in block_start.zip(block_end) {
+            if let SparseIndexDelimiter::Key(CompositeKey {
+                prefix: start_prefix,
+                key: _,
+            }) = start_delim
+            {
+                while let Some(&prefix) = prefix_iter.peek() {
+                    if start_prefix.as_str() <= prefix {
+                        break;
+                    }
+                    prefix_iter.next();
+                }
+            }
+            if let Some(&prefix) = prefix_iter.peek() {
+                if end_prefix.is_none() || end_prefix.is_some_and(|end_prefix| prefix <= end_prefix)
+                {
+                    result_uuids.push(block.id);
+                }
+            } else {
+                break;
+            }
+        }
+        result_uuids
+    }
+
+    pub(super) fn get_block_ids_range<'prefix, PrefixRange>(
         &self,
         prefix_range: PrefixRange,
     ) -> Vec<Uuid>

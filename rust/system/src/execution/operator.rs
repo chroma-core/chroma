@@ -4,6 +4,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use futures::FutureExt;
 use std::{any::type_name, fmt::Debug, panic::AssertUnwindSafe};
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub enum OperatorType {
@@ -34,6 +35,10 @@ where
     fn errors_when_sender_dropped(&self) -> bool {
         true
     }
+
+    fn can_cancel(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Debug, Error)]
@@ -46,7 +51,7 @@ pub enum TaskError<Err> {
     Aborted,
 }
 
-impl<Err> ChromaError for TaskError<Err>
+impl<Err: ChromaError> ChromaError for TaskError<Err>
 where
     Err: Debug + ChromaError + 'static,
 {
@@ -55,6 +60,14 @@ where
             TaskError::Panic(_) => ErrorCodes::Internal,
             TaskError::TaskFailed(e) => e.code(),
             TaskError::Aborted => ErrorCodes::ResourceExhausted,
+        }
+    }
+
+    fn should_trace_error(&self) -> bool {
+        match self {
+            TaskError::Panic(_) => true,
+            TaskError::TaskFailed(e) => e.should_trace_error(),
+            TaskError::Aborted => true,
         }
     }
 }
@@ -101,38 +114,16 @@ where
     reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
     task_id: Uuid,
     task_state: TaskState,
+    cancellation_token: Option<CancellationToken>,
 }
 
-/// A message type used by the dispatcher to send tasks to worker threads.
-pub type TaskMessage = Box<dyn TaskWrapper>;
-
-/// A task wrapper is a trait that can be used to run a task. We use it to
-/// erase the I, O types from the Task struct so that tasks.
-#[async_trait]
-pub trait TaskWrapper: Send + Debug {
-    fn get_name(&self) -> &'static str;
-    async fn run(&mut self);
-    #[allow(dead_code)]
-    fn id(&self) -> Uuid;
-    fn get_type(&self) -> OperatorType;
-    async fn abort(&mut self);
-}
-
-/// Implement the TaskWrapper trait for every Task. This allows us to
-/// erase the I, O types from the Task struct so that tasks can be
-/// stored in a homogenous queue regardless of their input and output types.
-#[async_trait]
-impl<Input, Output, Error> TaskWrapper for Task<Input, Output, Error>
+impl<Input, Output, Error> Task<Input, Output, Error>
 where
-    Error: Debug + Send,
     Input: Send + Sync + Debug,
     Output: Send + Sync + Debug,
+    Error: Debug + Send + ChromaError,
 {
-    fn get_name(&self) -> &'static str {
-        self.operator.get_name()
-    }
-
-    async fn run(&mut self) {
+    async fn main_run(&mut self) {
         if self.task_state != TaskState::NotStarted {
             tracing::error!(
                 "Task {} is already running or has already finished",
@@ -148,7 +139,9 @@ where
         match result {
             Ok(result) => {
                 if let Err(err) = result.as_ref() {
-                    tracing::error!("Task {} failed with error: {:?}", self.task_id, err);
+                    if err.should_trace_error() {
+                        tracing::error!("Task {} failed with error: {:?}", self.task_id, err);
+                    }
                 }
 
                 // If this (or similarly, the .send() below) errors, it means the receiver was dropped.
@@ -212,6 +205,49 @@ where
             }
         };
     }
+}
+
+/// A message type used by the dispatcher to send tasks to worker threads.
+pub type TaskMessage = Box<dyn TaskWrapper>;
+
+/// A task wrapper is a trait that can be used to run a task. We use it to
+/// erase the I, O types from the Task struct so that tasks.
+#[async_trait]
+pub trait TaskWrapper: Send + Debug {
+    fn get_name(&self) -> &'static str;
+    async fn run(&mut self);
+    #[allow(dead_code)]
+    fn id(&self) -> Uuid;
+    fn get_type(&self) -> OperatorType;
+    async fn abort(&mut self);
+}
+
+/// Implement the TaskWrapper trait for every Task. This allows us to
+/// erase the I, O types from the Task struct so that tasks can be
+/// stored in a homogenous queue regardless of their input and output types.
+#[async_trait]
+impl<Input, Output, Error> TaskWrapper for Task<Input, Output, Error>
+where
+    Error: Debug + Send + ChromaError,
+    Input: Send + Sync + Debug,
+    Output: Send + Sync + Debug,
+{
+    fn get_name(&self) -> &'static str {
+        self.operator.get_name()
+    }
+
+    async fn run(&mut self) {
+        let cancellation_token = self.cancellation_token.clone();
+        match cancellation_token {
+            Some(token) => {
+                tokio::select! {
+                    _ = token.cancelled() => { self.abort().await; }
+                    _ = self.main_run() => {}
+                }
+            }
+            None => self.main_run().await,
+        }
+    }
 
     fn id(&self) -> Uuid {
         self.task_id
@@ -222,13 +258,6 @@ where
     }
 
     async fn abort(&mut self) {
-        if self.task_state != TaskState::NotStarted {
-            tracing::error!(
-                "Task {} is already running or has already finished",
-                self.task_id
-            );
-            return;
-        }
         self.task_state = TaskState::Aborted;
         match self
             .reply_channel
@@ -266,19 +295,26 @@ pub fn wrap<Input, Output, Error>(
     operator: Box<dyn Operator<Input, Output, Error = Error>>,
     input: Input,
     reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
+    cancellation_token: CancellationToken,
 ) -> TaskMessage
 where
-    Error: Debug + Send + 'static,
+    Error: ChromaError + Debug + Send + 'static,
     Input: Send + Sync + Debug + 'static,
     Output: Send + Sync + Debug + 'static,
 {
     let id = Uuid::new_v4();
+    let mut token = Some(cancellation_token);
+
+    if !operator.can_cancel() {
+        token = None;
+    }
     Box::new(Task {
         operator,
         input,
         reply_channel,
         task_id: id,
         task_state: TaskState::NotStarted,
+        cancellation_token: token,
     })
 }
 
@@ -300,7 +336,7 @@ mod tests {
     struct MockOperator {}
     #[async_trait]
     impl Operator<(), ()> for MockOperator {
-        type Error = ();
+        type Error = std::io::Error;
 
         fn get_name(&self) -> &'static str {
             "MockOperator"
@@ -314,7 +350,7 @@ mod tests {
 
     #[derive(Debug)]
     struct MockComponent {
-        pub received_results: Arc<Mutex<Vec<TaskResult<(), ()>>>>,
+        pub received_results: Arc<Mutex<Vec<TaskResult<(), std::io::Error>>>>,
         pub dispatcher: ComponentHandle<Dispatcher>,
     }
     #[async_trait]
@@ -328,17 +364,22 @@ mod tests {
         }
 
         async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-            let task = wrap(Box::new(MockOperator {}), (), ctx.receiver());
+            let task = wrap(
+                Box::new(MockOperator {}),
+                (),
+                ctx.receiver(),
+                ctx.cancellation_token.clone(),
+            );
             self.dispatcher.send(task, None).await.unwrap();
         }
     }
     #[async_trait]
-    impl Handler<TaskResult<(), ()>> for MockComponent {
+    impl Handler<TaskResult<(), std::io::Error>> for MockComponent {
         type Result = ();
 
         async fn handle(
             &mut self,
-            message: TaskResult<(), ()>,
+            message: TaskResult<(), std::io::Error>,
             ctx: &ComponentContext<MockComponent>,
         ) {
             self.received_results.lock().push(message);
@@ -376,5 +417,33 @@ mod tests {
         assert!(result.is_err());
         let err = result.as_ref().unwrap_err();
         assert!(err.to_string().contains("MockOperator panicking"));
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("should trace: {0}")]
+    struct MockError(bool);
+
+    impl ChromaError for MockError {
+        fn code(&self) -> chroma_error::ErrorCodes {
+            chroma_error::ErrorCodes::InvalidArgument
+        }
+
+        fn should_trace_error(&self) -> bool {
+            self.0
+        }
+    }
+
+    #[test]
+    fn should_trace_flush_compaction_error() {
+        let fce = MockError(true);
+        let te: TaskError<MockError> = fce.into();
+        assert!(te.should_trace_error());
+    }
+
+    #[test]
+    fn should_not_trace_flush_compaction_error() {
+        let fce = MockError(false);
+        let te: TaskError<MockError> = fce.into();
+        assert!(!te.should_trace_error());
     }
 }

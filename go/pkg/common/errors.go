@@ -8,6 +8,7 @@ var (
 	// Tenant errors
 	ErrTenantNotFound                  = errors.New("tenant not found")
 	ErrTenantUniqueConstraintViolation = errors.New("tenant unique constraint violation")
+	ErrTenantResourceNameAlreadySet    = errors.New("tenant resource name is already set")
 
 	// Database errors
 	ErrDatabaseNotFound                  = errors.New("database not found")
@@ -30,6 +31,7 @@ var (
 	ErrCollectionTooManyFork                 = errors.New("collection entry has too many forks")
 	ErrCollectionDeletedWithLocksHeld        = errors.New("collection got deleted concurrently even though select for update locks were held. Not possible unless corruption somehow")
 	ErrMissingLineageFileName                = errors.New("missing lineage file name in root collection entry")
+	ErrCollectionWasNotSoftDeleted           = errors.New("collection was not soft deleted")
 
 	// Collection metadata errors
 	ErrUnknownCollectionMetadataType = errors.New("collection metadata value type not supported")

@@ -6,7 +6,7 @@ import XLink from "@/components/header/x-link";
 import DiscordLink from "@/components/header/discord-link";
 import Link from "next/link";
 import SearchBox from "@/components/header/search-box";
-import UpdatesLink from "@/components/header/updates-link";
+import YouTubeLink from "@/components/header/youtube-link";
 
 const Header: React.FC = () => {
   return (
@@ -21,7 +21,7 @@ const Header: React.FC = () => {
         <DiscordLink />
         <GithubLink />
         <XLink />
-        <UpdatesLink />
+        <YouTubeLink />
         <ThemeToggle />
       </div>
     </div>

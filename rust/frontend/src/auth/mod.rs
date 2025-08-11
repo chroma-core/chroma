@@ -6,12 +6,15 @@ use axum::http::HeaderMap;
 use axum::http::StatusCode;
 
 use chroma_types::{Collection, GetUserIdentityResponse};
+use serde::Serialize;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AuthzAction {
     Reset,
     CreateTenant,
     GetTenant,
+    UpdateTenant,
     CreateDatabase,
     GetDatabase,
     DeleteDatabase,
@@ -39,6 +42,7 @@ impl Display for AuthzAction {
             AuthzAction::Reset => write!(f, "system:reset"),
             AuthzAction::CreateTenant => write!(f, "tenant:create_tenant"),
             AuthzAction::GetTenant => write!(f, "tenant:get_tenant"),
+            AuthzAction::UpdateTenant => write!(f, "tenant:update_tenant"),
             AuthzAction::CreateDatabase => write!(f, "db:create_database"),
             AuthzAction::GetDatabase => write!(f, "db:get_database"),
             AuthzAction::DeleteDatabase => write!(f, "db:delete_database"),
@@ -62,7 +66,7 @@ impl Display for AuthzAction {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AuthzResource {
     pub tenant: Option<String>,
     pub database: Option<String>,
@@ -136,5 +140,56 @@ impl AuthenticateAndAuthorize for () {
                 databases: vec!["default_database".to_string()],
             },
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AuthzAction, AuthzResource};
+    use serde_json::{json, to_value};
+
+    #[test]
+    fn test_serialize_authz_action() {
+        let action = AuthzAction::DeleteCollection;
+        let json = to_value(action).unwrap();
+        assert_eq!(json, json!("delete_collection"));
+    }
+
+    #[test]
+    fn test_serialize_authz_resource_with_all_fields() {
+        let resource = AuthzResource {
+            tenant: Some("my_tenant".to_string()),
+            database: Some("my_db".to_string()),
+            collection: Some("my_collection".to_string()),
+        };
+
+        let json = to_value(&resource).unwrap();
+        assert_eq!(
+            json,
+            json!({
+                "tenant": "my_tenant",
+                "database": "my_db",
+                "collection": "my_collection"
+            })
+        );
+    }
+
+    #[test]
+    fn test_serialize_authz_resource_with_none_fields() {
+        let resource = AuthzResource {
+            tenant: None,
+            database: Some("db_only".to_string()),
+            collection: None,
+        };
+
+        let json = to_value(&resource).unwrap();
+        assert_eq!(
+            json,
+            json!({
+                "tenant": null,
+                "database": "db_only",
+                "collection": null
+            })
+        );
     }
 }

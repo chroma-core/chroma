@@ -15,9 +15,18 @@ test-group = "against-tilt"
 path = "junit.xml"
 
 [profile.ci_k8s_integration]
-default-filter = "test(/test_k8s_integration_/)"
+default-filter = "test(/test_k8s_integration_/) and not test(test_k8s_integration_garbage_collection)"
 
 [[profile.ci_k8s_integration.overrides]]
+filter = "all()"
+test-group = "against-tilt"
+
+# This one test is extremely slow in CI and difficult to speed up.
+# TODO(@codetheweb): after all collection files are stored under a prefix, test_k8s_integration_* tests can be run in parallel and we can remove this profile.
+[profile.ci_k8s_integration_slow]
+default-filter = "test(test_k8s_integration_garbage_collection)"
+
+[[profile.ci_k8s_integration_slow.overrides]]
 filter = "all()"
 test-group = "against-tilt"
 

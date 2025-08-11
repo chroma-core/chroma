@@ -1,8 +1,8 @@
 # Embedding Functions
 
-Embeddings are the way to represent any kind of data, making them the perfect fit for working with all kinds of A.I-powered tools and algorithms. They can represent text, images, and soon audio and video. There are many options for creating embeddings, whether locally using an installed library, or by calling an API.
+Embeddings are the way to represent any kind of data, making them the perfect fit for working with all kinds of AI-powered tools and algorithms. They can represent text, images, and soon audio and video. Chroma collections index embeddings to enable efficient similarity search on the data they represent. There are many options for creating embeddings, whether locally using an installed library, or by calling an API.
 
-Chroma provides lightweight wrappers around popular embedding providers, making it easy to use them in your apps. You can set an embedding function when you create a Chroma collection, which will be used automatically, or you can call them directly yourself.
+Chroma provides lightweight wrappers around popular embedding providers, making it easy to use them in your apps. You can set an embedding function when you [create](../collections/manage-collections) a Chroma collection, to be automatically used when adding and querying data, or you can call them directly yourself.
 
 |                                                                                          | Python | Typescript |
 |------------------------------------------------------------------------------------------|--------|------------|
@@ -13,8 +13,10 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Instructor](../../integrations/embedding-models/instructor)                             | ✓      | -          |
 | [Hugging Face Embedding Server](../../integrations/embedding-models/hugging-face-server) | ✓      | ✓          |
 | [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          |
-| [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai.md)    | ✓      | ✓          |
-| [Together AI](../../integrations/embedding-models/together-ai.md)                        | ✓      | ✓          |
+| [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai)    | ✓      | ✓          |
+| [Together AI](../../integrations/embedding-models/together-ai)                        | ✓      | ✓          |
+| [Mistral](../../integrations/embedding-models/mistral)                                | ✓      | ✓          |
+| [Morph](../../integrations/embedding-models/morph)                                    | ✓      | ✓          |
 
 We welcome pull requests to add new Embedding Functions to the community.
 
@@ -22,67 +24,164 @@ We welcome pull requests to add new Embedding Functions to the community.
 
 ## Default: all-MiniLM-L6-v2
 
-By default, Chroma uses the [Sentence Transformers](https://www.sbert.net/) `all-MiniLM-L6-v2` model to create embeddings. This embedding model can create sentence and document embeddings that can be used for a wide variety of tasks. This embedding function runs locally on your machine, and may require you download the model files (this will happen automatically).
+Chroma's default embedding function uses the [Sentence Transformers](https://www.sbert.net/) `all-MiniLM-L6-v2` model to create embeddings. This embedding model can create sentence and document embeddings that can be used for a wide variety of tasks. This embedding function runs locally on your machine, and may require you download the model files (this will happen automatically).
 
-{% TabbedCodeBlock %}
+If you don't specify an embedding function when creating a collection, Chroma will set it to be the `DefaultEmbeddingFunction`:
+
+{% Tabs %}
 
 {% Tab label="python" %}
 ```python
-from chromadb.utils import embedding_functions
-default_ef = embedding_functions.DefaultEmbeddingFunction()
+collection = client.create_collection(name="my_collection")
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
-```typescript
-import { DefaultEmbeddingFunction } from "chromadb";
-const defaultEF = new DefaultEmbeddingFunction();
+Install the `@chroma-core/default-embed` package:
+
+{% TabbedUseCaseCodeBlock language="Terminal" %}
+
+{% Tab label="npm" %}
+```terminal
+npm install @chroma-core/default-embed
 ```
 {% /Tab %}
 
-{% /TabbedCodeBlock %}
+{% Tab label="pnpm" %}
+```terminal
+pnpm add @chroma-core/default-embed
+```
+{% /Tab %}
 
-Embedding functions can be linked to a collection and used whenever you call `add`, `update`, `upsert` or `query`. You can also use them directly which can be handy for debugging.
+{% Tab label="yarn" %}
+```terminal
+yarn add @chroma-core/default-embed
+```
+{% /Tab %}
 
-{% TabbedCodeBlock %}
+{% Tab label="bun" %}
+```terminal
+bun add @chroma-core/default-embed
+```
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
+
+Create a collection without providing an embedding function. It will automatically be set with the `DefaultEmbeddingFunction`:
+
+```typescript
+const collection = await client.createCollection({ name: "my-collection" });
+```
+
+{% /Tab %}
+
+{% /Tabs %}
+
+## Using Embedding Functions
+
+Embedding functions can be linked to a collection and used whenever you call `add`, `update`, `upsert` or `query`.
+
+{% Tabs %}
 
 {% Tab label="python" %}
 ```python
-val = default_ef(["foo"])
-print(val) # [[0.05035809800028801, 0.0626462921500206, -0.061827320605516434...]]
-```
-{% /Tab %}
+# Set your OPENAI_API_KEY environment variable
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
 
-{% Tab label="typescript" %}
-```typescript
-const val = defaultEf.generate(["foo"]);
-console.log(val); // [[0.05035809800028801, 0.0626462921500206, -0.061827320605516434...]]
-```
-{% /Tab %}
+collection = client.create_collection(
+    name="my_collection",
+    embedding_function=OpenAIEmbeddingFunction(
+        model_name="text-embedding-3-small"
+    )
+)
 
-{% /TabbedCodeBlock %}
-
-## Sentence Transformers
-
-Chroma can also use any [Sentence Transformers](https://www.sbert.net/) model to create embeddings.
-
-You can pass in an optional `model_name` argument, which lets you choose which Sentence Transformers model to use. By default, Chroma uses `all-MiniLM-L6-v2`. You can see a list of all available models [here](https://www.sbert.net/docs/pretrained_models.html).
-
-{% TabbedCodeBlock %}
-
-{% Tab label="python" %}
-```python
-sentence_transformer_ef = embedding_functions.SentenceTransformerEmbeddingFunction(
-    model_name="all-MiniLM-L6-v2"
+# Chroma will use OpenAIEmbeddingFunction to embed your documents
+collection.add(
+    ids=["id1", "id2"],
+    documents=["doc1", "doc2"]
 )
 ```
 {% /Tab %}
 
 {% Tab label="typescript" %}
+Install the `@chroma-core/openai` package:
+
+{% TabbedUseCaseCodeBlock language="Terminal" %}
+
+{% Tab label="npm" %}
+```terminal
+npm install @chroma-core/openai
+```
+{% /Tab %}
+
+{% Tab label="pnpm" %}
+```terminal
+pnpm add @chroma-core/openai
+```
+{% /Tab %}
+
+{% Tab label="yarn" %}
+```terminal
+yarn add @chroma-core/openai
+```
+{% /Tab %}
+
+{% Tab label="bun" %}
+```terminal
+bun add @chroma-core/openai
+```
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
+
+Create a collection with the `OpenAIEmbeddingFunction`:
+
 ```typescript
-import { DefaultEmbeddingFunction } from "chromadb";
-const modelName = "all-MiniLM-L6-v2";
-const defaultEF = new DefaultEmbeddingFunction(modelName);
+// Set your OPENAI_API_KEY environment variable
+import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
+
+collection = await client.createCollection({
+    name: "my_collection",
+    embedding_function: new OpenAIEmbeddingFunction({
+        model_name: "text-embedding-3-small"
+    })
+});
+
+// Chroma will use OpenAIEmbeddingFunction to embed your documents
+await collection.add({
+    ids: ["id1", "id2"],
+    documents: ["doc1", "doc2"]
+})
+```
+{% /Tab %}
+
+{% /Tabs %}
+
+You can also use embedding functions directly which can be handy for debugging.
+
+{% TabbedCodeBlock %}
+
+{% Tab label="python" %}
+```python
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+
+default_ef = DefaultEmbeddingFunction()
+embeddings = default_ef(["foo"])
+print(embeddings) # [[0.05035809800028801, 0.0626462921500206, -0.061827320605516434...]]
+
+collection.query(query_embeddings=embeddings)
+```
+{% /Tab %}
+
+{% Tab label="typescript" %}
+```typescript
+import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
+
+const defaultEF = new DefaultEmbeddingFunction();
+const embeddings = await defaultEF.generate(["foo"]);
+console.log(embeddings); // [[0.05035809800028801, 0.0626462921500206, -0.061827320605516434...]]
+
+await collection.query({ queryEmbeddings: embeddings })
 ```
 {% /Tab %}
 
@@ -90,7 +189,7 @@ const defaultEF = new DefaultEmbeddingFunction(modelName);
 
 ## Custom Embedding Functions
 
-You can create your own embedding function to use with Chroma, it just needs to implement the `EmbeddingFunction` protocol.
+You can create your own embedding function to use with Chroma; it just needs to implement `EmbeddingFunction`.
 
 {% TabbedCodeBlock %}
 
@@ -107,7 +206,9 @@ class MyEmbeddingFunction(EmbeddingFunction):
 
 {% Tab label="typescript" %}
 ```typescript
-class MyEmbeddingFunction {
+import { EmbeddingFunction } from  "chromadb";
+
+class MyEmbeddingFunction implements EmbeddingFunction {
     private api_key: string;
 
     constructor(api_key: string) {
@@ -124,4 +225,4 @@ class MyEmbeddingFunction {
 
 {% /TabbedCodeBlock %}
 
-We welcome contributions! If you create an embedding function that you think would be useful to others, please consider [submitting a pull request](https://github.com/chroma-core/chroma) to add it to Chroma's `embedding_functions` module.
+We welcome contributions! If you create an embedding function that you think would be useful to others, please consider [submitting a pull request](https://github.com/chroma-core/chroma).

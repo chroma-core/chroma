@@ -13,6 +13,7 @@ use arrow::{
     array::{Array, StringArray},
     record_batch::RecordBatch,
 };
+use chroma_cache::foyer::MIB;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::de::Error as DeError;
 use serde::ser::Error as SerError;
@@ -597,7 +598,7 @@ impl Block {
 
 impl chroma_cache::Weighted for Block {
     fn weight(&self) -> usize {
-        8 // A block is at most 8 MB
+        ((self.get_size() as f32 / MIB as f32).ceil() as usize).max(1)
     }
 }
 
@@ -854,4 +855,31 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+
+    use std::sync::Arc;
+
+    use arrow::{
+        array::Int32Array,
+        datatypes::{DataType, Field, Schema},
+    };
+
+    use super::*;
+
+    #[test]
+    fn test_block_serde() {
+        let batch = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new("id", DataType::Int32, false)])),
+            vec![Arc::new(Int32Array::from(vec![1, 2, 3, 4, 5]))],
+        )
+        .unwrap();
+        let b1 = Block::from_record_batch(Uuid::new_v4(), batch.clone());
+        let bytes = bincode::serialize(&b1).unwrap();
+        let b2 = bincode::deserialize::<Block>(&bytes).unwrap();
+        assert_eq!(b1.id, b2.id);
+        assert_eq!(b1.data.0, b2.data.0);
+    }
 }

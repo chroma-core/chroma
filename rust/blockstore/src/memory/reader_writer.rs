@@ -22,6 +22,10 @@ impl MemoryBlockfileFlusher {
     pub(crate) fn id(&self) -> uuid::Uuid {
         self.id
     }
+
+    pub(crate) fn prefix_path(&self) -> &str {
+        ""
+    }
 }
 
 impl MemoryBlockfileWriter {

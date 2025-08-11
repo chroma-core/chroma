@@ -1,12 +1,15 @@
 package grpc
 
 import (
+	"time"
+
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/types"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func convertCollectionMetadataToModel(collectionMetadata *coordinatorpb.UpdateMetadata) (*model.CollectionMetadata[model.CollectionMetadataValueType], error) {
@@ -39,6 +42,7 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 		return nil
 	}
 
+	dbId := collection.DatabaseId.String()
 	collectionpb := &coordinatorpb.Collection{
 		Id:                         collection.ID.String(),
 		Name:                       collection.Name,
@@ -53,6 +57,11 @@ func convertCollectionToProto(collection *model.Collection) *coordinatorpb.Colle
 		LastCompactionTimeSecs:     collection.LastCompactionTimeSecs,
 		VersionFilePath:            &collection.VersionFileName,
 		LineageFilePath:            collection.LineageFileName,
+		UpdatedAt: &timestamppb.Timestamp{
+			Seconds: collection.UpdatedAt,
+			Nanos:   0,
+		},
+		DatabaseId: &dbId,
 	}
 
 	if collection.RootCollectionID != nil {
@@ -131,6 +140,7 @@ func convertToCreateCollectionModel(req *coordinatorpb.CreateCollectionRequest) 
 		GetOrCreate:          req.GetGetOrCreate(),
 		TenantID:             req.GetTenant(),
 		DatabaseName:         req.GetDatabase(),
+		Ts:                   time.Now().Unix(),
 	}, nil
 }
 

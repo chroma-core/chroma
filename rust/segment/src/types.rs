@@ -9,6 +9,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{Instrument, Span};
+use uuid::Uuid;
 
 use crate::distributed_spann::{SpannSegmentFlusher, SpannSegmentWriter};
 
@@ -1039,6 +1040,13 @@ pub enum ChromaSegmentFlusher {
 }
 
 impl ChromaSegmentFlusher {
+    pub fn flush_key(prefix_path: &str, id: &Uuid) -> String {
+        // For legacy collections, prefix_path will be empty.
+        if prefix_path.is_empty() {
+            return id.to_string();
+        }
+        format!("{}/{}", prefix_path, id)
+    }
     pub fn get_id(&self) -> SegmentUuid {
         match self {
             ChromaSegmentFlusher::RecordSegment(flusher) => flusher.id,
@@ -1086,7 +1094,7 @@ mod tests {
     };
     use chroma_cache::new_cache_for_test;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, OperationRecord, SegmentUuid};
+    use chroma_types::{CollectionUuid, DatabaseUuid, OperationRecord, SegmentUuid};
     use std::{collections::HashMap, str::FromStr};
 
     #[tokio::test]
@@ -1103,6 +1111,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1122,14 +1132,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1171,6 +1189,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -1264,14 +1285,22 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
@@ -1308,10 +1337,10 @@ mod tests {
             .expect("Get all data failed");
         assert_eq!(all_data.len(), 1);
         let record = &all_data[0];
-        assert_eq!(record.id, "embedding_id_1");
-        assert_eq!(record.document, Some("number"));
-        assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
-        assert_eq!(record.metadata, Some(res_metadata));
+        assert_eq!(record.1.id, "embedding_id_1");
+        assert_eq!(record.1.document, Some("number"));
+        assert_eq!(record.1.embedding, &[7.0, 8.0, 9.0]);
+        assert_eq!(record.1.metadata, Some(res_metadata));
         // Search by metadata filter.
         let metadata_segment_reader =
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
@@ -1375,6 +1404,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1394,14 +1425,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1443,6 +1482,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -1527,14 +1569,22 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
@@ -1571,10 +1621,10 @@ mod tests {
             .expect("Get all data failed");
         assert_eq!(all_data.len(), 1);
         let record = &all_data[0];
-        assert_eq!(record.id, "embedding_id_1");
-        assert_eq!(record.document, Some("doc1"));
-        assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
-        assert_eq!(record.metadata, Some(res_metadata));
+        assert_eq!(record.1.id, "embedding_id_1");
+        assert_eq!(record.1.document, Some("doc1"));
+        assert_eq!(record.1.embedding, &[7.0, 8.0, 9.0]);
+        assert_eq!(record.1.metadata, Some(res_metadata));
         // Search by metadata filter.
         let metadata_segment_reader =
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
@@ -1639,6 +1689,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1658,14 +1710,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1707,6 +1767,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -1811,14 +1874,22 @@ mod tests {
             emb_1.get_operation()
         );
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
@@ -1855,10 +1926,10 @@ mod tests {
             .expect("Get all data failed");
         assert_eq!(all_data.len(), 1);
         let record = &all_data[0];
-        assert_eq!(record.id, "embedding_id_1");
-        assert_eq!(record.document, Some("number"));
-        assert_eq!(record.embedding, &[7.0, 8.0, 9.0]);
-        assert_eq!(record.metadata, Some(res_metadata));
+        assert_eq!(record.1.id, "embedding_id_1");
+        assert_eq!(record.1.document, Some("number"));
+        assert_eq!(record.1.embedding, &[7.0, 8.0, 9.0]);
+        assert_eq!(record.1.metadata, Some(res_metadata));
         // Search by metadata filter.
         let metadata_segment_reader =
             MetadataSegmentReader::from_segment(&metadata_segment, &blockfile_provider)
@@ -1931,11 +2002,17 @@ mod tests {
             metadata: None,
             file_path: HashMap::new(),
         };
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let mut update_metadata = HashMap::new();
             update_metadata.insert(
                 String::from("hello"),
@@ -1990,6 +2067,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -2164,10 +2244,14 @@ mod tests {
         assert_eq!(1, id2_found);
         assert_eq!(1, id3_found);
         // Now write this, read again and validate.
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         segment_writer
             .apply_materialized_log_chunk(&some_reader, &res)
             .await
@@ -2187,70 +2271,83 @@ mod tests {
             .await
             .expect("Get all data failed");
         for data in all_data {
-            assert_ne!(data.id, "embedding_id_2");
-            if data.id == "embedding_id_1" {
+            assert_ne!(data.1.id, "embedding_id_2");
+            if data.1.id == "embedding_id_1" {
                 assert!(data
+                    .1
                     .metadata
                     .clone()
                     .expect("Metadata is empty")
                     .contains_key("hello"),);
                 assert_eq!(
-                    data.metadata
+                    data.1
+                        .metadata
                         .clone()
                         .expect("Metadata is empty")
                         .get("hello"),
                     Some(&MetadataValue::Str(String::from("new_world")))
                 );
                 assert!(data
+                    .1
                     .metadata
                     .clone()
                     .expect("Metadata is empty")
                     .contains_key("bye"),);
                 assert_eq!(
-                    data.metadata.clone().expect("Metadata is empty").get("bye"),
+                    data.1
+                        .metadata
+                        .clone()
+                        .expect("Metadata is empty")
+                        .get("bye"),
                     Some(&MetadataValue::Str(String::from("world")))
                 );
                 assert!(data
+                    .1
                     .metadata
                     .clone()
                     .expect("Metadata is empty")
                     .contains_key("hello_again"),);
                 assert_eq!(
-                    data.metadata
+                    data.1
+                        .metadata
                         .clone()
                         .expect("Metadata is empty")
                         .get("hello_again"),
                     Some(&MetadataValue::Str(String::from("new_world")))
                 );
-                assert_eq!(data.document.expect("Non empty document"), "doc1");
-                assert_eq!(data.embedding, vec![1.0, 2.0, 3.0]);
-            } else if data.id == "embedding_id_3" {
+                assert_eq!(data.1.document.expect("Non empty document"), "doc1");
+                assert_eq!(data.1.embedding, vec![1.0, 2.0, 3.0]);
+            } else if data.1.id == "embedding_id_3" {
                 assert!(data
+                    .1
                     .metadata
                     .clone()
                     .expect("Metadata is empty")
                     .contains_key("hello"),);
                 assert_eq!(
-                    data.metadata
+                    data.1
+                        .metadata
                         .clone()
                         .expect("Metadata is empty")
                         .get("hello"),
                     Some(&MetadataValue::Str(String::from("new_world")))
                 );
                 assert!(data
+                    .1
                     .metadata
                     .clone()
                     .expect("Metadata is empty")
                     .contains_key("hello_again"),);
                 assert_eq!(
-                    data.metadata
+                    data.1
+                        .metadata
                         .clone()
                         .expect("Metadata is empty")
                         .get("hello_again"),
                     Some(&MetadataValue::Str(String::from("new_world")))
                 );
-                assert_eq!(data.document.expect("Non empty document"), "doc3");
-                assert_eq!(data.embedding, vec![7.0, 8.0, 9.0]);
+                assert_eq!(data.1.document.expect("Non empty document"), "doc3");
+                assert_eq!(data.1.embedding, vec![7.0, 8.0, 9.0]);
             }
         }
     }

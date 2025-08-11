@@ -49,7 +49,7 @@ async fn test_k8s_integration_80_copy() {
     )
     .await
     .unwrap();
-    let scrubbed_source = reader.scrub().await.unwrap();
+    let scrubbed_source = reader.scrub(wal3::Limits::default()).await.unwrap();
     wal3::copy(
         &storage,
         &LogWriterOptions::default(),
@@ -67,7 +67,7 @@ async fn test_k8s_integration_80_copy() {
     )
     .await
     .unwrap();
-    let scrubbed_target = copied.scrub().await.unwrap();
+    let scrubbed_target = copied.scrub(wal3::Limits::default()).await.unwrap();
     assert_eq!(
         scrubbed_source.calculated_setsum,
         scrubbed_target.calculated_setsum,

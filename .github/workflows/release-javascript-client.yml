@@ -55,7 +55,7 @@ jobs:
         version: 9
         run_install: false
     - name: Setup Node.js
-      uses: useblacksmith/setup-node@v5
+      uses: actions/setup-node@v4
       with:
         node-version: "18.x"
         registry-url: ${{ matrix.registry }}
@@ -88,3 +88,34 @@ jobs:
       working-directory: ./clients/js/
       env:
         NODE_AUTH_TOKEN: ${{ matrix.registry == 'https://registry.npmjs.org' && secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
+
+  notify-slack-on-failure:
+    name: Notify Slack on Release Failure
+    if: failure()
+    needs: [release]
+    runs-on: blacksmith-2vcpu-ubuntu-2204
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          # If the workflow was triggered by a push on a tag, use github.ref_name.
+          # If manually dispatched, use the tag value supplied in the workflow input.
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          fi
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *Release failure!*
+              *Workflow:* ${{ github.workflow }}
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Author:* ${{ github.actor }}
+              *Tag:* ${{ steps.tag.outputs.tag }}

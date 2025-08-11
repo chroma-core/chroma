@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_storage::Storage;
+use chroma_storage::{DeleteOptions, Storage};
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
 use futures::stream::StreamExt;
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 use thiserror::Error;
 
 #[derive(Clone)]
@@ -22,7 +22,7 @@ impl std::fmt::Debug for DeleteVersionsAtSysDbOperator {
 
 #[derive(Debug)]
 pub struct DeleteVersionsAtSysDbInput {
-    pub version_file: CollectionVersionFile,
+    pub version_file: Arc<CollectionVersionFile>,
     pub epoch_id: i64,
     pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
@@ -31,13 +31,15 @@ pub struct DeleteVersionsAtSysDbInput {
 
 #[derive(Debug)]
 pub struct DeleteVersionsAtSysDbOutput {
-    pub version_file: CollectionVersionFile,
+    pub version_file: Arc<CollectionVersionFile>,
     pub versions_to_delete: VersionListForCollection,
     pub unused_s3_files: HashSet<String>,
 }
 
 #[derive(Error, Debug)]
 pub enum DeleteVersionsAtSysDbError {
+    #[error("Unknown error occurred when deleting versions at sysdb")]
+    UnknownError,
     #[error("Error deleting versions in sysdb: {0}")]
     SysDBError(String),
     #[error("Error deleting version file {path}: {message}")]
@@ -87,7 +89,7 @@ impl DeleteVersionsAtSysDbOperator {
             let path = file_path.clone();
             futures.push(async move {
                 storage
-                    .delete(&path)
+                    .delete(&path, DeleteOptions::default())
                     .await
                     .map_err(|e| (path, e.to_string()))
             });
@@ -157,7 +159,13 @@ impl Operator<DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOutput>
                 .delete_collection_version(vec![input.versions_to_delete.clone()])
                 .await
             {
-                Ok(_) => {
+                Ok(results) => {
+                    for (_, was_successful) in results {
+                        if !was_successful {
+                            return Err(DeleteVersionsAtSysDbError::UnknownError);
+                        }
+                    }
+
                     tracing::info!(
                         versions = ?input.versions_to_delete.versions,
                         "Successfully deleted versions from SysDB"
@@ -201,10 +209,10 @@ mod tests {
         let sysdb = SysDb::Test(TestSysDb::new());
 
         // Create a version file with actual version history
-        let version_file = CollectionVersionFile {
+        let version_file = Arc::new(CollectionVersionFile {
             version_history: Some(chroma_proto::CollectionVersionHistory { versions: vec![] }),
             ..Default::default()
-        };
+        });
 
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
@@ -237,7 +245,7 @@ mod tests {
         let tmp_dir = TempDir::new().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let sysdb = SysDb::Test(TestSysDb::new());
-        let version_file = CollectionVersionFile::default();
+        let version_file = Arc::new(CollectionVersionFile::default());
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
             database_id: "default".to_string(),
@@ -360,7 +368,7 @@ mod tests {
         }
 
         // Create version file with history
-        let version_file = CollectionVersionFile {
+        let version_file = Arc::new(CollectionVersionFile {
             version_history: Some(chroma_proto::CollectionVersionHistory {
                 versions: vec![
                     chroma_proto::CollectionVersionInfo {
@@ -378,7 +386,7 @@ mod tests {
                 ],
             }),
             ..Default::default()
-        };
+        });
 
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),
@@ -431,7 +439,7 @@ mod tests {
         }
 
         // Create version file with history
-        let version_file = CollectionVersionFile {
+        let version_file = Arc::new(CollectionVersionFile {
             version_history: Some(chroma_proto::CollectionVersionHistory {
                 versions: vec![
                     chroma_proto::CollectionVersionInfo {
@@ -449,7 +457,7 @@ mod tests {
                 ],
             }),
             ..Default::default()
-        };
+        });
 
         let versions_to_delete = VersionListForCollection {
             collection_id: "test_collection".to_string(),

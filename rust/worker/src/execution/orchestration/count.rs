@@ -3,7 +3,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    PanicError, TaskError, TaskMessage, TaskResult,
+    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::CollectionAndSegments;
 use thiserror::Error;
@@ -65,10 +65,9 @@ type CountResult = Result<CountOutput, CountError>;
 #[derive(Debug)]
 pub struct CountOrchestrator {
     // Orchestrator parameters
+    context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
-    dispatcher: ComponentHandle<Dispatcher>,
     queue: usize,
-
     // Collection and segments
     collection_and_segments: CollectionAndSegments,
 
@@ -85,14 +84,15 @@ pub struct CountOrchestrator {
 impl CountOrchestrator {
     pub(crate) fn new(
         blockfile_provider: BlockfileProvider,
-        dispatcher: ComponentHandle<Dispatcher>,
+        dispatcher: chroma_system::ComponentHandle<Dispatcher>,
         queue: usize,
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
     ) -> Self {
+        let context = OrchestratorContext::new(dispatcher);
         Self {
+            context,
             blockfile_provider,
-            dispatcher,
             collection_and_segments,
             queue,
             fetch_log,
@@ -108,7 +108,11 @@ impl Orchestrator for CountOrchestrator {
     type Error = CountError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
-        self.dispatcher.clone()
+        self.context.dispatcher.clone()
+    }
+
+    fn context(&self) -> &OrchestratorContext {
+        &self.context
     }
 
     async fn initial_tasks(
@@ -116,7 +120,12 @@ impl Orchestrator for CountOrchestrator {
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
         vec![(
-            wrap(Box::new(self.fetch_log.clone()), (), ctx.receiver()),
+            wrap(
+                Box::new(self.fetch_log.clone()),
+                (),
+                ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
+            ),
             Some(Span::current()),
         )]
     }
@@ -129,10 +138,8 @@ impl Orchestrator for CountOrchestrator {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Sender<CountResult> {
-        self.result_channel
-            .take()
-            .expect("The result channel should be set before take")
+    fn take_result_channel(&mut self) -> Option<Sender<CountResult>> {
+        self.result_channel.take()
     }
 }
 
@@ -159,6 +166,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CountOrchestrator {
                 output,
             ),
             ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
         );
         self.send(task, ctx, Some(Span::current())).await;
     }

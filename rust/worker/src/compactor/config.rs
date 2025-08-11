@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CompactorConfig {
     #[serde(default = "CompactorConfig::default_compaction_manager_queue_size")]
     pub compaction_manager_queue_size: usize,
+    #[serde(default = "CompactorConfig::default_job_expiry_seconds")]
+    pub job_expiry_seconds: u64,
     #[serde(default = "CompactorConfig::default_max_concurrent_jobs")]
     pub max_concurrent_jobs: usize,
     #[serde(default = "CompactorConfig::default_compaction_interval_sec")]
@@ -18,6 +20,12 @@ pub struct CompactorConfig {
     pub disabled_collections: Vec<String>,
     #[serde(default = "CompactorConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
+    #[serde(default = "CompactorConfig::default_purge_dirty_log_timeout_seconds")]
+    pub purge_dirty_log_timeout_seconds: u64,
+    #[serde(default = "CompactorConfig::default_repair_log_offsets_timeout_seconds")]
+    pub repair_log_offsets_timeout_seconds: u64,
+    #[serde(default = "CompactorConfig::default_max_failure_count")]
+    pub max_failure_count: u8,
 }
 
 impl CompactorConfig {
@@ -37,6 +45,10 @@ impl CompactorConfig {
         10
     }
 
+    fn default_job_expiry_seconds() -> u64 {
+        3600
+    }
+
     fn default_max_compaction_size() -> usize {
         10_000
     }
@@ -52,12 +64,25 @@ impl CompactorConfig {
     fn default_fetch_log_batch_size() -> u32 {
         100
     }
+
+    fn default_purge_dirty_log_timeout_seconds() -> u64 {
+        60
+    }
+
+    fn default_repair_log_offsets_timeout_seconds() -> u64 {
+        60
+    }
+
+    fn default_max_failure_count() -> u8 {
+        5
+    }
 }
 
 impl Default for CompactorConfig {
     fn default() -> Self {
         CompactorConfig {
             compaction_manager_queue_size: CompactorConfig::default_compaction_manager_queue_size(),
+            job_expiry_seconds: CompactorConfig::default_job_expiry_seconds(),
             max_concurrent_jobs: CompactorConfig::default_max_concurrent_jobs(),
             compaction_interval_sec: CompactorConfig::default_compaction_interval_sec(),
             min_compaction_size: CompactorConfig::default_min_compaction_size(),
@@ -65,6 +90,11 @@ impl Default for CompactorConfig {
             max_partition_size: CompactorConfig::default_max_partition_size(),
             disabled_collections: CompactorConfig::default_disabled_collections(),
             fetch_log_batch_size: CompactorConfig::default_fetch_log_batch_size(),
+            purge_dirty_log_timeout_seconds:
+                CompactorConfig::default_purge_dirty_log_timeout_seconds(),
+            repair_log_offsets_timeout_seconds:
+                CompactorConfig::default_repair_log_offsets_timeout_seconds(),
+            max_failure_count: CompactorConfig::default_max_failure_count(),
         }
     }
 }

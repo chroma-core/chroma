@@ -1,21 +1,21 @@
 use super::{CacheError, Weighted};
 use ahash::RandomState;
 use chroma_error::ChromaError;
-use chroma_tracing::util::Stopwatch;
+use chroma_tracing::util::{StopWatchUnit, Stopwatch};
 use clap::Parser;
 use foyer::{
     CacheBuilder, DirectFsDeviceOptions, Engine, FifoConfig, FifoPicker, HybridCacheBuilder,
-    InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, RateLimitPicker, S3FifoConfig,
-    StorageKey, StorageValue, TracingOptions,
+    InvalidRatioPicker, LargeEngineOptions, LfuConfig, LruConfig, S3FifoConfig, StorageKey,
+    StorageValue, Throttle, TracingOptions,
 };
-use opentelemetry::global;
+use opentelemetry::{global, KeyValue};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 use std::time::Duration;
 
-const MIB: usize = 1024 * 1024;
+pub const MIB: usize = 1024 * 1024;
 
 const fn default_capacity() -> usize {
     1048576
@@ -303,7 +303,7 @@ where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
-    cache: foyer::HybridCache<K, V>,
+    cache: foyer::HybridCache<K, V, RandomState>,
     cache_hit: opentelemetry::metrics::Counter<u64>,
     cache_miss: opentelemetry::metrics::Counter<u64>,
     get_latency: opentelemetry::metrics::Histogram<u64>,
@@ -311,6 +311,7 @@ where
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
+    hostname: KeyValue,
 }
 
 impl<K, V> Debug for FoyerHybridCache<K, V>
@@ -376,7 +377,7 @@ where
                 );
                 builder.with_hash_builder(rs)
             }
-            false => builder,
+            false => builder.with_hash_builder(RandomState::new()),
         };
 
         let Some(dir) = config.dir.as_ref() else {
@@ -385,14 +386,19 @@ where
             )));
         };
 
-        let mut builder = builder
+        let mut device_options = DirectFsDeviceOptions::new(dir)
+            .with_capacity(config.disk * MIB)
+            .with_file_size(config.file_size * MIB);
+        if config.admission_rate_limit > 0 {
+            device_options = device_options.with_throttle(
+                Throttle::new().with_write_throughput(config.admission_rate_limit * MIB),
+            );
+        }
+
+        let builder = builder
             .with_weighter(|_, v| v.weight())
             .storage(Engine::Large)
-            .with_device_options(
-                DirectFsDeviceOptions::new(dir)
-                    .with_capacity(config.disk * MIB)
-                    .with_file_size(config.file_size * MIB),
-            )
+            .with_device_options(device_options)
             .with_flush(config.flush)
             .with_recover_mode(foyer::RecoverMode::Strict)
             .with_large_object_disk_cache_options(
@@ -408,11 +414,6 @@ where
                     ]),
             );
 
-        if config.admission_rate_limit > 0 {
-            builder = builder.with_admission_picker(Arc::new(RateLimitPicker::new(
-                config.admission_rate_limit * MIB,
-            )));
-        }
         let cache = builder.build().await.map_err(|e| {
             CacheError::InvalidCacheConfig(format!("builder failed: {:?}", e)).boxed()
         })?;
@@ -426,6 +427,8 @@ where
         let insert_latency = meter.u64_histogram("insert_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
+        let hostname = std::env::var("HOSTNAME").unwrap_or("unknown".to_string());
+        let hostname_kv = KeyValue::new("hostname", hostname);
         Ok(FoyerHybridCache {
             cache,
             cache_hit,
@@ -435,6 +438,7 @@ where
             insert_latency,
             remove_latency,
             clear_latency,
+            hostname: hostname_kv,
         })
     }
 
@@ -451,38 +455,43 @@ where
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.get_latency, &[]);
+        let hostname = &[self.hostname.clone()];
+        let _stopwatch = Stopwatch::new(&self.get_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.get(key).await?.map(|v| v.value().clone());
         if res.is_some() {
-            self.cache_hit.add(1, &[]);
+            self.cache_hit.add(1, hostname);
         } else {
-            self.cache_miss.add(1, &[]);
+            self.cache_miss.add(1, hostname);
         }
         Ok(res)
     }
 
     async fn insert(&self, key: K, value: V) {
-        let _stopwatch = Stopwatch::new(&self.insert_latency, &[]);
+        let hostname = &[self.hostname.clone()];
+        let _stopwatch = Stopwatch::new(&self.insert_latency, hostname, StopWatchUnit::Millis);
         self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
-        let _stopwatch = Stopwatch::new(&self.remove_latency, &[]);
+        let hostname = &[self.hostname.clone()];
+        let _stopwatch = Stopwatch::new(&self.remove_latency, hostname, StopWatchUnit::Millis);
         self.cache.remove(key);
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
-        let _stopwatch = Stopwatch::new(&self.clear_latency, &[]);
+        let hostname = &[self.hostname.clone()];
+        let _stopwatch = Stopwatch::new(&self.clear_latency, hostname, StopWatchUnit::Millis);
         Ok(self.cache.clear().await?)
     }
 
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.obtain_latency, &[]);
+        let hostname = &[self.hostname.clone()];
+        let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.obtain(key).await?.map(|v| v.value().clone());
         if res.is_some() {
-            self.cache_hit.add(1, &[]);
+            self.cache_hit.add(1, hostname);
         } else {
-            self.cache_miss.add(1, &[]);
+            self.cache_miss.add(1, hostname);
         }
         Ok(res)
     }
@@ -513,6 +522,7 @@ where
     insert_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
+    hostname: KeyValue,
 }
 
 impl<K, V> Debug for FoyerPlainCache<K, V>
@@ -547,6 +557,8 @@ where
         let insert_latency = meter.u64_histogram("insert_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
+        let hostname = std::env::var("HOSTNAME").unwrap_or("unknown".to_string());
+        let hostname_kv = KeyValue::new("hostname", hostname);
         Ok(FoyerPlainCache {
             cache,
             cache_hit,
@@ -556,6 +568,7 @@ where
             insert_latency,
             remove_latency,
             clear_latency,
+            hostname: hostname_kv,
         })
     }
 
@@ -602,6 +615,8 @@ where
         let insert_latency = meter.u64_histogram("insert_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
+        let hostname = std::env::var("HOSTNAME").unwrap_or("unknown".to_string());
+        let hostname_kv = KeyValue::new("hostname", hostname);
         Ok(FoyerPlainCache {
             cache,
             cache_hit,
@@ -611,6 +626,7 @@ where
             insert_latency,
             remove_latency,
             clear_latency,
+            hostname: hostname_kv,
         })
     }
 }
@@ -622,39 +638,44 @@ where
     V: Clone + Send + Sync + Weighted + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.get_latency, &[]);
+        let hostname = &[self.hostname.clone()];
+        let _stopwatch = Stopwatch::new(&self.get_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.get(key).map(|v| v.value().clone());
         if res.is_some() {
-            self.cache_hit.add(1, &[]);
+            self.cache_hit.add(1, hostname);
         } else {
-            self.cache_miss.add(1, &[]);
+            self.cache_miss.add(1, hostname);
         }
         Ok(res)
     }
 
     async fn insert(&self, key: K, value: V) {
-        let _stopwatch = Stopwatch::new(&self.insert_latency, &[]);
+        let hostname = &[self.hostname.clone()];
+        let _stopwatch = Stopwatch::new(&self.insert_latency, hostname, StopWatchUnit::Millis);
         self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
-        let _stopwatch = Stopwatch::new(&self.remove_latency, &[]);
+        let hostname = &[self.hostname.clone()];
+        let _stopwatch = Stopwatch::new(&self.remove_latency, hostname, StopWatchUnit::Millis);
         self.cache.remove(key);
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
-        let _stopwatch = Stopwatch::new(&self.clear_latency, &[]);
+        let hostname = &[self.hostname.clone()];
+        let _stopwatch = Stopwatch::new(&self.clear_latency, hostname, StopWatchUnit::Millis);
         self.cache.clear();
         Ok(())
     }
 
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
-        let _stopwatch = Stopwatch::new(&self.obtain_latency, &[]);
+        let hostname = &[self.hostname.clone()];
+        let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.get(&key).map(|v| v.value().clone());
         if res.is_some() {
-            self.cache_hit.add(1, &[]);
+            self.cache_hit.add(1, hostname);
         } else {
-            self.cache_miss.add(1, &[]);
+            self.cache_miss.add(1, hostname);
         }
         Ok(res)
     }

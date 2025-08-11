@@ -9,9 +9,9 @@ from hypothesis import given, settings
 from chromadb.api import ClientAPI
 from chromadb.api.types import Embeddings, Metadatas
 from chromadb.test.conftest import (
-    reset,
     NOT_CLUSTER_ONLY,
     override_hypothesis_profile,
+    create_isolated_database,
 )
 import chromadb.test.property.strategies as strategies
 import chromadb.test.property.invariants as invariants
@@ -20,6 +20,32 @@ from chromadb.utils.batch_utils import create_batches
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+
+@given(
+    collection=collection_st,
+    record_set=strategies.recordsets(collection_st, min_size=1, max_size=5),
+)
+@settings(
+    deadline=None,
+    parent=override_hypothesis_profile(
+        normal=hypothesis.settings(max_examples=500),
+        fast=hypothesis.settings(max_examples=200),
+    ),
+    max_examples=2
+)
+def test_add_miniscule(
+    client: ClientAPI,
+    collection: strategies.Collection,
+    record_set: strategies.RecordSet,
+) -> None:
+    if (
+        client.get_settings().chroma_api_impl
+        == "chromadb.api.async_fastapi.AsyncFastAPI"
+    ):
+        pytest.skip(
+            "TODO @jai, come back and debug why CI runners fail with async + sync"
+        )
+    _test_add(client, collection, record_set, True, always_compact=True)
 
 
 # Hypothesis tends to generate smaller values so we explicitly segregate the
@@ -104,8 +130,9 @@ def _test_add(
     record_set: strategies.RecordSet,
     should_compact: bool,
     batch_ann_accuracy: bool = False,
+    always_compact: bool = False,
 ) -> None:
-    reset(client)
+    create_isolated_database(client)
 
     # TODO: Generative embedding functions
     coll = client.create_collection(
@@ -132,7 +159,7 @@ def _test_add(
     if (
         not NOT_CLUSTER_ONLY
         and should_compact
-        and len(normalized_record_set["ids"]) > 10
+        and (len(normalized_record_set["ids"]) > 10 or always_compact)
     ):
         # Wait for the model to be updated
         wait_for_version_increase(client, collection.name, initial_version)
@@ -187,6 +214,8 @@ def create_large_recordset(
 def test_add_large(
     client: ClientAPI, collection: strategies.Collection, should_compact: bool
 ) -> None:
+    create_isolated_database(client)
+
     if (
         client.get_settings().chroma_api_impl
         == "chromadb.api.async_fastapi.AsyncFastAPI"
@@ -194,7 +223,6 @@ def test_add_large(
         pytest.skip(
             "TODO @jai, come back and debug why CI runners fail with async + sync"
         )
-    reset(client)
 
     record_set = create_large_recordset(
         min_size=10000,
@@ -235,6 +263,8 @@ def test_add_large(
 def test_add_large_exceeding(
     client: ClientAPI, collection: strategies.Collection
 ) -> None:
+    create_isolated_database(client)
+
     if (
         client.get_settings().chroma_api_impl
         == "chromadb.api.async_fastapi.AsyncFastAPI"
@@ -242,7 +272,6 @@ def test_add_large_exceeding(
         pytest.skip(
             "TODO @jai, come back and debug why CI runners fail with async + sync"
         )
-    reset(client)
 
     record_set = create_large_recordset(
         min_size=client.get_max_batch_size(),
@@ -273,7 +302,6 @@ def test_out_of_order_ids(client: ClientAPI) -> None:
         pytest.skip(
             "TODO @jai, come back and debug why CI runners fail with async + sync"
         )
-    reset(client)
     ooo_ids = [
         "40",
         "05",
@@ -313,6 +341,9 @@ def test_out_of_order_ids(client: ClientAPI) -> None:
 
 def test_add_partial(client: ClientAPI) -> None:
     """Tests adding a record set with some of the fields set to None."""
+
+    create_isolated_database(client)
+
     if (
         client.get_settings().chroma_api_impl
         == "chromadb.api.async_fastapi.AsyncFastAPI"
@@ -320,7 +351,6 @@ def test_add_partial(client: ClientAPI) -> None:
         pytest.skip(
             "TODO @jai, come back and debug why CI runners fail with async + sync"
         )
-    reset(client)
 
     coll = client.create_collection("test")
     # TODO: We need to clean up the api types to support this typing

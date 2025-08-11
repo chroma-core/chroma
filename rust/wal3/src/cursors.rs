@@ -51,17 +51,23 @@ impl CursorName<'_> {
 ////////////////////////////////////////////// Witness /////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct Witness(ETag, pub Cursor);
+pub struct Witness {
+    e_tag: ETag,
+    pub cursor: Cursor,
+}
 
 impl Witness {
     /// This method constructs a witness that will likely fail, but that contains a new cursor.
     /// Useful in tests and not much else.
     pub fn default_etag_with_cursor(cursor: Cursor) -> Self {
-        Self(ETag("NO MATCH".to_string()), cursor)
+        Self {
+            e_tag: ETag("NO MATCH".to_string()),
+            cursor,
+        }
     }
 
     pub fn cursor(&self) -> &Cursor {
-        &self.1
+        &self.cursor
     }
 }
 
@@ -135,7 +141,7 @@ impl CursorStore {
         let cursor: Cursor = serde_json::from_slice(&data).map_err(|e| {
             Error::CorruptCursor(format!("Failed to deserialize cursor {}: {}", name.0, e))
         })?;
-        Ok(Some(Witness(e_tag, cursor)))
+        Ok(Some(Witness { e_tag, cursor }))
     }
 
     pub async fn init<'a>(&self, name: &CursorName<'a>, cursor: Cursor) -> Result<Witness, Error> {
@@ -151,7 +157,7 @@ impl CursorStore {
         witness: &Witness,
     ) -> Result<Witness, Error> {
         // Semaphore taken by put.
-        let options = PutOptions::if_matches(&witness.0, StorageRequestPriority::P0);
+        let options = PutOptions::if_matches(&witness.e_tag, StorageRequestPriority::P0);
         self.put(name, cursor.clone(), options).await
     }
 
@@ -179,7 +185,30 @@ impl CursorStore {
                 name.0
             )));
         };
-        Ok(Witness(e_tag, cursor))
+        Ok(Witness { e_tag, cursor })
+    }
+
+    pub async fn list(&self) -> Result<Vec<CursorName<'_>>, Error> {
+        let curdir = format!("{}/cursor/", self.prefix);
+        let paths = self
+            .storage
+            .list_prefix(&curdir, GetOptions::default())
+            .await
+            .map_err(Arc::new)?;
+        let mut cursors = vec![];
+        for path in paths {
+            if let Some(mut cursor) = path.strip_prefix(&self.prefix) {
+                cursor = cursor.trim_start_matches('/');
+                if let Some(cursor_name) = CursorName::from_path(cursor) {
+                    cursors.push(cursor_name)
+                } else {
+                    return Err(Error::CorruptCursor(format!(
+                        "do not understand cursor at {path}"
+                    )));
+                }
+            }
+        }
+        Ok(cursors)
     }
 }
 
@@ -248,8 +277,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(LogPosition::from_offset(99), witness.1.position);
-        assert_eq!(54321u64, witness.1.epoch_us);
-        assert_eq!("test-writer", witness.1.writer);
+        assert_eq!(LogPosition::from_offset(99), witness.cursor.position);
+        assert_eq!(54321u64, witness.cursor.epoch_us);
+        assert_eq!("test-writer", witness.cursor.writer);
     }
 }

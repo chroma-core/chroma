@@ -24,7 +24,7 @@ jobs:
           version: 9
           run_install: false
       - name: Setup node
-        uses: useblacksmith/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
@@ -75,7 +75,7 @@ jobs:
 
   build-windows:
     name: Build Windows bindings
-    runs-on: windows-latest
+    runs-on: 8core-32gb-windows-latest
     defaults:
       run:
         working-directory: rust/js_bindings
@@ -87,7 +87,7 @@ jobs:
           version: 9
           run_install: false
       - name: Setup node
-        uses: useblacksmith/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
@@ -140,7 +140,7 @@ jobs:
           version: 9
           run_install: false
       - name: Setup node
-        uses: useblacksmith/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
@@ -221,7 +221,7 @@ jobs:
           version: 9
           run_install: false
       - name: Setup node
-        uses: useblacksmith/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm

@@ -3,7 +3,7 @@ import React from "react";
 import InlineCode from "@/components/markdoc/inline-code";
 import CodeBlock from "@/components/markdoc/code-block";
 import TabbedUseCaseCodeBlock from "@/components/markdoc/tabbed-use-case-code-block";
-import Tab, { Tabs } from "@/components/markdoc/tabs";
+import Tab, { CustomTabs, Tabs } from "@/components/markdoc/tabs";
 import {
   Table,
   TableHeader,
@@ -17,6 +17,9 @@ import CenteredContent from "@/components/markdoc/centered-content";
 import Latex from "@/components/markdoc/latex";
 import Banner from "@/components/markdoc/banner";
 import Heading from "@/components/markdoc/markdoc-heading";
+import MarkdocImage from "@/components/markdoc/markdoc-image";
+import Accordion, { AccordionItem } from "@/components/markdoc/accordion";
+import Video from "@/components/markdoc/video";
 
 interface MarkDocConfig extends Config {
   components?: Record<string, React.FC<any>>;
@@ -92,6 +95,10 @@ const markdocConfig: MarkDocConfig = {
       render: "Tabs",
       selfClosing: false,
     },
+    CustomTabs: {
+      render: "CustomTabs",
+      selfClosing: false,
+    },
     CenteredContent: {
       render: "CenteredContent",
       selfClosing: false,
@@ -110,6 +117,64 @@ const markdocConfig: MarkDocConfig = {
       render: "Latex",
       selfClosing: false,
     },
+    MarkdocImage: {
+      render: "MarkdocImage",
+      selfClosing: true,
+      attributes: {
+        lightSrc: {
+          type: String,
+          required: true,
+        },
+        darkSrc: {
+          type: String,
+          required: true,
+        },
+        alt: {
+          type: String,
+          required: true,
+        },
+        title: {
+          type: String,
+          required: false,
+        },
+        width: {
+          type: Number,
+          required: false,
+        },
+        height: {
+          type: Number,
+          required: false,
+        },
+      },
+    },
+    Accordion: {
+      render: "Accordion",
+      selfClosing: false,
+    },
+    AccordionItem: {
+      render: "AccordionItem",
+      selfClosing: false,
+      attributes: {
+        label: {
+          type: String,
+          required: true,
+        },
+      },
+    },
+    Video: {
+      render: "Video",
+      selfClosing: true,
+      attributes: {
+        link: {
+          type: String,
+          required: true,
+        },
+        title: {
+          type: String,
+          required: true,
+        },
+      },
+    },
   },
   components: {
     InlineCode,
@@ -118,6 +183,7 @@ const markdocConfig: MarkDocConfig = {
     TabbedUseCaseCodeBlock,
     Tab,
     Tabs: Tabs,
+    CustomTabs,
     Table,
     TableHeader,
     TableBody,
@@ -128,6 +194,10 @@ const markdocConfig: MarkDocConfig = {
     Banner,
     Latex,
     Heading,
+    MarkdocImage,
+    Accordion,
+    AccordionItem,
+    Video,
   },
 };
 

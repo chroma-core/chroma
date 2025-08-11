@@ -1,8 +1,6 @@
 sysdb:
   flags:
     version-file-enabled: true
-    soft-delete-max-age: 1s
-    soft-delete-cleanup-interval: 2s
     s3-endpoint: "http://minio:9000"
     s3-access-key-id: "minio"
     s3-secret-access-key: "minio123"
@@ -26,6 +24,7 @@ queryService:
       value: 'value: "1"'
     - name: CONFIG_PATH
       value: 'value: "/tilt_config.yaml"'
+  jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
 
 compactionService:
   env:
@@ -33,3 +32,10 @@ compactionService:
       value: 'value: "1"'
     - name: CONFIG_PATH
       value: 'value: "/tilt_config.yaml"'
+  jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
+
+rustLogService:
+  replicaCount: 1
+
+garbageCollector:
+  jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"

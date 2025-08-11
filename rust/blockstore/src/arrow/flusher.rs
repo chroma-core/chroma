@@ -50,7 +50,7 @@ impl ArrowBlockfileFlusher {
         // number of futures is high.
         let mut futures = Vec::new();
         for block in &self.blocks {
-            futures.push(self.block_manager.flush(block));
+            futures.push(self.block_manager.flush(block, &self.root.prefix_path));
         }
         let num_futures = futures.len();
         // buffer_unordered hangs with 0 futures.
@@ -59,8 +59,10 @@ impl ArrowBlockfileFlusher {
             return Ok(());
         }
         tracing::debug!("Flushing {} blocks", num_futures);
+        // Flush 40 blocks at a time to reduce memory usage.
+        let num_concurrent_flushes = num_futures.min(40);
         futures::stream::iter(futures)
-            .buffer_unordered(num_futures)
+            .buffer_unordered(num_concurrent_flushes)
             .try_collect::<Vec<_>>()
             .await?;
 
@@ -78,5 +80,9 @@ impl ArrowBlockfileFlusher {
 
     pub(crate) fn num_entries(&self) -> usize {
         self.blocks.iter().fold(0, |acc, block| acc + block.len())
+    }
+
+    pub(crate) fn prefix_path(&self) -> &str {
+        &self.root.prefix_path
     }
 }

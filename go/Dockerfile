@@ -1,12 +1,22 @@
 FROM golang:bookworm AS builder
+ARG PROTOC_VERSION=31.1
 WORKDIR /build-dir
 RUN apt-get update && apt-get install -y make git bash protobuf-compiler unzip curl
 
-# Install a specific version of protoc
-RUN curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v28.2/protoc-28.2-linux-x86_64.zip && \
-    unzip protoc-28.2-linux-x86_64.zip -d /usr/local/ && \
-    rm protoc-28.2-linux-x86_64.zip && \
-    chmod +x /usr/local/bin/protoc
+RUN ARCH=$(uname -m) && \
+  if [ "$ARCH" = "x86_64" ]; then \
+    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-x86_64.zip; \
+  elif [ "$ARCH" = "aarch64" ]; then \
+    PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-aarch_64.zip; \
+  else \
+    echo "Unsupported architecture: $ARCH" && exit 1; \
+  fi && \
+  curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/$PROTOC_ZIP && \
+  unzip -o $PROTOC_ZIP -d /usr/local bin/protoc && \
+  unzip -o $PROTOC_ZIP -d /usr/local 'include/*' && \
+  rm -f $PROTOC_ZIP && \
+  chmod +x /usr/local/bin/protoc && \
+  protoc --version  # Verify installed version
 
 # Set the PATH to include Go binaries
 ENV PATH=$PATH:/root/go/bin

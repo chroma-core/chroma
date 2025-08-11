@@ -15,17 +15,17 @@ object_store = { version = "0.11", features = ["aws"] }
 
 async-trait = { workspace = true }
 futures = { workspace = true }
-parking_lot = { workspace = true }
-rand = { workspace = true}
+rand = { workspace = true }
 serde = { workspace = true }
 tempfile = { workspace = true }
 thiserror.workspace = true
 tokio = { workspace = true }
-tokio-util = { workspace = true }
 tracing = { workspace = true }
+opentelemetry = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
+chroma-tracing = { workspace = true }
 
 [dev-dependencies]
 rand_xorshift = { workspace = true }

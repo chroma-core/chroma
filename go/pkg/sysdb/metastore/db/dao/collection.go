@@ -30,7 +30,7 @@ func (s *collectionDb) DeleteAll() error {
 func (s *collectionDb) GetCollectionWithoutMetadata(collectionID *string, databaseName *string, softDeletedFlag *bool) (*dbmodel.Collection, error) {
 	var collections []*dbmodel.Collection
 	query := s.db.Table("collections").
-		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, collections.tenant, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
+		Select("collections.id, collections.name, collections.database_id, collections.is_deleted, collections.tenant, collections.version, collections.version_file_name, collections.log_position, NULLIF(collections.root_collection_id, '') AS root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("collections.id = ?", collectionID)
 
@@ -53,15 +53,47 @@ func (s *collectionDb) GetCollectionWithoutMetadata(collectionID *string, databa
 }
 
 func (s *collectionDb) GetCollectionEntries(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
-	return s.getCollections(id, name, tenantID, databaseName, limit, offset, nil)
+	ids := []string{}
+	if id != nil {
+		ids = append(ids, *id)
+	}
+	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, nil)
 }
 
-func (s *collectionDb) GetCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32) ([]*dbmodel.CollectionAndMetadata, error) {
+func (s *collectionDb) GetCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, includeSoftDeleted bool) ([]*dbmodel.CollectionAndMetadata, error) {
 	isDeleted := false
-	return s.getCollections(id, name, tenantID, databaseName, limit, offset, &isDeleted)
+	isDeletedPtr := &isDeleted
+	if includeSoftDeleted {
+		isDeletedPtr = nil
+	}
+
+	return s.getCollections(ids, name, tenantID, databaseName, limit, offset, isDeletedPtr)
 }
 
-func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string) ([]*dbmodel.CollectionToGc, error) {
+func (s *collectionDb) GetCollectionByResourceName(tenantResourceName string, databaseName string, collectionName string) (*dbmodel.CollectionAndMetadata, error) {
+	var tenant dbmodel.Tenant
+	err := s.db.Table("tenants").Where("resource_name = ?", tenantResourceName).First(&tenant).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, common.ErrCollectionNotFound
+		}
+		return nil, err
+	}
+
+	isDeleted := false
+	isDeletedPtr := &isDeleted
+
+	collections, err := s.getCollections(nil, &collectionName, tenant.ID, databaseName, nil, nil, isDeletedPtr)
+	if err != nil {
+		return nil, err
+	}
+	if len(collections) == 0 {
+		return nil, common.ErrCollectionNotFound
+	}
+	return collections[0], nil
+}
+
+func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64, tenantID *string, minVersionsIfAlive *uint64) ([]*dbmodel.CollectionToGc, error) {
 	// There are three types of collections:
 	// 1. Regular: a collection created by a normal call to create_collection(). Does not have a root_collection_id or a lineage_file_name.
 	// 2. Root of fork tree: a collection created by a call to create_collection() which was later the source of a fork with fork(). Has a lineage_file_name.
@@ -70,7 +102,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	// For the purposes of this method, we group by fork "trees". A fork tree is a root collection and all its forks (or, in the case of regular collections, a single collection). For every fork tree, we check if at least one collection in the tree meets the GC requirements. If so, we return the root collection of the tree. We ignore forks in the response as the garbage collector will GC forks when run on the root collection.
 
 	sub := s.read_db.Table("collections").
-		Select("COALESCE(NULLIF(root_collection_id, ''), id) AS id, MIN(oldest_version_ts) AS min_oldest_version_ts").
+		Select("COALESCE(NULLIF(root_collection_id, ''), id) AS id, MIN(oldest_version_ts) AS min_oldest_version_ts, MAX(num_versions) AS max_num_versions, BOOL_OR(is_deleted) AS any_deleted").
 		Group("COALESCE(NULLIF(root_collection_id, ''), id)").
 		Where("version_file_name IS NOT NULL").
 		Where("version_file_name != ''")
@@ -90,7 +122,11 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 		query = query.Where("oldest_version_ts < ?", cutoffTime)
 	}
 
-	query = query.Order("num_versions DESC")
+	if minVersionsIfAlive != nil {
+		query = query.Where("sub.max_num_versions >= ? OR sub.any_deleted = true", minVersionsIfAlive)
+	}
+
+	query = query.Order("sub.max_num_versions DESC")
 
 	// Apply limit only if provided
 	if limit != nil {
@@ -106,7 +142,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	return collections, nil
 }
 
-func (s *collectionDb) getCollections(id *string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
+func (s *collectionDb) getCollections(ids []string, name *string, tenantID string, databaseName string, limit *int32, offset *int32, is_deleted *bool) (collectionWithMetdata []*dbmodel.CollectionAndMetadata, err error) {
 	type Result struct {
 		// Collection fields
 		CollectionId               string     `gorm:"column:collection_id"`
@@ -151,8 +187,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 	if tenantID != "" {
 		query = query.Where("databases.tenant_id = ?", tenantID)
 	}
-	if id != nil {
-		query = query.Where("collections.id = ?", *id)
+	if ids != nil {
+		query = query.Where("collections.id IN ?", ids)
 	}
 	if name != nil {
 		query = query.Where("collections.name = ?", *name)
@@ -210,6 +246,8 @@ func (s *collectionDb) getCollections(id *string, name *string, tenantID string,
 				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
 				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
 				Tenant:                     r.Tenant,
+				UpdatedAt:                  *r.CollectionUpdatedAt,
+				CreatedAt:                  *r.CollectionCreatedAt,
 			}
 			if r.CollectionTs != nil {
 				col.Ts = *r.CollectionTs
@@ -327,7 +365,11 @@ func (s *collectionDb) GetCollectionSize(id string) (uint64, error) {
 
 func (s *collectionDb) GetSoftDeletedCollections(collectionID *string, tenantID string, databaseName string, limit int32) ([]*dbmodel.CollectionAndMetadata, error) {
 	isDeleted := true
-	return s.getCollections(collectionID, nil, tenantID, databaseName, &limit, nil, &isDeleted)
+	ids := ([]string)(nil)
+	if collectionID != nil {
+		ids = []string{*collectionID}
+	}
+	return s.getCollections(ids, nil, tenantID, databaseName, &limit, nil, &isDeleted)
 }
 
 // NOTE: This is the only method to do a hard delete of a single collection.
@@ -386,6 +428,9 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 	if in.Name != nil {
 		ret["name"] = *in.Name
 	}
+	if in.ConfigurationJsonStr != nil {
+		ret["configuration_json_str"] = *in.ConfigurationJsonStr
+	}
 	if in.Dimension != nil {
 		ret["dimension"] = *in.Dimension
 	}
@@ -428,6 +473,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 	totalRecordsPostCompaction uint64,
 	sizeBytesPostCompaction uint64,
 	lastCompactionTimeSecs uint64,
+	numVersions uint64,
 ) (int64, error) {
 	// TODO(rohitcp): Investigate if we need to hold the lock using "UPDATE"
 	// strength, or if we can use "SELECT FOR UPDATE" or some other less
@@ -445,6 +491,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 			"total_records_post_compaction": totalRecordsPostCompaction,
 			"size_bytes_post_compaction":    sizeBytesPostCompaction,
 			"last_compaction_time_secs":     lastCompactionTimeSecs,
+			"num_versions":                  numVersions,
 		})
 	if result.Error != nil {
 		return 0, result.Error
@@ -572,6 +619,23 @@ func (s *collectionDb) BatchGetCollectionVersionFilePaths(collectionIDs []string
 	result := make(map[string]string)
 	for _, collection := range collections {
 		result[collection.ID] = collection.VersionFileName
+	}
+	return result, nil
+}
+
+func (s *collectionDb) BatchGetCollectionSoftDeleteStatus(collectionIDs []string) (map[string]bool, error) {
+	var collections []dbmodel.Collection
+	err := s.read_db.Model(&dbmodel.Collection{}).
+		Select("id, is_deleted").
+		Where("id IN ?", collectionIDs).
+		Find(&collections).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]bool)
+	for _, collection := range collections {
+		result[collection.ID] = collection.IsDeleted
 	}
 	return result, nil
 }

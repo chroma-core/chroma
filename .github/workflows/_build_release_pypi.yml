@@ -67,7 +67,7 @@ jobs:
         platform:
           - { os: linux, runner: blacksmith-4vcpu-ubuntu-2204, target: x86_64 }
           - { os: linux, runner: blacksmith-4vcpu-ubuntu-2204-arm, target: aarch64 }
-          - { os: windows, runner: windows-latest, target: x64 }
+          - { os: windows, runner: 8core-32gb-windows-latest, target: x64 }
           - { os: macos, runner: macos-14, target: x86_64 }
           - { os: macos, runner: macos-14, target: aarch64 }
 
@@ -78,18 +78,8 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # On Windows, we want to set up Python with the correct architecture
-      - name: Set up Python on Windows
-        if: ${{ matrix.platform.os == 'windows' }}
-        # Blacksmith does not currently support windows, so we use the official action
+      - name: Set up Python
         uses: actions/setup-python@v5
-        with:
-          python-version: 3.x
-          architecture: ${{ matrix.platform.target }}
-
-      - name: Set up Python on non-Windows
-        if: ${{ matrix.platform.os != 'windows' }}
-        uses: useblacksmith/setup-python@v6
         with:
           python-version: 3.x
 

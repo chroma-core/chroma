@@ -78,7 +78,8 @@ export const chromaFetch: FetchAPI = async (
         case 422:
           if (
             respBody?.message &&
-            respBody?.message.startsWith("Quota exceeded")
+            (respBody?.message.startsWith("Quota exceeded") ||
+              respBody?.message.startsWith("Billing limit exceeded"))
           ) {
             throw new ChromaQuotaExceededError(respBody?.message);
           }

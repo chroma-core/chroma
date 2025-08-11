@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{any::Any, future::Future, sync::Arc};
 
 use self::config::StorageConfig;
 use admissioncontrolleds3::StorageRequestPriority;
@@ -16,7 +16,7 @@ use local::LocalStorage;
 use tempfile::TempDir;
 use thiserror::Error;
 
-pub use s3::s3_client_for_test_with_new_bucket;
+pub use s3::{s3_client_for_test_with_new_bucket, s3_config_for_localhost_with_bucket_name};
 
 /// A StorageError captures all kinds of errors that can come from storage.
 //
@@ -223,10 +223,45 @@ impl Storage {
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
             Storage::ObjectStore(object_store) => Ok(object_store.get(key).await?),
-            Storage::S3(s3) => s3.get(key).await,
+            Storage::S3(s3) => s3.get(key, options).await,
             Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage.get(key, options).await
+            }
+        }
+    }
+
+    pub async fn fetch<FetchReturn, FetchFn, FetchFut>(
+        &self,
+        key: &str,
+        options: GetOptions,
+        fetch_fn: FetchFn,
+    ) -> Result<(FetchReturn, Option<ETag>), StorageError>
+    where
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut + Send + 'static,
+        FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
+        FetchReturn: Clone + Any + Sync + Send,
+    {
+        match self {
+            Storage::ObjectStore(object_store) => {
+                let res = object_store.get_with_e_tag(key).await?;
+                let fetch_result = fetch_fn(Ok(res.0)).await?;
+                Ok((fetch_result, res.1))
+            }
+            Storage::S3(s3) => {
+                let res = s3.get_with_e_tag(key).await?;
+                let fetch_result = fetch_fn(Ok(res.0)).await?;
+                Ok((fetch_result, res.1))
+            }
+            Storage::Local(local) => {
+                let res = local.get_with_e_tag(key).await?;
+                let fetch_result = fetch_fn(Ok(res.0)).await?;
+                Ok((fetch_result, res.1))
+            }
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                admission_controlled_storage
+                    .fetch(key, options, fetch_fn)
+                    .await
             }
         }
     }
@@ -243,23 +278,6 @@ impl Storage {
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage
                     .get_with_e_tag(key, options)
-                    .await
-            }
-        }
-    }
-
-    pub async fn get_parallel(
-        &self,
-        key: &str,
-        options: GetOptions,
-    ) -> Result<Arc<Vec<u8>>, StorageError> {
-        match self {
-            Storage::ObjectStore(object_store) => object_store.get_parallel(key).await,
-            Storage::S3(s3) => s3.get_parallel(key).await.map(|res| res.0),
-            Storage::Local(local) => local.get(key).await,
-            Storage::AdmissionControlledS3(admission_controlled_storage) => {
-                admission_controlled_storage
-                    .get_parallel(key.to_string(), options)
                     .await
             }
         }
@@ -293,12 +311,38 @@ impl Storage {
         }
     }
 
-    pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
+    pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
         match self {
-            Storage::ObjectStore(object_store) => object_store.delete(key).await,
-            Storage::S3(s3) => s3.delete(key).await,
-            Storage::Local(local) => local.delete(key).await,
-            Storage::AdmissionControlledS3(_) => Err(StorageError::NotImplemented),
+            Storage::ObjectStore(object_store) => {
+                if options.if_match.is_some() {
+                    return Err(StorageError::Message {
+                        message: "if match not supported for object store backend".to_string(),
+                    });
+                }
+                object_store.delete(key).await
+            }
+            Storage::S3(s3) => s3.delete(key, options).await,
+            Storage::Local(local) => {
+                if options.if_match.is_some() {
+                    return Err(StorageError::Message {
+                        message: "if match not supported for object store backend".to_string(),
+                    });
+                }
+                local.delete(key).await
+            }
+            Storage::AdmissionControlledS3(ac) => ac.delete(key, options).await,
+        }
+    }
+
+    pub async fn delete_many<S: AsRef<str> + std::fmt::Debug, I: IntoIterator<Item = S>>(
+        &self,
+        keys: I,
+    ) -> Result<crate::s3::DeletedObjects, StorageError> {
+        match self {
+            Storage::ObjectStore(_) => Err(StorageError::NotImplemented),
+            Storage::S3(s3) => s3.delete_many(keys).await,
+            Storage::Local(local) => local.delete_many(keys).await,
+            Storage::AdmissionControlledS3(ac) => ac.delete_many(keys).await,
         }
     }
 
@@ -311,16 +355,25 @@ impl Storage {
         }
     }
 
-    pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
+    pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        match self {
+            Storage::ObjectStore(_) => Err(StorageError::NotImplemented),
+            Storage::S3(s3) => s3.copy(src_key, dst_key).await,
+            Storage::Local(local) => local.copy(src_key, dst_key).await,
+            Storage::AdmissionControlledS3(ac) => ac.copy(src_key, dst_key).await,
+        }
+    }
+
+    pub async fn list_prefix(
+        &self,
+        prefix: &str,
+        options: GetOptions,
+    ) -> Result<Vec<String>, StorageError> {
         match self {
             Storage::Local(local) => local.list_prefix(prefix).await,
-            Storage::S3(_) => {
-                unimplemented!("list_prefix not implemented for S3")
-            }
+            Storage::S3(s3) => s3.list_prefix(prefix).await,
             Storage::ObjectStore(object_store) => object_store.list_prefix(prefix).await,
-            Storage::AdmissionControlledS3(_) => {
-                unimplemented!("list_prefix not implemented for AdmissionControlledS3")
-            }
+            Storage::AdmissionControlledS3(acs3) => acs3.list_prefix(prefix, options).await,
         }
     }
 }
@@ -351,14 +404,13 @@ impl Configurable<StorageConfig> for Storage {
     }
 }
 
-pub fn test_storage() -> Storage {
-    Storage::Local(LocalStorage::new(
-        TempDir::new()
-            .expect("Should be able to create a temporary directory.")
-            .into_path()
-            .to_str()
-            .expect("Should be able to convert temporary directory path to string"),
-    ))
+pub fn test_storage() -> (TempDir, Storage) {
+    let temp_dir = TempDir::new().expect("Should be able to create a temporary directory.");
+    let storage =
+        Storage::Local(LocalStorage::new(temp_dir.path().to_str().expect(
+            "Should be able to convert temporary directory path to string",
+        )));
+    (temp_dir, storage)
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -412,6 +464,9 @@ impl PutOptions {
 pub struct GetOptions {
     priority: StorageRequestPriority,
     requires_strong_consistency: bool,
+    // If the underlying storage system would benefit from parallel requests
+    // this requests parallel loading of the object.
+    request_parallelism: bool,
 }
 
 impl GetOptions {
@@ -419,12 +474,41 @@ impl GetOptions {
         Self {
             priority,
             requires_strong_consistency: false,
+            request_parallelism: false,
         }
     }
 
     pub fn with_strong_consistency(mut self) -> Self {
         self.requires_strong_consistency = true;
         self
+    }
+
+    pub fn with_parallelism(mut self) -> Self {
+        self.request_parallelism = true;
+        self
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct DeleteOptions {
+    if_match: Option<ETag>,
+    priority: StorageRequestPriority,
+}
+
+impl DeleteOptions {
+    pub fn if_matches(e_tag: &ETag, priority: StorageRequestPriority) -> Self {
+        Self::new(Some(e_tag.clone()), priority)
+    }
+
+    pub fn with_priority(priority: StorageRequestPriority) -> Self {
+        Self {
+            priority,
+            ..Default::default()
+        }
+    }
+
+    fn new(if_match: Option<ETag>, priority: StorageRequestPriority) -> DeleteOptions {
+        DeleteOptions { if_match, priority }
     }
 }
 

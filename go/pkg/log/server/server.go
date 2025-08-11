@@ -8,9 +8,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/types"
-	trace_log "github.com/pingcap/log"
 	"google.golang.org/protobuf/proto"
-	"go.uber.org/zap"
 )
 
 type logServer struct {
@@ -56,16 +54,17 @@ func (s *logServer) ScoutLogs(ctx context.Context, req *logservicepb.ScoutLogsRe
 	}
 	var start int64
 	var limit int64
-	start, limit, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
+	var isSealed bool
+	start, limit, isSealed, err = s.lr.GetBoundsForCollection(ctx, collectionID.String())
 	if err != nil {
 		return
 	}
 	// +1 to convert from the (] bound to a [) bound.
 	res = &logservicepb.ScoutLogsResponse{
 		FirstUncompactedRecordOffset: int64(start + 1),
-		FirstUninsertedRecordOffset: int64(limit + 1),
+		FirstUninsertedRecordOffset:  int64(limit + 1),
+		IsSealed:                     isSealed,
 	}
-	trace_log.Info("Scouted Logs", zap.Int64("start", int64(start + 1)), zap.Int64("limit", int64(limit + 1)), zap.String("collectionId", req.CollectionId))
 	return
 }
 
@@ -154,6 +153,10 @@ func (s *logServer) UpdateCollectionLogOffset(ctx context.Context, req *logservi
 	return
 }
 
+func (s *logServer) RollbackCollectionLogOffset(ctx context.Context, req *logservicepb.UpdateCollectionLogOffsetRequest) (res *logservicepb.UpdateCollectionLogOffsetResponse, err error) {
+	return
+}
+
 func (s *logServer) PurgeDirtyForCollection(ctx context.Context, req *logservicepb.PurgeDirtyForCollectionRequest) (res *logservicepb.PurgeDirtyForCollectionResponse, err error) {
 	return
 }
@@ -177,6 +180,18 @@ func (s *logServer) MigrateLog(ctx context.Context, req *logservicepb.MigrateLog
 }
 
 func (s *logServer) InspectLogState(ctx context.Context, req *logservicepb.InspectLogStateRequest) (res *logservicepb.InspectLogStateResponse, err error) {
+	return
+}
+
+func (s *logServer) ScrubLog(ctx context.Context, req *logservicepb.ScrubLogRequest) (res *logservicepb.ScrubLogResponse, err error) {
+	return
+}
+
+func (s *logServer) GarbageCollectPhase2(ctx context.Context, req *logservicepb.GarbageCollectPhase2Request) (res *logservicepb.GarbageCollectPhase2Response, err error) {
+	return
+}
+
+func (s *logServer) PurgeFromCache(ctx context.Context, req *logservicepb.PurgeFromCacheRequest) (res *logservicepb.PurgeFromCacheResponse, err error) {
 	return
 }
 

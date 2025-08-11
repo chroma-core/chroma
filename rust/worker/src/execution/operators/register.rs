@@ -99,6 +99,13 @@ impl ChromaError for RegisterError {
             RegisterError::UpdateLogOffsetError(e) => e.code(),
         }
     }
+
+    fn should_trace_error(&self) -> bool {
+        match self {
+            RegisterError::FlushCompactionError(e) => e.should_trace_error(),
+            RegisterError::UpdateLogOffsetError(e) => e.should_trace_error(),
+        }
+    }
 }
 
 #[async_trait]
@@ -149,7 +156,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
 mod tests {
     use super::*;
     use chroma_log::in_memory_log::InMemoryLog;
-    use chroma_sysdb::TestSysDb;
+    use chroma_sysdb::{GetCollectionsOptions, TestSysDb};
     use chroma_types::{Collection, Segment, SegmentScope, SegmentType, SegmentUuid};
     use std::collections::HashMap;
     use std::str::FromStr;
@@ -273,7 +280,10 @@ mod tests {
         );
 
         let collections = sysdb
-            .get_collections(Some(collection_uuid_1), None, None, None, None, 0)
+            .get_collections(GetCollectionsOptions {
+                collection_id: Some(collection_uuid_1),
+                ..Default::default()
+            })
             .await;
 
         assert!(collections.is_ok());
@@ -305,5 +315,14 @@ mod tests {
         assert_eq!(segment_1.file_path, file_path_3);
         let segment_2 = segments.iter().find(|s| s.id == segment_id_2).unwrap();
         assert_eq!(segment_2.file_path, file_path_4);
+    }
+
+    #[test]
+    fn flush_compaction_error() {
+        let fce = FlushCompactionError::FailedToFlushCompaction(
+            tonic::Status::failed_precondition("collection soft deleted"),
+        );
+        let register: RegisterError = fce.into();
+        assert!(!register.should_trace_error());
     }
 }

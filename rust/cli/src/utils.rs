@@ -34,6 +34,9 @@ pub const CHROMA_DIR: &str = ".chroma";
 pub const CREDENTIALS_FILE: &str = "credentials";
 const CONFIG_FILE: &str = "config.json";
 pub const SELECTION_LIMIT: usize = 5;
+pub const CHROMA_API_KEY_ENV_VAR: &str = "CHROMA_API_KEY";
+pub const CHROMA_TENANT_ENV_VAR: &str = "CHROMA_TENANT";
+pub const CHROMA_DATABASE_ENV_VAR: &str = "CHROMA_DATABASE";
 
 #[derive(Debug, Error)]
 pub enum CliError {
@@ -356,7 +359,7 @@ pub async fn standup_local_chroma(
 ) -> Result<(AdminClient, JoinHandle<()>), CliError> {
     let host = format!("http://localhost:{}", config.port);
     let handle = spawn(async move {
-        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config).await;
+        frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
     });
     let admin_client = AdminClient::local(host);
     admin_client

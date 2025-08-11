@@ -23,6 +23,8 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Ollama Embeddings](./embedding-models/ollama)                          | ✓      | ✓          |
 | [Cloudflare Workers AI](./embedding-models/cloudflare-workers-ai.md)    | ✓      | ✓          |
 | [Together AI](./embedding-models/together-ai.md)                        | ✓      | ✓          |
+| [Mistral](./embedding-models/mistral.md)                                | ✓      | ✓          |
+| [Morph](./embedding-models/morph.md)                                    | ✓      | ✓          |
 
 ---
 
@@ -35,15 +37,17 @@ We welcome pull requests to add new Integrations to the community.
 {% special_table %}
 {% /special_table %}
 
-|                                         | Python | JS           |
-| --------------------------------------- | ------ | ------------ |
+|                                             | Python | JS           |
+| ------------------------------------------- | ------ | ------------ |
+| [Anthropic MCP](./frameworks/anthropic-mcp) | ✓      | Coming Soon! |
+| [Braintrust](./frameworks/braintrust)       | ✓      | ✓            |
 | [Chonkie](./frameworks/chonkie)        | ✓      | Coming Soon! |
-| [DeepEval](./frameworks/deepeval)       | ✓      | -            |
-| [Langchain](./frameworks/langchain)     | ✓      | ✓            |
-| [LlamaIndex](./frameworks/llamaindex)   | ✓      | ✓            |
-| [Braintrust](./frameworks/braintrust)   | ✓      | ✓            |
-| [OpenLLMetry](./frameworks/openllmetry) | ✓      | Coming Soon! |
-| [Streamlit](./frameworks/streamlit)     | ✓      | -            |
-| [Haystack](./frameworks/haystack)       | ✓      | -            |
-| [OpenLIT](./frameworks/openlit)         | ✓      | Coming Soon! |
-| [Anthropic MCP](./frameworks/anthropic-mcp) | ✓ | Coming Soon! |
+| [DeepEval](./frameworks/deepeval)           | ✓      | -            |
+| [Haystack](./frameworks/haystack)           | ✓      | -            |
+| [Langchain](./frameworks/langchain)         | ✓      | ✓            |
+| [LlamaIndex](./frameworks/llamaindex)       | ✓      | ✓            |
+| [OpenLIT](./frameworks/openlit)             | ✓      | Coming Soon! |
+| [OpenLLMetry](./frameworks/openllmetry)     | ✓      | Coming Soon! |
+| [Streamlit](./frameworks/streamlit)         | ✓      | -            |
+| [VoltAgent](./frameworks/voltagent)         | -      | ✓            |
+

@@ -12,14 +12,8 @@ serde_json = { workspace = true }
 futures = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
-tracing-opentelemetry = { workspace = true }
-tracing-subscriber = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
 tonic = { workspace = true }
 uuid = { workspace = true }
 parking_lot = { workspace = true }

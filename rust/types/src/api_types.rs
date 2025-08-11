@@ -1,5 +1,5 @@
 use crate::collection_configuration::InternalCollectionConfiguration;
-use crate::collection_configuration::UpdateCollectionConfiguration;
+use crate::collection_configuration::InternalUpdateCollectionConfiguration;
 use crate::error::QueryConversionError;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
@@ -20,7 +20,6 @@ use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
 use crate::UpdateMetadata;
 use crate::Where;
-use chroma_config::assignment::rendezvous_hash::AssignmentError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
@@ -82,7 +81,7 @@ impl ChromaError for GetCollectionWithSegmentsError {
             GetCollectionWithSegmentsError::CollectionConversionError(
                 collection_conversion_error,
             ) => collection_conversion_error.code(),
-            GetCollectionWithSegmentsError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            GetCollectionWithSegmentsError::DuplicateSegment => ErrorCodes::Internal,
             GetCollectionWithSegmentsError::Field(_) => ErrorCodes::FailedPrecondition,
             GetCollectionWithSegmentsError::SegmentConversionError(segment_conversion_error) => {
                 segment_conversion_error.code()
@@ -114,6 +113,23 @@ impl ChromaError for BatchGetCollectionVersionFilePathsError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum BatchGetCollectionSoftDeleteStatusError {
+    #[error("Grpc error: {0}")]
+    Grpc(#[from] Status),
+    #[error("Could not parse UUID from string {1}: {0}")]
+    Uuid(uuid::Error, String),
+}
+
+impl ChromaError for BatchGetCollectionSoftDeleteStatusError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            BatchGetCollectionSoftDeleteStatusError::Grpc(status) => status.code().into(),
+            BatchGetCollectionSoftDeleteStatusError::Uuid(_, _) => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 #[derive(Serialize, ToSchema)]
 pub struct ResetResponse {}
 
@@ -140,6 +156,7 @@ impl ChromaError for ResetError {
 #[derive(Serialize, ToSchema)]
 pub struct ChecklistResponse {
     pub max_batch_size: u32,
+    pub supports_base64_encoding: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -227,6 +244,7 @@ impl GetTenantRequest {
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
+    pub resource_name: Option<String>,
 }
 
 #[cfg(feature = "pyo3")]
@@ -235,6 +253,11 @@ impl GetTenantResponse {
     #[getter]
     pub fn name(&self) -> &String {
         &self.name
+    }
+
+    #[getter]
+    pub fn resource_name(&self) -> Option<String> {
+        self.resource_name.clone()
     }
 }
 
@@ -251,6 +274,55 @@ impl ChromaError for GetTenantError {
         match self {
             GetTenantError::Internal(err) => err.code(),
             GetTenantError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
+#[non_exhaustive]
+#[derive(Validate, Serialize, ToSchema)]
+pub struct UpdateTenantRequest {
+    pub tenant_id: String,
+    pub resource_name: String,
+}
+
+impl UpdateTenantRequest {
+    pub fn try_new(
+        tenant_id: String,
+        resource_name: String,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            resource_name,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Serialize, ToSchema)]
+#[cfg_attr(feature = "pyo3", pyo3::pyclass)]
+pub struct UpdateTenantResponse {}
+
+#[cfg(feature = "pyo3")]
+#[pyo3::pymethods]
+impl UpdateTenantResponse {}
+
+#[derive(Error, Debug)]
+pub enum UpdateTenantError {
+    #[error("Failed to set resource name")]
+    FailedToSetResourceName(#[from] tonic::Status),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Tenant [{0}] not found")]
+    NotFound(String),
+}
+
+impl ChromaError for UpdateTenantError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            UpdateTenantError::FailedToSetResourceName(_) => ErrorCodes::AlreadyExists,
+            UpdateTenantError::Internal(err) => err.code(),
+            UpdateTenantError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }
@@ -460,6 +532,20 @@ impl ChromaError for DeleteDatabaseError {
     }
 }
 
+#[derive(Debug, Error)]
+pub enum FinishDatabaseDeletionError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for FinishDatabaseDeletionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            FinishDatabaseDeletionError::Internal(err) => err.code(),
+        }
+    }
+}
+
 #[non_exhaustive]
 #[derive(Validate, Debug, Serialize, ToSchema)]
 pub struct ListCollectionsRequest {
@@ -616,6 +702,8 @@ pub enum CreateCollectionError {
     SpannNotImplemented,
     #[error("HNSW is not supported on this platform")]
     HnswNotSupported,
+    #[error("Failed to parse db id")]
+    DatabaseIdParseError,
 }
 
 impl ChromaError for CreateCollectionError {
@@ -632,6 +720,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::Aborted(_) => ErrorCodes::Aborted,
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
+            CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
         }
     }
 }
@@ -658,6 +747,8 @@ pub enum GetCollectionsError {
     Configuration(#[from] serde_json::Error),
     #[error("Could not deserialize collection ID")]
     CollectionId(#[from] uuid::Error),
+    #[error("Could not deserialize database ID")]
+    DatabaseId,
 }
 
 impl ChromaError for GetCollectionsError {
@@ -666,6 +757,7 @@ impl ChromaError for GetCollectionsError {
             GetCollectionsError::Internal(err) => err.code(),
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
+            GetCollectionsError::DatabaseId => ErrorCodes::Internal,
         }
     }
 }
@@ -684,7 +776,7 @@ pub struct UpdateCollectionRequest {
     pub new_name: Option<String>,
     #[validate(custom(function = "validate_non_empty_collection_update_metadata"))]
     pub new_metadata: Option<CollectionMetadataUpdate>,
-    pub new_configuration: Option<UpdateCollectionConfiguration>,
+    pub new_configuration: Option<InternalUpdateCollectionConfiguration>,
 }
 
 impl UpdateCollectionRequest {
@@ -692,7 +784,7 @@ impl UpdateCollectionRequest {
         collection_id: CollectionUuid,
         new_name: Option<String>,
         new_metadata: Option<CollectionMetadataUpdate>,
-        new_configuration: Option<UpdateCollectionConfiguration>,
+        new_configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             collection_id,
@@ -849,7 +941,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::CollectionConversionError(collection_conversion_error) => {
                 collection_conversion_error.code()
             }
-            ForkCollectionError::DuplicateSegment => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::DuplicateSegment => ErrorCodes::Internal,
             ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
             ForkCollectionError::Internal(chroma_error) => chroma_error.code(),
@@ -930,7 +1022,8 @@ pub struct AddCollectionRecordsRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
-    pub embeddings: Option<Vec<Vec<f32>>>,
+    #[validate(custom(function = "validate_embeddings"))]
+    pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<Metadata>>>,
@@ -943,7 +1036,7 @@ impl AddCollectionRecordsRequest {
         database_name: String,
         collection_id: CollectionUuid,
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
@@ -961,6 +1054,14 @@ impl AddCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+}
+
+fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
+    if embeddings.iter().any(|e| e.is_empty()) {
+        return Err(ValidationError::new("embedding_minimum_dimensions")
+            .with_message("Each embedding must have at least 1 dimension".into()));
+    }
+    Ok(())
 }
 
 #[derive(Serialize, ToSchema, Default, Deserialize)]
@@ -1057,7 +1158,8 @@ pub struct UpsertCollectionRecordsRequest {
     pub database_name: String,
     pub collection_id: CollectionUuid,
     pub ids: Vec<String>,
-    pub embeddings: Option<Vec<Vec<f32>>>,
+    #[validate(custom(function = "validate_embeddings"))]
+    pub embeddings: Vec<Vec<f32>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
     pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
@@ -1070,7 +1172,7 @@ impl UpsertCollectionRecordsRequest {
         database_name: String,
         collection_id: CollectionUuid,
         ids: Vec<String>,
-        embeddings: Option<Vec<Vec<f32>>>,
+        embeddings: Vec<Vec<f32>>,
         documents: Option<Vec<Option<String>>>,
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
@@ -1689,11 +1791,12 @@ impl ChromaError for QueryError {
 #[derive(Serialize, ToSchema)]
 pub struct HealthCheckResponse {
     pub is_executor_ready: bool,
+    pub is_log_client_ready: bool,
 }
 
 impl HealthCheckResponse {
     pub fn get_status_code(&self) -> tonic::Code {
-        if self.is_executor_ready {
+        if self.is_executor_ready && self.is_log_client_ready {
             tonic::Code::Ok
         } else {
             tonic::Code::Unavailable
@@ -1703,14 +1806,10 @@ impl HealthCheckResponse {
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
-    #[error("Assignment error: {0}")]
-    AssignmentError(#[from] AssignmentError),
     #[error("Error converting: {0}")]
     Conversion(#[from] QueryConversionError),
     #[error("Error converting plan to proto: {0}")]
     PlanToProto(#[from] PlanToProtoError),
-    #[error("Memberlist is empty")]
-    EmptyMemberlist,
     #[error(transparent)]
     Grpc(#[from] Status),
     #[error("Inconsistent data")]
@@ -1719,8 +1818,6 @@ pub enum ExecutorError {
     CollectionMissingHnswConfiguration,
     #[error("Internal error: {0}")]
     Internal(Box<dyn ChromaError>),
-    #[error("No client found for node: {0}")]
-    NoClientFound(String),
     #[error("Error sending backfill request to compactor: {0}")]
     BackfillError(Box<dyn ChromaError>),
 }
@@ -1728,15 +1825,12 @@ pub enum ExecutorError {
 impl ChromaError for ExecutorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ExecutorError::AssignmentError(_) => ErrorCodes::Internal,
             ExecutorError::Conversion(_) => ErrorCodes::InvalidArgument,
             ExecutorError::PlanToProto(_) => ErrorCodes::Internal,
-            ExecutorError::EmptyMemberlist => ErrorCodes::Internal,
             ExecutorError::Grpc(e) => e.code().into(),
             ExecutorError::InconsistentData => ErrorCodes::Internal,
             ExecutorError::CollectionMissingHnswConfiguration => ErrorCodes::Internal,
             ExecutorError::Internal(e) => e.code(),
-            ExecutorError::NoClientFound(_) => ErrorCodes::Internal,
             ExecutorError::BackfillError(e) => e.code(),
         }
     }

@@ -16,6 +16,7 @@ struct ManagerState {
         Vec<Vec<u8>>,
         tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
     )>,
+    tearing_down: bool,
 }
 
 impl ManagerState {
@@ -58,6 +59,14 @@ impl ManagerState {
     }
 }
 
+impl Drop for ManagerState {
+    fn drop(&mut self) {
+        for (_, notify) in std::mem::take(&mut self.enqueued).into_iter() {
+            let _ = notify.send(Err(Error::LogContentionRetry));
+        }
+    }
+}
+
 /////////////////////////////////////////// BatchManager ///////////////////////////////////////////
 
 #[derive(Debug)]
@@ -77,6 +86,7 @@ impl BatchManager {
                 next_write,
                 writers_active: 0,
                 enqueued: Vec::new(),
+                tearing_down: false,
             }),
             write_finished: tokio::sync::Notify::new(),
         })
@@ -89,8 +99,12 @@ impl BatchManager {
     ) {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
-        if state.backoff {
+        if state.tearing_down {
+            let _ = tx.send(Err(Error::LogContentionRetry));
+            self.write_finished.notify_one();
+        } else if state.backoff {
             let _ = tx.send(Err(Error::Backoff));
+            self.write_finished.notify_one();
         } else {
             state.enqueued.push((messages, tx));
         }
@@ -98,6 +112,10 @@ impl BatchManager {
 
     pub async fn wait_for_writable(&self) {
         self.write_finished.notified().await;
+    }
+
+    pub fn pump_write_finished(&self) {
+        self.write_finished.notify_one();
     }
 
     pub fn until_next_time(&self) -> Duration {
@@ -128,6 +146,13 @@ impl BatchManager {
     > {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
+
+        // We're shutting down.  Throw the work away.
+        if state.tearing_down {
+            self.write_finished.notify_one();
+            return Ok(None);
+        }
+
         // If there is no work, there is no notify.
         if state.enqueued.is_empty() {
             // No work, no notify.
@@ -166,7 +191,7 @@ impl BatchManager {
         let Some((fragment_seq_no, log_position)) =
             state.select_for_write(&self.options, manifest_manager, acc_count)?
         else {
-            // No fragment can be written at this time.
+            // Cannot yet select for write.  Notify will come from the timeout background is on.
             return Ok(None);
         };
         let mut work = std::mem::take(&mut state.enqueued);
@@ -188,6 +213,32 @@ impl BatchManager {
     pub fn finish_write(&self) {
         self.state.lock().unwrap().finish_write();
         self.write_finished.notify_one();
+    }
+
+    pub fn shutdown(&self) {
+        let enqueued = {
+            let mut state = self.state.lock().unwrap();
+            state.tearing_down = true;
+            std::mem::take(&mut state.enqueued)
+        };
+        for (_, tx) in enqueued {
+            let _ = tx.send(Err(Error::LogContentionRetry));
+        }
+    }
+
+    pub fn count_waiters(&self) -> usize {
+        let state = self.state.lock().unwrap();
+        state.enqueued.len()
+    }
+
+    pub fn debug_dump(&self) -> String {
+        let mut output = "[batch manager]\n".to_string();
+        let state = self.state.lock().unwrap();
+        output += &format!("backoff: {:?}\n", state.backoff);
+        output += &format!("next_write: {:?}\n", state.next_write);
+        output += &format!("writers_active: {:?}\n", state.writers_active);
+        output += &format!("enqueued: {}\n", state.enqueued.len());
+        output
     }
 }
 

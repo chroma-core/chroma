@@ -95,6 +95,10 @@ impl Operator<PrefetchRecordInput, PrefetchRecordOutput> for PrefetchRecordOpera
         false
     }
 
+    fn can_cancel(&self) -> bool {
+        false
+    }
+
     fn get_type(&self) -> OperatorType {
         OperatorType::IO
     }

@@ -194,7 +194,7 @@ Delete a collection with the given name.
 
 **Raises**:
 
-- `ValueError` - If the collection does not exist.
+- `chromadb.errors.NotFoundError` - If the collection does not exist.
 
 
 **Examples**:
@@ -272,7 +272,7 @@ List all collections.
 
 **Returns**:
 
-- `Sequence[CollectionName]` - A list of collection names. `CollectionName` is a string.
+- `Sequence[Collection]` - A list of collection objects.
 
 
 **Examples**:
@@ -356,7 +356,7 @@ Get a collection with the given name.
 
 **Raises**:
 
-- `ValueError` - If the collection does not exist
+- `chromadb.errors.NotFoundError` - If the collection does not exist
 
 
 **Examples**:

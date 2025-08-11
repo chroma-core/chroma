@@ -36,10 +36,23 @@ spec:
           configMap:
             name: garbage-collector-config
         {{ end }}
+        {{if .Values.garbageCollector.cache}}
+        - name: garbage-collector-cache
+          hostPath:
+            path: {{ .Values.garbageCollector.cache.hostPath }}
+            type: DirectoryOrCreate
+        {{ end }}
       containers:
       - name: garbage-collector
         image: "{{ .Values.garbageCollector.image.repository }}:{{ .Values.garbageCollector.image.tag }}"
         imagePullPolicy: IfNotPresent
+        readinessProbe:
+          grpc:
+            port: 50055
+        ports:
+          - containerPort: 6060
+            protocol: TCP
+            name: pprof
         {{ if .Values.garbageCollector.resources }}
         resources:
           limits:
@@ -54,7 +67,15 @@ spec:
           - name: garbage-collector-config
             mountPath: /config/
           {{ end }}
+          {{if .Values.garbageCollector.cache}}
+          - name: garbage-collector-cache
+            mountPath: {{ .Values.garbageCollector.cache.mountPath }}
+          {{ end }}
         env:
+          {{ if .Values.garbageCollector.jemallocConfig }}
+          - name: _RJEM_MALLOC_CONF
+            value: {{ .Values.garbageCollector.jemallocConfig }}
+          {{ end }}
           {{if .Values.garbageCollector.configuration}}
           - name: CONFIG_PATH
             value: /config/config.yaml
@@ -67,6 +88,14 @@ spec:
           - name: {{ .name }}
 {{ .value | nindent 12 }}
           {{ end }}
+      {{if .Values.garbageCollector.tolerations}}
+      tolerations:
+        {{ toYaml .Values.garbageCollector.tolerations | nindent 8 }}
+      {{ end }}
+      {{if .Values.garbageCollector.nodeSelector}}
+      nodeSelector:
+        {{ toYaml .Values.garbageCollector.nodeSelector | nindent 8 }}
+      {{ end }}
 
 ---
 apiVersion: v1

@@ -4,13 +4,14 @@ use chroma_benchmark::benchmark::{bench_run, tokio_multi_thread};
 use chroma_log::test::{upsert_generator, LoadFromGenerator};
 use chroma_segment::test::TestDistributedSegment;
 use chroma_system::Operator;
+use chroma_types::operator::Filter;
 use chroma_types::{
     BooleanOperator, Chunk, CompositeExpression, MetadataComparison, MetadataExpression,
     MetadataValue, PrimitiveOperator, Where,
 };
 use criterion::Criterion;
 use criterion::{criterion_group, criterion_main};
-use worker::execution::operators::filter::{FilterInput, FilterOperator};
+use worker::execution::operators::filter::FilterInput;
 
 fn baseline_where_clauses() -> Vec<(&'static str, Option<Where>)> {
     use BooleanOperator::*;
@@ -74,7 +75,7 @@ fn bench_filter(criterion: &mut Criterion) {
 
     for record_count in [1000, 10000, 100000] {
         let test_segment = runtime.block_on(async {
-            let mut segment = TestDistributedSegment::default();
+            let mut segment = TestDistributedSegment::new().await;
             segment
                 .populate_with_generator(record_count, upsert_generator)
                 .await;
@@ -89,12 +90,12 @@ fn bench_filter(criterion: &mut Criterion) {
         };
 
         for (op, where_clause) in baseline_where_clauses() {
-            let filter_operator = FilterOperator {
+            let filter_operator = Filter {
                 query_ids: None,
                 where_clause: where_clause.clone(),
             };
 
-            let routine = |(op, input): (FilterOperator, FilterInput)| async move {
+            let routine = |(op, input): (Filter, FilterInput)| async move {
                 op.run(&input)
                     .await
                     .expect("FilterOperator should not fail");

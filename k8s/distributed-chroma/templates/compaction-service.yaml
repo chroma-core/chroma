@@ -59,6 +59,9 @@ spec:
             {{ end }}
           ports:
             - containerPort: 50051
+            - containerPort: 6060
+              protocol: TCP
+              name: pprof
           env:
             {{if .Values.compactionService.configuration}}
             - name: CONFIG_PATH
@@ -68,6 +71,10 @@ spec:
             - name: {{ .name }}
               # TODO properly use flow control here to check which type of value we need.
 {{ .value | nindent 14 }}
+            {{ end }}
+            {{ if .Values.compactionService.jemallocConfig }}
+            - name: _RJEM_MALLOC_CONF
+              value: {{ .Values.compactionService.jemallocConfig }}
             {{ end }}
             - name: CHROMA_COMPACTION_SERVICE__MY_MEMBER_ID
               valueFrom:

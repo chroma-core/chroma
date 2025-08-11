@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
-use wal3::{FragmentSeqNo, LogWriter, LogWriterOptions, Manifest};
+use wal3::{FragmentSeqNo, LogPosition, LogWriter, LogWriterOptions, Manifest};
 
 mod common;
 
@@ -54,12 +54,12 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
         seq_no: FragmentSeqNo(1),
         start: 1,
         limit: 2,
-        num_bytes: 1187,
+        num_bytes: 1044,
         data: vec![(position, vec![42, 43, 44, 45])],
     };
     let postconditions = [
         Condition::Manifest(ManifestCondition {
-            acc_bytes: 1187,
+            acc_bytes: 1044,
             writer: "test writer".to_string(),
             snapshots: vec![],
             fragments: vec![fragment1.clone()],
@@ -78,15 +78,18 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
         seq_no: FragmentSeqNo(2),
         start: 2,
         limit: 3,
-        num_bytes: 1187,
+        num_bytes: 1044,
         data: vec![(position, vec![81, 82, 83, 84])],
     };
     let postconditions = [
         Condition::Manifest(ManifestCondition {
-            acc_bytes: 2374,
+            acc_bytes: 2088,
             writer: "test writer".to_string(),
             snapshots: vec![SnapshotCondition {
                 depth: 1,
+                start: LogPosition::from_offset(1),
+                limit: LogPosition::from_offset(2),
+                num_bytes: 1044,
                 writer: "test writer".to_string(),
                 snapshots: vec![],
                 fragments: vec![fragment1.clone()],
@@ -109,22 +112,28 @@ async fn test_k8s_integration_04_initialized_append_until_snapshot() {
         seq_no: FragmentSeqNo(3),
         start: 3,
         limit: 4,
-        num_bytes: 1187,
+        num_bytes: 1044,
         data: vec![(position, vec![90, 91, 92, 93])],
     };
     let postconditions = [
         Condition::Manifest(ManifestCondition {
-            acc_bytes: 3561,
+            acc_bytes: 3132,
             writer: "test writer".to_string(),
             snapshots: vec![
                 SnapshotCondition {
                     depth: 1,
+                    start: LogPosition::from_offset(1),
+                    limit: LogPosition::from_offset(2),
+                    num_bytes: 1044,
                     writer: "test writer".to_string(),
                     snapshots: vec![],
                     fragments: vec![fragment1.clone()],
                 },
                 SnapshotCondition {
                     depth: 1,
+                    start: LogPosition::from_offset(2),
+                    limit: LogPosition::from_offset(3),
+                    num_bytes: 1044,
                     writer: "test writer".to_string(),
                     snapshots: vec![],
                     fragments: vec![fragment2.clone()],

@@ -35,7 +35,11 @@ pub async fn query_service_entrypoint() {
     let config = config.query_service;
     let registry = Registry::new();
 
-    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
+    chroma_tracing::init_otel_tracing(
+        &config.service_name,
+        &config.otel_filters,
+        &config.otel_endpoint,
+    );
 
     let system = chroma_system::System::new();
     let dispatcher =
@@ -47,14 +51,14 @@ pub async fn query_service_entrypoint() {
             }
         };
     let mut dispatcher_handle = system.start_component(dispatcher);
-    let mut worker_server = match server::WorkerServer::try_from_config(&config, &registry).await {
-        Ok(worker_server) => worker_server,
-        Err(err) => {
-            println!("Failed to create worker server component: {:?}", err);
-            return;
-        }
-    };
-    worker_server.set_system(system.clone());
+    let mut worker_server =
+        match server::WorkerServer::try_from_config(&(config, system.clone()), &registry).await {
+            Ok(worker_server) => worker_server,
+            Err(err) => {
+                println!("Failed to create worker server component: {:?}", err);
+                return;
+            }
+        };
     worker_server.set_dispatcher(dispatcher_handle.clone());
 
     let server_join_handle = tokio::spawn(async move {
@@ -100,7 +104,11 @@ pub async fn compaction_service_entrypoint() {
     let config = config.compaction_service;
     let registry = Registry::new();
 
-    chroma_tracing::init_otel_tracing(&config.service_name, &config.otel_endpoint);
+    chroma_tracing::init_otel_tracing(
+        &config.service_name,
+        &config.otel_filters,
+        &config.otel_endpoint,
+    );
 
     let system = chroma_system::System::new();
 
@@ -126,16 +134,19 @@ pub async fn compaction_service_entrypoint() {
             }
         };
     let mut dispatcher_handle = system.start_component(dispatcher);
-    let mut compaction_manager =
-        match crate::compactor::CompactionManager::try_from_config(&config, &registry).await {
-            Ok(compaction_manager) => compaction_manager,
-            Err(err) => {
-                println!("Failed to create compaction manager component: {:?}", err);
-                return;
-            }
-        };
+    let mut compaction_manager = match crate::compactor::CompactionManager::try_from_config(
+        &(config.clone(), system.clone()),
+        &registry,
+    )
+    .await
+    {
+        Ok(compaction_manager) => compaction_manager,
+        Err(err) => {
+            println!("Failed to create compaction manager component: {:?}", err);
+            return;
+        }
+    };
     compaction_manager.set_dispatcher(dispatcher_handle.clone());
-    compaction_manager.set_system(system.clone());
 
     let mut compaction_manager_handle = system.start_component(compaction_manager);
     memberlist.subscribe(compaction_manager_handle.receiver());
@@ -145,6 +156,7 @@ pub async fn compaction_service_entrypoint() {
     let compaction_server = CompactionServer {
         manager: compaction_manager_handle.clone(),
         port: config.my_port,
+        jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
     };
 
     let server_join_handle = tokio::spawn(async move {

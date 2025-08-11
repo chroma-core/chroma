@@ -1,5 +1,7 @@
 use chroma_config::assignment;
+use chroma_index::config::SpannProviderConfig;
 use chroma_sysdb::SysDbConfig;
+use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +112,8 @@ pub struct QueryServiceConfig {
     pub service_name: String,
     #[serde(default = "QueryServiceConfig::default_otel_endpoint")]
     pub otel_endpoint: String,
+    #[serde(default = "QueryServiceConfig::default_otel_filters")]
+    pub otel_filters: Vec<OtelFilter>,
     #[allow(dead_code)]
     #[serde(default = "QueryServiceConfig::default_my_member_id")]
     pub my_member_id: String,
@@ -135,6 +139,10 @@ pub struct QueryServiceConfig {
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
     #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
+    #[serde(default)]
+    pub spann_provider: SpannProviderConfig,
+    #[serde(default)]
+    pub jemalloc_pprof_server_port: Option<u16>,
 }
 
 impl QueryServiceConfig {
@@ -144,6 +152,13 @@ impl QueryServiceConfig {
 
     fn default_otel_endpoint() -> String {
         "http://otel-collector:4317".to_string()
+    }
+
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "worker".to_string(),
+            filter_level: OtelFilterLevel::Trace,
+        }]
     }
 
     fn default_my_member_id() -> String {
@@ -159,7 +174,7 @@ impl QueryServiceConfig {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 /// # Description
 /// The primary config for the compaction service.
 /// ## Description of parameters
@@ -175,6 +190,8 @@ pub struct CompactionServiceConfig {
     pub service_name: String,
     #[serde(default = "CompactionServiceConfig::default_otel_endpoint")]
     pub otel_endpoint: String,
+    #[serde(default = "CompactionServiceConfig::default_otel_filters")]
+    pub otel_filters: Vec<OtelFilter>,
     #[serde(default = "CompactionServiceConfig::default_my_member_id")]
     pub my_member_id: String,
     #[allow(dead_code)]
@@ -200,6 +217,8 @@ pub struct CompactionServiceConfig {
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
     #[serde(default)]
     pub spann_provider: chroma_index::config::SpannProviderConfig,
+    #[serde(default)]
+    pub jemalloc_pprof_server_port: Option<u16>,
 }
 
 impl CompactionServiceConfig {
@@ -209,6 +228,13 @@ impl CompactionServiceConfig {
 
     fn default_otel_endpoint() -> String {
         "http://otel-collector:4317".to_string()
+    }
+
+    fn default_otel_filters() -> Vec<OtelFilter> {
+        vec![OtelFilter {
+            crate_name: "compaction_service".to_string(),
+            filter_level: OtelFilterLevel::Trace,
+        }]
     }
 
     fn default_my_member_id() -> String {

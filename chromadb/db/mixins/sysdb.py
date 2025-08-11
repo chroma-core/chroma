@@ -38,7 +38,8 @@ from chromadb.api.collection_configuration import (
     create_collection_configuration_to_json_str,
     load_collection_configuration_from_json_str,
     CollectionConfiguration,
-    load_collection_configuration_from_create_collection_configuration,
+    create_collection_configuration_to_json,
+    collection_configuration_to_json,
     collection_configuration_to_json_str,
     overwrite_collection_configuration,
     update_collection_configuration_from_legacy_update_metadata,
@@ -310,9 +311,7 @@ class SqlSysDB(SqlDB, SysDB):
         collection = Collection(
             id=id,
             name=name,
-            configuration=load_collection_configuration_from_create_collection_configuration(
-                configuration
-            ),
+            configuration_json=create_collection_configuration_to_json(configuration),
             metadata=metadata,
             dimension=dimension,
             tenant=tenant,
@@ -541,7 +540,9 @@ class SqlSysDB(SqlDB, SysDB):
                     Collection(
                         id=cast(UUID, id),
                         name=name,
-                        configuration=configuration,
+                        configuration_json=collection_configuration_to_json(
+                            configuration
+                        ),
                         metadata=metadata,
                         dimension=dimension,
                         tenant=str(rows[0][5]),

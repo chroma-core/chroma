@@ -14,24 +14,21 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
+    operator::Filter,
     regex::{
         literal_expr::{LiteralExpr, NgramLiteralProvider},
         ChromaRegex, ChromaRegexError,
     },
-    BooleanOperator, Chunk, CompositeExpression, DocumentExpression, DocumentOperator, LogRecord,
-    MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
+    BooleanOperator, Chunk, CompositeExpression, DataRecord, DocumentExpression, DocumentOperator,
+    LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
     MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where,
 };
-use futures::TryStreamExt;
+use futures::future::try_join_all;
 use roaring::RoaringBitmap;
 use thiserror::Error;
 use tracing::{Instrument, Span};
 
-/// The `FilterOperator` filters the collection with specified criteria
-///
-/// # Parameters
-/// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
-/// - `where_clause`: The predicate on individual record
+/// The `Filter` operator filters the collection with specified criteria
 ///
 /// # Inputs
 /// - `logs`: The latest log of the collection
@@ -46,12 +43,6 @@ use tracing::{Instrument, Span};
 ///
 /// # Usage
 /// It can be used to derive the mask of offset ids that should be included or excluded by the next operator
-#[derive(Clone, Debug)]
-pub struct FilterOperator {
-    pub query_ids: Option<Vec<String>>,
-    pub where_clause: Option<Where>,
-}
-
 #[derive(Clone, Debug)]
 pub struct FilterInput {
     pub logs: Chunk<LogRecord>,
@@ -254,22 +245,33 @@ impl<'me> MetadataProvider<'me> {
                             Some(offset_ids)
                                 if offset_ids.len() < rec_reader.count().await? as u64 / 10 =>
                             {
-                                for id in offset_ids {
-                                    if rec_reader.get_data_for_offset_id(id).await?.is_some_and(
-                                        |rec| rec.document.is_some_and(|doc| regex.is_match(doc)),
-                                    ) {
+                                let fetch_futures: Vec<_> =
+                                    offset_ids
+                                        .into_iter()
+                                        .map(|id| {
+                                            async move {
+                                        let data = rec_reader.get_data_for_offset_id(id).await?;
+                                        Ok::<(u32, Option<DataRecord>), Box<dyn ChromaError>>((
+                                            id, data,
+                                        ))
+                                    }.instrument(tracing::trace_span!(parent: Span::current(),
+                                        "DataRecord fetch for offset id",
+                                        offset_id = %id
+                                    ))
+                                        })
+                                        .collect();
+                                let data_results = try_join_all(fetch_futures).await?;
+                                for (id, data_opt) in data_results {
+                                    if data_opt.is_some_and(|rec| {
+                                        rec.document.is_some_and(|doc| regex.is_match(doc))
+                                    }) {
                                         exact_matching_offset_ids.insert(id);
                                     }
                                 }
                             }
                             // Perform range scan of all documents
                             candidate_offsets => {
-                                for (offset, record) in rec_reader
-                                    .get_data_stream(..)
-                                    .await
-                                    .try_collect::<Vec<_>>()
-                                    .await?
-                                {
+                                for (offset, record) in rec_reader.get_all_data().await? {
                                     if (candidate_offsets.is_none()
                                         || candidate_offsets
                                             .as_ref()
@@ -500,16 +502,14 @@ impl<'me> RoaringMetadataFilter<'me> for CompositeExpression {
 }
 
 #[async_trait]
-impl Operator<FilterInput, FilterOutput> for FilterOperator {
+impl Operator<FilterInput, FilterOutput> for Filter {
     type Error = FilterError;
 
     async fn run(&self, input: &FilterInput) -> Result<FilterOutput, FilterError> {
         tracing::debug!(
-            "[{}]: Num log entries {:?}, metadata segment {:?}, record segment {:?}",
+            "[{}]: Num log entries {:?}",
             self.get_name(),
             input.logs.len(),
-            input.metadata_segment,
-            input.record_segment
         );
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
@@ -533,6 +533,16 @@ impl Operator<FilterInput, FilterOutput> for FilterOperator {
             MetadataLogReader::create(&materialized_logs, &record_segment_reader)
                 .await
                 .map_err(FilterError::LogMaterializer)?;
+
+        // Short-circuit if filter is none.
+        if self.query_ids.is_none() && self.where_clause.is_none() {
+            return Ok(FilterOutput {
+                log_offset_ids: SignedRoaringBitmap::full(),
+                compact_offset_ids: SignedRoaringBitmap::full()
+                    & SignedRoaringBitmap::Exclude(metadata_log_reader.updated_offset_ids),
+            });
+        }
+
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
 
         let metadata_segement_reader =
@@ -624,39 +634,44 @@ mod tests {
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_system::Operator;
     use chroma_types::{
-        BooleanOperator, Chunk, CollectionUuid, CompositeExpression, DocumentExpression, LogRecord,
-        MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue, Operation,
-        OperationRecord, PrimitiveOperator, SegmentUuid, SetOperator, SignedRoaringBitmap, Where,
+        operator::Filter, BooleanOperator, Chunk, CollectionUuid, CompositeExpression,
+        DatabaseUuid, DocumentExpression, LogRecord, MetadataComparison, MetadataExpression,
+        MetadataSetValue, MetadataValue, Operation, OperationRecord, PrimitiveOperator,
+        SegmentUuid, SetOperator, SignedRoaringBitmap, Where,
     };
 
-    use crate::execution::operators::filter::{
-        FilterOperator, MetadataLogReader, MetadataProvider,
-    };
+    use crate::execution::operators::filter::{MetadataLogReader, MetadataProvider};
 
     use super::FilterInput;
 
-    /// The unit tests for `FilterOperator` uses the following test data
+    /// The unit tests for `Filter` operator uses the following test data
     /// It generates 120 log records, where the first 60 is compacted:
     /// - Log: Delete [11..=20], add [51..=100]
     /// - Compacted: Delete [1..=10] deletion, add [11..=50]
-    async fn setup_filter_input() -> FilterInput {
-        let mut test_segment = TestDistributedSegment::default();
+    async fn setup_filter_input() -> (TestDistributedSegment, FilterInput) {
+        let mut test_segment = TestDistributedSegment::new().await;
         test_segment
             .populate_with_generator(60, add_delete_generator)
             .await;
-        FilterInput {
-            logs: add_delete_generator.generate_chunk(61..=120),
-            blockfile_provider: test_segment.blockfile_provider,
-            metadata_segment: test_segment.metadata_segment,
-            record_segment: test_segment.record_segment,
-        }
+        let blockfile_provider = test_segment.blockfile_provider.clone();
+        let metadata_segment = test_segment.metadata_segment.clone();
+        let record_segment = test_segment.record_segment.clone();
+        (
+            test_segment,
+            FilterInput {
+                logs: add_delete_generator.generate_chunk(61..=120),
+                blockfile_provider,
+                metadata_segment,
+                record_segment,
+            },
+        )
     }
 
     #[tokio::test]
     async fn test_trivial_filter() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: None,
         };
@@ -664,7 +679,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(filter_output.log_offset_ids, SignedRoaringBitmap::full());
         assert_eq!(
@@ -675,9 +690,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_user_allowed_ids() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: Some((0..30).map(int_as_id).collect()),
             where_clause: None,
         };
@@ -685,7 +700,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(filter_output.log_offset_ids, SignedRoaringBitmap::empty());
         assert_eq!(
@@ -696,7 +711,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_eq() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Metadata(MetadataExpression {
             key: "is_even".to_string(),
@@ -706,7 +721,7 @@ mod tests {
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -714,7 +729,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -728,7 +743,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_ne() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
@@ -738,7 +753,7 @@ mod tests {
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -746,7 +761,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -765,7 +780,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_in() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Metadata(MetadataExpression {
             key: "is_even".to_string(),
@@ -775,7 +790,7 @@ mod tests {
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -783,7 +798,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -797,7 +812,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_nin() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
@@ -807,7 +822,7 @@ mod tests {
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -815,7 +830,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -834,7 +849,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_gt() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Metadata(MetadataExpression {
             key: "id".to_string(),
@@ -844,7 +859,7 @@ mod tests {
             ),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -852,7 +867,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -866,14 +881,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_contains() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::Contains,
             pattern: "<cat>".to_string(),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -881,7 +896,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -895,14 +910,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_not_contains() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_clause = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::NotContains,
             pattern: "<dog>".to_string(),
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -910,7 +925,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -929,7 +944,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_and() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_sub_clause_1 = Where::Metadata(MetadataExpression {
             key: "id".to_string(),
@@ -952,7 +967,7 @@ mod tests {
             children: vec![where_sub_clause_1, where_sub_clause_2],
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -960,7 +975,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -974,7 +989,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_simple_or() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_sub_clause_1 = Where::Metadata(MetadataExpression {
             key: "modulo_3".to_string(),
@@ -997,7 +1012,7 @@ mod tests {
             children: vec![where_sub_clause_1, where_sub_clause_2],
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: None,
             where_clause: Some(where_clause),
         };
@@ -1005,7 +1020,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -1019,7 +1034,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_complex_filter() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let where_sub_clause_1 = Where::Document(DocumentExpression {
             operator: chroma_types::DocumentOperator::NotContains,
@@ -1053,7 +1068,7 @@ mod tests {
             ],
         });
 
-        let filter_operator = FilterOperator {
+        let filter_operator = Filter {
             query_ids: Some((0..96).map(int_as_id).collect()),
             where_clause: Some(where_clause),
         };
@@ -1061,7 +1076,7 @@ mod tests {
         let filter_output = filter_operator
             .run(&filter_input)
             .await
-            .expect("FilterOperator should not fail");
+            .expect("Filter should not fail");
 
         assert_eq!(
             filter_output.log_offset_ids,
@@ -1091,6 +1106,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
         let mut record_segment = chroma_types::Segment {
             id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
             r#type: chroma_types::SegmentType::BlockfileRecord,
@@ -1110,14 +1127,22 @@ mod tests {
             file_path: HashMap::new(),
         };
         {
-            let segment_writer =
-                RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
-            let mut metadata_writer =
-                MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                    .await
-                    .expect("Error creating segment writer");
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+            )
+            .await
+            .expect("Error creating segment writer");
             let data = vec![
                 LogRecord {
                     log_offset: 1,
@@ -1163,6 +1188,9 @@ mod tests {
                             }
                             RecordSegmentReaderCreationError::UserRecordNotFound(_) => {
                                 panic!("Error creating record segment reader");
+                            }
+                            _ => {
+                                panic!("Unexpected error creating record segment reader: {:?}", e);
                             }
                         }
                     }
@@ -1229,14 +1257,22 @@ mod tests {
             RecordSegmentReader::from_segment(&record_segment, &blockfile_provider)
                 .await
                 .expect("Reader should be initialized by now");
-        let segment_writer =
-            RecordSegmentWriter::from_segment(&record_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
-        let mut metadata_writer =
-            MetadataSegmentWriter::from_segment(&metadata_segment, &blockfile_provider)
-                .await
-                .expect("Error creating segment writer");
+        let segment_writer = RecordSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &record_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
+        let mut metadata_writer = MetadataSegmentWriter::from_segment(
+            &tenant,
+            &database_id,
+            &metadata_segment,
+            &blockfile_provider,
+        )
+        .await
+        .expect("Error creating segment writer");
         let some_reader = Some(record_segment_reader);
         let mat_records = materialize_logs(&some_reader, data, None)
             .await
@@ -1289,7 +1325,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_regex_short_circuit() {
-        let filter_input = setup_filter_input().await;
+        let (_test_segment, filter_input) = setup_filter_input().await;
 
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &filter_input.record_segment,

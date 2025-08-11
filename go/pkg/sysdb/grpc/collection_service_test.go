@@ -13,6 +13,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao/daotest"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -27,6 +28,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/rand"
 	"pgregory.net/rapid"
 )
+
+// TODO(eculver): replace most suite.NoError(err) with suite.Require().NoError(err) so the test
+// stops running when the error is not nil instead of continuing and causing red herrings in test output
+
+// TODO(eculver): replace calls to dao.NewDefaultTestCollection with daotest.NewTestCollection
 
 type CollectionServiceTestSuite struct {
 	suite.Suite
@@ -346,16 +352,13 @@ func (suite *CollectionServiceTestSuite) TestCreateCollection() {
 }
 
 func (suite *CollectionServiceTestSuite) TestServer_GetCollection() {
-	// Create a test collection
+	// Create a test collection with a name that should not already exist in the database
 	collectionName := "test_get_collection"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, 128, suite.databaseId, nil))
 	suite.NoError(err)
 
-	// Enable soft delete mode
-	suite.s.coordinator.SetDeleteMode(coordinator.SoftDelete)
-
 	// Soft delete the collection
-	err = suite.s.coordinator.DeleteCollection(context.Background(), &model.DeleteCollection{
+	err = suite.s.coordinator.SoftDeleteCollection(context.Background(), &model.DeleteCollection{
 		ID:           types.MustParse(collectionID),
 		DatabaseName: suite.databaseName,
 		TenantID:     suite.tenantName,
@@ -378,11 +381,80 @@ func (suite *CollectionServiceTestSuite) TestServer_GetCollection() {
 	suite.NoError(err)
 }
 
+func (suite *CollectionServiceTestSuite) TestServer_GetCollectionByResourceName() {
+	tenantResourceName := "test_tenant_resource_name"
+	// Does this need to match the daotest.TestTenantID?
+	tenantID := "test_tenant_id"
+	databaseName := "test_database"
+	collectionName := "test_collection"
+	dim := int32(128)
+
+	databaseID, err := dao.CreateTestTenantAndDatabase(suite.db, tenantID, databaseName)
+	suite.NoError(err)
+
+	err = dao.SetTestTenantResourceName(suite.db, tenantID, tenantResourceName)
+	suite.NoError(err)
+
+	collectionID, err := dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, dim, databaseID, nil))
+	suite.NoError(err)
+
+	req := &coordinatorpb.GetCollectionByResourceNameRequest{
+		TenantResourceName: tenantResourceName,
+		Database:           databaseName,
+		Name:               collectionName,
+	}
+	resp, err := suite.s.GetCollectionByResourceName(context.Background(), req)
+	suite.NoError(err)
+	suite.NotNil(resp)
+	suite.NotNil(resp.Collection)
+	suite.Equal(collectionID, resp.Collection.Id)
+	suite.Equal(collectionName, resp.Collection.Name)
+	suite.Equal(tenantID, resp.Collection.Tenant)
+	suite.Equal(databaseName, resp.Collection.Database)
+
+	nonExistentCollectionName := "non_existent_collection"
+	req = &coordinatorpb.GetCollectionByResourceNameRequest{
+		TenantResourceName: tenantResourceName,
+		Database:           databaseName,
+		Name:               nonExistentCollectionName,
+	}
+	resp, err = suite.s.GetCollectionByResourceName(context.Background(), req)
+	suite.Error(err)
+	suite.Nil(resp.Collection)
+
+	nonExistentDatabaseName := "non_existent_database"
+	req = &coordinatorpb.GetCollectionByResourceNameRequest{
+		TenantResourceName: tenantResourceName,
+		Database:           nonExistentDatabaseName,
+		Name:               collectionName,
+	}
+	resp, err = suite.s.GetCollectionByResourceName(context.Background(), req)
+	suite.Error(err)
+	suite.Nil(resp.Collection)
+
+	nonExistentTenantResourceName := "non_existent_resource_name"
+	req = &coordinatorpb.GetCollectionByResourceNameRequest{
+		TenantResourceName: nonExistentTenantResourceName,
+		Database:           databaseName,
+		Name:               collectionName,
+	}
+	resp, err = suite.s.GetCollectionByResourceName(context.Background(), req)
+	suite.Error(err)
+	suite.Nil(resp.Collection)
+
+	err = dao.CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+	err = dao.CleanUpTestDatabase(suite.db, tenantID, databaseName)
+	suite.NoError(err)
+	err = dao.CleanUpTestTenant(suite.db, tenantID)
+	suite.NoError(err)
+}
+
 func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() {
 	log.Info("TestServer_FlushCollectionCompaction")
 	// create test collection
 	collectionName := "collection_service_test_flush_collection_compaction"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, 128, suite.databaseId, nil))
 	suite.NoError(err)
 
 	// flush collection compaction
@@ -532,10 +604,9 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	// Send FlushCollectionCompaction for a collection that is soft deleted.
 	// It should fail with a failed precondition error.
 	// Create collection and soft-delete it.
-	suite.s.coordinator.SetDeleteMode(coordinator.SoftDelete)
-	collectionID, err = dao.CreateTestCollection(suite.db, "test_flush_collection_compaction_soft_delete", 128, suite.databaseId, nil)
+	collectionID, err = dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection("test_flush_collection_compaction_soft_delete", 128, suite.databaseId, nil))
 	suite.NoError(err)
-	suite.s.coordinator.DeleteCollection(context.Background(), &model.DeleteCollection{
+	suite.s.coordinator.SoftDeleteCollection(context.Background(), &model.DeleteCollection{
 		ID:           types.MustParse(collectionID),
 		DatabaseName: suite.databaseName,
 		TenantID:     suite.tenantName,
@@ -557,9 +628,35 @@ func (suite *CollectionServiceTestSuite) TestServer_FlushCollectionCompaction() 
 	suite.NoError(err)
 }
 
+func (suite *CollectionServiceTestSuite) TestServer_CheckCollections() {
+	collectionName := "test_check_collections"
+	collectionID, err := dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, 128, suite.databaseId, nil))
+	suite.NoError(err)
+
+	request := &coordinatorpb.CheckCollectionsRequest{
+		CollectionIds: []string{collectionID},
+	}
+
+	// Call the service method
+	response, err := suite.s.CheckCollections(context.Background(), request)
+	suite.NoError(err)
+
+	suite.NotNil(response.GetDeleted(), "Deleted slice should not be nil.")
+	suite.Len(response.GetDeleted(), 1)
+	suite.False(response.GetDeleted()[0])
+
+	suite.NotNil(response.GetLogPosition(), "LogPosition slice should not be nil.")
+	suite.Len(response.GetLogPosition(), 1)
+	suite.GreaterOrEqual(response.GetLogPosition()[0], int64(0))
+
+	// clean up
+	err = dao.CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
 func (suite *CollectionServiceTestSuite) TestGetCollectionSize() {
 	collectionName := "collection_service_test_get_collection_size"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, 128, suite.databaseId, nil))
 	suite.NoError(err)
 
 	req := coordinatorpb.GetCollectionSizeRequest{
@@ -575,7 +672,7 @@ func (suite *CollectionServiceTestSuite) TestGetCollectionSize() {
 
 func (suite *CollectionServiceTestSuite) TestCountForks() {
 	collectionName := "collection_service_test_count_forks"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, 128, suite.databaseId, nil))
 	suite.NoError(err)
 
 	req := coordinatorpb.CountForksRequest{
@@ -620,7 +717,7 @@ func (suite *CollectionServiceTestSuite) TestCountForks() {
 
 func (suite *CollectionServiceTestSuite) TestFork() {
 	collectionName := "collection_service_test_forks"
-	collectionID, err := dao.CreateTestCollection(suite.db, collectionName, 128, suite.databaseId, nil)
+	collectionID, err := dao.CreateTestCollection(suite.db, daotest.NewDefaultTestCollection(collectionName, 128, suite.databaseId, nil))
 	suite.NoError(err)
 	targetCollectionID := types.NewUniqueID()
 
@@ -650,9 +747,6 @@ func (suite *CollectionServiceTestSuite) TestFork() {
 	suite.Equal(forkedCollection2.Collection.Id, fork2CollectionId.String())
 	suite.Equal(len(forkedCollection2.Segments), 2)
 
-	// Enable soft delete mode
-	suite.s.coordinator.SetDeleteMode(coordinator.SoftDelete)
-
 	// Delete the root.
 	deleteReq := model.DeleteCollection{
 		ID:           types.MustParse(collectionID),
@@ -660,7 +754,7 @@ func (suite *CollectionServiceTestSuite) TestFork() {
 		DatabaseName: suite.databaseName,
 		Ts:           time.Now().Unix(),
 	}
-	err = suite.s.coordinator.DeleteCollection(context.Background(), &deleteReq)
+	err = suite.s.coordinator.SoftDeleteCollection(context.Background(), &deleteReq)
 	suite.NoError(err)
 
 	// Fork should still succeed.
@@ -684,7 +778,7 @@ func (suite *CollectionServiceTestSuite) TestFork() {
 		DatabaseName: suite.databaseName,
 		Ts:           time.Now().Unix(),
 	}
-	err = suite.s.coordinator.DeleteCollection(context.Background(), &deleteReq2)
+	err = suite.s.coordinator.SoftDeleteCollection(context.Background(), &deleteReq2)
 	suite.NoError(err)
 
 	// Fork should not succeed.

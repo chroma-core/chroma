@@ -3,6 +3,9 @@
 open_telemetry:
   service_name: "rust-frontend-service"
   endpoint: "http://otel-collector:4317"
+  filters:
+    - crate_name: "chroma_frontend"
+      filter_level: "trace"
 sysdb:
   grpc:
     host: "sysdb.chroma"
@@ -40,6 +43,9 @@ executor:
         kube_namespace: "chroma"
         memberlist_name: "query-service-memberlist"
         queue_size: 100
+    client_selection_config:
+      first_attempt_weights: [0.5, 0.5]
+      uniform_on_retry: true
 scorecard_enabled: true
 scorecard:
   - patterns:

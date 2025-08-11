@@ -3,7 +3,7 @@ from chromadb.api import ServerAPI
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
-    load_collection_configuration_from_create_collection_configuration,
+    create_collection_configuration_to_json,
 )
 from chromadb.auth import UserIdentity
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
@@ -235,7 +235,7 @@ class SegmentAPI(ServerAPI):
             id=id,
             name=name,
             metadata=metadata,
-            configuration=load_collection_configuration_from_create_collection_configuration(
+            configuration_json=create_collection_configuration_to_json(
                 configuration or CreateCollectionConfiguration()
             ),
             tenant=tenant,
@@ -413,7 +413,9 @@ class SegmentAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
-        raise NotImplementedError("Collection forking is not implemented for SegmentAPI")
+        raise NotImplementedError(
+            "Collection forking is not implemented for SegmentAPI"
+        )
 
     @trace_method("SegmentAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override

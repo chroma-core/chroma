@@ -15,7 +15,7 @@ async fn main() {
         .connect()
         .await
         .expect("could not connect to log service");
-    let mut client = LogServiceClient::new(logservice);
+    let mut client = LogServiceClient::new(logservice).max_decoding_message_size(256 << 20);
     let dirty = client
         .inspect_dirty_log(InspectDirtyLogRequest {})
         .await

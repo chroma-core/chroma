@@ -14,7 +14,7 @@ const SignUpLink: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       href={"https://www.trychroma.com/signup"}
       target="_blank"
       rel="noopener noreferrer"
-      className="underline"
+      className="underline underline-offset-4 font-semibold"
     >
       {children}
     </Link>
@@ -44,7 +44,7 @@ const CloudSignUp: React.FC = () => {
   return (
     open && (
       <div
-        className={`absolute bottom-4 z-20 right-4 bg-white border border-black h-48 w-[400px] flex flex-col gap-0 sm:rounded-none p-0 dark:border-white dark:border dark:bg-gray-950 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
+        className={`hidden md:block absolute bottom-4 z-20 right-4 bg-white border border-black h-48 w-[400px] flex flex-col gap-0 sm:rounded-none p-0 dark:border-white dark:border dark:bg-gray-950 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
       >
         <Header84 title="NEW">
           <CloseButton84 onClick={handleDialogClose} />
@@ -62,7 +62,7 @@ const CloudSignUp: React.FC = () => {
                 <span className="font-bold">Chroma Cloud</span> is here.
               </p>
               <p>
-                <SignUpLink>Sign up</SignUpLink> for early access!
+                <SignUpLink>Sign up →</SignUpLink>
               </p>
             </div>
           </div>
