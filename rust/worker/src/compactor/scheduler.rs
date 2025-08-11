@@ -180,6 +180,19 @@ impl Scheduler {
         }
     }
 
+    async fn get_oneoff_collection_information(&mut self) -> Vec<CollectionInfo> {
+        // NOTE(rescrv):  We lie and say it's LogPosition(1).
+        // verify_and_enrich_collections will update it.
+        self.oneoff_collections
+            .drain()
+            .map(|x| CollectionInfo {
+                collection_id: x,
+                first_log_offset: 0,
+                first_log_ts: 0,
+            })
+            .collect()
+    }
+
     async fn verify_and_enrich_collections(
         &mut self,
         collections: Vec<CollectionInfo>,
@@ -465,7 +478,9 @@ impl Scheduler {
         }
         // Recompute disabled list.
         self.recompute_disabled_collections();
-        let collections = self.get_collections_with_new_data().await;
+        let mut collections = self.get_collections_with_new_data().await;
+        let oneoff_collections = self.get_oneoff_collection_information().await;
+        collections.extend(oneoff_collections);
         if collections.is_empty() {
             return;
         }
