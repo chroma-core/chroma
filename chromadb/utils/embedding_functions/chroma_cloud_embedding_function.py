@@ -12,19 +12,22 @@ class ChromaCloudEmbeddingModel(Enum):
 class ChromaCloudEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
-        model: ChromaCloudEmbeddingModel,
+        model: str,
         tenant_uuid: str,
         api_key: Optional[str] = None,
         api_key_env_var: str = "CHROMA_API_KEY",
+        timeout_seconds: int = 120,
     ):
         """
         Initialize the ChromaCloudEmbeddingFunction.
 
         Args:
+            model: (ChromaCloudEmbeddingModel) the
             api_key (str, optional): The API key for the Chroma API. If not provided,
                 it will be read from the environment variable specified by api_key_env_var.
             api_key_env_var (str, optional): Environment variable name that contains your API key.
                 Defaults to "CHROMA_API_KEY".
+            timeout_seconds (int, optional): The time in seconds to wait for a response from the Chroma Cloud EF.
         """
         try:
             import httpx
@@ -32,6 +35,11 @@ class ChromaCloudEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(
                 "The httpx python package is not installed. Please install it with `pip install httpx`."
             )
+        
+        try:
+            model = ChromaCloudEmbeddingModel(model)
+        except:
+            raise ValueError("The valid ")
 
         if api_key is not None:
             warnings.warn(
@@ -48,7 +56,7 @@ class ChromaCloudEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 
         self._api_url = "https://api.trychroma.com/api/v2/embed"
-        self._session = httpx.Client()
+        self._session = httpx.Client(timeout=timeout_seconds)
         self._session.headers.update(
             {"x-chroma-token": self.api_key}
         )
@@ -67,18 +75,36 @@ class ChromaCloudEmbeddingFunction(EmbeddingFunction[Documents]):
         if not input:
             return []
 
-        # Get embeddings from /embed endpoint
-        response = self._session.post(
-            self._api_url,
-            json={"model": str(self.model.value), "texts": input, "tenant_uuid": self.tenant_uuid},
-        ).json()
-
+        try:
+            import httpx
+        except ImportError:
+            raise ValueError(
+                "The httpx python package is not installed. Please install it with `pip install httpx`."
+            )
+        
+        try:
+            response = self._session.post(
+                self._api_url,
+                json={"model": str(self.model.value), "texts": input, "tenant_uuid": self.tenant_uuid},
+            )
+            response.raise_for_status()
+            response_data = response.json()
+        except httpx.RequestError as e:
+            raise ValueError(f"Failed to connect to Chroma Cloud API: {e}")
+        except httpx.HTTPStatusError as e:
+            raise ValueError(f"Chroma Cloud API returned error {e.response.status_code}: {e.response.text}")
+        except Exception as e:
+            raise ValueError(f"Failed to parse API response: {e}")
+        
         # Extract embeddings from response
-        return [np.array(data.embedding, dtype=np.float32) for data in response.data]
+        if not hasattr(response_data, 'data') or not response_data.data:
+            raise ValueError("Invalid response format from Chroma Cloud API")
+
+        return [np.array(data.embedding, dtype=np.float32) for data in response_data.data]
 
     @staticmethod
     def name() -> str:
-        return "chroma_hosted"
+        return "chroma_cloud"
 
     def default_space(self) -> Space:
         return "cosine"
@@ -127,4 +153,4 @@ class ChromaCloudEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config_schema(config, "chroma_hosted")
+        validate_config_schema(config, "chroma_cloud")
