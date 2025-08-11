@@ -273,5 +273,5 @@ jobs:
               :x: *ChromaDB release failure!*
               *Workflow:* ${{ github.workflow }}
               *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Ref:* <https://github.com/${{ github.repository }}/tree/${{ github.ref_name }}|${{ github.ref_name }}>
               *Author:* ${{ github.actor }}
-              *Ref:* ${{ github.ref_name }}
