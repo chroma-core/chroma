@@ -1235,8 +1235,11 @@ async fn fork_collection(
             collection_id.0.to_string(),
         ));
 
-    let _guard =
-        server.scorecard_request(&["op:fork_collection", format!("tenant:{}", tenant).as_str()])?;
+    let _guard = server.scorecard_request(&[
+        "op:fork_collection",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
 
     let request = chroma_types::ForkCollectionRequest::try_new(
         tenant,
