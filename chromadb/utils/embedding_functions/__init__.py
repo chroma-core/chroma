@@ -67,6 +67,9 @@ from chromadb.utils.embedding_functions.mistral_embedding_function import (
 from chromadb.utils.embedding_functions.morph_embedding_function import (
     MorphEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.chroma_cloud_embedding_function import (
+    ChromaCloudEmbeddingFunction,
+)
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -99,6 +102,7 @@ _all_classes: Set[str] = {
     "CloudflareWorkersAIEmbeddingFunction",
     "TogetherAIEmbeddingFunction",
     "DefaultEmbeddingFunction",
+    "ChromaCloudEmbeddingFunction",
 }
 
 
@@ -161,6 +165,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "default": DefaultEmbeddingFunction,
     "cloudflare_workers_ai": CloudflareWorkersAIEmbeddingFunction,
     "together_ai": TogetherAIEmbeddingFunction,
+    "chroma_cloud": ChromaCloudEmbeddingFunction
 }
 
 
@@ -240,6 +245,7 @@ __all__ = [
     "MistralEmbeddingFunction",
     "MorphEmbeddingFunction",
     "VoyageAIEmbeddingFunction",
+    "ChromaCloudEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
     "OpenCLIPEmbeddingFunction",
     "RoboflowEmbeddingFunction",
