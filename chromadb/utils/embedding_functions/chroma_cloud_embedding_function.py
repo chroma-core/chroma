@@ -37,7 +37,7 @@ class ChromaCloudEmbeddingFunction(EmbeddingFunction[Documents]):
             )
         
         try:
-            model = ChromaCloudEmbeddingModel(model)
+            validated_model = ChromaCloudEmbeddingModel(model)
         except:
             raise ValueError("The valid ")
 
@@ -48,14 +48,14 @@ class ChromaCloudEmbeddingFunction(EmbeddingFunction[Documents]):
                 DeprecationWarning,
             )
 
-        self.model = model
+        self.model = validated_model
         self.tenant_uuid = tenant_uuid
         self.api_key_env_var = api_key_env_var
         self.api_key = api_key or os.getenv(api_key_env_var)
         if not self.api_key:
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
 
-        self._api_url = "https://api.trychroma.com/api/v2/embed"
+        self._api_url = "https://chroma-core-staging--chroma-trieve-ingest-immediateembed-10d1fc.modal.run"
         self._session = httpx.Client(timeout=timeout_seconds)
         self._session.headers.update(
             {"x-chroma-token": self.api_key}
@@ -124,7 +124,7 @@ class ChromaCloudEmbeddingFunction(EmbeddingFunction[Documents]):
 
         # Create and return the embedding function
         return ChromaCloudEmbeddingFunction(
-            model=ChromaCloudEmbeddingModel(model),
+            model=model,
             tenant_uuid=tenant_uuid,
             api_key_env_var=api_key_env_var,
         )
