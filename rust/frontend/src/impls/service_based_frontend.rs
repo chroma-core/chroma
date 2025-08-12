@@ -423,6 +423,13 @@ impl ServiceBasedFrontend {
         GetCollectionByCrnRequest { crn, .. }: GetCollectionByCrnRequest,
     ) -> Result<GetCollectionByCrnResponse, GetCollectionByCrnError> {
         if let Some((tenant_resource_name, database_name, collection_name)) = self.parse_crn(&crn) {
+            if tenant_resource_name.is_empty()
+                || database_name.is_empty()
+                || collection_name.is_empty()
+            {
+                return Err(GetCollectionByCrnError::NotFound(crn));
+            }
+
             let collection = self
                 .sysdb_client
                 .get_collection_by_crn(tenant_resource_name, database_name, collection_name)
