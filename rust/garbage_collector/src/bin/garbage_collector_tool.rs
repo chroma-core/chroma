@@ -2,6 +2,7 @@ use chroma_blockstore::RootManager;
 use chroma_config::Configurable;
 use chroma_log::Log;
 use chroma_storage::Storage;
+use chroma_storage::StorageError;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
@@ -23,6 +24,7 @@ use sqlx::Row;
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 #[derive(Debug, clap::ValueEnum, Clone)]
@@ -100,18 +102,23 @@ async fn download_file(
     storage_client: &Storage,
     storage_key: &str,
     output_directory: &PathBuf,
-) -> Result<Arc<Vec<u8>>, Box<dyn std::error::Error>> {
+) -> Result<Option<Arc<Vec<u8>>>, Box<dyn std::error::Error>> {
     let output_path = output_directory.join(storage_key);
 
     if output_path.exists() {
         let data = std::fs::read(output_path)?;
-        return Ok(Arc::new(data));
+        return Ok(Some(Arc::new(data)));
     }
 
-    let data = storage_client.get(storage_key, Default::default()).await?;
-    std::fs::create_dir_all(output_path.parent().unwrap())?;
-    std::fs::write(output_path, data.as_ref())?;
-    Ok(data)
+    match storage_client.get(storage_key, Default::default()).await {
+        Ok(data) => {
+            std::fs::create_dir_all(output_path.parent().unwrap())?;
+            std::fs::write(output_path, data.as_ref())?;
+            Ok(Some(data))
+        }
+        Err(StorageError::NotFound { .. }) => Ok(None),
+        Err(e) => Err(Box::new(e)),
+    }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -273,7 +280,8 @@ async fn main() {
                             &object_store_output_directory,
                         )
                         .await
-                        .expect("Failed to download version file");
+                        .expect("Failed to download version file")
+                        .expect("Version file not found");
 
                         let decoded_version_file =
                             CollectionVersionFile::decode(version_file.as_slice()).unwrap();
@@ -322,15 +330,24 @@ async fn main() {
             bar.set_length(sparse_indices_to_fetch.len() as u64);
             bar.set_message("Fetching sparse indices...");
 
+            let missing_sparse_indices_count = Arc::new(AtomicUsize::new(0));
+            let total_sparse_indices_count = sparse_indices_to_fetch.len();
             futures::stream::iter(sparse_indices_to_fetch)
                 .map(|path| {
                     let storage_client = storage_client.clone();
                     let object_store_output_directory = &object_store_output_directory;
                     let bar = bar.clone();
+                    let missing_sparse_indices_count = Arc::clone(&missing_sparse_indices_count);
                     async move {
-                        download_file(&storage_client, &path, &object_store_output_directory)
-                            .await
-                            .expect("Failed to download sparse index file");
+                        let result =
+                            download_file(&storage_client, &path, &object_store_output_directory)
+                                .await
+                                .expect("Failed to download sparse index file");
+
+                        if result.is_none() {
+                            missing_sparse_indices_count
+                                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        }
 
                         bar.inc(1);
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -341,6 +358,16 @@ async fn main() {
                 .await;
 
             bar.finish();
+
+            let missing_count =
+                missing_sparse_indices_count.load(std::sync::atomic::Ordering::SeqCst);
+            if missing_count > 0 {
+                tracing::warn!(
+                    "{} sparse indices out of {} were not found.",
+                    missing_count,
+                    total_sparse_indices_count,
+                );
+            }
         }
 
         GarbageCollectorCommand::ExportSysDbCollections {
