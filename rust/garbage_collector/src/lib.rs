@@ -14,7 +14,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tonic::transport::Server;
 use tracing::{debug, error, info};
 
-mod config;
+pub mod config;
 mod construct_version_graph_orchestrator;
 mod garbage_collector_component;
 pub mod garbage_collector_orchestrator;
