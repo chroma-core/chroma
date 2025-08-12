@@ -85,7 +85,7 @@ query_service:
         capacity: 8589934592 # 8GB
     permitted_parallelism: 180
   spann_provider:
-    adaptive_search_nprobe: true
+    adaptive_search_nprobe: false
   fetch_log_batch_size: 1000
 compaction_service:
   service_name: "compaction-service"
