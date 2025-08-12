@@ -3445,6 +3445,7 @@ dependencies = [
  "figment",
  "futures",
  "humantime",
+ "indicatif",
  "itertools 0.13.0",
  "opentelemetry",
  "petgraph 0.8.1",
