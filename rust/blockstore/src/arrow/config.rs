@@ -31,6 +31,10 @@ impl BlockManagerConfig {
     pub fn default_num_concurrent_block_flushes() -> usize {
         40
     }
+
+    pub fn validate(&self) -> bool {
+        self.max_block_size_bytes != 0 && self.num_concurrent_block_flushes != 0
+    }
 }
 
 impl Default for BlockManagerConfig {

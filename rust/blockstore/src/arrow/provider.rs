@@ -242,6 +242,20 @@ impl ArrowBlockfileProvider {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ArrowBlockfileProviderError {
+    #[error("Invalid config")]
+    ConfigValidationError,
+}
+
+impl ChromaError for ArrowBlockfileProviderError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ArrowBlockfileProviderError::ConfigValidationError => ErrorCodes::Internal,
+        }
+    }
+}
+
 #[async_trait]
 impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfileProvider {
     async fn try_from_config(
@@ -249,6 +263,12 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (blockfile_config, storage) = config;
+        blockfile_config
+            .block_manager_config
+            .validate()
+            .then_some(())
+            .ok_or(ArrowBlockfileProviderError::ConfigValidationError)
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
         let block_cache = match chroma_cache::from_config_persistent(
             &blockfile_config.block_manager_config.block_cache_config,
         )
