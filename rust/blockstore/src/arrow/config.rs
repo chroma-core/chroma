@@ -19,11 +19,17 @@ pub struct BlockManagerConfig {
     pub max_block_size_bytes: usize,
     #[serde(default)]
     pub block_cache_config: CacheConfig,
+    #[serde(default = "BlockManagerConfig::default_num_concurrent_block_flushes")]
+    pub num_concurrent_block_flushes: usize,
 }
 
 impl BlockManagerConfig {
     fn default_max_block_size_bytes() -> usize {
         16384
+    }
+
+    pub fn default_num_concurrent_block_flushes() -> usize {
+        40
     }
 }
 
@@ -35,6 +41,8 @@ impl Default for BlockManagerConfig {
                 capacity: 1000,
                 ..Default::default()
             }),
+            num_concurrent_block_flushes: BlockManagerConfig::default_num_concurrent_block_flushes(
+            ),
         }
     }
 }

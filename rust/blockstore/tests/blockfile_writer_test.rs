@@ -2,6 +2,7 @@
 
 #[cfg(test)]
 mod tests {
+    use chroma_blockstore::arrow::config::BlockManagerConfig;
     use chroma_blockstore::arrow::provider::{ArrowBlockfileProvider, BlockfileReaderOptions};
     use chroma_blockstore::{
         BlockfileReader, BlockfileWriter, BlockfileWriterMutationOrdering, BlockfileWriterOptions,
@@ -206,6 +207,7 @@ mod tests {
                 ref_state.generated_max_block_size_bytes,
                 block_cache,
                 sparse_index_cache,
+                BlockManagerConfig::default_num_concurrent_block_flushes(),
             );
             let prefix_path = String::from("");
             let writer = block_on(

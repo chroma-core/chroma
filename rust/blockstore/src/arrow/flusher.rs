@@ -59,8 +59,9 @@ impl ArrowBlockfileFlusher {
             return Ok(());
         }
         tracing::debug!("Flushing {} blocks", num_futures);
-        // Flush 40 blocks at a time to reduce memory usage.
-        let num_concurrent_flushes = num_futures.min(40);
+        // Flush n blocks at a time to reduce memory usage.
+        let num_concurrent_flushes =
+            num_futures.min(self.block_manager.num_concurrent_block_flushes());
         futures::stream::iter(futures)
             .buffer_unordered(num_concurrent_flushes)
             .try_collect::<Vec<_>>()
