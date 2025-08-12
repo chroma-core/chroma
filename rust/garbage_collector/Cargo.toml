@@ -37,6 +37,7 @@ base64 = { workspace = true }
 clap = { workspace = true }
 tracing-subscriber = { workspace = true }
 indicatif = { workspace = true }
+sqlx = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }

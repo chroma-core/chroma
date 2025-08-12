@@ -6,7 +6,6 @@ use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
 use chroma_types::chroma_proto::CollectionVersionFile;
-use chroma_types::CollectionUuid;
 use chroma_types::Segment;
 use chrono::DateTime;
 use chrono::Utc;
@@ -19,10 +18,11 @@ use garbage_collector_library::{
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
 use prost::Message;
+use sqlx::postgres::PgPoolOptions;
+use sqlx::Row;
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 
 #[derive(Debug, clap::ValueEnum, Clone)]
@@ -46,47 +46,12 @@ impl From<CliCleanupMode> for CleanupMode {
     }
 }
 
-#[derive(Debug, clap::Args)]
-#[group(required = true, multiple = false)]
-struct CollectionIdsSource {
-    #[clap(long)]
-    collection_id: Option<String>,
-    #[clap(long)]
-    collection_ids: Option<Vec<String>>,
-    #[clap(long)]
-    read_collection_ids_stdin: Option<bool>,
-}
-
-impl CollectionIdsSource {
-    fn get_collection_ids(&self) -> HashSet<CollectionUuid> {
-        if self.read_collection_ids_stdin.unwrap_or(false) {
-            let mut collection_ids = String::new();
-            std::io::stdin()
-                .read_line(&mut collection_ids)
-                .expect("Failed to read from stdin");
-            collection_ids
-                .trim()
-                .split(',')
-                .map(|id| {
-                    CollectionUuid::from_str(id.trim()).expect("Invalid collection ID format")
-                })
-                .collect()
-        } else if let Some(id) = &self.collection_id {
-            HashSet::from([CollectionUuid::from_str(id).expect("Invalid collection ID format")])
-        } else if let Some(ids) = &self.collection_ids {
-            ids.iter()
-                .map(|id| CollectionUuid::from_str(id).expect("Invalid collection ID format"))
-                .collect()
-        } else {
-            unreachable!()
-        }
-    }
-}
-
 #[derive(Debug, Parser)]
 enum GarbageCollectorCommand {
     /// Manually run garbage collection on a specific collection
     GarbageCollect {
+        #[arg(short, long)]
+        config_path: String,
         #[arg(long)]
         collection_id: String,
         #[arg(long, default_value = "true")]
@@ -101,9 +66,20 @@ enum GarbageCollectorCommand {
         collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
     },
 
-    DownloadCollection {
-        #[clap(flatten)]
-        collection_id_source: CollectionIdsSource,
+    ExportSysDbCollections {
+        #[arg(long)]
+        collection_id: String,
+        #[arg(long, default_value = "false")]
+        include_all_children: bool,
+        #[arg(long)]
+        output_file: PathBuf,
+    },
+
+    DownloadCollections {
+        #[arg(short, long)]
+        config_path: String,
+        #[arg(long)]
+        exported_collections_path: PathBuf,
         #[arg(long)]
         output_directory: PathBuf,
         #[arg(long, default_value = "false")]
@@ -116,9 +92,6 @@ enum GarbageCollectorCommand {
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(short, long)]
-    config_path: String,
-
     #[command(subcommand)]
     command: GarbageCollectorCommand,
 }
@@ -141,6 +114,26 @@ async fn download_file(
     Ok(data)
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct SerializedCollection {
+    id: String,
+    name: String,
+    dimension: Option<i32>,
+    database_id: String,
+    is_deleted: bool,
+    log_position: i64,
+    version: i32,
+    configuration_json_str: String,
+    total_records_post_compaction: i64,
+    size_bytes_post_compaction: i64,
+    last_compaction_time_secs: i64,
+    version_file_name: String,
+    lineage_file_name: Option<String>,
+    root_collection_id: Option<String>,
+    tenant: String,
+    num_versions: i32,
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt::init();
@@ -155,12 +148,13 @@ async fn main() {
             cleanup_mode,
             version_absolute_cutoff_time,
             collection_soft_delete_absolute_cutoff_time,
+            config_path,
         } => {
             let collection_id = collection_id.parse().expect("Invalid collection ID format");
 
             let system = chroma_system::System::new();
             let registry = chroma_config::registry::Registry::new();
-            let config = GarbageCollectorConfig::load_from_path(&args.config_path);
+            let config = GarbageCollectorConfig::load_from_path(&config_path);
 
             let log_client = Log::try_from_config(&(config.log, system.clone()), &registry)
                 .await
@@ -231,64 +225,32 @@ async fn main() {
             orchestrator.run(system.clone()).await.unwrap();
         }
 
-        GarbageCollectorCommand::DownloadCollection {
-            collection_id_source,
+        GarbageCollectorCommand::DownloadCollections {
+            exported_collections_path,
             output_directory,
             include_blocks,
             download_concurrency,
+            config_path,
         } => {
             if include_blocks {
                 unimplemented!("Downloading collections with blocks is not yet implemented");
             }
 
             let registry = chroma_config::registry::Registry::new();
-            let config = GarbageCollectorConfig::load_from_path(&args.config_path);
+            let config = GarbageCollectorConfig::load_from_path(&config_path);
 
             let storage_client = Storage::try_from_config(&config.storage_config, &registry)
                 .await
                 .expect("Failed to create storage client");
 
-            let mut sysdb_client = SysDb::try_from_config(
-                &chroma_sysdb::SysDbConfig::Grpc(config.sysdb_config),
-                &registry,
-            )
-            .await
-            .expect("Failed to create sysdb client");
-
-            let collection_ids = collection_id_source.get_collection_ids();
-
-            let collections = sysdb_client
-                .get_collections(GetCollectionsOptions {
-                    collection_ids: Some(collection_ids.iter().cloned().collect()),
-                    ..Default::default()
-                })
-                .await
-                .expect("Failed to get collections");
-
-            if collections.len() != collection_ids.len() {
-                tracing::error!(
-                    "Expected {} collections, but found {}",
-                    collection_ids.len(),
-                    collections.len()
-                );
-                return;
-            }
-
             let object_store_output_directory = output_directory.join("object_store");
-            let collections_jsonl_path = output_directory.join("collections.jsonl");
 
-            std::fs::create_dir_all(&collections_jsonl_path.parent().unwrap())
-                .expect("Failed to create output directory");
-
-            let mut collections_jsonl_file = std::fs::File::create(&collections_jsonl_path)
-                .expect("Failed to create JSONL file");
-
-            for collection in &collections {
-                let collection_json = serde_json::to_string(collection)
-                    .expect("Failed to serialize collection to JSON");
-                writeln!(collections_jsonl_file, "{}", collection_json)
-                    .expect("Failed to write to JSONL file");
-            }
+            let collections_file = std::fs::read_to_string(&exported_collections_path)
+                .expect("Failed to read exported collections file");
+            let collections: Vec<SerializedCollection> = collections_file
+                .lines()
+                .map(|line| serde_json::from_str(line).expect("Failed to parse collection JSON"))
+                .collect();
 
             let bar = ProgressBar::new(collections.len() as u64);
             bar.set_style(
@@ -307,7 +269,7 @@ async fn main() {
                     async move {
                         let version_file = download_file(
                             &storage_client,
-                            collection.version_file_path.as_ref().unwrap(),
+                            &collection.version_file_name,
                             &object_store_output_directory,
                         )
                         .await
@@ -335,7 +297,7 @@ async fn main() {
                             }
                         }
 
-                        if let Some(lineage_file_path) = &collection.lineage_file_path {
+                        if let Some(lineage_file_path) = &collection.lineage_file_name {
                             download_file(
                                 &storage_client,
                                 lineage_file_path,
@@ -379,6 +341,73 @@ async fn main() {
                 .await;
 
             bar.finish();
+        }
+
+        GarbageCollectorCommand::ExportSysDbCollections {
+            collection_id,
+            include_all_children,
+            output_file,
+        } => {
+            let database_url = std::env::var("DATABASE_URL")
+                .expect("DATABASE_URL environment variable is not set.");
+
+            let pool = PgPoolOptions::new()
+                .connect(&database_url)
+                .await
+                .expect("Failed to connect to database");
+
+            let mut rows = sqlx::query("SELECT * FROM collections WHERE id = $1")
+                .bind(&collection_id)
+                .fetch_all(&pool)
+                .await
+                .expect("Failed to fetch collection from database");
+
+            if include_all_children {
+                let children =
+                    sqlx::query("SELECT * FROM collections WHERE root_collection_id = $1")
+                        .bind(&collection_id)
+                        .fetch_all(&pool)
+                        .await
+                        .expect("Failed to fetch child collections from database");
+                rows.extend(children);
+            }
+
+            let mut file =
+                std::fs::File::create(&output_file).expect("Failed to create output file");
+
+            let len = rows.len();
+            for row in rows {
+                let collection = SerializedCollection {
+                    id: row.get::<String, _>("id"),
+                    name: row.get::<String, _>("name"),
+                    configuration_json_str: row.get::<String, _>("configuration_json_str"),
+                    dimension: row.get::<Option<i32>, _>("dimension"),
+                    tenant: row.get::<String, _>("tenant"),
+                    log_position: row.get::<i64, _>("log_position"),
+                    version: row.get::<i32, _>("version"),
+                    total_records_post_compaction: row
+                        .get::<i64, _>("total_records_post_compaction"),
+                    size_bytes_post_compaction: row.get::<i64, _>("size_bytes_post_compaction"),
+                    last_compaction_time_secs: row.get::<i64, _>("last_compaction_time_secs"),
+                    version_file_name: row.get::<String, _>("version_file_name"),
+                    root_collection_id: row
+                        .get::<Option<String>, _>("root_collection_id")
+                        .map(|s| s.to_string()),
+                    lineage_file_name: row
+                        .get::<Option<String>, _>("lineage_file_name")
+                        .map(|s| s.to_string()),
+                    is_deleted: row.get::<bool, _>("is_deleted"),
+                    database_id: row.get::<String, _>("database_id"),
+                    num_versions: row.get::<i32, _>("num_versions"),
+                };
+
+                let collection_json = serde_json::to_string(&collection)
+                    .expect("Failed to serialize collection to JSON");
+                writeln!(file, "{}", collection_json)
+                    .expect("Failed to write collection to output file");
+            }
+
+            tracing::info!("Exported {} collections to {}", len, output_file.display());
         }
     }
 }
