@@ -31,6 +31,12 @@ impl Value for String {
     }
 }
 
+impl Value for f32 {
+    fn get_size(&self) -> usize {
+        4
+    }
+}
+
 impl Value for u32 {
     fn get_size(&self) -> usize {
         4
