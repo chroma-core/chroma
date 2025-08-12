@@ -76,12 +76,14 @@ impl BlockfileProvider {
         max_block_size_bytes: usize,
         block_cache: Box<dyn PersistentCache<Uuid, Block>>,
         root_cache: Box<dyn PersistentCache<Uuid, RootReader>>,
+        num_concurrent_block_flushes: usize,
     ) -> Self {
         BlockfileProvider::ArrowBlockfileProvider(ArrowBlockfileProvider::new(
             storage,
             max_block_size_bytes,
             block_cache,
             root_cache,
+            num_concurrent_block_flushes,
         ))
     }
 

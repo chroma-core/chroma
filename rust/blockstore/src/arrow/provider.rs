@@ -80,9 +80,15 @@ impl ArrowBlockfileProvider {
         max_block_size_bytes: usize,
         block_cache: Box<dyn PersistentCache<Uuid, Block>>,
         root_cache: Box<dyn PersistentCache<Uuid, RootReader>>,
+        num_concurrent_block_flushes: usize,
     ) -> Self {
         Self {
-            block_manager: BlockManager::new(storage.clone(), max_block_size_bytes, block_cache),
+            block_manager: BlockManager::new(
+                storage.clone(),
+                max_block_size_bytes,
+                block_cache,
+                num_concurrent_block_flushes,
+            ),
             root_manager: RootManager::new(storage, root_cache),
         }
     }
@@ -236,6 +242,20 @@ impl ArrowBlockfileProvider {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ArrowBlockfileProviderError {
+    #[error("Invalid config")]
+    ConfigValidationError,
+}
+
+impl ChromaError for ArrowBlockfileProviderError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ArrowBlockfileProviderError::ConfigValidationError => ErrorCodes::Internal,
+        }
+    }
+}
+
 #[async_trait]
 impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfileProvider {
     async fn try_from_config(
@@ -243,6 +263,12 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (blockfile_config, storage) = config;
+        blockfile_config
+            .block_manager_config
+            .validate()
+            .then_some(())
+            .ok_or(ArrowBlockfileProviderError::ConfigValidationError)
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
         let block_cache = match chroma_cache::from_config_persistent(
             &blockfile_config.block_manager_config.block_cache_config,
         )
@@ -269,6 +295,9 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
             blockfile_config.block_manager_config.max_block_size_bytes,
             block_cache,
             sparse_index_cache,
+            blockfile_config
+                .block_manager_config
+                .num_concurrent_block_flushes,
         ))
     }
 }
@@ -355,6 +384,7 @@ pub struct BlockManager {
     storage: Storage,
     default_max_block_size_bytes: usize,
     block_metrics: BlockMetrics,
+    num_concurrent_block_flushes: usize,
 }
 
 impl BlockManager {
@@ -362,6 +392,7 @@ impl BlockManager {
         storage: Storage,
         default_max_block_size_bytes: usize,
         block_cache: Box<dyn PersistentCache<Uuid, Block>>,
+        num_concurrent_block_flushes: usize,
     ) -> Self {
         let block_cache: Arc<dyn PersistentCache<Uuid, Block>> = block_cache.into();
         Self {
@@ -369,6 +400,7 @@ impl BlockManager {
             storage,
             default_max_block_size_bytes,
             block_metrics: BlockMetrics::default(),
+            num_concurrent_block_flushes,
         }
     }
 
@@ -538,6 +570,10 @@ impl BlockManager {
 
     pub(super) fn default_max_block_size_bytes(&self) -> usize {
         self.default_max_block_size_bytes
+    }
+
+    pub(super) fn num_concurrent_block_flushes(&self) -> usize {
+        self.num_concurrent_block_flushes
     }
 }
 
@@ -774,14 +810,19 @@ impl RootManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::arrow::block::delta::UnorderedBlockDelta;
+    use crate::arrow::{block::delta::UnorderedBlockDelta, config::BlockManagerConfig};
     use chroma_cache::new_cache_for_test;
     use chroma_storage::test_storage;
 
     #[tokio::test]
     async fn test_cached() {
         let (_temp_dir, storage) = test_storage();
-        let manager = BlockManager::new(storage, 100, new_cache_for_test());
+        let manager = BlockManager::new(
+            storage,
+            100,
+            new_cache_for_test(),
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         assert!(!manager.cached(&Uuid::new_v4()).await);
 
         let delta = manager.create::<&str, String, UnorderedBlockDelta>();
