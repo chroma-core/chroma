@@ -1,7 +1,7 @@
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionAndSegments, CollectionUuid, CountForksError, Database, FlushCompactionResponse,
-    GetCollectionByResourceNameError, GetCollectionSizeError, GetCollectionWithSegmentsError,
+    GetCollectionByCrnError, GetCollectionSizeError, GetCollectionWithSegmentsError,
     GetSegmentsError, ListDatabasesError, ListDatabasesResponse, Segment, SegmentFlushInfo,
     SegmentScope, SegmentType, Tenant, UpdateTenantError, UpdateTenantResponse,
 };
@@ -184,18 +184,16 @@ impl TestSysDb {
         Ok(collections)
     }
 
-    pub(crate) async fn get_collection_by_resource_name(
+    pub(crate) async fn get_collection_by_crn(
         &mut self,
         tenant_resource_name: String,
         database: String,
         name: String,
-    ) -> Result<Collection, GetCollectionByResourceNameError> {
+    ) -> Result<Collection, GetCollectionByCrnError> {
         let inner = self.inner.lock();
         let tenant = inner.tenant_resource_names.get(&tenant_resource_name);
         if tenant.is_none() {
-            return Err(GetCollectionByResourceNameError::NotFound(
-                tenant_resource_name,
-            ));
+            return Err(GetCollectionByCrnError::NotFound(tenant_resource_name));
         }
         let tenant = tenant.unwrap();
         let collection = inner
@@ -203,7 +201,7 @@ impl TestSysDb {
             .values()
             .find(|c| c.tenant == *tenant && c.database == database && c.name == name);
         if collection.is_none() {
-            return Err(GetCollectionByResourceNameError::NotFound(format!(
+            return Err(GetCollectionByCrnError::NotFound(format!(
                 "{}:{}:{}",
                 tenant_resource_name, database, name
             )));

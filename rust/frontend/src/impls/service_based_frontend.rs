@@ -27,7 +27,8 @@ use chroma_types::{
     DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
     DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError,
     DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest,
-    ForkCollectionResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
+    GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
     GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
     GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
     HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
@@ -379,8 +380,8 @@ impl ServiceBasedFrontend {
 
     /// Parse a collection name to see if it matches the pattern "<tenant_resource_name>/<database_name>/<collection_name>"
     /// Returns Some((tenant_resource_name, database_name, collection_name)) if the pattern matches, None otherwise
-    fn parse_resource_name(&self, collection_name: &str) -> Option<(String, String, String)> {
-        let parts: Vec<&str> = collection_name.split(':').collect();
+    fn parse_crn(&self, crn: &str) -> Option<(String, String, String)> {
+        let parts: Vec<&str> = crn.split(':').collect();
         if parts.len() == 3 {
             Some((
                 parts[0].to_string(),
@@ -401,35 +402,36 @@ impl ServiceBasedFrontend {
             ..
         }: GetCollectionRequest,
     ) -> Result<GetCollectionResponse, GetCollectionError> {
-        if let Some((tenant_resource_name, database_name, collection_name)) =
-            self.parse_resource_name(&collection_name)
-        {
+        let mut collections = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                name: Some(collection_name.clone()),
+                tenant: Some(tenant_id.clone()),
+                database: Some(database_name.clone()),
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        collections
+            .pop()
+            .ok_or(GetCollectionError::NotFound(collection_name))
+    }
+
+    pub async fn get_collection_by_crn(
+        &mut self,
+        GetCollectionByCrnRequest { crn, .. }: GetCollectionByCrnRequest,
+    ) -> Result<GetCollectionByCrnResponse, GetCollectionByCrnError> {
+        if let Some((tenant_resource_name, database_name, collection_name)) = self.parse_crn(&crn) {
             let collection = self
                 .sysdb_client
-                .get_collection_by_resource_name(
-                    tenant_resource_name,
-                    database_name,
-                    collection_name,
-                )
+                .get_collection_by_crn(tenant_resource_name, database_name, collection_name)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
             Ok(collection)
         } else {
-            let mut collections = self
-                .sysdb_client
-                .get_collections(GetCollectionsOptions {
-                    name: Some(collection_name.clone()),
-                    tenant: Some(tenant_id.clone()),
-                    database: Some(database_name.clone()),
-                    limit: Some(1),
-                    ..Default::default()
-                })
-                .await
-                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
-            collections
-                .pop()
-                .ok_or(GetCollectionError::NotFound(collection_name))
+            return Err(GetCollectionByCrnError::NotFound(crn));
         }
     }
 
@@ -1790,7 +1792,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_resource_name() {
+    fn test_parse_crn() {
         let registry = Registry::new();
         let system = System::new();
         let config = FrontendConfig::sqlite_in_memory();
@@ -1802,7 +1804,7 @@ mod tests {
             ))
             .unwrap();
 
-        let result = frontend.parse_resource_name("tenant1/db1/coll1");
+        let result = frontend.parse_crn("tenant1/db1/coll1");
         assert_eq!(
             result,
             Some((
@@ -1812,12 +1814,9 @@ mod tests {
             ))
         );
 
-        assert_eq!(frontend.parse_resource_name("tenant1/coll1"), None);
-        assert_eq!(frontend.parse_resource_name("tenant1"), None);
-        assert_eq!(
-            frontend.parse_resource_name("tenant1/db1/coll1/extra"),
-            None
-        );
-        assert_eq!(frontend.parse_resource_name(""), None);
+        assert_eq!(frontend.parse_crn("tenant1/coll1"), None);
+        assert_eq!(frontend.parse_crn("tenant1"), None);
+        assert_eq!(frontend.parse_crn("tenant1/db1/coll1/extra"), None);
+        assert_eq!(frontend.parse_crn(""), None);
     }
 }

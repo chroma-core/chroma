@@ -16,13 +16,13 @@ use chroma_types::{
     CountRequest, CountResponse, CreateCollectionRequest, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DeleteCollectionRecordsResponse, DeleteDatabaseRequest, DeleteDatabaseResponse,
-    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse,
-    GetTenantRequest, GetTenantResponse, GetUserIdentityResponse, HeartbeatResponse, IncludeList,
-    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest,
-    QueryResponse, UpdateCollectionConfiguration, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateMetadata, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsResponse,
+    GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetResponse, GetTenantRequest, GetTenantResponse, GetUserIdentityResponse,
+    HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
+    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
+    ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
+    UpdateCollectionConfiguration, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
+    UpdateMetadata, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -112,6 +112,7 @@ pub struct Metrics {
     list_collections: Counter<u64>,
     count_collections: Counter<u64>,
     get_collection: Counter<u64>,
+    get_collection_by_crn: Counter<u64>,
     update_collection: Counter<u64>,
     delete_collection: Counter<u64>,
     fork_collection: Counter<u64>,
@@ -144,6 +145,7 @@ impl Metrics {
             list_collections: meter.u64_counter("list_collections").build(),
             count_collections: meter.u64_counter("count_collections").build(),
             get_collection: meter.u64_counter("get_collection").build(),
+            get_collection_by_crn: meter.u64_counter("get_collection_by_crn").build(),
             update_collection: meter.u64_counter("update_collection").build(),
             delete_collection: meter.u64_counter("delete_collection").build(),
             fork_collection: meter.u64_counter("fork_collection").build(),
@@ -233,6 +235,7 @@ impl FrontendServer {
             .route("/api/v2/reset", post(reset))
             .route("/api/v2/version", get(version))
             .route("/api/v2/auth/identity", get(get_user_identity))
+            .route("/api/v2/collections/{crn}", get(get_collection_by_crn))
             .route("/api/v2/tenants", post(create_tenant))
             .route("/api/v2/tenants/{tenant_name}", get(get_tenant))
             .route("/api/v2/tenants/{tenant_name}", patch(update_tenant))
@@ -1076,6 +1079,32 @@ async fn get_collection(
         server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()])?;
     let request = GetCollectionRequest::try_new(tenant, database, collection_name)?;
     let collection = server.frontend.get_collection(request).await?;
+    Ok(Json(collection))
+}
+
+async fn get_collection_by_crn(
+    headers: HeaderMap,
+    Path(crn): Path<String>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<Collection>, ServerError> {
+    server
+        .metrics
+        .get_collection_by_crn
+        .add(1, &[KeyValue::new("crn", crn.clone())]);
+    tracing::info!(name: "get_collection_by_crn", crn = %crn);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::GetCollectionByCrn,
+            AuthzResource {
+                tenant: None,
+                database: None,
+                collection: Some(crn.clone()),
+            },
+        )
+        .await?;
+    let request = GetCollectionByCrnRequest::try_new(crn)?;
+    let collection = server.frontend.get_collection_by_crn(request).await?;
     Ok(Json(collection))
 }
 

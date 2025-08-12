@@ -762,19 +762,35 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
+#[non_exhaustive]
+#[derive(Validate, Clone, Serialize, ToSchema)]
+pub struct GetCollectionByCrnRequest {
+    pub crn: String,
+}
+
+impl GetCollectionByCrnRequest {
+    pub fn try_new(crn: String) -> Result<Self, ChromaValidationError> {
+        let request = Self { crn };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+pub type GetCollectionByCrnResponse = Collection;
+
 #[derive(Debug, Error)]
-pub enum GetCollectionByResourceNameError {
+pub enum GetCollectionByCrnError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Collection [{0}] does not exist")]
     NotFound(String),
 }
 
-impl ChromaError for GetCollectionByResourceNameError {
+impl ChromaError for GetCollectionByCrnError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GetCollectionByResourceNameError::Internal(err) => err.code(),
-            GetCollectionByResourceNameError::NotFound(_) => ErrorCodes::NotFound,
+            GetCollectionByCrnError::Internal(err) => err.code(),
+            GetCollectionByCrnError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }
