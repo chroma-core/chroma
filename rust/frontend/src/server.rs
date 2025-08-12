@@ -322,9 +322,7 @@ impl FrontendServer {
             app = app.layer(cors_builder);
         }
 
-        // TODO: tracing
         let addr = format!("{}:{}", listen_address, port);
-        // println!("Listening on {addr}");
         tracing::info!(%addr, "Frontend server listening on address");
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         let bound_port = listener
