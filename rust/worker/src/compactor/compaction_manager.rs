@@ -685,7 +685,7 @@ impl Handler<RegisterOnReadySignal> for CompactionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_blockstore::arrow::config::TEST_MAX_BLOCK_SIZE_BYTES;
+    use chroma_blockstore::arrow::config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES};
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_index::config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig};
@@ -910,6 +910,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),

@@ -4,7 +4,10 @@ use chroma_benchmark::{
     benchmark::tokio_multi_thread,
     datasets::{gist::GistDataset, types::RecordDataset},
 };
-use chroma_blockstore::{arrow::provider::ArrowBlockfileProvider, provider::BlockfileProvider};
+use chroma_blockstore::{
+    arrow::{config::BlockManagerConfig, provider::ArrowBlockfileProvider},
+    provider::BlockfileProvider,
+};
 use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_index::{
@@ -67,6 +70,7 @@ fn add_to_index_and_get_reader<'a>(
             max_block_size_bytes,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
