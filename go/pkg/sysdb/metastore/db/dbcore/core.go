@@ -26,6 +26,8 @@ import (
 var (
 	globalDB     *gorm.DB
 	globalReadDB *gorm.DB
+	// Feature flag for optimized collection queries (off by default)
+	optimizedCollectionQueriesEnabled bool
 )
 
 type DBConfig struct {
@@ -38,6 +40,8 @@ type DBConfig struct {
 	MaxIdleConns int
 	MaxOpenConns int
 	SslMode      string
+	// Feature flag to enable optimized collection queries with CTE (off by default)
+	EnableOptimizedCollectionQueries bool
 }
 
 func ConnectDB(cfg DBConfig) error {
@@ -52,6 +56,8 @@ func ConnectDB(cfg DBConfig) error {
 
 	globalDB = db
 	globalReadDB = read_db
+	// Set the feature flag from config
+	optimizedCollectionQueriesEnabled = cfg.EnableOptimizedCollectionQueries
 
 	return nil
 }
@@ -153,6 +159,11 @@ func GetReadDB(ctx context.Context) *gorm.DB {
 	}
 
 	return globalReadDB.WithContext(ctx)
+}
+
+// IsOptimizedCollectionQueriesEnabled returns the state of the optimized collection queries feature flag
+func IsOptimizedCollectionQueriesEnabled() bool {
+	return optimizedCollectionQueriesEnabled
 }
 
 func CreateDefaultTenantAndDatabase(db *gorm.DB) string {
