@@ -71,6 +71,7 @@ query_service:
             admission_rate_limit: 256 # 256MiB/s
             shards: 64
             eviction: lru
+        num_concurrent_block_flushes: 40
       sparse_index_manager_config:
         sparse_index_cache_config:
           lru:
@@ -152,6 +153,7 @@ compaction_service:
           lru:
             name: "block_cache"
             capacity: 1000
+        num_concurrent_block_flushes: 40
       sparse_index_manager_config:
         sparse_index_cache_config:
           lru:
