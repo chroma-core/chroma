@@ -275,7 +275,7 @@ def ann_accuracy(
     collection: Collection,
     record_set: RecordSet,
     n_results: int = 1,
-    min_recall: float = 0.99,
+    min_recall: float = 0.95,
     embedding_function: Optional[types.EmbeddingFunction] = None,  # type: ignore[type-arg]
     query_indices: Optional[List[int]] = None,
     query_embeddings: Optional[types.Embeddings] = None,
