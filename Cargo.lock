@@ -1620,6 +1620,7 @@ dependencies = [
  "anyhow",
  "arrow",
  "async-trait",
+ "base64 0.22.1",
  "chroma-benchmark",
  "chroma-blockstore",
  "chroma-cache",

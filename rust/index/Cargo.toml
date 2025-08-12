@@ -21,6 +21,7 @@ roaring = { workspace = true }
 futures = { workspace = true }
 async-trait = { workspace = true }
 tempfile = { workspace = true }
+base64 = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }

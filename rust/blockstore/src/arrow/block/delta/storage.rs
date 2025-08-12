@@ -22,6 +22,7 @@ use std::{
 pub enum BlockStorage {
     String(SingleColumnStorage<String>),
     VecUInt32(SingleColumnStorage<Vec<u32>>),
+    Float32(SingleColumnStorage<f32>),
     UInt32(SingleColumnStorage<u32>),
     RoaringBitmap(SingleColumnStorage<RoaringBitmap>),
     DataRecord(DataRecordStorage),
@@ -33,6 +34,7 @@ impl Debug for BlockStorage {
         match self {
             BlockStorage::String(_) => f.debug_struct("String").finish(),
             BlockStorage::VecUInt32(_) => f.debug_struct("VecUInt32").finish(),
+            BlockStorage::Float32(_) => f.debug_struct("Float32").finish(),
             BlockStorage::UInt32(_) => f.debug_struct("UInt32").finish(),
             BlockStorage::RoaringBitmap(_) => f.debug_struct("RoaringBitmap").finish(),
             BlockStorage::DataRecord(_) => f.debug_struct("DataRecord").finish(),
@@ -154,6 +156,7 @@ impl BlockStorage {
     pub fn get_prefix_size(&self) -> usize {
         match self {
             BlockStorage::String(builder) => builder.get_prefix_size(),
+            BlockStorage::Float32(builder) => builder.get_prefix_size(),
             BlockStorage::UInt32(builder) => builder.get_prefix_size(),
             BlockStorage::DataRecord(builder) => builder.get_prefix_size(),
             BlockStorage::VecUInt32(builder) => builder.get_prefix_size(),
@@ -165,6 +168,7 @@ impl BlockStorage {
     pub fn get_key_size(&self) -> usize {
         match self {
             BlockStorage::String(builder) => builder.get_key_size(),
+            BlockStorage::Float32(builder) => builder.get_key_size(),
             BlockStorage::UInt32(builder) => builder.get_key_size(),
             BlockStorage::DataRecord(builder) => builder.get_key_size(),
             BlockStorage::VecUInt32(builder) => builder.get_key_size(),
@@ -176,6 +180,7 @@ impl BlockStorage {
     pub fn get_min_key(&self) -> Option<CompositeKey> {
         match self {
             BlockStorage::String(builder) => builder.get_min_key(),
+            BlockStorage::Float32(builder) => builder.get_min_key(),
             BlockStorage::UInt32(builder) => builder.get_min_key(),
             BlockStorage::DataRecord(builder) => builder.get_min_key(),
             BlockStorage::VecUInt32(builder) => builder.get_min_key(),
@@ -188,6 +193,7 @@ impl BlockStorage {
     pub fn get_size<K: ArrowWriteableKey>(&self) -> usize {
         match self {
             BlockStorage::String(builder) => builder.get_size::<K>(),
+            BlockStorage::Float32(builder) => builder.get_size::<K>(),
             BlockStorage::UInt32(builder) => builder.get_size::<K>(),
             BlockStorage::DataRecord(builder) => builder.get_size::<K>(),
             BlockStorage::VecUInt32(builder) => builder.get_size::<K>(),
@@ -201,6 +207,10 @@ impl BlockStorage {
             BlockStorage::String(builder) => {
                 let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::String(storage))
+            }
+            BlockStorage::Float32(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::Float32(storage))
             }
             BlockStorage::UInt32(builder) => {
                 let (split_key, storage) = builder.split::<K>(split_size);
@@ -228,6 +238,7 @@ impl BlockStorage {
     pub fn len(&self) -> usize {
         match self {
             BlockStorage::String(builder) => builder.len(),
+            BlockStorage::Float32(builder) => builder.len(),
             BlockStorage::UInt32(builder) => builder.len(),
             BlockStorage::DataRecord(builder) => builder.len(),
             BlockStorage::VecUInt32(builder) => builder.len(),
@@ -244,6 +255,11 @@ impl BlockStorage {
             K::get_arrow_builder(self.len(), self.get_prefix_size(), self.get_key_size());
         match self {
             BlockStorage::String(builder) => {
+                // TODO: handle error
+                let (schema, columns) = builder.into_arrow(key_builder, metadata);
+                RecordBatch::try_new(schema, columns).unwrap()
+            }
+            BlockStorage::Float32(builder) => {
                 // TODO: handle error
                 let (schema, columns) = builder.into_arrow(key_builder, metadata);
                 RecordBatch::try_new(schema, columns).unwrap()
