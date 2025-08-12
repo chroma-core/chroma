@@ -324,7 +324,8 @@ impl FrontendServer {
 
         // TODO: tracing
         let addr = format!("{}:{}", listen_address, port);
-        println!("Listening on {addr}");
+        // println!("Listening on {addr}");
+        tracing::info!(%addr, "Frontend server listening on address");
         let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
         let bound_port = listener
             .local_addr()
@@ -1342,6 +1343,10 @@ impl AddCollectionRecordsPayload {
         (status = 400, description = "Invalid data for collection addition")
     )
 )]
+// NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
+// the individual method since the overall handler span includes buffering
+// the body.
+#[tracing::instrument(name = "collection_add", skip_all)]
 async fn collection_add(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
@@ -1450,6 +1455,10 @@ pub struct UpdateCollectionRecordsPayload {
         (status = 404, description = "Collection not found")
     )
 )]
+// NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
+// the individual method since the overall handler span includes buffering
+// the body.
+#[tracing::instrument(name = "collection_update", skip_all)]
 async fn collection_update(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
@@ -1566,6 +1575,10 @@ pub struct UpsertCollectionRecordsPayload {
         ("collection_id" = String, Path, description = "Collection ID"),
     )
 )]
+// NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
+// the individual method since the overall handler span includes buffering
+// the body.
+#[tracing::instrument(name = "collection_upsert", skip_all)]
 async fn collection_upsert(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
