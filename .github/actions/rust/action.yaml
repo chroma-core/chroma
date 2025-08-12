@@ -30,6 +30,7 @@ runs:
       uses: arduino/setup-protoc@v3
       with:
         repo-token: ${{ inputs.github-token }}
+        version: v31.1
     - name: Set up cache
       uses: Swatinem/rust-cache@v2
       with:
