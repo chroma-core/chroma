@@ -98,7 +98,9 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
         ctx: &ComponentContext<Self>,
     ) {
         let cancel = if let Err(err) = &res {
-            tracing::error!("Error running {}: {}", Self::name(), err);
+            if err.should_trace_error() {
+                tracing::error!("Error running {}: {}", Self::name(), err);
+            }
             true
         } else {
             false
@@ -138,7 +140,9 @@ pub trait Orchestrator: Debug + Send + Sized + 'static {
     ) {
         self.cleanup().await;
         let cancel = if let Err(err) = &res {
-            tracing::error!("Error running {}: {}", Self::name(), err);
+            if err.should_trace_error() {
+                tracing::error!("Error running {}: {}", Self::name(), err);
+            }
             true
         } else {
             false
