@@ -31,9 +31,6 @@ use std::sync::Arc;
 
 #[derive(Debug, clap::ValueEnum, Clone)]
 enum CliCleanupMode {
-    DryRun,
-    Rename,
-    Delete,
     DryRunV2,
     DeleteV2,
 }
@@ -41,9 +38,6 @@ enum CliCleanupMode {
 impl From<CliCleanupMode> for CleanupMode {
     fn from(mode: CliCleanupMode) -> Self {
         match mode {
-            CliCleanupMode::DryRun => CleanupMode::DryRun,
-            CliCleanupMode::Rename => CleanupMode::Rename,
-            CliCleanupMode::Delete => CleanupMode::Delete,
             CliCleanupMode::DryRunV2 => CleanupMode::DryRunV2,
             CliCleanupMode::DeleteV2 => CleanupMode::DeleteV2,
         }
@@ -440,12 +434,8 @@ async fn main() {
                     size_bytes_post_compaction: row.get::<i64, _>("size_bytes_post_compaction"),
                     last_compaction_time_secs: row.get::<i64, _>("last_compaction_time_secs"),
                     version_file_name: row.get::<String, _>("version_file_name"),
-                    root_collection_id: row
-                        .get::<Option<String>, _>("root_collection_id")
-                        .map(|s| s.to_string()),
-                    lineage_file_name: row
-                        .get::<Option<String>, _>("lineage_file_name")
-                        .map(|s| s.to_string()),
+                    root_collection_id: row.get::<Option<String>, _>("root_collection_id"),
+                    lineage_file_name: row.get::<Option<String>, _>("lineage_file_name"),
                     is_deleted: row.get::<bool, _>("is_deleted"),
                     database_id: row.get::<String, _>("database_id"),
                     num_versions: row.get::<i32, _>("num_versions"),
