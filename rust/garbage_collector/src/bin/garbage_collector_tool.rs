@@ -22,6 +22,7 @@ use prost::Message;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::Row;
 use std::collections::HashSet;
+use std::io::BufRead;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
@@ -75,6 +76,11 @@ enum GarbageCollectorCommand {
         include_all_children: bool,
         #[arg(long)]
         output_file: PathBuf,
+    },
+
+    ImportSysDbCollections {
+        #[arg(long)]
+        input_file: PathBuf,
     },
 
     DownloadCollections {
@@ -229,7 +235,15 @@ async fn main() {
                 enable_dangerous_option_to_ignore_min_versions_for_wal3,
             );
 
-            orchestrator.run(system.clone()).await.unwrap();
+            let result = orchestrator.run(system.clone()).await;
+
+            system.stop().await;
+            system.join().await;
+
+            match result {
+                Ok(_) => tracing::info!("Garbage collection completed successfully."),
+                Err(e) => tracing::error!("Garbage collection failed: {}", e),
+            }
         }
 
         GarbageCollectorCommand::DownloadCollections {
@@ -435,6 +449,101 @@ async fn main() {
             }
 
             tracing::info!("Exported {} collections to {}", len, output_file.display());
+        }
+
+        GarbageCollectorCommand::ImportSysDbCollections { input_file } => {
+            let database_url = std::env::var("DATABASE_URL")
+                .expect("DATABASE_URL environment variable is not set.");
+
+            let pool = PgPoolOptions::new()
+                .connect(&database_url)
+                .await
+                .expect("Failed to connect to database");
+
+            let file =
+                std::fs::File::open(&input_file).expect("Failed to open input file for reading");
+            let reader = std::io::BufReader::new(file);
+
+            let mut created_database_ids = HashSet::new();
+            let mut created_tenant_ids = HashSet::new();
+
+            let mut num_imported = 0;
+            for line in reader.lines() {
+                let line = line.expect("Failed to read line from input file");
+                let collection: SerializedCollection =
+                    serde_json::from_str(&line).expect("Failed to parse collection JSON");
+
+                if !created_tenant_ids.contains(&collection.tenant) {
+                    sqlx::query("INSERT INTO tenants (id, last_compaction_time) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+                        .bind(&collection.tenant)
+                        .bind(0)
+                        .execute(&pool)
+                        .await
+                        .expect("Failed to insert tenant in database");
+                    created_tenant_ids.insert(collection.tenant.clone());
+                }
+
+                if !created_database_ids.contains(&collection.database_id) {
+                    sqlx::query(
+                        "INSERT INTO databases (id, name, tenant_id) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                    )
+                    .bind(&collection.database_id)
+                    .bind(format!("imported_{}", &collection.database_id))
+                    .bind(&collection.tenant)
+                    .execute(&pool)
+                    .await
+                    .expect("Failed to insert database in database");
+                    created_database_ids.insert(collection.database_id.clone());
+                }
+
+                sqlx::query(
+                    "INSERT INTO collections (
+                        id,
+                        name,
+                        dimension,
+                        database_id,
+                        is_deleted,
+                        log_position,
+                        version,
+                        configuration_json_str,
+                        total_records_post_compaction,
+                        size_bytes_post_compaction,
+                        last_compaction_time_secs,
+                        version_file_name,
+                        lineage_file_name,
+                        root_collection_id,
+                        tenant,
+                        num_versions
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) ON CONFLICT DO NOTHING",
+                )
+                .bind(&collection.id)
+                .bind(&collection.name)
+                .bind(collection.dimension)
+                .bind(&collection.database_id)
+                .bind(collection.is_deleted)
+                .bind(collection.log_position)
+                .bind(collection.version)
+                .bind(&collection.configuration_json_str)
+                .bind(collection.total_records_post_compaction)
+                .bind(collection.size_bytes_post_compaction)
+                .bind(collection.last_compaction_time_secs)
+                .bind(&collection.version_file_name)
+                .bind(collection.lineage_file_name)
+                .bind(collection.root_collection_id)
+                .bind(&collection.tenant)
+                .bind(collection.num_versions)
+                .execute(&pool)
+                .await
+                .expect("Failed to insert collection in database");
+
+                num_imported += 1;
+            }
+
+            tracing::info!(
+                "Imported {} collections from {}",
+                num_imported,
+                input_file.display()
+            );
         }
     }
 }
