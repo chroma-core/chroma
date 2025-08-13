@@ -24,6 +24,7 @@ use sqlx::Row;
 use std::collections::HashSet;
 use std::io::BufRead;
 use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
@@ -69,23 +70,33 @@ enum GarbageCollectorCommand {
         collection_soft_delete_absolute_cutoff_time: DateTime<Utc>,
     },
 
+    /// Export collections from the sysdb to a file.
+    /// Requires the `DATABASE_URL` environment variable to be set.
+    #[command(name = "export-sysdb-collections")]
     ExportSysDbCollections {
         #[arg(long)]
         collection_id: String,
+        /// If true, include all collections where `root_collection_id` matches the given `collection_id`.
         #[arg(long, default_value = "false")]
         include_all_children: bool,
         #[arg(long)]
         output_file: PathBuf,
     },
 
+    /// Import collections from a file created by `export-sysdb-collections` into the sysdb.
+    /// Requires the `DATABASE_URL` environment variable to be set.
+    #[command(name = "import-sysdb-collections")]
     ImportSysDbCollections {
         #[arg(long)]
         input_file: PathBuf,
     },
 
+    /// Download all files from object storage associated with a given set of collections.
     DownloadCollections {
         #[arg(short, long)]
         config_path: String,
+        /// Path to the file containing exported collections in JSON format.
+        /// This should have been created by `export-sysdb-collections`.
         #[arg(long)]
         exported_collections_path: PathBuf,
         #[arg(long)]
@@ -107,7 +118,7 @@ struct Args {
 async fn download_file(
     storage_client: &Storage,
     storage_key: &str,
-    output_directory: &PathBuf,
+    output_directory: &Path,
 ) -> Result<Option<Arc<Vec<u8>>>, Box<dyn std::error::Error>> {
     let output_path = output_directory.join(storage_key);
 
@@ -291,7 +302,7 @@ async fn main() {
                         let version_file = download_file(
                             &storage_client,
                             &collection.version_file_name,
-                            &object_store_output_directory,
+                            object_store_output_directory,
                         )
                         .await
                         .expect("Failed to download version file")
@@ -323,7 +334,7 @@ async fn main() {
                             download_file(
                                 &storage_client,
                                 lineage_file_path,
-                                &object_store_output_directory,
+                                object_store_output_directory,
                             )
                             .await
                             .expect("Failed to download lineage file");
@@ -354,7 +365,7 @@ async fn main() {
                     let missing_sparse_indices_count = Arc::clone(&missing_sparse_indices_count);
                     async move {
                         let result =
-                            download_file(&storage_client, &path, &object_store_output_directory)
+                            download_file(&storage_client, &path, object_store_output_directory)
                                 .await
                                 .expect("Failed to download sparse index file");
 
