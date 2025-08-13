@@ -341,7 +341,6 @@ async fn main() {
                         }
 
                         bar.inc(1);
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
                         futures::stream::iter(sparse_indices_to_fetch)
                     }
@@ -375,7 +374,6 @@ async fn main() {
                         }
 
                         bar.inc(1);
-                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
                 })
                 .buffer_unordered(download_concurrency)
