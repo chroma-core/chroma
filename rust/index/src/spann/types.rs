@@ -559,8 +559,8 @@ impl SpannIndexWriter {
             );
             SpannIndexWriterError::VersionsMapDataLoadError(e)
         })?;
-        versions_data.iter().for_each(|(_, key, value)| {
-            versions_map.insert(*key, *value);
+        versions_data.for_each(|(_, key, value)| {
+            versions_map.insert(key, value);
         });
         Ok(VersionsMapInner { versions_map })
     }

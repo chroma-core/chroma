@@ -327,7 +327,8 @@ impl<'me> FullTextIndexReader<'me> {
                 let positional_posting_list = self
                     .posting_lists_blockfile_reader
                     .get_range(token.text.as_str()..=token.text.as_str(), ..)
-                    .await?;
+                    .await?
+                    .collect::<Vec<_>>();
                 Ok::<_, FullTextIndexError>(positional_posting_list)
             })
             .collect::<Vec<_>>()
@@ -427,8 +428,8 @@ impl<'me> FullTextIndexReader<'me> {
             .get_range(token..=token, ..)
             .await?;
         let mut results = vec![];
-        for (_, doc_id, positions) in positional_posting_list.iter() {
-            results.push((*doc_id, positions.to_vec()));
+        for (_, doc_id, positions) in positional_posting_list {
+            results.push((doc_id, positions.to_vec()));
         }
         Ok(results)
     }
@@ -454,12 +455,13 @@ impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'
         ngram_range: NgramRange,
     ) -> Result<Vec<(&'me str, u32, &'me [u32])>, FullTextIndexError>
     where
-        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync,
+        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync + 'me,
     {
         Ok(self
             .posting_lists_blockfile_reader
             .get_range(ngram_range, ..)
-            .await?)
+            .await?
+            .collect::<Vec<_>>())
     }
 }
 

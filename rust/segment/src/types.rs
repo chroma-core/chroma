@@ -1338,7 +1338,8 @@ mod tests {
         let all_data = segment_reader
             .get_all_data()
             .await
-            .expect("Get all data failed");
+            .expect("Get all data failed")
+            .collect::<Vec<_>>();
         assert_eq!(all_data.len(), 1);
         let record = &all_data[0];
         assert_eq!(record.1.id, "embedding_id_1");
@@ -1623,7 +1624,8 @@ mod tests {
         let all_data = segment_reader
             .get_all_data()
             .await
-            .expect("Get all data failed");
+            .expect("Get all data failed")
+            .collect::<Vec<_>>();
         assert_eq!(all_data.len(), 1);
         let record = &all_data[0];
         assert_eq!(record.1.id, "embedding_id_1");
@@ -1929,7 +1931,8 @@ mod tests {
         let all_data = segment_reader
             .get_all_data()
             .await
-            .expect("Get all data failed");
+            .expect("Get all data failed")
+            .collect::<Vec<_>>();
         assert_eq!(all_data.len(), 1);
         let record = &all_data[0];
         assert_eq!(record.1.id, "embedding_id_1");
@@ -2276,7 +2279,8 @@ mod tests {
         let all_data = segment_reader
             .get_all_data()
             .await
-            .expect("Get all data failed");
+            .expect("Get all data failed")
+            .collect::<Vec<_>>();
         for data in all_data {
             assert_ne!(data.1.id, "embedding_id_2");
             if data.1.id == "embedding_id_1" {

@@ -616,10 +616,10 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         &'me self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(&'me str, K, V)>, Box<dyn ChromaError>>
+    ) -> Result<impl Iterator<Item = (&'me str, K, V)> + 'me, Box<dyn ChromaError>>
     where
-        PrefixRange: RangeBounds<&'prefix str> + Clone,
-        KeyRange: RangeBounds<K> + Clone,
+        PrefixRange: RangeBounds<&'prefix str> + Clone + 'me,
+        KeyRange: RangeBounds<K> + Clone + 'me,
     {
         let block_ids = self
             .root
@@ -642,12 +642,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         });
 
         let blocks = try_join_all(block_futures).await?;
-        let mut result: Vec<(&str, K, V)> = vec![];
-        for block in blocks {
-            result.extend(block.get_range(prefix_range.clone(), key_range.clone()));
-        }
-
-        Ok(result)
+        Ok(blocks
+            .into_iter()
+            .flat_map(move |block| block.get_range(prefix_range.clone(), key_range.clone())))
     }
 
     pub(crate) async fn contains(
@@ -1201,40 +1198,39 @@ mod tests {
             };
 
             let materialized_range = match operation {
-                ComparisonOperation::GreaterThan => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Excluded(query.as_str()), Bound::Unbounded),
-                        )
-                        .await
-                }
-                ComparisonOperation::GreaterThanOrEquals => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Included(query.as_str()), Bound::Unbounded),
-                        )
-                        .await
-                }
-                ComparisonOperation::LessThan => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Unbounded, Bound::Excluded(query.as_str())),
-                        )
-                        .await
-                }
-                ComparisonOperation::LessThanOrEquals => {
-                    reader
-                        .get_range(
-                            prefix..=prefix,
-                            (Bound::Unbounded, Bound::Included(query.as_str())),
-                        )
-                        .await
-                }
-            }
-            .unwrap();
+                ComparisonOperation::GreaterThan => reader
+                    .get_range(
+                        prefix..=prefix,
+                        (Bound::Excluded(query.as_str()), Bound::Unbounded),
+                    )
+                    .await
+                    .unwrap()
+                    .collect::<Vec<_>>(),
+                ComparisonOperation::GreaterThanOrEquals => reader
+                    .get_range(
+                        prefix..=prefix,
+                        (Bound::Included(query.as_str()), Bound::Unbounded),
+                    )
+                    .await
+                    .unwrap()
+                    .collect(),
+                ComparisonOperation::LessThan => reader
+                    .get_range(
+                        prefix..=prefix,
+                        (Bound::Unbounded, Bound::Excluded(query.as_str())),
+                    )
+                    .await
+                    .unwrap()
+                    .collect(),
+                ComparisonOperation::LessThanOrEquals => reader
+                    .get_range(
+                        prefix..=prefix,
+                        (Bound::Unbounded, Bound::Included(query.as_str())),
+                    )
+                    .await
+                    .unwrap()
+                    .collect(),
+            };
 
             let stream_result = range_stream.try_collect::<Vec<_>>().await.unwrap();
             assert_eq!(

@@ -1001,7 +1001,8 @@ mod test {
             .posting_lists
             .get_range(.., ..)
             .await
-            .expect("Error getting all data from reader");
+            .expect("Error getting all data from reader")
+            .collect::<Vec<_>>();
         pl.sort_by(|a, b| a.0.cmp(b.0));
         assert_eq!(pl.len(), 1);
         assert_eq!(pl[0].2.doc_offset_ids, &[1, 2]);
@@ -1012,7 +1013,8 @@ mod test {
             .versions_map
             .get_range(.., ..)
             .await
-            .expect("Error gettting all data from reader");
+            .expect("Error gettting all data from reader")
+            .collect::<Vec<_>>();
         versions_map.sort_by(|a, b| a.1.cmp(&b.1));
         assert_eq!(
             versions_map
