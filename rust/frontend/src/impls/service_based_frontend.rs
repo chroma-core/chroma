@@ -439,7 +439,7 @@ impl ServiceBasedFrontend {
 
             Ok(collection)
         } else {
-            return Err(GetCollectionByCrnError::NotFound(crn));
+            Err(GetCollectionByCrnError::NotFound(crn))
         }
     }
 

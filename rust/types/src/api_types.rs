@@ -7,7 +7,8 @@ use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::plan::PlanToProtoError;
 use crate::validators::{
-    validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
+    validate_crn, validate_name, validate_non_empty_collection_update_metadata,
+    validate_non_empty_metadata,
 };
 use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
@@ -765,6 +766,7 @@ impl ChromaError for GetCollectionsError {
 #[non_exhaustive]
 #[derive(Validate, Clone, Serialize, ToSchema)]
 pub struct GetCollectionByCrnRequest {
+    #[validate(custom(function = "validate_crn"))]
     pub crn: String,
 }
 
