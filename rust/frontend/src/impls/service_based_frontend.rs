@@ -378,11 +378,12 @@ impl ServiceBasedFrontend {
             .map(|count| count as u32)
     }
 
-    /// Parse a collection name to see if it matches the pattern "<tenant_resource_name>/<database_name>/<collection_name>"
+    /// Parse a collection name to see if it matches the pattern "<tenant_resource_name>:<database_name>:<collection_name>"
     /// Returns Some((tenant_resource_name, database_name, collection_name)) if the pattern matches, None otherwise
     fn parse_crn(&self, crn: &str) -> Option<(String, String, String)> {
         let parts: Vec<&str> = crn.split(':').collect();
-        if parts.len() == 3 {
+        if parts.len() == 3 && !parts[0].is_empty() && !parts[1].is_empty() && !parts[2].is_empty()
+        {
             Some((
                 parts[0].to_string(),
                 parts[1].to_string(),
@@ -1811,7 +1812,7 @@ mod tests {
             ))
             .unwrap();
 
-        let result = frontend.parse_crn("tenant1/db1/coll1");
+        let result = frontend.parse_crn("tenant1:db1:coll1");
         assert_eq!(
             result,
             Some((
@@ -1821,9 +1822,14 @@ mod tests {
             ))
         );
 
-        assert_eq!(frontend.parse_crn("tenant1/coll1"), None);
+        assert_eq!(frontend.parse_crn("tenant1:coll1"), None);
         assert_eq!(frontend.parse_crn("tenant1"), None);
-        assert_eq!(frontend.parse_crn("tenant1/db1/coll1/extra"), None);
+        assert_eq!(frontend.parse_crn("tenant1:db1:coll1:extra"), None);
         assert_eq!(frontend.parse_crn(""), None);
+        assert_eq!(frontend.parse_crn("tenant1:db1:"), None);
+        assert_eq!(frontend.parse_crn("tenant1:db1:coll1:"), None);
+        assert_eq!(frontend.parse_crn(":db1:coll1"), None);
+        assert_eq!(frontend.parse_crn(":db1:coll1:"), None);
+        assert_eq!(frontend.parse_crn(":db1::"), None);
     }
 }
