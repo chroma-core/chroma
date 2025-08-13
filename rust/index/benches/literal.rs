@@ -3,7 +3,10 @@ use chroma_benchmark::{
     datasets::rust::TheStackDedupRust,
 };
 use chroma_blockstore::{
-    arrow::provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
+    arrow::{
+        config::BlockManagerConfig,
+        provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
+    },
     provider::BlockfileProvider,
     BlockfileWriterOptions,
 };
@@ -208,6 +211,7 @@ fn bench_literal(criterion: &mut Criterion) {
         BLOCK_SIZE,
         new_cache_for_test(),
         new_cache_for_test(),
+        BlockManagerConfig::default_num_concurrent_block_flushes(),
     );
     let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
     let mut blockfile_id = None;
@@ -256,6 +260,7 @@ fn bench_literal(criterion: &mut Criterion) {
         BLOCK_SIZE,
         new_cache_for_test(),
         new_cache_for_test(),
+        BlockManagerConfig::default_num_concurrent_block_flushes(),
     );
     let blockfile_provider = BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
     let reader_options = BlockfileReaderOptions::new(

@@ -467,7 +467,8 @@ impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'
 mod tests {
     use super::*;
     use chroma_blockstore::{
-        arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider,
+        arrow::{config::BlockManagerConfig, provider::BlockfileReaderOptions},
+        provider::BlockfileProvider,
         BlockfileWriterOptions,
     };
     use chroma_cache::new_cache_for_test;
@@ -967,7 +968,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
-        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            1024 * 1024,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
@@ -1006,7 +1013,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
-        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            1024 * 1024,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
@@ -1048,7 +1061,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
-        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            1024 * 1024,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
@@ -1133,7 +1152,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
-        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            1024 * 1024,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(
@@ -1214,7 +1239,13 @@ mod tests {
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
         let root_cache = new_cache_for_test();
-        let provider = BlockfileProvider::new_arrow(storage, 1024 * 1024, block_cache, root_cache);
+        let provider = BlockfileProvider::new_arrow(
+            storage,
+            1024 * 1024,
+            block_cache,
+            root_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
         let prefix_path = String::from("");
         let pl_blockfile_writer = provider
             .write::<u32, Vec<u32>>(BlockfileWriterOptions::new(prefix_path.clone()))

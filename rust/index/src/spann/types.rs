@@ -2840,7 +2840,10 @@ mod tests {
     use std::{collections::HashSet, f32::consts::PI, path::PathBuf, sync::Arc};
 
     use chroma_blockstore::{
-        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        arrow::{
+            config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES},
+            provider::ArrowBlockfileProvider,
+        },
         provider::BlockfileProvider,
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
@@ -2875,6 +2878,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -3087,6 +3091,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -3350,6 +3355,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -3585,6 +3591,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -3847,6 +3854,7 @@ mod tests {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -4143,6 +4151,7 @@ mod tests {
             max_block_size_bytes,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
     }

@@ -958,7 +958,10 @@ mod test {
         types::materialize_logs,
     };
     use chroma_blockstore::{
-        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        arrow::{
+            config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES},
+            provider::ArrowBlockfileProvider,
+        },
         provider::BlockfileProvider,
     };
     use chroma_cache::new_cache_for_test;
@@ -1002,6 +1005,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -1327,6 +1331,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let tenant = String::from("test_tenant");
         let database_id = DatabaseUuid::new();
@@ -1597,6 +1602,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -1836,6 +1842,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
@@ -2063,6 +2070,7 @@ mod test {
             TEST_MAX_BLOCK_SIZE_BYTES,
             block_cache,
             sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
