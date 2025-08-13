@@ -1,7 +1,3 @@
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
-
 use super::operator::OperatorType;
 use super::{operator::TaskMessage, worker_thread::WorkerThread};
 use crate::execution::config::DispatcherConfig;
@@ -14,7 +10,10 @@ use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use parking_lot::Mutex;
+use std::collections::VecDeque;
 use std::fmt::Debug;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{trace_span, Instrument, Span};
 
@@ -77,17 +76,27 @@ struct DispatcherMetrics {
     aborted_tasks: opentelemetry::metrics::Counter<u64>,
 }
 
-impl Default for DispatcherMetrics {
-    fn default() -> Self {
+impl DispatcherMetrics {
+    fn new(max_worker_queue_depth: u64, max_io_queue_depth: u64) -> Self {
         let meter = opentelemetry::global::meter("chroma.execution.dispatcher");
         DispatcherMetrics {
             worker_queue_depth: meter
                 .u64_histogram("worker_queue_depth")
                 .with_description("The depth of the worker queue")
+                .with_boundaries(
+                    (0..=10)
+                        .map(|x| (x * (max_worker_queue_depth / 10)) as f64)
+                        .collect(),
+                )
                 .build(),
             io_task_depth: meter
                 .u64_histogram("io_task_depth")
                 .with_description("The depth of the IO task queue")
+                .with_boundaries(
+                    (0..=10)
+                        .map(|x| (x * (max_io_queue_depth / 10)) as f64)
+                        .collect(),
+                )
                 .build(),
             aborted_tasks: meter
                 .u64_counter("aborted_tasks")
@@ -100,14 +109,16 @@ impl Default for DispatcherMetrics {
 impl Dispatcher {
     /// Create a new dispatcher from a configuration.
     pub fn new(config: DispatcherConfig) -> Self {
-        let active_io_tasks = config.active_io_tasks;
         Dispatcher {
-            config,
+            config: config.clone(),
             task_queue: VecDeque::new(),
             waiters: Vec::new(),
-            active_io_tasks: Arc::new(AtomicU64::new(active_io_tasks as u64)),
+            active_io_tasks: Arc::new(AtomicU64::new(config.active_io_tasks as u64)),
             worker_handles: Arc::new(Mutex::new(Vec::new())),
-            metrics: DispatcherMetrics::default(),
+            metrics: DispatcherMetrics::new(
+                config.worker_queue_size as u64,
+                config.active_io_tasks as u64,
+            ),
         }
     }
 
