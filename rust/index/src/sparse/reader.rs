@@ -129,6 +129,7 @@ impl<'me> SparseReader<'me> {
                     });
                     dimension_id.push(id);
                     dimension_upper_bound.push(weight * dimension_max_value);
+                    // NOTE: This is incorrect. We need to find the value of the first record, not block max
                     dimension_score.push(weight * value);
                     query_weight.push(weight);
                 }
