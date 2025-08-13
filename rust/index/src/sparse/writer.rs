@@ -20,8 +20,7 @@ impl SparseDelta {
             self.dimension_value_updates
                 .entry(dimension_id)
                 .or_default()
-                .entry(offset)
-                .insert_entry(Some(value));
+                .insert(offset, Some(value));
         }
     }
 
@@ -30,8 +29,7 @@ impl SparseDelta {
             self.dimension_value_updates
                 .entry(dimension_id)
                 .or_default()
-                .entry(offset)
-                .insert_entry(None);
+                .insert(offset, None);
         }
     }
 }
@@ -54,12 +52,51 @@ impl<'me> SparseWriter<'me> {
     pub async fn write_delta(&self, delta: SparseDelta) -> Result<(), SparseWriterError> {
         for (dimension_id, updates) in delta.dimension_value_updates {
             let encoded_dimension = encode_u32(dimension_id);
-            let blocks = match self.reader.as_ref() {
-                Some(reader) => reader.get_blocks(dimension_id).await?,
-                None => Vec::new(),
+            let (commited_blocks, mut offset_values) = match self.reader.as_ref() {
+                Some(reader) => {
+                    let blocks = reader.get_blocks(dimension_id).await?.into_iter().collect();
+                    let offset_values = reader
+                        .get_offset_values(dimension_id, ..)
+                        .await?
+                        .into_iter()
+                        .collect();
+                    (blocks, offset_values)
+                }
+                None => (HashMap::new(), BTreeMap::new()),
+            };
+            for &offset in commited_blocks.keys() {
+                self.max_writer
+                    .delete::<_, f32>(&encoded_dimension, offset)
+                    .await?;
             }
-            .into_iter()
-            .collect::<BTreeMap<_, _>>();
+            for (offset, update) in updates {
+                match update {
+                    Some(value) => {
+                        self.offset_value_writer
+                            .set(&encoded_dimension, offset, value)
+                            .await?;
+                        offset_values.insert(offset, value);
+                    }
+                    None => {
+                        self.offset_value_writer
+                            .delete::<_, f32>(&encoded_dimension, offset)
+                            .await?;
+                        offset_values.remove(&offset);
+                    }
+                };
+            }
+            let offset_value_vec = offset_values.into_iter().collect::<Vec<_>>();
+            for block in offset_value_vec.chunks(self.block_size as usize) {
+                let (min_offset, max_value) = block.iter().fold(
+                    (u32::MAX, f32::MIN),
+                    |(min_offset, max_value), (offset, value)| {
+                        (min_offset.min(*offset), max_value.max(*value))
+                    },
+                );
+                self.max_writer
+                    .set(&encoded_dimension, min_offset, max_value)
+                    .await?;
+            }
         }
         Ok(())
     }

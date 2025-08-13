@@ -1,11 +1,12 @@
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap},
+    ops::RangeBounds,
 };
 
 use chroma_blockstore::BlockfileReader;
 use chroma_error::ChromaError;
-use futures::{StreamExt, TryStreamExt};
+use futures::{Stream, StreamExt, TryStreamExt};
 use thiserror::Error;
 
 use crate::sparse::types::{encode_u32, DIMENSION_PREFIX};
@@ -75,6 +76,25 @@ impl<'me> SparseReader<'me> {
             })
             .try_collect::<Vec<_>>()
             .await?)
+    }
+
+    pub async fn get_offset_values(
+        &'me self,
+        dimension_id: u32,
+        offset_range: impl RangeBounds<u32> + Clone + Send + 'me,
+    ) -> Result<Vec<(u32, f32)>, SparseReaderError> {
+        let encoded_dimension = encode_u32(dimension_id);
+        Ok(self
+            .offset_value_reader
+            .get_range_stream(
+                encoded_dimension.as_str()..=encoded_dimension.as_str(),
+                offset_range,
+            )
+            .try_collect::<Vec<_>>()
+            .await?
+            .into_iter()
+            .map(|(_, offset, value)| (offset, value))
+            .collect())
     }
 
     pub async fn lower_bound_offset_value(
