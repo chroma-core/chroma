@@ -281,7 +281,9 @@ mod tests {
 
             // Check that entries are ordered and match expected
             if !ref_last_commit.is_empty() {
-                let all_entries = block_on(reader.get_range(.., ..)).unwrap();
+                let all_entries = block_on(reader.get_range(.., ..))
+                    .unwrap()
+                    .collect::<Vec<_>>();
 
                 assert_eq!(all_entries.len(), ref_last_commit.len());
 

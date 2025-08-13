@@ -94,7 +94,7 @@ pub trait NgramLiteralProvider<E, const N: usize = 3> {
         ngram_range: NgramRange,
     ) -> Result<Vec<(&'me str, u32, &'me [u32])>, E>
     where
-        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync;
+        NgramRange: Clone + RangeBounds<&'me str> + Send + Sync + 'me;
 
     // Return the documents containing the literals. The search space is restricted to the documents in the mask if specified
     //

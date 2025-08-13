@@ -94,18 +94,22 @@ impl<
         &'referred_data self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<Vec<(&'referred_data str, K, V)>, Box<dyn ChromaError>>
+    ) -> Result<
+        Box<dyn Iterator<Item = (&'referred_data str, K, V)> + 'referred_data>,
+        Box<dyn ChromaError>,
+    >
     where
-        PrefixRange: RangeBounds<&'prefix str> + Clone,
-        KeyRange: RangeBounds<K> + Clone,
+        PrefixRange: RangeBounds<&'prefix str> + Clone + 'referred_data,
+        KeyRange: RangeBounds<K> + Clone + 'referred_data,
     {
         match self {
             BlockfileReader::MemoryBlockfileReader(reader) => reader
                 .get_range_iter(prefix_range, key_range)
-                .map(|i| i.collect()),
-            BlockfileReader::ArrowBlockfileReader(reader) => {
-                reader.get_range(prefix_range, key_range).await
-            }
+                .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = _> + 'referred_data>),
+            BlockfileReader::ArrowBlockfileReader(reader) => reader
+                .get_range(prefix_range, key_range)
+                .await
+                .map(|iter| Box::new(iter) as Box<dyn Iterator<Item = _> + 'referred_data>),
         }
     }
 

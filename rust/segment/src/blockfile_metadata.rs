@@ -1225,7 +1225,8 @@ mod test {
         let res = record_segment_reader
             .get_all_data()
             .await
-            .expect("Error getting all data from record segment");
+            .expect("Error getting all data from record segment")
+            .collect::<Vec<_>>();
         assert_eq!(res.len(), 0);
         // Add a few records and they should exist.
         let data = vec![
@@ -1316,7 +1317,8 @@ mod test {
         let res = record_segment_reader
             .get_all_data()
             .await
-            .expect("Error getting all data from record segment");
+            .expect("Error getting all data from record segment")
+            .collect::<Vec<_>>();
         assert_eq!(res.len(), 2);
     }
 
@@ -1577,7 +1579,8 @@ mod test {
         let mut res = record_segment_reader
             .get_all_data()
             .await
-            .expect("Record segment get all data failed");
+            .expect("Record segment get all data failed")
+            .collect::<Vec<_>>();
         assert_eq!(res.len(), 2);
         res.sort_by(|x, y| x.1.id.cmp(y.1.id));
         let mut id1_mt = HashMap::new();
@@ -1820,7 +1823,8 @@ mod test {
         let mut res = record_segment_reader
             .get_all_data()
             .await
-            .expect("Record segment get all data failed");
+            .expect("Record segment get all data failed")
+            .collect::<Vec<_>>();
         assert_eq!(res.len(), 1);
         res.sort_by(|x, y| x.1.id.cmp(y.1.id));
         let mut id1_mt = HashMap::new();
@@ -2050,7 +2054,8 @@ mod test {
         let mut res = record_segment_reader
             .get_all_data()
             .await
-            .expect("Record segment get all data failed");
+            .expect("Record segment get all data failed")
+            .collect::<Vec<_>>();
         assert_eq!(res.len(), 1);
         res.sort_by(|x, y| x.1.id.cmp(y.1.id));
         assert_eq!(
@@ -2251,7 +2256,8 @@ mod test {
         let mut res = record_segment_reader
             .get_all_data()
             .await
-            .expect("Record segment get all data failed");
+            .expect("Record segment get all data failed")
+            .collect::<Vec<_>>();
         assert_eq!(res.len(), 2);
         res.sort_by(|x, y| x.1.id.cmp(y.1.id));
         assert_eq!(
