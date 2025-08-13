@@ -34,6 +34,10 @@ humantime = { workspace = true }
 opentelemetry = { workspace = true }
 petgraph = { workspace = true }
 base64 = { workspace = true }
+clap = { workspace = true }
+tracing-subscriber = { workspace = true }
+indicatif = { workspace = true }
+sqlx = { workspace = true }
 
 chroma-config = { workspace = true }
 chroma-error = { workspace = true }
@@ -62,4 +66,3 @@ tokio-test = "0.4"
 rand = { workspace = true }
 itertools = { workspace = true }
 tracing-test = { version = "0.2.5" }
-tracing-subscriber = { workspace = true }

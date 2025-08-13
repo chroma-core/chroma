@@ -23,7 +23,7 @@ where
 }
 
 #[derive(Debug, serde::Deserialize, Clone, Default)]
-pub(super) struct GarbageCollectorConfig {
+pub struct GarbageCollectorConfig {
     pub(super) service_name: String,
     pub(super) otel_endpoint: String,
     #[serde(default = "GarbageCollectorConfig::default_otel_filters")]
@@ -43,13 +43,13 @@ pub(super) struct GarbageCollectorConfig {
     pub(super) max_collections_to_gc: u32,
     pub(super) gc_interval_mins: u32,
     #[serde(default = "GarbageCollectorConfig::default_min_versions_to_keep")]
-    pub(super) min_versions_to_keep: u32,
+    pub min_versions_to_keep: u32,
     #[serde(default = "GarbageCollectorConfig::default_filter_min_versions_if_alive")]
     pub(super) filter_min_versions_if_alive: Option<u64>,
     pub(super) disallow_collections: HashSet<CollectionUuid>,
-    pub(super) sysdb_config: chroma_sysdb::GrpcSysDbConfig,
-    pub(super) dispatcher_config: DispatcherConfig,
-    pub(super) storage_config: StorageConfig,
+    pub sysdb_config: chroma_sysdb::GrpcSysDbConfig,
+    pub dispatcher_config: DispatcherConfig,
+    pub storage_config: StorageConfig,
     #[serde(default)]
     pub(super) default_mode: CleanupMode,
     #[serde(default)]
@@ -84,7 +84,7 @@ impl GarbageCollectorConfig {
         Self::load_from_path(DEFAULT_CONFIG_PATH)
     }
 
-    pub(super) fn load_from_path(path: &str) -> Self {
+    pub fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(Env::prefixed("CHROMA_GC_").map(|k| match k {
