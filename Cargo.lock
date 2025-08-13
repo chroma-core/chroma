@@ -1630,6 +1630,7 @@ dependencies = [
  "chroma-storage",
  "chroma-tracing",
  "chroma-types",
+ "clap",
  "criterion",
  "futures",
  "hnswlib",
