@@ -26,6 +26,7 @@ where
 {
     inner: Arc<Inner<C>>,
     handler: C,
+    queue_depth_metric: opentelemetry::metrics::Histogram<u64>,
 }
 
 impl<C> ComponentExecutor<C>
@@ -39,6 +40,8 @@ where
         system: System,
         scheduler: Scheduler,
     ) -> Self {
+        let max_queue_depth = handler.queue_size();
+
         ComponentExecutor {
             inner: Arc::new(Inner {
                 sender,
@@ -47,6 +50,15 @@ where
                 scheduler,
             }),
             handler,
+            queue_depth_metric: opentelemetry::global::meter("chroma.execution.executor")
+                .u64_histogram("component_queue_depth")
+                .with_description("The depth of the component's message queue")
+                .with_boundaries(
+                    (0..=10)
+                        .map(|i| (i * (max_queue_depth / 10)) as f64)
+                        .collect::<Vec<_>>(),
+                )
+                .build(),
         }
     }
 
@@ -64,6 +76,15 @@ where
             .await;
 
         loop {
+            let queue_depth = channel.max_capacity() - channel.capacity();
+            self.queue_depth_metric.record(
+                queue_depth as u64,
+                &[opentelemetry::KeyValue::new(
+                    "component_name",
+                    C::get_name(),
+                )],
+            );
+
             select! {
                 _ = self.inner.cancellation_token.cancelled() => {
                     if let Err(err) = timeout(
