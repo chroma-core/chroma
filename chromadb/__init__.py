@@ -1,7 +1,9 @@
 from typing import Dict, Optional, Union
 import logging
 from chromadb.api.client import Client as ClientCreator
-from chromadb.api.client import AdminClient as AdminClientCreator
+from chromadb.api.client import (
+    AdminClient as AdminClientCreator,
+)
 from chromadb.api.async_client import AsyncClient as AsyncClientCreator
 from chromadb.auth.token_authn import TokenTransportHeader
 import chromadb.config
@@ -27,6 +29,7 @@ from chromadb.api.types import (
     UpdateCollectionMetadata,
 )
 from pathlib import Path
+import os
 
 # Re-export types from chromadb.types
 __all__ = [
@@ -304,26 +307,24 @@ def CloudClient(
     settings: Optional[Settings] = None,
     *,  # Following arguments are keyword-only, intended for testing only.
     cloud_host: str = "api.trychroma.com",
-    cloud_port: int = 8000,
+    cloud_port: int = 443,
     enable_ssl: bool = True,
 ) -> ClientAPI:
     """
-    Creates a client to connect to a tennant and database on the Chroma cloud.
+    Creates a client to connect to a tenant and database on Chroma cloud.
 
     Args:
-        tenant: The tenant to use for this client.
-        database: The database to use for this client.
+        tenant: The tenant to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single tenant. If provided, it will be validated against the API key's scope.
+        database: The database to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single database. If provided, it will be validated against the API key's scope.
         api_key: The api key to use for this client.
     """
+
     required_args = [
-        CloudClientArg(name="tenant", env_var="CHROMA_TENANT", value=tenant),
-        CloudClientArg(name="database", env_var="CHROMA_DATABASE", value=database),
         CloudClientArg(name="api_key", env_var="CHROMA_API_KEY", value=api_key),
     ]
 
-    # If any of tenant, database, or api_key is not provided, try to load it from the environment variable
+    # If api_key is not provided, try to load it from the environment variable
     if not all([arg.value for arg in required_args]):
-        import os
         for arg in required_args:
             arg.value = arg.value or os.environ.get(arg.env_var)
 
@@ -338,8 +339,12 @@ def CloudClient(
         settings = Settings()
 
     # Make sure paramaters are the correct types -- users can pass anything.
-    tenant = str(tenant)
-    database = str(database)
+    tenant = tenant or os.environ.get("CHROMA_TENANT")
+    if tenant is not None:
+        tenant = str(tenant)
+    database = database or os.environ.get("CHROMA_DATABASE")
+    if database is not None:
+        database = str(database)
     api_key = str(api_key)
     cloud_host = str(cloud_host)
     cloud_port = int(cloud_port)
@@ -348,7 +353,6 @@ def CloudClient(
     settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
     settings.chroma_server_host = cloud_host
     settings.chroma_server_http_port = cloud_port
-    # Always use SSL for cloud
     settings.chroma_server_ssl_enabled = enable_ssl
 
     settings.chroma_client_auth_provider = (
@@ -356,6 +360,7 @@ def CloudClient(
     )
     settings.chroma_client_auth_credentials = api_key
     settings.chroma_auth_token_transport_header = TokenTransportHeader.X_CHROMA_TOKEN
+    settings.chroma_overwrite_singleton_tenant_database_access_from_auth = True
 
     return ClientCreator(tenant=tenant, database=database, settings=settings)
 
