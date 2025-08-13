@@ -1483,7 +1483,7 @@ dependencies = [
 
 [[package]]
 name = "chroma-cli"
-version = "1.1.5"
+version = "1.1.6"
 dependencies = [
  "arboard",
  "axum 0.8.1",

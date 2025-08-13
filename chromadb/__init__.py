@@ -311,10 +311,11 @@ def CloudClient(
     enable_ssl: bool = True,
 ) -> ClientAPI:
     """
-    Creates a client to connect to a tennant and database on the Chroma cloud.
+    Creates a client to connect to a tenant and database on Chroma cloud.
 
     Args:
-        database: The database to use for this client.
+        tenant: The tenant to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single tenant. If provided, it will be validated against the API key's scope.
+        database: The database to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single database. If provided, it will be validated against the API key's scope.
         api_key: The api key to use for this client.
     """
 
