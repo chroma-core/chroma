@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
-	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm/clause"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	"github.com/pingcap/log"
 )
@@ -199,15 +199,11 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		query = query.Where("collections.is_deleted = ?", *is_deleted)
 	}
 
-	if limit != nil {
-		query = query.Limit(int(*limit))
-	}
-	if offset != nil {
-		query = query.Offset(int(*offset))
-	}
+	isQueryOptimized := dbcore.IsOptimizedCollectionQueriesEnabled() && databaseName != "" && tenantID != ""
 
 	// Use optimized CTE query only if feature flag is enabled
-	if dbcore.IsOptimizedCollectionQueriesEnabled() && databaseName != "" && tenantID != "" {
+	// TODO(tanujnay112): Clean this feature flag and branching logic up after testing
+	if isQueryOptimized {
 		var dummy []Result
 		stmt := query.Session(&gorm.Session{DryRun: true}).Find(&dummy).Statement
 		sqlString := stmt.SQL.String()
@@ -218,14 +214,30 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 			FROM databases
 			WHERE name = $%d AND tenant_id = $%d
 		)`, len(vars)+1, len(vars)+2)
+		vars = append(vars, databaseName, tenantID)
 
-		fullSQL := cte + `SELECT * FROM (` + sqlString + `) p WHERE p.database_id = (SELECT id FROM db)`
-		vars = append([]interface{}{databaseName, tenantID}, vars...)
+		fullSQL := cte + `SELECT * FROM (` + sqlString + `) p WHERE p.database_id = (SELECT id FROM db) `
+
+		// A LIMIT/OFFSET inside a subquery prevents an outside filter from being pushed down.
+		if limit != nil {
+			fullSQL += fmt.Sprintf(`LIMIT %d `, int(*limit))
+		}
+		if offset != nil {
+			fullSQL += fmt.Sprintf(`OFFSET %d `, int(*offset))
+		}
+
 		query = s.db.Raw(fullSQL, vars...)
+	} else {
+		if limit != nil {
+			query = query.Limit(int(*limit))
+		}
+		if offset != nil {
+			query = query.Offset(int(*offset))
+		}
 	}
 
 	var results []Result
-	err = s.db.Table("(?) as ci", query).
+	query = s.db.Table("(?) as ci", query).
 		Select(`
             ci.*,
             cm.key,
@@ -237,11 +249,31 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
             cm.created_at as metadata_created_at,
             cm.updated_at as metadata_updated_at
         `).
-		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.collection_id").
-		Scan(&results).Error
+		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.collection_id")
 
-	if err != nil {
-		return nil, err
+	if isQueryOptimized {
+		// Setting random_page_cost to 1.1 because that's usually the recommended value
+		// for SSD based databases. This encourages index usage. The default used
+		// to be 4.0 which was more for HDD based databases where random seeking
+		// was way more expensive than sequential access.
+		var dummy []Result
+		stmt := query.Session(&gorm.Session{DryRun: true}).Find(&dummy).Statement
+		sqlString := stmt.SQL.String()
+
+		// Use a transaction to execute both commands in a single round trip
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SET LOCAL random_page_cost = 1.1").Error; err != nil {
+				return err
+			}
+			return tx.Raw(sqlString, stmt.Vars...).Scan(&results).Error
+		})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if err := query.Scan(&results).Error; err != nil {
+			return nil, err
+		}
 	}
 
 	var collectionsMap = make(map[string]*dbmodel.CollectionAndMetadata)
