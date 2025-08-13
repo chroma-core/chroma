@@ -916,6 +916,15 @@ impl LogServer {
                 }
             }
         }
+        if allow_rollback {
+            let mark_dirty = MarkDirty {
+                collection_id,
+                dirty_log: Arc::clone(&self.dirty_log),
+            };
+            let _ = mark_dirty
+                .mark_dirty(LogPosition::from_offset(adjusted_log_offset as u64), 1usize)
+                .await;
+        }
         let mut need_to_compact = self.need_to_compact.lock();
         if let Entry::Occupied(mut entry) = need_to_compact.entry(collection_id) {
             let rollup = entry.get_mut();
