@@ -244,15 +244,6 @@ impl DistanceFunction {
                     }
                 }
                 #[cfg(all(
-                    any(target_arch = "x86_64", target_arch = "x86"),
-                    target_feature = "sse"
-                ))]
-                {
-                    if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance_sse::euclidean_distance(a, b) };
-                    }
-                }
-                #[cfg(all(
                     target_arch = "x86_64",
                     all(target_feature = "avx", target_feature = "fma")
                 ))]
@@ -261,6 +252,15 @@ impl DistanceFunction {
                         && std::arch::is_x86_feature_detected!("fma")
                     {
                         return unsafe { crate::distance_avx::euclidean_distance(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    any(target_arch = "x86_64", target_arch = "x86"),
+                    target_feature = "sse"
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("sse") {
+                        return unsafe { crate::distance_sse::euclidean_distance(a, b) };
                     }
                 }
                 let mut sum = 0.0;
@@ -277,15 +277,6 @@ impl DistanceFunction {
                     }
                 }
                 #[cfg(all(
-                    any(target_arch = "x86_64", target_arch = "x86"),
-                    target_feature = "sse"
-                ))]
-                {
-                    if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance_sse::cosine_distance(a, b) };
-                    }
-                }
-                #[cfg(all(
                     target_arch = "x86_64",
                     all(target_feature = "avx", target_feature = "fma")
                 ))]
@@ -294,6 +285,15 @@ impl DistanceFunction {
                         && std::arch::is_x86_feature_detected!("fma")
                     {
                         return unsafe { crate::distance_avx::cosine_distance(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    any(target_arch = "x86_64", target_arch = "x86"),
+                    target_feature = "sse"
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("sse") {
+                        return unsafe { crate::distance_sse::cosine_distance(a, b) };
                     }
                 }
                 // For cosine we just assume the vectors have been normalized, since that
@@ -312,15 +312,6 @@ impl DistanceFunction {
                     }
                 }
                 #[cfg(all(
-                    any(target_arch = "x86_64", target_arch = "x86"),
-                    target_feature = "sse"
-                ))]
-                {
-                    if std::arch::is_x86_feature_detected!("sse") {
-                        return unsafe { crate::distance_sse::inner_product(a, b) };
-                    }
-                }
-                #[cfg(all(
                     target_arch = "x86_64",
                     all(target_feature = "avx", target_feature = "fma")
                 ))]
@@ -329,6 +320,15 @@ impl DistanceFunction {
                         && std::arch::is_x86_feature_detected!("fma")
                     {
                         return unsafe { crate::distance_avx::inner_product(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    any(target_arch = "x86_64", target_arch = "x86"),
+                    target_feature = "sse"
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("sse") {
+                        return unsafe { crate::distance_sse::inner_product(a, b) };
                     }
                 }
                 let mut sum = 0.0;
