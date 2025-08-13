@@ -1710,7 +1710,10 @@ func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVers
 	}
 	versions := versionFile.GetVersionHistory().GetVersions()
 	if versions != nil && len(versions) > 1 {
-		for _, vx := range versions {
+		for idx, vx := range versions {
+			if idx == 0 {
+				continue
+			}
 			segments := vx.GetSegmentInfo().GetSegmentCompactionInfo()
 			if segments == nil || len(segments) == 0 {
 				log.Error("version has no segments", zap.String("collection_id", collectionID), zap.Int64("version", vx.Version))
