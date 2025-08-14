@@ -27,7 +27,8 @@ use chroma_types::{
     DeleteCollectionError, DeleteCollectionRecordsError, DeleteCollectionRecordsRequest,
     DeleteCollectionRecordsResponse, DeleteCollectionRequest, DeleteDatabaseError,
     DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError, ForkCollectionRequest,
-    ForkCollectionResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
+    GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
     GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
     GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
     HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
@@ -400,6 +401,23 @@ impl ServiceBasedFrontend {
         collections
             .pop()
             .ok_or(GetCollectionError::NotFound(collection_name))
+    }
+
+    pub async fn get_collection_by_crn(
+        &mut self,
+        GetCollectionByCrnRequest { parsed_crn, .. }: GetCollectionByCrnRequest,
+    ) -> Result<GetCollectionByCrnResponse, GetCollectionByCrnError> {
+        let collection = self
+            .sysdb_client
+            .get_collection_by_crn(
+                parsed_crn.tenant_resource_name.clone(),
+                parsed_crn.database_name.clone(),
+                parsed_crn.collection_name.clone(),
+            )
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+
+        Ok(collection)
     }
 
     pub async fn create_collection(
@@ -1756,5 +1774,27 @@ mod tests {
         assert!(segments
             .iter()
             .any(|s| s.r#type == SegmentType::BlockfileRecord && s.scope == SegmentScope::RECORD));
+    }
+
+    #[test]
+    fn test_crn_parsing() {
+        use chroma_types::GetCollectionByCrnRequest;
+
+        let result = GetCollectionByCrnRequest::try_new("tenant1:db1:coll1".to_string());
+        assert!(result.is_ok());
+        let request = result.unwrap();
+        assert_eq!(request.parsed_crn.tenant_resource_name, "tenant1");
+        assert_eq!(request.parsed_crn.database_name, "db1");
+        assert_eq!(request.parsed_crn.collection_name, "coll1");
+
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:coll1".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:db1:coll1:extra".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:db1:".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:db1:coll1:".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new(":db1:coll1".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new(":db1:coll1:".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new(":db1::".to_string()).is_err());
     }
 }

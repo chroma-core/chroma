@@ -762,6 +762,65 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ChromaResourceName {
+    pub tenant_resource_name: String,
+    pub database_name: String,
+    pub collection_name: String,
+}
+#[non_exhaustive]
+#[derive(Clone, Serialize, ToSchema)]
+pub struct GetCollectionByCrnRequest {
+    pub parsed_crn: ChromaResourceName,
+}
+
+impl GetCollectionByCrnRequest {
+    pub fn try_new(crn: String) -> Result<Self, ChromaValidationError> {
+        let parsed_crn = parse_and_validate_crn(&crn)?;
+        Ok(Self { parsed_crn })
+    }
+}
+
+fn parse_and_validate_crn(crn: &str) -> Result<ChromaResourceName, ChromaValidationError> {
+    let mut parts = crn.splitn(4, ':');
+    if let (Some(p1), Some(p2), Some(p3), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    {
+        if !p1.is_empty() && !p2.is_empty() && !p3.is_empty() {
+            return Ok(ChromaResourceName {
+                tenant_resource_name: p1.to_string(),
+                database_name: p2.to_string(),
+                collection_name: p3.to_string(),
+            });
+        }
+    }
+    let mut err = ValidationError::new("invalid_crn_format");
+    err.message = Some(
+        "CRN must be in the format <tenant_resource_name>:<database_name>:<collection_name> with non-empty parts"
+            .into(),
+    );
+    Err(ChromaValidationError::from(("crn", err)))
+}
+
+pub type GetCollectionByCrnResponse = Collection;
+
+#[derive(Debug, Error)]
+pub enum GetCollectionByCrnError {
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+}
+
+impl ChromaError for GetCollectionByCrnError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetCollectionByCrnError::Internal(err) => err.code(),
+            GetCollectionByCrnError::NotFound(_) => ErrorCodes::NotFound,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,

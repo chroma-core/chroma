@@ -1,9 +1,9 @@
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionAndSegments, CollectionUuid, CountForksError, Database, FlushCompactionResponse,
-    GetCollectionSizeError, GetCollectionWithSegmentsError, GetSegmentsError, ListDatabasesError,
-    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant,
-    UpdateTenantError, UpdateTenantResponse,
+    GetCollectionByCrnError, GetCollectionSizeError, GetCollectionWithSegmentsError,
+    GetSegmentsError, ListDatabasesError, ListDatabasesResponse, Segment, SegmentFlushInfo,
+    SegmentScope, SegmentType, Tenant, UpdateTenantError, UpdateTenantResponse,
 };
 use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
@@ -182,6 +182,31 @@ impl TestSysDb {
             collections.push(collection.clone());
         }
         Ok(collections)
+    }
+
+    pub(crate) async fn get_collection_by_crn(
+        &mut self,
+        tenant_resource_name: String,
+        database: String,
+        name: String,
+    ) -> Result<Collection, GetCollectionByCrnError> {
+        let inner = self.inner.lock();
+        let tenant = inner.tenant_resource_names.get(&tenant_resource_name);
+        if tenant.is_none() {
+            return Err(GetCollectionByCrnError::NotFound(tenant_resource_name));
+        }
+        let tenant = tenant.unwrap();
+        let collection = inner
+            .collections
+            .values()
+            .find(|c| c.tenant == *tenant && c.database == database && c.name == name);
+        if collection.is_none() {
+            return Err(GetCollectionByCrnError::NotFound(format!(
+                "{}:{}:{}",
+                tenant_resource_name, database, name
+            )));
+        }
+        Ok(collection.unwrap().clone())
     }
 
     pub(crate) async fn get_segments(

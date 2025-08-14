@@ -11,13 +11,13 @@ use chroma_types::{
     chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments,
     CollectionMetadataUpdate, CountCollectionsError, CreateCollectionError, CreateDatabaseError,
     CreateDatabaseResponse, CreateTenantError, CreateTenantResponse, Database,
-    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionSizeError,
-    GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
-    GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
-    InternalUpdateCollectionConfiguration, ListCollectionVersionsError, ListDatabasesError,
-    ListDatabasesResponse, Metadata, ResetError, ResetResponse, SegmentFlushInfo,
-    SegmentFlushInfoConversionError, SegmentUuid, UpdateCollectionError, UpdateTenantError,
-    UpdateTenantResponse, VectorIndexConfiguration,
+    DeleteCollectionError, DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionByCrnError,
+    GetCollectionSizeError, GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError,
+    GetDatabaseResponse, GetSegmentsError, GetTenantError, GetTenantResponse,
+    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
+    ListCollectionVersionsError, ListDatabasesError, ListDatabasesResponse, Metadata, ResetError,
+    ResetResponse, SegmentFlushInfo, SegmentFlushInfoConversionError, SegmentUuid,
+    UpdateCollectionError, UpdateTenantError, UpdateTenantResponse, VectorIndexConfiguration,
 };
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
@@ -158,6 +158,25 @@ impl SysDb {
             SysDb::Grpc(grpc) => grpc.get_collections(options).await,
             SysDb::Sqlite(sqlite) => sqlite.get_collections(options).await,
             SysDb::Test(test) => test.get_collections(options).await,
+        }
+    }
+
+    pub async fn get_collection_by_crn(
+        &mut self,
+        tenant_resource_name: String,
+        database: String,
+        name: String,
+    ) -> Result<Collection, GetCollectionByCrnError> {
+        match self {
+            SysDb::Grpc(grpc) => {
+                grpc.get_collection_by_crn(tenant_resource_name, database, name)
+                    .await
+            }
+            SysDb::Sqlite(_) => unimplemented!(),
+            SysDb::Test(test) => {
+                test.get_collection_by_crn(tenant_resource_name, database, name)
+                    .await
+            }
         }
     }
 
@@ -897,6 +916,41 @@ impl GrpcSysDb {
                 }
             }
             Err(e) => Err(GetCollectionsError::Internal(e.into())),
+        }
+    }
+
+    async fn get_collection_by_crn(
+        &mut self,
+        tenant_resource_name: String,
+        database: String,
+        name: String,
+    ) -> Result<Collection, GetCollectionByCrnError> {
+        let req = chroma_proto::GetCollectionByResourceNameRequest {
+            tenant_resource_name: tenant_resource_name.clone(),
+            database: database.clone(),
+            name: name.clone(),
+        };
+        let res = self.client.get_collection_by_resource_name(req).await;
+
+        match res {
+            Ok(res) => {
+                let collection = match res.into_inner().collection {
+                    Some(collection) => collection,
+                    None => {
+                        return Err(GetCollectionByCrnError::NotFound(format!(
+                            "{}:{}:{}",
+                            tenant_resource_name, database, name
+                        )));
+                    }
+                };
+
+                Ok(collection
+                    .try_into()
+                    .map_err(|e: CollectionConversionError| {
+                        GetCollectionByCrnError::Internal(e.boxed())
+                    })?)
+            }
+            Err(e) => Err(GetCollectionByCrnError::Internal(e.into())),
         }
     }
 
