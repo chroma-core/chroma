@@ -1713,6 +1713,7 @@ func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVers
 		return errors.New("version history is empty")
 	}
 	versions := versionFile.GetVersionHistory().GetVersions()
+	seenPaths := false
 	if versions != nil && len(versions) > 1 {
 		for idx, vx := range versions {
 			if idx == 0 {
@@ -1725,9 +1726,11 @@ func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVers
 			}
 			for _, seg := range segments {
 				file_paths := seg.GetFilePaths()
-				if file_paths == nil || len(file_paths) == 0 {
+				if seenPaths && (file_paths == nil || len(file_paths) == 0) {
 					log.Error("version has no file paths", zap.String("collection_id", collectionID), zap.Int64("version", vx.Version), zap.String("segment_id", seg.GetSegmentId()))
 					return errors.New("version has no file paths")
+				} else if file_paths != nil && len(file_paths) > 0 {
+					seenPaths = true
 				}
 			}
 		}

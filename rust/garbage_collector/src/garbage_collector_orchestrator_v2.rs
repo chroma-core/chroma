@@ -28,7 +28,7 @@ use crate::operators::mark_versions_at_sysdb::{
 };
 use crate::types::{
     version_graph_to_collection_dependency_graph, CleanupMode, GarbageCollectorResponse,
-    VersionGraph,
+    VersionGraph, VersionGraphNode,
 };
 use async_trait::async_trait;
 use chroma_blockstore::RootManager;
@@ -549,6 +549,12 @@ impl GarbageCollectorOrchestrator {
         output: ListFilesAtVersionOutput,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
+        let version_file = self.version_files.get(&output.collection_id).ok_or(
+            GarbageCollectorError::InvariantViolation(format!(
+                "Expected version file to be set for collection {}",
+                output.collection_id
+            )),
+        )?;
         let version_action = self
             .versions_to_delete_output
             .as_ref()
@@ -608,7 +614,7 @@ impl GarbageCollectorOrchestrator {
                 ))?;
             let root = graph.node_weight(root_index).expect("Node should exist");
 
-            let versions_from_root_to_this_node = petgraph::algo::astar(
+            let nodes_from_root_to_this_node = petgraph::algo::astar(
                 graph,
                 root_index,
                 |finish| finish == this_node,
@@ -623,14 +629,52 @@ impl GarbageCollectorOrchestrator {
             .into_iter()
             .map(|i| {
                 let node = graph.node_weight(i).expect("Node should exist");
-                node.version
+                node.clone()
             })
             .collect::<Vec<_>>();
-            let are_all_versions_v0 = versions_from_root_to_this_node
-                .iter()
-                .all(|&version| version == 0);
 
-            if !are_all_versions_v0 {
+            fn extract_paths(
+                version_file: &CollectionVersionFile,
+                node: &VersionGraphNode,
+                output: &ListFilesAtVersionOutput,
+            ) -> Result<bool, GarbageCollectorError> {
+                let Some(version_history) = version_file.version_history.as_ref() else {
+                    return Err(GarbageCollectorError::InvariantViolation(format!(
+                        "Version {} of collection {} not found in version file.",
+                        output.version, output.collection_id
+                    )));
+                };
+                for version in version_history.versions.iter() {
+                    if version.version == node.version {
+                        let Some(segment_info) = version.segment_info.as_ref() else {
+                            return Err(GarbageCollectorError::InvariantViolation(format!(
+                                "Version {} of collection {} has no segment info.",
+                                output.version, output.collection_id
+                            )));
+                        };
+                        let mut all_segments_have_paths =
+                            !segment_info.segment_compaction_info.is_empty();
+                        for segment in segment_info.segment_compaction_info.iter() {
+                            if segment.file_paths.is_empty() {
+                                all_segments_have_paths = false;
+                            }
+                        }
+                        return Ok(all_segments_have_paths);
+                    }
+                }
+                Ok(false)
+            }
+            let extracted_paths = nodes_from_root_to_this_node
+                .iter()
+                .map(|node| extract_paths(version_file, node, &output))
+                .collect::<Vec<_>>();
+            let mut have_paths = Vec::with_capacity(extracted_paths.len());
+            for res in extracted_paths.into_iter() {
+                have_paths.push(res?);
+            }
+            let have_hole_in_paths = have_paths.into_iter().skip_while(|&x| !x).any(|x| !x);
+
+            if have_hole_in_paths {
                 return Err(GarbageCollectorError::InvariantViolation(format!(
                     "Version {} of collection {} has no file paths, but has non-v0 ancestors. This should never happen.",
                     output.version, output.collection_id
