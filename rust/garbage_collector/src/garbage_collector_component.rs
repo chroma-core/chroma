@@ -363,7 +363,12 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             .sysdb_client
             .get_collections_to_gc(
                 Some(version_absolute_cutoff_time.into()),
-                Some(self.config.max_collections_to_gc.into()),
+                Some(
+                    self.config
+                        .max_collections_to_fetch
+                        .unwrap_or(self.config.max_collections_to_gc)
+                        .into(),
+                ),
                 message.tenant.clone(),
                 self.config.filter_min_versions_if_alive,
             )
@@ -395,7 +400,9 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             }
 
             true
-        }).collect::<Vec<_>>();
+        })
+        .take(self.config.max_collections_to_gc as usize)
+        .collect::<Vec<_>>();
 
         tracing::info!(
             "Filtered to {} collections to garbage collect",
@@ -728,6 +735,7 @@ mod tests {
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
+            max_collections_to_fetch: None,
             gc_interval_mins: 10,
             disallow_collections: HashSet::new(),
             min_versions_to_keep: 2,
@@ -865,6 +873,7 @@ mod tests {
             version_cutoff_time: Duration::from_secs(1),
             collection_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
+            max_collections_to_fetch: None,
             min_versions_to_keep: 2,
             filter_min_versions_if_alive: None,
             gc_interval_mins: 10,
