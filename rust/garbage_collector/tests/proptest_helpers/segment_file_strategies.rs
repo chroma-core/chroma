@@ -211,6 +211,7 @@ impl Arbitrary for SegmentFilePaths {
 
 impl From<SegmentFilePaths> for HashMap<String, Vec<String>> {
     fn from(segment_file_paths: SegmentFilePaths) -> Self {
+        assert!(!segment_file_paths.paths.is_empty());
         let mut file_paths = HashMap::new();
         for (key, value) in segment_file_paths.paths {
             file_paths.insert(
@@ -238,6 +239,7 @@ impl SegmentFilePaths {
                 paths.extend(file_ref.reference.paths());
             }
         }
+        assert!(!paths.is_empty());
         paths
     }
 
@@ -354,7 +356,7 @@ impl SegmentFilePaths {
         let new_sparse_indices_strategy = proptest::collection::hash_map(
             (0..10).prop_map(|i| format!("sparse_index_{}", i)),
             new_or_forked_sparse_index_strategy(None, self.prefix_path.clone()),
-            0..3,
+            1..3,
         )
         .prop_map(|sparse_indices| {
             let mut refs = HashMap::new();
@@ -506,6 +508,9 @@ impl Arbitrary for SegmentGroup {
         )
             .prop_map(
                 |(vector_segment_paths, metadata_segment_paths, record_segment_paths)| {
+                    assert!(!vector_segment_paths.paths().is_empty());
+                    assert!(!metadata_segment_paths.paths().is_empty());
+                    assert!(!record_segment_paths.paths().is_empty());
                     SegmentGroup {
                         vector: (vector_segment_paths),
                         metadata: (metadata_segment_paths),
