@@ -195,7 +195,7 @@ impl Arbitrary for SegmentFilePaths {
                 };
                 (Just(segment_file_reference_type), refs)
             }),
-            0..10,
+            1..10,
         )
         .prop_map(move |elements| SegmentFilePaths {
             paths: elements

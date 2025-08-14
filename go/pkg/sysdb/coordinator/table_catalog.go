@@ -1845,6 +1845,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			log.Error("version file modification failed", zap.Error(err))
 			return nil, err
 		}
+		existingVersion += 1
 
 		err = tc.validateVersionFile(existingVersionFilePb, collectionEntry.ID.String(), existingVersion)
 		if err != nil {
