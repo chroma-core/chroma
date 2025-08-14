@@ -139,6 +139,7 @@ def _test_add(
         name=collection.name,
         metadata=collection.metadata,  # type: ignore
         embedding_function=collection.embedding_function,
+        configuration=collection.collection_config,
     )
     initial_version = cast(int, coll.get_model()["version"])
 

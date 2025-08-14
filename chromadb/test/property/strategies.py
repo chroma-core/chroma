@@ -19,6 +19,11 @@ from chromadb.api.types import (
     Metadata,
 )
 from chromadb.types import LiteralValue, WhereOperator, LogicalOperator
+from chromadb.test.conftest import is_spann_disabled_mode, skip_reason_spann_disabled
+from chromadb.api.collection_configuration import (
+    CreateCollectionConfiguration,
+    CreateSpannConfiguration,
+)
 
 # Set the random seed for reproducibility
 np.random.seed(0)  # unnecessary, hypothesis does this for us
@@ -278,6 +283,7 @@ class Collection(ExternalCollection):
     known_document_keywords: List[str]
     has_documents: bool = False
     has_embeddings: bool = False
+    collection_config: Optional[CreateCollectionConfiguration] = None
 
 
 @st.composite
@@ -329,6 +335,21 @@ def collections(
             # in tests once https://github.com/chroma-core/issues/issues/61 lands
             metadata["hnsw:space"] = draw(st.sampled_from(["cosine", "l2", "ip"]))
 
+    collection_config: Optional[CreateCollectionConfiguration] = None
+    # Generate a spann config if in spann mode
+    if not is_spann_disabled_mode:
+        # Use metadata["hnsw:space"] if it exists, otherwise default to "l2"
+        spann_space = metadata.get("hnsw:space", "l2") if metadata else "l2"
+
+        spann_config: CreateSpannConfiguration = {
+            "space": spann_space,
+            "write_nprobe": 4,
+            "reassign_neighbor_count": 4
+        }
+        collection_config = {
+            "spann": spann_config,
+        }
+
     known_metadata_keys: Dict[str, Union[int, str, float]] = {}
     if add_filterable_data:
         while len(known_metadata_keys) < 5:
@@ -374,6 +395,7 @@ def collections(
         known_document_keywords=known_document_keywords,
         has_embeddings=has_embeddings,
         embedding_function=embedding_function,
+        collection_config=collection_config
     )
 
 
