@@ -180,8 +180,24 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 	isQueryOptimized := dbcore.IsOptimizedCollectionQueriesEnabled() && databaseName != "" && tenantID != ""
 
 	query := s.db.Table("collections")
-	collection_targets := "collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id AS database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, "
-	db_targets := " databases.name as database_name, databases.tenant_id as db_tenant_id, "
+	collection_targets := "collections.id as collection_id, " +
+		"collections.name as collection_name, " +
+		"collections.configuration_json_str, " +
+		"collections.dimension, " +
+		"collections.database_id AS database_id, " +
+		"collections.ts as collection_ts, " +
+		"collections.is_deleted, " +
+		"collections.created_at as collection_created_at, " +
+		"collections.updated_at as collection_updated_at, " +
+		"collections.log_position, " +
+		"collections.version, " +
+		"collections.version_file_name, " +
+		"collections.root_collection_id, " +
+		"NULLIF(collections.lineage_file_name, '') AS lineage_file_name, " +
+		"collections.total_records_post_compaction, " +
+		"collections.size_bytes_post_compaction, " +
+		"collections.last_compaction_time_secs, "
+	db_targets := "databases.name as database_name, databases.tenant_id as db_tenant_id, "
 	collection_tenant := "collections.tenant as tenant"
 
 	if isQueryOptimized {
