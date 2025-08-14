@@ -1586,7 +1586,7 @@ func (tc *Catalog) ListCollectionVersions(ctx context.Context,
 	return filteredVersions, nil
 }
 
-func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction, previousSegmentInfo []*model.Segment, ts_secs int64) (string, error) {
+func (tc *Catalog) modifyVersionFileInPlace(ctx context.Context, versionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction, previousSegmentInfo []*model.Segment, ts_secs int64) error {
 	segmentCompactionInfos := make([]*coordinatorpb.FlushSegmentCompactionInfo, 0, len(flushCollectionCompaction.FlushSegmentCompactions))
 	// If flushCollectionCompaction.FlushSegmentCompactions is empty then use previousSegmentInfo.
 	if len(flushCollectionCompaction.FlushSegmentCompactions) == 0 {
@@ -1617,7 +1617,7 @@ func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFil
 		}
 	}
 
-	existingVersionFilePb.GetVersionHistory().Versions = append(existingVersionFilePb.GetVersionHistory().Versions, &coordinatorpb.CollectionVersionInfo{
+	versionFilePb.GetVersionHistory().Versions = append(versionFilePb.GetVersionHistory().Versions, &coordinatorpb.CollectionVersionInfo{
 		Version:       int64(flushCollectionCompaction.CurrentCollectionVersion) + 1,
 		CreatedAtSecs: ts_secs,
 		SegmentInfo: &coordinatorpb.CollectionSegmentInfo{
@@ -1630,12 +1630,16 @@ func (tc *Catalog) updateVersionFileInS3(ctx context.Context, existingVersionFil
 		},
 		VersionChangeReason: coordinatorpb.CollectionVersionInfo_VERSION_CHANGE_REASON_DATA_COMPACTION,
 	})
+	return nil
+}
+
+func (tc *Catalog) updateVersionFileInS3(ctx context.Context, versionFilePb *coordinatorpb.CollectionVersionFile, flushCollectionCompaction *model.FlushCollectionCompaction) (string, error) {
 
 	// Write the new version file to S3.
 	// Format of version file name: <version>_<uuid>_flush
 	// The version should be left padded with 0s upto 6 digits.
 	newVersionFileName := fmt.Sprintf("%06d_%s_flush", flushCollectionCompaction.CurrentCollectionVersion+1, uuid.New().String())
-	fullFilePath, err := tc.s3Store.PutVersionFile(ctx, flushCollectionCompaction.TenantID, existingVersionFilePb.CollectionInfoImmutable.DatabaseId, flushCollectionCompaction.ID.String(), newVersionFileName, existingVersionFilePb)
+	fullFilePath, err := tc.s3Store.PutVersionFile(ctx, flushCollectionCompaction.TenantID, versionFilePb.CollectionInfoImmutable.DatabaseId, flushCollectionCompaction.ID.String(), newVersionFileName, versionFilePb)
 	if err != nil {
 		return "", err
 	}
@@ -1709,6 +1713,28 @@ func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVers
 		return errors.New("version history is empty")
 	}
 	versions := versionFile.GetVersionHistory().GetVersions()
+	seenPaths := false
+	if versions != nil && len(versions) > 1 {
+		for idx, vx := range versions {
+			if idx == 0 {
+				continue
+			}
+			segments := vx.GetSegmentInfo().GetSegmentCompactionInfo()
+			if segments == nil || len(segments) == 0 {
+				log.Error("version has no segments", zap.String("collection_id", collectionID), zap.Int64("version", vx.Version))
+				return errors.New("version has no segments")
+			}
+			for _, seg := range segments {
+				file_paths := seg.GetFilePaths()
+				if seenPaths && (file_paths == nil || len(file_paths) == 0) {
+					log.Error("version has no file paths", zap.String("collection_id", collectionID), zap.Int64("version", vx.Version), zap.String("segment_id", seg.GetSegmentId()))
+					return errors.New("version has no file paths")
+				} else if file_paths != nil && len(file_paths) > 0 {
+					seenPaths = true
+				}
+			}
+		}
+	}
 	lastVersion := versions[len(versions)-1].GetVersion()
 	if lastVersion != version {
 		// Extract all version numbers for logging
@@ -1815,19 +1841,25 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			// There was previously a bug that resulted in the tenant ID missing from some version files (https://github.com/chroma-core/chroma/pull/4408).
 			// This line can be removed once all corrupted version files are fixed.
 			existingVersionFilePb.CollectionInfoImmutable.TenantId = collectionEntry.TenantID
+		}
 
-			// Do a simple validation of the version file.
-			err = tc.validateVersionFile(existingVersionFilePb, collectionEntry.ID.String(), existingVersion)
-			if err != nil {
-				log.Error("version file validation failed", zap.Error(err))
-				return nil, err
-			}
+		err = tc.modifyVersionFileInPlace(ctx, existingVersionFilePb, flushCollectionCompaction, segments, time.Now().Unix())
+		if err != nil {
+			log.Error("version file modification failed", zap.Error(err))
+			return nil, err
+		}
+		existingVersion += 1
+
+		err = tc.validateVersionFile(existingVersionFilePb, collectionEntry.ID.String(), existingVersion)
+		if err != nil {
+			log.Error("version file validation failed", zap.Error(err))
+			return nil, err
 		}
 
 		// The update function takes the content of the existing version file,
 		// and the set of segments that are part of the new version file.
 		// NEW VersionFile is created in S3 at this step.
-		newVersionFileName, err := tc.updateVersionFileInS3(ctx, existingVersionFilePb, flushCollectionCompaction, segments, time.Now().Unix())
+		newVersionFileName, err := tc.updateVersionFileInS3(ctx, existingVersionFilePb, flushCollectionCompaction)
 		if err != nil {
 			return nil, err
 		}
