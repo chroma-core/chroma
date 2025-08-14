@@ -41,6 +41,7 @@ pub struct GarbageCollectorConfig {
     )]
     pub(super) version_cutoff_time: Duration,
     pub(super) max_collections_to_gc: u32,
+    pub(super) max_collection_to_fetch: Option<u32>,
     pub(super) gc_interval_mins: u32,
     #[serde(default = "GarbageCollectorConfig::default_min_versions_to_keep")]
     pub min_versions_to_keep: u32,
