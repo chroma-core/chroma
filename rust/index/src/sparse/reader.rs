@@ -78,7 +78,7 @@ impl Ord for Score {
 
 impl PartialOrd for Score {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(&other))
+        Some(self.cmp(other))
     }
 }
 
@@ -171,7 +171,7 @@ impl<'me> SparseReader<'me> {
                 };
                 let dimension_upper_bound = query * dimension_max;
                 let Some((offset, value)) = self
-                    .lower_bound_offset_value(&encoded_dimension_id, u32::MIN)
+                    .lower_bound_offset_value(encoded_dimension_id, u32::MIN)
                     .await?
                 else {
                     continue;
@@ -229,7 +229,7 @@ impl<'me> SparseReader<'me> {
 
             let (accumulated_block_upper_bound, min_block_cutoff) = cursors[..=pivot_cursor_index]
                 .iter_mut()
-                .filter_map(|cursor| {
+                .map(|cursor| {
                     while let Some(&(next_block_first_offset, next_block_max)) =
                         cursor.block_iterator.peek()
                     {
@@ -247,7 +247,7 @@ impl<'me> SparseReader<'me> {
                         .map(|&(next_block_first_offset, _)| next_block_first_offset)
                         .unwrap_or(u32::MAX);
 
-                    Some((cursor.block_upper_bound, pivot_block_cutoff))
+                    (cursor.block_upper_bound, pivot_block_cutoff)
                 })
                 .fold(
                     (0.0, following_cursor_offset),
@@ -266,8 +266,9 @@ impl<'me> SparseReader<'me> {
                 } else if pivot_offset < first_unchecked_offset {
                     first_unchecked_offset
                 } else if pivot_offset <= cursors[0].offset {
-                    let score = cursors[..=pivot_cursor_index]
+                    let score = cursors
                         .iter()
+                        .take_while(|cursor| cursor.offset <= pivot_offset)
                         .map(|cursor| cursor.query * cursor.value)
                         .sum();
                     if (top_scores.len() as u32) < k {
