@@ -6,7 +6,7 @@ grpcio-tools==1.67.1 # Later version not compatible with protobuf 4.25.5
 httpx
 hypothesis==6.112.2 # TODO: Resolve breaking changes and bump version
 hypothesis[numpy]==6.112.2 # TODO: Resolve breaking changes and bump version
-maturin
+maturin>=1.0
 mypy-protobuf
 opentelemetry-instrumentation-fastapi>=0.41b0
 pandas
