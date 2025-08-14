@@ -245,6 +245,26 @@ impl DistanceFunction {
                 }
                 #[cfg(all(
                     target_arch = "x86_64",
+                    all(
+                        target_feature = "avx512f",
+                        target_feature = "avx512dq",
+                        target_feature = "avx512bw",
+                        target_feature = "avx512vl",
+                        target_feature = "fma"
+                    )
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("avx512f")
+                        && std::arch::is_x86_feature_detected!("avx512dq")
+                        && std::arch::is_x86_feature_detected!("avx512bw")
+                        && std::arch::is_x86_feature_detected!("avx512vl")
+                        && std::arch::is_x86_feature_detected!("fma")
+                    {
+                        return unsafe { crate::distance_avx512::euclidean_distance(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    target_arch = "x86_64",
                     all(target_feature = "avx", target_feature = "fma")
                 ))]
                 {
@@ -274,6 +294,26 @@ impl DistanceFunction {
                 {
                     if std::arch::is_aarch64_feature_detected!("neon") {
                         return unsafe { crate::distance_neon::cosine_distance(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    target_arch = "x86_64",
+                    all(
+                        target_feature = "avx512f",
+                        target_feature = "avx512dq",
+                        target_feature = "avx512bw",
+                        target_feature = "avx512vl",
+                        target_feature = "fma"
+                    )
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("avx512f")
+                        && std::arch::is_x86_feature_detected!("avx512dq")
+                        && std::arch::is_x86_feature_detected!("avx512bw")
+                        && std::arch::is_x86_feature_detected!("avx512vl")
+                        && std::arch::is_x86_feature_detected!("fma")
+                    {
+                        return unsafe { crate::distance_avx512::cosine_distance(a, b) };
                     }
                 }
                 #[cfg(all(
@@ -309,6 +349,26 @@ impl DistanceFunction {
                 {
                     if std::arch::is_aarch64_feature_detected!("neon") {
                         return unsafe { crate::distance_neon::inner_product(a, b) };
+                    }
+                }
+                #[cfg(all(
+                    target_arch = "x86_64",
+                    all(
+                        target_feature = "avx512f",
+                        target_feature = "avx512dq",
+                        target_feature = "avx512bw",
+                        target_feature = "avx512vl",
+                        target_feature = "fma"
+                    )
+                ))]
+                {
+                    if std::arch::is_x86_feature_detected!("avx512f")
+                        && std::arch::is_x86_feature_detected!("avx512dq")
+                        && std::arch::is_x86_feature_detected!("avx512bw")
+                        && std::arch::is_x86_feature_detected!("avx512vl")
+                        && std::arch::is_x86_feature_detected!("fma")
+                    {
+                        return unsafe { crate::distance_avx512::inner_product(a, b) };
                     }
                 }
                 #[cfg(all(

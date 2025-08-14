@@ -345,3 +345,188 @@ pub unsafe fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+    #[allow(unused_imports)]
+    use crate::distance::*;
+    use rand::Rng;
+
+    #[allow(dead_code)]
+    fn generate_random_vector(size: usize) -> Vec<f32> {
+        let mut rng = rand::thread_rng();
+        (0..size).map(|_| rng.gen_range(-10.0..10.0)).collect()
+    }
+
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx",
+        target_feature = "fma"
+    ))]
+    fn test_distance_functions(v1: &[f32], v2: &[f32]) {
+        // Test Euclidean distance
+        let euclid_simd = unsafe { euclidean_distance(v1, v2) };
+        let euclid = euclidean_distance_scalar(v1, v2);
+        let euclid_tolerance = (euclid.abs() * 1e-5).max(1e-6);
+        assert!(
+            (euclid_simd - euclid).abs() < euclid_tolerance,
+            "Euclidean distance mismatch: SIMD={}, Scalar={}, tolerance={}",
+            euclid_simd,
+            euclid,
+            euclid_tolerance
+        );
+
+        // Test Cosine distance
+        let cosine_simd = unsafe { cosine_distance(v1, v2) };
+        let cosine = cosine_distance_scalar(v1, v2);
+        let cosine_tolerance = (cosine.abs() * 1e-5).max(1e-6);
+        assert!(
+            (cosine_simd - cosine).abs() < cosine_tolerance,
+            "Cosine distance mismatch: SIMD={}, Scalar={}, tolerance={}",
+            cosine_simd,
+            cosine,
+            cosine_tolerance
+        );
+
+        // Test Inner product
+        let inner_simd = unsafe { inner_product(v1, v2) };
+        let inner = inner_product_scalar(v1, v2);
+        let inner_tolerance = (inner.abs() * 1e-5).max(1e-6);
+        assert!(
+            (inner_simd - inner).abs() < inner_tolerance,
+            "Inner product mismatch: SIMD={}, Scalar={}, tolerance={}",
+            inner_simd,
+            inner,
+            inner_tolerance
+        );
+    }
+
+    #[test]
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx",
+        target_feature = "fma"
+    ))]
+    fn test_spaces_avx() {
+        println!("Running AVX distance test...");
+        if is_x86_feature_detected!("avx") && is_x86_feature_detected!("fma") {
+            let v1: Vec<f32> = vec![
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                26., 27., 28., 29., 30., 31.,
+            ];
+            let v2: Vec<f32> = vec![
+                40., 41., 42., 43., 44., 45., 46., 47., 48., 49., 50., 51., 52., 53., 54., 55.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                56., 57., 58., 59., 60., 61.,
+            ];
+
+            test_distance_functions(&v1, &v2);
+        } else {
+            println!("avx test skipped");
+        }
+    }
+
+    #[test]
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx",
+        target_feature = "fma"
+    ))]
+    fn test_avx_random_sizes() {
+        if !is_x86_feature_detected!("avx") || !is_x86_feature_detected!("fma") {
+            println!("avx random sizes test skipped");
+            return;
+        }
+
+        println!("Running AVX random sizes test...");
+
+        // Test various vector sizes
+        let sizes = vec![16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
+
+        for size in sizes {
+            println!("Testing size: {}", size);
+            let v1 = generate_random_vector(size);
+            let v2 = generate_random_vector(size);
+            test_distance_functions(&v1, &v2);
+        }
+    }
+
+    #[test]
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx",
+        target_feature = "fma"
+    ))]
+    fn test_avx_edge_cases() {
+        if !is_x86_feature_detected!("avx") || !is_x86_feature_detected!("fma") {
+            println!("avx edge cases test skipped");
+            return;
+        }
+
+        println!("Running AVX edge cases test...");
+
+        // Test edge cases with non-multiple-of-32 sizes
+        let edge_sizes = vec![1, 8, 15, 31, 33, 63, 65, 127, 129];
+
+        for size in edge_sizes {
+            println!("Testing edge case size: {}", size);
+            let v1 = generate_random_vector(size);
+            let v2 = generate_random_vector(size);
+            test_distance_functions(&v1, &v2);
+        }
+    }
+
+    #[test]
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx",
+        target_feature = "fma"
+    ))]
+    fn test_avx_special_values() {
+        if !is_x86_feature_detected!("avx") || !is_x86_feature_detected!("fma") {
+            println!("avx special values test skipped");
+            return;
+        }
+
+        println!("Running AVX special values test...");
+
+        // Test with special values
+        let size = 128;
+
+        // Test with zeros
+        let v1 = vec![0.0; size];
+        let v2 = vec![0.0; size];
+        test_distance_functions(&v1, &v2);
+
+        // Test with ones
+        let v1 = vec![1.0; size];
+        let v2 = vec![1.0; size];
+        test_distance_functions(&v1, &v2);
+
+        // Test with alternating values
+        let v1: Vec<f32> = (0..size)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
+        let v2: Vec<f32> = (0..size)
+            .map(|i| if i % 2 == 0 { -1.0 } else { 1.0 })
+            .collect();
+        test_distance_functions(&v1, &v2);
+
+        // Test with very small values
+        let v1: Vec<f32> = (0..size).map(|_| 1e-6).collect();
+        let v2: Vec<f32> = (0..size).map(|_| 2e-6).collect();
+        test_distance_functions(&v1, &v2);
+
+        // Test with very large values
+        let v1: Vec<f32> = (0..size).map(|_| 1e6).collect();
+        let v2: Vec<f32> = (0..size).map(|_| 2e6).collect();
+        test_distance_functions(&v1, &v2);
+    }
+}
