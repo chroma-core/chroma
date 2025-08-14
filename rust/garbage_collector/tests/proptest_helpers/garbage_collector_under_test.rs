@@ -233,6 +233,12 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                 ref_state.runtime.block_on(async {
                     next_segments.write_files(&state.storage).await;
 
+                    let segment_flush_info = next_segments.into_segment_flushes(segment_ids);
+
+                    for sfi in segment_flush_info.iter() {
+                        assert!(!sfi.file_paths.is_empty());
+                    }
+
                     state
                         .sysdb
                         .flush_compaction(
@@ -240,7 +246,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                             collection_id,
                             0,
                             ref_state.max_version_for_collection(collection_id).unwrap() as i32 - 1,
-                            next_segments.into_segment_flushes(segment_ids),
+                            segment_flush_info,
                             0,
                             0,
                         )
