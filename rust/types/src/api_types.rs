@@ -7,8 +7,7 @@ use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::plan::PlanToProtoError;
 use crate::validators::{
-    validate_crn, validate_name, validate_non_empty_collection_update_metadata,
-    validate_non_empty_metadata,
+    validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
 };
 use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
@@ -763,19 +762,44 @@ impl ChromaError for GetCollectionsError {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+pub struct ChromaResourceName {
+    pub tenant_resource_name: String,
+    pub database_name: String,
+    pub collection_name: String,
+}
 #[non_exhaustive]
-#[derive(Validate, Clone, Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct GetCollectionByCrnRequest {
-    #[validate(custom(function = "validate_crn"))]
-    pub crn: String,
+    pub parsed_crn: ChromaResourceName,
 }
 
 impl GetCollectionByCrnRequest {
     pub fn try_new(crn: String) -> Result<Self, ChromaValidationError> {
-        let request = Self { crn };
-        request.validate().map_err(ChromaValidationError::from)?;
-        Ok(request)
+        let parsed_crn = parse_and_validate_crn(&crn)?;
+        Ok(Self { parsed_crn })
     }
+}
+
+fn parse_and_validate_crn(crn: &str) -> Result<ChromaResourceName, ChromaValidationError> {
+    let mut parts = crn.splitn(4, ':');
+    if let (Some(p1), Some(p2), Some(p3), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    {
+        if !p1.is_empty() && !p2.is_empty() && !p3.is_empty() {
+            return Ok(ChromaResourceName {
+                tenant_resource_name: p1.to_string(),
+                database_name: p2.to_string(),
+                collection_name: p3.to_string(),
+            });
+        }
+    }
+    let mut err = ValidationError::new("invalid_crn_format");
+    err.message = Some(
+        "CRN must be in the format <tenant_resource_name>:<database_name>:<collection_name> with non-empty parts"
+            .into(),
+    );
+    Err(ChromaValidationError::from(("crn", err)))
 }
 
 pub type GetCollectionByCrnResponse = Collection;

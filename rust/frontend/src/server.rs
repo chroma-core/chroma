@@ -1082,6 +1082,20 @@ async fn get_collection(
     Ok(Json(collection))
 }
 
+/// Retrieves a collection by Chroma Resource Name.
+#[utoipa::path(
+    get,
+    path = "/api/v2/collections/{crn}",
+    responses(
+        (status = 200, description = "Collection found", body = Collection),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("crn" = String, Path, description = "Chroma Resource Name")
+    )
+)]
 async fn get_collection_by_crn(
     headers: HeaderMap,
     Path(crn): Path<String>,

@@ -53,17 +53,3 @@ pub(crate) fn validate_name(name: impl AsRef<str>) -> Result<(), ValidationError
     }
     Ok(())
 }
-
-pub(crate) fn validate_crn(crn: &str) -> Result<(), ValidationError> {
-    let parts: Vec<&str> = crn.split(':').collect();
-    if parts.len() == 3 && parts.iter().all(|p| !p.is_empty()) {
-        Ok(())
-    } else {
-        let mut err = ValidationError::new("invalid_crn_format");
-        err.message = Some(
-            "CRN must be in the format <tenant_resource_name>:<database_name>:<collection_name> with non-empty parts"
-                .into(),
-        );
-        Err(err)
-    }
-}

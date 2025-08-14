@@ -378,22 +378,6 @@ impl ServiceBasedFrontend {
             .map(|count| count as u32)
     }
 
-    /// Parse a collection name to see if it matches the pattern "<tenant_resource_name>:<database_name>:<collection_name>"
-    /// Returns Some((tenant_resource_name, database_name, collection_name)) if the pattern matches, None otherwise
-    fn parse_crn(&self, crn: &str) -> Option<(String, String, String)> {
-        let parts: Vec<&str> = crn.split(':').collect();
-        if parts.len() == 3 && !parts[0].is_empty() && !parts[1].is_empty() && !parts[2].is_empty()
-        {
-            Some((
-                parts[0].to_string(),
-                parts[1].to_string(),
-                parts[2].to_string(),
-            ))
-        } else {
-            None
-        }
-    }
-
     pub async fn get_collection(
         &mut self,
         GetCollectionRequest {
@@ -421,19 +405,19 @@ impl ServiceBasedFrontend {
 
     pub async fn get_collection_by_crn(
         &mut self,
-        GetCollectionByCrnRequest { crn, .. }: GetCollectionByCrnRequest,
+        GetCollectionByCrnRequest { parsed_crn, .. }: GetCollectionByCrnRequest,
     ) -> Result<GetCollectionByCrnResponse, GetCollectionByCrnError> {
-        if let Some((tenant_resource_name, database_name, collection_name)) = self.parse_crn(&crn) {
-            let collection = self
-                .sysdb_client
-                .get_collection_by_crn(tenant_resource_name, database_name, collection_name)
-                .await
-                .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
+        let collection = self
+            .sysdb_client
+            .get_collection_by_crn(
+                parsed_crn.tenant_resource_name.clone(),
+                parsed_crn.database_name.clone(),
+                parsed_crn.collection_name.clone(),
+            )
+            .await
+            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
 
-            Ok(collection)
-        } else {
-            Err(GetCollectionByCrnError::NotFound(crn))
-        }
+        Ok(collection)
     }
 
     pub async fn create_collection(
@@ -1793,36 +1777,24 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_crn() {
-        let registry = Registry::new();
-        let system = System::new();
-        let config = FrontendConfig::sqlite_in_memory();
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let frontend = rt
-            .block_on(ServiceBasedFrontend::try_from_config(
-                &(config, system),
-                &registry,
-            ))
-            .unwrap();
+    fn test_crn_parsing() {
+        use chroma_types::GetCollectionByCrnRequest;
 
-        let result = frontend.parse_crn("tenant1:db1:coll1");
-        assert_eq!(
-            result,
-            Some((
-                "tenant1".to_string(),
-                "db1".to_string(),
-                "coll1".to_string()
-            ))
-        );
+        let result = GetCollectionByCrnRequest::try_new("tenant1:db1:coll1".to_string());
+        assert!(result.is_ok());
+        let request = result.unwrap();
+        assert_eq!(request.parsed_crn.tenant_resource_name, "tenant1");
+        assert_eq!(request.parsed_crn.database_name, "db1");
+        assert_eq!(request.parsed_crn.collection_name, "coll1");
 
-        assert_eq!(frontend.parse_crn("tenant1:coll1"), None);
-        assert_eq!(frontend.parse_crn("tenant1"), None);
-        assert_eq!(frontend.parse_crn("tenant1:db1:coll1:extra"), None);
-        assert_eq!(frontend.parse_crn(""), None);
-        assert_eq!(frontend.parse_crn("tenant1:db1:"), None);
-        assert_eq!(frontend.parse_crn("tenant1:db1:coll1:"), None);
-        assert_eq!(frontend.parse_crn(":db1:coll1"), None);
-        assert_eq!(frontend.parse_crn(":db1:coll1:"), None);
-        assert_eq!(frontend.parse_crn(":db1::"), None);
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:coll1".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:db1:coll1:extra".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:db1:".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new("tenant1:db1:coll1:".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new(":db1:coll1".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new(":db1:coll1:".to_string()).is_err());
+        assert!(GetCollectionByCrnRequest::try_new(":db1::".to_string()).is_err());
     }
 }
