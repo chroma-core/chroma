@@ -29,12 +29,15 @@ COPY rust/ rust/
 # Skip building these as they're not needed by images (and if Python bindings are built, the final binaries are unnecessarily linked against Python).
 ENV EXCLUDED_PACKAGES="chromadb_rust_bindings chromadb-js-bindings chroma-benchmark "
 
+# Note: Using flag ENABLE_AVX512 to build AVX512 optimizations for hnswlib, and AVX for Rust.
+# Once Rust supports AVX512, the target-features will be updated to use AVX512.
 RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
   if [ "$ENABLE_AVX512" = "1" ]; then \
     export CXXFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
     export CFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
-    echo "Building with AVX512 optimizations for hnswlib"; \
+    export RUSTFLAGS="-C target-feature=+avx,+fma" && \
+    echo "Building with AVX512 optimizations for hnswlib and AVX for Rust"; \
   else \
     echo "Building without AVX512 optimizations"; \
   fi && \
