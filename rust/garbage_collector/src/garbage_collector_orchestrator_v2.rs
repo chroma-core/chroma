@@ -645,6 +645,9 @@ impl GarbageCollectorOrchestrator {
                     )));
                 };
                 for version in version_history.versions.iter() {
+                    if version.version == 0 {
+                        continue;
+                    }
                     if version.version == node.version {
                         let Some(segment_info) = version.segment_info.as_ref() else {
                             return Err(GarbageCollectorError::InvariantViolation(format!(
@@ -666,13 +669,16 @@ impl GarbageCollectorOrchestrator {
             }
             let extracted_paths = nodes_from_root_to_this_node
                 .iter()
-                .map(|node| extract_paths(version_file, node, &output))
+                .map(|node| extract_paths(version_file, node, &output).map(|x| (node.version, x)))
                 .collect::<Vec<_>>();
             let mut have_paths = Vec::with_capacity(extracted_paths.len());
             for res in extracted_paths.into_iter() {
                 have_paths.push(res?);
             }
-            let have_hole_in_paths = have_paths.into_iter().skip_while(|&x| !x).any(|x| !x);
+            let have_hole_in_paths = have_paths
+                .into_iter()
+                .skip_while(|&x| x.0 == 0 && !x.1)
+                .any(|x| !x.1);
 
             if have_hole_in_paths {
                 return Err(GarbageCollectorError::InvariantViolation(format!(
@@ -1262,6 +1268,7 @@ mod tests {
         );
         let result = orchestrator.run(system).await;
         assert!(result.is_err());
+        println!("{:?}", result);
         assert!(format!("{:?}", result).contains("no file paths"));
     }
 }
