@@ -43,6 +43,7 @@ opentelemetry = { version = "0.27.0", default-features = false, features = ["tra
 indicatif = { workspace = true }
 clap = { workspace = true }
 anyhow = "1.0"
+sprs = "0.11"
 
 [dev-dependencies]
 rayon = { workspace = true }
