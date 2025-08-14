@@ -2,18 +2,17 @@ package dao
 
 import (
 	"errors"
-	"fmt"
 	"sort"
 	"time"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
-	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm/clause"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
 
+	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	"github.com/pingcap/log"
 )
@@ -178,15 +177,36 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		MetadataUpdatedAt *time.Time `gorm:"column:metadata_updated_at"`
 	}
 
-	query := s.db.Table("collections").
-		Select("collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id AS database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, databases.name as database_name, databases.tenant_id as db_tenant_id, collections.tenant as tenant").
-		Joins("INNER JOIN databases ON collections.database_id = databases.id").
-		Order("collections.created_at ASC")
+	isQueryOptimized := dbcore.IsOptimizedCollectionQueriesEnabled() && databaseName != "" && tenantID != ""
 
-	if databaseName != "" {
+	query := s.db.Table("collections")
+	collection_targets := "collections.id as collection_id, collections.name as collection_name, collections.configuration_json_str, collections.dimension, collections.database_id AS database_id, collections.ts as collection_ts, collections.is_deleted, collections.created_at as collection_created_at, collections.updated_at as collection_updated_at, collections.log_position, collections.version, collections.version_file_name, collections.root_collection_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, collections.total_records_post_compaction, collections.size_bytes_post_compaction, collections.last_compaction_time_secs, "
+	db_targets := " databases.name as database_name, databases.tenant_id as db_tenant_id, "
+	collection_tenant := "collections.tenant as tenant"
+
+	if isQueryOptimized {
+		db_id_query := s.db.Model(&dbmodel.Database{}).
+			Select("id").
+			Where("tenant_id = ?", tenantID).
+			Where("name = ?", databaseName).
+			Limit(1)
+
+		// We rewrite the query to get the one database_id with what is hopefully an initplan
+		// that first gets the database_id and then uses it to do an ordered scan over
+		// the matching collections.
+		query = query.Select(collection_targets+"? as database_name, ? as db_tenant_id, "+collection_tenant, databaseName, tenantID).
+			Where("collections.database_id = (?)", db_id_query)
+	} else {
+		query = query.Select(collection_targets + db_targets + collection_tenant).
+			Joins("INNER JOIN databases ON collections.database_id = databases.id")
+	}
+
+	query = query.Order("collections.created_at ASC")
+
+	if databaseName != "" && !isQueryOptimized {
 		query = query.Where("databases.name = ?", databaseName)
 	}
-	if tenantID != "" {
+	if tenantID != "" && !isQueryOptimized {
 		query = query.Where("databases.tenant_id = ?", tenantID)
 	}
 	if ids != nil {
@@ -206,26 +226,8 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		query = query.Offset(int(*offset))
 	}
 
-	// Use optimized CTE query only if feature flag is enabled
-	if dbcore.IsOptimizedCollectionQueriesEnabled() && databaseName != "" && tenantID != "" {
-		var dummy []Result
-		stmt := query.Session(&gorm.Session{DryRun: true}).Find(&dummy).Statement
-		sqlString := stmt.SQL.String()
-		vars := stmt.Vars
-
-		cte := fmt.Sprintf(`WITH db AS (
-			SELECT id
-			FROM databases
-			WHERE name = $%d AND tenant_id = $%d
-		)`, len(vars)+1, len(vars)+2)
-
-		fullSQL := cte + `SELECT * FROM (` + sqlString + `) p WHERE p.database_id = (SELECT id FROM db)`
-		vars = append([]interface{}{databaseName, tenantID}, vars...)
-		query = s.db.Raw(fullSQL, vars...)
-	}
-
 	var results []Result
-	err = s.db.Table("(?) as ci", query).
+	query = s.db.Table("(?) as ci", query).
 		Select(`
             ci.*,
             cm.key,
@@ -237,8 +239,27 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
             cm.created_at as metadata_created_at,
             cm.updated_at as metadata_updated_at
         `).
-		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.collection_id").
-		Scan(&results).Error
+		Joins("LEFT JOIN collection_metadata cm ON cm.collection_id = ci.collection_id")
+
+	if isQueryOptimized {
+		// Setting random_page_cost to 1.1 because that's usually the recommended value
+		// for SSD based databases. This encourages index usage. The default used
+		// to be 4.0 which was more for HDD based databases where random seeking
+		// was way more expensive than sequential access.
+		var dummy []Result
+		stmt := query.Session(&gorm.Session{DryRun: true}).Find(&dummy).Statement
+		sqlString := stmt.SQL.String()
+
+		// Use a transaction to execute both commands in a single round trip
+		err = s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Exec("SET LOCAL random_page_cost = 1.1").Error; err != nil {
+				return err
+			}
+			return tx.Raw(sqlString, stmt.Vars...).Scan(&results).Error
+		})
+	} else {
+		err = query.Scan(&results).Error
+	}
 
 	if err != nil {
 		return nil, err
