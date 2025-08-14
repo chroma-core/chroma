@@ -23,18 +23,8 @@ import json
 import os
 from chromadb.utils.embedding_functions import register_embedding_function
 from chromadb.test.conftest import ClientFactories
+from chromadb.test.conftest import is_spann_disabled_mode, skip_reason_spann_disabled
 from chromadb.types import Collection as CollectionModel
-
-
-# Check if we are running in a mode where SPANN is disabled
-# (Rust bindings test OR Rust single-node integration test)
-is_spann_disabled_mode = (
-    os.getenv("CHROMA_RUST_BINDINGS_TEST_ONLY") == "1"
-    or os.getenv("CHROMA_INTEGRATION_TEST_ONLY") == "1"
-)
-skip_reason_spann_disabled = (
-    "SPANN creation/modification disallowed in Rust bindings or integration test mode"
-)
 
 
 class LegacyEmbeddingFunction(EmbeddingFunction[Embeddable]):
