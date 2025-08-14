@@ -1,16 +1,62 @@
+//! Sparse Index Block-Max WAND Benchmark
+//!
+//! This benchmark evaluates the performance of the Block-Max WAND algorithm
+//! for sparse vector search compared to brute force baseline.
+//!
+//! ## Usage Modes
+//!
+//! ### Full Benchmark Mode (default)
+//! Compares WAND performance against brute force ground truth:
+//! ```bash
+//! cargo run --release --example sparse_wand_benchmark -- \
+//!   -d /path/to/dataset \
+//!   -n 65536 \  # number of documents
+//!   -m 200 \    # number of queries
+//!   -k 128      # top-k results
+//! ```
+//!
+//! ### WAND-Only Mode (for profiling)
+//! Runs only WAND without brute force comparison, useful for flamegraph profiling:
+//! ```bash
+//! cargo run --release --example sparse_wand_benchmark -- \
+//!   -d /path/to/dataset \
+//!   --wand-only \
+//!   -i 100  # run each query 100 times for better profiling
+//! ```
+//!
+//! ### Flamegraph Profiling Example
+//! ```bash
+//! # Install flamegraph tools if needed
+//! cargo install flamegraph
+//!
+//! # Run with profiling
+//! cargo flamegraph --example sparse_wand_benchmark -- \
+//!   -d /path/to/dataset \
+//!   --wand-only \
+//!   -n 10000 \
+//!   -m 50 \
+//!   -i 100
+//! ```
+//!
+//! ## Options
+//! - `--sort-by-url`: Sort documents by URL for better cache locality
+//! - `--wand-only`: Skip brute force comparison for profiling
+//! - `-i, --iterations`: Number of iterations per query (for profiling)
+
 use anyhow::Result;
 use arrow::array::{Array, Float32Array, Int32Array, ListArray, StringArray};
 use arrow::record_batch::RecordBatch;
 use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
 use chroma_index::sparse::{
-    reader::SparseReader,
+    reader::{Score, SparseReader},
     writer::{SparseDelta, SparseWriter},
 };
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-use std::collections::{HashMap, HashSet};
+use sprs::CsVec;
+use std::collections::{BinaryHeap, HashSet};
 use std::fs::File;
 use std::time::Instant;
 use tempfile::TempDir;
@@ -20,21 +66,21 @@ use uuid::Uuid;
 const SPARSE_MAX_PREFIX: &str = "sparse_max";
 const SPARSE_OFFSET_VALUE_PREFIX: &str = "sparse_offset_value";
 
-// Sparse document and query structures using HashMap instead of sprs
+// Sparse document and query structures using CsVec from sprs
 #[derive(Debug, Clone)]
 pub struct SparseDocument {
     pub doc_id: String,
     pub url: String,
     pub title: String,
     pub body: String,
-    pub sparse_vector: HashMap<usize, f32>,
+    pub sparse_vector: CsVec<f32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SparseQuery {
     pub query_id: String,
     pub text: String,
-    pub sparse_vector: HashMap<usize, f32>,
+    pub sparse_vector: CsVec<f32>,
 }
 
 /// Load documents with sparse vectors from parquet file
@@ -185,11 +231,14 @@ fn process_sparse_document_batch(batch: RecordBatch) -> Result<Vec<SparseDocumen
             .downcast_ref::<Float32Array>()
             .ok_or_else(|| anyhow::anyhow!("values is not Float32Array"))?;
 
-        // Create sparse vector as HashMap
-        let mut sparse_vector = HashMap::new();
+        // Create sparse vector as CsVec
+        let mut sparse_indices = Vec::new();
+        let mut sparse_values = Vec::new();
         for j in 0..indices.len() {
-            sparse_vector.insert(indices.value(j) as usize, values.value(j));
+            sparse_indices.push(indices.value(j) as usize);
+            sparse_values.push(values.value(j));
         }
+        let sparse_vector = CsVec::new(usize::MAX, sparse_indices, sparse_values);
 
         documents.push(SparseDocument {
             doc_id,
@@ -253,11 +302,14 @@ fn process_sparse_query_batch(batch: RecordBatch) -> Result<Vec<SparseQuery>> {
             .downcast_ref::<Float32Array>()
             .ok_or_else(|| anyhow::anyhow!("values is not Float32Array"))?;
 
-        // Create sparse vector as HashMap
-        let mut sparse_vector = HashMap::new();
+        // Create sparse vector as CsVec
+        let mut sparse_indices = Vec::new();
+        let mut sparse_values = Vec::new();
         for j in 0..indices.len() {
-            sparse_vector.insert(indices.value(j) as usize, values.value(j));
+            sparse_indices.push(indices.value(j) as usize);
+            sparse_values.push(values.value(j));
         }
+        let sparse_vector = CsVec::new(usize::MAX, sparse_indices, sparse_values);
 
         queries.push(SparseQuery {
             query_id,
@@ -283,16 +335,28 @@ struct Args {
     num_documents: usize,
 
     /// Number of queries to run
-    #[arg(short = 'm', long, default_value_t = 16)]
+    #[arg(short = 'm', long, default_value_t = 200)]
     num_queries: usize,
 
     /// Top-k results to retrieve
-    #[arg(short = 'k', long, default_value_t = 16)]
+    #[arg(short = 'k', long, default_value_t = 128)]
     top_k: usize,
 
     /// Block size for the sparse index
     #[arg(short = 'b', long, default_value_t = 128)]
     block_size: u32,
+
+    /// Sort documents by URL for better cache locality
+    #[arg(short = 's', long)]
+    sort_by_url: bool,
+
+    /// Skip brute force comparison (WAND only mode for profiling)
+    #[arg(long)]
+    wand_only: bool,
+
+    /// Number of iterations to run each query (for profiling)
+    #[arg(short = 'i', long, default_value_t = 1)]
+    iterations: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -301,154 +365,184 @@ struct SearchResult {
     top_k_offsets: Vec<u32>,
     scores: Vec<f32>,
     search_time_ms: f64,
-}
-
-fn compute_sparse_dot_product(vec1: &[(u32, f32)], vec2: &[(u32, f32)]) -> f32 {
-    let mut score = 0.0;
-    let mut i = 0;
-    let mut j = 0;
-
-    while i < vec1.len() && j < vec2.len() {
-        match vec1[i].0.cmp(&vec2[j].0) {
-            std::cmp::Ordering::Less => i += 1,
-            std::cmp::Ordering::Greater => j += 1,
-            std::cmp::Ordering::Equal => {
-                score += vec1[i].1 * vec2[j].1;
-                i += 1;
-                j += 1;
-            }
-        }
-    }
-
-    score
+    full_evaluations: u32,
 }
 
 fn brute_force_search(
     documents: &[SparseDocument],
     query: &SparseQuery,
     top_k: usize,
-) -> SearchResult {
+) -> (SearchResult, usize) {
     let start = Instant::now();
 
-    // Convert query sparse vector to sorted list of (dimension_id, value)
-    let mut query_vec: Vec<(u32, f32)> = Vec::new();
-    for (idx, val) in query.sparse_vector.iter() {
-        query_vec.push((*idx as u32, *val));
-    }
-    query_vec.sort_by_key(|&(dim, _)| dim);
-
-    // Compute scores for all documents
-    let mut scores: Vec<(u32, f32)> = Vec::new();
+    // Use a min-heap to maintain top-k results efficiently (same as WAND implementation)
+    let mut top_scores = BinaryHeap::<Score>::with_capacity(top_k);
+    let mut non_trivial_count = 0;
 
     for (offset, doc) in documents.iter().enumerate() {
-        // Convert document sparse vector to sorted list
-        let mut doc_vec: Vec<(u32, f32)> = Vec::new();
-        for (idx, val) in doc.sparse_vector.iter() {
-            doc_vec.push((*idx as u32, *val));
-        }
-        doc_vec.sort_by_key(|&(dim, _)| dim);
-
-        let score = compute_sparse_dot_product(&query_vec, &doc_vec);
+        // Use sprs dot product directly
+        let score = query.sparse_vector.dot(&doc.sparse_vector);
         if score > 0.0 {
-            scores.push((offset as u32, score));
+            non_trivial_count += 1;
+
+            if top_scores.len() < top_k {
+                top_scores.push(Score {
+                    offset: offset as u32,
+                    score,
+                });
+            } else if let Some(min_entry) = top_scores.peek() {
+                if score > min_entry.score {
+                    top_scores.pop();
+                    top_scores.push(Score {
+                        offset: offset as u32,
+                        score,
+                    });
+                }
+            }
         }
     }
 
-    // Sort by score descending and take top-k
-    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-    scores.truncate(top_k);
+    // Extract results from heap and sort by score descending
+    let mut scores: Vec<Score> = top_scores.into_sorted_vec();
+    scores.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap()
+            .then(a.offset.cmp(&b.offset))
+    });
 
     let elapsed = start.elapsed();
 
-    SearchResult {
+    let result = SearchResult {
         query_id: query.query_id.clone(),
-        top_k_offsets: scores.iter().map(|&(offset, _)| offset).collect(),
-        scores: scores.iter().map(|&(_, score)| score).collect(),
+        top_k_offsets: scores.iter().map(|s| s.offset).collect(),
+        scores: scores.iter().map(|s| s.score).collect(),
         search_time_ms: elapsed.as_secs_f64() * 1000.0,
-    }
+        full_evaluations: documents.len() as u32,
+    };
+
+    (result, non_trivial_count)
 }
 
 async fn build_sparse_index(
     documents: &[SparseDocument],
     block_size: u32,
+    sort_by_url: bool,
 ) -> anyhow::Result<(TempDir, BlockfileProvider, Uuid, Uuid)> {
-    println!("Building sparse index...");
+    println!("🏗️ Building sparse index...");
     let start = Instant::now();
+
+    // Sort documents by URL if requested for better cache locality
+    let mut sorted_documents = documents.to_vec();
+    if sort_by_url {
+        println!("🔗 Sorting documents by URL for better cache locality...");
+        sorted_documents.sort_by(|a, b| a.url.cmp(&b.url));
+    }
 
     let (temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
 
-    // Create writers for the sparse index
-    let max_writer = provider
-        .write::<u32, f32>(BlockfileWriterOptions::new(SPARSE_MAX_PREFIX.to_string()))
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create max writer: {:?}", e))?;
+    // Process documents in batches with write-commit-flush loop
+    let batch_size = 65536;
+    let num_chunks = (sorted_documents.len() + batch_size - 1) / batch_size;
 
-    let offset_value_writer = provider
-        .write::<u32, f32>(BlockfileWriterOptions::new(
-            SPARSE_OFFSET_VALUE_PREFIX.to_string(),
-        ))
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create offset value writer: {:?}", e))?;
-
-    // Store the writer IDs for later use when creating readers
-    let max_writer_id = max_writer.id();
-    let offset_value_writer_id = offset_value_writer.id();
-
-    // Create sparse writer (without reader since we're building from scratch)
-    let sparse_writer = SparseWriter::new(block_size, max_writer, offset_value_writer, None);
-
-    // Build the index
-    let pb = ProgressBar::new(documents.len() as u64);
+    let pb = ProgressBar::new(num_chunks as u64);
     pb.set_style(
         ProgressStyle::default_bar()
             .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+                "{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} chunks ({eta})",
             )
             .unwrap()
-            .progress_chars("#>-"),
+            .progress_chars("█▉▊▋▌▍▎▏  "),
     );
+    pb.set_message("Building index chunks");
 
-    // Process documents in batches for efficiency
-    let batch_size = 4096;
-    for (chunk_idx, chunk) in documents.chunks(batch_size).enumerate() {
+    let mut max_writer_id = None;
+    let mut offset_value_writer_id = None;
+
+    for (chunk_idx, chunk) in sorted_documents.chunks(batch_size).enumerate() {
+        // Create writer options, forking if not the first chunk
+        let mut max_writer_options = BlockfileWriterOptions::new(SPARSE_MAX_PREFIX.to_string());
+        let mut offset_value_writer_options =
+            BlockfileWriterOptions::new(SPARSE_OFFSET_VALUE_PREFIX.to_string());
+
+        if let Some(id) = max_writer_id {
+            max_writer_options = max_writer_options.fork(id);
+        }
+        if let Some(id) = offset_value_writer_id {
+            offset_value_writer_options = offset_value_writer_options.fork(id);
+        }
+
+        // Create writers for this chunk
+        let max_writer = provider
+            .write::<u32, f32>(max_writer_options)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create max writer: {:?}", e))?;
+
+        let offset_value_writer = provider
+            .write::<u32, f32>(offset_value_writer_options)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to create offset value writer: {:?}", e))?;
+
+        // Store the writer IDs for forking in next iteration
+        max_writer_id = Some(max_writer.id());
+        offset_value_writer_id = Some(offset_value_writer.id());
+
+        // Create sparse writer for this chunk
+        let sparse_writer = SparseWriter::new(block_size, max_writer, offset_value_writer, None);
+
+        // Build delta for this chunk
         let mut delta = SparseDelta::default();
-
         for (idx, doc) in chunk.iter().enumerate() {
             let offset = (chunk_idx * batch_size + idx) as u32;
 
-            // Convert sparse vector to iterator of (dimension_id, value)
+            // Convert CsVec to iterator of (dimension_id, value)
             let sparse_iter = doc
                 .sparse_vector
+                .indices()
                 .iter()
+                .zip(doc.sparse_vector.data().iter())
                 .map(|(idx, val)| (*idx as u32, *val));
             delta.create(offset, sparse_iter);
         }
 
         // Write the batch
-        sparse_writer
-            .write_delta(delta)
+        sparse_writer.write(delta);
+
+        // Commit
+        let flusher = sparse_writer
+            .commit()
             .await
-            .map_err(|e| anyhow::anyhow!("Failed to write delta: {:?}", e))?;
-        pb.inc(chunk.len() as u64);
+            .map_err(|e| anyhow::anyhow!("Failed to commit sparse writer: {:?}", e))?;
+
+        // Flush
+        flusher
+            .flush()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to flush sparse writer: {:?}", e))?;
+
+        // Clear cache after each chunk
+        provider
+            .clear()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to clear cache: {:?}", e))?;
+
+        pb.inc(1);
     }
 
-    pb.finish_with_message("Index built");
-
-    // Commit and flush writers
-    let flusher = sparse_writer
-        .commit()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to commit sparse writer: {:?}", e))?;
-
-    flusher
-        .flush()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to flush sparse writer: {:?}", e))?;
+    pb.finish_with_message("✅ Index built");
 
     let elapsed = start.elapsed();
-    println!("Index build time: {:.2} ms", elapsed.as_secs_f64() * 1000.0);
+    println!("⏱️ Index build time: {:.2} s", elapsed.as_secs_f64());
+    println!("  Documents indexed: {}", sorted_documents.len());
+    println!("  Chunks processed: {}", num_chunks);
+    println!("  Documents per chunk: {}", batch_size);
 
-    Ok((temp_dir, provider, max_writer_id, offset_value_writer_id))
+    Ok((
+        temp_dir,
+        provider,
+        max_writer_id.expect("Should have created at least one max writer"),
+        offset_value_writer_id.expect("Should have created at least one offset value writer"),
+    ))
 }
 
 async fn search_with_wand(
@@ -457,8 +551,12 @@ async fn search_with_wand(
     offset_value_reader_id: Uuid,
     queries: &[SparseQuery],
     top_k: usize,
+    iterations: usize,
+    show_progress: bool,
 ) -> anyhow::Result<Vec<SearchResult>> {
-    println!("\nSearching with Block-Max WAND...");
+    if show_progress {
+        println!("\n⚡ Searching with Block-Max WAND...");
+    }
 
     // Open readers for the sparse index using the writer IDs
     let max_reader = provider
@@ -484,66 +582,111 @@ async fn search_with_wand(
     let sparse_reader = SparseReader::new(max_reader, offset_value_reader);
 
     let mut results = Vec::new();
-    let pb = ProgressBar::new(queries.len() as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
-            )
-            .unwrap()
-            .progress_chars("#>-"),
-    );
+
+    let pb = if show_progress {
+        let pb = ProgressBar::new((queries.len() * iterations) as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+                )
+                .unwrap()
+                .progress_chars("█▉▊▋▌▍▎▏  "),
+        );
+        pb.set_message(if iterations > 1 {
+            format!("WAND search ({} iterations)", iterations)
+        } else {
+            "WAND search".to_string()
+        });
+        Some(pb)
+    } else {
+        None
+    };
 
     for query in queries {
-        let start = Instant::now();
+        let mut total_time_ms = 0.0;
+        let mut last_scores = Vec::new();
+        let mut last_offsets = Vec::new();
+        let mut last_full_evaluations = 0;
 
-        // Convert query sparse vector to iterator
-        let query_vec: Vec<(u32, f32)> = query
-            .sparse_vector
-            .iter()
-            .map(|(idx, val)| (*idx as u32, *val))
-            .collect();
+        for _ in 0..iterations {
+            let start = Instant::now();
 
-        // Run WAND search
-        let scores = sparse_reader
-            .wand(query_vec, top_k as u32)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to run WAND search: {:?}", e))?;
+            // Convert CsVec to Vec of (dimension_id, value)
+            let query_vec: Vec<(u32, f32)> = query
+                .sparse_vector
+                .indices()
+                .iter()
+                .zip(query.sparse_vector.data().iter())
+                .map(|(idx, val)| (*idx as u32, *val))
+                .collect();
 
-        let elapsed = start.elapsed();
+            // Run WAND search
+            let (scores, full_evaluations) = sparse_reader
+                .wand(query_vec, top_k as u32)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to run WAND search: {:?}", e))?;
+
+            let elapsed = start.elapsed();
+            total_time_ms += elapsed.as_secs_f64() * 1000.0;
+
+            // Store results from last iteration
+            last_offsets = scores.iter().map(|s| s.offset).collect();
+            last_scores = scores.iter().map(|s| s.score).collect();
+            last_full_evaluations = full_evaluations;
+
+            if let Some(ref pb) = pb {
+                pb.inc(1);
+            }
+        }
 
         results.push(SearchResult {
             query_id: query.query_id.clone(),
-            top_k_offsets: scores.iter().map(|s| s.offset).collect(),
-            scores: scores.iter().map(|s| s.score).collect(),
-            search_time_ms: elapsed.as_secs_f64() * 1000.0,
+            top_k_offsets: last_offsets,
+            scores: last_scores,
+            search_time_ms: total_time_ms / iterations as f64, // Average time per query
+            full_evaluations: last_full_evaluations,
         });
-
-        pb.inc(1);
     }
 
-    pb.finish_with_message("WAND search complete");
+    if let Some(pb) = pb {
+        pb.finish_with_message("✅ WAND search complete");
+    }
     Ok(results)
 }
 
-fn calculate_recall(ground_truth: &[SearchResult], predictions: &[SearchResult], k: usize) -> f32 {
-    let mut total_recall = 0.0;
+fn compute_accuracy(reference: &[SearchResult], results: &[SearchResult]) -> f64 {
+    if reference.is_empty() {
+        return if results.is_empty() { 1.0 } else { 0.0 };
+    }
+
+    let mut total_accuracy = 0.0;
     let mut count = 0;
 
-    for gt in ground_truth {
-        if let Some(pred) = predictions.iter().find(|p| p.query_id == gt.query_id) {
-            let gt_set: HashSet<u32> = gt.top_k_offsets.iter().take(k).cloned().collect();
-            let pred_set: HashSet<u32> = pred.top_k_offsets.iter().take(k).cloned().collect();
+    for ref_result in reference {
+        if let Some(result) = results.iter().find(|r| r.query_id == ref_result.query_id) {
+            // For accuracy, we count how many documents in the WAND results
+            // are also in the reference results (top-k from brute force)
+            let reference_ids: HashSet<_> = ref_result.top_k_offsets.iter().collect();
+            let results_ids: HashSet<_> = result.top_k_offsets.iter().collect();
 
-            let intersection = gt_set.intersection(&pred_set).count();
-            let recall = intersection as f32 / k.min(gt_set.len()) as f32;
-            total_recall += recall;
+            // Count exact matches (documents that appear in both result sets)
+            let exact_matches = reference_ids.intersection(&results_ids).count();
+
+            // Accuracy is the proportion of WAND results that are in the true top-k
+            let accuracy = if result.top_k_offsets.is_empty() {
+                0.0
+            } else {
+                exact_matches as f64 / result.top_k_offsets.len() as f64
+            };
+
+            total_accuracy += accuracy;
             count += 1;
         }
     }
 
     if count > 0 {
-        total_recall / count as f32
+        total_accuracy / count as f64
     } else {
         0.0
     }
@@ -558,8 +701,8 @@ async fn main() -> anyhow::Result<()> {
     let documents_path = format!("{}/documents.parquet", args.dataset_path);
     let queries_path = format!("{}/queries.parquet", args.dataset_path);
 
-    println!("Sparse Index Block-Max WAND Benchmark");
-    println!("======================================");
+    println!("🚀 Sparse Index Block-Max WAND Benchmark");
+    println!("{}", "=".repeat(60));
     println!("Configuration:");
     println!("  Dataset: {}", args.dataset_path);
     println!("  Documents: {}", documents_path);
@@ -568,115 +711,246 @@ async fn main() -> anyhow::Result<()> {
     println!("  Num queries: {}", args.num_queries);
     println!("  Top-k: {}", args.top_k);
     println!("  Block size: {}", args.block_size);
+    println!("  Sort by URL: {}", args.sort_by_url);
+    println!(
+        "  Mode: {}",
+        if args.wand_only {
+            "WAND only (profiling)"
+        } else {
+            "Full benchmark"
+        }
+    );
+    if args.iterations > 1 {
+        println!("  Iterations per query: {}", args.iterations);
+    }
     println!();
 
     // Load documents
-    println!("Loading documents...");
+    println!("📄 Loading documents...");
     let documents = load_sparse_documents(documents_path, 0, args.num_documents)?;
-    println!("Loaded {} documents", documents.len());
+    println!("✅ Loaded {} documents", documents.len());
 
     // Load queries
-    println!("Loading queries...");
+    println!("🔍 Loading queries...");
     let queries = load_sparse_queries(queries_path, 0, args.num_queries)?;
-    println!("Loaded {} queries", queries.len());
+    println!("✅ Loaded {} queries", queries.len());
 
     // Build sparse index
     let (temp_dir, provider, max_reader_id, offset_value_reader_id) =
-        build_sparse_index(&documents, args.block_size).await?;
+        build_sparse_index(&documents, args.block_size, args.sort_by_url).await?;
 
-    // Run brute force search as ground truth
-    println!("\nRunning brute force search (ground truth)...");
-    let start = Instant::now();
-    let brute_force_results: Vec<SearchResult> = queries
-        .iter()
-        .map(|query| brute_force_search(&documents, query, args.top_k))
-        .collect();
-    let brute_force_time = start.elapsed().as_secs_f64() * 1000.0;
-    println!("Brute force total time: {:.2} ms", brute_force_time);
-
-    // Run WAND search
-    let wand_results = search_with_wand(
-        &provider,
-        max_reader_id,
-        offset_value_reader_id,
-        &queries,
-        args.top_k,
-    )
-    .await?;
-
-    // Calculate metrics
-    let recall = calculate_recall(&brute_force_results, &wand_results, args.top_k);
-
-    let avg_brute_force_time = brute_force_results
-        .iter()
-        .map(|r| r.search_time_ms)
-        .sum::<f64>()
-        / brute_force_results.len() as f64;
-
-    let avg_wand_time =
-        wand_results.iter().map(|r| r.search_time_ms).sum::<f64>() / wand_results.len() as f64;
-
-    let speedup = avg_brute_force_time / avg_wand_time;
-
-    // Print results
-    println!("\n======================================");
-    println!("Results:");
-    println!("  Recall@{}: {:.2}%", args.top_k, recall * 100.0);
-    println!("  Avg brute force time: {:.2} ms", avg_brute_force_time);
-    println!("  Avg WAND time: {:.2} ms", avg_wand_time);
-    println!("  Speedup: {:.2}x", speedup);
-
-    // Print detailed comparison for first few queries
-    println!("\nDetailed comparison (first 5 queries):");
-    for i in 0..5.min(queries.len()) {
-        let bf = &brute_force_results[i];
-        let wand = &wand_results[i];
-
-        println!("\nQuery {}: {}", i + 1, bf.query_id);
-        println!(
-            "  Brute force top-{} offsets: {:?}",
-            args.top_k, bf.top_k_offsets
-        );
-        println!("  Brute force top-{} scores: {:?}", args.top_k, bf.scores);
-        println!(
-            "  WAND top-{} offsets: {:?}",
-            args.top_k, wand.top_k_offsets
-        );
-        println!("  WAND top-{} scores: {:?}", args.top_k, wand.scores);
-
-        let gt_set: HashSet<u32> = bf.top_k_offsets.iter().cloned().collect();
-        let pred_set: HashSet<u32> = wand.top_k_offsets.iter().cloned().collect();
-        let overlap = gt_set.intersection(&pred_set).count();
-
-        println!("  Overlap: {}/{}", overlap, args.top_k);
-
-        // Validate scores for matching offsets
-        let mut score_differences = Vec::new();
-        for (j, wand_offset) in wand.top_k_offsets.iter().enumerate() {
-            if let Some(bf_idx) = bf.top_k_offsets.iter().position(|&o| o == *wand_offset) {
-                let score_diff = (wand.scores[j] - bf.scores[bf_idx]).abs();
-                score_differences.push(score_diff);
-                if score_diff > 1e-5 {
-                    println!(
-                        "    Score mismatch for offset {}: BF={:.6}, WAND={:.6}, diff={:.6}",
-                        wand_offset, bf.scores[bf_idx], wand.scores[j], score_diff
-                    );
-                }
-            }
-        }
-
-        if !score_differences.is_empty() {
-            let avg_diff: f32 =
-                score_differences.iter().sum::<f32>() / score_differences.len() as f32;
-            let max_diff = score_differences.iter().cloned().fold(0.0f32, f32::max);
+    if args.wand_only {
+        // WAND-only mode for profiling
+        println!("\n🎯 Running WAND-only mode (no brute force comparison)");
+        if args.iterations > 1 {
             println!(
-                "  Score validation: avg_diff={:.6}, max_diff={:.6}",
-                avg_diff, max_diff
+                "Running {} iterations per query for profiling...",
+                args.iterations
             );
         }
 
-        println!("  Brute force time: {:.2} ms", bf.search_time_ms);
-        println!("  WAND time: {:.2} ms", wand.search_time_ms);
+        let start_total = Instant::now();
+        let wand_results = search_with_wand(
+            &provider,
+            max_reader_id,
+            offset_value_reader_id,
+            &queries,
+            args.top_k,
+            args.iterations,
+            false, // no progress bar in wand-only mode
+        )
+        .await?;
+        let total_time = start_total.elapsed().as_secs_f64() * 1000.0;
+
+        // Calculate metrics
+        let avg_wand_time =
+            wand_results.iter().map(|r| r.search_time_ms).sum::<f64>() / wand_results.len() as f64;
+
+        let avg_wand_evaluations = wand_results
+            .iter()
+            .map(|r| r.full_evaluations as f64)
+            .sum::<f64>()
+            / wand_results.len() as f64;
+
+        let evaluation_percentage = (avg_wand_evaluations / documents.len() as f64) * 100.0;
+
+        let total_iterations = queries.len() * args.iterations;
+
+        // Print results
+        println!("\n📨 WAND-ONLY RESULTS");
+        println!("{}", "=".repeat(60));
+        println!("🎯 Performance:");
+        println!("  Total time: {:.2} ms", total_time);
+        println!("  Total iterations: {}", total_iterations);
+        println!("  Avg time per query: {:.2} ms", avg_wand_time);
+        println!("  Queries per second: {:.2}", 1000.0 / avg_wand_time);
+        println!(
+            "  Avg full evaluations: {:.1}/{} ({:.1}%)",
+            avg_wand_evaluations,
+            documents.len(),
+            evaluation_percentage
+        );
+        println!();
+        println!("📊 Statistics:");
+        println!("  Documents indexed: {}", documents.len());
+        println!("  Queries processed: {}", queries.len());
+        println!("  Iterations per query: {}", args.iterations);
+
+        println!("\n🔥 Ready for flamegraph profiling!");
+        println!("Tip: Use with cargo flamegraph --freq 99 for lower overhead");
+    } else {
+        // Full benchmark mode with brute force comparison
+        println!("\n🐌 Running brute force search (ground truth)...");
+        let pb_brute = ProgressBar::new(queries.len() as u64);
+        pb_brute.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.yellow/blue}] {pos}/{len} ({eta})",
+                )
+                .unwrap()
+                .progress_chars("█▉▊▋▌▍▎▏  "),
+        );
+        pb_brute.set_message("Brute force search");
+
+        let start = Instant::now();
+        let mut brute_force_results = Vec::new();
+        let mut total_non_trivial = 0;
+
+        for (i, query) in queries.iter().enumerate() {
+            let (result, non_trivial_count) = brute_force_search(&documents, query, args.top_k);
+            total_non_trivial += non_trivial_count;
+            brute_force_results.push(result);
+            pb_brute.set_position((i + 1) as u64);
+        }
+
+        pb_brute.finish_with_message("✅ Brute force complete");
+        let brute_force_time = start.elapsed().as_secs_f64() * 1000.0;
+
+        // Calculate non-trivial document statistics
+        let avg_non_trivial = total_non_trivial as f64 / queries.len() as f64;
+        let avg_percentage = (avg_non_trivial / documents.len() as f64) * 100.0;
+
+        println!("Brute force total time: {:.2} ms", brute_force_time);
+        println!(
+            "Average documents with non-zero similarity: {:.1}/{} ({:.1}%)",
+            avg_non_trivial,
+            documents.len(),
+            avg_percentage
+        );
+
+        // Run WAND search
+        let wand_results = search_with_wand(
+            &provider,
+            max_reader_id,
+            offset_value_reader_id,
+            &queries,
+            args.top_k,
+            args.iterations,
+            true, // show progress in full benchmark mode
+        )
+        .await?;
+
+        // Show example query and retrieved documents
+        println!("\n📝 Example Query and Retrieved Documents");
+        println!("{}", "=".repeat(60));
+        if !queries.is_empty() && !wand_results.is_empty() {
+            let example_query = &queries[0];
+            let example_result = &wand_results[0];
+
+            println!("Query: {}", example_query.text);
+            println!("Query ID: {}", example_query.query_id);
+            println!(
+                "\nTop {} Retrieved Documents:",
+                example_result.top_k_offsets.len().min(5)
+            );
+            println!("{}", "-".repeat(60));
+
+            for (i, (&offset, &score)) in example_result
+                .top_k_offsets
+                .iter()
+                .zip(example_result.scores.iter())
+                .take(5)
+                .enumerate()
+            {
+                let doc = &documents[offset as usize];
+                println!("\n{}. Score: {:.4}", i + 1, score);
+                println!("   URL: {}", doc.url);
+                println!(
+                    "   Title: {}",
+                    if doc.title.len() > 80 {
+                        format!("{}...", &doc.title[..77])
+                    } else {
+                        doc.title.clone()
+                    }
+                );
+                println!(
+                    "   Body: {}",
+                    if doc.body.len() > 150 {
+                        format!("{}...", &doc.body[..147])
+                    } else {
+                        doc.body.clone()
+                    }
+                );
+            }
+        }
+
+        // Calculate metrics
+        let accuracy = compute_accuracy(&brute_force_results, &wand_results);
+
+        let avg_brute_force_time = brute_force_results
+            .iter()
+            .map(|r| r.search_time_ms)
+            .sum::<f64>()
+            / brute_force_results.len() as f64;
+
+        let avg_wand_time =
+            wand_results.iter().map(|r| r.search_time_ms).sum::<f64>() / wand_results.len() as f64;
+
+        let avg_wand_evaluations = wand_results
+            .iter()
+            .map(|r| r.full_evaluations as f64)
+            .sum::<f64>()
+            / wand_results.len() as f64;
+
+        let speedup = avg_brute_force_time / avg_wand_time;
+        let evaluation_reduction = (1.0 - (avg_wand_evaluations / documents.len() as f64)) * 100.0;
+
+        // Print results
+        println!("\n📨 BENCHMARK RESULTS");
+        println!("{}", "=".repeat(60));
+        println!("🎯 Performance Comparison:");
+        println!("  Method              Time (ms)    Evaluations    Speedup");
+        println!("  {}", "-".repeat(58));
+        println!(
+            "  Brute Force         {:<12.2} {:<14} 1.00x",
+            avg_brute_force_time,
+            documents.len()
+        );
+        println!(
+            "  Block-Max WAND      {:<12.2} {:<14.1} {:.2}x",
+            avg_wand_time, avg_wand_evaluations, speedup
+        );
+        if args.iterations > 1 {
+            println!("  (WAND averaged over {} iterations)", args.iterations);
+        }
+        println!();
+        println!("🔍 Quality Metrics:");
+        println!("  Accuracy@{}: {:.2}%", args.top_k, accuracy * 100.0);
+        println!("  Evaluation reduction: {:.1}%", evaluation_reduction);
+        println!();
+        println!("📊 Dataset Statistics:");
+        println!("  Documents processed: {}", documents.len());
+        println!("  Queries processed: {}", queries.len());
+        println!(
+            "  Avg non-zero docs per query: {:.1} ({:.1}%)",
+            avg_non_trivial, avg_percentage
+        );
+
+        println!("\n🎉 Benchmark completed successfully!");
+        println!("Total queries processed: {}", queries.len());
+        if args.sort_by_url {
+            println!("Documents were sorted by URL for better cache locality");
+        }
     }
 
     // Clean up

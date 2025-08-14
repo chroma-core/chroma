@@ -1,7 +1,11 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use chroma_blockstore::{BlockfileFlusher, BlockfileWriter};
 use chroma_error::ChromaError;
+use parking_lot::Mutex;
 use thiserror::Error;
 
 use crate::sparse::{
@@ -32,6 +36,15 @@ impl SparseDelta {
                 .insert(offset, None);
         }
     }
+
+    fn merge(&mut self, other: Self) {
+        for (dimension_id, updates) in other.dimension_value_updates {
+            self.dimension_value_updates
+                .entry(dimension_id)
+                .or_default()
+                .extend(updates);
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -57,6 +70,7 @@ impl SparseFlusher {
 
 pub struct SparseWriter<'me> {
     block_size: u32,
+    delta: Arc<Mutex<SparseDelta>>,
     max_writer: BlockfileWriter,
     offset_value_writer: BlockfileWriter,
     reader: Option<SparseReader<'me>>,
@@ -71,6 +85,7 @@ impl<'me> SparseWriter<'me> {
     ) -> Self {
         Self {
             block_size,
+            delta: Default::default(),
             max_writer,
             offset_value_writer,
             reader,
@@ -78,14 +93,7 @@ impl<'me> SparseWriter<'me> {
     }
 
     pub async fn commit(self) -> Result<SparseFlusher, SparseWriterError> {
-        Ok(SparseFlusher {
-            max_flusher: self.max_writer.commit::<u32, f32>().await?,
-            offset_value_flusher: self.offset_value_writer.commit::<u32, f32>().await?,
-        })
-    }
-
-    pub async fn write_delta(&self, delta: SparseDelta) -> Result<(), SparseWriterError> {
-        for (dimension_id, updates) in delta.dimension_value_updates {
+        for (&dimension_id, updates) in &self.delta.lock().dimension_value_updates {
             let encoded_dimension = encode_u32(dimension_id);
             let (commited_blocks, mut offset_values) = match self.reader.as_ref() {
                 Some(reader) => {
@@ -103,7 +111,7 @@ impl<'me> SparseWriter<'me> {
                     .delete::<_, f32>(&encoded_dimension, offset)
                     .await?;
             }
-            for (offset, update) in updates {
+            for (&offset, &update) in updates {
                 match update {
                     Some(value) => {
                         self.offset_value_writer
@@ -143,6 +151,13 @@ impl<'me> SparseWriter<'me> {
                     .await?;
             }
         }
-        Ok(())
+        Ok(SparseFlusher {
+            max_flusher: self.max_writer.commit::<u32, f32>().await?,
+            offset_value_flusher: self.offset_value_writer.commit::<u32, f32>().await?,
+        })
+    }
+
+    pub fn write(&self, delta: SparseDelta) {
+        self.delta.lock().merge(delta);
     }
 }

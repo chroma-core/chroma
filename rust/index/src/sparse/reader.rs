@@ -151,13 +151,16 @@ impl<'me> SparseReader<'me> {
         &self,
         query_vector: impl IntoIterator<Item = (u32, f32)>,
         k: u32,
-    ) -> Result<Vec<Score>, SparseReaderError> {
+    ) -> Result<(Vec<Score>, u32), SparseReaderError> {
         let collected_query = query_vector
             .into_iter()
             .map(|(dimension_id, query)| (dimension_id, encode_u32(dimension_id), query))
             .collect::<Vec<_>>();
         let dimension_count = collected_query.len();
         let all_dimension_max = self.get_dimension_max().await?;
+
+        // NOTE: This is a temporary counter for debug purpose. Should be removed later
+        let mut full_eval_counter = 0;
 
         let mut cursors = Vec::with_capacity(dimension_count);
         for (dimension_id, encoded_dimension_id, query) in &collected_query {
@@ -191,7 +194,7 @@ impl<'me> SparseReader<'me> {
         cursors.sort_unstable();
 
         let Some(mut first_unchecked_offset) = cursors.first().map(|cursor| cursor.offset) else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), 0));
         };
 
         let mut threshold = f32::MIN;
@@ -292,6 +295,7 @@ impl<'me> SparseReader<'me> {
                             .map(|score| score.score)
                             .unwrap_or_default();
                     }
+                    full_eval_counter += 1;
                     first_unchecked_offset = pivot_offset + 1;
                     first_unchecked_offset
                 } else {
@@ -318,6 +322,6 @@ impl<'me> SparseReader<'me> {
             }
         }
 
-        Ok(top_scores.into_sorted_vec())
+        Ok((top_scores.into_sorted_vec(), full_eval_counter))
     }
 }
