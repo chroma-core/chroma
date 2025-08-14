@@ -50,9 +50,11 @@ struct AdmissionControlledS3StorageMetrics {
     pub nac_lock_wait_duration_us: opentelemetry::metrics::Histogram<u64>,
     pub outstanding_read_requests: Arc<AtomicUsize>,
     pub read_requests_waiting_for_token: Arc<AtomicUsize>,
+    pub write_requests_waiting_for_token: Arc<AtomicUsize>,
     pub hostname_attribute: [KeyValue; 1],
     pub nac_outstanding_read_requests: opentelemetry::metrics::Histogram<u64>,
     pub nac_read_requests_waiting_for_token: opentelemetry::metrics::Histogram<u64>,
+    pub nac_write_requests_waiting_for_token: opentelemetry::metrics::Histogram<u64>,
     pub nac_priority_increase_sent: opentelemetry::metrics::Counter<u64>,
 }
 
@@ -62,6 +64,7 @@ impl Default for AdmissionControlledS3StorageMetrics {
         Self {
             outstanding_read_requests: Arc::new(AtomicUsize::new(0)),
             read_requests_waiting_for_token: Arc::new(AtomicUsize::new(0)),
+            write_requests_waiting_for_token: Arc::new(AtomicUsize::new(0)),
             hostname_attribute: [KeyValue::new(
                 "hostname",
                 std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
@@ -82,7 +85,13 @@ impl Default for AdmissionControlledS3StorageMetrics {
             nac_read_requests_waiting_for_token: meter
                 .u64_histogram("nac_read_requests_waiting_for_token")
                 .with_description(
-                    "Number of requests in the admission control system waiting for a token",
+                    "Number of read requests in the admission control system waiting for a token",
+                )
+                .build(),
+            nac_write_requests_waiting_for_token: meter
+                .u64_histogram("nac_write_requests_waiting_for_token")
+                .with_description(
+                    "Number of write requests in the admission control system waiting for a token",
                 )
                 .build(),
             nac_priority_increase_sent: meter
@@ -541,8 +550,22 @@ impl AdmissionControlledS3Storage {
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
         let atomic_priority = Arc::new(AtomicUsize::new(options.priority.as_usize()));
+
+        // Record write requests waiting for token
+        self.metrics.nac_write_requests_waiting_for_token.record(
+            self.metrics
+                .write_requests_waiting_for_token
+                .fetch_add(1, Ordering::Relaxed) as u64,
+            &self.metrics.hostname_attribute,
+        );
+
         // Acquire permit.
         let _permit = self.rate_limiter.enter(atomic_priority, None).await;
+
+        self.metrics
+            .write_requests_waiting_for_token
+            .fetch_sub(1, Ordering::Relaxed);
+
         self.storage
             .oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
             .await
@@ -565,8 +588,21 @@ impl AdmissionControlledS3Storage {
             .await?;
         let mut upload_parts = Vec::new();
         for part_index in 0..part_count {
+            // Record write requests waiting for token
+            self.metrics.nac_write_requests_waiting_for_token.record(
+                self.metrics
+                    .write_requests_waiting_for_token
+                    .fetch_add(1, Ordering::Relaxed) as u64,
+                &self.metrics.hostname_attribute,
+            );
+
             // Acquire token.
             let _permit = self.rate_limiter.enter(atomic_priority.clone(), None).await;
+
+            self.metrics
+                .write_requests_waiting_for_token
+                .fetch_sub(1, Ordering::Relaxed);
+
             let completed_part = self
                 .storage
                 .upload_part(
