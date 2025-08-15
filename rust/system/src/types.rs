@@ -176,8 +176,7 @@ impl<C: Component> ComponentSender<C> {
         M: Message,
     {
         self.sender
-            .send(WrappedMessage::new(message, None, tracing_context))
-            .await
+            .try_send(WrappedMessage::new(message, None, tracing_context))
             .map_err(|_| ChannelError::SendError)
     }
 
