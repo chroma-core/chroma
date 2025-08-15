@@ -1,4 +1,4 @@
-/* Much of this file is copied from https://github.com/qdrant/qdrant/blob/master/lib/segment/src/spaces/simple_sse.rs
+/* Much of this file is copied from https://github.com/qdrant/qdrant/blob/master/lib/segment/src/spaces/simple_avx.rs
 copyright Qdrant, licensed under the Apache 2.0 license.
 
  TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
@@ -201,141 +201,158 @@ copyright Qdrant, licensed under the Apache 2.0 license.
 */
 #![allow(clippy::missing_safety_doc)]
 
-#[cfg(target_arch = "x86")]
-use std::arch::x86::*;
 #[cfg(target_arch = "x86_64")]
+#[allow(unused_imports)]
 use std::arch::x86_64::*;
 
-#[cfg(target_feature = "sse")]
-pub unsafe fn hsum128_ps_sse(x: __m128) -> f32 {
-    let x64: __m128 = _mm_add_ps(x, _mm_movehl_ps(x, x));
-    let x32: __m128 = _mm_add_ss(x64, _mm_shuffle_ps(x64, x64, 0x55));
-    _mm_cvtss_f32(x32)
-}
+// NOTE: no need for hsum512_ps_avx bc rust has it built in as _mm512_reduce_add_ps
+// https://doc.rust-lang.org/beta/core/arch/x86/fn._mm512_reduce_add_ps.html
 
-#[cfg(target_feature = "sse")]
+#[cfg(all(
+    target_feature = "avx512f",
+    target_feature = "avx512dq",
+    target_feature = "avx512bw",
+    target_feature = "avx512vl",
+    target_feature = "fma"
+))]
 pub unsafe fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len();
-    let m = n - (n % 16);
+    let m = n - (n % 64);
     let mut ptr1: *const f32 = a.as_ptr();
     let mut ptr2: *const f32 = b.as_ptr();
-    let mut sum128_1: __m128 = _mm_setzero_ps();
-    let mut sum128_2: __m128 = _mm_setzero_ps();
-    let mut sum128_3: __m128 = _mm_setzero_ps();
-    let mut sum128_4: __m128 = _mm_setzero_ps();
-
+    let mut sum512_1: __m512 = _mm512_setzero_ps();
+    let mut sum512_2: __m512 = _mm512_setzero_ps();
+    let mut sum512_3: __m512 = _mm512_setzero_ps();
+    let mut sum512_4: __m512 = _mm512_setzero_ps();
     let mut i: usize = 0;
     while i < m {
-        sum128_1 = _mm_add_ps(_mm_mul_ps(_mm_loadu_ps(ptr1), _mm_loadu_ps(ptr2)), sum128_1);
-
-        sum128_2 = _mm_add_ps(
-            _mm_mul_ps(_mm_loadu_ps(ptr1.add(4)), _mm_loadu_ps(ptr2.add(4))),
-            sum128_2,
+        sum512_1 = _mm512_fmadd_ps(_mm512_loadu_ps(ptr1), _mm512_loadu_ps(ptr2), sum512_1);
+        sum512_2 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(16)),
+            _mm512_loadu_ps(ptr2.add(16)),
+            sum512_2,
+        );
+        sum512_3 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(32)),
+            _mm512_loadu_ps(ptr2.add(32)),
+            sum512_3,
+        );
+        sum512_4 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(48)),
+            _mm512_loadu_ps(ptr2.add(48)),
+            sum512_4,
         );
 
-        sum128_3 = _mm_add_ps(
-            _mm_mul_ps(_mm_loadu_ps(ptr1.add(8)), _mm_loadu_ps(ptr2.add(8))),
-            sum128_3,
-        );
-
-        sum128_4 = _mm_add_ps(
-            _mm_mul_ps(_mm_loadu_ps(ptr1.add(12)), _mm_loadu_ps(ptr2.add(12))),
-            sum128_4,
-        );
-
-        ptr1 = ptr1.add(16);
-        ptr2 = ptr2.add(16);
-        i += 16;
+        ptr1 = ptr1.add(64);
+        ptr2 = ptr2.add(64);
+        i += 64;
     }
 
-    let mut result = hsum128_ps_sse(sum128_1)
-        + hsum128_ps_sse(sum128_2)
-        + hsum128_ps_sse(sum128_3)
-        + hsum128_ps_sse(sum128_4);
+    let mut result = _mm512_reduce_add_ps(sum512_1)
+        + _mm512_reduce_add_ps(sum512_2)
+        + _mm512_reduce_add_ps(sum512_3)
+        + _mm512_reduce_add_ps(sum512_4);
+
     for i in 0..n - m {
         result += (*ptr1.add(i)) * (*ptr2.add(i));
     }
     1.0_f32 - result
 }
 
-#[cfg(target_feature = "sse")]
+#[cfg(all(
+    target_feature = "avx512f",
+    target_feature = "avx512dq",
+    target_feature = "avx512bw",
+    target_feature = "avx512vl",
+    target_feature = "fma"
+))]
 pub unsafe fn inner_product(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len();
-    let m = n - (n % 16);
+    let m = n - (n % 64);
     let mut ptr1: *const f32 = a.as_ptr();
     let mut ptr2: *const f32 = b.as_ptr();
-    let mut sum128_1: __m128 = _mm_setzero_ps();
-    let mut sum128_2: __m128 = _mm_setzero_ps();
-    let mut sum128_3: __m128 = _mm_setzero_ps();
-    let mut sum128_4: __m128 = _mm_setzero_ps();
-
+    let mut sum512_1: __m512 = _mm512_setzero_ps();
+    let mut sum512_2: __m512 = _mm512_setzero_ps();
+    let mut sum512_3: __m512 = _mm512_setzero_ps();
+    let mut sum512_4: __m512 = _mm512_setzero_ps();
     let mut i: usize = 0;
     while i < m {
-        sum128_1 = _mm_add_ps(_mm_mul_ps(_mm_loadu_ps(ptr1), _mm_loadu_ps(ptr2)), sum128_1);
-
-        sum128_2 = _mm_add_ps(
-            _mm_mul_ps(_mm_loadu_ps(ptr1.add(4)), _mm_loadu_ps(ptr2.add(4))),
-            sum128_2,
+        sum512_1 = _mm512_fmadd_ps(_mm512_loadu_ps(ptr1), _mm512_loadu_ps(ptr2), sum512_1);
+        sum512_2 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(16)),
+            _mm512_loadu_ps(ptr2.add(16)),
+            sum512_2,
+        );
+        sum512_3 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(32)),
+            _mm512_loadu_ps(ptr2.add(32)),
+            sum512_3,
+        );
+        sum512_4 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(48)),
+            _mm512_loadu_ps(ptr2.add(48)),
+            sum512_4,
         );
 
-        sum128_3 = _mm_add_ps(
-            _mm_mul_ps(_mm_loadu_ps(ptr1.add(8)), _mm_loadu_ps(ptr2.add(8))),
-            sum128_3,
-        );
-
-        sum128_4 = _mm_add_ps(
-            _mm_mul_ps(_mm_loadu_ps(ptr1.add(12)), _mm_loadu_ps(ptr2.add(12))),
-            sum128_4,
-        );
-
-        ptr1 = ptr1.add(16);
-        ptr2 = ptr2.add(16);
-        i += 16;
+        ptr1 = ptr1.add(64);
+        ptr2 = ptr2.add(64);
+        i += 64;
     }
 
-    let mut result = hsum128_ps_sse(sum128_1)
-        + hsum128_ps_sse(sum128_2)
-        + hsum128_ps_sse(sum128_3)
-        + hsum128_ps_sse(sum128_4);
+    let mut result = _mm512_reduce_add_ps(sum512_1)
+        + _mm512_reduce_add_ps(sum512_2)
+        + _mm512_reduce_add_ps(sum512_3)
+        + _mm512_reduce_add_ps(sum512_4);
+
     for i in 0..n - m {
         result += (*ptr1.add(i)) * (*ptr2.add(i));
     }
     1.0_f32 - result
 }
 
-#[cfg(target_feature = "sse")]
+#[cfg(all(
+    target_feature = "avx512f",
+    target_feature = "avx512dq",
+    target_feature = "avx512bw",
+    target_feature = "avx512vl",
+    target_feature = "fma"
+))]
 pub unsafe fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len();
-    let m = n - (n % 16);
+    let m = n - (n % 64);
     let mut ptr1: *const f32 = a.as_ptr();
     let mut ptr2: *const f32 = b.as_ptr();
-    let mut sum128_1: __m128 = _mm_setzero_ps();
-    let mut sum128_2: __m128 = _mm_setzero_ps();
-    let mut sum128_3: __m128 = _mm_setzero_ps();
-    let mut sum128_4: __m128 = _mm_setzero_ps();
+    let mut sum512_1: __m512 = _mm512_setzero_ps();
+    let mut sum512_2: __m512 = _mm512_setzero_ps();
+    let mut sum512_3: __m512 = _mm512_setzero_ps();
+    let mut sum512_4: __m512 = _mm512_setzero_ps();
     let mut i: usize = 0;
     while i < m {
-        let sub128_1 = _mm_sub_ps(_mm_loadu_ps(ptr1), _mm_loadu_ps(ptr2));
-        sum128_1 = _mm_add_ps(_mm_mul_ps(sub128_1, sub128_1), sum128_1);
+        let sub512_1: __m512 =
+            _mm512_sub_ps(_mm512_loadu_ps(ptr1.add(0)), _mm512_loadu_ps(ptr2.add(0)));
+        sum512_1 = _mm512_fmadd_ps(sub512_1, sub512_1, sum512_1);
 
-        let sub128_2 = _mm_sub_ps(_mm_loadu_ps(ptr1.add(4)), _mm_loadu_ps(ptr2.add(4)));
-        sum128_2 = _mm_add_ps(_mm_mul_ps(sub128_2, sub128_2), sum128_2);
+        let sub512_2: __m512 =
+            _mm512_sub_ps(_mm512_loadu_ps(ptr1.add(16)), _mm512_loadu_ps(ptr2.add(16)));
+        sum512_2 = _mm512_fmadd_ps(sub512_2, sub512_2, sum512_2);
 
-        let sub128_3 = _mm_sub_ps(_mm_loadu_ps(ptr1.add(8)), _mm_loadu_ps(ptr2.add(8)));
-        sum128_3 = _mm_add_ps(_mm_mul_ps(sub128_3, sub128_3), sum128_3);
+        let sub512_3: __m512 =
+            _mm512_sub_ps(_mm512_loadu_ps(ptr1.add(32)), _mm512_loadu_ps(ptr2.add(32)));
+        sum512_3 = _mm512_fmadd_ps(sub512_3, sub512_3, sum512_3);
 
-        let sub128_4 = _mm_sub_ps(_mm_loadu_ps(ptr1.add(12)), _mm_loadu_ps(ptr2.add(12)));
-        sum128_4 = _mm_add_ps(_mm_mul_ps(sub128_4, sub128_4), sum128_4);
+        let sub512_4: __m512 =
+            _mm512_sub_ps(_mm512_loadu_ps(ptr1.add(48)), _mm512_loadu_ps(ptr2.add(48)));
+        sum512_4 = _mm512_fmadd_ps(sub512_4, sub512_4, sum512_4);
 
-        ptr1 = ptr1.add(16);
-        ptr2 = ptr2.add(16);
-        i += 16;
+        ptr1 = ptr1.add(64);
+        ptr2 = ptr2.add(64);
+        i += 64;
     }
 
-    let mut result = hsum128_ps_sse(sum128_1)
-        + hsum128_ps_sse(sum128_2)
-        + hsum128_ps_sse(sum128_3)
-        + hsum128_ps_sse(sum128_4);
+    let mut result = _mm512_reduce_add_ps(sum512_1)
+        + _mm512_reduce_add_ps(sum512_2)
+        + _mm512_reduce_add_ps(sum512_3)
+        + _mm512_reduce_add_ps(sum512_4);
     for i in 0..n - m {
         result += (*ptr1.add(i) - *ptr2.add(i)).powi(2);
     }
@@ -352,11 +369,20 @@ mod tests {
     #[test]
     #[cfg(all(
         any(target_arch = "x86", target_arch = "x86_64"),
-        target_feature = "sse"
+        target_feature = "avx512f",
+        target_feature = "avx512dq",
+        target_feature = "avx512bw",
+        target_feature = "avx512vl",
+        target_feature = "fma"
     ))]
-    fn test_spaces_sse() {
-        println!("Running SSE distance test...");
-        if is_x86_feature_detected!("sse") {
+    fn test_spaces_avx512() {
+        println!("Running AVX512 distance test...");
+        if is_x86_feature_detected!("avx512f")
+            && is_x86_feature_detected!("avx512dq")
+            && is_x86_feature_detected!("avx512bw")
+            && is_x86_feature_detected!("avx512vl")
+            && is_x86_feature_detected!("fma")
+        {
             let v1: Vec<f32> = vec![
                 10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
                 10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
@@ -384,7 +410,7 @@ mod tests {
             let inner = inner_product_scalar(&v1, &v2);
             assert_eq!(inner_simd, inner);
         } else {
-            println!("sse test skipped");
+            println!("avx512 test skipped");
         }
     }
 }

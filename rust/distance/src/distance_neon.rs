@@ -295,3 +295,47 @@ pub unsafe fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+    #[allow(unused_imports)]
+    use crate::distance::*;
+
+    #[test]
+    #[cfg(target_feature = "neon")]
+    fn test_spaces_neon() {
+        println!("Running NEON distance test...");
+        if std::arch::is_aarch64_feature_detected!("neon") {
+            let v1: Vec<f32> = vec![
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                26., 27., 28., 29., 30., 31.,
+            ];
+            let v2: Vec<f32> = vec![
+                40., 41., 42., 43., 44., 45., 46., 47., 48., 49., 50., 51., 52., 53., 54., 55.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
+                56., 57., 58., 59., 60., 61.,
+            ];
+
+            let euclid_simd = unsafe { euclidean_distance(&v1, &v2) };
+            let euclid = euclidean_distance_scalar(&v1, &v2);
+            assert_eq!(euclid_simd, euclid);
+
+            let cosine_simd = unsafe { cosine_distance(&v1, &v2) };
+            let cosine = cosine_distance_scalar(&v1, &v2);
+            assert_eq!(cosine_simd, cosine);
+
+            let inner_simd = unsafe { inner_product(&v1, &v2) };
+            let inner = inner_product_scalar(&v1, &v2);
+            assert_eq!(inner_simd, inner);
+        } else {
+            println!("neon test skipped");
+        }
+    }
+}
