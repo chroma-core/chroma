@@ -176,11 +176,7 @@ impl<C: Component> ComponentSender<C> {
         M: Message,
     {
         self.sender
-            .send_timeout(
-                WrappedMessage::new(message, None, tracing_context),
-                std::time::Duration::from_secs(1),
-            )
-            .await
+            .try_send(WrappedMessage::new(message, None, tracing_context))
             .map_err(|_| ChannelError::SendError)
     }
 
