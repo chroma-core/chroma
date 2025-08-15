@@ -354,10 +354,6 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             "Graph after transition: \n{}",
             ref_state.get_graphviz_of_graph()
         );
-        println!(
-            "Collection statuses after transition: {:#?}",
-            ref_state.collection_status
-        );
 
         state
     }
