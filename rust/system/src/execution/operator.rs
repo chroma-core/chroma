@@ -76,8 +76,8 @@ where
 /// It contains the task id for tracking purposes.
 #[derive(Debug)]
 pub struct TaskResult<Output, Error> {
-    result: Result<Output, TaskError<Error>>,
-    task_id: Uuid,
+    pub(crate) result: Result<Output, TaskError<Error>>,
+    pub(crate) task_id: Uuid,
 }
 
 impl<Output, Error> TaskResult<Output, Error> {
