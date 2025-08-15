@@ -64,7 +64,13 @@ pub enum RecordSegmentWriterCreationError {
 
 impl chroma_error::ChromaError for RecordSegmentWriterCreationError {
     fn code(&self) -> chroma_error::ErrorCodes {
-        chroma_error::ErrorCodes::Internal
+        use chroma_error::ErrorCodes;
+        match self {
+            Self::InvalidSegmentType | Self::IncorrectNumberOfFiles => ErrorCodes::InvalidArgument,
+            Self::BlockfileCreateError(e) => e.code(),
+            Self::BlockfileOpenError(e) => e.code(),
+            _ => ErrorCodes::Internal,
+        }
     }
 }
 
