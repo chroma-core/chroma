@@ -93,10 +93,7 @@ fn display_run_message(config: &FrontendServerConfig) {
             .blue()
     );
     println!(
-        "\n☁️ {} Chroma Cloud powers serverless vector and full-text \
-        search. It's extremely fast, cost-effective, scalable and painless. \
-        Create a DB and try it out in under 30 seconds with $5 of free \
-        credits.\n{}",
+        "\n☁️ {} Chroma Cloud powers serverless vector and full-text search. It's extremely fast, cost-effective, scalable and painless.\nCreate a DB and try it out in under 30 seconds with $5 of free credits.\n{}\n",
         "Chroma Cloud is here!".bold(),
         "https://trychroma.com/signup".underline().blue()
     )
