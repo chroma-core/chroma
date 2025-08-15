@@ -381,7 +381,7 @@ impl Default for BlockMetrics {
 #[derive(Clone)]
 pub struct BlockManager {
     block_cache: Arc<dyn PersistentCache<Uuid, Block>>,
-    storage: Storage,
+    storage: Arc<Storage>,
     default_max_block_size_bytes: usize,
     block_metrics: BlockMetrics,
     num_concurrent_block_flushes: usize,
@@ -395,6 +395,7 @@ impl BlockManager {
         num_concurrent_block_flushes: usize,
     ) -> Self {
         let block_cache: Arc<dyn PersistentCache<Uuid, Block>> = block_cache.into();
+        let storage = Arc::new(storage);
         Self {
             block_cache,
             storage,
