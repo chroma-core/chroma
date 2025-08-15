@@ -37,7 +37,6 @@ use futures::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
-use opentelemetry::KeyValue;
 use rand::Rng;
 use std::clone::Clone;
 use std::ops::Range;
@@ -69,7 +68,6 @@ pub struct StorageMetrics {
     s3_rename_latency_ms: Histogram<u64>,
     s3_list_count: Counter<u64>,
     s3_list_latency_ms: Histogram<u64>,
-    hostname_attribute: [KeyValue; 1],
 }
 
 impl Default for StorageMetrics {
@@ -146,10 +144,6 @@ impl Default for StorageMetrics {
                 .with_description("Latency of S3 list operations in milliseconds")
                 .with_unit("ms")
                 .build(),
-            hostname_attribute: [KeyValue::new(
-                "hostname",
-                std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()),
-            )],
         }
     }
 }
@@ -385,13 +379,11 @@ impl S3Storage {
         let range_and_output_slices = ranges.iter().zip(output_slices.drain(..));
         let mut get_futures = Vec::new();
         let num_parts = range_and_output_slices.len();
-        self.metrics
-            .s3_get_count
-            .add(num_parts as u64, &self.metrics.hostname_attribute);
+        self.metrics.s3_get_count.add(num_parts as u64, &[]);
         for (range, output_slice) in range_and_output_slices {
             let _stopwatch = Stopwatch::new(
                 &self.metrics.s3_get_latency_ms,
-                &self.metrics.hostname_attribute,
+                &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
             let range_str = format!("bytes={}-{}", range.0, range.1);
@@ -439,12 +431,10 @@ impl S3Storage {
         &self,
         key: &str,
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
-        self.metrics
-            .s3_get_count
-            .add(1, &self.metrics.hostname_attribute);
+        self.metrics.s3_get_count.add(1, &[]);
         let _stopwatch = Stopwatch::new(
             &self.metrics.s3_get_latency_ms,
-            &self.metrics.hostname_attribute,
+            &[],
             chroma_tracing::util::StopWatchUnit::Millis,
         );
         let (mut stream, e_tag) = self.get_stream_and_e_tag(key).await?;
@@ -548,12 +538,10 @@ impl S3Storage {
         ) -> BoxFuture<'static, Result<ByteStream, StorageError>>,
         options: PutOptions,
     ) -> Result<Option<ETag>, StorageError> {
-        self.metrics
-            .s3_put_count
-            .add(1, &self.metrics.hostname_attribute);
+        self.metrics.s3_put_count.add(1, &[]);
         self.metrics
             .s3_put_bytes
-            .record(total_size_bytes as u64, &self.metrics.hostname_attribute);
+            .record(total_size_bytes as u64, &[]);
 
         let result = if self.is_oneshot_upload(total_size_bytes) {
             self.oneshot_upload(key, total_size_bytes, create_bytestream_fn, options)
@@ -561,7 +549,7 @@ impl S3Storage {
         } else {
             let _stopwatch = Stopwatch::new(
                 &self.metrics.s3_put_latency_ms,
-                &self.metrics.hostname_attribute,
+                &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
             self.multipart_upload(key, total_size_bytes, create_bytestream_fn, options)
@@ -569,9 +557,7 @@ impl S3Storage {
         };
 
         if result.is_err() {
-            self.metrics
-                .s3_put_error_count
-                .add(1, &self.metrics.hostname_attribute);
+            self.metrics.s3_put_error_count.add(1, &[]);
         }
 
         result
@@ -589,7 +575,7 @@ impl S3Storage {
     ) -> Result<Option<ETag>, StorageError> {
         let _stopwatch = Stopwatch::new(
             &self.metrics.s3_put_latency_ms,
-            &self.metrics.hostname_attribute,
+            &[],
             chroma_tracing::util::StopWatchUnit::Millis,
         );
         let req = self
@@ -610,9 +596,7 @@ impl S3Storage {
 
         let resp = req.send().await.map_err(|err| {
             let err = err.into_service_error();
-            self.metrics
-                .s3_put_error_count
-                .add(1, &self.metrics.hostname_attribute);
+            self.metrics.s3_put_error_count.add(1, &[]);
             if err.meta().code() == Some("PreconditionFailed") {
                 StorageError::Precondition {
                     path: key.to_string(),
@@ -685,9 +669,7 @@ impl S3Storage {
         let length = this_part;
 
         // Record the size of this upload part
-        self.metrics
-            .s3_upload_part_bytes
-            .record(length as u64, &self.metrics.hostname_attribute);
+        self.metrics.s3_upload_part_bytes.record(length as u64, &[]);
 
         let stream = create_bytestream_fn(offset..(offset + length)).await?;
 
@@ -765,7 +747,7 @@ impl S3Storage {
         // Record number of parts in this multipart upload
         self.metrics
             .s3_multipart_upload_parts
-            .record(part_count as u64, &self.metrics.hostname_attribute);
+            .record(part_count as u64, &[]);
 
         let mut upload_parts = Vec::new();
         for part_index in 0..part_count {
@@ -789,9 +771,7 @@ impl S3Storage {
 
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
-        self.metrics
-            .s3_delete_count
-            .add(1, &self.metrics.hostname_attribute);
+        self.metrics.s3_delete_count.add(1, &[]);
 
         let req = self.client.delete_object().bucket(&self.bucket).key(key);
 
@@ -833,9 +813,7 @@ impl S3Storage {
         &self,
         keys: I,
     ) -> Result<DeletedObjects, StorageError> {
-        self.metrics
-            .s3_delete_many_count
-            .add(1, &self.metrics.hostname_attribute);
+        self.metrics.s3_delete_many_count.add(1, &[]);
 
         let mut objects = vec![];
         for key in keys {
@@ -894,12 +872,10 @@ impl S3Storage {
 
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
-        self.metrics
-            .s3_rename_count
-            .add(1, &self.metrics.hostname_attribute);
+        self.metrics.s3_rename_count.add(1, &[]);
         let _stopwatch = Stopwatch::new(
             &self.metrics.s3_rename_latency_ms,
-            &self.metrics.hostname_attribute,
+            &[],
             chroma_tracing::util::StopWatchUnit::Millis,
         );
 
@@ -919,12 +895,10 @@ impl S3Storage {
 
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
-        self.metrics
-            .s3_copy_count
-            .add(1, &self.metrics.hostname_attribute);
+        self.metrics.s3_copy_count.add(1, &[]);
         let _stopwatch = Stopwatch::new(
             &self.metrics.s3_copy_latency_ms,
-            &self.metrics.hostname_attribute,
+            &[],
             chroma_tracing::util::StopWatchUnit::Millis,
         );
 
@@ -948,12 +922,10 @@ impl S3Storage {
     }
 
     pub async fn list_prefix(&self, prefix: &str) -> Result<Vec<String>, StorageError> {
-        self.metrics
-            .s3_list_count
-            .add(1, &self.metrics.hostname_attribute);
+        self.metrics.s3_list_count.add(1, &[]);
         let _stopwatch = Stopwatch::new(
             &self.metrics.s3_list_latency_ms,
-            &self.metrics.hostname_attribute,
+            &[],
             chroma_tracing::util::StopWatchUnit::Millis,
         );
 
