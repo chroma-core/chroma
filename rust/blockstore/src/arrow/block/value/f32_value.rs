@@ -28,7 +28,7 @@ impl ArrowWriteableValue for f32 {
     }
 
     fn validity_size(_item_count: usize) -> usize {
-        0 // We don't support None values for Fload32Array
+        0 // We don't support None values for Float32Array
     }
 
     fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage) {

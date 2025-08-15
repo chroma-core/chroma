@@ -2,7 +2,6 @@ use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashMap},
     fmt,
-    iter::Peekable,
     ops::RangeBounds,
 };
 
@@ -12,12 +11,9 @@ use thiserror::Error;
 
 use crate::sparse::types::{encode_u32, DIMENSION_PREFIX};
 
-struct Cursor<B, D>
-where
-    B: Iterator<Item = (u32, f32)>,
-    D: Iterator<Item = (u32, f32)>,
-{
-    block_iterator: Peekable<B>,
+struct Cursor<B, D> {
+    block_iterator: B,
+    block_next_offset: u32,
     block_upper_bound: f32,
     dimension_iterator: D,
     dimension_upper_bound: f32,
@@ -26,13 +22,10 @@ where
     value: f32,
 }
 
-impl<B, D> fmt::Debug for Cursor<B, D>
-where
-    B: Iterator<Item = (u32, f32)>,
-    D: Iterator<Item = (u32, f32)>,
-{
+impl<B, D> fmt::Debug for Cursor<B, D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Cursor")
+            .field("block_next_offset", &self.block_next_offset)
             .field("block_upper_bound", &self.block_upper_bound)
             .field("dimension_upper_bound", &self.dimension_upper_bound)
             .field("offset", &self.offset)
@@ -42,38 +35,21 @@ where
     }
 }
 
-impl<B, D> Eq for Cursor<B, D>
-where
-    B: Iterator<Item = (u32, f32)>,
-    D: Iterator<Item = (u32, f32)>,
-{
-}
+impl<B, D> Eq for Cursor<B, D> {}
 
-impl<B, D> Ord for Cursor<B, D>
-where
-    B: Iterator<Item = (u32, f32)>,
-    D: Iterator<Item = (u32, f32)>,
-{
+impl<B, D> Ord for Cursor<B, D> {
     fn cmp(&self, other: &Self) -> Ordering {
         self.offset.cmp(&other.offset)
     }
 }
 
-impl<B, D> PartialEq for Cursor<B, D>
-where
-    B: Iterator<Item = (u32, f32)>,
-    D: Iterator<Item = (u32, f32)>,
-{
+impl<B, D> PartialEq for Cursor<B, D> {
     fn eq(&self, other: &Self) -> bool {
         self.offset == other.offset
     }
 }
 
-impl<B, D> PartialOrd for Cursor<B, D>
-where
-    B: Iterator<Item = (u32, f32)>,
-    D: Iterator<Item = (u32, f32)>,
-{
+impl<B, D> PartialOrd for Cursor<B, D> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -172,30 +148,27 @@ impl<'me> SparseReader<'me> {
 
         let mut cursors = Vec::with_capacity(dimension_count);
         for (dimension_id, encoded_dimension_id, query) in &collected_query {
-            if let Some(dimension_max) = all_dimension_max.get(dimension_id) {
-                let mut block_iterator = self.get_blocks(encoded_dimension_id).await?.peekable();
-                let Some(block_upper_bound) = block_iterator
-                    .next()
-                    .map(|(_, block_max)| query * block_max)
-                else {
-                    continue;
-                };
-                let dimension_upper_bound = query * dimension_max;
-                let mut dimension_iterator =
-                    self.get_offset_values(encoded_dimension_id, ..).await?;
-                let Some((offset, value)) = dimension_iterator.next() else {
-                    continue;
-                };
-                cursors.push(Cursor {
-                    block_iterator,
-                    block_upper_bound,
-                    dimension_iterator,
-                    dimension_upper_bound,
-                    offset,
-                    query: *query,
-                    value,
-                })
-            }
+            let Some(dimension_max) = all_dimension_max.get(dimension_id) else {
+                continue;
+            };
+            let mut block_iterator = self.get_blocks(encoded_dimension_id).await?.peekable();
+            let Some((block_next_offset, block_max)) = block_iterator.next() else {
+                continue;
+            };
+            let mut dimension_iterator = self.get_offset_values(encoded_dimension_id, ..).await?;
+            let Some((offset, value)) = dimension_iterator.next() else {
+                continue;
+            };
+            cursors.push(Cursor {
+                block_iterator,
+                block_next_offset,
+                block_upper_bound: query * block_max,
+                dimension_iterator,
+                dimension_upper_bound: query * dimension_max,
+                offset,
+                query: *query,
+                value,
+            })
         }
 
         cursors.sort_unstable();
@@ -210,20 +183,12 @@ impl<'me> SparseReader<'me> {
         loop {
             let mut accumulated_dimension_upper_bound = 0.0;
             let mut following_cursor_offset = u32::MAX;
-            let mut peak_cursor_index = 0;
-            let mut lag_cursor_index = 0;
             let mut pivot_cursor_index = None;
 
             for (cursor_index, cursor) in cursors.iter().enumerate() {
                 if pivot_cursor_index.is_some() {
                     following_cursor_offset = cursor.offset;
                     break;
-                }
-                if cursors[peak_cursor_index].dimension_upper_bound < cursor.dimension_upper_bound {
-                    if cursors[peak_cursor_index].offset < cursor.offset {
-                        lag_cursor_index = peak_cursor_index;
-                    }
-                    peak_cursor_index = cursor_index;
                 }
                 accumulated_dimension_upper_bound += cursor.dimension_upper_bound;
                 if threshold < accumulated_dimension_upper_bound {
@@ -237,95 +202,93 @@ impl<'me> SparseReader<'me> {
 
             let pivot_offset = cursors[pivot_cursor_index].offset;
 
-            let (accumulated_block_upper_bound, min_block_cutoff) = cursors[..=pivot_cursor_index]
+            let (accumulated_block_upper_bound, min_block_next_offset) = cursors
+                [..=pivot_cursor_index]
                 .iter_mut()
-                .map(|cursor| {
-                    while let Some(&(next_block_first_offset, next_block_max)) =
-                        cursor.block_iterator.peek()
-                    {
-                        if next_block_first_offset <= pivot_offset {
-                            cursor.block_upper_bound = cursor.query * next_block_max;
-                            cursor.block_iterator.next();
-                        } else {
-                            break;
+                .filter_map(|cursor| {
+                    if cursor.block_next_offset <= pivot_offset {
+                        for (block_next_offset, block_max) in cursor.block_iterator.by_ref() {
+                            if pivot_offset < block_next_offset {
+                                cursor.block_next_offset = block_next_offset;
+                                cursor.block_upper_bound = cursor.query * block_max;
+                                break;
+                            }
                         }
                     }
 
-                    let pivot_block_cutoff = cursor
-                        .block_iterator
-                        .peek()
-                        .map(|&(next_block_first_offset, _)| next_block_first_offset)
-                        .unwrap_or(u32::MAX);
-
-                    (cursor.block_upper_bound, pivot_block_cutoff)
+                    (pivot_offset < cursor.block_next_offset)
+                        .then_some((cursor.block_upper_bound, cursor.block_next_offset))
                 })
                 .fold(
                     (0.0, following_cursor_offset),
-                    |(accumulated_block_upper_bound, min_block_cutoff),
-                     (block_upper_bound, block_cutoff)| {
+                    |(accumulated_block_upper_bound, min_block_next_offset),
+                     (block_upper_bound, block_next_offset)| {
                         (
                             accumulated_block_upper_bound + block_upper_bound,
-                            min_block_cutoff.min(block_cutoff),
+                            min_block_next_offset.min(block_next_offset),
                         )
                     },
                 );
 
-            let offset_cutoff =
-                if accumulated_block_upper_bound < threshold && pivot_offset < min_block_cutoff {
-                    min_block_cutoff
-                } else if pivot_offset < first_unchecked_offset {
-                    first_unchecked_offset
-                } else if pivot_offset <= cursors[0].offset {
-                    let score = cursors
-                        .iter()
-                        .take_while(|cursor| cursor.offset <= pivot_offset)
-                        .map(|cursor| cursor.query * cursor.value)
-                        .sum();
-                    if (top_scores.len() as u32) < k {
-                        top_scores.push(Score {
-                            score,
-                            offset: pivot_offset,
-                        });
-                    } else if top_scores
+            let offset_cutoff = if accumulated_block_upper_bound < threshold
+                && pivot_offset < min_block_next_offset
+            {
+                min_block_next_offset
+            } else if pivot_offset < first_unchecked_offset {
+                first_unchecked_offset
+            } else if pivot_offset <= cursors[0].offset {
+                let score = cursors
+                    .iter()
+                    .take_while(|cursor| cursor.offset <= pivot_offset)
+                    .map(|cursor| cursor.query * cursor.value)
+                    .sum();
+                if (top_scores.len() as u32) < k {
+                    top_scores.push(Score {
+                        score,
+                        offset: pivot_offset,
+                    });
+                } else if top_scores
+                    .peek()
+                    .map(|score| score.score)
+                    .unwrap_or(f32::MIN)
+                    < score
+                {
+                    top_scores.pop();
+                    top_scores.push(Score {
+                        score,
+                        offset: pivot_offset,
+                    });
+                    threshold = top_scores
                         .peek()
                         .map(|score| score.score)
-                        .unwrap_or(f32::MIN)
-                        < score
-                    {
-                        top_scores.pop();
-                        top_scores.push(Score {
-                            score,
-                            offset: pivot_offset,
-                        });
-                        threshold = top_scores
-                            .peek()
-                            .map(|score| score.score)
-                            .unwrap_or_default();
-                    }
-                    first_unchecked_offset = pivot_offset + 1;
-                    first_unchecked_offset
-                } else {
-                    peak_cursor_index = lag_cursor_index;
-                    pivot_offset
-                };
-
-            let mut exhausted = true;
-            while let Some((offset, value)) = cursors[peak_cursor_index].dimension_iterator.next() {
-                if offset_cutoff <= offset {
-                    let rotate_cutoff_index =
-                        cursors.partition_point(|cursor| cursor.offset < offset);
-                    cursors[peak_cursor_index].offset = offset;
-                    cursors[peak_cursor_index].value = value;
-                    if peak_cursor_index < rotate_cutoff_index {
-                        cursors[peak_cursor_index..rotate_cutoff_index].rotate_left(1);
-                    }
-                    exhausted = false;
-                    break;
+                        .unwrap_or_default();
                 }
+                first_unchecked_offset = pivot_offset + 1;
+                first_unchecked_offset
+            } else {
+                pivot_offset
+            };
+
+            let mut cursor_index = 0;
+            while cursor_index < cursors.len().min(pivot_cursor_index + 1) {
+                let cursor = &mut cursors[cursor_index];
+                if cursor.offset < offset_cutoff {
+                    let mut exhausted = true;
+                    for (offset, value) in cursor.dimension_iterator.by_ref() {
+                        if offset_cutoff <= offset {
+                            cursor.offset = offset;
+                            cursor.value = value;
+                            exhausted = false;
+                            break;
+                        }
+                    }
+                    if exhausted {
+                        cursors.swap_remove(cursor_index);
+                    }
+                }
+                cursor_index += 1;
             }
-            if exhausted {
-                cursors.remove(peak_cursor_index);
-            }
+            cursors.sort_unstable();
         }
 
         Ok(top_scores.into_sorted_vec())
