@@ -5,8 +5,8 @@ use std::{
 
 use chroma_blockstore::{BlockfileFlusher, BlockfileWriter};
 use chroma_error::ChromaError;
-use parking_lot::Mutex;
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 use crate::sparse::{
     reader::{SparseReader, SparseReaderError},
@@ -93,7 +93,7 @@ impl<'me> SparseWriter<'me> {
     }
 
     pub async fn commit(self) -> Result<SparseFlusher, SparseWriterError> {
-        for (&dimension_id, updates) in &self.delta.lock().dimension_value_updates {
+        for (&dimension_id, updates) in &self.delta.lock().await.dimension_value_updates {
             let encoded_dimension = encode_u32(dimension_id);
             let (commited_blocks, mut offset_values) = match self.reader.as_ref() {
                 Some(reader) => {
@@ -157,7 +157,7 @@ impl<'me> SparseWriter<'me> {
         })
     }
 
-    pub fn write(&self, delta: SparseDelta) {
-        self.delta.lock().merge(delta);
+    pub async fn write(&self, delta: SparseDelta) {
+        self.delta.lock().await.merge(delta);
     }
 }

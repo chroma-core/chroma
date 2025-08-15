@@ -46,6 +46,7 @@
 use anyhow::Result;
 use arrow::array::{Array, Float32Array, Int32Array, ListArray, StringArray};
 use arrow::record_batch::RecordBatch;
+use chroma_blockstore::arrow::provider::BlockfileReaderOptions;
 use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
 use chroma_index::sparse::{
@@ -365,7 +366,6 @@ struct SearchResult {
     top_k_offsets: Vec<u32>,
     scores: Vec<f32>,
     search_time_ms: f64,
-    full_evaluations: u32,
 }
 
 fn brute_force_search(
@@ -418,7 +418,6 @@ fn brute_force_search(
         top_k_offsets: scores.iter().map(|s| s.offset).collect(),
         scores: scores.iter().map(|s| s.score).collect(),
         search_time_ms: elapsed.as_secs_f64() * 1000.0,
-        full_evaluations: documents.len() as u32,
     };
 
     (result, non_trivial_count)
@@ -443,7 +442,7 @@ async fn build_sparse_index(
 
     // Process documents in batches with write-commit-flush loop
     let batch_size = 65536;
-    let num_chunks = (sorted_documents.len() + batch_size - 1) / batch_size;
+    let num_chunks = sorted_documents.len().div_ceil(batch_size);
 
     let pb = ProgressBar::new(num_chunks as u64);
     pb.set_style(
@@ -483,12 +482,38 @@ async fn build_sparse_index(
             .await
             .map_err(|e| anyhow::anyhow!("Failed to create offset value writer: {:?}", e))?;
 
-        // Store the writer IDs for forking in next iteration
-        max_writer_id = Some(max_writer.id());
-        offset_value_writer_id = Some(offset_value_writer.id());
+        // Create reader for existing data (if we have previous committed data)
+        let sparse_reader = if let (Some(max_id), Some(offset_value_id)) =
+            (max_writer_id, offset_value_writer_id)
+        {
+            let max_reader = provider
+                .read::<u32, f32>(BlockfileReaderOptions::new(
+                    max_id,
+                    SPARSE_MAX_PREFIX.to_string(),
+                ))
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to create max reader: {:?}", e))?;
+
+            let offset_value_reader = provider
+                .read::<u32, f32>(BlockfileReaderOptions::new(
+                    offset_value_id,
+                    SPARSE_OFFSET_VALUE_PREFIX.to_string(),
+                ))
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to create offset value reader: {:?}", e))?;
+
+            Some(SparseReader::new(max_reader, offset_value_reader))
+        } else {
+            None
+        };
 
         // Create sparse writer for this chunk
-        let sparse_writer = SparseWriter::new(block_size, max_writer, offset_value_writer, None);
+        let sparse_writer = SparseWriter::new(
+            block_size,
+            max_writer.clone(),
+            offset_value_writer.clone(),
+            sparse_reader,
+        );
 
         // Build delta for this chunk
         let mut delta = SparseDelta::default();
@@ -506,7 +531,7 @@ async fn build_sparse_index(
         }
 
         // Write the batch
-        sparse_writer.write(delta);
+        sparse_writer.write(delta).await;
 
         // Commit
         let flusher = sparse_writer
@@ -519,6 +544,10 @@ async fn build_sparse_index(
             .flush()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to flush sparse writer: {:?}", e))?;
+
+        // Store the writer IDs for forking in next iteration (after commit/flush)
+        max_writer_id = Some(max_writer.id());
+        offset_value_writer_id = Some(offset_value_writer.id());
 
         // Clear cache after each chunk
         provider
@@ -534,8 +563,8 @@ async fn build_sparse_index(
     let elapsed = start.elapsed();
     println!("⏱️ Index build time: {:.2} s", elapsed.as_secs_f64());
     println!("  Documents indexed: {}", sorted_documents.len());
-    println!("  Chunks processed: {}", num_chunks);
-    println!("  Documents per chunk: {}", batch_size);
+    println!("  Chunks processed: {num_chunks}");
+    println!("  Documents per chunk: {batch_size}");
 
     Ok((
         temp_dir,
@@ -594,7 +623,7 @@ async fn search_with_wand(
                 .progress_chars("█▉▊▋▌▍▎▏  "),
         );
         pb.set_message(if iterations > 1 {
-            format!("WAND search ({} iterations)", iterations)
+            format!("WAND search ({iterations} iterations)")
         } else {
             "WAND search".to_string()
         });
@@ -607,7 +636,6 @@ async fn search_with_wand(
         let mut total_time_ms = 0.0;
         let mut last_scores = Vec::new();
         let mut last_offsets = Vec::new();
-        let mut last_full_evaluations = 0;
 
         for _ in 0..iterations {
             let start = Instant::now();
@@ -622,7 +650,7 @@ async fn search_with_wand(
                 .collect();
 
             // Run WAND search
-            let (scores, full_evaluations) = sparse_reader
+            let scores = sparse_reader
                 .wand(query_vec, top_k as u32)
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to run WAND search: {:?}", e))?;
@@ -633,7 +661,6 @@ async fn search_with_wand(
             // Store results from last iteration
             last_offsets = scores.iter().map(|s| s.offset).collect();
             last_scores = scores.iter().map(|s| s.score).collect();
-            last_full_evaluations = full_evaluations;
 
             if let Some(ref pb) = pb {
                 pb.inc(1);
@@ -645,7 +672,6 @@ async fn search_with_wand(
             top_k_offsets: last_offsets,
             scores: last_scores,
             search_time_ms: total_time_ms / iterations as f64, // Average time per query
-            full_evaluations: last_full_evaluations,
         });
     }
 
@@ -655,41 +681,184 @@ async fn search_with_wand(
     Ok(results)
 }
 
-fn compute_accuracy(reference: &[SearchResult], results: &[SearchResult]) -> f64 {
+fn verify_and_compute_recall(
+    documents: &[SparseDocument],
+    queries: &[SparseQuery],
+    reference: &[SearchResult],
+    results: &[SearchResult],
+) -> anyhow::Result<f64> {
+    println!("\n🔍 Verifying WAND results and computing recall...");
+
     if reference.is_empty() {
-        return if results.is_empty() { 1.0 } else { 0.0 };
+        return Ok(if results.is_empty() { 1.0 } else { 0.0 });
     }
 
-    let mut total_accuracy = 0.0;
+    let score_tolerance = 1e-5;
+    let mut total_recall = 0.0;
     let mut count = 0;
+    let mut queries_with_issues = 0;
+    let mut verification_passed = true;
 
     for ref_result in reference {
-        if let Some(result) = results.iter().find(|r| r.query_id == ref_result.query_id) {
-            // For accuracy, we count how many documents in the WAND results
-            // are also in the reference results (top-k from brute force)
+        let query = queries
+            .iter()
+            .find(|q| q.query_id == ref_result.query_id)
+            .ok_or_else(|| anyhow::anyhow!("Query {} not found", ref_result.query_id))?;
+
+        if let Some(wand_result) = results.iter().find(|r| r.query_id == ref_result.query_id) {
+            let mut query_has_issues = false;
+
+            // 1. Check for duplicate documents in WAND results
+            let unique_offsets: HashSet<u32> = wand_result.top_k_offsets.iter().cloned().collect();
+            if unique_offsets.len() != wand_result.top_k_offsets.len() {
+                println!(
+                    "\n  ⚠️ Query {}: WAND returned {} documents but only {} are unique",
+                    query.query_id,
+                    wand_result.top_k_offsets.len(),
+                    unique_offsets.len()
+                );
+                query_has_issues = true;
+                verification_passed = false;
+            }
+
+            // 2. Verify scores by recomputing with brute force
+            let mut score_errors = 0;
+            for (&offset, &wand_score) in wand_result
+                .top_k_offsets
+                .iter()
+                .zip(wand_result.scores.iter())
+            {
+                let doc = &documents[offset as usize];
+                let actual_score = query.sparse_vector.dot(&doc.sparse_vector);
+
+                let score_diff = (actual_score - wand_score).abs();
+                if score_diff > score_tolerance {
+                    if score_errors == 0 {
+                        println!(
+                            "\n  ⚠️ Query {} has score verification errors:",
+                            query.query_id
+                        );
+                    }
+                    if score_errors < 5 {
+                        println!("     Doc {offset}: WAND={wand_score:.6}, Actual={actual_score:.6}, Diff={score_diff:.2e}");
+                    }
+                    score_errors += 1;
+                    query_has_issues = true;
+                    verification_passed = false;
+                }
+            }
+            if score_errors > 5 {
+                println!("     ... and {} more score mismatches", score_errors - 5);
+            }
+
+            // 3. Check recall considering tie-breaking
             let reference_ids: HashSet<_> = ref_result.top_k_offsets.iter().collect();
-            let results_ids: HashSet<_> = result.top_k_offsets.iter().collect();
+            let results_ids: HashSet<_> = wand_result.top_k_offsets.iter().collect();
+            let found_docs = reference_ids.intersection(&results_ids).count();
 
-            // Count exact matches (documents that appear in both result sets)
-            let exact_matches = reference_ids.intersection(&results_ids).count();
+            // Get minimum scores for tie-breaking analysis
+            let ref_min_score = ref_result.scores.last().copied().unwrap_or(0.0);
+            let wand_min_score = wand_result.scores.last().copied().unwrap_or(0.0);
+            let min_score_diff = (ref_min_score - wand_min_score).abs();
 
-            // Accuracy is the proportion of WAND results that are in the true top-k
-            let accuracy = if result.top_k_offsets.is_empty() {
-                0.0
+            // Check if missing documents are due to tie-breaking
+            let missing_docs: Vec<_> = reference_ids.difference(&results_ids).cloned().collect();
+            let extra_docs: Vec<_> = results_ids.difference(&reference_ids).cloned().collect();
+
+            let mut missing_due_to_ties = true;
+            if !missing_docs.is_empty() {
+                // Check if all missing docs have scores equal to the minimum (tie-breaking)
+                for &missing_offset in &missing_docs {
+                    let doc = &documents[*missing_offset as usize];
+                    let missing_score = query.sparse_vector.dot(&doc.sparse_vector);
+                    if (missing_score - ref_min_score).abs() > score_tolerance {
+                        missing_due_to_ties = false;
+                        break;
+                    }
+                }
+
+                // Also verify that extra docs have similar scores (tie-breaking)
+                for &extra_offset in &extra_docs {
+                    let doc = &documents[*extra_offset as usize];
+                    let extra_score = query.sparse_vector.dot(&doc.sparse_vector);
+                    if (extra_score - wand_min_score).abs() > score_tolerance {
+                        missing_due_to_ties = false;
+                        break;
+                    }
+                }
+            }
+
+            // Calculate recall
+            let recall = if ref_result.top_k_offsets.is_empty() {
+                1.0
+            } else if missing_due_to_ties && min_score_diff < score_tolerance {
+                // If differences are only due to tie-breaking, consider it 100% recall
+                1.0
             } else {
-                exact_matches as f64 / result.top_k_offsets.len() as f64
+                found_docs as f64 / ref_result.top_k_offsets.len() as f64
             };
 
-            total_accuracy += accuracy;
+            // Report issues if recall is not 100% (excluding tie-breaking)
+            if recall < 1.0 {
+                println!(
+                    "\n  ⚠️ Query {} has recall {:.2}% (not due to tie-breaking)",
+                    ref_result.query_id,
+                    recall * 100.0
+                );
+                println!(
+                    "     Reference: {} docs, min score: {:.6}",
+                    ref_result.top_k_offsets.len(),
+                    ref_min_score
+                );
+                println!(
+                    "     WAND: {} docs, min score: {:.6}",
+                    wand_result.top_k_offsets.len(),
+                    wand_min_score
+                );
+                println!(
+                    "     Missing {} docs: {:?}",
+                    missing_docs.len(),
+                    missing_docs.iter().take(10).collect::<Vec<_>>()
+                );
+                query_has_issues = true;
+                verification_passed = false;
+            } else if !missing_docs.is_empty() {
+                // Recall is 100% but there were tie-breaking differences
+                println!("\n  ℹ️ Query {}: 100% recall (with {} tie-breaking differences at score {:.6})",
+                    query.query_id, missing_docs.len(), ref_min_score
+                );
+            }
+
+            if query_has_issues {
+                queries_with_issues += 1;
+            }
+
+            total_recall += recall;
             count += 1;
         }
     }
 
-    if count > 0 {
-        total_accuracy / count as f64
+    let avg_recall = if count > 0 {
+        total_recall / count as f64
     } else {
         0.0
+    };
+
+    // Summary
+    if verification_passed {
+        println!("\n  ✅ All verifications passed!");
+        println!("     - No duplicate documents");
+        println!("     - All scores match actual computation (tolerance: {score_tolerance:.2e})");
+        println!(
+            "     - Recall: {:.2}% (tie-breaking handled correctly)",
+            avg_recall * 100.0
+        );
+    } else {
+        println!("\n  ⚠️ Verification found issues in {queries_with_issues}/{count} queries");
+        println!("     - Average recall: {:.2}%", avg_recall * 100.0);
     }
+
+    Ok(avg_recall)
 }
 
 #[tokio::main]
@@ -705,8 +874,8 @@ async fn main() -> anyhow::Result<()> {
     println!("{}", "=".repeat(60));
     println!("Configuration:");
     println!("  Dataset: {}", args.dataset_path);
-    println!("  Documents: {}", documents_path);
-    println!("  Queries: {}", queries_path);
+    println!("  Documents: {documents_path}");
+    println!("  Queries: {queries_path}");
     println!("  Num documents: {}", args.num_documents);
     println!("  Num queries: {}", args.num_queries);
     println!("  Top-k: {}", args.top_k);
@@ -766,30 +935,17 @@ async fn main() -> anyhow::Result<()> {
         let avg_wand_time =
             wand_results.iter().map(|r| r.search_time_ms).sum::<f64>() / wand_results.len() as f64;
 
-        let avg_wand_evaluations = wand_results
-            .iter()
-            .map(|r| r.full_evaluations as f64)
-            .sum::<f64>()
-            / wand_results.len() as f64;
-
-        let evaluation_percentage = (avg_wand_evaluations / documents.len() as f64) * 100.0;
-
         let total_iterations = queries.len() * args.iterations;
 
         // Print results
         println!("\n📨 WAND-ONLY RESULTS");
         println!("{}", "=".repeat(60));
         println!("🎯 Performance:");
-        println!("  Total time: {:.2} ms", total_time);
-        println!("  Total iterations: {}", total_iterations);
-        println!("  Avg time per query: {:.2} ms", avg_wand_time);
+        println!("  Total time: {total_time:.2} ms");
+        println!("  Total iterations: {total_iterations}");
+        println!("  Avg time per query: {avg_wand_time:.2} ms");
         println!("  Queries per second: {:.2}", 1000.0 / avg_wand_time);
-        println!(
-            "  Avg full evaluations: {:.1}/{} ({:.1}%)",
-            avg_wand_evaluations,
-            documents.len(),
-            evaluation_percentage
-        );
+
         println!();
         println!("📊 Statistics:");
         println!("  Documents indexed: {}", documents.len());
@@ -830,7 +986,7 @@ async fn main() -> anyhow::Result<()> {
         let avg_non_trivial = total_non_trivial as f64 / queries.len() as f64;
         let avg_percentage = (avg_non_trivial / documents.len() as f64) * 100.0;
 
-        println!("Brute force total time: {:.2} ms", brute_force_time);
+        println!("Brute force total time: {brute_force_time:.2} ms");
         println!(
             "Average documents with non-zero similarity: {:.1}/{} ({:.1}%)",
             avg_non_trivial,
@@ -850,52 +1006,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .await?;
 
-        // Show example query and retrieved documents
-        println!("\n📝 Example Query and Retrieved Documents");
-        println!("{}", "=".repeat(60));
-        if !queries.is_empty() && !wand_results.is_empty() {
-            let example_query = &queries[0];
-            let example_result = &wand_results[0];
-
-            println!("Query: {}", example_query.text);
-            println!("Query ID: {}", example_query.query_id);
-            println!(
-                "\nTop {} Retrieved Documents:",
-                example_result.top_k_offsets.len().min(5)
-            );
-            println!("{}", "-".repeat(60));
-
-            for (i, (&offset, &score)) in example_result
-                .top_k_offsets
-                .iter()
-                .zip(example_result.scores.iter())
-                .take(5)
-                .enumerate()
-            {
-                let doc = &documents[offset as usize];
-                println!("\n{}. Score: {:.4}", i + 1, score);
-                println!("   URL: {}", doc.url);
-                println!(
-                    "   Title: {}",
-                    if doc.title.len() > 80 {
-                        format!("{}...", &doc.title[..77])
-                    } else {
-                        doc.title.clone()
-                    }
-                );
-                println!(
-                    "   Body: {}",
-                    if doc.body.len() > 150 {
-                        format!("{}...", &doc.body[..147])
-                    } else {
-                        doc.body.clone()
-                    }
-                );
-            }
-        }
-
-        // Calculate metrics
-        let accuracy = compute_accuracy(&brute_force_results, &wand_results);
+        // Verify WAND results and compute recall
+        let recall =
+            verify_and_compute_recall(&documents, &queries, &brute_force_results, &wand_results)?;
 
         let avg_brute_force_time = brute_force_results
             .iter()
@@ -906,45 +1019,27 @@ async fn main() -> anyhow::Result<()> {
         let avg_wand_time =
             wand_results.iter().map(|r| r.search_time_ms).sum::<f64>() / wand_results.len() as f64;
 
-        let avg_wand_evaluations = wand_results
-            .iter()
-            .map(|r| r.full_evaluations as f64)
-            .sum::<f64>()
-            / wand_results.len() as f64;
-
         let speedup = avg_brute_force_time / avg_wand_time;
-        let evaluation_reduction = (1.0 - (avg_wand_evaluations / documents.len() as f64)) * 100.0;
 
         // Print results
         println!("\n📨 BENCHMARK RESULTS");
         println!("{}", "=".repeat(60));
         println!("🎯 Performance Comparison:");
-        println!("  Method              Time (ms)    Evaluations    Speedup");
-        println!("  {}", "-".repeat(58));
-        println!(
-            "  Brute Force         {:<12.2} {:<14} 1.00x",
-            avg_brute_force_time,
-            documents.len()
-        );
-        println!(
-            "  Block-Max WAND      {:<12.2} {:<14.1} {:.2}x",
-            avg_wand_time, avg_wand_evaluations, speedup
-        );
+        println!("  Method              Time (ms)    Speedup");
+        println!("  {}", "-".repeat(42));
+        println!("  Brute Force         {avg_brute_force_time:<12.2} 1.00x");
+        println!("  Block-Max WAND      {avg_wand_time:<12.2} {speedup:.2}x");
         if args.iterations > 1 {
             println!("  (WAND averaged over {} iterations)", args.iterations);
         }
         println!();
         println!("🔍 Quality Metrics:");
-        println!("  Accuracy@{}: {:.2}%", args.top_k, accuracy * 100.0);
-        println!("  Evaluation reduction: {:.1}%", evaluation_reduction);
+        println!("  Recall@{}: {:.2}%", args.top_k, recall * 100.0);
         println!();
         println!("📊 Dataset Statistics:");
         println!("  Documents processed: {}", documents.len());
         println!("  Queries processed: {}", queries.len());
-        println!(
-            "  Avg non-zero docs per query: {:.1} ({:.1}%)",
-            avg_non_trivial, avg_percentage
-        );
+        println!("  Avg non-zero docs per query: {avg_non_trivial:.1} ({avg_percentage:.1}%)");
 
         println!("\n🎉 Benchmark completed successfully!");
         println!("Total queries processed: {}", queries.len());
