@@ -19,7 +19,6 @@ use futures::future::{join_all, try_join_all};
 use futures::{Stream, StreamExt, TryStreamExt};
 use parking_lot::{Mutex, RwLock};
 use std::collections::HashSet;
-use std::iter::once_with;
 use std::mem::transmute;
 use std::ops::RangeBounds;
 use std::{collections::HashMap, sync::Arc};
@@ -645,12 +644,7 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         let blocks = try_join_all(block_futures).await?;
         Ok(blocks
             .into_iter()
-            .flat_map(move |block| {
-                let prefix_range_clone = prefix_range.clone();
-                let key_range_clone = key_range.clone();
-                once_with(|| block.get_range(prefix_range_clone, key_range_clone))
-            })
-            .flatten())
+            .flat_map(move |block| block.get_range(prefix_range.clone(), key_range.clone())))
     }
 
     pub(crate) async fn contains(

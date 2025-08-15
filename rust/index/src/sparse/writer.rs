@@ -135,15 +135,15 @@ impl<'me> SparseWriter<'me> {
             } else {
                 let mut dimension_max = f32::MIN;
                 for block in offset_value_vec.chunks(self.block_size as usize) {
-                    let (min_offset, max_value) = block.iter().fold(
-                        (u32::MAX, f32::MIN),
-                        |(min_offset, max_value), (offset, value)| {
-                            (min_offset.min(*offset), max_value.max(*value))
+                    let (max_offset, max_value) = block.iter().fold(
+                        (u32::MIN, f32::MIN),
+                        |(max_offset, max_value), (offset, value)| {
+                            (max_offset.max(*offset), max_value.max(*value))
                         },
                     );
                     dimension_max = dimension_max.max(max_value);
                     self.max_writer
-                        .set(&encoded_dimension, min_offset, max_value)
+                        .set(&encoded_dimension, max_offset + 1, max_value)
                         .await?;
                 }
                 self.max_writer
