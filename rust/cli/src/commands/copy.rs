@@ -8,11 +8,12 @@ use crate::utils::{
     get_current_profile, parse_host, parse_local, parse_path, AddressBook, CliError, Environment,
     ErrorResponse, Profile, UtilsError,
 };
-use chroma_types::{CollectionConfiguration, IncludeList};
+use chroma_types::{CollectionConfiguration, CountResponse, IncludeList};
 use clap::Parser;
 use crossterm::style::Stylize;
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::Select;
+use futures::{stream, StreamExt};
 use indicatif::{ProgressBar, ProgressStyle};
 use thiserror::Error;
 use tokio::task::JoinHandle;
@@ -213,12 +214,15 @@ async fn copy_collections(
     );
     progress.set_message(String::from("Verifying collections..."));
     progress.enable_steady_tick(std::time::Duration::from_millis(100));
+    progress.set_message(String::from("Copying collections..."));
 
     for collection in collections {
         let size = collection
             .count()
             .await
             .map_err(|_| CollectionAPIError::Count(collection.name.clone()))?;
+
+        let offsets: Vec<u32> = (0..size).step_by(100).collect();
 
         let target_collection = target
             .create_collection(
@@ -229,47 +233,47 @@ async fn copy_collections(
             .await
             .map_err(|_| ChromaClientError::CreateCollection(collection.name.clone()))?;
 
-        let message = format!("Copying collection: {} ({} records)", collection.name, size);
-        progress.set_message(message);
+        stream::iter(offsets.into_iter().map(|offset| {
+            let collection = collection.clone();
+            let target_collection = target_collection.clone();
 
-        for i in (0..(size)).step_by(100) {
-            let records = collection
-                .get(
-                    None,
-                    None,
-                    None,
-                    Some(IncludeList::all()),
-                    Some(100),
-                    Some(i),
-                )
-                .await
-                .map_err(|_| ChromaClientError::CollectionGet(collection.name.clone()))?;
+            async move {
+                let records = collection
+                    .get(
+                        None,
+                        None,
+                        None,
+                        Some(IncludeList::all()),
+                        Some(100),
+                        Some(offset),
+                    )
+                    .await
+                    .map_err(|_| ChromaClientError::CollectionGet(collection.name.clone()))?;
 
-            if records.ids.is_empty() {
-                break;
+                if records.ids.is_empty() {
+                    return Ok::<(), CliError>(());
+                }
+
+                target_collection
+                    .add(
+                        records.ids,
+                        records
+                            .embeddings
+                            .ok_or_else(|| CollectionAPIError::Add(collection.name.clone()))?,
+                        records.documents,
+                        records.uris,
+                        records.metadatas,
+                    )
+                    .await
+                    .map_err(|_| CliError::Collection(CollectionAPIError::Add(collection.name.clone())))?;
+
+
+                Ok(())
             }
+        })).buffer_unordered(5).collect::<Vec<_>>().await.into_iter().collect::<Result<(), CliError>>()?;
 
-            target_collection
-                .add(
-                    records.ids,
-                    records
-                        .embeddings
-                        .ok_or_else(|| CollectionAPIError::Add(collection.name.clone()))?,
-                    records.documents,
-                    records.uris,
-                    records.metadatas,
-                )
-                .await
-                .map_err(|e| {
-                    if e.to_string().contains("Quota") {
-                        let msg = serde_json::from_str::<ErrorResponse>(&e.to_string())
-                            .unwrap_or_default()
-                            .message;
-                        return CliError::Utils(UtilsError::Quota(msg));
-                    }
-                    CliError::Collection(CollectionAPIError::Add(collection.name.clone()))
-                })?;
-        }
+        // let message = format!("Copying collection: {} ({} records)", collection.name, size);
+        // progress.set_message(message);
     }
 
     println!("Copy Completed!");
