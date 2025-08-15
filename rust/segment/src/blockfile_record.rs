@@ -62,6 +62,18 @@ pub enum RecordSegmentWriterCreationError {
     InvalidPrefixPath,
 }
 
+impl chroma_error::ChromaError for RecordSegmentWriterCreationError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        use chroma_error::ErrorCodes;
+        match self {
+            Self::InvalidSegmentType | Self::IncorrectNumberOfFiles => ErrorCodes::InvalidArgument,
+            Self::BlockfileCreateError(e) => e.code(),
+            Self::BlockfileOpenError(e) => e.code(),
+            _ => ErrorCodes::Internal,
+        }
+    }
+}
+
 impl RecordSegmentWriter {
     async fn construct_and_set_data_record(
         &self,

@@ -206,7 +206,28 @@ impl ChromaError for CompactionError {
         if let CompactionError::FetchLog(FetchLogError::PullLog(e)) = self {
             e.code() != ErrorCodes::NotFound
         } else {
-            true
+            match self {
+                Self::Aborted => true,
+                Self::ApplyLog(e) => e.should_trace_error(),
+                Self::Channel(e) => e.should_trace_error(),
+                Self::Commit(e) => e.should_trace_error(),
+                Self::FetchLog(e) => e.should_trace_error(),
+                Self::Flush(e) => e.should_trace_error(),
+                Self::GetCollectionAndSegments(e) => e.should_trace_error(),
+                Self::HnswSegment(e) => e.should_trace_error(),
+                Self::InvariantViolation(_) => true,
+                Self::MaterializeLogs(e) => e.should_trace_error(),
+                Self::MetadataSegment(e) => e.should_trace_error(),
+                Self::Panic(e) => e.should_trace_error(),
+                Self::Partition(e) => e.should_trace_error(),
+                Self::PrefetchSegment(e) => e.should_trace_error(),
+                Self::RecordSegmentReader(e) => e.should_trace_error(),
+                Self::RecordSegmentWriter(e) => e.should_trace_error(),
+                Self::Register(e) => e.should_trace_error(),
+                Self::Result(_) => true,
+                Self::SpannSegment(e) => e.should_trace_error(),
+                Self::SourceRecordSegment(e) => e.should_trace_error(),
+            }
         }
     }
 }
