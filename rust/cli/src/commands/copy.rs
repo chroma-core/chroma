@@ -232,7 +232,7 @@ async fn copy_collections(
         let message = format!("Copying collection: {} ({} records)", collection.name, size);
         progress.set_message(message);
 
-        for i in (0..(size + 1)).step_by(100) {
+        for i in (0..(size)).step_by(100) {
             let records = collection
                 .get(
                     None,
@@ -244,6 +244,10 @@ async fn copy_collections(
                 )
                 .await
                 .map_err(|_| ChromaClientError::CollectionGet(collection.name.clone()))?;
+
+            if records.ids.is_empty() {
+                break;
+            }
 
             target_collection
                 .add(
