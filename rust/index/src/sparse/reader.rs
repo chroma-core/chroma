@@ -10,26 +10,30 @@ use chroma_blockstore::BlockfileReader;
 use chroma_error::ChromaError;
 use thiserror::Error;
 
-use crate::sparse::types::{decode_u32, encode_u32, DIMENSION_PREFIX};
+use crate::sparse::types::{encode_u32, DIMENSION_PREFIX};
 
-struct Cursor<B: Iterator<Item = (u32, f32)>> {
+struct Cursor<B, D>
+where
+    B: Iterator<Item = (u32, f32)>,
+    D: Iterator<Item = (u32, f32)>,
+{
     block_iterator: Peekable<B>,
     block_upper_bound: f32,
+    dimension_iterator: D,
     dimension_upper_bound: f32,
-    encoded_dimension_id: String,
     offset: u32,
     query: f32,
     value: f32,
 }
 
-impl<B: Iterator<Item = (u32, f32)>> fmt::Debug for Cursor<B> {
+impl<B, D> fmt::Debug for Cursor<B, D>
+where
+    B: Iterator<Item = (u32, f32)>,
+    D: Iterator<Item = (u32, f32)>,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Cursor")
             .field("block_upper_bound", &self.block_upper_bound)
-            .field(
-                "dimension",
-                &decode_u32(&self.encoded_dimension_id).unwrap_or(u32::MAX),
-            )
             .field("dimension_upper_bound", &self.dimension_upper_bound)
             .field("offset", &self.offset)
             .field("query", &self.query)
@@ -38,21 +42,38 @@ impl<B: Iterator<Item = (u32, f32)>> fmt::Debug for Cursor<B> {
     }
 }
 
-impl<B: Iterator<Item = (u32, f32)>> Eq for Cursor<B> {}
+impl<B, D> Eq for Cursor<B, D>
+where
+    B: Iterator<Item = (u32, f32)>,
+    D: Iterator<Item = (u32, f32)>,
+{
+}
 
-impl<B: Iterator<Item = (u32, f32)>> Ord for Cursor<B> {
+impl<B, D> Ord for Cursor<B, D>
+where
+    B: Iterator<Item = (u32, f32)>,
+    D: Iterator<Item = (u32, f32)>,
+{
     fn cmp(&self, other: &Self) -> Ordering {
         self.offset.cmp(&other.offset)
     }
 }
 
-impl<B: Iterator<Item = (u32, f32)>> PartialEq for Cursor<B> {
+impl<B, D> PartialEq for Cursor<B, D>
+where
+    B: Iterator<Item = (u32, f32)>,
+    D: Iterator<Item = (u32, f32)>,
+{
     fn eq(&self, other: &Self) -> bool {
         self.offset == other.offset
     }
 }
 
-impl<B: Iterator<Item = (u32, f32)>> PartialOrd for Cursor<B> {
+impl<B, D> PartialOrd for Cursor<B, D>
+where
+    B: Iterator<Item = (u32, f32)>,
+    D: Iterator<Item = (u32, f32)>,
+{
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -137,16 +158,6 @@ impl<'me> SparseReader<'me> {
             .map(|(_, offset, value)| (offset, value)))
     }
 
-    pub async fn lower_bound_offset_value(
-        &'me self,
-        encoded_dimension_id: &'me str,
-        lower_bound: u32,
-    ) -> Result<Option<(u32, f32)>, SparseReaderError> {
-        self.get_offset_values(encoded_dimension_id, lower_bound..)
-            .await
-            .map(|mut itr| itr.next())
-    }
-
     pub async fn wand(
         &self,
         query_vector: impl IntoIterator<Item = (u32, f32)>,
@@ -173,17 +184,16 @@ impl<'me> SparseReader<'me> {
                     continue;
                 };
                 let dimension_upper_bound = query * dimension_max;
-                let Some((offset, value)) = self
-                    .lower_bound_offset_value(encoded_dimension_id, u32::MIN)
-                    .await?
-                else {
+                let mut dimension_iterator =
+                    self.get_offset_values(encoded_dimension_id, ..).await?;
+                let Some((offset, value)) = dimension_iterator.next() else {
                     continue;
                 };
                 cursors.push(Cursor {
                     block_iterator,
                     block_upper_bound,
+                    dimension_iterator,
                     dimension_upper_bound,
-                    encoded_dimension_id: encoded_dimension_id.clone(),
                     offset,
                     query: *query,
                     value,
@@ -303,21 +313,21 @@ impl<'me> SparseReader<'me> {
                     pivot_offset
                 };
 
-            let next_offset = self
-                .lower_bound_offset_value(
-                    &cursors[peak_cursor_index].encoded_dimension_id,
-                    offset_cutoff,
-                )
-                .await?;
-
-            if let Some((offset, value)) = next_offset {
-                let rotate_cutoff_index = cursors.partition_point(|cursor| cursor.offset < offset);
-                cursors[peak_cursor_index].offset = offset;
-                cursors[peak_cursor_index].value = value;
-                if peak_cursor_index < rotate_cutoff_index {
-                    cursors[peak_cursor_index..rotate_cutoff_index].rotate_left(1);
+            let mut exhausted = true;
+            while let Some((offset, value)) = cursors[peak_cursor_index].dimension_iterator.next() {
+                if offset_cutoff <= offset {
+                    let rotate_cutoff_index =
+                        cursors.partition_point(|cursor| cursor.offset < offset);
+                    cursors[peak_cursor_index].offset = offset;
+                    cursors[peak_cursor_index].value = value;
+                    if peak_cursor_index < rotate_cutoff_index {
+                        cursors[peak_cursor_index..rotate_cutoff_index].rotate_left(1);
+                    }
+                    exhausted = false;
+                    break;
                 }
-            } else {
+            }
+            if exhausted {
                 cursors.remove(peak_cursor_index);
             }
         }
