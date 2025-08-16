@@ -12,6 +12,7 @@ from chromadb.utils.embedding_functions import (
 )
 from multiprocessing import cpu_count
 import warnings
+from chromadb.errors import UnsupportedSpaceError
 
 
 class HNSWConfiguration(TypedDict, total=False):
@@ -383,12 +384,36 @@ def create_collection_configuration_to_json(
         if ef.is_legacy():
             ef_config = {"type": "legacy"}
         else:
+            if hnsw_config is None and spann_config is None:
+                # this populates space from ef if not provided in either config
+                hnsw_config = CreateHNSWConfiguration(space=ef.default_space())
+
+            # if hnsw config or spann config exists but space is not provided, populate it from ef
+            if hnsw_config is not None and hnsw_config.get("space") is None:
+                hnsw_config["space"] = ef.default_space()
+            if spann_config is not None and spann_config.get("space") is None:
+                spann_config["space"] = ef.default_space()
+
+            # Validate space compatibility with embedding function
+            if hnsw_config is not None:
+                if hnsw_config.get("space") not in ef.supported_spaces():
+                    raise UnsupportedSpaceError(
+                        f"space {hnsw_config.get('space')} is not supported by {ef.name()}"
+                    )
+            if spann_config is not None:
+                if spann_config.get("space") not in ef.supported_spaces():
+                    raise UnsupportedSpaceError(
+                        f"space {spann_config.get('space')} is not supported by {ef.name()}"
+                    )
+
             ef_config = {
                 "name": ef.name(),
                 "type": "known",
                 "config": ef.get_config(),
             }
             register_embedding_function(type(ef))  # type: ignore
+    except UnsupportedSpaceError as e:
+        raise e
     except Exception as e:
         warnings.warn(
             f"legacy embedding function config: {e}",

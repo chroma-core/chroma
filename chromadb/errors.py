@@ -173,6 +173,17 @@ class QuotaError(ChromaError):
         return "QuotaError"
 
 
+class UnsupportedSpaceError(ChromaError):
+    @overrides
+    def code(self) -> int:
+        return 400
+
+    @classmethod
+    @overrides
+    def name(cls) -> str:
+        return "UnsupportedSpaceError"
+
+
 error_types: Dict[str, Type[ChromaError]] = {
     "InvalidDimension": InvalidDimensionException,
     "InvalidArgumentError": InvalidArgumentError,
@@ -189,6 +200,7 @@ error_types: Dict[str, Type[ChromaError]] = {
     "UniqueConstraintError": UniqueConstraintError,
     "QuotaError": QuotaError,
     "InternalError": InternalError,
+    "UnsupportedSpaceError": UnsupportedSpaceError,
     # Catch-all for any other errors
     "ChromaError": ChromaError,
 }
