@@ -1877,10 +1877,16 @@ impl SpannIndexWriter {
 
     pub async fn garbage_collect_heads(&mut self) -> Result<(), SpannIndexWriterError> {
         tracing::info!("Garbage collecting all the heads");
-        let prefix_path = {
+        let (prefix_path, non_deleted_len) = {
             let hnsw_read_guard = self.hnsw_index.inner.read();
-            hnsw_read_guard.prefix_path.clone()
+            (
+                hnsw_read_guard.prefix_path.clone(),
+                hnsw_read_guard.hnsw_index.len(),
+            )
         };
+        if non_deleted_len == 0 {
+            return Ok(());
+        }
         // Create a new hnsw index and add elements to it.
         let clean_hnsw = self
             .hnsw_provider
