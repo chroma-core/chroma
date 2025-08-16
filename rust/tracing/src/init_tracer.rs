@@ -40,9 +40,7 @@ pub struct OtelFilter {
     pub filter_level: OtelFilterLevel,
 }
 
-pub fn init_global_filter_layer(
-    custom_filters: &[OtelFilter],
-) -> Box<dyn Layer<Registry> + Send + Sync> {
+fn get_env_filter(custom_filters: &[OtelFilter]) -> EnvFilter {
     // These need to have underscores because the Rust compiler automatically
     // converts all hyphens in crate names to underscores to make them valid
     // Rust identifiers
@@ -86,13 +84,13 @@ pub fn init_global_filter_layer(
             .join(","),
     );
 
-    EnvFilter::new(std::env::var("RUST_LOG").unwrap_or(global_filter)).boxed()
+    EnvFilter::new(std::env::var("RUST_LOG").unwrap_or(global_filter))
 }
 
-pub fn init_otel_layer(
+fn init_otel_layer(
     service_name: &String,
     otel_endpoint: &String,
-) -> Box<dyn Layer<Registry> + Send + Sync> {
+) -> Box<dyn Layer<Registry> + Send + Sync + 'static> {
     tracing::info!(
         "Registering jaeger subscriber for {} at endpoint {}",
         service_name,
@@ -155,23 +153,11 @@ pub fn init_otel_layer(
     tracing_opentelemetry::OpenTelemetryLayer::new(tracer).boxed()
 }
 
-pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
+fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync + 'static> {
     fmt::layer().pretty().with_target(false).boxed()
 }
 
-pub fn init_tracing(layers: Vec<Box<dyn Layer<Registry> + Send + Sync>>) {
-    global::set_text_map_propagator(TraceContextPropagator::new());
-    let layers = layers
-        .into_iter()
-        .reduce(|a, b| Box::new(a.and_then(b)))
-        .expect("Should be able to create tracing layers");
-    let subscriber = tracing_subscriber::registry().with(layers);
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("Should be able to set global tracing subscriber");
-    tracing::info!("Global tracing subscriber set");
-}
-
-pub fn init_panic_tracing_hook() {
+fn init_panic_tracing_hook() {
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let payload = panic_info.payload();
@@ -193,17 +179,40 @@ pub fn init_panic_tracing_hook() {
     }));
 }
 
+/// Initialize OpenTelemetry tracing with the given service name, custom filters, and OTLP endpoint.
+///
+/// This function will also enable the Tokio console subscriber if the `ENABLE_TOKIO_CONSOLE` environment variable is set.
+/// Its behavior can be customized with a few environment variables: https://docs.rs/console-subscriber/latest/console_subscriber/struct.Builder.html#method.with_default_env
+///
+/// By default, it listens on port 6669.
+/// Use the [tokio-console](https://github.com/tokio-rs/console) CLI tool to connect.
 pub fn init_otel_tracing(
     service_name: &String,
     custom_filters: &[OtelFilter],
     otel_endpoint: &String,
 ) {
     let layers = vec![
-        // The global filter applies to all subsequent layers
-        init_global_filter_layer(custom_filters),
         init_otel_layer(service_name, otel_endpoint),
         init_stdout_layer(),
     ];
-    init_tracing(layers);
+
+    global::set_text_map_propagator(TraceContextPropagator::new());
+    let layers = layers
+        .into_iter()
+        .reduce(|a, b| Box::new(a.and_then(b)))
+        .expect("Should be able to create tracing layers");
+
+    let subscriber = tracing_subscriber::registry()
+        .with(layers.with_filter(get_env_filter(custom_filters)))
+        .with(
+            std::env::var_os("ENABLE_TOKIO_CONSOLE")
+                .is_some()
+                .then(console_subscriber::spawn),
+        );
+
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Should be able to set global tracing subscriber");
+    tracing::info!("Global tracing subscriber set");
+
     init_panic_tracing_hook();
 }
