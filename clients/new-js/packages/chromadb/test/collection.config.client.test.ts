@@ -5,6 +5,68 @@ import {
   UpdateCollectionConfiguration,
 } from "../src";
 import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
+import { EmbeddingFunction, EmbeddingFunctionSpace } from "../src/embedding-function";
+import { CollectionMetadata } from "../src/types";
+
+class DefaultSpaceCustomEmbeddingFunction implements EmbeddingFunction {
+  private _dim: number;
+  private _modelName: string;
+
+  constructor(modelName: string, dim: number = 3) {
+    this._dim = dim;
+    this._modelName = modelName;
+  }
+
+  async generate(texts: string[]): Promise<number[][]> {
+    return texts.map(() => Array(this._dim).fill(1.0));
+  }
+
+  name = "default_space_custom_ef";
+
+  getConfig(): Record<string, any> {
+    return { model_name: this._modelName, dim: this._dim };
+  }
+
+  buildFromConfig(config: Record<string, any>): EmbeddingFunction {
+    return new DefaultSpaceCustomEmbeddingFunction(
+      config.model_name,
+      config.dim
+    );
+  }
+
+  defaultSpace(): EmbeddingFunctionSpace {
+    if (this._modelName === "i_want_cosine") {
+      return "cosine";
+    } else if (this._modelName === "i_want_l2") {
+      return "l2";
+    } else if (this._modelName === "i_want_ip") {
+      return "ip";
+    } else {
+      return "cosine";
+    }
+  }
+
+  supportedSpaces(): EmbeddingFunctionSpace[] {
+    if (this._modelName === "i_want_cosine") {
+      return ["cosine"];
+    } else if (this._modelName === "i_want_l2") {
+      return ["l2"];
+    } else if (this._modelName === "i_want_ip") {
+      return ["ip"];
+    } else if (this._modelName === "i_want_anything") {
+      return ["cosine", "l2", "ip"];
+    } else {
+      return ["cosine", "l2", "ip"];
+    }
+  }
+
+  static buildFromConfig(config: Record<string, any>): EmbeddingFunction {
+    return new DefaultSpaceCustomEmbeddingFunction(
+      config.model_name,
+      config.dim
+    );
+  }
+}
 
 describe("collection operations", () => {
   // connects to the unauthenticated chroma instance started in
@@ -57,7 +119,6 @@ describe("collection operations", () => {
       name: "test_config_get",
       embeddingFunction: new DefaultEmbeddingFunction(),
     });
-    console.log("Configuration after getCollection:", collection.configuration);
     expect(collection).toBeDefined();
     expect(collection.name).toBe("test_config_get");
     expect(collection.configuration).toBeDefined();
@@ -97,10 +158,6 @@ describe("collection operations", () => {
       name: "test_config_update",
       embeddingFunction: new DefaultEmbeddingFunction(),
     });
-    console.log(
-      "Configuration after modify and getCollection:",
-      updatedCollection.configuration,
-    );
     expect(updatedCollection).toBeDefined();
     expect(updatedCollection.configuration).toBeDefined();
     expect(updatedCollection.configuration).toHaveProperty("hnsw");
@@ -214,5 +271,249 @@ describe("collection operations", () => {
     expect(collection.configuration?.hnsw?.ef_construction).toBe(100); // Default
     expect(collection.configuration?.hnsw?.max_neighbors).toBe(16); // Default
     expect(collection.configuration?.hnsw?.ef_search).toBe(100); // Default
+  });
+});
+
+describe("default space functionality", () => {
+  const client = new ChromaClient({
+    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+  });
+
+  beforeEach(async () => {
+    await client.reset();
+  });
+
+  test("it should create collection with custom embedding function and default space (cosine)", async () => {
+    const collection = await client.createCollection({
+      name: "test_default_space_custom_embedding_function",
+      embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
+        "i_want_cosine",
+        3
+      ),
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    if (ef?.type === "known") {
+      expect(ef.name).toBe("default_space_custom_ef");
+      expect(ef.config).toEqual({ model_name: "i_want_cosine", dim: 3 });
+    }
+
+    const hnswConfig = collection.configuration?.hnsw;
+    expect(hnswConfig).toBeDefined();
+    expect(hnswConfig?.space).toBe("cosine");
+  });
+
+  test("it should create collection with custom embedding function and default space (l2)", async () => {
+    const collection = await client.createCollection({
+      name: "test_default_space_custom_embedding_function_l2",
+      embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
+        "i_want_l2",
+        3
+      ),
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    if (ef?.type === "known") {
+      expect(ef.name).toBe("default_space_custom_ef");
+      expect(ef.config).toEqual({ model_name: "i_want_l2", dim: 3 });
+    }
+
+    const hnswConfig = collection.configuration?.hnsw;
+    expect(hnswConfig).toBeDefined();
+    expect(hnswConfig?.space).toBe("l2");
+  });
+
+  test("it should create collection with custom embedding function and default space (ip)", async () => {
+    const collection = await client.createCollection({
+      name: "test_default_space_custom_embedding_function_ip",
+      embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
+        "i_want_ip",
+        3
+      ),
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    if (ef?.type === "known") {
+      expect(ef.name).toBe("default_space_custom_ef");
+      expect(ef.config).toEqual({ model_name: "i_want_ip", dim: 3 });
+    }
+
+    const hnswConfig = collection.configuration?.hnsw;
+    expect(hnswConfig).toBeDefined();
+    expect(hnswConfig?.space).toBe("ip");
+  });
+
+  test("it should create collection with custom embedding function and default space (anything)", async () => {
+    const collection = await client.createCollection({
+      name: "test_default_space_custom_embedding_function_anything",
+      embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
+        "i_want_anything",
+        3
+      ),
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    if (ef?.type === "known") {
+      expect(ef.name).toBe("default_space_custom_ef");
+      expect(ef.config).toEqual({ model_name: "i_want_anything", dim: 3 });
+    }
+
+    const hnswConfig = collection.configuration?.hnsw;
+    expect(hnswConfig).toBeDefined();
+    expect(hnswConfig?.space).toBe("cosine");
+  });
+
+  test("it should create collection with custom embedding function and valid explicit configuration", async () => {
+    const collection = await client.createCollection({
+      name: "test_default_space_custom_embedding_function_with_valid_config",
+      embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
+        "i_want_anything",
+        3
+      ),
+      configuration: { hnsw: { space: "l2" } },
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    if (ef?.type === "known") {
+      expect(ef.name).toBe("default_space_custom_ef");
+      expect(ef.config).toEqual({ model_name: "i_want_anything", dim: 3 });
+    }
+
+    const hnswConfig = collection.configuration?.hnsw;
+    expect(hnswConfig).toBeDefined();
+    expect(hnswConfig?.space).toBe("l2");
+  });
+
+  test("it should warn but still create collection with invalid space configuration", async () => {
+    // Now warns instead of raising error for invalid space configurations
+    const collection = await client.createCollection({
+      name: "test_default_space_custom_embedding_function_with_invalid_config",
+      embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
+        "i_want_cosine",
+        3
+      ),
+      configuration: { hnsw: { space: "l2" } },
+    });
+
+    // Collection should still be created despite the warning
+    expect(collection).toBeDefined();
+    expect(collection.configuration?.hnsw?.space).toBe("l2");
+
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    if (ef?.type === "known") {
+      expect(ef.name).toBe("default_space_custom_ef");
+      expect(ef.config).toEqual({ model_name: "i_want_cosine", dim: 3 });
+    }
+  });
+
+  test("it should create collection with custom embedding function and metadata space", async () => {
+    const metadata: CollectionMetadata = { "hnsw:space": "ip" };
+    const collection = await client.createCollection({
+      name: "test_default_space_custom_embedding_function_with_metadata",
+      embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
+        "i_want_anything",
+        3
+      ),
+      metadata,
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    if (ef?.type === "known") {
+      expect(ef.name).toBe("default_space_custom_ef");
+      expect(ef.config).toEqual({ model_name: "i_want_anything", dim: 3 });
+    }
+
+    const hnswConfig = collection.configuration?.hnsw;
+    expect(hnswConfig).toBeDefined();
+    expect(hnswConfig?.space).toBe("ip");
+  });
+
+  test("it should warn but still create collection with invalid metadata space", async () => {
+    const metadata: CollectionMetadata = { "hnsw:space": "l2" };
+
+    // Now warns instead of raising error for invalid space configurations
+    const collection = await client.createCollection({
+      name: "test_default_space_custom_embedding_function_with_invalid_metadata",
+      embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
+        "i_want_cosine",
+        3
+      ),
+      metadata,
+    });
+
+    // Collection should still be created despite the warning
+    expect(collection).toBeDefined();
+    expect(collection.configuration?.hnsw?.space).toBe("l2");
+
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    if (ef?.type === "known") {
+      expect(ef.name).toBe("default_space_custom_ef");
+      expect(ef.config).toEqual({ model_name: "i_want_cosine", dim: 3 });
+    }
+  });
+
+  test("it should prioritize configuration over metadata when both are provided", async () => {
+    const metadata: CollectionMetadata = { "hnsw:space": "l2" };
+    const collection = await client.createCollection({
+      name: "test_default_space_custom_embedding_function_with_metadata_and_config",
+      configuration: { hnsw: { space: "ip" } },
+      embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
+        "i_want_anything",
+        3
+      ),
+      metadata,
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    if (ef?.type === "known") {
+      expect(ef.name).toBe("default_space_custom_ef");
+      expect(ef.config).toEqual({ model_name: "i_want_anything", dim: 3 });
+    }
+
+    const hnswConfig = collection.configuration?.hnsw;
+    expect(hnswConfig).toBeDefined();
+    expect(hnswConfig?.space).toBe("ip");
+  });
+
+  test("it should not set default space when embedding function has no supportedSpaces method", async () => {
+    const partialEF: EmbeddingFunction = {
+      generate: async (texts: string[]) => texts.map(() => [1.0, 1.0, 1.0]),
+      defaultSpace: () => "cosine",
+    };
+
+    const collection = await client.createCollection({
+      name: "test_partial_embedding_function",
+      embeddingFunction: partialEF,
+    });
+
+    expect(collection).toBeDefined();
+    const hnswConfig = collection.configuration?.hnsw;
+    expect(hnswConfig).toBeDefined();
+    expect(hnswConfig?.space).toBe("l2");
   });
 });

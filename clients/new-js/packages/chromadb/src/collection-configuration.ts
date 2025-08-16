@@ -7,10 +7,12 @@ import {
 } from "./api";
 import {
   EmbeddingFunction,
+  EmbeddingFunctionSpace,
   getDefaultEFConfig,
   getEmbeddingFunction,
   serializeEmbeddingFunction,
 } from "./embedding-function";
+import { CollectionMetadata } from "./types";
 
 export interface CollectionConfiguration {
   embeddingFunction?: EmbeddingFunctionConfiguration | null;
@@ -54,9 +56,11 @@ export interface UpdateSPANNConfiguration {
 export const processCreateCollectionConfig = async ({
   configuration,
   embeddingFunction,
+  metadata,
 }: {
   configuration?: CreateCollectionConfiguration;
   embeddingFunction?: EmbeddingFunction | null;
+  metadata?: CollectionMetadata;
 }) => {
   if (configuration?.hnsw && configuration?.spann) {
     throw new ChromaValueError(
@@ -71,6 +75,56 @@ export const processCreateCollectionConfig = async ({
 
   if (!embeddingFunctionConfiguration && embeddingFunction !== null) {
     embeddingFunctionConfiguration = await getDefaultEFConfig();
+  }
+
+  const overallEf = embeddingFunction || configuration?.embeddingFunction;
+
+  if (overallEf && overallEf.defaultSpace && overallEf.supportedSpaces) {
+    if (configuration?.hnsw === undefined && configuration?.spann === undefined) {
+      if (metadata === undefined || metadata?.["hnsw:space"] === undefined) {
+        if (!configuration) configuration = {};
+        configuration.hnsw = { space: overallEf.defaultSpace() };
+      }
+    }
+
+    if (configuration?.hnsw && !configuration.hnsw.space && overallEf.defaultSpace) {
+      configuration.hnsw.space = overallEf.defaultSpace();
+    }
+
+    if (configuration?.spann && !configuration.spann.space && overallEf.defaultSpace) {
+      configuration.spann.space = overallEf.defaultSpace();
+    }
+
+    if (overallEf.supportedSpaces) {
+      const supportedSpaces = overallEf.supportedSpaces();
+
+      if (configuration?.hnsw?.space && !supportedSpaces.includes(configuration.hnsw.space)) {
+        console.warn(
+          `Space '${configuration.hnsw.space}' is not supported by embedding function '${overallEf.name || 'unknown'}'. ` +
+          `Supported spaces: ${supportedSpaces.join(', ')}`
+        );
+      }
+
+      if (configuration?.spann?.space && !supportedSpaces.includes(configuration.spann.space)) {
+        console.warn(
+          `Space '${configuration.spann.space}' is not supported by embedding function '${overallEf.name || 'unknown'}'. ` +
+          `Supported spaces: ${supportedSpaces.join(', ')}`
+        );
+      }
+
+      if (
+        !configuration?.hnsw &&
+        !configuration?.spann &&
+        metadata &&
+        typeof metadata["hnsw:space"] === "string" &&
+        !supportedSpaces.includes(metadata["hnsw:space"] as EmbeddingFunctionSpace)
+      ) {
+        console.warn(
+          `Space '${metadata["hnsw:space"]}' from metadata is not supported by embedding function '${overallEf.name || 'unknown'}'. ` +
+          `Supported spaces: ${supportedSpaces.join(', ')}`
+        );
+      }
+    }
   }
 
   return {
