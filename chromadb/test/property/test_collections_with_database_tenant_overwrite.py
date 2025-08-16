@@ -145,11 +145,12 @@ class SingletonTenantDatabaseCollectionStateMachine(
         return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
 
 
-def _singleton_and_root_clients() -> Tuple[Client, Client, ClientFactories]:
+def _singleton_and_root_clients(
+    client_factories: ClientFactories,
+) -> Tuple[Client, Client]:
     api_fixture = fastapi_fixture_admin_and_singleton_tenant_db_user()
     sys: System = next(api_fixture)
     sys.reset_state()
-    client_factories = ClientFactories(sys)
     root_client = client_factories.create_client()
     _root_admin_client = client_factories.create_admin_client_from_system()
 
@@ -165,15 +166,16 @@ def _singleton_and_root_clients() -> Tuple[Client, Client, ClientFactories]:
     singleton_system.start()
     singleton_client = Client.from_system(singleton_system)
 
-    return singleton_client, root_client, client_factories
+    return singleton_client, root_client
 
 
 def test_collections_with_tenant_database_overwrite(
     caplog: pytest.LogCaptureFixture,
+    client_factories: ClientFactories,
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    singleton_client, root_client, client_factories = _singleton_and_root_clients()
+    singleton_client, root_client = _singleton_and_root_clients(client_factories)
     run_state_machine_as_test(
         lambda: SingletonTenantDatabaseCollectionStateMachine(
             singleton_client, root_client, client_factories
@@ -183,10 +185,11 @@ def test_collections_with_tenant_database_overwrite(
 
 def test_repeat_failure(
     caplog: pytest.LogCaptureFixture,
+    client_factories: ClientFactories,
 ) -> None:
     caplog.set_level(logging.ERROR)
 
-    singleton_client, root_client, client_factories = _singleton_and_root_clients()
+    singleton_client, root_client = _singleton_and_root_clients(client_factories)
 
     state = SingletonTenantDatabaseCollectionStateMachine(
         singleton_client, root_client, client_factories

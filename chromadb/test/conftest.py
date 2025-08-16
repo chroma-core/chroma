@@ -205,7 +205,7 @@ def _run_server(
     """Run a Chroma server locally"""
     if is_persistent and persist_directory:
         settings = Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -223,7 +223,7 @@ def _run_server(
         )
     else:
         settings = Settings(
-            chroma_api_impl="chromadb.api.segment.SegmentAPI",
+            chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
             chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
             chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -590,9 +590,9 @@ def async_integration() -> Generator[System, None, None]:
 
 @pytest.fixture(scope="function")
 def python_sqlite_ephemeral() -> Generator[System, None, None]:
-    """Fixture generator for segment-based API using in-memory Sqlite"""
+    """Fixture generator for rust-based API using in-memory Sqlite"""
     settings = Settings(
-        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
         chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
@@ -608,10 +608,10 @@ def python_sqlite_ephemeral() -> Generator[System, None, None]:
 
 @pytest.fixture(scope="function")
 def python_sqlite_persistent() -> Generator[System, None, None]:
-    """Fixture generator for segment-based API using persistent Sqlite"""
+    """Fixture generator for rust-based API using persistent Sqlite"""
     save_path = tempfile.TemporaryDirectory()
     settings = Settings(
-        chroma_api_impl="chromadb.api.segment.SegmentAPI",
+        chroma_api_impl="chromadb.api.rust.RustBindingsAPI",
         chroma_sysdb_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_producer_impl="chromadb.db.impl.sqlite.SqliteDB",
         chroma_consumer_impl="chromadb.db.impl.sqlite.SqliteDB",
