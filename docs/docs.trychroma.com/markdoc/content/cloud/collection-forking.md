@@ -5,7 +5,7 @@
 Forking lets you create a new collection from an existing one instantly, using copy-on-write under the hood. The forked collection initially shares its data with the source and only incurs additional storage for incremental changes you make afterward.
 
 {% Banner type="tip" %}
-**Forking is available in Chroma Cloud only.** The file system on single-node Chroma does not support forking.
+**Forking is available in Chroma Cloud only.** The storage engine on single-node Chroma does not support forking.
 {% /Banner %}
 
 ## How it works
