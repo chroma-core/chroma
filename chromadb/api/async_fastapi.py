@@ -297,7 +297,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     ) -> CollectionModel:
         """Creates a collection"""
         config_json = (
-            create_collection_configuration_to_json(configuration)
+            create_collection_configuration_to_json(configuration, metadata)
             if configuration
             else None
         )

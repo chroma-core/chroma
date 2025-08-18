@@ -490,22 +490,6 @@ importers:
       semver:
         specifier: ^7.7.1
         version: 7.7.1
-    optionalDependencies:
-      chromadb-js-bindings-darwin-arm64:
-        specifier: ^1.0.1
-        version: 1.0.1
-      chromadb-js-bindings-darwin-x64:
-        specifier: ^1.0.1
-        version: 1.0.1
-      chromadb-js-bindings-linux-arm64-gnu:
-        specifier: ^1.0.1
-        version: 1.0.1
-      chromadb-js-bindings-linux-x64-gnu:
-        specifier: ^1.0.1
-        version: 1.0.1
-      chromadb-js-bindings-win32-x64-msvc:
-        specifier: ^1.0.1
-        version: 1.0.1
     devDependencies:
       '@chroma-core/default-embed':
         specifier: workspace:^
@@ -579,6 +563,22 @@ importers:
       wait-on:
         specifier: ^8.0.3
         version: 8.0.3
+    optionalDependencies:
+      chromadb-js-bindings-darwin-arm64:
+        specifier: ^1.0.2
+        version: 1.0.3
+      chromadb-js-bindings-darwin-x64:
+        specifier: ^1.0.2
+        version: 1.0.3
+      chromadb-js-bindings-linux-arm64-gnu:
+        specifier: ^1.0.2
+        version: 1.0.3
+      chromadb-js-bindings-linux-x64-gnu:
+        specifier: ^1.0.2
+        version: 1.0.3
+      chromadb-js-bindings-win32-x64-msvc:
+        specifier: ^1.0.2
+        version: 1.0.3
 
 packages:
 
@@ -2150,32 +2150,32 @@ packages:
     resolution: {integrity: sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g==}
     engines: {node: '>=18'}
 
-  chromadb-js-bindings-darwin-arm64@1.0.1:
-    resolution: {integrity: sha512-IyvK0/AauGzaBtDmq/rSPZFGbUGLXpR0y30GXinwfLRitIPHN1S0tuygiULKV8CLQDIa5rOtnucLhfX0ARZIpw==}
+  chromadb-js-bindings-darwin-arm64@1.0.3:
+    resolution: {integrity: sha512-l9lHbPMUC6/Z0hI3IP7ZVtT4//6iM1/Xpk6fmXQhIdQxSqt/XxbPdlSwSFpX7J86ZCuMU19OvmH7gvenQr1R5g==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [darwin]
 
-  chromadb-js-bindings-darwin-x64@1.0.1:
-    resolution: {integrity: sha512-COpf6ESv95D6dHxYF7o3YAkz9aGFazBVFvIEOmYdlMd+O+ClrtUN9sNtrFF7JPXDCwvc4xWiq3NvuhfNGodyqQ==}
+  chromadb-js-bindings-darwin-x64@1.0.3:
+    resolution: {integrity: sha512-6zhyJ5mgiWmWrg6OBNMO2HQPWUuBLFEhPGmhpNQ0lEdtf4J8rdRWrDdN1C2s5oDMuLURTrVgfDQA6fRJWlcD8Q==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [darwin]
 
-  chromadb-js-bindings-linux-arm64-gnu@1.0.1:
-    resolution: {integrity: sha512-M6i5UMMrQWao70Ic3R/QI8IJpvoFfysaLwQ5LDvs77M3TITguImLUk8nRmC+8Vt9e97zIMg2llHMy87gzTUvJA==}
+  chromadb-js-bindings-linux-arm64-gnu@1.0.3:
+    resolution: {integrity: sha512-Ua26xM82LVGIis+tO56caUMMcYKl5T9fHN4rPDEq+LsEp+LGoMvuedP0QFfLkWGJpxwwn12hQUa1EfFF3NhpiQ==}
     engines: {node: '>= 10'}
     cpu: [arm64]
     os: [linux]
 
-  chromadb-js-bindings-linux-x64-gnu@1.0.1:
-    resolution: {integrity: sha512-Aw4WB+ojLgwcbopOLz2JnrmoCSRPUPmP9TBz1RUaZ3qTFINoyULkT1l6aD/O7leBZFYxRMLFQRfiCKp5uU+xYg==}
+  chromadb-js-bindings-linux-x64-gnu@1.0.3:
+    resolution: {integrity: sha512-tVT+uQErHb6U/d+sRqQxNIWktJNxkHOw4ScOYrjxTY2YTH6rU0hrUYs0XVvVj4XRKpvGSSn6kj0voJbmCrFRHg==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [linux]
 
-  chromadb-js-bindings-win32-x64-msvc@1.0.1:
-    resolution: {integrity: sha512-RNTJMrlUaiwUB6BODV7c5UqKW0EXzSH/vYBT/j7ZcSH2njzl18szDnirozCC4P4FNPKIbx5u1YzWCZZ9RlgjjQ==}
+  chromadb-js-bindings-win32-x64-msvc@1.0.3:
+    resolution: {integrity: sha512-pEZcSOeDiEnoK4Zd0k+LaVQU/TYyBBr2JC1IofPT9DB6X2IuUsVZyniPpIDjGgpNLpI9gmtHcvclVAiz4c9k5Q==}
     engines: {node: '>= 10'}
     cpu: [x64]
     os: [win32]
@@ -6549,19 +6549,19 @@ snapshots:
 
   chownr@3.0.0: {}
 
-  chromadb-js-bindings-darwin-arm64@1.0.1:
+  chromadb-js-bindings-darwin-arm64@1.0.3:
     optional: true
 
-  chromadb-js-bindings-darwin-x64@1.0.1:
+  chromadb-js-bindings-darwin-x64@1.0.3:
     optional: true
 
-  chromadb-js-bindings-linux-arm64-gnu@1.0.1:
+  chromadb-js-bindings-linux-arm64-gnu@1.0.3:
     optional: true
 
-  chromadb-js-bindings-linux-x64-gnu@1.0.1:
+  chromadb-js-bindings-linux-x64-gnu@1.0.3:
     optional: true
 
-  chromadb-js-bindings-win32-x64-msvc@1.0.1:
+  chromadb-js-bindings-win32-x64-msvc@1.0.3:
     optional: true
 
   ci-info@3.9.0: {}

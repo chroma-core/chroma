@@ -258,7 +258,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             json={
                 "name": name,
                 "metadata": metadata,
-                "configuration": create_collection_configuration_to_json(configuration)
+                "configuration": create_collection_configuration_to_json(
+                    configuration, metadata
+                )
                 if configuration
                 else None,
                 "get_or_create": get_or_create,

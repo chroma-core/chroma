@@ -236,7 +236,7 @@ class SegmentAPI(ServerAPI):
             name=name,
             metadata=metadata,
             configuration_json=create_collection_configuration_to_json(
-                configuration or CreateCollectionConfiguration()
+                configuration or CreateCollectionConfiguration(), metadata
             ),
             tenant=tenant,
             database=database,

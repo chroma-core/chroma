@@ -43,6 +43,7 @@ from chromadb.api.collection_configuration import (
     collection_configuration_to_json_str,
     overwrite_collection_configuration,
     update_collection_configuration_from_legacy_update_metadata,
+    CollectionMetadata,
 )
 
 logger = logging.getLogger(__name__)
@@ -311,7 +312,9 @@ class SqlSysDB(SqlDB, SysDB):
         collection = Collection(
             id=id,
             name=name,
-            configuration_json=create_collection_configuration_to_json(configuration),
+            configuration_json=create_collection_configuration_to_json(
+                configuration, cast(CollectionMetadata, metadata)
+            ),
             metadata=metadata,
             dimension=dimension,
             tenant=tenant,
@@ -337,7 +340,9 @@ class SqlSysDB(SqlDB, SysDB):
                     ParameterValue(self.uuid_to_db(collection["id"])),
                     ParameterValue(collection["name"]),
                     ParameterValue(
-                        create_collection_configuration_to_json_str(configuration)
+                        create_collection_configuration_to_json_str(
+                            configuration, cast(CollectionMetadata, metadata)
+                        )
                     ),
                     ParameterValue(collection["dimension"]),
                     # Get the database id for the database with the given name and tenant
@@ -941,7 +946,7 @@ class SqlSysDB(SqlDB, SysDB):
         create_collection_config = CreateCollectionConfiguration()
         # Write the configuration into the database
         configuration_json_str = create_collection_configuration_to_json_str(
-            create_collection_config
+            create_collection_config, cast(CollectionMetadata, metadata)
         )
         q = (
             self.querybuilder()
