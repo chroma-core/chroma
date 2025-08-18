@@ -12,7 +12,6 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
-      RUSTFLAGS: "-C target-feature=+avx,+fma,+sse"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,7 +28,6 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
-      RUSTFLAGS: "-C target-feature=+avx,+fma,+sse"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
