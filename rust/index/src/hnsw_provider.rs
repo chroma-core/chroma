@@ -488,6 +488,15 @@ impl HnswIndexProvider {
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
+            // fsync the file to ensure all writes are flushed to disk
+            let file_handle = tokio::fs::File::open(&file_path)
+                .await
+                .map_err(|e| Box::new(HnswIndexProviderFlushError::FsyncError(Box::new(e))))?;
+            file_handle
+                .sync_all()
+                .await
+                .map_err(|e| Box::new(HnswIndexProviderFlushError::FsyncError(Box::new(e))))?;
+
             let key = Self::format_key(prefix_path, id, file);
             let res = self
                 .storage
@@ -636,6 +645,8 @@ pub enum HnswIndexProviderFlushError {
     HnswSaveError(#[from] Box<dyn ChromaError>),
     #[error("Storage Put Error")]
     StoragePutError(#[from] chroma_storage::StorageError),
+    #[error("Failed to fsync file: {0}")]
+    FsyncError(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl ChromaError for HnswIndexProviderFlushError {
@@ -644,6 +655,7 @@ impl ChromaError for HnswIndexProviderFlushError {
             HnswIndexProviderFlushError::NoIndexFound(_) => ErrorCodes::NotFound,
             HnswIndexProviderFlushError::HnswSaveError(e) => e.code(),
             HnswIndexProviderFlushError::StoragePutError(e) => e.code(),
+            HnswIndexProviderFlushError::FsyncError(_) => ErrorCodes::Internal,
         }
     }
 }
