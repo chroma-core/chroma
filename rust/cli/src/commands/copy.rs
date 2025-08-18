@@ -6,9 +6,9 @@ use crate::commands::db::get_db_name;
 use crate::commands::install::InstallError;
 use crate::utils::{
     get_current_profile, parse_host, parse_local, parse_path, AddressBook, CliError, Environment,
-    Profile, UtilsError,
+    ErrorResponse, Profile, UtilsError,
 };
-use chroma_types::{CollectionConfiguration, CountResponse, IncludeList};
+use chroma_types::{CollectionConfiguration, IncludeList};
 use clap::Parser;
 use crossterm::style::Stylize;
 use dialoguer::theme::ColorfulTheme;
@@ -289,7 +289,13 @@ async fn copy_collections(
                         records.metadatas,
                     )
                     .await
-                    .map_err(|_| {
+                    .map_err(|e| {
+                        if e.to_string().to_lowercase().contains("quota") {
+                            let msg = serde_json::from_str::<ErrorResponse>(&e.to_string())
+                                .unwrap_or_default()
+                                .message;
+                            return CliError::Utils(UtilsError::Quota(msg));
+                        }
                         CliError::Collection(CollectionAPIError::Add(collection.name.clone()))
                     })?;
 
