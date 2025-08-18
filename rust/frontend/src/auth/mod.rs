@@ -111,6 +111,14 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
     ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>;
 }
 
+fn default_identity() -> GetUserIdentityResponse {
+    GetUserIdentityResponse {
+        user_id: String::new(),
+        tenant: "default_tenant".to_string(),
+        databases: vec!["default_database".to_string()],
+    }
+}
+
 impl AuthenticateAndAuthorize for () {
     fn authenticate_and_authorize(
         &self,
@@ -119,11 +127,7 @@ impl AuthenticateAndAuthorize for () {
         _resource: AuthzResource,
     ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>> {
         Box::pin(ready(Ok::<GetUserIdentityResponse, AuthError>(
-            GetUserIdentityResponse {
-                user_id: String::new(),
-                tenant: "default_tenant".to_string(),
-                databases: vec!["default_database".to_string()],
-            },
+            default_identity(),
         )))
     }
 
@@ -135,11 +139,7 @@ impl AuthenticateAndAuthorize for () {
         _collection: Collection,
     ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>> {
         Box::pin(ready(Ok::<GetUserIdentityResponse, AuthError>(
-            GetUserIdentityResponse {
-                user_id: String::new(),
-                tenant: "default_tenant".to_string(),
-                databases: vec!["default_database".to_string()],
-            },
+            default_identity(),
         )))
     }
 
@@ -148,11 +148,7 @@ impl AuthenticateAndAuthorize for () {
         _headers: &HeaderMap,
     ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>> {
         Box::pin(ready(Ok::<GetUserIdentityResponse, AuthError>(
-            GetUserIdentityResponse {
-                user_id: String::new(),
-                tenant: "default_tenant".to_string(),
-                databases: vec!["default_database".to_string()],
-            },
+            default_identity(),
         )))
     }
 }
