@@ -14,7 +14,7 @@ const XLink: React.FC = () => {
     >
       <UIButton className="flex items-center gap-2 p-[0.35rem] text-xs">
         <XLogo className="h-[14px] w-[14px] invert dark:invert-0" />
-        <p>22.1k</p>
+        <p>22.7k</p>
       </UIButton>
     </Link>
   );
