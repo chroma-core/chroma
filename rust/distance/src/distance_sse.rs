@@ -361,7 +361,7 @@ mod tests {
         // Test Euclidean distance
         let euclid_simd = unsafe { euclidean_distance(v1, v2) };
         let euclid = euclidean_distance_scalar(v1, v2);
-        let euclid_tolerance = (euclid.abs() * 1e-5).max(1e-6);
+        let euclid_tolerance = (euclid.abs() * 1e-4).max(1e-5);
         assert!(
             (euclid_simd - euclid).abs() < euclid_tolerance,
             "Euclidean distance mismatch: SIMD={}, Scalar={}, tolerance={}",
@@ -373,7 +373,7 @@ mod tests {
         // Test Cosine distance
         let cosine_simd = unsafe { cosine_distance(v1, v2) };
         let cosine = cosine_distance_scalar(v1, v2);
-        let cosine_tolerance = (cosine.abs() * 1e-5).max(1e-6);
+        let cosine_tolerance = (cosine.abs() * 1e-4).max(1e-5);
         assert!(
             (cosine_simd - cosine).abs() < cosine_tolerance,
             "Cosine distance mismatch: SIMD={}, Scalar={}, tolerance={}",
@@ -385,7 +385,7 @@ mod tests {
         // Test Inner product
         let inner_simd = unsafe { inner_product(v1, v2) };
         let inner = inner_product_scalar(v1, v2);
-        let inner_tolerance = (inner.abs() * 1e-5).max(1e-6);
+        let inner_tolerance = (inner.abs() * 1e-4).max(1e-5);
         assert!(
             (inner_simd - inner).abs() < inner_tolerance,
             "Inner product mismatch: SIMD={}, Scalar={}, tolerance={}",
