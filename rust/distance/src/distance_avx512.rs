@@ -1,4 +1,4 @@
-/* Much of this file is copied from https://github.com/qdrant/qdrant/blob/master/lib/segment/src/spaces/simple_neon.rs
+/* Much of this file is copied from https://github.com/qdrant/qdrant/blob/master/lib/segment/src/spaces/simple_avx.rs
 copyright Qdrant, licensed under the Apache 2.0 license.
 
  TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
@@ -201,95 +201,158 @@ copyright Qdrant, licensed under the Apache 2.0 license.
 */
 #![allow(clippy::missing_safety_doc)]
 
-#[cfg(target_feature = "neon")]
-use std::arch::aarch64::*;
+#[cfg(target_arch = "x86_64")]
+#[allow(unused_imports)]
+use std::arch::x86_64::*;
 
-#[cfg(target_feature = "neon")]
+// NOTE: no need for hsum512_ps_avx bc rust has it built in as _mm512_reduce_add_ps
+// https://doc.rust-lang.org/beta/core/arch/x86/fn._mm512_reduce_add_ps.html
+
+#[cfg(all(
+    target_feature = "avx512f",
+    target_feature = "avx512dq",
+    target_feature = "avx512bw",
+    target_feature = "avx512vl",
+    target_feature = "fma"
+))]
 pub unsafe fn cosine_distance(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len();
-    let m = n - (n % 16);
+    let m = n - (n % 64);
     let mut ptr1: *const f32 = a.as_ptr();
     let mut ptr2: *const f32 = b.as_ptr();
-    let mut sum1 = vdupq_n_f32(0.);
-    let mut sum2 = vdupq_n_f32(0.);
-    let mut sum3 = vdupq_n_f32(0.);
-    let mut sum4 = vdupq_n_f32(0.);
-
+    let mut sum512_1: __m512 = _mm512_setzero_ps();
+    let mut sum512_2: __m512 = _mm512_setzero_ps();
+    let mut sum512_3: __m512 = _mm512_setzero_ps();
+    let mut sum512_4: __m512 = _mm512_setzero_ps();
     let mut i: usize = 0;
     while i < m {
-        sum1 = vfmaq_f32(sum1, vld1q_f32(ptr1), vld1q_f32(ptr2));
-        sum2 = vfmaq_f32(sum2, vld1q_f32(ptr1.add(4)), vld1q_f32(ptr2.add(4)));
-        sum3 = vfmaq_f32(sum3, vld1q_f32(ptr1.add(8)), vld1q_f32(ptr2.add(8)));
-        sum4 = vfmaq_f32(sum4, vld1q_f32(ptr1.add(12)), vld1q_f32(ptr2.add(12)));
-        ptr1 = ptr1.add(16);
-        ptr2 = ptr2.add(16);
-        i += 16;
+        sum512_1 = _mm512_fmadd_ps(_mm512_loadu_ps(ptr1), _mm512_loadu_ps(ptr2), sum512_1);
+        sum512_2 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(16)),
+            _mm512_loadu_ps(ptr2.add(16)),
+            sum512_2,
+        );
+        sum512_3 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(32)),
+            _mm512_loadu_ps(ptr2.add(32)),
+            sum512_3,
+        );
+        sum512_4 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(48)),
+            _mm512_loadu_ps(ptr2.add(48)),
+            sum512_4,
+        );
+
+        ptr1 = ptr1.add(64);
+        ptr2 = ptr2.add(64);
+        i += 64;
     }
-    let mut result = vaddvq_f32(sum1) + vaddvq_f32(sum2) + vaddvq_f32(sum3) + vaddvq_f32(sum4);
+
+    let mut result = _mm512_reduce_add_ps(sum512_1)
+        + _mm512_reduce_add_ps(sum512_2)
+        + _mm512_reduce_add_ps(sum512_3)
+        + _mm512_reduce_add_ps(sum512_4);
+
     for i in 0..n - m {
         result += (*ptr1.add(i)) * (*ptr2.add(i));
     }
     1.0_f32 - result
 }
 
-#[cfg(target_feature = "neon")]
+#[cfg(all(
+    target_feature = "avx512f",
+    target_feature = "avx512dq",
+    target_feature = "avx512bw",
+    target_feature = "avx512vl",
+    target_feature = "fma"
+))]
 pub unsafe fn inner_product(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len();
-    let m = n - (n % 16);
+    let m = n - (n % 64);
     let mut ptr1: *const f32 = a.as_ptr();
     let mut ptr2: *const f32 = b.as_ptr();
-    let mut sum1 = vdupq_n_f32(0.);
-    let mut sum2 = vdupq_n_f32(0.);
-    let mut sum3 = vdupq_n_f32(0.);
-    let mut sum4 = vdupq_n_f32(0.);
-
+    let mut sum512_1: __m512 = _mm512_setzero_ps();
+    let mut sum512_2: __m512 = _mm512_setzero_ps();
+    let mut sum512_3: __m512 = _mm512_setzero_ps();
+    let mut sum512_4: __m512 = _mm512_setzero_ps();
     let mut i: usize = 0;
     while i < m {
-        sum1 = vfmaq_f32(sum1, vld1q_f32(ptr1), vld1q_f32(ptr2));
-        sum2 = vfmaq_f32(sum2, vld1q_f32(ptr1.add(4)), vld1q_f32(ptr2.add(4)));
-        sum3 = vfmaq_f32(sum3, vld1q_f32(ptr1.add(8)), vld1q_f32(ptr2.add(8)));
-        sum4 = vfmaq_f32(sum4, vld1q_f32(ptr1.add(12)), vld1q_f32(ptr2.add(12)));
-        ptr1 = ptr1.add(16);
-        ptr2 = ptr2.add(16);
-        i += 16;
+        sum512_1 = _mm512_fmadd_ps(_mm512_loadu_ps(ptr1), _mm512_loadu_ps(ptr2), sum512_1);
+        sum512_2 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(16)),
+            _mm512_loadu_ps(ptr2.add(16)),
+            sum512_2,
+        );
+        sum512_3 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(32)),
+            _mm512_loadu_ps(ptr2.add(32)),
+            sum512_3,
+        );
+        sum512_4 = _mm512_fmadd_ps(
+            _mm512_loadu_ps(ptr1.add(48)),
+            _mm512_loadu_ps(ptr2.add(48)),
+            sum512_4,
+        );
+
+        ptr1 = ptr1.add(64);
+        ptr2 = ptr2.add(64);
+        i += 64;
     }
-    let mut result = vaddvq_f32(sum1) + vaddvq_f32(sum2) + vaddvq_f32(sum3) + vaddvq_f32(sum4);
+
+    let mut result = _mm512_reduce_add_ps(sum512_1)
+        + _mm512_reduce_add_ps(sum512_2)
+        + _mm512_reduce_add_ps(sum512_3)
+        + _mm512_reduce_add_ps(sum512_4);
+
     for i in 0..n - m {
         result += (*ptr1.add(i)) * (*ptr2.add(i));
     }
     1.0_f32 - result
 }
 
-#[cfg(target_feature = "neon")]
+#[cfg(all(
+    target_feature = "avx512f",
+    target_feature = "avx512dq",
+    target_feature = "avx512bw",
+    target_feature = "avx512vl",
+    target_feature = "fma"
+))]
 pub unsafe fn euclidean_distance(a: &[f32], b: &[f32]) -> f32 {
     let n = a.len();
-    let m = n - (n % 16);
+    let m = n - (n % 64);
     let mut ptr1: *const f32 = a.as_ptr();
     let mut ptr2: *const f32 = b.as_ptr();
-    let mut sum1 = vdupq_n_f32(0.);
-    let mut sum2 = vdupq_n_f32(0.);
-    let mut sum3 = vdupq_n_f32(0.);
-    let mut sum4 = vdupq_n_f32(0.);
-
+    let mut sum512_1: __m512 = _mm512_setzero_ps();
+    let mut sum512_2: __m512 = _mm512_setzero_ps();
+    let mut sum512_3: __m512 = _mm512_setzero_ps();
+    let mut sum512_4: __m512 = _mm512_setzero_ps();
     let mut i: usize = 0;
     while i < m {
-        let sub1 = vsubq_f32(vld1q_f32(ptr1), vld1q_f32(ptr2));
-        sum1 = vfmaq_f32(sum1, sub1, sub1);
+        let sub512_1: __m512 =
+            _mm512_sub_ps(_mm512_loadu_ps(ptr1.add(0)), _mm512_loadu_ps(ptr2.add(0)));
+        sum512_1 = _mm512_fmadd_ps(sub512_1, sub512_1, sum512_1);
 
-        let sub2 = vsubq_f32(vld1q_f32(ptr1.add(4)), vld1q_f32(ptr2.add(4)));
-        sum2 = vfmaq_f32(sum2, sub2, sub2);
+        let sub512_2: __m512 =
+            _mm512_sub_ps(_mm512_loadu_ps(ptr1.add(16)), _mm512_loadu_ps(ptr2.add(16)));
+        sum512_2 = _mm512_fmadd_ps(sub512_2, sub512_2, sum512_2);
 
-        let sub3 = vsubq_f32(vld1q_f32(ptr1.add(8)), vld1q_f32(ptr2.add(8)));
-        sum3 = vfmaq_f32(sum3, sub3, sub3);
+        let sub512_3: __m512 =
+            _mm512_sub_ps(_mm512_loadu_ps(ptr1.add(32)), _mm512_loadu_ps(ptr2.add(32)));
+        sum512_3 = _mm512_fmadd_ps(sub512_3, sub512_3, sum512_3);
 
-        let sub4 = vsubq_f32(vld1q_f32(ptr1.add(12)), vld1q_f32(ptr2.add(12)));
-        sum4 = vfmaq_f32(sum4, sub4, sub4);
+        let sub512_4: __m512 =
+            _mm512_sub_ps(_mm512_loadu_ps(ptr1.add(48)), _mm512_loadu_ps(ptr2.add(48)));
+        sum512_4 = _mm512_fmadd_ps(sub512_4, sub512_4, sum512_4);
 
-        ptr1 = ptr1.add(16);
-        ptr2 = ptr2.add(16);
-        i += 16;
+        ptr1 = ptr1.add(64);
+        ptr2 = ptr2.add(64);
+        i += 64;
     }
-    let mut result = vaddvq_f32(sum1) + vaddvq_f32(sum2) + vaddvq_f32(sum3) + vaddvq_f32(sum4);
+
+    let mut result = _mm512_reduce_add_ps(sum512_1)
+        + _mm512_reduce_add_ps(sum512_2)
+        + _mm512_reduce_add_ps(sum512_3)
+        + _mm512_reduce_add_ps(sum512_4);
     for i in 0..n - m {
         result += (*ptr1.add(i) - *ptr2.add(i)).powi(2);
     }
@@ -310,7 +373,14 @@ mod tests {
         (0..size).map(|_| rng.gen_range(-10.0..10.0)).collect()
     }
 
-    #[cfg(target_feature = "neon")]
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx512f",
+        target_feature = "avx512dq",
+        target_feature = "avx512bw",
+        target_feature = "avx512vl",
+        target_feature = "fma"
+    ))]
     fn test_distance_functions(v1: &[f32], v2: &[f32]) {
         // Test Euclidean distance
         let euclid_simd = unsafe { euclidean_distance(v1, v2) };
@@ -350,10 +420,22 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_feature = "neon")]
-    fn test_spaces_neon() {
-        println!("Running NEON distance test...");
-        if std::arch::is_aarch64_feature_detected!("neon") {
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx512f",
+        target_feature = "avx512dq",
+        target_feature = "avx512bw",
+        target_feature = "avx512vl",
+        target_feature = "fma"
+    ))]
+    fn test_spaces_avx512() {
+        println!("Running AVX512 distance test...");
+        if is_x86_feature_detected!("avx512f")
+            && is_x86_feature_detected!("avx512dq")
+            && is_x86_feature_detected!("avx512bw")
+            && is_x86_feature_detected!("avx512vl")
+            && is_x86_feature_detected!("fma")
+        {
             let v1: Vec<f32> = vec![
                 10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
                 10., 11., 12., 13., 14., 15., 16., 17., 18., 19., 20., 21., 22., 23., 24., 25.,
@@ -371,19 +453,31 @@ mod tests {
 
             test_distance_functions(&v1, &v2);
         } else {
-            println!("neon test skipped");
+            println!("avx512 test skipped");
         }
     }
 
     #[test]
-    #[cfg(target_feature = "neon")]
-    fn test_neon_random_sizes() {
-        if !std::arch::is_aarch64_feature_detected!("neon") {
-            println!("neon random sizes test skipped");
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx512f",
+        target_feature = "avx512dq",
+        target_feature = "avx512bw",
+        target_feature = "avx512vl",
+        target_feature = "fma"
+    ))]
+    fn test_avx512_random_sizes() {
+        if !is_x86_feature_detected!("avx512f")
+            || !is_x86_feature_detected!("avx512dq")
+            || !is_x86_feature_detected!("avx512bw")
+            || !is_x86_feature_detected!("avx512vl")
+            || !is_x86_feature_detected!("fma")
+        {
+            println!("avx512 random sizes test skipped");
             return;
         }
 
-        println!("Running NEON random sizes test...");
+        println!("Running AVX512 random sizes test...");
 
         // Test various vector sizes
         let sizes = vec![16, 32, 64, 128, 256, 512, 1024, 2048, 4096];
@@ -397,17 +491,29 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_feature = "neon")]
-    fn test_neon_edge_cases() {
-        if !std::arch::is_aarch64_feature_detected!("neon") {
-            println!("neon edge cases test skipped");
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx512f",
+        target_feature = "avx512dq",
+        target_feature = "avx512bw",
+        target_feature = "avx512vl",
+        target_feature = "fma"
+    ))]
+    fn test_avx512_edge_cases() {
+        if !is_x86_feature_detected!("avx512f")
+            || !is_x86_feature_detected!("avx512dq")
+            || !is_x86_feature_detected!("avx512bw")
+            || !is_x86_feature_detected!("avx512vl")
+            || !is_x86_feature_detected!("fma")
+        {
+            println!("avx512 edge cases test skipped");
             return;
         }
 
-        println!("Running NEON edge cases test...");
+        println!("Running AVX512 edge cases test...");
 
-        // Test edge cases with non-multiple-of-16 sizes
-        let edge_sizes = vec![1, 4, 8, 15, 17, 31, 33, 63, 65, 127, 129];
+        // Test edge cases with non-multiple-of-64 sizes
+        let edge_sizes = vec![1, 8, 15, 31, 63, 65, 127, 129, 255, 257];
 
         for size in edge_sizes {
             println!("Testing edge case size: {}", size);
@@ -418,17 +524,29 @@ mod tests {
     }
 
     #[test]
-    #[cfg(target_feature = "neon")]
-    fn test_neon_special_values() {
-        if !std::arch::is_aarch64_feature_detected!("neon") {
-            println!("neon special values test skipped");
+    #[cfg(all(
+        any(target_arch = "x86", target_arch = "x86_64"),
+        target_feature = "avx512f",
+        target_feature = "avx512dq",
+        target_feature = "avx512bw",
+        target_feature = "avx512vl",
+        target_feature = "fma"
+    ))]
+    fn test_avx512_special_values() {
+        if !is_x86_feature_detected!("avx512f")
+            || !is_x86_feature_detected!("avx512dq")
+            || !is_x86_feature_detected!("avx512bw")
+            || !is_x86_feature_detected!("avx512vl")
+            || !is_x86_feature_detected!("fma")
+        {
+            println!("avx512 special values test skipped");
             return;
         }
 
-        println!("Running NEON special values test...");
+        println!("Running AVX512 special values test...");
 
         // Test with special values
-        let size = 128;
+        let size = 256;
 
         // Test with zeros
         let v1 = vec![0.0; size];
