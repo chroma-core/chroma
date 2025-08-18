@@ -48,7 +48,7 @@ impl Language {
         api_key: String,
     ) -> String {
         match self {
-            Language::Python => get_python_connection(url, tenant_id, db_name, api_key),
+            Language::Python => get_python_connection(db_name, api_key),
             Language::JavaScript => get_js_connection(url, tenant_id, db_name, api_key),
             Language::TypeScript => get_js_connection(url, tenant_id, db_name, api_key),
         }
@@ -223,25 +223,15 @@ fn db_delete_cancelled() -> String {
     )
 }
 
-fn get_python_connection(
-    url: String,
-    tenant_id: String,
-    db_name: String,
-    api_key: String,
-) -> String {
+fn get_python_connection(db_name: String, api_key: String) -> String {
     format!(
         "Python connection snippet:
     import chromadb
-    client = chromadb.HttpClient(
-        ssl=True,
-        host={},
-        tenant='{}',
+    client = chromadb.CloudClient(
         database='{}',
-        headers={{
-            'x-chroma-token': '{}'
-        }}
+        api_key='{}'
     )",
-        url, tenant_id, db_name, api_key
+        db_name, api_key
     )
 }
 
