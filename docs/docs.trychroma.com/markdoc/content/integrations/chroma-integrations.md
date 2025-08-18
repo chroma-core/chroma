@@ -49,21 +49,3 @@ We welcome pull requests to add new Integrations to the community.
 | [OpenLIT](./frameworks/openlit)             | ✓      | Coming Soon! |
 | [Anthropic MCP](./frameworks/anthropic-mcp) | ✓      | Coming Soon! |
 | [VoltAgent](./frameworks/voltagent)         | -      | ✓            |
-
----
-
-## Platform Integrations
-
-Chroma can be integrated into popular content management systems, enabling site owners to leverage vector search and AI-native capabilities directly within their existing workflows.
-
-We welcome contributions to expand support for other platforms.
-
-{% special_table %}
-{% /special_table %}
-
-|                                                        | PHP/WordPress | Python | JS |
-| ------------------------------------------------------ | ------------- | ------ | -- |
-| [WordPress (AI Engine Pro)](https://wordpress.org/plugins/ai-engine/) | ✓             | -      | ✓  |
-
-> **AI Engine Pro** is a powerful WordPress plugin that brings AI chatbots, embeddings, and content generation features to any WordPress site. With Chroma as the vector database, it enables fast semantic search and retrieval-augmented generation (RAG) workflows.
-
