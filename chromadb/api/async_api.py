@@ -425,6 +425,26 @@ class AsyncClientAPI(AsyncBaseAPI, ABC):
         pass
 
     @abstractmethod
+    async def get_collection_by_crn(self, crn: str) -> AsyncCollection:
+        """Get a collection by Chroma Resource Name.
+        Args:
+            crn: The Chroma Resource Name of the collection to get
+
+        Returns:
+            Collection: The collection
+
+        Raises:
+            ValueError: If the collection does not exist
+
+        Examples:
+            ```python
+            await client.get_collection_by_crn("tenant_resource_name:database:collection")
+            # collection(name="collection", metadata={})
+            ```
+        """
+        pass
+
+    @abstractmethod
     async def get_or_create_collection(
         self,
         name: str,
@@ -554,6 +574,16 @@ class AsyncAdminAPI(ABC):
         """
         pass
 
+    @abstractmethod
+    async def update_tenant(self, name: str, resource_name: str) -> None:
+        """Update a tenant. Raises an error if the tenant does not exist.
+
+        Args:
+            tenant: The name of the tenant to update.
+            resource_name: The new resource name for the tenant.
+        """
+        pass
+
 
 class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing
@@ -595,6 +625,10 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        pass
+
+    @abstractmethod
+    async def get_collection_by_crn(self, crn: str) -> CollectionModel:
         pass
 
     @abstractmethod
