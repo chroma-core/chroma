@@ -64,7 +64,7 @@ pub struct CopyArgs {
     path: Option<String>,
     #[clap(
         long = "batch",
-        default_value_t = 300,
+        default_value_t = 100,
         value_parser = clap::value_parser!(u32).range(1..=300),
         help = "Batch size for records when copying (min 1, max 300)"
     )]
