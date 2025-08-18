@@ -1140,6 +1140,52 @@ export const ApiApiFetchParamCreator = function (
       };
     },
     /**
+     * @summary Retrieves a collection by Chroma Resource Name.
+     * @param {string} crn <p>Chroma Resource Name</p>
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    getCollectionByCrn(crn: string, options: RequestInit = {}): FetchArgs {
+      // verify required parameter 'crn' is not null or undefined
+      if (crn === null || crn === undefined) {
+        throw new RequiredError(
+          "crn",
+          "Required parameter crn was null or undefined when calling getCollectionByCrn.",
+        );
+      }
+      let localVarPath = `/api/v2/collections/{crn}`.replace(
+        "{crn}",
+        encodeURIComponent(String(crn)),
+      );
+      const localVarPathQueryStart = localVarPath.indexOf("?");
+      const localVarRequestOptions: RequestInit = Object.assign(
+        { method: "GET" },
+        options,
+      );
+      const localVarHeaderParameter: Headers = options.headers
+        ? new Headers(options.headers)
+        : new Headers();
+      const localVarQueryParameter = new URLSearchParams(
+        localVarPathQueryStart !== -1
+          ? localVarPath.substring(localVarPathQueryStart + 1)
+          : "",
+      );
+      if (localVarPathQueryStart !== -1) {
+        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
+      }
+
+      localVarRequestOptions.headers = localVarHeaderParameter;
+
+      const localVarQueryParameterString = localVarQueryParameter.toString();
+      if (localVarQueryParameterString) {
+        localVarPath += "?" + localVarQueryParameterString;
+      }
+      return {
+        url: localVarPath,
+        options: localVarRequestOptions,
+      };
+    },
+    /**
      * @summary Retrieves a specific database by name.
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Name of the database to retrieve</p>
@@ -2551,6 +2597,57 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
+     * @summary Retrieves a collection by Chroma Resource Name.
+     * @param {string} crn <p>Chroma Resource Name</p>
+     * @param {RequestInit} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    getCollectionByCrn(
+      crn: string,
+      options?: RequestInit,
+    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.Collection> {
+      const localVarFetchArgs = ApiApiFetchParamCreator(
+        configuration,
+      ).getCollectionByCrn(crn, options);
+      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
+        return fetch(
+          basePath + localVarFetchArgs.url,
+          localVarFetchArgs.options,
+        ).then((response) => {
+          const contentType = response.headers.get("Content-Type");
+          const mimeType = contentType
+            ? contentType.replace(/;.*/, "")
+            : undefined;
+
+          if (response.status === 200) {
+            if (mimeType === "application/json") {
+              return response.json() as any;
+            }
+            throw response;
+          }
+          if (response.status === 401) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 404) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          if (response.status === 500) {
+            if (mimeType === "application/json") {
+              throw response;
+            }
+            throw response;
+          }
+          throw response;
+        });
+      };
+    },
+    /**
      * @summary Retrieves a specific database by name.
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Name of the database to retrieve</p>
@@ -3454,6 +3551,19 @@ export class ApiApi extends BaseAPI {
       collectionId,
       options,
     )(this.fetch, this.basePath);
+  }
+
+  /**
+   * @summary Retrieves a collection by Chroma Resource Name.
+   * @param {string} crn <p>Chroma Resource Name</p>
+   * @param {RequestInit} [options] Override http request option.
+   * @throws {RequiredError}
+   */
+  public getCollectionByCrn(crn: string, options?: RequestInit) {
+    return ApiApiFp(this.configuration).getCollectionByCrn(crn, options)(
+      this.fetch,
+      this.basePath,
+    );
   }
 
   /**
