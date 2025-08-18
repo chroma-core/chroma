@@ -64,7 +64,7 @@ pub struct CopyArgs {
     path: Option<String>,
     #[clap(
         long = "batch",
-        default_value_t = 300,
+        default_value_t = 100,
         value_parser = clap::value_parser!(u32).range(1..=300),
         help = "Batch size for records when copying (min 1, max 300)"
     )]
@@ -75,7 +75,7 @@ pub struct CopyArgs {
         value_parser = clap::value_parser!(u32).range(1..=8),
         help = "Number of concurrent processes when copying (min 1, max 8)"
     )]
-    concurrent: usize,
+    concurrent: u32,
 }
 
 fn select_chroma_server_prompt() -> &'static str {
@@ -192,7 +192,7 @@ async fn copy_collections(
     collections: Vec<String>,
     all: bool,
     step: u32,
-    concurrent: usize,
+    concurrent: u32,
 ) -> Result<(), CliError> {
     let collections = if all {
         source
@@ -306,7 +306,7 @@ async fn copy_collections(
                 Ok(())
             }
         }))
-        .buffer_unordered(concurrent)
+        .buffer_unordered(concurrent as usize)
         .collect::<Vec<_>>()
         .await
         .into_iter()
