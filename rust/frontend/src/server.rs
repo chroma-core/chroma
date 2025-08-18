@@ -378,7 +378,7 @@ impl FrontendServer {
         headers: &HeaderMap,
         action: AuthzAction,
         resource: AuthzResource,
-    ) -> Result<(), ServerError> {
+    ) -> Result<GetUserIdentityResponse, ServerError> {
         Ok(self
             .auth
             .authenticate_and_authorize(headers, action, resource)
@@ -393,7 +393,7 @@ impl FrontendServer {
         action: AuthzAction,
         resource: AuthzResource,
         collection_id: CollectionUuid,
-    ) -> Result<(), ServerError> {
+    ) -> Result<GetUserIdentityResponse, ServerError> {
         let collection = self.frontend.get_cached_collection(collection_id).await?;
         Ok(self
             .auth

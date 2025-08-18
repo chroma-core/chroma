@@ -95,7 +95,7 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         _headers: &HeaderMap,
         action: AuthzAction,
         resource: AuthzResource,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>;
 
     fn authenticate_and_authorize_collection(
         &self,
@@ -103,7 +103,7 @@ pub trait AuthenticateAndAuthorize: Send + Sync {
         action: AuthzAction,
         resource: AuthzResource,
         _collection: Collection,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>>;
+    ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>>;
 
     fn get_user_identity(
         &self,
@@ -117,8 +117,14 @@ impl AuthenticateAndAuthorize for () {
         _headers: &HeaderMap,
         _action: AuthzAction,
         _resource: AuthzResource,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
-        Box::pin(ready(Ok::<(), AuthError>(())))
+    ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>> {
+        Box::pin(ready(Ok::<GetUserIdentityResponse, AuthError>(
+            GetUserIdentityResponse {
+                user_id: String::new(),
+                tenant: "default_tenant".to_string(),
+                databases: vec!["default_database".to_string()],
+            },
+        )))
     }
 
     fn authenticate_and_authorize_collection(
@@ -127,8 +133,14 @@ impl AuthenticateAndAuthorize for () {
         _action: AuthzAction,
         _resource: AuthzResource,
         _collection: Collection,
-    ) -> Pin<Box<dyn Future<Output = Result<(), AuthError>> + Send>> {
-        Box::pin(ready(Ok::<(), AuthError>(())))
+    ) -> Pin<Box<dyn Future<Output = Result<GetUserIdentityResponse, AuthError>> + Send>> {
+        Box::pin(ready(Ok::<GetUserIdentityResponse, AuthError>(
+            GetUserIdentityResponse {
+                user_id: String::new(),
+                tenant: "default_tenant".to_string(),
+                databases: vec!["default_database".to_string()],
+            },
+        )))
     }
 
     fn get_user_identity(
