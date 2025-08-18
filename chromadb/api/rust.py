@@ -219,7 +219,7 @@ class RustBindingsAPI(ServerAPI):
         )
         if configuration:
             configuration_json_str = create_collection_configuration_to_json_str(
-                configuration
+                configuration, metadata
             )
         else:
             configuration_json_str = None

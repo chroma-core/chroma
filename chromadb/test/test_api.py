@@ -16,7 +16,11 @@ import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
 from chromadb.api.types import Document, EmbeddingFunction, QueryResult
 from chromadb.config import Settings
-from chromadb.errors import ChromaError, InvalidArgumentError, NotFoundError
+from chromadb.errors import (
+    ChromaError,
+    NotFoundError,
+    InvalidArgumentError,
+)
 from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
 
 
