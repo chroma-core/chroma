@@ -40,17 +40,11 @@ pub enum Language {
 }
 
 impl Language {
-    fn get_connection(
-        &self,
-        url: String,
-        tenant_id: String,
-        db_name: String,
-        api_key: String,
-    ) -> String {
+    fn get_connection(&self, tenant_id: String, db_name: String, api_key: String) -> String {
         match self {
             Language::Python => get_python_connection(db_name, api_key),
-            Language::JavaScript => get_js_connection(url, tenant_id, db_name, api_key),
-            Language::TypeScript => get_js_connection(url, tenant_id, db_name, api_key),
+            Language::JavaScript => get_js_connection(tenant_id, db_name, api_key),
+            Language::TypeScript => get_js_connection(tenant_id, db_name, api_key),
         }
     }
 }
@@ -235,18 +229,17 @@ fn get_python_connection(db_name: String, api_key: String) -> String {
     )
 }
 
-fn get_js_connection(url: String, tenant_id: String, db_name: String, api_key: String) -> String {
+fn get_js_connection(tenant_id: String, db_name: String, api_key: String) -> String {
     format!(
         "Javascript/Typescript connection snippet:
-    import {{ ChromaClient }} from 'chromadb';
-    const client = new ChromaClient({{
-        path: '{}',
-        auth: {{ provider: 'token', credentials: '{}', tokenHeaderType: 'X_CHROMA_TOKEN' }},
+    import {{ CloudClient }} from 'chromadb';
+    const client = new CloudClient({{
+        apiKey: '{}',
         tenant: '{}',
         database: '{}'
     }});
 ",
-        url, api_key, tenant_id, db_name
+        api_key, tenant_id, db_name
     )
 }
 
@@ -402,7 +395,6 @@ pub async fn connect(args: ConnectArgs, current_profile: Profile) -> Result<(), 
     };
 
     let connection_string = language.get_connection(
-        admin_client.host,
         current_profile.tenant_id,
         name,
         admin_client.api_key.unwrap_or("".to_string()),
