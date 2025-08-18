@@ -15,6 +15,17 @@
 //!   -k 128      # top-k results
 //! ```
 //!
+//! ### With Filtering
+//! Test WAND with a filter that excludes 30% of documents:
+//! ```bash
+//! cargo run --release --example sparse_wand_benchmark -- \
+//!   -d /path/to/dataset \
+//!   -n 65536 \
+//!   -m 200 \
+//!   -k 128 \
+//!   -f 30       # exclude 30% of documents
+//! ```
+//!
 //! ### WAND-Only Mode (for profiling)
 //! Runs only WAND without brute force comparison, useful for flamegraph profiling:
 //! ```bash
@@ -42,6 +53,7 @@
 //! - `--sort-by-url`: Sort documents by URL for better cache locality
 //! - `--wand-only`: Skip brute force comparison for profiling
 //! - `-i, --iterations`: Number of iterations per query (for profiling)
+//! - `-f, --filter-percentage`: Randomly exclude a percentage of documents (0-100) to test filtering
 
 use anyhow::Result;
 use arrow::array::{Array, Float32Array, Int32Array, ListArray, StringArray};
@@ -53,6 +65,7 @@ use chroma_index::sparse::{
     reader::{Score, SparseReader},
     writer::{SparseDelta, SparseWriter},
 };
+use chroma_types::SignedRoaringBitmap;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -358,6 +371,10 @@ struct Args {
     /// Number of iterations to run each query (for profiling)
     #[arg(short = 'i', long, default_value_t = 1)]
     iterations: usize,
+
+    /// Filter percentage: randomly exclude this percentage of documents (0-100)
+    #[arg(short = 'f', long, default_value_t = 0)]
+    filter_percentage: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -372,6 +389,7 @@ fn brute_force_search(
     documents: &[SparseDocument],
     query: &SparseQuery,
     top_k: usize,
+    mask: &SignedRoaringBitmap,
 ) -> (SearchResult, usize) {
     let start = Instant::now();
 
@@ -380,6 +398,11 @@ fn brute_force_search(
     let mut non_trivial_count = 0;
 
     for (offset, doc) in documents.iter().enumerate() {
+        // Skip documents that are filtered out
+        if !mask.contains(offset as u32) {
+            continue;
+        }
+        
         // Use sprs dot product directly
         let score = query.sparse_vector.dot(&doc.sparse_vector);
         if score > 0.0 {
@@ -580,6 +603,7 @@ async fn search_with_wand(
     offset_value_reader_id: Uuid,
     queries: &[SparseQuery],
     top_k: usize,
+    mask: SignedRoaringBitmap,
     iterations: usize,
     show_progress: bool,
 ) -> anyhow::Result<Vec<SearchResult>> {
@@ -649,9 +673,9 @@ async fn search_with_wand(
                 .map(|(idx, val)| (*idx as u32, *val))
                 .collect();
 
-            // Run WAND search
+            // Run WAND search with the provided mask
             let scores = sparse_reader
-                .wand(query_vec, top_k as u32)
+                .wand(query_vec, top_k as u32, mask.clone())
                 .await
                 .map_err(|e| anyhow::anyhow!("Failed to run WAND search: {:?}", e))?;
 
@@ -881,6 +905,9 @@ async fn main() -> anyhow::Result<()> {
     println!("  Top-k: {}", args.top_k);
     println!("  Block size: {}", args.block_size);
     println!("  Sort by URL: {}", args.sort_by_url);
+    if args.filter_percentage > 0 {
+        println!("  Filter: {}% of documents excluded", args.filter_percentage);
+    }
     println!(
         "  Mode: {}",
         if args.wand_only {
@@ -908,6 +935,22 @@ async fn main() -> anyhow::Result<()> {
     let (temp_dir, provider, max_reader_id, offset_value_reader_id) =
         build_sparse_index(&documents, args.block_size, args.sort_by_url).await?;
 
+    // Create mask based on filter percentage
+    let mask = if args.filter_percentage > 0 {
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let mut excluded = roaring::RoaringBitmap::new();
+        for i in 0..documents.len() as u32 {
+            if rng.gen_range(0..100) < args.filter_percentage {
+                excluded.insert(i);
+            }
+        }
+        println!("🎭 Filter mask created: {} documents excluded", excluded.len());
+        SignedRoaringBitmap::Exclude(excluded)
+    } else {
+        SignedRoaringBitmap::full()
+    };
+
     if args.wand_only {
         // WAND-only mode for profiling
         println!("\n🎯 Running WAND-only mode (no brute force comparison)");
@@ -925,6 +968,7 @@ async fn main() -> anyhow::Result<()> {
             offset_value_reader_id,
             &queries,
             args.top_k,
+            mask,
             args.iterations,
             false, // no progress bar in wand-only mode
         )
@@ -973,7 +1017,7 @@ async fn main() -> anyhow::Result<()> {
         let mut total_non_trivial = 0;
 
         for (i, query) in queries.iter().enumerate() {
-            let (result, non_trivial_count) = brute_force_search(&documents, query, args.top_k);
+            let (result, non_trivial_count) = brute_force_search(&documents, query, args.top_k, &mask);
             total_non_trivial += non_trivial_count;
             brute_force_results.push(result);
             pb_brute.set_position((i + 1) as u64);
@@ -1001,6 +1045,7 @@ async fn main() -> anyhow::Result<()> {
             offset_value_reader_id,
             &queries,
             args.top_k,
+            mask.clone(),
             args.iterations,
             true, // show progress in full benchmark mode
         )

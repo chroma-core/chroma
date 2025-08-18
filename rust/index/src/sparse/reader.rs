@@ -7,6 +7,7 @@ use std::{
 
 use chroma_blockstore::BlockfileReader;
 use chroma_error::ChromaError;
+use chroma_types::SignedRoaringBitmap;
 use thiserror::Error;
 
 use crate::sparse::types::{encode_u32, DIMENSION_PREFIX};
@@ -138,6 +139,7 @@ impl<'me> SparseReader<'me> {
         &self,
         query_vector: impl IntoIterator<Item = (u32, f32)>,
         k: u32,
+        mask: SignedRoaringBitmap,
     ) -> Result<Vec<Score>, SparseReaderError> {
         let collected_query = query_vector
             .into_iter()
@@ -151,12 +153,20 @@ impl<'me> SparseReader<'me> {
             let Some(dimension_max) = all_dimension_max.get(dimension_id) else {
                 continue;
             };
-            let mut block_iterator = self.get_blocks(encoded_dimension_id).await?.peekable();
-            let Some((block_next_offset, block_max)) = block_iterator.next() else {
+            let mut dimension_iterator = self.get_offset_values(encoded_dimension_id, ..).await?;
+            let Some((offset, value)) = dimension_iterator
+                .by_ref()
+                .skip_while(|&(offset, _)| !mask.contains(offset))
+                .next()
+            else {
                 continue;
             };
-            let mut dimension_iterator = self.get_offset_values(encoded_dimension_id, ..).await?;
-            let Some((offset, value)) = dimension_iterator.next() else {
+            let mut block_iterator = self.get_blocks(encoded_dimension_id).await?.peekable();
+            let Some((block_next_offset, block_max)) = block_iterator
+                .by_ref()
+                .skip_while(|&(block_next_offset, _)| block_next_offset <= offset)
+                .next()
+            else {
                 continue;
             };
             cursors.push(Cursor {
@@ -207,17 +217,15 @@ impl<'me> SparseReader<'me> {
                 .iter_mut()
                 .filter_map(|cursor| {
                     if cursor.block_next_offset <= pivot_offset {
-                        for (block_next_offset, block_max) in cursor.block_iterator.by_ref() {
-                            if pivot_offset < block_next_offset {
-                                cursor.block_next_offset = block_next_offset;
-                                cursor.block_upper_bound = cursor.query * block_max;
-                                break;
-                            }
-                        }
+                        let (block_next_offset, block_max) = cursor
+                            .block_iterator
+                            .by_ref()
+                            .skip_while(|&(block_next_offset, _)| block_next_offset <= pivot_offset)
+                            .next()?;
+                        cursor.block_next_offset = block_next_offset;
+                        cursor.block_upper_bound = cursor.query * block_max;
                     }
-
-                    (pivot_offset < cursor.block_next_offset)
-                        .then_some((cursor.block_upper_bound, cursor.block_next_offset))
+                    Some((cursor.block_upper_bound, cursor.block_next_offset))
                 })
                 .fold(
                     (0.0, following_cursor_offset),
@@ -273,16 +281,15 @@ impl<'me> SparseReader<'me> {
             while cursor_index < cursors.len().min(pivot_cursor_index + 1) {
                 let cursor = &mut cursors[cursor_index];
                 if cursor.offset < offset_cutoff {
-                    let mut exhausted = true;
-                    for (offset, value) in cursor.dimension_iterator.by_ref() {
-                        if offset_cutoff <= offset {
-                            cursor.offset = offset;
-                            cursor.value = value;
-                            exhausted = false;
-                            break;
-                        }
-                    }
-                    if exhausted {
+                    if let Some((offset, value)) = cursor
+                        .dimension_iterator
+                        .by_ref()
+                        .skip_while(|&(offset, _)| offset < offset_cutoff || !mask.contains(offset))
+                        .next()
+                    {
+                        cursor.offset = offset;
+                        cursor.value = value;
+                    } else {
                         cursors.swap_remove(cursor_index);
                     }
                 }
