@@ -63,11 +63,6 @@ class SysDB(Component):
         """Get a tenant by name. Raises an Error if the Tenant does not exist."""
         pass
 
-    @abstractmethod
-    def update_tenant(self, name: str, resource_name: str) -> None:
-        """Update a tenant by name. Raises an Error if the Tenant does not exist."""
-        pass
-
     # TODO: Investigate and remove this method, as segment creation is done as
     # part of collection creation.
     @abstractmethod
@@ -150,11 +145,6 @@ class SysDB(Component):
         offset: Optional[int] = None,
     ) -> Sequence[Collection]:
         """Find collections by id or name. If name is provided, tenant and database must also be provided."""
-        pass
-
-    @abstractmethod
-    def get_collection_by_crn(self, crn: str) -> Collection:
-        """Get a collection by crn."""
         pass
 
     @abstractmethod

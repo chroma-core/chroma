@@ -204,7 +204,9 @@ class SegmentAPI(ServerAPI):
     @trace_method("SegmentAPI.update_tenant", OpenTelemetryGranularity.OPERATION)
     @override
     def update_tenant(self, name: str, resource_name: str) -> None:
-        self._sysdb.update_tenant(name=name, resource_name=resource_name)
+        raise NotImplementedError(
+            "get_collection_by_crn is not implemented for SegmentAPI"
+        )
 
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
@@ -331,7 +333,9 @@ class SegmentAPI(ServerAPI):
     @override
     @rate_limit
     def get_collection_by_crn(self, crn: str) -> CollectionModel:
-        return self._sysdb.get_collection_by_crn(crn=crn)
+        raise NotImplementedError(
+            "get_collection_by_crn is not implemented for SegmentAPI"
+        )
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
