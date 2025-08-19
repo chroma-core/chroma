@@ -6,7 +6,7 @@ use std::{
 };
 
 use chroma_blockstore::BlockfileReader;
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SignedRoaringBitmap;
 use thiserror::Error;
 
@@ -86,7 +86,15 @@ pub enum SparseReaderError {
     Blockfile(#[from] Box<dyn ChromaError>),
 }
 
-#[derive(Debug)]
+impl ChromaError for SparseReaderError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SparseReaderError::Blockfile(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct SparseReader<'me> {
     max_reader: BlockfileReader<'me, u32, f32>,
     offset_value_reader: BlockfileReader<'me, u32, f32>,
