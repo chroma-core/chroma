@@ -63,7 +63,7 @@ use chroma_blockstore::test_arrow_blockfile_provider;
 use chroma_blockstore::{provider::BlockfileProvider, BlockfileWriterOptions};
 use chroma_index::sparse::{
     reader::{Score, SparseReader},
-    writer::{SparseDelta, SparseWriter},
+    writer::SparseWriter,
 };
 use chroma_types::SignedRoaringBitmap;
 use clap::Parser;
@@ -402,7 +402,7 @@ fn brute_force_search(
         if !mask.contains(offset as u32) {
             continue;
         }
-        
+
         // Use sprs dot product directly
         let score = query.sparse_vector.dot(&doc.sparse_vector);
         if score > 0.0 {
@@ -538,8 +538,7 @@ async fn build_sparse_index(
             sparse_reader,
         );
 
-        // Build delta for this chunk
-        let mut delta = SparseDelta::default();
+        // Write documents in this chunk
         for (idx, doc) in chunk.iter().enumerate() {
             let offset = (chunk_idx * batch_size + idx) as u32;
 
@@ -550,11 +549,8 @@ async fn build_sparse_index(
                 .iter()
                 .zip(doc.sparse_vector.data().iter())
                 .map(|(idx, val)| (*idx as u32, *val));
-            delta.create(offset, sparse_iter);
+            sparse_writer.set(offset, sparse_iter).await;
         }
-
-        // Write the batch
-        sparse_writer.write(delta).await;
 
         // Commit
         let flusher = sparse_writer
@@ -597,6 +593,7 @@ async fn build_sparse_index(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn search_with_wand(
     provider: &BlockfileProvider,
     max_reader_id: Uuid,
@@ -906,7 +903,10 @@ async fn main() -> anyhow::Result<()> {
     println!("  Block size: {}", args.block_size);
     println!("  Sort by URL: {}", args.sort_by_url);
     if args.filter_percentage > 0 {
-        println!("  Filter: {}% of documents excluded", args.filter_percentage);
+        println!(
+            "  Filter: {}% of documents excluded",
+            args.filter_percentage
+        );
     }
     println!(
         "  Mode: {}",
@@ -945,7 +945,10 @@ async fn main() -> anyhow::Result<()> {
                 excluded.insert(i);
             }
         }
-        println!("🎭 Filter mask created: {} documents excluded", excluded.len());
+        println!(
+            "🎭 Filter mask created: {} documents excluded",
+            excluded.len()
+        );
         SignedRoaringBitmap::Exclude(excluded)
     } else {
         SignedRoaringBitmap::full()
@@ -1017,7 +1020,8 @@ async fn main() -> anyhow::Result<()> {
         let mut total_non_trivial = 0;
 
         for (i, query) in queries.iter().enumerate() {
-            let (result, non_trivial_count) = brute_force_search(&documents, query, args.top_k, &mask);
+            let (result, non_trivial_count) =
+                brute_force_search(&documents, query, args.top_k, &mask);
             total_non_trivial += non_trivial_count;
             brute_force_results.push(result);
             pb_brute.set_position((i + 1) as u64);
