@@ -291,12 +291,25 @@ print(results)
 
 {% Tab label="typescript" %}
 ```typescript
-import { ChromaClient } from "chromadb";
+import { ChromaClient, OpenAIEmbeddingFunction, OllamaEmbeddingFunction } from "chromadb";
+
+// using OpenAI mmbedding
+const embedder = new OpenAIEmbeddingFunction({
+  openai_api_key: "your_api_key",
+});
+
+// using ollama embedding
+const embedder = new OllamaEmbeddingFunction({
+    url: "http://127.0.0.1:11434/api/embeddings",
+    model: "llama2"
+})
+
 const client = new ChromaClient();
 
 // switch `createCollection` to `getOrCreateCollection` to avoid creating a new collection every time
 const collection = await client.getOrCreateCollection({
     name: "my_collection",
+    embeddingFunction: embedder,
 });
 
 // switch `addRecords` to `upsertRecords` to avoid adding the same documents every time
