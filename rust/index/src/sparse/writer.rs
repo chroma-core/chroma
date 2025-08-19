@@ -4,16 +4,17 @@ use std::{
 };
 
 use chroma_blockstore::{BlockfileFlusher, BlockfileWriter};
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 use crate::sparse::{
     reader::{SparseReader, SparseReaderError},
     types::{encode_u32, DIMENSION_PREFIX},
 };
 
-#[derive(Default)]
+#[derive(Debug, Default, Clone)]
 pub struct SparseDelta {
     dimension_value_updates: HashMap<u32, HashMap<u32, Option<f32>>>,
 }
@@ -55,6 +56,15 @@ pub enum SparseWriterError {
     Reader(#[from] SparseReaderError),
 }
 
+impl ChromaError for SparseWriterError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SparseWriterError::Blockfile(err) => err.code(),
+            SparseWriterError::Reader(err) => err.code(),
+        }
+    }
+}
+
 pub struct SparseFlusher {
     max_flusher: BlockfileFlusher,
     offset_value_flusher: BlockfileFlusher,
@@ -66,8 +76,17 @@ impl SparseFlusher {
         self.offset_value_flusher.flush::<u32, f32>().await?;
         Ok(())
     }
+
+    pub fn max_id(&self) -> Uuid {
+        self.max_flusher.id()
+    }
+
+    pub fn offset_value_id(&self) -> Uuid {
+        self.offset_value_flusher.id()
+    }
 }
 
+#[derive(Clone)]
 pub struct SparseWriter<'me> {
     block_size: u32,
     delta: Arc<Mutex<SparseDelta>>,
