@@ -443,6 +443,9 @@ class ClientAPI(BaseAPI, ABC):
         """Get a collection by Chroma Resource Name.
         Args:
             crn: The Chroma Resource Name of the collection to get
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
+            data_loader: Optional function to use to load records (documents, images, etc.)
 
         Returns:
             Collection: The collection
@@ -593,7 +596,7 @@ class AdminAPI(ABC):
         """Update a tenant. Raises an error if the tenant does not exist.
 
         Args:
-            tenant: The name of the tenant to update.
+            name: The name of the tenant to update.
             resource_name: The new resource name for the tenant.
         """
         pass

@@ -579,7 +579,7 @@ class AsyncAdminAPI(ABC):
         """Update a tenant. Raises an error if the tenant does not exist.
 
         Args:
-            tenant: The name of the tenant to update.
+            name: The name of the tenant to update.
             resource_name: The new resource name for the tenant.
         """
         pass
