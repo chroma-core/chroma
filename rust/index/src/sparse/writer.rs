@@ -55,6 +55,7 @@ impl SparseFlusher {
 #[derive(Clone)]
 pub struct SparseWriter<'me> {
     block_size: u32,
+    #[allow(clippy::type_complexity)]
     delta: Arc<Mutex<HashMap<u32, HashMap<u32, Option<f32>>>>>,
     max_writer: BlockfileWriter,
     offset_value_writer: BlockfileWriter,
