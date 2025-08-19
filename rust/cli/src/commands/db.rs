@@ -42,7 +42,7 @@ pub enum Language {
 impl Language {
     fn get_connection(&self, tenant_id: String, db_name: String, api_key: String) -> String {
         match self {
-            Language::Python => get_python_connection(db_name, api_key),
+            Language::Python => get_python_connection(tenant_id, db_name, api_key),
             Language::JavaScript => get_js_connection(tenant_id, db_name, api_key),
             Language::TypeScript => get_js_connection(tenant_id, db_name, api_key),
         }
@@ -217,15 +217,16 @@ fn db_delete_cancelled() -> String {
     )
 }
 
-fn get_python_connection(db_name: String, api_key: String) -> String {
+fn get_python_connection(tenant_id: String, db_name: String, api_key: String) -> String {
     format!(
         "Python connection snippet:
     import chromadb
     client = chromadb.CloudClient(
-        database='{}',
-        api_key='{}'
+        api_key='{}',
+        tenant='{}',
+        database='{}'
     )",
-        db_name, api_key
+        api_key, tenant_id, db_name
     )
 }
 
