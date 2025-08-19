@@ -36,8 +36,8 @@ RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   if [ "$ENABLE_AVX512" = "1" ]; then \
     export CXXFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
     export CFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
-    export RUSTFLAGS="-C target-feature=+avx512f,+avx512dq,+avx512bw,+avx512vl,+fma" && \
-    echo "Building with AVX512 optimizations for hnswlib and Rust"; \
+    export RUSTFLAGS="-C target-feature=+avx,+fma" && \
+    echo "Building with AVX512 optimizations for hnswlib and AVX for Rust"; \
   else \
     echo "Building without AVX512 optimizations"; \
   fi && \
