@@ -14,40 +14,6 @@ use crate::sparse::{
     types::{encode_u32, DIMENSION_PREFIX},
 };
 
-#[derive(Debug, Default, Clone)]
-pub struct SparseDelta {
-    dimension_value_updates: HashMap<u32, HashMap<u32, Option<f32>>>,
-}
-
-impl SparseDelta {
-    pub fn create(&mut self, offset: u32, sparse_vector: impl IntoIterator<Item = (u32, f32)>) {
-        for (dimension_id, value) in sparse_vector {
-            self.dimension_value_updates
-                .entry(dimension_id)
-                .or_default()
-                .insert(offset, Some(value));
-        }
-    }
-
-    pub fn delete(&mut self, offset: u32, sparse_indices: impl IntoIterator<Item = u32>) {
-        for dimension_id in sparse_indices {
-            self.dimension_value_updates
-                .entry(dimension_id)
-                .or_default()
-                .insert(offset, None);
-        }
-    }
-
-    fn merge(&mut self, other: Self) {
-        for (dimension_id, updates) in other.dimension_value_updates {
-            self.dimension_value_updates
-                .entry(dimension_id)
-                .or_default()
-                .extend(updates);
-        }
-    }
-}
-
 #[derive(Debug, Error)]
 pub enum SparseWriterError {
     #[error(transparent)]
@@ -89,7 +55,7 @@ impl SparseFlusher {
 #[derive(Clone)]
 pub struct SparseWriter<'me> {
     block_size: u32,
-    delta: Arc<Mutex<SparseDelta>>,
+    delta: Arc<Mutex<HashMap<u32, HashMap<u32, Option<f32>>>>>,
     max_writer: BlockfileWriter,
     offset_value_writer: BlockfileWriter,
     reader: Option<SparseReader<'me>>,
@@ -111,8 +77,29 @@ impl<'me> SparseWriter<'me> {
         }
     }
 
+    pub async fn set(&self, offset: u32, sparse_vector: impl IntoIterator<Item = (u32, f32)>) {
+        let mut delta_guard = self.delta.lock().await;
+        for (dimension_id, value) in sparse_vector {
+            delta_guard
+                .entry(dimension_id)
+                .or_default()
+                .insert(offset, Some(value));
+        }
+    }
+
+    pub async fn delete(&self, offset: u32, sparse_indices: impl IntoIterator<Item = u32>) {
+        let mut delta_guard = self.delta.lock().await;
+        for dimension_id in sparse_indices {
+            delta_guard
+                .entry(dimension_id)
+                .or_default()
+                .insert(offset, None);
+        }
+    }
+
     pub async fn commit(self) -> Result<SparseFlusher, SparseWriterError> {
-        for (&dimension_id, updates) in &self.delta.lock().await.dimension_value_updates {
+        let mut delta_guard = self.delta.lock().await;
+        for (dimension_id, updates) in delta_guard.drain() {
             let encoded_dimension = encode_u32(dimension_id);
             let (commited_blocks, mut offset_values) = match self.reader.as_ref() {
                 Some(reader) => {
@@ -130,7 +117,7 @@ impl<'me> SparseWriter<'me> {
                     .delete::<_, f32>(&encoded_dimension, offset)
                     .await?;
             }
-            for (&offset, &update) in updates {
+            for (offset, update) in updates {
                 match update {
                     Some(value) => {
                         self.offset_value_writer
@@ -174,9 +161,5 @@ impl<'me> SparseWriter<'me> {
             max_flusher: self.max_writer.commit::<u32, f32>().await?,
             offset_value_flusher: self.offset_value_writer.commit::<u32, f32>().await?,
         })
-    }
-
-    pub async fn write(&self, delta: SparseDelta) {
-        self.delta.lock().await.merge(delta);
     }
 }
