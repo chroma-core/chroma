@@ -201,6 +201,11 @@ class SegmentAPI(ServerAPI):
     def get_tenant(self, name: str) -> t.Tenant:
         return self._sysdb.get_tenant(name=name)
 
+    @trace_method("SegmentAPI.update_tenant", OpenTelemetryGranularity.OPERATION)
+    @override
+    def update_tenant(self, name: str, resource_name: str) -> None:
+        self._sysdb.update_tenant(name=name, resource_name=resource_name)
+
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings.
