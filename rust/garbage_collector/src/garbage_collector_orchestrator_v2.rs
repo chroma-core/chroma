@@ -911,7 +911,6 @@ impl GarbageCollectorOrchestrator {
                         collection_id: collection_id.to_string(),
                         versions,
                     },
-                    unused_s3_files: output.deleted_files.clone(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
