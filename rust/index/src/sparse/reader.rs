@@ -164,16 +164,14 @@ impl<'me> SparseReader<'me> {
             let mut dimension_iterator = self.get_offset_values(encoded_dimension_id, ..).await?;
             let Some((offset, value)) = dimension_iterator
                 .by_ref()
-                .skip_while(|&(offset, _)| !mask.contains(offset))
-                .next()
+                .find(|&(offset, _)| mask.contains(offset))
             else {
                 continue;
             };
             let mut block_iterator = self.get_blocks(encoded_dimension_id).await?.peekable();
             let Some((block_next_offset, block_max)) = block_iterator
                 .by_ref()
-                .skip_while(|&(block_next_offset, _)| block_next_offset <= offset)
-                .next()
+                .find(|&(block_next_offset, _)| offset < block_next_offset)
             else {
                 continue;
             };
@@ -228,8 +226,7 @@ impl<'me> SparseReader<'me> {
                         let (block_next_offset, block_max) = cursor
                             .block_iterator
                             .by_ref()
-                            .skip_while(|&(block_next_offset, _)| block_next_offset <= pivot_offset)
-                            .next()?;
+                            .find(|&(block_next_offset, _)| pivot_offset < block_next_offset)?;
                         cursor.block_next_offset = block_next_offset;
                         cursor.block_upper_bound = cursor.query * block_max;
                     }
@@ -292,8 +289,7 @@ impl<'me> SparseReader<'me> {
                     if let Some((offset, value)) = cursor
                         .dimension_iterator
                         .by_ref()
-                        .skip_while(|&(offset, _)| offset < offset_cutoff || !mask.contains(offset))
-                        .next()
+                        .find(|&(offset, _)| offset_cutoff <= offset && mask.contains(offset))
                     {
                         cursor.offset = offset;
                         cursor.value = value;
