@@ -42,6 +42,9 @@ impl OperationRecord {
                             UpdateMetadataValue::Int(i) => size_of_val(i),
                             UpdateMetadataValue::Float(f) => size_of_val(f),
                             UpdateMetadataValue::Str(s) => s.len(),
+                            UpdateMetadataValue::SparseVector(v) => {
+                                v.iter().map(|(k, v)| size_of_val(k) + size_of_val(v)).sum()
+                            }
                             UpdateMetadataValue::None => 0,
                         }
                 })
