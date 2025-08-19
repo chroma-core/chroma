@@ -290,6 +290,44 @@ export type GetUserIdentityResponses = {
 
 export type GetUserIdentityResponse2 = GetUserIdentityResponses[keyof GetUserIdentityResponses];
 
+export type GetCollectionByCrnData = {
+    body?: never;
+    path: {
+        /**
+         * Chroma Resource Name
+         */
+        crn: string;
+    };
+    query?: never;
+    url: '/api/v2/collections/{crn}';
+};
+
+export type GetCollectionByCrnErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type GetCollectionByCrnError = GetCollectionByCrnErrors[keyof GetCollectionByCrnErrors];
+
+export type GetCollectionByCrnResponses = {
+    /**
+     * Collection found
+     */
+    200: Collection;
+};
+
+export type GetCollectionByCrnResponse = GetCollectionByCrnResponses[keyof GetCollectionByCrnResponses];
+
 export type HealthcheckData = {
     body?: never;
     path?: never;

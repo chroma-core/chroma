@@ -2182,6 +2182,7 @@ impl Modify for ChromaTokenSecurityAddon {
         list_collections,
         count_collections,
         get_collection,
+        get_collection_by_crn,
         update_collection,
         delete_collection,
         fork_collection,
