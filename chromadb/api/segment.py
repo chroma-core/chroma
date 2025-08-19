@@ -320,6 +320,14 @@ class SegmentAPI(ServerAPI):
         else:
             raise NotFoundError(f"Collection {name} does not exist.")
 
+    @trace_method(
+        "SegmentAPI.get_collection_by_crn", OpenTelemetryGranularity.OPERATION
+    )
+    @override
+    @rate_limit
+    def get_collection_by_crn(self, crn: str) -> CollectionModel:
+        return self._sysdb.get_collection_by_crn(crn=crn)
+
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override
     @rate_limit
