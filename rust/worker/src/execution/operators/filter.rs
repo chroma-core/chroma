@@ -336,6 +336,9 @@ impl MetadataProvider<'_> {
                             .as_ref(),
                         &s.as_str().into(),
                     ),
+                    MetadataValue::SparseVector(_) => {
+                        unimplemented!("Comparison with sparse vector is not supported")
+                    }
                 };
                 if let Some(reader) = metadata_index_reader {
                     match op {

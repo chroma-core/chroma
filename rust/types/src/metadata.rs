@@ -16,7 +16,7 @@ use pyo3::{types::PyAnyMethods, FromPyObject, IntoPyObject};
 #[cfg(feature = "testing")]
 use proptest::prelude::*;
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, ToSchema)]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[serde(untagged)]
 pub enum UpdateMetadataValue {
@@ -30,6 +30,7 @@ pub enum UpdateMetadataValue {
     )]
     Float(f64),
     Str(String),
+    SparseVector(HashMap<u32, f32>),
     None,
 }
 
@@ -81,6 +82,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
                 Ok(UpdateMetadataValue::Str(value.clone()))
             }
+            Some(chroma_proto::update_metadata_value::Value::SparseVectorValue(value)) => Ok(
+                UpdateMetadataValue::SparseVector(value.offset_value.clone()),
+            ),
             // Used to communicate that the user wants to delete this key.
             None => Ok(UpdateMetadataValue::None),
         }
@@ -106,6 +110,13 @@ impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
                     value,
                 )),
             },
+            UpdateMetadataValue::SparseVector(offset_value) => chroma_proto::UpdateMetadataValue {
+                value: Some(
+                    chroma_proto::update_metadata_value::Value::SparseVectorValue(
+                        chroma_proto::SparseVector { offset_value },
+                    ),
+                ),
+            },
             UpdateMetadataValue::None => chroma_proto::UpdateMetadataValue { value: None },
         }
     }
@@ -120,6 +131,9 @@ impl TryFrom<&UpdateMetadataValue> for MetadataValue {
             UpdateMetadataValue::Int(value) => Ok(MetadataValue::Int(*value)),
             UpdateMetadataValue::Float(value) => Ok(MetadataValue::Float(*value)),
             UpdateMetadataValue::Str(value) => Ok(MetadataValue::Str(value.clone())),
+            UpdateMetadataValue::SparseVector(value) => {
+                Ok(MetadataValue::SparseVector(value.clone()))
+            }
             UpdateMetadataValue::None => Err(MetadataValueConversionError::InvalidValue),
         }
     }
@@ -131,7 +145,7 @@ MetadataValue
 ===========================================
 */
 
-#[derive(Clone, Debug, Deserialize, PartialEq, PartialOrd, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
 #[cfg_attr(feature = "pyo3", derive(FromPyObject, IntoPyObject))]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 #[serde(untagged)]
@@ -146,16 +160,31 @@ pub enum MetadataValue {
     )]
     Float(f64),
     Str(String),
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    SparseVector(HashMap<u32, f32>),
 }
 
 impl Eq for MetadataValue {}
 
 /// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
-/// We are not planning to support `f64::NaN`s anyway, so the `PartialOrd` and `Ord` should be identical
 #[allow(clippy::derive_ord_xor_partial_ord)]
 impl Ord for MetadataValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap_or(Ordering::Equal)
+        match (self, other) {
+            (MetadataValue::Bool(left), MetadataValue::Bool(right)) => left.cmp(right),
+            (MetadataValue::Int(left), MetadataValue::Int(right)) => left.cmp(right),
+            (MetadataValue::Float(left), MetadataValue::Float(right)) => left.total_cmp(right),
+            (MetadataValue::Str(left), MetadataValue::Str(right)) => left.cmp(right),
+            // There is no ordering on sparse vector
+            (MetadataValue::SparseVector(_), MetadataValue::SparseVector(_)) => Ordering::Equal,
+            _ => panic!("Differen types of metadata are not comparable"),
+        }
+    }
+}
+
+impl PartialOrd for MetadataValue {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -210,6 +239,7 @@ impl From<MetadataValue> for UpdateMetadataValue {
             MetadataValue::Int(v) => UpdateMetadataValue::Int(v),
             MetadataValue::Float(v) => UpdateMetadataValue::Float(v),
             MetadataValue::Str(v) => UpdateMetadataValue::Str(v),
+            MetadataValue::SparseVector(v) => UpdateMetadataValue::SparseVector(v),
         }
     }
 }
@@ -225,6 +255,19 @@ impl From<MetadataValue> for Value {
                 Number::from_f64(val).expect("Inf and NaN should not be present in MetadataValue"),
             ),
             MetadataValue::Str(val) => Self::String(val),
+            MetadataValue::SparseVector(val) => Self::Object(
+                val.into_iter()
+                    .map(|(k, v)| {
+                        (
+                            k.to_string(),
+                            Value::Number(
+                                Number::from_f64(v as f64)
+                                    .expect("Float number should not be NaN or infinite"),
+                            ),
+                        )
+                    })
+                    .collect(),
+            ),
         }
     }
 }
@@ -283,6 +326,15 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
             },
             MetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
+            },
+            MetadataValue::SparseVector(value) => chroma_proto::UpdateMetadataValue {
+                value: Some(
+                    chroma_proto::update_metadata_value::Value::SparseVectorValue(
+                        chroma_proto::SparseVector {
+                            offset_value: value,
+                        },
+                    ),
+                ),
             },
         }
     }
@@ -396,6 +448,9 @@ pub fn logical_size_of_metadata(metadata: &Metadata) -> usize {
                     MetadataValue::Int(i) => size_of_val(i),
                     MetadataValue::Float(f) => size_of_val(f),
                     MetadataValue::Str(s) => s.len(),
+                    MetadataValue::SparseVector(v) => {
+                        v.iter().map(|(k, v)| size_of_val(k) + size_of_val(v)).sum()
+                    }
                 }
         })
         .sum()
@@ -825,14 +880,15 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
             MetadataComparison::Primitive(primitive_operator, metadata_value) => match metadata_value {
                 MetadataValue::Bool(value) => chroma_proto::direct_comparison::Comparison::SingleBoolOperand(chroma_proto::SingleBoolComparison { value, comparator: chroma_proto::GenericComparator::try_from(primitive_operator)? as i32 }),
                 MetadataValue::Int(value) => chroma_proto::direct_comparison::Comparison::SingleIntOperand(chroma_proto::SingleIntComparison { value, comparator: Some(match primitive_operator {
-                    generic_operator @ PrimitiveOperator::Equal | generic_operator @ PrimitiveOperator::NotEqual => chroma_proto::single_int_comparison::Comparator::GenericComparator(chroma_proto::GenericComparator::try_from(generic_operator)? as i32),
-                    numeric => chroma_proto::single_int_comparison::Comparator::NumberComparator(chroma_proto::NumberComparator::try_from(numeric)? as i32) }),
-                }),
+                                generic_operator @ PrimitiveOperator::Equal | generic_operator @ PrimitiveOperator::NotEqual => chroma_proto::single_int_comparison::Comparator::GenericComparator(chroma_proto::GenericComparator::try_from(generic_operator)? as i32),
+                                numeric => chroma_proto::single_int_comparison::Comparator::NumberComparator(chroma_proto::NumberComparator::try_from(numeric)? as i32) }),
+                            }),
                 MetadataValue::Float(value) => chroma_proto::direct_comparison::Comparison::SingleDoubleOperand(chroma_proto::SingleDoubleComparison { value, comparator: Some(match primitive_operator {
-                    generic_operator @ PrimitiveOperator::Equal | generic_operator @ PrimitiveOperator::NotEqual => chroma_proto::single_double_comparison::Comparator::GenericComparator(chroma_proto::GenericComparator::try_from(generic_operator)? as i32),
-                    numeric => chroma_proto::single_double_comparison::Comparator::NumberComparator(chroma_proto::NumberComparator::try_from(numeric)? as i32) }),
-                }),
+                                generic_operator @ PrimitiveOperator::Equal | generic_operator @ PrimitiveOperator::NotEqual => chroma_proto::single_double_comparison::Comparator::GenericComparator(chroma_proto::GenericComparator::try_from(generic_operator)? as i32),
+                                numeric => chroma_proto::single_double_comparison::Comparator::NumberComparator(chroma_proto::NumberComparator::try_from(numeric)? as i32) }),
+                            }),
                 MetadataValue::Str(value) => chroma_proto::direct_comparison::Comparison::SingleStringOperand(chroma_proto::SingleStringComparison { value, comparator: chroma_proto::GenericComparator::try_from(primitive_operator)? as i32 }),
+                MetadataValue::SparseVector(_) => return Err(WhereConversionError::Cause("Comparison with sparse vector is not supported".to_string())),
             },
             MetadataComparison::Set(set_operator, metadata_set_value) => match metadata_set_value {
                 MetadataSetValue::Bool(vec) => chroma_proto::direct_comparison::Comparison::BoolListOperand(chroma_proto::BoolListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
@@ -945,17 +1001,6 @@ pub enum MetadataSetValue {
     Int(Vec<i64>),
     Float(Vec<f64>),
     Str(Vec<String>),
-}
-
-impl From<MetadataValue> for MetadataSetValue {
-    fn from(value: MetadataValue) -> Self {
-        match value {
-            MetadataValue::Bool(value) => Self::Bool(vec![value]),
-            MetadataValue::Int(value) => Self::Int(vec![value]),
-            MetadataValue::Float(value) => Self::Float(vec![value]),
-            MetadataValue::Str(value) => Self::Str(vec![value]),
-        }
-    }
 }
 
 // TODO: Deprecate where_document
