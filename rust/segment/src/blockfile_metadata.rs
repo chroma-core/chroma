@@ -15,11 +15,17 @@ use chroma_index::fulltext::types::{
 use chroma_index::metadata::types::{
     MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
 };
+use chroma_index::sparse::reader::SparseReader;
+use chroma_index::sparse::writer::SparseFlusher;
+use chroma_index::sparse::writer::SparseWriter;
 use chroma_types::DatabaseUuid;
 use chroma_types::SegmentType;
 use chroma_types::BOOL_METADATA;
+use chroma_types::ENABLE_SPARSE_INDEX;
 use chroma_types::F32_METADATA;
 use chroma_types::FULL_TEXT_PLS;
+use chroma_types::SPARSE_MAX;
+use chroma_types::SPARSE_OFFSET_VALUE;
 use chroma_types::STRING_METADATA;
 use chroma_types::U32_METADATA;
 use chroma_types::{MaterializedLogOperation, MetadataValue, Segment, SegmentUuid};
@@ -37,6 +43,7 @@ pub struct MetadataSegmentWriter<'me> {
     pub(crate) bool_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) f32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
     pub(crate) u32_metadata_index_writer: Option<MetadataIndexWriter<'me>>,
+    pub(crate) sparse_index_writer: Option<SparseWriter<'me>>,
     pub id: SegmentUuid,
 }
 
@@ -300,7 +307,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
                 None => match blockfile_provider
-                    .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path))
+                    .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
                     .await
                 {
                     Ok(writer) => (writer, None),
@@ -310,12 +317,91 @@ impl<'me> MetadataSegmentWriter<'me> {
         let u32_metadata_index_writer =
             MetadataIndexWriter::new_u32(u32_metadata_writer, u32_metadata_index_reader);
 
+        let sparse_index_writer = if segment.metadata.as_ref().is_some_and(|meta| {
+            meta.get(ENABLE_SPARSE_INDEX)
+                .is_some_and(|value| matches!(value, MetadataValue::Bool(true)))
+        }) {
+            let max_file_path = segment
+                .file_path
+                .get(SPARSE_MAX)
+                .and_then(|paths| paths.first());
+            let offset_value_file_path = segment
+                .file_path
+                .get(SPARSE_OFFSET_VALUE)
+                .and_then(|paths| paths.first());
+            if let (Some(max_file_path), Some(offset_value_file_path)) =
+                (max_file_path, offset_value_file_path)
+            {
+                let (max_prefix, max_uuid) = Segment::extract_prefix_and_id(&max_file_path)
+                    .map_err(|_| MetadataSegmentError::UuidParseError(max_file_path.to_string()))?;
+                let max_reader = blockfile_provider
+                    .read::<u32, f32>(BlockfileReaderOptions::new(
+                        max_uuid,
+                        max_prefix.to_string(),
+                    ))
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+                let max_writer = blockfile_provider
+                    .write::<u32, f32>(
+                        BlockfileWriterOptions::new(max_prefix.to_string()).fork(max_uuid),
+                    )
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+                let (offset_value_prefix, offset_value_uuid) =
+                    Segment::extract_prefix_and_id(&offset_value_file_path).map_err(|_| {
+                        MetadataSegmentError::UuidParseError(offset_value_file_path.to_string())
+                    })?;
+                let offset_value_reader = blockfile_provider
+                    .read::<u32, f32>(BlockfileReaderOptions::new(
+                        offset_value_uuid,
+                        offset_value_prefix.to_string(),
+                    ))
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+                let offset_value_writer = blockfile_provider
+                    .write::<u32, f32>(
+                        BlockfileWriterOptions::new(offset_value_prefix.to_string())
+                            .fork(offset_value_uuid),
+                    )
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+                Some(SparseWriter::new(
+                    128,
+                    max_writer,
+                    offset_value_writer,
+                    Some(SparseReader::new(max_reader, offset_value_reader)),
+                ))
+            } else {
+                let max_writer = blockfile_provider
+                    .write::<u32, f32>(
+                        BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+                    )
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+                let offset_value_writer = blockfile_provider
+                    .write::<u32, f32>(
+                        BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+                    )
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+                Some(SparseWriter::new(
+                    128,
+                    max_writer,
+                    offset_value_writer,
+                    None,
+                ))
+            }
+        } else {
+            None
+        };
+
         Ok(MetadataSegmentWriter {
             full_text_index_writer: Some(full_text_index_writer),
             string_metadata_index_writer: Some(string_metadata_index_writer),
             bool_metadata_index_writer: Some(bool_metadata_index_writer),
             f32_metadata_index_writer: Some(f32_metadata_index_writer),
             u32_metadata_index_writer: Some(u32_metadata_index_writer),
+            sparse_index_writer,
             id: segment.id,
         })
     }
@@ -744,6 +830,17 @@ impl<'me> MetadataSegmentWriter<'me> {
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
+        let sparse_index_flusher = if let Some(sparse_index_writer) = self.sparse_index_writer {
+            Some(
+                sparse_index_writer
+                    .commit()
+                    .await
+                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?,
+            )
+        } else {
+            None
+        };
+
         Ok(MetadataSegmentFlusher {
             id: self.id,
             full_text_index_flusher: full_text_flusher,
@@ -751,6 +848,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             bool_metadata_index_flusher: bool_metadata_flusher,
             f32_metadata_index_flusher: f32_metadata_flusher,
             u32_metadata_index_flusher: u32_metadata_flusher,
+            sparse_index_flusher,
         })
     }
 }
@@ -762,6 +860,7 @@ pub struct MetadataSegmentFlusher {
     pub(crate) bool_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) f32_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) u32_metadata_index_flusher: MetadataIndexFlusher,
+    pub(crate) sparse_index_flusher: Option<SparseFlusher>,
 }
 
 impl Debug for MetadataSegmentFlusher {
@@ -843,6 +942,26 @@ impl MetadataSegmentFlusher {
             )],
         );
 
+        if let Some(sparse_flusher) = self.sparse_index_flusher {
+            let max_id = sparse_flusher.max_id();
+            let offset_value_id = sparse_flusher.offset_value_id();
+            sparse_flusher
+                .flush()
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+            flushed.insert(
+                SPARSE_MAX.to_string(),
+                vec![ChromaSegmentFlusher::flush_key(&prefix_path, &max_id)],
+            );
+            flushed.insert(
+                SPARSE_OFFSET_VALUE.to_string(),
+                vec![ChromaSegmentFlusher::flush_key(
+                    &prefix_path,
+                    &offset_value_id,
+                )],
+            );
+        }
+
         Ok(flushed)
     }
 }
@@ -853,6 +972,7 @@ pub struct MetadataSegmentReader<'me> {
     pub bool_metadata_index_reader: Option<MetadataIndexReader<'me>>,
     pub f32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
     pub u32_metadata_index_reader: Option<MetadataIndexReader<'me>>,
+    pub sparse_index_reader: Option<SparseReader<'me>>,
 }
 
 impl MetadataSegmentReader<'_> {
@@ -902,18 +1022,27 @@ impl MetadataSegmentReader<'_> {
         let u32_metadata_future =
             Self::load_index_reader(segment, U32_METADATA, blockfile_provider);
 
+        let sparse_max_future = Self::load_index_reader(segment, SPARSE_MAX, blockfile_provider);
+
+        let sparse_offset_value_future =
+            Self::load_index_reader(segment, SPARSE_OFFSET_VALUE, blockfile_provider);
+
         let (
             pls_reader,
             string_metadata_reader,
             bool_metadata_reader,
             f32_metadata_reader,
             u32_metadata_reader,
+            sparse_max_reader,
+            sparse_offset_value_reader,
         ) = tokio::join!(
             pls_future,
             string_metadata_future,
             bool_metadata_future,
             f32_metadata_future,
-            u32_metadata_future
+            u32_metadata_future,
+            sparse_max_future,
+            sparse_offset_value_future,
         );
 
         // Handle results and create index readers
@@ -936,12 +1065,25 @@ impl MetadataSegmentReader<'_> {
         let f32_metadata_reader = f32_metadata_reader?;
         let f32_metadata_index_reader = f32_metadata_reader.map(MetadataIndexReader::new_f32);
 
+        let sparse_index_reader =
+            if let (Some(sparse_max_reader), Some(sparse_offset_value_reader)) =
+                (sparse_max_reader?, sparse_offset_value_reader?)
+            {
+                Some(SparseReader::new(
+                    sparse_max_reader,
+                    sparse_offset_value_reader,
+                ))
+            } else {
+                None
+            };
+
         Ok(MetadataSegmentReader {
             full_text_index_reader,
             string_metadata_index_reader,
             bool_metadata_index_reader,
             f32_metadata_index_reader,
             u32_metadata_index_reader,
+            sparse_index_reader,
         })
     }
 }
