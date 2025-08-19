@@ -182,6 +182,7 @@ fn calculate_recall<'a>(
                 emb,
                 spann_reader.hnsw_index.clone(),
                 probe_nbr,
+                None,
                 rng_epsilon,
                 rng_factor,
                 distance_function.clone(),
