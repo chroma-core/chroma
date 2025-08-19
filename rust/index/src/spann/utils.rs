@@ -521,10 +521,12 @@ impl ChromaError for RngQueryError {
 }
 
 // Assumes that query is already normalized.
+#[allow(clippy::too_many_arguments)]
 pub async fn rng_query(
     normalized_query: &[f32],
     hnsw_index: HnswIndexRef,
     k: usize,
+    replica_count: Option<usize>,
     rng_epsilon: f32,
     rng_factor: f32,
     distance_function: DistanceFunction,
@@ -577,6 +579,11 @@ pub async fn rng_query(
         .iter()
         .zip(nearby_distances.iter().zip(embeddings))
     {
+        if let Some(replica_count) = replica_count {
+            if res_ids.len() >= replica_count {
+                break;
+            }
+        }
         let mut rng_accepted = true;
         for nbr_embedding in res_embeddings.iter() {
             let dist = distance_function.distance(&embedding[..], &nbr_embedding[..]);

@@ -21,6 +21,10 @@ fn default_write_nprobe() -> u32 {
     32
 }
 
+fn default_nreplica_count() -> u32 {
+    8
+}
+
 fn default_write_rng_factor() -> f32 {
     1.0
 }
@@ -101,6 +105,9 @@ pub struct InternalSpannConfiguration {
     #[serde(default = "default_write_nprobe")]
     #[validate(range(max = 128))]
     pub write_nprobe: u32,
+    #[serde(default = "default_nreplica_count")]
+    #[validate(range(max = 8))]
+    pub nreplica_count: u32,
     #[serde(default = "default_write_rng_factor")]
     pub write_rng_factor: f32,
     #[serde(default = "default_write_rng_epsilon")]
@@ -203,4 +210,303 @@ impl Default for SpannConfiguration {
 pub struct UpdateSpannConfiguration {
     pub search_nprobe: Option<u32>,
     pub ef_search: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spann_configuration_to_internal_spann_configuration() {
+        let spann_config = SpannConfiguration {
+            search_nprobe: Some(100),
+            write_nprobe: Some(50),
+            space: Some(HnswSpace::Cosine),
+            ef_construction: Some(150),
+            ef_search: Some(180),
+            max_neighbors: Some(32),
+            reassign_neighbor_count: Some(48),
+            split_threshold: Some(75),
+            merge_threshold: Some(50),
+        };
+
+        let internal_config: InternalSpannConfiguration = spann_config.into();
+
+        assert_eq!(internal_config.search_nprobe, 100);
+        assert_eq!(internal_config.write_nprobe, 50);
+        assert_eq!(internal_config.space, HnswSpace::Cosine);
+        assert_eq!(internal_config.ef_construction, 150);
+        assert_eq!(internal_config.ef_search, 180);
+        assert_eq!(internal_config.max_neighbors, 32);
+        assert_eq!(internal_config.reassign_neighbor_count, 48);
+        assert_eq!(internal_config.split_threshold, 75);
+        assert_eq!(internal_config.merge_threshold, 50);
+        assert_eq!(
+            internal_config.search_rng_factor,
+            default_search_rng_factor()
+        );
+        assert_eq!(
+            internal_config.search_rng_epsilon,
+            default_search_rng_epsilon()
+        );
+        assert_eq!(internal_config.nreplica_count, default_nreplica_count());
+        assert_eq!(internal_config.write_rng_factor, default_write_rng_factor());
+        assert_eq!(
+            internal_config.write_rng_epsilon,
+            default_write_rng_epsilon()
+        );
+        assert_eq!(
+            internal_config.num_samples_kmeans,
+            default_num_samples_kmeans()
+        );
+        assert_eq!(internal_config.initial_lambda, default_initial_lambda());
+        assert_eq!(
+            internal_config.num_centers_to_merge_to,
+            default_num_centers_to_merge_to()
+        );
+    }
+
+    #[test]
+    fn test_spann_configuration_to_internal_spann_configuration_with_none_values() {
+        let spann_config = SpannConfiguration {
+            search_nprobe: None,
+            write_nprobe: None,
+            space: None,
+            ef_construction: None,
+            ef_search: None,
+            max_neighbors: None,
+            reassign_neighbor_count: None,
+            split_threshold: None,
+            merge_threshold: None,
+        };
+
+        let internal_config: InternalSpannConfiguration = spann_config.into();
+
+        assert_eq!(internal_config.search_nprobe, default_search_nprobe());
+        assert_eq!(internal_config.write_nprobe, default_write_nprobe());
+        assert_eq!(internal_config.space, default_space_spann());
+        assert_eq!(
+            internal_config.ef_construction,
+            default_construction_ef_spann()
+        );
+        assert_eq!(internal_config.ef_search, default_search_ef_spann());
+        assert_eq!(internal_config.max_neighbors, default_m_spann());
+        assert_eq!(
+            internal_config.reassign_neighbor_count,
+            default_reassign_neighbor_count()
+        );
+        assert_eq!(internal_config.split_threshold, default_split_threshold());
+        assert_eq!(internal_config.merge_threshold, default_merge_threshold());
+        assert_eq!(
+            internal_config.search_rng_factor,
+            default_search_rng_factor()
+        );
+        assert_eq!(
+            internal_config.search_rng_epsilon,
+            default_search_rng_epsilon()
+        );
+        assert_eq!(internal_config.nreplica_count, default_nreplica_count());
+        assert_eq!(internal_config.write_rng_factor, default_write_rng_factor());
+        assert_eq!(
+            internal_config.write_rng_epsilon,
+            default_write_rng_epsilon()
+        );
+        assert_eq!(
+            internal_config.num_samples_kmeans,
+            default_num_samples_kmeans()
+        );
+        assert_eq!(internal_config.initial_lambda, default_initial_lambda());
+        assert_eq!(
+            internal_config.num_centers_to_merge_to,
+            default_num_centers_to_merge_to()
+        );
+    }
+
+    #[test]
+    fn test_spann_configuration_to_internal_spann_configuration_mixed_values() {
+        let spann_config = SpannConfiguration {
+            search_nprobe: Some(80),
+            write_nprobe: None,
+            space: Some(HnswSpace::Ip),
+            ef_construction: None,
+            ef_search: Some(160),
+            max_neighbors: Some(48),
+            reassign_neighbor_count: None,
+            split_threshold: Some(100),
+            merge_threshold: None,
+        };
+
+        let internal_config: InternalSpannConfiguration = spann_config.into();
+
+        assert_eq!(internal_config.search_nprobe, 80);
+        assert_eq!(internal_config.write_nprobe, default_write_nprobe());
+        assert_eq!(internal_config.space, HnswSpace::Ip);
+        assert_eq!(
+            internal_config.ef_construction,
+            default_construction_ef_spann()
+        );
+        assert_eq!(internal_config.ef_search, 160);
+        assert_eq!(internal_config.max_neighbors, 48);
+        assert_eq!(
+            internal_config.reassign_neighbor_count,
+            default_reassign_neighbor_count()
+        );
+        assert_eq!(internal_config.split_threshold, 100);
+        assert_eq!(internal_config.merge_threshold, default_merge_threshold());
+        assert_eq!(
+            internal_config.search_rng_factor,
+            default_search_rng_factor()
+        );
+        assert_eq!(
+            internal_config.search_rng_epsilon,
+            default_search_rng_epsilon()
+        );
+        assert_eq!(internal_config.nreplica_count, default_nreplica_count());
+        assert_eq!(internal_config.write_rng_factor, default_write_rng_factor());
+        assert_eq!(
+            internal_config.write_rng_epsilon,
+            default_write_rng_epsilon()
+        );
+        assert_eq!(
+            internal_config.num_samples_kmeans,
+            default_num_samples_kmeans()
+        );
+        assert_eq!(internal_config.initial_lambda, default_initial_lambda());
+        assert_eq!(
+            internal_config.num_centers_to_merge_to,
+            default_num_centers_to_merge_to()
+        );
+    }
+
+    #[test]
+    fn test_internal_spann_configuration_default() {
+        let internal_config = InternalSpannConfiguration::default();
+
+        assert_eq!(internal_config.search_nprobe, default_search_nprobe());
+        assert_eq!(internal_config.write_nprobe, default_write_nprobe());
+        assert_eq!(internal_config.space, default_space_spann());
+        assert_eq!(
+            internal_config.ef_construction,
+            default_construction_ef_spann()
+        );
+        assert_eq!(internal_config.ef_search, default_search_ef_spann());
+        assert_eq!(internal_config.max_neighbors, default_m_spann());
+        assert_eq!(
+            internal_config.reassign_neighbor_count,
+            default_reassign_neighbor_count()
+        );
+        assert_eq!(internal_config.split_threshold, default_split_threshold());
+        assert_eq!(internal_config.merge_threshold, default_merge_threshold());
+        assert_eq!(
+            internal_config.search_rng_factor,
+            default_search_rng_factor()
+        );
+        assert_eq!(
+            internal_config.search_rng_epsilon,
+            default_search_rng_epsilon()
+        );
+        assert_eq!(internal_config.nreplica_count, default_nreplica_count());
+        assert_eq!(internal_config.write_rng_factor, default_write_rng_factor());
+        assert_eq!(
+            internal_config.write_rng_epsilon,
+            default_write_rng_epsilon()
+        );
+        assert_eq!(
+            internal_config.num_samples_kmeans,
+            default_num_samples_kmeans()
+        );
+        assert_eq!(internal_config.initial_lambda, default_initial_lambda());
+        assert_eq!(
+            internal_config.num_centers_to_merge_to,
+            default_num_centers_to_merge_to()
+        );
+    }
+
+    #[test]
+    fn test_spann_configuration_default() {
+        let spann_config = SpannConfiguration::default();
+        let internal_config: InternalSpannConfiguration = spann_config.into();
+
+        assert_eq!(internal_config.search_nprobe, default_search_nprobe());
+        assert_eq!(internal_config.write_nprobe, default_write_nprobe());
+        assert_eq!(internal_config.space, default_space_spann());
+        assert_eq!(
+            internal_config.ef_construction,
+            default_construction_ef_spann()
+        );
+        assert_eq!(internal_config.ef_search, default_search_ef_spann());
+        assert_eq!(internal_config.max_neighbors, default_m_spann());
+        assert_eq!(
+            internal_config.reassign_neighbor_count,
+            default_reassign_neighbor_count()
+        );
+        assert_eq!(internal_config.split_threshold, default_split_threshold());
+        assert_eq!(internal_config.merge_threshold, default_merge_threshold());
+        assert_eq!(
+            internal_config.search_rng_factor,
+            default_search_rng_factor()
+        );
+        assert_eq!(
+            internal_config.search_rng_epsilon,
+            default_search_rng_epsilon()
+        );
+        assert_eq!(internal_config.nreplica_count, default_nreplica_count());
+        assert_eq!(internal_config.write_rng_factor, default_write_rng_factor());
+        assert_eq!(
+            internal_config.write_rng_epsilon,
+            default_write_rng_epsilon()
+        );
+        assert_eq!(
+            internal_config.num_samples_kmeans,
+            default_num_samples_kmeans()
+        );
+        assert_eq!(internal_config.initial_lambda, default_initial_lambda());
+        assert_eq!(
+            internal_config.num_centers_to_merge_to,
+            default_num_centers_to_merge_to()
+        );
+    }
+
+    #[test]
+    fn test_deserialize_json_without_nreplica_count() {
+        let json_without_nreplica = r#"{
+            "search_nprobe": 120,
+            "search_rng_factor": 2.5,
+            "search_rng_epsilon": 15.0,
+            "write_nprobe": 60,
+            "write_rng_factor": 1.5,
+            "write_rng_epsilon": 8.0,
+            "split_threshold": 80,
+            "num_samples_kmeans": 1500,
+            "initial_lambda": 150.0,
+            "reassign_neighbor_count": 32,
+            "merge_threshold": 30,
+            "num_centers_to_merge_to": 6,
+            "space": "l2",
+            "ef_construction": 180,
+            "ef_search": 200,
+            "max_neighbors": 56
+        }"#;
+
+        let internal_config: InternalSpannConfiguration =
+            serde_json::from_str(json_without_nreplica).unwrap();
+
+        assert_eq!(internal_config.search_nprobe, 120);
+        assert_eq!(internal_config.search_rng_factor, 2.5);
+        assert_eq!(internal_config.search_rng_epsilon, 15.0);
+        assert_eq!(internal_config.write_nprobe, 60);
+        assert_eq!(internal_config.write_rng_factor, 1.5);
+        assert_eq!(internal_config.write_rng_epsilon, 8.0);
+        assert_eq!(internal_config.split_threshold, 80);
+        assert_eq!(internal_config.num_samples_kmeans, 1500);
+        assert_eq!(internal_config.initial_lambda, 150.0);
+        assert_eq!(internal_config.reassign_neighbor_count, 32);
+        assert_eq!(internal_config.merge_threshold, 30);
+        assert_eq!(internal_config.num_centers_to_merge_to, 6);
+        assert_eq!(internal_config.space, HnswSpace::L2);
+        assert_eq!(internal_config.ef_construction, 180);
+        assert_eq!(internal_config.ef_search, 200);
+        assert_eq!(internal_config.max_neighbors, 56);
+        assert_eq!(internal_config.nreplica_count, default_nreplica_count());
+    }
 }
