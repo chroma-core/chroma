@@ -1221,10 +1221,44 @@ mod tests {
         // Create v1 with no file paths
         sysdb
             .flush_compaction(
-                tenant,
+                tenant.clone(),
                 root_collection_id,
                 0,
                 0,
+                Arc::new([SegmentFlushInfo {
+                    segment_id,
+                    file_paths: HashMap::new(),
+                }]),
+                0,
+                0,
+            )
+            .await
+            .unwrap();
+
+        // Create v2 with file paths
+        sysdb
+            .flush_compaction(
+                tenant.clone(),
+                root_collection_id,
+                0,
+                1,
+                Arc::new([SegmentFlushInfo {
+                    segment_id,
+                    file_paths: HashMap::from([("foo".to_string(), vec!["bar".to_string()])]),
+                }]),
+                0,
+                0,
+            )
+            .await
+            .unwrap();
+
+        // Create v3 with no file paths
+        sysdb
+            .flush_compaction(
+                tenant,
+                root_collection_id,
+                0,
+                2,
                 Arc::new([SegmentFlushInfo {
                     segment_id,
                     file_paths: HashMap::new(),
