@@ -582,7 +582,11 @@ impl GarbageCollectorOrchestrator {
         );
 
         if output.file_paths.is_empty() {
-            // We only allow empty file paths if the version is 0 and all ancestors are also at v0. Otherwise, compaction should have flushed new file paths. This check is defensive and should never fail.
+            // We only allow empty file paths until the first version with file paths. After that version, all subsequent versions must have file paths. This check is defensive and should never fail. What we expect:
+            // v0: no data has been compacted, so there are no file paths.
+            // v1-N: a compaction has occurred, but it was a no-op (e.g. all log entries were deletions of non-existent IDs), so there are no file paths.
+            // vN+1..: a compaction has occurred with at least 1 valid log entry after materializing the logs, so there must be file paths.
+
             let graph = self
                 .graph
                 .as_ref()
@@ -675,15 +679,15 @@ impl GarbageCollectorOrchestrator {
             for res in extracted_paths.into_iter() {
                 have_paths.push(res?);
             }
-            let have_hole_in_paths = have_paths
+            let has_no_paths_at_version = have_paths
                 .into_iter()
-                .skip_while(|&x| x.0 == 0 && !x.1)
-                .any(|x| !x.1);
+                .skip_while(|&(_version, has_paths)| !has_paths)
+                .find(|(_version, has_paths)| !has_paths);
 
-            if have_hole_in_paths {
+            if let Some((version, _)) = has_no_paths_at_version {
                 return Err(GarbageCollectorError::InvariantViolation(format!(
-                    "Version {} of collection {} has no file paths, but has non-v0 ancestors. This should never happen.",
-                    output.version, output.collection_id
+                    "Version {} of collection {} has no file paths, but has ancestors with file paths. This should never happen.",
+                    version, output.collection_id
                 )));
             }
         }
@@ -1216,10 +1220,44 @@ mod tests {
         // Create v1 with no file paths
         sysdb
             .flush_compaction(
-                tenant,
+                tenant.clone(),
                 root_collection_id,
                 0,
                 0,
+                Arc::new([SegmentFlushInfo {
+                    segment_id,
+                    file_paths: HashMap::new(),
+                }]),
+                0,
+                0,
+            )
+            .await
+            .unwrap();
+
+        // Create v2 with file paths
+        sysdb
+            .flush_compaction(
+                tenant.clone(),
+                root_collection_id,
+                0,
+                1,
+                Arc::new([SegmentFlushInfo {
+                    segment_id,
+                    file_paths: HashMap::from([("foo".to_string(), vec!["bar".to_string()])]),
+                }]),
+                0,
+                0,
+            )
+            .await
+            .unwrap();
+
+        // Create v3 with no file paths
+        sysdb
+            .flush_compaction(
+                tenant,
+                root_collection_id,
+                0,
+                2,
                 Arc::new([SegmentFlushInfo {
                     segment_id,
                     file_paths: HashMap::new(),
