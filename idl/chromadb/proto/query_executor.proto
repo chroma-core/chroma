@@ -33,7 +33,6 @@ message ProjectionOperator {
     bool document = 1;
     bool embedding = 2;
     bool metadata = 3;
-    bool score = 4;
 }
 
 message KNNProjectionOperator {
@@ -90,13 +89,115 @@ message KNNBatchResult {
     uint64 pulled_log_bytes = 2;
 }
 
+
+message Order {
+    message DenseKnn {
+        Vector embedding = 1;
+        string key = 2;
+        uint32 limit = 3;
+    }
+
+    message SparseKnn {
+        SparseVector embedding = 1;
+        string key = 2;
+        uint32 limit = 3;
+    }
+
+    oneof order {
+        DenseKnn dense_knn = 1;
+        SparseKnn sparse_knn = 2;
+    }
+}
+
+
+message Score {
+    message Absolute {
+        Score score = 1;
+    }
+
+    message Constant {
+        float value = 1;
+    }
+
+    message Division {
+        Score left = 1;
+        Score right = 2;
+    }
+
+    message Enumeration {
+        Score score = 1;
+    }
+
+    message Exponentiation {
+        Score score = 1;
+    }
+
+    message Logarithm {
+        Score score = 1;
+    }
+
+    message Maximum {
+        repeated Score scores = 1;
+    }
+
+    message Metadata {
+        string key = 1;
+    }
+
+    message Minimum {
+        repeated Score scores = 1;
+    }
+
+    message Multiplication {
+        repeated Score scores = 1;
+    }
+
+    message Order {
+        Order source = 1;
+        optional float default = 2;
+    }
+    
+    message Subtraction {
+        Score left = 1;
+        Score right = 2;
+    }
+
+    message Summation {
+        repeated Score scores = 1;
+    }
+
+    oneof score {
+        Absolute absolute = 1;
+        Constant constant = 2;
+        Division division = 3;
+        Enumeration enumeration = 4;
+        Exponentiation exponentiation = 5;
+        Logarithm logarithm = 6;
+        Maximum maximum = 7;
+        Metadata metadata = 8;
+        Minimum minimum = 9;
+        Multiplication multiplication = 10;
+        Order order = 11;
+        Subtraction subtraction = 12;
+        Summation summation = 13;
+    }
+}
+
+message ScoreOperator {
+    Score score = 1;
+}
+
+message ProjectOperator {
+    repeated string fields = 1;
+}
+
 message Retrieve {
     ScanOperator scan = 1;
     FilterOperator filter = 2;
-    // ScoreOperator score = 3;
+    ScoreOperator score = 3;
     // AggregateOperator aggregate = 4;
     LimitOperator limit = 5;
-    ProjectionOperator project = 6;
+    ProjectOperator project = 6;
 }
 
 service QueryExecutor {
