@@ -124,7 +124,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
-        return self.bindings.create_database(name, tenant)  # type: ignore[no-any-return]
+        return self.bindings.create_database(name, tenant)
 
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
@@ -137,7 +137,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
-        return self.bindings.delete_database(name, tenant)  # type: ignore[no-any-return]
+        return self.bindings.delete_database(name, tenant)
 
     @override
     def list_databases(
@@ -158,28 +158,24 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def create_tenant(self, name: str) -> None:
-        return self.bindings.create_tenant(name)  # type: ignore[no-any-return]
+        return self.bindings.create_tenant(name)
 
     @override
     def get_tenant(self, name: str) -> Tenant:
         tenant = self.bindings.get_tenant(name)
         return Tenant(name=tenant.name)
 
-    @override
-    def update_tenant(self, name: str, resource_name: str) -> None:
-        return self.bindings.update_tenant(name, resource_name)  # type: ignore[no-any-return]
-
     # ////////////////////////////// Base API //////////////////////////////
 
     @override
     def heartbeat(self) -> int:
-        return self.bindings.heartbeat()  # type: ignore[no-any-return]
+        return self.bindings.heartbeat()
 
     @override
     def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int:
-        return self.bindings.count_collections(tenant, database)  # type: ignore[no-any-return]
+        return self.bindings.count_collections(tenant, database)
 
     @override
     def list_collections(
@@ -261,19 +257,6 @@ class RustBindingsAPI(ServerAPI):
         )
 
     @override
-    def get_collection_by_crn(self, crn: str) -> CollectionModel:
-        collection = self.bindings.get_collection_by_crn(crn)
-        return CollectionModel(
-            id=collection.id,
-            name=collection.name,
-            configuration_json=collection.configuration,
-            metadata=collection.metadata,
-            dimension=collection.dimension,
-            tenant=collection.tenant,
-            database=collection.database,
-        )
-
-    @override
     def get_or_create_collection(
         self,
         name: str,
@@ -334,7 +317,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> int:
-        return self.bindings.count(str(collection_id), tenant, database)  # type: ignore[no-any-return]
+        return self.bindings.count(str(collection_id), tenant, database)
 
     @override
     def _peek(
@@ -421,7 +404,7 @@ class RustBindingsAPI(ServerAPI):
             )
         )
 
-        return self.bindings.add(  # type: ignore[no-any-return]
+        return self.bindings.add(
             ids,
             str(collection_id),
             embeddings,
@@ -455,7 +438,7 @@ class RustBindingsAPI(ServerAPI):
             )
         )
 
-        return self.bindings.update(  # type: ignore[no-any-return]
+        return self.bindings.update(
             str(collection_id),
             ids,
             embeddings,
@@ -478,7 +461,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        return self.bindings.upsert(  # type: ignore[no-any-return]
+        return self.bindings.upsert(
             str(collection_id),
             ids,
             embeddings,
@@ -561,7 +544,7 @@ class RustBindingsAPI(ServerAPI):
             )
         )
 
-        return self.bindings.delete(  # type: ignore[no-any-return]
+        return self.bindings.delete(
             str(collection_id),
             ids,
             json.dumps(where) if where else None,
@@ -572,11 +555,11 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def reset(self) -> bool:
-        return self.bindings.reset()  # type: ignore[no-any-return]
+        return self.bindings.reset()
 
     @override
     def get_version(self) -> str:
-        return self.bindings.get_version()  # type: ignore[no-any-return]
+        return self.bindings.get_version()
 
     @override
     def get_settings(self) -> Settings:
@@ -584,7 +567,7 @@ class RustBindingsAPI(ServerAPI):
 
     @override
     def get_max_batch_size(self) -> int:
-        return self.bindings.get_max_batch_size()  # type: ignore[no-any-return]
+        return self.bindings.get_max_batch_size()
 
     # TODO: Remove this if it's not planned to be used
     @override

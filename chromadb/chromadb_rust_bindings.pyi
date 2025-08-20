@@ -81,7 +81,6 @@ class Bindings:
     ) -> Sequence[DatabaseFromBindings]: ...
     def create_tenant(self, name: str) -> None: ...
     def get_tenant(self, name: str) -> GetTenantResponse: ...
-    def update_tenant(self, name: str, resource_name: str) -> None: ...
     def count_collections(
         self, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
     ) -> int: ...
@@ -106,10 +105,6 @@ class Bindings:
         name: str,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> CollectionModel: ...
-    def get_collection_by_crn(
-        self,
-        crn: str,
     ) -> CollectionModel: ...
     def update_collection(
         self,
@@ -180,7 +175,7 @@ class Bindings:
         limit: Optional[int] = None,
         offset: Optional[int] = None,
         where_document: Optional[str] = None,
-        include: Include = ["metadatas", "documents"],
+        include: Include = ["metadatas", "documents"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> GetResponse: ...
@@ -191,7 +186,7 @@ class Bindings:
         n_results: int = 10,
         where: Optional[str] = None,
         where_document: Optional[str] = None,
-        include: Include = ["metadatas", "documents", "distances"],
+        include: Include = ["metadatas", "documents", "distances"],  # type: ignore[list-item]
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> QueryResponse: ...
