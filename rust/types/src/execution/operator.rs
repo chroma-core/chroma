@@ -744,12 +744,8 @@ impl TryFrom<Rank> for chroma_proto::Rank {
 pub enum Score {
     #[serde(rename = "$abs")]
     Absolute { score: Box<Score> },
-    #[serde(rename = "$const")]
-    Constant { value: f32 },
     #[serde(rename = "$div")]
     Division { left: Box<Score>, right: Box<Score> },
-    #[serde(rename = "$enum")]
-    Enumeration { score: Box<Score> },
     #[serde(rename = "$exp")]
     Exponentiation { score: Box<Score> },
     #[serde(rename = "$log")]
@@ -762,6 +758,8 @@ pub enum Score {
     Minimum { scores: Vec<Score> },
     #[serde(rename = "$mul")]
     Multiplication { scores: Vec<Score> },
+    #[serde(rename = "$ord")]
+    Ordinal { score: Box<Score> },
     #[serde(rename = "$rank")]
     Rank {
         source: Box<Rank>,
@@ -771,6 +769,8 @@ pub enum Score {
     Subtraction { left: Box<Score>, right: Box<Score> },
     #[serde(rename = "$sum")]
     Summation { scores: Vec<Score> },
+    #[serde(rename = "$val")]
+    Value { value: f32 },
 }
 
 impl Eq for Score {}
@@ -786,23 +786,12 @@ impl TryFrom<chroma_proto::Score> for Score {
                     score: Box::new(Score::try_from(*inner_score)?),
                 })
             }
-            Some(chroma_proto::score::Score::Constant(constant)) => Ok(Score::Constant {
-                value: constant.value,
-            }),
             Some(chroma_proto::score::Score::Division(div)) => {
                 let left = div.left.ok_or(QueryConversionError::field("left"))?;
                 let right = div.right.ok_or(QueryConversionError::field("right"))?;
                 Ok(Score::Division {
                     left: Box::new(Score::try_from(*left)?),
                     right: Box::new(Score::try_from(*right)?),
-                })
-            }
-            Some(chroma_proto::score::Score::Enumeration(enumeration)) => {
-                let inner_score = enumeration
-                    .score
-                    .ok_or(QueryConversionError::field("score"))?;
-                Ok(Score::Enumeration {
-                    score: Box::new(Score::try_from(*inner_score)?),
                 })
             }
             Some(chroma_proto::score::Score::Exponentiation(exp)) => {
@@ -844,6 +833,14 @@ impl TryFrom<chroma_proto::Score> for Score {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Score::Multiplication { scores })
             }
+            Some(chroma_proto::score::Score::Ordinal(ordinal)) => {
+                let inner_score = ordinal
+                    .score
+                    .ok_or(QueryConversionError::field("score"))?;
+                Ok(Score::Ordinal {
+                    score: Box::new(Score::try_from(*inner_score)?),
+                })
+            }
             Some(chroma_proto::score::Score::Rank(rank)) => {
                 let source = rank.source.ok_or(QueryConversionError::field("source"))?;
                 Ok(Score::Rank {
@@ -867,6 +864,9 @@ impl TryFrom<chroma_proto::Score> for Score {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Score::Summation { scores })
             }
+            Some(chroma_proto::score::Score::Value(value)) => Ok(Score::Value {
+                value: value.value,
+            }),
             None => Err(QueryConversionError::field("score")),
         }
     }
@@ -882,20 +882,12 @@ impl TryFrom<Score> for chroma_proto::Score {
                     score: Some(Box::new(chroma_proto::Score::try_from(*score)?)),
                 }))
             }
-            Score::Constant { value } => {
-                chroma_proto::score::Score::Constant(chroma_proto::score::Constant { value })
-            }
             Score::Division { left, right } => {
                 chroma_proto::score::Score::Division(Box::new(chroma_proto::score::Division {
                     left: Some(Box::new(chroma_proto::Score::try_from(*left)?)),
                     right: Some(Box::new(chroma_proto::Score::try_from(*right)?)),
                 }))
             }
-            Score::Enumeration { score } => chroma_proto::score::Score::Enumeration(Box::new(
-                chroma_proto::score::Enumeration {
-                    score: Some(Box::new(chroma_proto::Score::try_from(*score)?)),
-                },
-            )),
             Score::Exponentiation { score } => chroma_proto::score::Score::Exponentiation(
                 Box::new(chroma_proto::score::Exponentiation {
                     score: Some(Box::new(chroma_proto::Score::try_from(*score)?)),
@@ -936,6 +928,11 @@ impl TryFrom<Score> for chroma_proto::Score {
                     scores: proto_scores,
                 })
             }
+            Score::Ordinal { score } => chroma_proto::score::Score::Ordinal(Box::new(
+                chroma_proto::score::Ordinal {
+                    score: Some(Box::new(chroma_proto::Score::try_from(*score)?)),
+                },
+            )),
             Score::Rank { source, default } => {
                 chroma_proto::score::Score::Rank(chroma_proto::score::RankScore {
                     source: Some(chroma_proto::Rank::try_from(*source)?),
@@ -956,6 +953,9 @@ impl TryFrom<Score> for chroma_proto::Score {
                 chroma_proto::score::Score::Summation(chroma_proto::score::Summation {
                     scores: proto_scores,
                 })
+            }
+            Score::Value { value } => {
+                chroma_proto::score::Score::Value(chroma_proto::score::Value { value })
             }
         };
 
