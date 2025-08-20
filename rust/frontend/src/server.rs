@@ -7,7 +7,7 @@ use axum::{
 };
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
-    MeteredFutureExt, ReadAction, StartRequest, WriteAction,
+    ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
 };
 use chroma_system::System;
 use chroma_types::{
@@ -1783,7 +1783,6 @@ async fn collection_delete(
     let metering_context_container =
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
-            tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::GetForDelete,
@@ -1861,14 +1860,23 @@ async fn collection_count(
     ])?;
 
     // Create a metering context
-    let metering_context_container =
+    let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
-            tenant.clone(),
             database.clone(),
             collection_id.clone(),
             ReadAction::Count,
-        ));
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.clone(),
+                ReadAction::Count,
+            ),
+        )
+    };
 
     let request = CountRequest::try_new(
         tenant,
@@ -1971,14 +1979,23 @@ async fn collection_get(
     ])?;
 
     // Create a metering context
-    let metering_context_container =
+    let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
-            tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Get,
-        ));
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.0.to_string(),
+                ReadAction::Get,
+            ),
+        )
+    };
 
     metering_context_container.enter();
 
@@ -2098,14 +2115,23 @@ async fn collection_query(
     ])?;
 
     // Create a metering context
-    let metering_context_container =
+    let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
-            tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Query,
-        ));
+        ))
+    } else {
+        chroma_metering::create::<ExternalCollectionReadContext>(
+            ExternalCollectionReadContext::new(
+                requester_identity.tenant.clone(),
+                database.clone(),
+                collection_id.0.to_string(),
+                ReadAction::Query,
+            ),
+        )
+    };
 
     metering_context_container.enter();
 
