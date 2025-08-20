@@ -476,7 +476,6 @@ impl Handler<TaskResult<DeleteUnusedFilesOutput, DeleteUnusedFilesError>>
                 epoch_id,
                 sysdb_client: self.sysdb_client.clone(),
                 versions_to_delete,
-                unused_s3_files: output.deleted_files.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),

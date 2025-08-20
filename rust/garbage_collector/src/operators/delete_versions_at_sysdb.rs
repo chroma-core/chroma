@@ -5,7 +5,7 @@ use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
 use futures::stream::StreamExt;
-use std::{collections::HashSet, sync::Arc};
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Clone)]
@@ -26,14 +26,12 @@ pub struct DeleteVersionsAtSysDbInput {
     pub epoch_id: i64,
     pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
-    pub unused_s3_files: HashSet<String>,
 }
 
 #[derive(Debug)]
 pub struct DeleteVersionsAtSysDbOutput {
     pub version_file: Arc<CollectionVersionFile>,
     pub versions_to_delete: VersionListForCollection,
-    pub unused_s3_files: HashSet<String>,
 }
 
 #[derive(Error, Debug)]
@@ -138,11 +136,6 @@ impl Operator<DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOutput>
             "Starting deletion of versions from SysDB"
         );
 
-        tracing::info!(
-            unused_files_count = input.unused_s3_files.len(),
-            "Unused S3 files that will be cleaned up after version deletion"
-        );
-
         let mut sysdb = input.sysdb_client.clone();
 
         if !input.versions_to_delete.versions.is_empty() {
@@ -189,7 +182,6 @@ impl Operator<DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOutput>
         Ok(DeleteVersionsAtSysDbOutput {
             version_file: input.version_file.clone(),
             versions_to_delete: input.versions_to_delete.clone(),
-            unused_s3_files: input.unused_s3_files.clone(),
         })
     }
 }
@@ -226,7 +218,6 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
-            unused_s3_files: HashSet::new(),
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
@@ -258,7 +249,6 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
-            unused_s3_files: HashSet::new(),
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
@@ -400,7 +390,6 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
-            unused_s3_files: HashSet::new(),
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
@@ -471,7 +460,6 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
-            unused_s3_files: HashSet::new(),
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
