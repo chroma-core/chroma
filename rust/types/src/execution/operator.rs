@@ -834,9 +834,7 @@ impl TryFrom<chroma_proto::Score> for Score {
                 Ok(Score::Multiplication { scores })
             }
             Some(chroma_proto::score::Score::Ordinal(ordinal)) => {
-                let inner_score = ordinal
-                    .score
-                    .ok_or(QueryConversionError::field("score"))?;
+                let inner_score = ordinal.score.ok_or(QueryConversionError::field("score"))?;
                 Ok(Score::Ordinal {
                     score: Box::new(Score::try_from(*inner_score)?),
                 })
@@ -864,9 +862,9 @@ impl TryFrom<chroma_proto::Score> for Score {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Score::Summation { scores })
             }
-            Some(chroma_proto::score::Score::Value(value)) => Ok(Score::Value {
-                value: value.value,
-            }),
+            Some(chroma_proto::score::Score::Value(value)) => {
+                Ok(Score::Value { value: value.value })
+            }
             None => Err(QueryConversionError::field("score")),
         }
     }
@@ -928,11 +926,11 @@ impl TryFrom<Score> for chroma_proto::Score {
                     scores: proto_scores,
                 })
             }
-            Score::Ordinal { score } => chroma_proto::score::Score::Ordinal(Box::new(
-                chroma_proto::score::Ordinal {
+            Score::Ordinal { score } => {
+                chroma_proto::score::Score::Ordinal(Box::new(chroma_proto::score::Ordinal {
                     score: Some(Box::new(chroma_proto::Score::try_from(*score)?)),
-                },
-            )),
+                }))
+            }
             Score::Rank { source, default } => {
                 chroma_proto::score::Score::Rank(chroma_proto::score::RankScore {
                     source: Some(chroma_proto::Rank::try_from(*source)?),
@@ -967,5 +965,5 @@ impl TryFrom<Score> for chroma_proto::Score {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Project {
-    fields: HashSet<String>,
+    pub fields: HashSet<String>,
 }
