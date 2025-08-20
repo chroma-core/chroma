@@ -33,6 +33,7 @@ message ProjectionOperator {
     bool document = 1;
     bool embedding = 2;
     bool metadata = 3;
+    bool score = 4;
 }
 
 message KNNProjectionOperator {
@@ -87,6 +88,15 @@ message KNNResult {
 message KNNBatchResult {
     repeated KNNResult results = 1;
     uint64 pulled_log_bytes = 2;
+}
+
+message Retrieve {
+    ScanOperator scan = 1;
+    FilterOperator filter = 2;
+    // ScoreOperator score = 3;
+    // AggregateOperator aggregate = 4;
+    LimitOperator limit = 5;
+    ProjectionOperator project = 6;
 }
 
 service QueryExecutor {
