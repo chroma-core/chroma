@@ -115,17 +115,9 @@ message Score {
         Score score = 1;
     }
 
-    message Constant {
-        float value = 1;
-    }
-
     message Division {
         Score left = 1;
         Score right = 2;
-    }
-
-    message Enumeration {
-        Score score = 1;
     }
 
     message Exponentiation {
@@ -152,6 +144,10 @@ message Score {
         repeated Score scores = 1;
     }
 
+    message Ordinal {
+        Score score = 1;
+    }
+
     message RankScore {
         Rank source = 1;
         optional float default = 2;
@@ -166,20 +162,24 @@ message Score {
         repeated Score scores = 1;
     }
 
+    message Value {
+        float value = 1;
+    }
+
     oneof score {
         Absolute absolute = 1;
-        Constant constant = 2;
-        Division division = 3;
-        Enumeration enumeration = 4;
-        Exponentiation exponentiation = 5;
-        Logarithm logarithm = 6;
-        Maximum maximum = 7;
-        Metadata metadata = 8;
-        Minimum minimum = 9;
-        Multiplication multiplication = 10;
-        RankScore rank = 11;
-        Subtraction subtraction = 12;
-        Summation summation = 13;
+        Division division = 2;
+        Exponentiation exponentiation = 3;
+        Logarithm logarithm = 4;
+        Maximum maximum = 5;
+        Metadata metadata = 6;
+        Minimum minimum = 7;
+        Multiplication multiplication = 8;
+        Ordinal ordinal = 9;
+        RankScore rank = 10;
+        Subtraction subtraction = 11;
+        Summation summation = 12;
+        Value value = 13;
     }
 }
 
