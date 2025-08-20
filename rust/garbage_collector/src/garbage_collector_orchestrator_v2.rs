@@ -679,14 +679,14 @@ impl GarbageCollectorOrchestrator {
             for res in extracted_paths.into_iter() {
                 have_paths.push(res?);
             }
-            let have_hole_in_paths = have_paths
+            let has_no_paths_at_version = have_paths
                 .into_iter()
                 .skip_while(|&(_version, has_paths)| !has_paths)
                 .find(|(_version, has_paths)| !has_paths);
 
-            if let Some((version, _)) = have_hole_in_paths {
+            if let Some((version, _)) = has_no_paths_at_version {
                 return Err(GarbageCollectorError::InvariantViolation(format!(
-                    "Version {} of collection {} has no file paths, but has non-v0 ancestors. This should never happen.",
+                    "Version {} of collection {} has no file paths, but has ancestors with file paths. This should never happen.",
                     version, output.collection_id
                 )));
             }
