@@ -1,11 +1,11 @@
-use std::collections::HashMap;
-
 use super::{
     error::QueryConversionError,
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan, ScanToProtoError},
 };
-use crate::{chroma_proto, MetadataValue};
-use serde::{Deserialize, Serialize};
+use crate::{
+    chroma_proto,
+    operator::{Project, Score},
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -137,63 +137,11 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum Order {
-    #[serde(rename = "$dense-knn")]
-    DenseKnn {
-        embedding: Vec<f32>,
-        key: String,
-        limit: u32,
-    },
-    #[serde(rename = "$sparse-knn")]
-    SparseKnn {
-        embedding: HashMap<u32, f32>,
-        key: String,
-        limit: u32,
-    },
-}
-
-impl Eq for Order {}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum Score {
-    #[serde(rename = "$abs")]
-    Absolute { score: Box<Score> },
-    #[serde(rename = "$const")]
-    Constant { value: f32 },
-    #[serde(rename = "$div")]
-    Division { left: Box<Score>, right: Box<Score> },
-    #[serde(rename = "$enum")]
-    Enumeration { score: Box<Score> },
-    #[serde(rename = "$exp")]
-    Exponentiation { score: Box<Score> },
-    #[serde(rename = "$log")]
-    Logarithm { score: Box<Score> },
-    #[serde(rename = "$max")]
-    Maximum { scores: Vec<Score> },
-    #[serde(rename = "$meta")]
-    Metadata { key: String },
-    #[serde(rename = "$min")]
-    Minimum { scores: Vec<Score> },
-    #[serde(rename = "$mul")]
-    Multiplication { scores: Vec<Score> },
-    #[serde(rename = "$opt")]
-    Optional { source: Box<Order>, default: f32 },
-    #[serde(rename = "$req")]
-    Required { source: Box<Order> },
-    #[serde(rename = "$sub")]
-    Subtraction { left: Box<Score>, right: Box<Score> },
-    #[serde(rename = "$sum")]
-    Summation { scores: Vec<Score> },
-}
-
-impl Eq for Score {}
-
 #[derive(Clone, Debug)]
 pub struct Retrieve {
     pub scan: Scan,
     pub filter: Filter,
     pub score: Score,
     pub limit: Limit,
-    pub project: Projection,
+    pub project: Project,
 }
