@@ -64,10 +64,6 @@ spec:
         - name: query-service
           image: "{{ .Values.queryService.image.repository }}:{{ .Values.queryService.image.tag }}"
           imagePullPolicy: IfNotPresent
-          lifecycle:
-            preStop:
-              sleep:
-                seconds: 10
           readinessProbe:
             grpc:
               port: 50051
