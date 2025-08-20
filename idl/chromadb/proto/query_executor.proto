@@ -90,7 +90,7 @@ message KNNBatchResult {
 }
 
 
-message Order {
+message Rank {
     message DenseKnn {
         Vector embedding = 1;
         string key = 2;
@@ -103,7 +103,7 @@ message Order {
         uint32 limit = 3;
     }
 
-    oneof order {
+    oneof rank {
         DenseKnn dense_knn = 1;
         SparseKnn sparse_knn = 2;
     }
@@ -152,8 +152,8 @@ message Score {
         repeated Score scores = 1;
     }
 
-    message Order {
-        Order source = 1;
+    message RankScore {
+        Rank source = 1;
         optional float default = 2;
     }
     
@@ -177,7 +177,7 @@ message Score {
         Metadata metadata = 8;
         Minimum minimum = 9;
         Multiplication multiplication = 10;
-        Order order = 11;
+        RankScore rank = 11;
         Subtraction subtraction = 12;
         Summation summation = 13;
     }
