@@ -79,17 +79,13 @@ class Client(SharedSystemClient, ClientAPI):
             user_provided_tenant=tenant,
             user_provided_database=database,
         )
-
+        
         # this should not happen unless types are invalidated
         if maybe_tenant is None and tenant is None:
-            raise ChromaAuthError(
-                "Could not determine a tenant from the current authentication method. Please provide a tenant."
-            )
+            raise ChromaAuthError("Could not determine a tenant from the current authentication method. Please provide a tenant.")
         if maybe_database is None and database is None:
-            raise ChromaAuthError(
-                "Could not determine a database name from the current authentication method. Please provide a database name."
-            )
-
+            raise ChromaAuthError("Could not determine a database name from the current authentication method. Please provide a database name.")
+        
         if maybe_tenant:
             self.tenant = maybe_tenant
         if maybe_database:
@@ -207,30 +203,6 @@ class Client(SharedSystemClient, ClientAPI):
             tenant=self.tenant,
             database=self.database,
         )
-        persisted_ef_config = model.configuration_json.get("embedding_function")
-
-        validate_embedding_function_conflict_on_get(
-            embedding_function, persisted_ef_config
-        )
-
-        return Collection(
-            client=self._server,
-            model=model,
-            embedding_function=embedding_function,
-            data_loader=data_loader,
-        )
-
-    @override
-    def get_collection_by_crn(
-        self,
-        crn: str,
-        embedding_function: Optional[
-            EmbeddingFunction[Embeddable]
-        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
-        data_loader: Optional[DataLoader[Loadable]] = None,
-    ) -> Collection:
-        model = self._server.get_collection_by_crn(crn=crn)
-
         persisted_ef_config = model.configuration_json.get("embedding_function")
 
         validate_embedding_function_conflict_on_get(
@@ -492,7 +464,9 @@ class Client(SharedSystemClient, ClientAPI):
         self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
 
-    def _validate_tenant_database(self, tenant: str, database: str) -> None:
+    def _validate_tenant_database(
+        self, tenant: str, database: str
+    ) -> None:
         try:
             self._admin_client.get_tenant(name=tenant)
         except httpx.ConnectError:
@@ -552,10 +526,6 @@ class AdminClient(SharedSystemClient, AdminAPI):
     @override
     def get_tenant(self, name: str) -> Tenant:
         return self._server.get_tenant(name=name)
-
-    @override
-    def update_tenant(self, name: str, resource_name: str) -> None:
-        return self._server.update_tenant(name=name, resource_name=resource_name)
 
     @classmethod
     @override
