@@ -1,7 +1,7 @@
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use std::{
     cmp::{Ordering, Reverse},
-    collections::BinaryHeap,
+    collections::{BinaryHeap, HashMap, HashSet},
 };
 use thiserror::Error;
 
@@ -351,13 +351,11 @@ impl KnnMerge {
 /// - `document`: Whether to retrieve document
 /// - `embedding`: Whether to retrieve embedding
 /// - `metadata`: Whether to retrieve metadata
-/// - `score`: Whether to retrieve score
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default)]
 pub struct Projection {
     pub document: bool,
     pub embedding: bool,
     pub metadata: bool,
-    pub score: bool,
 }
 
 impl From<chroma_proto::ProjectionOperator> for Projection {
@@ -366,7 +364,6 @@ impl From<chroma_proto::ProjectionOperator> for Projection {
             document: value.document,
             embedding: value.embedding,
             metadata: value.metadata,
-            score: value.score,
         }
     }
 }
@@ -377,7 +374,6 @@ impl From<Projection> for chroma_proto::ProjectionOperator {
             document: value.document,
             embedding: value.embedding,
             metadata: value.metadata,
-            score: value.score,
         }
     }
 }
@@ -653,4 +649,133 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
                 .collect::<Result<_, _>>()?,
         })
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Order {
+    #[serde(rename = "$dense-knn")]
+    DenseKnn {
+        embedding: Vec<f32>,
+        key: String,
+        limit: u32,
+    },
+    #[serde(rename = "$sparse-knn")]
+    SparseKnn {
+        embedding: HashMap<u32, f32>,
+        key: String,
+        limit: u32,
+    },
+}
+
+impl Eq for Order {}
+
+impl TryFrom<chroma_proto::Order> for Order {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::Order) -> Result<Self, Self::Error> {
+        let order = value.order.ok_or(QueryConversionError::field("order"))?;
+        match order {
+            chroma_proto::order::Order::DenseKnn(dense_knn) => Ok(Order::DenseKnn {
+                embedding: dense_knn
+                    .embedding
+                    .ok_or(QueryConversionError::field("embedding"))?
+                    .try_into()
+                    .map(|(v, _)| v)?,
+                key: dense_knn.key,
+                limit: dense_knn.limit,
+            }),
+            chroma_proto::order::Order::SparseKnn(sparse_knn) => Ok(Order::SparseKnn {
+                embedding: sparse_knn
+                    .embedding
+                    .ok_or(QueryConversionError::field("embedding"))?
+                    .offset_value,
+                key: sparse_knn.key,
+                limit: sparse_knn.limit,
+            }),
+        }
+    }
+}
+
+impl TryFrom<Order> for chroma_proto::Order {
+    type Error = QueryConversionError;
+
+    fn try_from(value: Order) -> Result<Self, Self::Error> {
+        match value {
+            Order::DenseKnn {
+                embedding,
+                key,
+                limit,
+            } => {
+                let dim = embedding.len();
+                Ok(chroma_proto::Order {
+                    order: Some(chroma_proto::order::Order::DenseKnn(
+                        chroma_proto::order::DenseKnn {
+                            embedding: Some(chroma_proto::Vector::try_from((
+                                embedding,
+                                ScalarEncoding::FLOAT32,
+                                dim,
+                            ))?),
+                            key,
+                            limit,
+                        },
+                    )),
+                })
+            }
+            Order::SparseKnn {
+                embedding,
+                key,
+                limit,
+            } => Ok(chroma_proto::Order {
+                order: Some(chroma_proto::order::Order::SparseKnn(
+                    chroma_proto::order::SparseKnn {
+                        embedding: Some(chroma_proto::SparseVector {
+                            offset_value: embedding,
+                        }),
+                        key,
+                        limit,
+                    },
+                )),
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Score {
+    #[serde(rename = "$abs")]
+    Absolute { score: Box<Score> },
+    #[serde(rename = "$const")]
+    Constant { value: f32 },
+    #[serde(rename = "$div")]
+    Division { left: Box<Score>, right: Box<Score> },
+    #[serde(rename = "$enum")]
+    Enumeration { score: Box<Score> },
+    #[serde(rename = "$exp")]
+    Exponentiation { score: Box<Score> },
+    #[serde(rename = "$log")]
+    Logarithm { score: Box<Score> },
+    #[serde(rename = "$max")]
+    Maximum { scores: Vec<Score> },
+    #[serde(rename = "$meta")]
+    Metadata { key: String },
+    #[serde(rename = "$min")]
+    Minimum { scores: Vec<Score> },
+    #[serde(rename = "$mul")]
+    Multiplication { scores: Vec<Score> },
+    #[serde(rename = "$ord")]
+    Order {
+        source: Box<Order>,
+        default: Option<f32>,
+    },
+    #[serde(rename = "$sub")]
+    Subtraction { left: Box<Score>, right: Box<Score> },
+    #[serde(rename = "$sum")]
+    Summation { scores: Vec<Score> },
+}
+
+impl Eq for Score {}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Project {
+    fields: HashSet<String>,
 }
