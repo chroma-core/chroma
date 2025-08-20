@@ -201,6 +201,11 @@ class SegmentAPI(ServerAPI):
     def get_tenant(self, name: str) -> t.Tenant:
         return self._sysdb.get_tenant(name=name)
 
+    @trace_method("SegmentAPI.update_tenant", OpenTelemetryGranularity.OPERATION)
+    @override
+    def update_tenant(self, name: str, resource_name: str) -> None:
+        raise NotImplementedError("update_tenant is not implemented for SegmentAPI")
+
     # TODO: Actually fix CollectionMetadata type to remove type: ignore flags. This is
     # necessary because changing the value type from `Any` to`` `Union[str, int, float]`
     # causes the system to somehow convert all values to strings.
@@ -319,6 +324,16 @@ class SegmentAPI(ServerAPI):
             return existing[0]
         else:
             raise NotFoundError(f"Collection {name} does not exist.")
+
+    @trace_method(
+        "SegmentAPI.get_collection_by_crn", OpenTelemetryGranularity.OPERATION
+    )
+    @override
+    @rate_limit
+    def get_collection_by_crn(self, crn: str) -> CollectionModel:
+        raise NotImplementedError(
+            "get_collection_by_crn is not implemented for SegmentAPI"
+        )
 
     @trace_method("SegmentAPI.list_collection", OpenTelemetryGranularity.OPERATION)
     @override

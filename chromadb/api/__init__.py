@@ -432,6 +432,36 @@ class ClientAPI(BaseAPI, ABC):
         pass
 
     @abstractmethod
+    def get_collection_by_crn(
+        self,
+        crn: str,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> Collection:
+        """Get a collection by Chroma Resource Name.
+        Args:
+            crn: The Chroma Resource Name of the collection to get
+            embedding_function: Optional function to use to embed documents.
+                                Uses the default embedding function if not provided.
+            data_loader: Optional function to use to load records (documents, images, etc.)
+
+        Returns:
+            Collection: The collection
+
+        Raises:
+            ValueError: If the collection does not exist
+
+        Examples:
+            ```python
+            client.get_collection_by_crn("tenant_resource_name:database:collection")
+            # collection(name="collection", metadata={})
+            ```
+        """
+        pass
+
+    @abstractmethod
     def get_or_create_collection(
         self,
         name: str,
@@ -561,6 +591,16 @@ class AdminAPI(ABC):
         """
         pass
 
+    @abstractmethod
+    def update_tenant(self, name: str, resource_name: str) -> None:
+        """Update a tenant. Raises an error if the tenant does not exist.
+
+        Args:
+            name: The name of the tenant to update.
+            resource_name: The new resource name for the tenant.
+        """
+        pass
+
 
 class ServerAPI(BaseAPI, AdminAPI, Component):
     """An API instance that extends the relevant Base API methods by passing
@@ -602,6 +642,10 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> CollectionModel:
+        pass
+
+    @abstractmethod
+    def get_collection_by_crn(self, crn: str) -> CollectionModel:
         pass
 
     @abstractmethod

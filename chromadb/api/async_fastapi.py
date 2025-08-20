@@ -242,6 +242,15 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         return Tenant(name=resp_json["name"])
 
+    @trace_method("AsyncFastAPI.update_tenant", OpenTelemetryGranularity.OPERATION)
+    @override
+    async def update_tenant(self, name: str, resource_name: str) -> None:
+        await self._make_request(
+            "patch",
+            "/tenants/" + name,
+            json={"resource_name": resource_name},
+        )
+
     @trace_method("AsyncFastAPI.get_user_identity", OpenTelemetryGranularity.OPERATION)
     @override
     async def get_user_identity(self) -> UserIdentity:
@@ -330,6 +339,18 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
         model = CollectionModel.from_json(resp_json)
 
+        return model
+
+    @trace_method(
+        "AsyncFastAPI.get_collection_by_crn", OpenTelemetryGranularity.OPERATION
+    )
+    @override
+    async def get_collection_by_crn(self, crn: str) -> CollectionModel:
+        resp_json = await self._make_request(
+            "get",
+            f"/collections/{crn}",
+        )
+        model = CollectionModel.from_json(resp_json)
         return model
 
     @trace_method(

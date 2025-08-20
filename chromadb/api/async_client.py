@@ -241,6 +241,29 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         )
 
     @override
+    async def get_collection_by_crn(
+        self,
+        crn: str,
+        embedding_function: Optional[
+            EmbeddingFunction[Embeddable]
+        ] = ef.DefaultEmbeddingFunction(),  # type: ignore
+        data_loader: Optional[DataLoader[Loadable]] = None,
+    ) -> AsyncCollection:
+        model = await self._server.get_collection_by_crn(crn=crn)
+        persisted_ef_config = model.configuration_json.get("embedding_function")
+
+        validate_embedding_function_conflict_on_get(
+            embedding_function, persisted_ef_config
+        )
+
+        return AsyncCollection(
+            client=self._server,
+            model=model,
+            embedding_function=embedding_function,
+            data_loader=data_loader,
+        )
+
+    @override
     async def get_or_create_collection(
         self,
         name: str,
@@ -509,6 +532,10 @@ class AsyncAdminClient(SharedSystemClient, AsyncAdminAPI):
     @override
     async def get_tenant(self, name: str) -> Tenant:
         return await self._server.get_tenant(name=name)
+
+    @override
+    async def update_tenant(self, name: str, resource_name: str) -> None:
+        return await self._server.update_tenant(name=name, resource_name=resource_name)
 
     @classmethod
     @override

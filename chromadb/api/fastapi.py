@@ -196,6 +196,13 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         resp_json = self._make_request("get", "/tenants/" + name)
         return Tenant(name=resp_json["name"])
 
+    @trace_method("FastAPI.update_tenant", OpenTelemetryGranularity.OPERATION)
+    @override
+    def update_tenant(self, name: str, resource_name: str) -> None:
+        self._make_request(
+            "patch", "/tenants/" + name, json={"resource_name": resource_name}
+        )
+
     @trace_method("FastAPI.get_user_identity", OpenTelemetryGranularity.OPERATION)
     @override
     def get_user_identity(self) -> UserIdentity:
@@ -284,6 +291,16 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             f"/tenants/{tenant}/databases/{database}/collections/{name}",
         )
 
+        model = CollectionModel.from_json(resp_json)
+        return model
+
+    @trace_method("FastAPI.get_collection_by_crn", OpenTelemetryGranularity.OPERATION)
+    @override
+    def get_collection_by_crn(self, crn: str) -> CollectionModel:
+        resp_json = self._make_request(
+            "get",
+            f"/collections/{crn}",
+        )
         model = CollectionModel.from_json(resp_json)
         return model
 
