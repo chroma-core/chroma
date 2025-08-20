@@ -320,7 +320,9 @@ export class CollectionImpl implements Collection {
       );
     }
 
-    return preparedRecordSet as T extends true ? PreparedRecordSet : PreparedInsertRecordSet;
+    return preparedRecordSet as T extends true
+      ? PreparedRecordSet
+      : PreparedInsertRecordSet;
   }
 
   private validateGet(

@@ -329,9 +329,9 @@ export class ChromaClient {
       embeddingFunction: embeddingFunction
         ? embeddingFunction
         : await getEmbeddingFunction(
-          data.name,
-          data.configuration_json.embedding_function ?? undefined,
-        ),
+            data.name,
+            data.configuration_json.embedding_function ?? undefined,
+          ),
       id: data.id,
     });
   }
