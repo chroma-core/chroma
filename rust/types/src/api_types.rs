@@ -1,10 +1,14 @@
 use crate::collection_configuration::InternalCollectionConfiguration;
 use crate::collection_configuration::InternalUpdateCollectionConfiguration;
 use crate::error::QueryConversionError;
+use crate::operator::Filter;
 use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
+use crate::operator::Limit;
+use crate::operator::Project;
 use crate::operator::ProjectionRecord;
+use crate::operator::Score;
 use crate::plan::PlanToProtoError;
 use crate::validators::{
     validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
@@ -1836,6 +1840,112 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
         }
         res
     }
+}
+
+////////////////////////// Retrieve //////////////////////////
+
+#[derive(Clone, Debug, Deserialize, Serialize, Validate)]
+pub struct RetrievePayload {
+    pub filter: Filter,
+    pub score: Score,
+    pub limit: Limit,
+    pub project: Project,
+}
+
+// Manual ToSchema implementation to avoid recursive schema generation
+impl utoipa::PartialSchema for RetrievePayload {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        use utoipa::openapi::schema::*;
+        use utoipa::openapi::*;
+
+        RefOr::T(Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::Type(Type::Object))
+                .description(Some("Payload for hybrid search retrieval"))
+                .property(
+                    "filter",
+                    ObjectBuilder::new()
+                        .schema_type(SchemaType::Type(Type::Object))
+                        .description(Some("Filter criteria for retrieval"))
+                        .property(
+                            "query_ids",
+                            ArrayBuilder::new()
+                                .items(Object::with_type(SchemaType::Type(Type::String))),
+                        )
+                        .property(
+                            "where_clause",
+                            Object::with_type(SchemaType::Type(Type::Object)),
+                        ),
+                )
+                .property(
+                    "score",
+                    ObjectBuilder::new()
+                        .schema_type(SchemaType::Type(Type::Object))
+                        .description(Some("Scoring expression for hybrid search"))
+                        .additional_properties(Some(Schema::Object(Object::with_type(
+                            SchemaType::Type(Type::Object),
+                        )))),
+                )
+                .property(
+                    "limit",
+                    ObjectBuilder::new()
+                        .schema_type(SchemaType::Type(Type::Object))
+                        .property("skip", Object::with_type(SchemaType::Type(Type::Integer)))
+                        .property("fetch", Object::with_type(SchemaType::Type(Type::Integer)))
+                        .required("skip"),
+                )
+                .property(
+                    "project",
+                    ObjectBuilder::new()
+                        .schema_type(SchemaType::Type(Type::Object))
+                        .property(
+                            "fields",
+                            ArrayBuilder::new()
+                                .items(Object::with_type(SchemaType::Type(Type::String))),
+                        )
+                        .required("fields"),
+                )
+                .required("filter")
+                .required("score")
+                .required("limit")
+                .required("project")
+                .build(),
+        ))
+    }
+}
+
+impl utoipa::ToSchema for RetrievePayload {}
+
+#[non_exhaustive]
+#[derive(Clone, Debug, Serialize, ToSchema, Validate)]
+pub struct RetrieveRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+    pub queries: Vec<RetrievePayload>,
+}
+
+impl RetrieveRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        queries: Vec<RetrievePayload>,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            queries,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, ToSchema, Debug, Default)]
+pub struct RetrieveResponse {
+    pub debug: String,
 }
 
 #[derive(Error, Debug)]
