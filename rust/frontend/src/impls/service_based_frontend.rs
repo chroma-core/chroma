@@ -7,10 +7,10 @@ use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_metering::{
-    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable, FinishRequest,
-    FtsQueryLength, LatestCollectionLogicalSizeBytes, LogSizeBytes, MetadataPredicateCount,
-    MeterEvent, MeteredFutureExt, PulledLogSizeBytes, QueryEmbeddingCount, ReturnBytes,
-    WriteAction,
+    CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
+    ExternalCollectionReadContext, FinishRequest, FtsQueryLength, LatestCollectionLogicalSizeBytes,
+    LogSizeBytes, MetadataPredicateCount, MeterEvent, MeteredFutureExt, PulledLogSizeBytes,
+    QueryEmbeddingCount, ReturnBytes, WriteAction,
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
@@ -1239,9 +1239,16 @@ impl ServiceBasedFrontend {
                     .submit()
                     .await;
             }
-            Err(e) => {
-                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
-            }
+            Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
+                Ok(external_collection_read_context) => {
+                    MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                        .submit()
+                        .await;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                }
+            },
         }
 
         Ok(count_result.count)
@@ -1364,9 +1371,16 @@ impl ServiceBasedFrontend {
                     .submit()
                     .await;
             }
-            Err(e) => {
-                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
-            }
+            Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
+                Ok(external_collection_read_context) => {
+                    MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                        .submit()
+                        .await;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                }
+            },
         }
 
         Ok((get_result, include).into())
@@ -1493,9 +1507,16 @@ impl ServiceBasedFrontend {
                     .submit()
                     .await;
             }
-            Err(e) => {
-                tracing::error!("Failed to submit metering event to receiver: {:?}", e)
-            }
+            Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
+                Ok(external_collection_read_context) => {
+                    MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                        .submit()
+                        .await;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                }
+            },
         }
 
         Ok((query_result, include).into())
