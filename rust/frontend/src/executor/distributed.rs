@@ -24,7 +24,8 @@ use rand::distributions::Distribution;
 use tonic::Request;
 
 // Convenience type alias for the gRPC query client used by the DistributedExecutor
-type QueryClient = QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
+type QueryClient =
+    QueryExecutorClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>;
 
 /// A distributed executor that routes requests to the appropriate node based on the assignment policy
 /// # Fields

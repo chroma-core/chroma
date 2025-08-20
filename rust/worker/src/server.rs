@@ -9,7 +9,6 @@ use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
-use chroma_tracing::util::wrap_span_with_parent_context;
 use chroma_types::{
     chroma_proto::{
         self,
@@ -21,7 +20,6 @@ use chroma_types::{
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
 use tonic::{transport::Server, Request, Response, Status};
-use tracing::{trace_span, Instrument};
 
 use crate::{
     config::QueryServiceConfig,
@@ -104,6 +102,7 @@ impl WorkerServer {
         let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
 
         let server = Server::builder()
+            .layer(chroma_tracing::GrpcServerTraceLayer)
             .add_service(health_service)
             .add_service(QueryExecutorServer::new(worker.clone()));
 
@@ -415,39 +414,21 @@ impl QueryExecutor for WorkerServer {
         &self,
         count: Request<chroma_proto::CountPlan>,
     ) -> Result<Response<chroma_proto::CountResult>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let count_span = trace_span!("CountPlan",);
-        let instrumented_span = wrap_span_with_parent_context(count_span, count.metadata());
-        self.orchestrate_count(count)
-            .instrument(instrumented_span)
-            .await
+        self.orchestrate_count(count).await
     }
 
     async fn get(
         &self,
         get: Request<chroma_proto::GetPlan>,
     ) -> Result<Response<chroma_proto::GetResult>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let get_span = trace_span!("GetPlan",);
-        let instrumented_span = wrap_span_with_parent_context(get_span, get.metadata());
-        self.orchestrate_get(get)
-            .instrument(instrumented_span)
-            .await
+        self.orchestrate_get(get).await
     }
 
     async fn knn(
         &self,
         knn: Request<chroma_proto::KnnPlan>,
     ) -> Result<Response<chroma_proto::KnnBatchResult>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let knn_span = trace_span!("KnnPlan",);
-        let instrumented_span = wrap_span_with_parent_context(knn_span, knn.metadata());
-        self.orchestrate_knn(knn)
-            .instrument(instrumented_span)
-            .await
+        self.orchestrate_knn(knn).await
     }
 }
 
@@ -456,30 +437,18 @@ impl QueryExecutor for WorkerServer {
 impl chroma_types::chroma_proto::debug_server::Debug for WorkerServer {
     async fn get_info(
         &self,
-        request: Request<()>,
+        _request: Request<()>,
     ) -> Result<Response<chroma_types::chroma_proto::GetInfoResponse>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let request_span = trace_span!("Get info");
-
-        wrap_span_with_parent_context(request_span, request.metadata()).in_scope(|| {
-            let response = chroma_types::chroma_proto::GetInfoResponse {
-                version: option_env!("CARGO_PKG_VERSION")
-                    .unwrap_or("unknown")
-                    .to_string(),
-            };
-            Ok(Response::new(response))
-        })
+        let response = chroma_types::chroma_proto::GetInfoResponse {
+            version: option_env!("CARGO_PKG_VERSION")
+                .unwrap_or("unknown")
+                .to_string(),
+        };
+        Ok(Response::new(response))
     }
 
-    async fn trigger_panic(&self, request: Request<()>) -> Result<Response<()>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let request_span = trace_span!("Trigger panic");
-
-        wrap_span_with_parent_context(request_span, request.metadata()).in_scope(|| {
-            panic!("Intentional panic triggered");
-        })
+    async fn trigger_panic(&self, _request: Request<()>) -> Result<Response<()>, Status> {
+        panic!("Intentional panic triggered");
     }
 }
 
