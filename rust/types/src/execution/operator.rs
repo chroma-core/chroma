@@ -1,3 +1,4 @@
+use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use std::{
     cmp::{Ordering, Reverse},
     collections::BinaryHeap,
@@ -6,7 +7,7 @@ use thiserror::Error;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, CollectionAndSegments, CollectionUuid, Metadata,
-    ScalarEncoding, Where,
+    RawWhereFields, ScalarEncoding, Where,
 };
 
 use super::error::QueryConversionError;
@@ -116,10 +117,22 @@ pub struct FetchLog {
 /// # Parameters
 /// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
 /// - `where_clause`: The predicate on individual record
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Filter {
     pub query_ids: Option<Vec<String>>,
+    #[serde(deserialize_with = "Filter::deserialize_where")]
     pub where_clause: Option<Where>,
+}
+
+impl Filter {
+    fn deserialize_where<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Where>, D::Error> {
+        let raw_fields = RawWhereFields::deserialize(deserializer)?;
+        raw_fields
+            .parse()
+            .map_err(|e| D::Error::custom(e.to_string()))
+    }
 }
 
 impl TryFrom<chroma_proto::FilterOperator> for Filter {
@@ -226,7 +239,7 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
 /// # Parameters
 /// - `skip`: The number of records to skip in the beginning
 /// - `fetch`: The number of records to fetch after `skip`
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Limit {
     pub skip: u32,
     pub fetch: Option<u32>,
@@ -338,11 +351,13 @@ impl KnnMerge {
 /// - `document`: Whether to retrieve document
 /// - `embedding`: Whether to retrieve embedding
 /// - `metadata`: Whether to retrieve metadata
-#[derive(Clone, Debug, Default)]
+/// - `score`: Whether to retrieve score
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Projection {
     pub document: bool,
     pub embedding: bool,
     pub metadata: bool,
+    pub score: bool,
 }
 
 impl From<chroma_proto::ProjectionOperator> for Projection {
@@ -351,6 +366,7 @@ impl From<chroma_proto::ProjectionOperator> for Projection {
             document: value.document,
             embedding: value.embedding,
             metadata: value.metadata,
+            score: value.score,
         }
     }
 }
@@ -361,6 +377,7 @@ impl From<Projection> for chroma_proto::ProjectionOperator {
             document: value.document,
             embedding: value.embedding,
             metadata: value.metadata,
+            score: value.score,
         }
     }
 }
