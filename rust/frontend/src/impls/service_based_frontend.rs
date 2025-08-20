@@ -18,7 +18,7 @@ use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
-    plan::{Count, Get, Knn},
+    plan::{Count, Get, Knn, Retrieve},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
     Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
     CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
@@ -34,11 +34,12 @@ use chroma_types::{
     HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
     Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
-    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
+    RetrieveRequest, RetrieveResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -1575,6 +1576,39 @@ impl ServiceBasedFrontend {
             .query_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
+    }
+
+    pub async fn retrieve(
+        &mut self,
+        request: RetrieveRequest,
+    ) -> Result<RetrieveResponse, QueryError> {
+        // Get collection and segments once for all queries
+        let collection_and_segments = self
+            .collections_with_segments_provider
+            .get_collection_with_segments(request.collection_id)
+            .await
+            .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+
+        // Process each query in the batch and create Retrieve plans
+        let retrieve_plans = request
+            .queries
+            .into_iter()
+            .map(|query| Retrieve {
+                scan: Scan {
+                    collection_and_segments: collection_and_segments.clone(),
+                },
+                filter: query.filter,
+                score: query.score,
+                limit: query.limit,
+                project: query.project,
+            })
+            .collect::<Vec<_>>();
+
+        // TODO: Execute the retrieve plans using the executor and aggregate results
+        // For now, return an empty response
+        Ok(RetrieveResponse {
+            debug: format!("{retrieve_plans:#?}"),
+        })
     }
 
     pub async fn healthcheck(&self) -> HealthCheckResponse {
