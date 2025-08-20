@@ -149,6 +149,9 @@ initialize_metering! {
     #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
     #[serde(rename_all = "snake_case")]
     pub struct CollectionReadContext {
+        /// The tenant that is requesting the resource
+        pub requester_tenant: String,
+        /// The tenant who owns the requested resource
         pub tenant: String,
         pub database: String,
         pub collection_id: String,
@@ -167,12 +170,14 @@ initialize_metering! {
 
     impl CollectionReadContext {
         pub fn new(
+            requester_tenant: String,
             tenant: String,
             database: String,
             collection_id: String,
             action: ReadAction,
         ) -> Self {
             CollectionReadContext {
+                requester_tenant,
                 tenant,
                 database,
                 collection_id,

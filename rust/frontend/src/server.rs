@@ -1745,7 +1745,7 @@ async fn collection_delete(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
-    server
+    let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Delete,
@@ -1782,6 +1782,7 @@ async fn collection_delete(
     // NOTE(c-gamble): This is a read context because read happens first on delete, then write.
     let metering_context_container =
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            requester_identity.tenant.clone(),
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
@@ -1840,7 +1841,7 @@ async fn collection_count(
         database = database,
         collection_id = collection_id
     );
-    let authorized = server
+    let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Count,
@@ -1856,12 +1857,13 @@ async fn collection_count(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-        format!("requester:{}", authorized.tenant).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
     ])?;
 
     // Create a metering context
     let metering_context_container =
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            requester_identity.tenant.clone(),
             tenant.clone(),
             database.clone(),
             collection_id.clone(),
@@ -1924,7 +1926,7 @@ async fn collection_get(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
-    let authorized = server
+    let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Get,
@@ -1965,12 +1967,13 @@ async fn collection_get(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-        format!("requester:{}", authorized.tenant).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
     ])?;
 
     // Create a metering context
     let metering_context_container =
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            requester_identity.tenant.clone(),
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
@@ -2053,7 +2056,7 @@ async fn collection_query(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
-    let authorized = server
+    let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Query,
@@ -2091,12 +2094,13 @@ async fn collection_query(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
-        format!("requester:{}", authorized.tenant).as_str(),
+        format!("requester:{}", requester_identity.tenant).as_str(),
     ])?;
 
     // Create a metering context
     let metering_context_container =
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            requester_identity.tenant.clone(),
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
