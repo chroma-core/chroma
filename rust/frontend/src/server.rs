@@ -1840,7 +1840,7 @@ async fn collection_count(
         database = database,
         collection_id = collection_id
     );
-    server
+    let authorized = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Count,
@@ -1856,6 +1856,7 @@ async fn collection_count(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", authorized.tenant).as_str(),
     ])?;
 
     // Create a metering context
@@ -1923,7 +1924,7 @@ async fn collection_get(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
-    server
+    let authorized = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Get,
@@ -1964,6 +1965,7 @@ async fn collection_get(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", authorized.tenant).as_str(),
     ])?;
 
     // Create a metering context
@@ -2051,7 +2053,7 @@ async fn collection_query(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
-    server
+    let authorized = server
         .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::Query,
@@ -2089,6 +2091,7 @@ async fn collection_query(
         "op:read",
         format!("tenant:{}", tenant).as_str(),
         format!("collection:{}", collection_id).as_str(),
+        format!("requester:{}", authorized.tenant).as_str(),
     ])?;
 
     // Create a metering context
