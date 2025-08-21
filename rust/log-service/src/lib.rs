@@ -10,6 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
 use chroma_cache::CacheConfig;
+use chroma_config::helpers::deserialize_duration_from_seconds;
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_log::{config::GrpcLogConfig, grpc_log::GrpcLog};
@@ -2332,6 +2333,7 @@ impl LogServerWrapper {
 
         let max_encoding_message_size = log_server.config.max_encoding_message_size;
         let max_decoding_message_size = log_server.config.max_decoding_message_size;
+        let shutdown_grace_period = log_server.config.grpc_shutdown_grace_period;
 
         let wrapper = LogServerWrapper {
             log_server: Arc::new(log_server),
@@ -2354,7 +2356,9 @@ impl LogServerWrapper {
                 }
             };
             sigterm.recv().await;
-            tracing::info!("Received SIGTERM, shutting down");
+            tracing::info!("Received SIGTERM, waiting for grace period...");
+            tokio::time::sleep(shutdown_grace_period).await;
+            tracing::info!("Grace period ended, shutting down server...");
         });
 
         let res = server.await;
@@ -2503,6 +2507,12 @@ pub struct LogServerConfig {
     pub max_encoding_message_size: usize,
     #[serde(default = "LogServerConfig::default_max_decoding_message_size")]
     pub max_decoding_message_size: usize,
+    #[serde(
+        rename = "grpc_shutdown_grace_period_seconds",
+        deserialize_with = "deserialize_duration_from_seconds",
+        default = "LogServerConfig::default_grpc_shutdown_grace_period"
+    )]
+    pub grpc_shutdown_grace_period: Duration,
 }
 
 impl LogServerConfig {
@@ -2542,6 +2552,10 @@ impl LogServerConfig {
     fn default_max_decoding_message_size() -> usize {
         32_000_000
     }
+
+    fn default_grpc_shutdown_grace_period() -> Duration {
+        Duration::from_secs(1)
+    }
 }
 
 impl Default for LogServerConfig {
@@ -2562,6 +2576,7 @@ impl Default for LogServerConfig {
             proxy_to: None,
             max_encoding_message_size: Self::default_max_encoding_message_size(),
             max_decoding_message_size: Self::default_max_decoding_message_size(),
+            grpc_shutdown_grace_period: Self::default_grpc_shutdown_grace_period(),
         }
     }
 }
