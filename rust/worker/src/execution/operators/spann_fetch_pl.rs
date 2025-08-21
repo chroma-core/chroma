@@ -45,9 +45,7 @@ impl SpannFetchPlOperator {
 }
 
 #[async_trait]
-impl<'referred_data> Operator<SpannFetchPlInput<'referred_data>, SpannFetchPlOutput>
-    for SpannFetchPlOperator
-{
+impl Operator<SpannFetchPlInput<'_>, SpannFetchPlOutput> for SpannFetchPlOperator {
     type Error = SpannFetchPlError;
 
     async fn run(

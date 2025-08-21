@@ -192,6 +192,7 @@ pub enum StorageConfigError {
 }
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum Storage {
     ObjectStore(object_store::ObjectStore),
     S3(s3::S3Storage),

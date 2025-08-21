@@ -187,7 +187,7 @@ pub(crate) enum MetadataProvider<'me> {
     Log(&'me MetadataLogReader<'me>),
 }
 
-impl<'me> MetadataProvider<'me> {
+impl MetadataProvider<'_> {
     pub(crate) async fn filter_by_document_contains(
         &self,
         query: &str,
