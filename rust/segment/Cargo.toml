@@ -20,6 +20,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 rayon = { workspace = true }
+opentelemetry = { workspace = true }
 
 chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
