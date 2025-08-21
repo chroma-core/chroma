@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use bytes::Bytes;
 use chroma_cache::CacheConfig;
-use chroma_config::helpers::deserialize_duration_from_seconds;
+use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
 use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_log::{config::GrpcLogConfig, grpc_log::GrpcLog};
@@ -2511,6 +2511,7 @@ pub struct LogServerConfig {
     #[serde(
         rename = "grpc_shutdown_grace_period_seconds",
         deserialize_with = "deserialize_duration_from_seconds",
+        serialize_with = "serialize_duration_to_seconds",
         default = "LogServerConfig::default_grpc_shutdown_grace_period"
     )]
     pub grpc_shutdown_grace_period: Duration,
