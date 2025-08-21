@@ -12,9 +12,9 @@ use chroma_system::ComponentHandle;
 use chroma_types::{
     operator::{
         CountResult, Filter, GetResult, KnnBatchResult, KnnProjectionOutput, KnnProjectionRecord,
-        Projection, ProjectionRecord, RecordDistance,
+        Projection, ProjectionRecord, RecordDistance, RetrieveResult,
     },
-    plan::{Count, Get, Knn},
+    plan::{Count, Get, Knn, Retrieve},
     CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SegmentType,
 };
 use std::{
@@ -304,6 +304,12 @@ impl LocalExecutor {
             pulled_log_bytes: 0,
             results,
         })
+    }
+
+    pub async fn retrieve(&mut self, _plan: Retrieve) -> Result<RetrieveResult, ExecutorError> {
+        Err(ExecutorError::NotImplemented(
+            "Retrieve operation is not implemented for local executor".to_string(),
+        ))
     }
 
     pub async fn reset(&mut self) -> Result<(), Box<dyn ChromaError>> {

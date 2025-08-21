@@ -1,12 +1,13 @@
 use super::{
     error::QueryConversionError,
-    operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan, ScanToProtoError},
+    operator::{
+        Filter, KnnBatch, KnnProjection, Limit, Project, Projection, Scan, ScanToProtoError, Score,
+    },
 };
-use crate::{
-    chroma_proto,
-    operator::{Project, Score},
-};
+use crate::chroma_proto;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use validator::Validate;
 
 #[derive(Error, Debug)]
 pub enum PlanToProtoError {
@@ -137,11 +138,150 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Retrieve {
-    pub scan: Scan,
+#[derive(Clone, Debug, Deserialize, Serialize, Validate)]
+pub struct RetrievePayload {
     pub filter: Filter,
     pub score: Score,
     pub limit: Limit,
     pub project: Project,
+}
+
+impl utoipa::PartialSchema for RetrievePayload {
+    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+        use utoipa::openapi::schema::*;
+        use utoipa::openapi::*;
+
+        RefOr::T(Schema::Object(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::Type(Type::Object))
+                .description(Some("Payload for hybrid search retrieval"))
+                .property(
+                    "filter",
+                    ObjectBuilder::new()
+                        .schema_type(SchemaType::Type(Type::Object))
+                        .description(Some("Filter criteria for retrieval"))
+                        .property(
+                            "query_ids",
+                            ArrayBuilder::new()
+                                .items(Object::with_type(SchemaType::Type(Type::String))),
+                        )
+                        .property(
+                            "where_clause",
+                            Object::with_type(SchemaType::Type(Type::Object)),
+                        ),
+                )
+                .property(
+                    "score",
+                    ObjectBuilder::new()
+                        .schema_type(SchemaType::Type(Type::Object))
+                        .description(Some("Scoring expression for hybrid search"))
+                        .additional_properties(Some(Schema::Object(Object::with_type(
+                            SchemaType::Type(Type::Object),
+                        )))),
+                )
+                .property(
+                    "limit",
+                    ObjectBuilder::new()
+                        .schema_type(SchemaType::Type(Type::Object))
+                        .property("skip", Object::with_type(SchemaType::Type(Type::Integer)))
+                        .property("fetch", Object::with_type(SchemaType::Type(Type::Integer)))
+                        .required("skip"),
+                )
+                .property(
+                    "project",
+                    ObjectBuilder::new()
+                        .schema_type(SchemaType::Type(Type::Object))
+                        .property(
+                            "fields",
+                            ArrayBuilder::new()
+                                .items(Object::with_type(SchemaType::Type(Type::String))),
+                        )
+                        .required("fields"),
+                )
+                .required("filter")
+                .required("score")
+                .required("limit")
+                .required("project")
+                .build(),
+        ))
+    }
+}
+
+impl utoipa::ToSchema for RetrievePayload {}
+
+#[derive(Clone, Debug)]
+pub struct Retrieve {
+    pub scan: Scan,
+    pub payloads: Vec<RetrievePayload>,
+}
+
+impl TryFrom<chroma_proto::RetrievePayload> for RetrievePayload {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::RetrievePayload) -> Result<Self, Self::Error> {
+        Ok(Self {
+            filter: value
+                .filter
+                .ok_or(QueryConversionError::field("filter"))?
+                .try_into()?,
+            score: value
+                .score
+                .ok_or(QueryConversionError::field("score"))?
+                .try_into()?,
+            limit: value
+                .limit
+                .ok_or(QueryConversionError::field("limit"))?
+                .into(),
+            project: value
+                .project
+                .ok_or(QueryConversionError::field("project"))?
+                .try_into()?,
+        })
+    }
+}
+
+impl TryFrom<RetrievePayload> for chroma_proto::RetrievePayload {
+    type Error = QueryConversionError;
+
+    fn try_from(value: RetrievePayload) -> Result<Self, Self::Error> {
+        Ok(Self {
+            filter: Some(value.filter.try_into()?),
+            score: Some(value.score.try_into()?),
+            limit: Some(value.limit.into()),
+            project: Some(value.project.try_into()?),
+        })
+    }
+}
+
+impl TryFrom<chroma_proto::RetrievePlan> for Retrieve {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::RetrievePlan) -> Result<Self, Self::Error> {
+        Ok(Self {
+            scan: value
+                .scan
+                .ok_or(QueryConversionError::field("scan"))?
+                .try_into()?,
+            payloads: value
+                .payloads
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+}
+
+impl TryFrom<Retrieve> for chroma_proto::RetrievePlan {
+    type Error = QueryConversionError;
+
+    fn try_from(value: Retrieve) -> Result<Self, Self::Error> {
+        Ok(Self {
+            scan: Some(value.scan.try_into()?),
+            payloads: value
+                .payloads
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
 }

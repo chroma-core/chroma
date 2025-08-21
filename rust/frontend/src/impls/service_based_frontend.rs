@@ -63,6 +63,7 @@ struct Metrics {
     add_retries_counter: Counter<u64>,
     update_retries_counter: Counter<u64>,
     upsert_retries_counter: Counter<u64>,
+    retrieve_retries_counter: Counter<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +103,7 @@ impl ServiceBasedFrontend {
         let add_retries_counter = meter.u64_counter("add_retries").build();
         let update_retries_counter = meter.u64_counter("update_retries").build();
         let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
+        let retrieve_retries_counter = meter.u64_counter("retrieve_retries").build();
         let metrics = Arc::new(Metrics {
             fork_retries_counter,
             delete_retries_counter,
@@ -111,6 +113,7 @@ impl ServiceBasedFrontend {
             add_retries_counter,
             update_retries_counter,
             upsert_retries_counter,
+            retrieve_retries_counter,
         });
         // factor: 2.0,
         // min_delay_ms: 100,
@@ -1578,7 +1581,7 @@ impl ServiceBasedFrontend {
         res
     }
 
-    pub async fn retrieve(
+    pub async fn retryable_retrieve(
         &mut self,
         request: RetrieveRequest,
     ) -> Result<RetrieveResponse, QueryError> {
@@ -1589,26 +1592,69 @@ impl ServiceBasedFrontend {
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
 
-        // Process each query in the batch and create Retrieve plans
-        let retrieve_plans = request
-            .queries
-            .into_iter()
-            .map(|query| Retrieve {
-                scan: Scan {
-                    collection_and_segments: collection_and_segments.clone(),
-                },
-                filter: query.filter,
-                score: query.score,
-                limit: query.limit,
-                project: query.project,
-            })
-            .collect::<Vec<_>>();
+        // Create a single Retrieve plan with one scan and the payloads from the request
+        let retrieve_plan = Retrieve {
+            scan: Scan {
+                collection_and_segments,
+            },
+            payloads: request.retrievals,
+        };
 
-        // TODO: Execute the retrieve plans using the executor and aggregate results
-        // For now, return an empty response
+        // Execute the single retrieve plan using the executor
+        let result = self.executor.retrieve(retrieve_plan).await?;
+
         Ok(RetrieveResponse {
-            debug: format!("{retrieve_plans:#?}"),
+            results: result.results,
         })
+    }
+
+    pub async fn retrieve(
+        &mut self,
+        request: RetrieveRequest,
+    ) -> Result<RetrieveResponse, QueryError> {
+        let retries = Arc::new(AtomicUsize::new(0));
+        let retrieve_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            let cache_clone = self
+                .collections_with_segments_provider
+                .collections_with_segments_cache
+                .clone();
+            async move {
+                let res = self_clone.retryable_retrieve(request_clone).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => {
+                        if e.code() == ErrorCodes::NotFound {
+                            tracing::info!(
+                                "Invalidating cache for collection {}",
+                                request.collection_id
+                            );
+                            cache_clone.remove(&request.collection_id).await;
+                        }
+                        Err(e)
+                    }
+                }
+            }
+        };
+        let res = retrieve_to_retry
+            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying retrieve() request for collection {}",
+                        request.collection_id
+                    );
+                }
+            })
+            .await;
+        self.metrics
+            .retrieve_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+        res
     }
 
     pub async fn healthcheck(&self) -> HealthCheckResponse {

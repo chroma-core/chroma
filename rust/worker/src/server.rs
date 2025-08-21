@@ -438,6 +438,32 @@ impl QueryExecutor for WorkerServer {
     ) -> Result<Response<chroma_proto::KnnBatchResult>, Status> {
         self.orchestrate_knn(knn).await
     }
+
+    async fn retrieve(
+        &self,
+        request: Request<chroma_proto::RetrievePlan>,
+    ) -> Result<Response<chroma_proto::RetrieveResult>, Status> {
+        // Note: We cannot write a middleware that instruments every service rpc
+        // with a span because of https://github.com/hyperium/tonic/pull/1202.
+        let retrieve_span = trace_span!("RetrievePlan",);
+        let _instrumented_span = wrap_span_with_parent_context(retrieve_span, request.metadata());
+        
+        // For now, just print the debug of the payloads and return one result per payload
+        let inner = request.into_inner();
+        let num_payloads = inner.payloads.len();
+        
+        let debug_msg = format!("Received retrieve request with {} payloads:\n{:#?}", num_payloads, inner);
+        tracing::info!("{}", debug_msg);
+        
+        // Return one debug string per payload
+        let results = (0..num_payloads)
+            .map(|i| format!("Debug result for payload {}: {:?}", i, inner.payloads.get(i)))
+            .collect();
+        
+        Ok(Response::new(chroma_proto::RetrieveResult {
+            results,
+        }))
+    }
 }
 
 #[cfg(debug_assertions)]
