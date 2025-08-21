@@ -10,6 +10,7 @@ use chroma_metering::{
     ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
 };
 use chroma_system::System;
+use chroma_types::plan::RetrievePayload;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
@@ -21,7 +22,7 @@ use chroma_types::{
     HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    RetrievePayload, RetrieveRequest, RetrieveResponse, UpdateCollectionConfiguration,
+    RetrieveRequest, RetrieveResponse, UpdateCollectionConfiguration,
     UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata, UpdateTenantRequest,
     UpdateTenantResponse, UpsertCollectionRecordsResponse,
 };
@@ -2175,14 +2176,14 @@ async fn collection_query(
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct RetrieveRequestPayload {
-    queries: Vec<RetrievePayload>,
+    retrievals: Vec<RetrievePayload>,
 }
 
 /// Retrieve records from a collection with hybrid criterias.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/retrieve",
-    // request_body = RetrieveRequestPayload,
+    request_body = RetrieveRequestPayload,
     responses(
         (status = 200, description = "Records retrieved from the collection", body = RetrieveResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -2208,6 +2209,7 @@ async fn collection_retrieve(
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
+    // TODO: Maybe add AuthzAction:Retrieve
     let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
@@ -2229,7 +2231,6 @@ async fn collection_retrieve(
         .map(|val| val.to_string());
 
     // TODO: Add quota enforcement for retrieve
-
     let _guard = server.scorecard_request(&[
         "op:read",
         format!("tenant:{}", tenant).as_str(),
@@ -2237,13 +2238,14 @@ async fn collection_retrieve(
         format!("requester:{}", requester_identity.tenant).as_str(),
     ])?;
 
+    // TODO: Maybe add ReadAction::Retrieve
     // Create a metering context
     let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
-            ReadAction::Get, // TODO: Add ReadAction::Retrieve
+            ReadAction::Query,
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2251,7 +2253,7 @@ async fn collection_retrieve(
                 requester_identity.tenant.clone(),
                 database.clone(),
                 collection_id.0.to_string(),
-                ReadAction::Get, // TODO: Add ReadAction::Retrieve
+                ReadAction::Query,
             ),
         )
     };
@@ -2264,10 +2266,10 @@ async fn collection_retrieve(
 
     tracing::info!(
         name: "collection_retrieve",
-        num_queries = payload.queries.len(),
+        num_queries = payload.retrievals.len(),
     );
 
-    let request = RetrieveRequest::try_new(tenant, database, collection_id, payload.queries)?;
+    let request = RetrieveRequest::try_new(tenant, database, collection_id, payload.retrievals)?;
     let res = server
         .frontend
         .retrieve(request)
