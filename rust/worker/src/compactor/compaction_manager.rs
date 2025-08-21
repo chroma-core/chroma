@@ -31,6 +31,7 @@ use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
 use chroma_system::TaskResult;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
+use chroma_tracing::link_event;
 use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
@@ -178,13 +179,18 @@ impl CompactionManager {
         self.scheduler.schedule().await;
         let jobs_iter = self.scheduler.get_jobs();
         for job in jobs_iter {
-            let instrumented_span = span!(
-                parent: None,
-                tracing::Level::INFO,
-                "Compacting job",
-                collection_id = ?job.collection_id
+            let instrumented_span = link_event!(
+                Level::INFO,
+                span!(
+                    parent: None,
+                    tracing::Level::INFO,
+                    "Compacting job",
+                    collection_id = ?job.collection_id
+                ),
+                "Starting compaction for collection {}",
+                job.collection_id
             );
-            instrumented_span.follows_from(Span::current());
+
             let future = self
                 .context
                 .clone()

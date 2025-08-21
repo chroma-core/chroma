@@ -3465,6 +3465,7 @@ dependencies = [
  "tonic",
  "tonic-health",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-test",
  "uuid",
@@ -9902,6 +9903,7 @@ dependencies = [
  "tonic",
  "tonic-health",
  "tracing",
+ "tracing-opentelemetry",
  "uuid",
 ]
 
