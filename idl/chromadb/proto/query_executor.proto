@@ -111,41 +111,9 @@ message Rank {
 
 
 message Score {
-    message Absolute {
-        Score score = 1;
-    }
-
     message Division {
         Score left = 1;
         Score right = 2;
-    }
-
-    message Exponentiation {
-        Score score = 1;
-    }
-
-    message Logarithm {
-        Score score = 1;
-    }
-
-    message Maximum {
-        repeated Score scores = 1;
-    }
-
-    message Metadata {
-        string key = 1;
-    }
-
-    message Minimum {
-        repeated Score scores = 1;
-    }
-
-    message Multiplication {
-        repeated Score scores = 1;
-    }
-
-    message Ordinal {
-        Score score = 1;
     }
 
     message RankScore {
@@ -158,28 +126,24 @@ message Score {
         Score right = 2;
     }
 
-    message Summation {
+    message ScoreList {
         repeated Score scores = 1;
     }
 
-    message Value {
-        float value = 1;
-    }
-
     oneof score {
-        Absolute absolute = 1;
+        Score absolute = 1;
         Division division = 2;
-        Exponentiation exponentiation = 3;
-        Logarithm logarithm = 4;
-        Maximum maximum = 5;
-        Metadata metadata = 6;
-        Minimum minimum = 7;
-        Multiplication multiplication = 8;
-        Ordinal ordinal = 9;
+        Score exponentiation = 3;
+        Score logarithm = 4;
+        ScoreList maximum = 5;
+        string metadata = 6;
+        ScoreList minimum = 7;
+        ScoreList multiplication = 8;
+        Score ordinal = 9;
         RankScore rank = 10;
         Subtraction subtraction = 11;
-        Summation summation = 12;
-        Value value = 13;
+        ScoreList summation = 12;
+        float value = 13;
     }
 }
 
