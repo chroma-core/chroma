@@ -3,6 +3,10 @@ kind: Deployment
 metadata:
   name: sysdb
   namespace: {{ .Values.namespace }}
+  annotations:
+  {{ range .Values.sysdb.annotations }}
+    {{ .name }}: {{ .value }}
+  {{ end }}
 spec:
   replicas: {{ .Values.sysdb.replicaCount }}
   selector:
