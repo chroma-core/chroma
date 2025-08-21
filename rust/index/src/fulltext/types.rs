@@ -436,7 +436,7 @@ impl<'me> FullTextIndexReader<'me> {
 }
 
 #[async_trait::async_trait]
-impl<'reader> NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'reader> {
+impl NgramLiteralProvider<FullTextIndexError> for FullTextIndexReader<'_> {
     fn maximum_branching_factor(&self) -> usize {
         6
     }

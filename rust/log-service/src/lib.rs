@@ -631,7 +631,7 @@ impl LogServer {
         }
         tracing::info!("scouted {collection_id} start={start} limit={limit}");
         const STEP: u64 = 100;
-        let num_steps = (limit.saturating_sub(start) + STEP - 1) / STEP;
+        let num_steps = limit.saturating_sub(start).div_ceil(STEP);
         let actual_steps = (0..num_steps)
             .map(|x| {
                 (
