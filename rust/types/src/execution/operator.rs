@@ -136,6 +136,15 @@ impl Filter {
     }
 }
 
+impl Default for Filter {
+    fn default() -> Self {
+        Self {
+            query_ids: None,
+            where_clause: None,
+        }
+    }
+}
+
 impl TryFrom<chroma_proto::FilterOperator> for Filter {
     type Error = QueryConversionError;
 
@@ -240,7 +249,7 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
 /// # Parameters
 /// - `skip`: The number of records to skip in the beginning
 /// - `fetch`: The number of records to fetch after `skip`
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Limit {
     #[serde(default)]
     pub skip: u32,
@@ -251,6 +260,15 @@ pub struct Limit {
 impl Limit {
     fn default_fetch() -> Option<u32> {
         Some(128)
+    }
+}
+
+impl Default for Limit {
+    fn default() -> Self {
+        Self {
+            skip: 0,
+            fetch: Self::default_fetch(),
+        }
     }
 }
 
@@ -752,23 +770,23 @@ impl TryFrom<Rank> for chroma_proto::Rank {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Score {
     #[serde(rename = "$abs")]
-    Absolute { score: Box<Score> },
+    Absolute(Box<Score>),
     #[serde(rename = "$div")]
     Division { left: Box<Score>, right: Box<Score> },
     #[serde(rename = "$exp")]
-    Exponentiation { score: Box<Score> },
+    Exponentiation(Box<Score>),
     #[serde(rename = "$log")]
-    Logarithm { score: Box<Score> },
+    Logarithm(Box<Score>),
     #[serde(rename = "$max")]
-    Maximum { scores: Vec<Score> },
+    Maximum(Vec<Score>),
     #[serde(rename = "$meta")]
-    Metadata { key: String },
+    Metadata(String),
     #[serde(rename = "$min")]
-    Minimum { scores: Vec<Score> },
+    Minimum(Vec<Score>),
     #[serde(rename = "$mul")]
-    Multiplication { scores: Vec<Score> },
+    Multiplication(Vec<Score>),
     #[serde(rename = "$ord")]
-    Ordinal { score: Box<Score> },
+    Ordinal(Box<Score>),
     #[serde(rename = "$rank")]
     Rank {
         source: Box<Rank>,
@@ -777,9 +795,9 @@ pub enum Score {
     #[serde(rename = "$sub")]
     Subtraction { left: Box<Score>, right: Box<Score> },
     #[serde(rename = "$sum")]
-    Summation { scores: Vec<Score> },
+    Summation(Vec<Score>),
     #[serde(rename = "$val")]
-    Value { value: f32 },
+    Value(f32),
 }
 
 impl Eq for Score {}
@@ -790,10 +808,7 @@ impl TryFrom<chroma_proto::Score> for Score {
     fn try_from(proto_score: chroma_proto::Score) -> Result<Self, Self::Error> {
         match proto_score.score {
             Some(chroma_proto::score::Score::Absolute(abs)) => {
-                let inner_score = abs.score.ok_or(QueryConversionError::field("score"))?;
-                Ok(Score::Absolute {
-                    score: Box::new(Score::try_from(*inner_score)?),
-                })
+                Ok(Score::Absolute(Box::new(Score::try_from(*abs)?)))
             }
             Some(chroma_proto::score::Score::Division(div)) => {
                 let left = div.left.ok_or(QueryConversionError::field("left"))?;
@@ -804,16 +819,10 @@ impl TryFrom<chroma_proto::Score> for Score {
                 })
             }
             Some(chroma_proto::score::Score::Exponentiation(exp)) => {
-                let inner_score = exp.score.ok_or(QueryConversionError::field("score"))?;
-                Ok(Score::Exponentiation {
-                    score: Box::new(Score::try_from(*inner_score)?),
-                })
+                Ok(Score::Exponentiation(Box::new(Score::try_from(*exp)?)))
             }
             Some(chroma_proto::score::Score::Logarithm(log)) => {
-                let inner_score = log.score.ok_or(QueryConversionError::field("score"))?;
-                Ok(Score::Logarithm {
-                    score: Box::new(Score::try_from(*inner_score)?),
-                })
+                Ok(Score::Logarithm(Box::new(Score::try_from(*log)?)))
             }
             Some(chroma_proto::score::Score::Maximum(max)) => {
                 let scores = max
@@ -821,18 +830,16 @@ impl TryFrom<chroma_proto::Score> for Score {
                     .into_iter()
                     .map(Score::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(Score::Maximum { scores })
+                Ok(Score::Maximum(scores))
             }
-            Some(chroma_proto::score::Score::Metadata(meta)) => {
-                Ok(Score::Metadata { key: meta.key })
-            }
+            Some(chroma_proto::score::Score::Metadata(meta)) => Ok(Score::Metadata(meta)),
             Some(chroma_proto::score::Score::Minimum(min)) => {
                 let scores = min
                     .scores
                     .into_iter()
                     .map(Score::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(Score::Minimum { scores })
+                Ok(Score::Minimum(scores))
             }
             Some(chroma_proto::score::Score::Multiplication(mul)) => {
                 let scores = mul
@@ -840,13 +847,10 @@ impl TryFrom<chroma_proto::Score> for Score {
                     .into_iter()
                     .map(Score::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(Score::Multiplication { scores })
+                Ok(Score::Multiplication(scores))
             }
             Some(chroma_proto::score::Score::Ordinal(ordinal)) => {
-                let inner_score = ordinal.score.ok_or(QueryConversionError::field("score"))?;
-                Ok(Score::Ordinal {
-                    score: Box::new(Score::try_from(*inner_score)?),
-                })
+                Ok(Score::Ordinal(Box::new(Score::try_from(*ordinal)?)))
             }
             Some(chroma_proto::score::Score::Rank(rank)) => {
                 let source = rank.source.ok_or(QueryConversionError::field("source"))?;
@@ -869,11 +873,9 @@ impl TryFrom<chroma_proto::Score> for Score {
                     .into_iter()
                     .map(Score::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(Score::Summation { scores })
+                Ok(Score::Summation(scores))
             }
-            Some(chroma_proto::score::Score::Value(value)) => {
-                Ok(Score::Value { value: value.value })
-            }
+            Some(chroma_proto::score::Score::Value(value)) => Ok(Score::Value(value)),
             None => Err(QueryConversionError::field("score")),
         }
     }
@@ -905,62 +907,52 @@ impl TryFrom<Score> for chroma_proto::Score {
 
     fn try_from(score: Score) -> Result<Self, Self::Error> {
         let proto_score = match score {
-            Score::Absolute { score } => {
-                chroma_proto::score::Score::Absolute(Box::new(chroma_proto::score::Absolute {
-                    score: Some(Box::new(chroma_proto::Score::try_from(*score)?)),
-                }))
-            }
+            Score::Absolute(score) => chroma_proto::score::Score::Absolute(Box::new(
+                chroma_proto::Score::try_from(*score)?,
+            )),
             Score::Division { left, right } => {
                 chroma_proto::score::Score::Division(Box::new(chroma_proto::score::Division {
                     left: Some(Box::new(chroma_proto::Score::try_from(*left)?)),
                     right: Some(Box::new(chroma_proto::Score::try_from(*right)?)),
                 }))
             }
-            Score::Exponentiation { score } => chroma_proto::score::Score::Exponentiation(
-                Box::new(chroma_proto::score::Exponentiation {
-                    score: Some(Box::new(chroma_proto::Score::try_from(*score)?)),
-                }),
-            ),
-            Score::Logarithm { score } => {
-                chroma_proto::score::Score::Logarithm(Box::new(chroma_proto::score::Logarithm {
-                    score: Some(Box::new(chroma_proto::Score::try_from(*score)?)),
-                }))
-            }
-            Score::Maximum { scores } => {
+            Score::Exponentiation(score) => chroma_proto::score::Score::Exponentiation(Box::new(
+                chroma_proto::Score::try_from(*score)?,
+            )),
+            Score::Logarithm(score) => chroma_proto::score::Score::Logarithm(Box::new(
+                chroma_proto::Score::try_from(*score)?,
+            )),
+            Score::Maximum(scores) => {
                 let proto_scores = scores
                     .into_iter()
                     .map(chroma_proto::Score::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                chroma_proto::score::Score::Maximum(chroma_proto::score::Maximum {
+                chroma_proto::score::Score::Maximum(chroma_proto::score::ScoreList {
                     scores: proto_scores,
                 })
             }
-            Score::Metadata { key } => {
-                chroma_proto::score::Score::Metadata(chroma_proto::score::Metadata { key })
-            }
-            Score::Minimum { scores } => {
+            Score::Metadata(key) => chroma_proto::score::Score::Metadata(key),
+            Score::Minimum(scores) => {
                 let proto_scores = scores
                     .into_iter()
                     .map(chroma_proto::Score::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                chroma_proto::score::Score::Minimum(chroma_proto::score::Minimum {
+                chroma_proto::score::Score::Minimum(chroma_proto::score::ScoreList {
                     scores: proto_scores,
                 })
             }
-            Score::Multiplication { scores } => {
+            Score::Multiplication(scores) => {
                 let proto_scores = scores
                     .into_iter()
                     .map(chroma_proto::Score::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                chroma_proto::score::Score::Multiplication(chroma_proto::score::Multiplication {
+                chroma_proto::score::Score::Multiplication(chroma_proto::score::ScoreList {
                     scores: proto_scores,
                 })
             }
-            Score::Ordinal { score } => {
-                chroma_proto::score::Score::Ordinal(Box::new(chroma_proto::score::Ordinal {
-                    score: Some(Box::new(chroma_proto::Score::try_from(*score)?)),
-                }))
-            }
+            Score::Ordinal(score) => chroma_proto::score::Score::Ordinal(Box::new(
+                chroma_proto::Score::try_from(*score)?,
+            )),
             Score::Rank { source, default } => {
                 chroma_proto::score::Score::Rank(chroma_proto::score::RankScore {
                     source: Some(chroma_proto::Rank::try_from(*source)?),
@@ -973,18 +965,16 @@ impl TryFrom<Score> for chroma_proto::Score {
                     right: Some(Box::new(chroma_proto::Score::try_from(*right)?)),
                 }),
             ),
-            Score::Summation { scores } => {
+            Score::Summation(scores) => {
                 let proto_scores = scores
                     .into_iter()
                     .map(chroma_proto::Score::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                chroma_proto::score::Score::Summation(chroma_proto::score::Summation {
+                chroma_proto::score::Score::Summation(chroma_proto::score::ScoreList {
                     scores: proto_scores,
                 })
             }
-            Score::Value { value } => {
-                chroma_proto::score::Score::Value(chroma_proto::score::Value { value })
-            }
+            Score::Value(value) => chroma_proto::score::Score::Value(value),
         };
 
         Ok(chroma_proto::Score {
@@ -993,7 +983,7 @@ impl TryFrom<Score> for chroma_proto::Score {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Project {
     #[serde(default)]
     pub fields: HashSet<String>,
