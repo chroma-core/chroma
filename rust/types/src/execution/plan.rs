@@ -140,9 +140,12 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
 
 #[derive(Clone, Debug, Deserialize, Serialize, Validate)]
 pub struct RetrievePayload {
+    #[serde(default)]
     pub filter: Filter,
     pub score: Score,
+    #[serde(default)]
     pub limit: Limit,
+    #[serde(default)]
     pub project: Project,
 }
 

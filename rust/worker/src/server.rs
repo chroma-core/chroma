@@ -448,16 +448,23 @@ impl QueryExecutor for WorkerServer {
         let retrieve_span = trace_span!("RetrievePlan",);
         let _instrumented_span = wrap_span_with_parent_context(retrieve_span, request.metadata());
         
-        // For now, just print the debug of the payloads and return one result per payload
-        let inner = request.into_inner();
-        let num_payloads = inner.payloads.len();
+        // Convert proto to Retrieve for cleaner debug output
+        let proto_plan = request.into_inner();
+        let retrieve_plan = match chroma_types::plan::Retrieve::try_from(proto_plan.clone()) {
+            Ok(plan) => plan,
+            Err(e) => {
+                return Err(Status::invalid_argument(format!("Failed to convert proto to Retrieve: {}", e)));
+            }
+        };
         
-        let debug_msg = format!("Received retrieve request with {} payloads:\n{:#?}", num_payloads, inner);
-        tracing::info!("{}", debug_msg);
+        let num_payloads = retrieve_plan.payloads.len();
+        tracing::info!("Received retrieve request with {} payloads:\n{:#?}", num_payloads, retrieve_plan);
         
         // Return one debug string per payload
-        let results = (0..num_payloads)
-            .map(|i| format!("Debug result for payload {}: {:?}", i, inner.payloads.get(i)))
+        let results = retrieve_plan.payloads
+            .iter()
+            .enumerate()
+            .map(|(i, payload)| format!("Debug result for payload {}: {:#?}", i, payload))
             .collect();
         
         Ok(Response::new(chroma_proto::RetrieveResult {
