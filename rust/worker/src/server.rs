@@ -136,6 +136,7 @@ impl WorkerServer {
             };
             sigterm.recv().await;
             tracing::info!("Received SIGTERM, waiting for grace period...");
+            // Note: gRPC calls can still be successfully made during this period. We rely on the memberlist updating to stop clients from sending new requests. Ideally there would be a Tower layer that rejected new requests during this period with UNAVAILABLE or similar.
             tokio::time::sleep(shutdown_grace_period).await;
             tracing::info!("Grace period ended, shutting down server...");
         });
