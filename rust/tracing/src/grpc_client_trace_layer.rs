@@ -15,22 +15,22 @@ const SPAN_ID_HEADER_KEY: &str = "chroma-spanid";
 
 /// Propagates tracing information to gRPC requests and creates a span for each request.
 #[derive(Clone)]
-pub struct GrpcTraceLayer;
+pub struct GrpcClientTraceLayer;
 
-impl<S> Layer<S> for GrpcTraceLayer {
-    type Service = GrpcTraceService<S>;
+impl<S> Layer<S> for GrpcClientTraceLayer {
+    type Service = GrpcClientTraceService<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        GrpcTraceService { inner: service }
+        GrpcClientTraceService { inner: service }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct GrpcTraceService<S> {
+pub struct GrpcClientTraceService<S> {
     inner: S,
 }
 
-impl<S, ReqBody> Service<http::Request<ReqBody>> for GrpcTraceService<S>
+impl<S, ReqBody> Service<http::Request<ReqBody>> for GrpcClientTraceService<S>
 where
     S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>, Error = Error>
         + Clone
