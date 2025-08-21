@@ -119,8 +119,9 @@ pub struct FetchLog {
 /// - `where_clause`: The predicate on individual record
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Filter {
+    #[serde(default)]
     pub query_ids: Option<Vec<String>>,
-    #[serde(deserialize_with = "Filter::deserialize_where")]
+    #[serde(default, deserialize_with = "Filter::deserialize_where")]
     pub where_clause: Option<Where>,
 }
 
@@ -241,8 +242,16 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
 /// - `fetch`: The number of records to fetch after `skip`
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Limit {
+    #[serde(default)]
     pub skip: u32,
+    #[serde(default = "Limit::default_fetch")]
     pub fetch: Option<u32>,
+}
+
+impl Limit {
+    fn default_fetch() -> Option<u32> {
+        Some(128)
+    }
 }
 
 impl From<chroma_proto::LimitOperator> for Limit {
@@ -870,6 +879,27 @@ impl TryFrom<chroma_proto::Score> for Score {
     }
 }
 
+impl TryFrom<chroma_proto::ScoreOperator> for Score {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::ScoreOperator) -> Result<Self, Self::Error> {
+        value
+            .score
+            .ok_or(QueryConversionError::field("score"))?
+            .try_into()
+    }
+}
+
+impl TryFrom<Score> for chroma_proto::ScoreOperator {
+    type Error = QueryConversionError;
+
+    fn try_from(value: Score) -> Result<Self, Self::Error> {
+        Ok(Self {
+            score: Some(value.try_into()?),
+        })
+    }
+}
+
 impl TryFrom<Score> for chroma_proto::Score {
     type Error = QueryConversionError;
 
@@ -965,5 +995,47 @@ impl TryFrom<Score> for chroma_proto::Score {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Project {
+    #[serde(default)]
     pub fields: HashSet<String>,
+}
+
+impl TryFrom<chroma_proto::ProjectOperator> for Project {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::ProjectOperator) -> Result<Self, Self::Error> {
+        Ok(Self {
+            fields: value.fields.into_iter().collect(),
+        })
+    }
+}
+
+impl TryFrom<Project> for chroma_proto::ProjectOperator {
+    type Error = QueryConversionError;
+
+    fn try_from(value: Project) -> Result<Self, Self::Error> {
+        Ok(Self {
+            fields: value.fields.into_iter().collect(),
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RetrieveResult {
+    pub results: Vec<String>,
+}
+
+impl From<chroma_proto::RetrieveResult> for RetrieveResult {
+    fn from(value: chroma_proto::RetrieveResult) -> Self {
+        Self {
+            results: value.results,
+        }
+    }
+}
+
+impl From<RetrieveResult> for chroma_proto::RetrieveResult {
+    fn from(value: RetrieveResult) -> Self {
+        Self {
+            results: value.results,
+        }
+    }
 }
