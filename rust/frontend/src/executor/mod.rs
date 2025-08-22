@@ -40,7 +40,9 @@ impl Executor {
     }
     pub async fn retrieve(&mut self, plan: Retrieve) -> Result<RetrieveResult, ExecutorError> {
         match self {
-            Executor::Distributed(distributed_executor) => distributed_executor.retrieve(plan).await,
+            Executor::Distributed(distributed_executor) => {
+                distributed_executor.retrieve(plan).await
+            }
             Executor::Local(local_executor) => local_executor.retrieve(plan).await,
         }
     }

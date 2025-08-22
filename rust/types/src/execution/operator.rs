@@ -1,13 +1,15 @@
+use core::mem::discriminant;
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use std::{
     cmp::{Ordering, Reverse},
     collections::{BinaryHeap, HashMap, HashSet},
+    hash::{Hash, Hasher},
 };
 use thiserror::Error;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, CollectionAndSegments, CollectionUuid, Metadata,
-    RawWhereFields, ScalarEncoding, Where,
+    RawWhereFields, ScalarEncoding, Where, CHROMA_EMBEDDING_KEY,
 };
 
 use super::error::QueryConversionError;
@@ -117,7 +119,7 @@ pub struct FetchLog {
 /// # Parameters
 /// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
 /// - `where_clause`: The predicate on individual record
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Filter {
     #[serde(default)]
     pub query_ids: Option<Vec<String>>,
@@ -133,15 +135,6 @@ impl Filter {
         raw_fields
             .parse()
             .map_err(|e| D::Error::custom(e.to_string()))
-    }
-}
-
-impl Default for Filter {
-    fn default() -> Self {
-        Self {
-            query_ids: None,
-            where_clause: None,
-        }
     }
 }
 
@@ -290,7 +283,7 @@ impl From<Limit> for chroma_proto::LimitOperator {
     }
 }
 
-/// The `RecordDistance` represents how far the embedding (identified by `offset_id`) is to the query embedding
+/// The `RecordDistance` represents a measure of embedding (identified by `offset_id`) with respect to query embedding
 #[derive(Clone, Debug)]
 pub struct RecordDistance {
     pub offset_id: u32,
@@ -683,18 +676,66 @@ pub enum Rank {
     #[serde(rename = "$dense-knn")]
     DenseKnn {
         embedding: Vec<f32>,
+        #[serde(default = "Rank::default_key")]
         key: String,
+        #[serde(default = "Rank::default_limit")]
         limit: u32,
     },
     #[serde(rename = "$sparse-knn")]
     SparseKnn {
         embedding: HashMap<u32, f32>,
+        #[serde(default = "Rank::default_key")]
         key: String,
+        #[serde(default = "Rank::default_limit")]
         limit: u32,
     },
 }
 
+impl Rank {
+    pub fn default_key() -> String {
+        CHROMA_EMBEDDING_KEY.to_string()
+    }
+    pub fn default_limit() -> u32 {
+        1024
+    }
+}
+
 impl Eq for Rank {}
+
+impl Hash for Rank {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        discriminant(self).hash(state);
+        match self {
+            Rank::DenseKnn {
+                embedding,
+                key,
+                limit,
+            } => {
+                let bits = embedding
+                    .iter()
+                    .map(|val| (val + 0.0).to_bits())
+                    .collect::<Vec<_>>();
+                bits.hash(state);
+                key.hash(state);
+                limit.hash(state);
+            }
+            Rank::SparseKnn {
+                embedding,
+                key,
+                limit,
+            } => {
+                let mut sorted_bits = embedding
+                    .iter()
+                    .map(|(index, val)| (*index, (val + 0.0).to_bits()))
+                    .collect::<Vec<_>>();
+                sorted_bits.sort_unstable();
+                sorted_bits.hash(state);
+                key.hash(state);
+                limit.hash(state);
+            }
+        }
+    }
+}
 
 impl TryFrom<chroma_proto::Rank> for Rank {
     type Error = QueryConversionError;
@@ -767,7 +808,7 @@ impl TryFrom<Rank> for chroma_proto::Rank {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Score {
     #[serde(rename = "$abs")]
     Absolute(Box<Score>),
@@ -779,18 +820,17 @@ pub enum Score {
     Logarithm(Box<Score>),
     #[serde(rename = "$max")]
     Maximum(Vec<Score>),
-    #[serde(rename = "$meta")]
-    Metadata(String),
     #[serde(rename = "$min")]
     Minimum(Vec<Score>),
     #[serde(rename = "$mul")]
     Multiplication(Vec<Score>),
-    #[serde(rename = "$ord")]
-    Ordinal(Box<Score>),
     #[serde(rename = "$rank")]
     Rank {
-        source: Box<Rank>,
+        #[serde(default)]
         default: Option<f32>,
+        #[serde(default)]
+        ordinal: bool,
+        source: Box<Rank>,
     },
     #[serde(rename = "$sub")]
     Subtraction { left: Box<Score>, right: Box<Score> },
@@ -800,7 +840,28 @@ pub enum Score {
     Value(f32),
 }
 
-impl Eq for Score {}
+impl Score {
+    pub fn ranks(&self) -> HashSet<Rank> {
+        match self {
+            Score::Absolute(score) | Score::Exponentiation(score) | Score::Logarithm(score) => {
+                score.ranks()
+            }
+            Score::Division { left, right } | Score::Subtraction { left, right } => {
+                left.ranks().into_iter().chain(right.ranks()).collect()
+            }
+            Score::Maximum(scores)
+            | Score::Minimum(scores)
+            | Score::Multiplication(scores)
+            | Score::Summation(scores) => scores.iter().flat_map(Score::ranks).collect(),
+            Score::Value(_) => HashSet::new(),
+            Score::Rank {
+                default: _,
+                ordinal: _,
+                source,
+            } => HashSet::from_iter([*source.clone()]),
+        }
+    }
+}
 
 impl TryFrom<chroma_proto::Score> for Score {
     type Error = QueryConversionError;
@@ -832,7 +893,6 @@ impl TryFrom<chroma_proto::Score> for Score {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Score::Maximum(scores))
             }
-            Some(chroma_proto::score::Score::Metadata(meta)) => Ok(Score::Metadata(meta)),
             Some(chroma_proto::score::Score::Minimum(min)) => {
                 let scores = min
                     .scores
@@ -849,14 +909,12 @@ impl TryFrom<chroma_proto::Score> for Score {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Score::Multiplication(scores))
             }
-            Some(chroma_proto::score::Score::Ordinal(ordinal)) => {
-                Ok(Score::Ordinal(Box::new(Score::try_from(*ordinal)?)))
-            }
             Some(chroma_proto::score::Score::Rank(rank)) => {
                 let source = rank.source.ok_or(QueryConversionError::field("source"))?;
                 Ok(Score::Rank {
-                    source: Box::new(Rank::try_from(source)?),
                     default: rank.default,
+                    ordinal: rank.ordinal,
+                    source: Box::new(Rank::try_from(source)?),
                 })
             }
             Some(chroma_proto::score::Score::Subtraction(sub)) => {
@@ -931,7 +989,6 @@ impl TryFrom<Score> for chroma_proto::Score {
                     scores: proto_scores,
                 })
             }
-            Score::Metadata(key) => chroma_proto::score::Score::Metadata(key),
             Score::Minimum(scores) => {
                 let proto_scores = scores
                     .into_iter()
@@ -950,15 +1007,15 @@ impl TryFrom<Score> for chroma_proto::Score {
                     scores: proto_scores,
                 })
             }
-            Score::Ordinal(score) => chroma_proto::score::Score::Ordinal(Box::new(
-                chroma_proto::Score::try_from(*score)?,
-            )),
-            Score::Rank { source, default } => {
-                chroma_proto::score::Score::Rank(chroma_proto::score::RankScore {
-                    source: Some(chroma_proto::Rank::try_from(*source)?),
-                    default,
-                })
-            }
+            Score::Rank {
+                default,
+                ordinal,
+                source,
+            } => chroma_proto::score::Score::Rank(chroma_proto::score::RankScore {
+                default,
+                ordinal,
+                source: Some(chroma_proto::Rank::try_from(*source)?),
+            }),
             Score::Subtraction { left, right } => chroma_proto::score::Score::Subtraction(
                 Box::new(chroma_proto::score::Subtraction {
                     left: Some(Box::new(chroma_proto::Score::try_from(*left)?)),
