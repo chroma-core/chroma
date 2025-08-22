@@ -194,7 +194,7 @@ impl<'me> SparseReader<'me> {
         };
 
         let mut threshold = f32::MIN;
-        let mut top_scores = BinaryHeap::<Score>::with_capacity(k as usize);
+        let mut top_scores = BinaryHeap::with_capacity(k as usize);
 
         loop {
             let mut accumulated_dimension_upper_bound = 0.0;

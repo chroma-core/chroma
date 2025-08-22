@@ -105,7 +105,7 @@ impl<
         &'storage self,
         prefix_range: PrefixRange,
         key_range: KeyRange,
-    ) -> Result<impl Iterator<Item = (&'storage str, K, V)> + 'storage, Box<dyn ChromaError>>
+    ) -> Result<impl Iterator<Item = (&'storage str, K, V)> + Send + 'storage, Box<dyn ChromaError>>
     where
         PrefixRange: RangeBounds<&'prefix str>,
         KeyRange: RangeBounds<K>,
