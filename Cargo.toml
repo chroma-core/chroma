@@ -71,6 +71,7 @@ humantime = { version = "2.2.0" }
 petgraph = { version = "0.8.1" }
 base64 = "0.22"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
+sprs = "0.11.3"
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
