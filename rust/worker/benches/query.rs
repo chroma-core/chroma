@@ -6,7 +6,10 @@ use chroma_benchmark::{
     datasets::sift::Sift1MData,
 };
 use chroma_config::{registry::Registry, Configurable};
-use chroma_segment::test::TestDistributedSegment;
+use chroma_segment::{
+    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
+    test::TestDistributedSegment,
+};
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
 use chroma_types::operator::{Knn, KnnProjection};
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -29,12 +32,10 @@ fn trivial_knn_filter(
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
-    let hnsw_provider = test_segments.hnsw_provider.clone();
     let collection_uuid = test_segments.collection.collection_id;
     KnnFilterOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
-        hnsw_provider,
         1000,
         test_segments.into(),
         empty_fetch_log(collection_uuid),
@@ -47,12 +48,10 @@ fn always_true_knn_filter(
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
-    let hnsw_provider = test_segments.hnsw_provider.clone();
     let collection_uuid = test_segments.collection.collection_id;
     KnnFilterOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
-        hnsw_provider,
         1000,
         test_segments.into(),
         empty_fetch_log(collection_uuid),
@@ -65,12 +64,10 @@ fn always_false_knn_filter(
     dispatcher_handle: ComponentHandle<Dispatcher>,
 ) -> KnnFilterOrchestrator {
     let blockfile_provider = test_segments.blockfile_provider.clone();
-    let hnsw_provider = test_segments.hnsw_provider.clone();
     let collection_uuid = test_segments.collection.collection_id;
     KnnFilterOrchestrator::new(
         blockfile_provider,
         dispatcher_handle,
-        hnsw_provider,
         1000,
         test_segments.into(),
         empty_fetch_log(collection_uuid),
@@ -81,6 +78,7 @@ fn always_false_knn_filter(
 fn knn(
     test_segments: &TestDistributedSegment,
     dispatcher_handle: ComponentHandle<Dispatcher>,
+    hnsw_reader: Option<DistributedHNSWSegmentReader>,
     knn_filter_output: KnnFilterOutput,
     query: Vec<f32>,
 ) -> KnnOrchestrator {
@@ -88,6 +86,7 @@ fn knn(
         test_segments.blockfile_provider.clone(),
         dispatcher_handle.clone(),
         1000,
+        hnsw_reader,
         knn_filter_output.clone(),
         Knn {
             embedding: query,
@@ -126,6 +125,21 @@ fn bench_query(criterion: &mut Criterion) {
     let runtime = tokio_multi_thread();
     let test_segments = runtime.block_on(sift1m_segments());
 
+    let hnsw_reader = match runtime.block_on(DistributedHNSWSegmentReader::from_segment(
+        &test_segments.collection.clone(),
+        &test_segments.vector_segment,
+        test_segments
+            .collection
+            .dimension
+            .expect("Collection dimension should be non-zero") as usize,
+        test_segments.hnsw_provider.clone(),
+    )) {
+        Ok(hnsw_reader) => Some(*hnsw_reader),
+        Err(err) if matches!(*err, DistributedHNSWSegmentFromSegmentError::Uninitialized) => None,
+
+        Err(err) => panic!("{err}"),
+    };
+
     let config = RootConfig::default();
     let system = System::default();
     let registry = Registry::new();
@@ -159,6 +173,7 @@ fn bench_query(criterion: &mut Criterion) {
                             knn(
                                 &test_segments,
                                 dispatcher_handle.clone(),
+                                hnsw_reader.clone(),
                                 knn_filter_output.clone(),
                                 query.clone(),
                             ),
@@ -183,6 +198,7 @@ fn bench_query(criterion: &mut Criterion) {
                             knn(
                                 &test_segments,
                                 dispatcher_handle.clone(),
+                                hnsw_reader.clone(),
                                 knn_filter_output.clone(),
                                 query.clone(),
                             ),
@@ -207,6 +223,7 @@ fn bench_query(criterion: &mut Criterion) {
                             knn(
                                 &test_segments,
                                 dispatcher_handle.clone(),
+                                hnsw_reader.clone(),
                                 knn_filter_output.clone(),
                                 query.clone(),
                             ),

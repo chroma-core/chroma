@@ -9942,6 +9942,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "shuttle",
+ "sprs",
  "tantivy",
  "tempfile",
  "thiserror 1.0.69",
