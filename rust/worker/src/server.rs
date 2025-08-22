@@ -17,6 +17,7 @@ use chroma_types::{
         query_executor_server::{QueryExecutor, QueryExecutorServer},
     },
     operator::{GetResult, KnnBatch, KnnBatchResult, KnnProjection, Scan},
+    plan::Retrieve,
     CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
@@ -443,33 +444,34 @@ impl QueryExecutor for WorkerServer {
         &self,
         request: Request<chroma_proto::RetrievePlan>,
     ) -> Result<Response<chroma_proto::RetrieveResult>, Status> {
-        // Note: We cannot write a middleware that instruments every service rpc
-        // with a span because of https://github.com/hyperium/tonic/pull/1202.
-        let retrieve_span = trace_span!("RetrievePlan",);
-        let _instrumented_span = wrap_span_with_parent_context(retrieve_span, request.metadata());
-        
         // Convert proto to Retrieve for cleaner debug output
         let proto_plan = request.into_inner();
-        let retrieve_plan = match chroma_types::plan::Retrieve::try_from(proto_plan.clone()) {
+        let retrieve_plan = match Retrieve::try_from(proto_plan.clone()) {
             Ok(plan) => plan,
             Err(e) => {
-                return Err(Status::invalid_argument(format!("Failed to convert proto to Retrieve: {}", e)));
+                return Err(Status::invalid_argument(format!(
+                    "Failed to convert proto to Retrieve: {}",
+                    e
+                )));
             }
         };
-        
+
         let num_payloads = retrieve_plan.payloads.len();
-        tracing::info!("Received retrieve request with {} payloads:\n{:#?}", num_payloads, retrieve_plan);
-        
+        tracing::info!(
+            "Received retrieve request with {} payloads:\n{:#?}",
+            num_payloads,
+            retrieve_plan
+        );
+
         // Return one debug string per payload
-        let results = retrieve_plan.payloads
+        let results = retrieve_plan
+            .payloads
             .iter()
             .enumerate()
             .map(|(i, payload)| format!("Debug result for payload {}: {:#?}", i, payload))
             .collect();
-        
-        Ok(Response::new(chroma_proto::RetrieveResult {
-            results,
-        }))
+
+        Ok(Response::new(chroma_proto::RetrieveResult { results }))
     }
 }
 

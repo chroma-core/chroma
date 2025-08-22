@@ -212,12 +212,6 @@ impl utoipa::PartialSchema for RetrievePayload {
 
 impl utoipa::ToSchema for RetrievePayload {}
 
-#[derive(Clone, Debug)]
-pub struct Retrieve {
-    pub scan: Scan,
-    pub payloads: Vec<RetrievePayload>,
-}
-
 impl TryFrom<chroma_proto::RetrievePayload> for RetrievePayload {
     type Error = QueryConversionError;
 
@@ -254,6 +248,12 @@ impl TryFrom<RetrievePayload> for chroma_proto::RetrievePayload {
             project: Some(value.project.try_into()?),
         })
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct Retrieve {
+    pub scan: Scan,
+    pub payloads: Vec<RetrievePayload>,
 }
 
 impl TryFrom<chroma_proto::RetrievePlan> for Retrieve {
