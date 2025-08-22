@@ -1141,7 +1141,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.12.1",
  "lazy_static",
  "lazycell",
  "log",
@@ -1657,6 +1657,7 @@ version = "0.1.0"
 dependencies = [
  "axum 0.8.1",
  "jemalloc_pprof",
+ "mappings",
  "tokio",
 ]
 
@@ -4418,9 +4419,9 @@ checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 
 [[package]]
 name = "jemalloc_pprof"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5622af6d21ff86ed7797ef98e11b8f302da25ec69a7db9f6cde8e2e1c8df9992"
+checksum = "9770dc31e3b7797ce9ec1184c23021eae0ee50d8cac2f3c706a9cae1fb664e41"
 dependencies = [
  "anyhow",
  "libc",
