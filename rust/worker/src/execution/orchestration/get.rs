@@ -5,13 +5,14 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
+use chroma_tracing::link_event;
 use chroma_types::{
     operator::{Filter, GetResult, Limit, Projection, ProjectionOutput},
     CollectionAndSegments,
 };
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
-use tracing::Span;
+use tracing::{Level, Span};
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
@@ -200,8 +201,12 @@ impl Orchestrator for GetOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         // Prefetch task is detached from the orchestrator
-        let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
-        tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
+        let record_prefetch_span = link_event!(
+            Level::INFO,
+            tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id),
+            "Creating record segment prefetch task"
+        );
+        tasks.push((prefetch_record_segment_task, Some(record_prefetch_span)));
 
         // Prefetch metadata segment.
         let prefetch_metadata_task = wrap(
@@ -213,8 +218,12 @@ impl Orchestrator for GetOrchestrator {
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
         );
-        let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
-        tasks.push((prefetch_metadata_task, Some(prefetch_span)));
+        let metadata_prefetch_span = link_event!(
+            Level::INFO,
+            tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id),
+            "Creating metadata segment prefetch task"
+        );
+        tasks.push((prefetch_metadata_task, Some(metadata_prefetch_span.clone())));
 
         // Fetch log task.
         let fetch_log_task = wrap(

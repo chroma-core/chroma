@@ -4,6 +4,7 @@ use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, TaskMessage, TaskResult,
 };
+use chroma_tracing::link_event;
 use chroma_types::operator::{
     Knn, KnnMerge, KnnOutput, KnnProjection, KnnProjectionOutput, RecordDistance,
 };
@@ -307,7 +308,11 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         // Prefetch span is detached from the orchestrator.
-        let prefetch_span = tracing::info_span!(parent: None, "Prefetch_record", num_records = output.distances.len());
+        let prefetch_span = link_event!(
+            tracing::Level::INFO,
+            tracing::info_span!(parent: None, "Prefetch_record", num_records = output.distances.len()),
+            "Creating record segment prefetch task"
+        );
         self.send(prefetch_task, ctx, Some(prefetch_span)).await;
 
         let projection_task = wrap(
