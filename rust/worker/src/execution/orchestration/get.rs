@@ -17,7 +17,6 @@ use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
     filter::{FilterError, FilterInput, FilterOutput},
     limit::{LimitError, LimitInput, LimitOutput},
-    prefetch_record::{PrefetchRecordError, PrefetchRecordOperator, PrefetchRecordOutput},
     prefetch_segment::{
         PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
     },
@@ -343,18 +342,6 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             offset_ids: output.offset_ids.iter().collect(),
         };
 
-        // Prefetch records before projection
-        let prefetch_task = wrap(
-            Box::new(PrefetchRecordOperator {}),
-            input.clone(),
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-
-        if !self.send(prefetch_task, ctx, Some(Span::current())).await {
-            return;
-        }
-
         let task = wrap(
             Box::new(self.projection.clone()),
             input,
@@ -362,19 +349,6 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for GetOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         self.send(task, ctx, Some(Span::current())).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for GetOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        _message: TaskResult<PrefetchRecordOutput, PrefetchRecordError>,
-        _ctx: &ComponentContext<Self>,
-    ) {
-        // The output and error from `PrefetchRecordOperator` are ignored
     }
 }
 
