@@ -21,4 +21,7 @@ pub mod prefetch_segment;
 pub mod projection;
 pub mod purge_dirty_log;
 pub mod repair_log_offsets;
+pub mod reverse_project;
+pub mod score;
 pub mod source_record_segment;
+pub mod sparse_knn;

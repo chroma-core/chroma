@@ -7,7 +7,10 @@ use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_log::Log;
-use chroma_segment::spann_provider::SpannProvider;
+use chroma_segment::{
+    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
+    spann_provider::SpannProvider,
+};
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
@@ -328,7 +331,6 @@ impl WorkerServer {
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
-            self.hnsw_index_provider.clone(),
             // TODO: Make this configurable
             1000,
             collection_and_segments.clone(),
@@ -377,6 +379,23 @@ impl WorkerServer {
                 Err(err) => Err(Status::new(err.code().into(), err.to_string())),
             }
         } else {
+            let hnsw_reader = match DistributedHNSWSegmentReader::from_segment(
+                &collection_and_segments.collection,
+                &collection_and_segments.vector_segment,
+                matching_records.dimension as usize,
+                self.hnsw_index_provider.clone(),
+            )
+            .await
+            {
+                Ok(hnsw_reader) => Some(*hnsw_reader),
+                Err(err)
+                    if matches!(*err, DistributedHNSWSegmentFromSegmentError::Uninitialized) =>
+                {
+                    None
+                }
+
+                Err(err) => return Err(Status::new(err.code().into(), err.to_string())),
+            };
             let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
                 .into_iter()
                 .map(|knn| {
@@ -385,6 +404,7 @@ impl WorkerServer {
                         dispatcher.clone(),
                         // TODO: Make this configurable
                         1000,
+                        hnsw_reader.clone(),
                         matching_records.clone(),
                         knn,
                         knn_projection.clone(),
