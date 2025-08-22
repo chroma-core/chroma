@@ -1,13 +1,14 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.api.types import Embeddable, Embeddings, EmbeddingFunction, Space
 from typing import List, Dict, Any, cast, Optional
 import os
 import numpy as np
 import numpy.typing as npt
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 import warnings
 
 
-class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
+class GooglePalmEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """To use this EmbeddingFunction, you must have the google.generativeai Python package installed and have a PaLM API key."""
 
     def __init__(
@@ -48,19 +49,18 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         palm.configure(api_key=self.api_key)
         self._palm = palm
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
         Args:
-            input: Documents or images to generate embeddings for.
+            input: Documents to generate embeddings for.
 
         Returns:
             Embeddings for the documents.
         """
         # Google PaLM only works with text documents
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError("Google PaLM only supports text documents, not images")
+        input = text_only_embeddable_check(input, "Google PaLM")
 
         return [
             np.array(
@@ -83,7 +83,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
 
@@ -119,7 +119,7 @@ class GooglePalmEmbeddingFunction(EmbeddingFunction[Documents]):
         validate_config_schema(config, "google_palm")
 
 
-class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
+class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """To use this EmbeddingFunction, you must have the google.generativeai Python package installed and have a Google API key."""
 
     def __init__(
@@ -165,21 +165,18 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         genai.configure(api_key=self.api_key)
         self._genai = genai
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
         Args:
-            input: Documents or images to generate embeddings for.
+            input: Documents to generate embeddings for.
 
         Returns:
             Embeddings for the documents.
         """
         # Google Generative AI only works with text documents
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError(
-                "Google Generative AI only supports text documents, not images"
-            )
+        input = text_only_embeddable_check(input, "Google Generative AI")
 
         embeddings_list: List[npt.NDArray[np.float32]] = []
         for text in input:
@@ -206,7 +203,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
         task_type = config.get("task_type")
@@ -251,7 +248,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         validate_config_schema(config, "google_generative_ai")
 
 
-class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
+class GoogleVertexEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """To use this EmbeddingFunction, you must have the vertexai Python package installed and have Google Cloud credentials configured."""
 
     def __init__(
@@ -301,19 +298,18 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         vertexai.init(project=project_id, location=region)
         self._model = TextEmbeddingModel.from_pretrained(model_name)
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
         Args:
-            input: Documents or images to generate embeddings for.
+            input: Documents to generate embeddings for.
 
         Returns:
             Embeddings for the documents.
         """
         # Google Vertex only works with text documents
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError("Google Vertex only supports text documents, not images")
+        input = text_only_embeddable_check(input, "Google Vertex")
 
         embeddings_list: List[npt.NDArray[np.float32]] = []
         for text in input:
@@ -336,7 +332,7 @@ class GoogleVertexEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
         project_id = config.get("project_id")

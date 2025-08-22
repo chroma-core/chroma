@@ -1,12 +1,13 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.api.types import Embeddable, Embeddings, EmbeddingFunction, Space
 from typing import List, Dict, Any, Optional
 import os
 import numpy as np
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 import warnings
 
 
-class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
+class OpenAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
     def __init__(
         self,
         api_key: Optional[str] = None,
@@ -102,7 +103,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
                 default_headers=self.default_headers,
             )
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
         Args:
@@ -110,6 +111,8 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         Returns:
             Embeddings for the documents.
         """
+        input = text_only_embeddable_check(input, type(self).__name__)
+
         # Handle batching
         if not input:
             return []
@@ -141,7 +144,7 @@ class OpenAIEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         # Extract parameters from config
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")

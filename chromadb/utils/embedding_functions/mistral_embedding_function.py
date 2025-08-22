@@ -1,11 +1,12 @@
-from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
+from chromadb.api.types import Embeddable, Embeddings, EmbeddingFunction, Space
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import List, Dict, Any
 import os
 import numpy as np
 
 
-class MistralEmbeddingFunction(EmbeddingFunction[Documents]):
+class MistralEmbeddingFunction(EmbeddingFunction[Embeddable]):
     def __init__(
         self,
         model: str,
@@ -31,15 +32,14 @@ class MistralEmbeddingFunction(EmbeddingFunction[Documents]):
             raise ValueError(f"The {api_key_env_var} environment variable is not set.")
         self.client = Mistral(api_key=self.api_key)
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Get the embeddings for a list of texts.
 
         Args:
-            input (Documents): A list of texts to get embeddings for.
+            input (Embeddable): A list of texts to get embeddings for.
         """
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError("Mistral only supports text documents, not images")
+        input = text_only_embeddable_check(input, "Mistral")
         output = self.client.embeddings.create(
             model=self.model,
             inputs=input,
@@ -59,7 +59,7 @@ class MistralEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         model = config.get("model")
         api_key_env_var = config.get("api_key_env_var")
 

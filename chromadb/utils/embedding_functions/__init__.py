@@ -1,11 +1,14 @@
-from typing import Dict, Any, Type, Set
+from typing import Dict, Any, Type, Set, cast
 from chromadb.api.types import (
+    Document,
+    Embeddable,
     EmbeddingFunction,
     Embeddings,
     Documents,
 )
 
 # Import all embedding functions
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.cohere_embedding_function import (
     CohereEmbeddingFunction,
 )
@@ -106,13 +109,13 @@ def get_builtins() -> Set[str]:
     return _all_classes
 
 
-class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
+class DefaultEmbeddingFunction(EmbeddingFunction[Embeddable]):
     def __init__(self) -> None:
         if is_thin_client:
             return
 
-    def __call__(self, input: Documents) -> Embeddings:
-        # Delegate to ONNXMiniLM_L6_V2
+    def __call__(self, input: Embeddable) -> Embeddings:
+         # Delegate to ONNXMiniLM_L6_V2
         return ONNXMiniLM_L6_V2()(input)
 
     @staticmethod
@@ -136,7 +139,7 @@ class DefaultEmbeddingFunction(EmbeddingFunction[Documents]):
 
 
 # Dictionary of supported embedding functions
-known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignore
+known_embedding_functions: Dict[str, Type[EmbeddingFunction[Embeddable]]] = {
     "cohere": CohereEmbeddingFunction,
     "openai": OpenAIEmbeddingFunction,
     "huggingface": HuggingFaceEmbeddingFunction,
@@ -197,7 +200,7 @@ def register_embedding_function(ef_class=None):  # type: ignore
 
 
 # Function to convert config to embedding function
-def config_to_embedding_function(config: Dict[str, Any]) -> EmbeddingFunction:  # type: ignore
+def config_to_embedding_function(config: Dict[str, Any]) -> EmbeddingFunction[Embeddable]:
     """Convert a config dictionary to an embedding function.
 
     Args:
