@@ -32,8 +32,6 @@ jobs:
         include:
           - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
             parallelized: true
-          - test-glob: "chromadb/test/property/test_cross_version_persist.py"
-            parallelized: true
 
     runs-on: ${{ inputs.runner }}
     steps:
