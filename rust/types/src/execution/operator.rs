@@ -2,14 +2,14 @@ use core::mem::discriminant;
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use std::{
     cmp::{Ordering, Reverse},
-    collections::{BinaryHeap, HashMap, HashSet},
+    collections::{BinaryHeap, HashSet},
     hash::{Hash, Hasher},
 };
 use thiserror::Error;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, CollectionAndSegments, CollectionUuid, Metadata,
-    RawWhereFields, ScalarEncoding, Where, CHROMA_EMBEDDING_KEY,
+    RawWhereFields, ScalarEncoding, SparseVector, Where, CHROMA_EMBEDDING_KEY,
 };
 
 use super::error::QueryConversionError;
@@ -683,7 +683,7 @@ pub enum Rank {
     },
     #[serde(rename = "$sparse-knn")]
     SparseKnn {
-        embedding: HashMap<u32, f32>,
+        embedding: SparseVector,
         #[serde(default = "Rank::default_key")]
         key: String,
         #[serde(default = "Rank::default_limit")]
@@ -726,7 +726,7 @@ impl Hash for Rank {
             } => {
                 let mut sorted_bits = embedding
                     .iter()
-                    .map(|(index, val)| (*index, (val + 0.0).to_bits()))
+                    .map(|(index, val)| (index, (val + 0.0).to_bits()))
                     .collect::<Vec<_>>();
                 sorted_bits.sort_unstable();
                 sorted_bits.hash(state);
@@ -756,7 +756,7 @@ impl TryFrom<chroma_proto::Rank> for Rank {
                 embedding: sparse_knn
                     .embedding
                     .ok_or(QueryConversionError::field("embedding"))?
-                    .offset_value,
+                    .into(),
                 key: sparse_knn.key,
                 limit: sparse_knn.limit,
             }),
@@ -796,9 +796,7 @@ impl TryFrom<Rank> for chroma_proto::Rank {
             } => Ok(chroma_proto::Rank {
                 rank: Some(chroma_proto::rank::Rank::SparseKnn(
                     chroma_proto::rank::SparseKnn {
-                        embedding: Some(chroma_proto::SparseVector {
-                            offset_value: embedding,
-                        }),
+                        embedding: Some(embedding.into()),
                         key,
                         limit,
                     },
