@@ -21,7 +21,6 @@ use chroma_index::sparse::writer::SparseWriter;
 use chroma_types::DatabaseUuid;
 use chroma_types::SegmentType;
 use chroma_types::BOOL_METADATA;
-use chroma_types::ENABLE_SPARSE_INDEX;
 use chroma_types::F32_METADATA;
 use chroma_types::FULL_TEXT_PLS;
 use chroma_types::SPARSE_MAX;
@@ -317,82 +316,75 @@ impl<'me> MetadataSegmentWriter<'me> {
         let u32_metadata_index_writer =
             MetadataIndexWriter::new_u32(u32_metadata_writer, u32_metadata_index_reader);
 
-        let sparse_index_writer = if segment.metadata.as_ref().is_some_and(|meta| {
-            meta.get(ENABLE_SPARSE_INDEX)
-                .is_some_and(|value| matches!(value, MetadataValue::Bool(true)))
-        }) {
-            let max_file_path = segment
-                .file_path
-                .get(SPARSE_MAX)
-                .and_then(|paths| paths.first());
-            let offset_value_file_path = segment
-                .file_path
-                .get(SPARSE_OFFSET_VALUE)
-                .and_then(|paths| paths.first());
-            if let (Some(max_file_path), Some(offset_value_file_path)) =
-                (max_file_path, offset_value_file_path)
-            {
-                let (max_prefix, max_uuid) = Segment::extract_prefix_and_id(max_file_path)
-                    .map_err(|_| MetadataSegmentError::UuidParseError(max_file_path.to_string()))?;
-                let max_reader = blockfile_provider
-                    .read::<u32, f32>(BlockfileReaderOptions::new(
-                        max_uuid,
-                        max_prefix.to_string(),
-                    ))
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
-                let max_writer = blockfile_provider
-                    .write::<u32, f32>(
-                        BlockfileWriterOptions::new(max_prefix.to_string()).fork(max_uuid),
-                    )
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
-                let (offset_value_prefix, offset_value_uuid) =
-                    Segment::extract_prefix_and_id(offset_value_file_path).map_err(|_| {
-                        MetadataSegmentError::UuidParseError(offset_value_file_path.to_string())
-                    })?;
-                let offset_value_reader = blockfile_provider
-                    .read::<u32, f32>(BlockfileReaderOptions::new(
-                        offset_value_uuid,
-                        offset_value_prefix.to_string(),
-                    ))
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
-                let offset_value_writer = blockfile_provider
-                    .write::<u32, f32>(
-                        BlockfileWriterOptions::new(offset_value_prefix.to_string())
-                            .fork(offset_value_uuid),
-                    )
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
-                Some(SparseWriter::new(
-                    128,
-                    max_writer,
-                    offset_value_writer,
-                    Some(SparseReader::new(max_reader, offset_value_reader)),
+        let max_file_path = segment
+            .file_path
+            .get(SPARSE_MAX)
+            .and_then(|paths| paths.first());
+        let offset_value_file_path = segment
+            .file_path
+            .get(SPARSE_OFFSET_VALUE)
+            .and_then(|paths| paths.first());
+        let sparse_index_writer = if let (Some(max_file_path), Some(offset_value_file_path)) =
+            (max_file_path, offset_value_file_path)
+        {
+            let (max_prefix, max_uuid) = Segment::extract_prefix_and_id(max_file_path)
+                .map_err(|_| MetadataSegmentError::UuidParseError(max_file_path.to_string()))?;
+            let max_reader = blockfile_provider
+                .read::<u32, f32>(BlockfileReaderOptions::new(
+                    max_uuid,
+                    max_prefix.to_string(),
                 ))
-            } else {
-                let max_writer = blockfile_provider
-                    .write::<u32, f32>(
-                        BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
-                    )
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
-                let offset_value_writer = blockfile_provider
-                    .write::<u32, f32>(
-                        BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
-                    )
-                    .await
-                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
-                Some(SparseWriter::new(
-                    128,
-                    max_writer,
-                    offset_value_writer,
-                    None,
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+            let max_writer = blockfile_provider
+                .write::<u32, f32>(
+                    BlockfileWriterOptions::new(max_prefix.to_string()).fork(max_uuid),
+                )
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            let (offset_value_prefix, offset_value_uuid) =
+                Segment::extract_prefix_and_id(offset_value_file_path).map_err(|_| {
+                    MetadataSegmentError::UuidParseError(offset_value_file_path.to_string())
+                })?;
+            let offset_value_reader = blockfile_provider
+                .read::<u32, f32>(BlockfileReaderOptions::new(
+                    offset_value_uuid,
+                    offset_value_prefix.to_string(),
                 ))
-            }
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
+            let offset_value_writer = blockfile_provider
+                .write::<u32, f32>(
+                    BlockfileWriterOptions::new(offset_value_prefix.to_string())
+                        .fork(offset_value_uuid),
+                )
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            Some(SparseWriter::new(
+                128,
+                max_writer,
+                offset_value_writer,
+                Some(SparseReader::new(max_reader, offset_value_reader)),
+            ))
         } else {
-            None
+            let max_writer = blockfile_provider
+                .write::<u32, f32>(
+                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+                )
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            let offset_value_writer = blockfile_provider
+                .write::<u32, f32>(
+                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
+                )
+                .await
+                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            Some(SparseWriter::new(
+                128,
+                max_writer,
+                offset_value_writer,
+                None,
+            ))
         };
 
         Ok(MetadataSegmentWriter {
@@ -414,65 +406,65 @@ impl<'me> MetadataSegmentWriter<'me> {
     ) -> Result<(), MetadataIndexError> {
         match key {
             MetadataValue::Str(v) => {
-                        match &self.string_metadata_index_writer {
-                            Some(writer) => {
-                                match writer.set(prefix, v.as_str(), offset_id).await {
-                                    Ok(()) => Ok(()),
-                                    Err(e) => {
-                                        tracing::error!("Error inserting into str metadata index writer {:?}", e);
-                                        Err(e)
-                                    }
-                                }
+                match &self.string_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.set(prefix, v.as_str(), offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error inserting into str metadata index writer {:?}", e);
+                                Err(e)
                             }
-                            None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
                         }
                     }
+                    None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
+                }
+            }
             MetadataValue::Int(v) => {
-                        match &self.u32_metadata_index_writer {
-                            Some(writer) => {
-                                match writer.set(prefix, *v as u32, offset_id).await {
-                                    Ok(()) => Ok(()),
-                                    Err(e) => {
-                                        tracing::error!("Error inserting into u32 metadata index writer {:?}", e);
-                                        Err(e)
-                                    }
-                                }
+                match &self.u32_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.set(prefix, *v as u32, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error inserting into u32 metadata index writer {:?}", e);
+                                Err(e)
                             }
-                            None => panic!("Invariant violation. u32 metadata index writer should be set for metadata segment"),
                         }
                     }
+                    None => panic!("Invariant violation. u32 metadata index writer should be set for metadata segment"),
+                }
+            }
             MetadataValue::Float(v) => {
-                        match &self.f32_metadata_index_writer {
-                            Some(writer) => {
-                                match writer.set(prefix, *v as f32, offset_id).await {
-                                    Ok(()) => Ok(()),
-                                    Err(e) => {
-                                        tracing::error!("Error inserting into f32 metadata index writer {:?}", e);
-                                        Err(e)
-                                    }
-                                }
+                match &self.f32_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.set(prefix, *v as f32, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error inserting into f32 metadata index writer {:?}", e);
+                                Err(e)
                             }
-                            None => panic!("Invariant violation. f32 metadata index writer should be set for metadata segment"),
                         }
                     }
+                    None => panic!("Invariant violation. f32 metadata index writer should be set for metadata segment"),
+                }
+            }
             MetadataValue::Bool(v) => {
-                        match &self.bool_metadata_index_writer {
-                            Some(writer) => {
-                                match writer.set(prefix, *v, offset_id).await {
-                                    Ok(()) => Ok(()),
-                                    Err(e) => {
-                                        tracing::error!("Error inserting into bool metadata index writer {:?}", e);
-                                        Err(e)
-                                    }
-                                }
+                match &self.bool_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.set(prefix, *v, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error inserting into bool metadata index writer {:?}", e);
+                                Err(e)
                             }
-                            None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
                         }
                     }
+                    None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
+                }
+            }
             MetadataValue::SparseVector(offset_value) => {
                 match &self.sparse_index_writer {
                     Some(writer) => {
-                        writer.set(offset_id, offset_value.iter().map(|(&i, &v)| (i, v))).await;
+                        writer.set(offset_id, offset_value.iter()).await;
                         Ok(())
                     }
                     None => panic!("Invariant violation. sparse index writer should be set for metadata segment"),
@@ -489,64 +481,64 @@ impl<'me> MetadataSegmentWriter<'me> {
     ) -> Result<(), MetadataIndexError> {
         match key {
             MetadataValue::Str(v) => {
-                        match &self.string_metadata_index_writer {
-                            Some(writer) => {
-                                match writer.delete(prefix, v.as_str(), offset_id).await {
-                                    Ok(()) => Ok(()),
-                                    Err(e) => {
-                                        tracing::error!("Error deleting from str metadata index writer {:?}", e);
-                                        Err(e)
-                                    }
-                                }
+                match &self.string_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.delete(prefix, v.as_str(), offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error deleting from str metadata index writer {:?}", e);
+                                Err(e)
                             }
-                            None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
                         }
                     }
+                    None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
+                }
+            }
             MetadataValue::Int(v) => {
-                        match &self.u32_metadata_index_writer {
-                            Some(writer) => {
-                                match writer.delete(prefix, *v as u32, offset_id).await {
-                                    Ok(()) => Ok(()),
-                                    Err(e) => {
-                                        tracing::error!("Error deleting from u32 metadata index writer {:?}", e);
-                                        Err(e)
-                                    }
-                                }
+                match &self.u32_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.delete(prefix, *v as u32, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error deleting from u32 metadata index writer {:?}", e);
+                                Err(e)
                             }
-                            None => panic!("Invariant violation. u32 metadata index writer should be set for metadata segment"),
                         }
                     }
+                    None => panic!("Invariant violation. u32 metadata index writer should be set for metadata segment"),
+                }
+            }
             MetadataValue::Float(v) => {
-                        match &self.f32_metadata_index_writer {
-                            Some(writer) => {
-                                match writer.delete(prefix, *v as f32, offset_id).await {
-                                    Ok(()) => Ok(()),
-                                    Err(e) => {
-                                        tracing::error!("Error deleting from f32 metadata index writer {:?}", e);
-                                        Err(e)
-                                    }
-                                }
+                match &self.f32_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.delete(prefix, *v as f32, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error deleting from f32 metadata index writer {:?}", e);
+                                Err(e)
                             }
-                            None => panic!("Invariant violation. f32 metadata index writer should be set for metadata segment"),
                         }
                     }
+                    None => panic!("Invariant violation. f32 metadata index writer should be set for metadata segment"),
+                }
+            }
             MetadataValue::Bool(v) => {
-                        match &self.bool_metadata_index_writer {
-                            Some(writer) => {
-                                match writer.delete(prefix, *v, offset_id).await {
-                                    Ok(()) => Ok(()),
-                                    Err(e) => {
-                                        tracing::error!("Error deleting from bool metadata index writer {:?}", e);
-                                        Err(e)
-                                    }
-                                }
+                match &self.bool_metadata_index_writer {
+                    Some(writer) => {
+                        match writer.delete(prefix, *v, offset_id).await {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                tracing::error!("Error deleting from bool metadata index writer {:?}", e);
+                                Err(e)
                             }
-                            None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
                         }
                     }
+                    None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
+                }
+            }
             MetadataValue::SparseVector(offset_value) => match &self.sparse_index_writer {
                 Some(writer) => {
-                    writer.delete(offset_id, offset_value.keys().cloned()).await;
+                    writer.delete(offset_id, offset_value.indices.iter().cloned()).await;
                     Ok(())
                 }
                     None => panic!("Invariant violation. sparse index writer should be set for metadata segment"),
@@ -846,15 +838,12 @@ impl<'me> MetadataSegmentWriter<'me> {
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
-        let sparse_index_flusher = if let Some(sparse_index_writer) = self.sparse_index_writer {
-            Some(
-                sparse_index_writer
-                    .commit()
-                    .await
-                    .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?,
-            )
-        } else {
-            None
+        let sparse_index_flusher = match self.sparse_index_writer {
+            Some(sparse_index_writer) => match sparse_index_writer.commit().await {
+                Ok(flusher) => flusher,
+                Err(e) => return Err(Box::new(e)),
+            },
+            None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
         Ok(MetadataSegmentFlusher {
@@ -876,7 +865,7 @@ pub struct MetadataSegmentFlusher {
     pub(crate) bool_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) f32_metadata_index_flusher: MetadataIndexFlusher,
     pub(crate) u32_metadata_index_flusher: MetadataIndexFlusher,
-    pub(crate) sparse_index_flusher: Option<SparseFlusher>,
+    pub(crate) sparse_index_flusher: SparseFlusher,
 }
 
 impl Debug for MetadataSegmentFlusher {
@@ -958,25 +947,23 @@ impl MetadataSegmentFlusher {
             )],
         );
 
-        if let Some(sparse_flusher) = self.sparse_index_flusher {
-            let max_id = sparse_flusher.max_id();
-            let offset_value_id = sparse_flusher.offset_value_id();
-            sparse_flusher
-                .flush()
-                .await
-                .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
-            flushed.insert(
-                SPARSE_MAX.to_string(),
-                vec![ChromaSegmentFlusher::flush_key(&prefix_path, &max_id)],
-            );
-            flushed.insert(
-                SPARSE_OFFSET_VALUE.to_string(),
-                vec![ChromaSegmentFlusher::flush_key(
-                    &prefix_path,
-                    &offset_value_id,
-                )],
-            );
+        let max_id = self.sparse_index_flusher.max_id();
+        let offset_value_id = self.sparse_index_flusher.offset_value_id();
+        match self.sparse_index_flusher.flush().await {
+            Ok(_) => {}
+            Err(e) => return Err(Box::new(e)),
         }
+        flushed.insert(
+            SPARSE_MAX.to_string(),
+            vec![ChromaSegmentFlusher::flush_key(&prefix_path, &max_id)],
+        );
+        flushed.insert(
+            SPARSE_OFFSET_VALUE.to_string(),
+            vec![ChromaSegmentFlusher::flush_key(
+                &prefix_path,
+                &offset_value_id,
+            )],
+        );
 
         Ok(flushed)
     }

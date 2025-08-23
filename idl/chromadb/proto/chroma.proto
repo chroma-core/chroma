@@ -26,7 +26,8 @@ message Vector {
 }
 
 message SparseVector {
-    map<uint32, float> offset_value = 1;
+    repeated uint32 indices = 1;
+    repeated float values = 2;
 }
 
 enum SegmentScope {

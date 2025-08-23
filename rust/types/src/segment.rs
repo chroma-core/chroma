@@ -20,7 +20,6 @@ pub const BOOL_METADATA: &str = "bool_metadata";
 pub const F32_METADATA: &str = "f32_metadata";
 pub const U32_METADATA: &str = "u32_metadata";
 
-pub const ENABLE_SPARSE_INDEX: &str = "enable_sparse_index";
 pub const SPARSE_MAX: &str = "sparse_max";
 pub const SPARSE_OFFSET_VALUE: &str = "sparse_offset_value";
 

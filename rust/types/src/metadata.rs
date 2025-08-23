@@ -4,6 +4,7 @@ use serde_json::{Number, Value};
 use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
+    mem::size_of_val,
 };
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -11,10 +12,108 @@ use utoipa::ToSchema;
 use crate::chroma_proto;
 
 #[cfg(feature = "pyo3")]
-use pyo3::{types::PyAnyMethods, FromPyObject, IntoPyObject};
+use pyo3::types::PyAnyMethods;
 
 #[cfg(feature = "testing")]
 use proptest::prelude::*;
+
+/// Represents a sparse vector using parallel arrays for indices and values.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, ToSchema)]
+pub struct SparseVector {
+    /// Dimension indices
+    pub indices: Vec<u32>,
+    /// Values corresponding to each index
+    pub values: Vec<f32>,
+}
+
+impl SparseVector {
+    /// Create a new sparse vector from parallel arrays.
+    pub fn new(indices: Vec<u32>, values: Vec<f32>) -> Self {
+        Self { indices, values }
+    }
+
+    /// Create a sparse vector from an iterator of (index, value) pairs.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (u32, f32)>) -> Self {
+        let (indices, values) = pairs.into_iter().unzip();
+        Self { indices, values }
+    }
+
+    /// Iterate over (index, value) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (u32, f32)> + '_ {
+        self.indices
+            .iter()
+            .copied()
+            .zip(self.values.iter().copied())
+    }
+}
+
+impl Eq for SparseVector {}
+
+impl Ord for SparseVector {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.indices.cmp(&other.indices).then_with(|| {
+            for (a, b) in self.values.iter().zip(other.values.iter()) {
+                match a.total_cmp(b) {
+                    Ordering::Equal => continue,
+                    other => return other,
+                }
+            }
+            self.values.len().cmp(&other.values.len())
+        })
+    }
+}
+
+impl PartialOrd for SparseVector {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl From<chroma_proto::SparseVector> for SparseVector {
+    fn from(proto: chroma_proto::SparseVector) -> Self {
+        SparseVector::new(proto.indices, proto.values)
+    }
+}
+
+impl From<SparseVector> for chroma_proto::SparseVector {
+    fn from(sparse: SparseVector) -> Self {
+        chroma_proto::SparseVector {
+            indices: sparse.indices,
+            values: sparse.values,
+        }
+    }
+}
+
+#[cfg(feature = "pyo3")]
+impl<'py> pyo3::IntoPyObject<'py> for SparseVector {
+    type Target = pyo3::PyAny;
+    type Output = pyo3::Bound<'py, Self::Target>;
+    type Error = pyo3::PyErr;
+
+    fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
+        use pyo3::types::PyDict;
+        let dict = PyDict::new(py);
+        dict.set_item("indices", self.indices)?;
+        dict.set_item("values", self.values)?;
+        Ok(dict.into_any())
+    }
+}
+
+#[cfg(feature = "pyo3")]
+impl<'py> pyo3::FromPyObject<'py> for SparseVector {
+    fn extract_bound(ob: &pyo3::Bound<'py, pyo3::PyAny>) -> pyo3::PyResult<Self> {
+        use pyo3::types::PyDict;
+
+        let dict = ob.downcast::<PyDict>()?;
+        let indices_obj = dict.get_item("indices")?;
+        let values_obj = dict.get_item("values")?;
+
+        let indices: Vec<u32> = indices_obj.extract()?;
+        let values: Vec<f32> = values_obj.extract()?;
+
+        Ok(SparseVector::new(indices, values))
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize, ToSchema)]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
@@ -30,14 +129,17 @@ pub enum UpdateMetadataValue {
     )]
     Float(f64),
     Str(String),
-    SparseVector(HashMap<u32, f32>),
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    SparseVector(SparseVector),
     None,
 }
 
 #[cfg(feature = "pyo3")]
-impl FromPyObject<'_> for UpdateMetadataValue {
-    fn extract_bound(ob: &pyo3::Bound<'_, pyo3::PyAny>) -> pyo3::PyResult<Self> {
-        if let Ok(value) = ob.extract::<bool>() {
+impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
+    fn extract_bound(ob: &pyo3::Bound<'py, pyo3::PyAny>) -> pyo3::PyResult<Self> {
+        if ob.is_none() {
+            Ok(UpdateMetadataValue::None)
+        } else if let Ok(value) = ob.extract::<bool>() {
             Ok(UpdateMetadataValue::Bool(value))
         } else if let Ok(value) = ob.extract::<i64>() {
             Ok(UpdateMetadataValue::Int(value))
@@ -45,8 +147,12 @@ impl FromPyObject<'_> for UpdateMetadataValue {
             Ok(UpdateMetadataValue::Float(value))
         } else if let Ok(value) = ob.extract::<String>() {
             Ok(UpdateMetadataValue::Str(value))
+        } else if let Ok(value) = ob.extract::<SparseVector>() {
+            Ok(UpdateMetadataValue::SparseVector(value))
         } else {
-            Ok(UpdateMetadataValue::None)
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "Cannot convert Python object to UpdateMetadataValue",
+            ))
         }
     }
 }
@@ -82,9 +188,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
                 Ok(UpdateMetadataValue::Str(value.clone()))
             }
-            Some(chroma_proto::update_metadata_value::Value::SparseVectorValue(value)) => Ok(
-                UpdateMetadataValue::SparseVector(value.offset_value.clone()),
-            ),
+            Some(chroma_proto::update_metadata_value::Value::SparseVectorValue(value)) => {
+                Ok(UpdateMetadataValue::SparseVector(value.clone().into()))
+            }
             // Used to communicate that the user wants to delete this key.
             None => Ok(UpdateMetadataValue::None),
         }
@@ -110,10 +216,10 @@ impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
                     value,
                 )),
             },
-            UpdateMetadataValue::SparseVector(offset_value) => chroma_proto::UpdateMetadataValue {
+            UpdateMetadataValue::SparseVector(sparse_vec) => chroma_proto::UpdateMetadataValue {
                 value: Some(
                     chroma_proto::update_metadata_value::Value::SparseVectorValue(
-                        chroma_proto::SparseVector { offset_value },
+                        sparse_vec.into(),
                     ),
                 ),
             },
@@ -146,8 +252,8 @@ MetadataValue
 */
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
-#[cfg_attr(feature = "pyo3", derive(FromPyObject, IntoPyObject))]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "pyo3", derive(pyo3::FromPyObject, pyo3::IntoPyObject))]
 #[serde(untagged)]
 pub enum MetadataValue {
     Bool(bool),
@@ -161,24 +267,42 @@ pub enum MetadataValue {
     Float(f64),
     Str(String),
     #[cfg_attr(feature = "testing", proptest(skip))]
-    SparseVector(HashMap<u32, f32>),
+    SparseVector(SparseVector),
 }
 
 impl Eq for MetadataValue {}
 
 /// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
+///
+/// For cross-type comparisons, we define a consistent ordering based on variant position:
+/// Bool < Int < Float < Str < SparseVector
 #[allow(clippy::derive_ord_xor_partial_ord)]
 impl Ord for MetadataValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (MetadataValue::Bool(left), MetadataValue::Bool(right)) => left.cmp(right),
-            (MetadataValue::Int(left), MetadataValue::Int(right)) => left.cmp(right),
-            (MetadataValue::Float(left), MetadataValue::Float(right)) => left.total_cmp(right),
-            (MetadataValue::Str(left), MetadataValue::Str(right)) => left.cmp(right),
-            // There is no ordering on sparse vector
-            (MetadataValue::SparseVector(_), MetadataValue::SparseVector(_)) => Ordering::Equal,
-            _ => panic!("Differen types of metadata are not comparable"),
+        // Define type ordering based on variant position
+        fn type_order(val: &MetadataValue) -> u8 {
+            match val {
+                MetadataValue::Bool(_) => 0,
+                MetadataValue::Int(_) => 1,
+                MetadataValue::Float(_) => 2,
+                MetadataValue::Str(_) => 3,
+                MetadataValue::SparseVector(_) => 4,
+            }
         }
+
+        // Chain type ordering with value ordering
+        type_order(self).cmp(&type_order(other)).then_with(|| {
+            match (self, other) {
+                (MetadataValue::Bool(left), MetadataValue::Bool(right)) => left.cmp(right),
+                (MetadataValue::Int(left), MetadataValue::Int(right)) => left.cmp(right),
+                (MetadataValue::Float(left), MetadataValue::Float(right)) => left.total_cmp(right),
+                (MetadataValue::Str(left), MetadataValue::Str(right)) => left.cmp(right),
+                (MetadataValue::SparseVector(left), MetadataValue::SparseVector(right)) => {
+                    left.cmp(right)
+                }
+                _ => Ordering::Equal, // Different types, but type_order already handled this
+            }
+        })
     }
 }
 
@@ -255,19 +379,33 @@ impl From<MetadataValue> for Value {
                 Number::from_f64(val).expect("Inf and NaN should not be present in MetadataValue"),
             ),
             MetadataValue::Str(val) => Self::String(val),
-            MetadataValue::SparseVector(val) => Self::Object(
-                val.into_iter()
-                    .map(|(k, v)| {
-                        (
-                            k.to_string(),
-                            Value::Number(
-                                Number::from_f64(v as f64)
-                                    .expect("Float number should not be NaN or infinite"),
-                            ),
-                        )
-                    })
-                    .collect(),
-            ),
+            MetadataValue::SparseVector(val) => {
+                let mut map = serde_json::Map::new();
+                map.insert(
+                    "indices".to_string(),
+                    Value::Array(
+                        val.indices
+                            .iter()
+                            .map(|&i| Value::Number(i.into()))
+                            .collect(),
+                    ),
+                );
+                map.insert(
+                    "values".to_string(),
+                    Value::Array(
+                        val.values
+                            .iter()
+                            .map(|&v| {
+                                Value::Number(
+                                    Number::from_f64(v as f64)
+                                        .expect("Float number should not be NaN or infinite"),
+                                )
+                            })
+                            .collect(),
+                    ),
+                );
+                Self::Object(map)
+            }
         }
     }
 }
@@ -303,6 +441,9 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
             Some(chroma_proto::update_metadata_value::Value::StringValue(value)) => {
                 Ok(MetadataValue::Str(value.clone()))
             }
+            Some(chroma_proto::update_metadata_value::Value::SparseVectorValue(value)) => {
+                Ok(MetadataValue::SparseVector(value.clone().into()))
+            }
             _ => Err(MetadataValueConversionError::InvalidValue),
         }
     }
@@ -327,12 +468,10 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
             MetadataValue::Bool(value) => chroma_proto::UpdateMetadataValue {
                 value: Some(chroma_proto::update_metadata_value::Value::BoolValue(value)),
             },
-            MetadataValue::SparseVector(value) => chroma_proto::UpdateMetadataValue {
+            MetadataValue::SparseVector(sparse_vec) => chroma_proto::UpdateMetadataValue {
                 value: Some(
                     chroma_proto::update_metadata_value::Value::SparseVectorValue(
-                        chroma_proto::SparseVector {
-                            offset_value: value,
-                        },
+                        sparse_vec.into(),
                     ),
                 ),
             },
@@ -449,7 +588,8 @@ pub fn logical_size_of_metadata(metadata: &Metadata) -> usize {
                     MetadataValue::Float(f) => size_of_val(f),
                     MetadataValue::Str(s) => s.len(),
                     MetadataValue::SparseVector(v) => {
-                        v.iter().map(|(k, v)| size_of_val(k) + size_of_val(v)).sum()
+                        v.indices.iter().map(size_of_val).sum::<usize>()
+                            + v.values.iter().map(size_of_val).sum::<usize>()
                     }
                 }
         })
