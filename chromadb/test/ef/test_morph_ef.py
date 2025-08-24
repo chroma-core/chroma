@@ -12,7 +12,7 @@ def test_morph_embedding_function_with_api_key() -> None:
         pytest.skip("MORPH_API_KEY not set")
 
     ef = MorphEmbeddingFunction(
-        model_name="morph-embedding-v2"
+        model_name="morph-embedding-v3"
     )
 
     # Test with code snippets (Morph's specialty)
@@ -34,7 +34,7 @@ def test_morph_embedding_function_with_custom_parameters() -> None:
         pytest.skip("MORPH_API_KEY not set")
 
     ef = MorphEmbeddingFunction(
-        model_name="morph-embedding-v2",
+        model_name="morph-embedding-v3",
         api_base="https://api.morphllm.com/v1",
         encoding_format="float",
         api_key_env_var="MORPH_API_KEY"
@@ -58,7 +58,7 @@ def test_morph_embedding_function_config_roundtrip() -> None:
         pytest.skip("openai package not installed")
 
     ef = MorphEmbeddingFunction(
-        model_name="morph-embedding-v2",
+        model_name="morph-embedding-v3",
         api_base="https://api.morphllm.com/v1",
         encoding_format="float",
         api_key_env_var="MORPH_API_KEY"
@@ -74,7 +74,7 @@ def test_morph_embedding_function_config_roundtrip() -> None:
     assert "api_key_env_var" in config
 
     # Verify values
-    assert config["model_name"] == "morph-embedding-v2"
+    assert config["model_name"] == "morph-embedding-v3"
     assert config["api_base"] == "https://api.morphllm.com/v1"
     assert config["encoding_format"] == "float"
     assert config["api_key_env_var"] == "MORPH_API_KEY"
@@ -100,7 +100,7 @@ def test_morph_embedding_function_spaces() -> None:
         pytest.skip("openai package not installed")
 
     ef = MorphEmbeddingFunction(
-        model_name="morph-embedding-v2",
+        model_name="morph-embedding-v3",
         api_key_env_var="MORPH_API_KEY"
     )
 
@@ -118,7 +118,7 @@ def test_morph_embedding_function_validate_config() -> None:
     """Test that Morph embedding function validates configuration correctly."""
     # Valid configuration
     valid_config = {
-        "model_name": "morph-embedding-v2",
+        "model_name": "morph-embedding-v3",
         "api_key_env_var": "MORPH_API_KEY"
     }
 
@@ -127,7 +127,7 @@ def test_morph_embedding_function_validate_config() -> None:
 
     # Invalid configuration (missing required fields)
     invalid_config = {
-        "model_name": "morph-embedding-v2"
+        "model_name": "morph-embedding-v3"
         # Missing api_key_env_var
     }
 
