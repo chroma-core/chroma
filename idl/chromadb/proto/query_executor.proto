@@ -89,9 +89,91 @@ message KNNBatchResult {
     uint64 pulled_log_bytes = 2;
 }
 
+
+message Rank {
+    message DenseKnn {
+        Vector embedding = 1;
+        string key = 2;
+        uint32 limit = 3;
+    }
+
+    message SparseKnn {
+        SparseVector embedding = 1;
+        string key = 2;
+        uint32 limit = 3;
+    }
+
+    oneof rank {
+        DenseKnn dense_knn = 1;
+        SparseKnn sparse_knn = 2;
+    }
+}
+
+
+message Score {
+    message Division {
+        Score left = 1;
+        Score right = 2;
+    }
+
+    message RankScore {
+        optional float default = 1;
+        bool ordinal = 2;
+        Rank source = 3;
+    }
+    
+    message Subtraction {
+        Score left = 1;
+        Score right = 2;
+    }
+
+    message ScoreList {
+        repeated Score scores = 1;
+    }
+
+    oneof score {
+        Score absolute = 1;
+        Division division = 2;
+        Score exponentiation = 3;
+        Score logarithm = 4;
+        ScoreList maximum = 5;
+        ScoreList minimum = 6;
+        ScoreList multiplication = 7;
+        RankScore rank = 8;
+        Subtraction subtraction = 9;
+        ScoreList summation = 10;
+        float value = 11;
+    }
+}
+
+message ScoreOperator {
+    Score score = 1;
+}
+
+message ProjectOperator {
+    repeated string fields = 1;
+}
+
+message RetrievePayload {
+    FilterOperator filter = 1;
+    ScoreOperator score = 2;
+    LimitOperator limit = 3;
+    ProjectOperator project = 4;
+}
+
+message RetrievePlan {
+    ScanOperator scan = 1;
+    repeated RetrievePayload payloads = 2;
+}
+
+message RetrieveResult {
+    repeated string results = 1;
+}
+
 service QueryExecutor {
     rpc Count(CountPlan) returns (CountResult) {}
     rpc Get(GetPlan) returns (GetResult) {}
     rpc KNN(KNNPlan) returns (KNNBatchResult) {}
+    rpc Retrieve(RetrievePlan) returns (RetrieveResult) {}
 }
 

@@ -1,12 +1,15 @@
+use core::mem::discriminant;
+use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use std::{
     cmp::{Ordering, Reverse},
-    collections::BinaryHeap,
+    collections::{BinaryHeap, HashSet},
+    hash::{Hash, Hasher},
 };
 use thiserror::Error;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, CollectionAndSegments, CollectionUuid, Metadata,
-    ScalarEncoding, Where,
+    RawWhereFields, ScalarEncoding, SparseVector, Where, CHROMA_EMBEDDING_KEY,
 };
 
 use super::error::QueryConversionError;
@@ -116,10 +119,23 @@ pub struct FetchLog {
 /// # Parameters
 /// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
 /// - `where_clause`: The predicate on individual record
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Filter {
+    #[serde(default)]
     pub query_ids: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "Filter::deserialize_where")]
     pub where_clause: Option<Where>,
+}
+
+impl Filter {
+    fn deserialize_where<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Where>, D::Error> {
+        let raw_fields = RawWhereFields::deserialize(deserializer)?;
+        raw_fields
+            .parse()
+            .map_err(|e| D::Error::custom(e.to_string()))
+    }
 }
 
 impl TryFrom<chroma_proto::FilterOperator> for Filter {
@@ -226,10 +242,27 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
 /// # Parameters
 /// - `skip`: The number of records to skip in the beginning
 /// - `fetch`: The number of records to fetch after `skip`
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Limit {
+    #[serde(default)]
     pub skip: u32,
+    #[serde(default = "Limit::default_fetch")]
     pub fetch: Option<u32>,
+}
+
+impl Limit {
+    fn default_fetch() -> Option<u32> {
+        Some(128)
+    }
+}
+
+impl Default for Limit {
+    fn default() -> Self {
+        Self {
+            skip: 0,
+            fetch: Self::default_fetch(),
+        }
+    }
 }
 
 impl From<chroma_proto::LimitOperator> for Limit {
@@ -250,7 +283,7 @@ impl From<Limit> for chroma_proto::LimitOperator {
     }
 }
 
-/// The `RecordDistance` represents how far the embedding (identified by `offset_id`) is to the query embedding
+/// The `RecordDistance` represents a measure of embedding (identified by `offset_id`) with respect to query embedding
 #[derive(Clone, Debug)]
 pub struct RecordDistance {
     pub offset_id: u32,
@@ -635,5 +668,419 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()?,
         })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Rank {
+    #[serde(rename = "$dense-knn")]
+    DenseKnn {
+        embedding: Vec<f32>,
+        #[serde(default = "Rank::default_key")]
+        key: String,
+        #[serde(default = "Rank::default_limit")]
+        limit: u32,
+    },
+    #[serde(rename = "$sparse-knn")]
+    SparseKnn {
+        embedding: SparseVector,
+        #[serde(default = "Rank::default_key")]
+        key: String,
+        #[serde(default = "Rank::default_limit")]
+        limit: u32,
+    },
+}
+
+impl Rank {
+    pub fn default_key() -> String {
+        CHROMA_EMBEDDING_KEY.to_string()
+    }
+    pub fn default_limit() -> u32 {
+        1024
+    }
+}
+
+impl Eq for Rank {}
+
+impl Hash for Rank {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        discriminant(self).hash(state);
+        match self {
+            Rank::DenseKnn {
+                embedding,
+                key,
+                limit,
+            } => {
+                let bits = embedding
+                    .iter()
+                    .map(|val| (val + 0.0).to_bits())
+                    .collect::<Vec<_>>();
+                bits.hash(state);
+                key.hash(state);
+                limit.hash(state);
+            }
+            Rank::SparseKnn {
+                embedding,
+                key,
+                limit,
+            } => {
+                let mut sorted_bits = embedding
+                    .iter()
+                    .map(|(index, val)| (index, (val + 0.0).to_bits()))
+                    .collect::<Vec<_>>();
+                sorted_bits.sort_unstable();
+                sorted_bits.hash(state);
+                key.hash(state);
+                limit.hash(state);
+            }
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::Rank> for Rank {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::Rank) -> Result<Self, Self::Error> {
+        let rank = value.rank.ok_or(QueryConversionError::field("rank"))?;
+        match rank {
+            chroma_proto::rank::Rank::DenseKnn(dense_knn) => Ok(Rank::DenseKnn {
+                embedding: dense_knn
+                    .embedding
+                    .ok_or(QueryConversionError::field("embedding"))?
+                    .try_into()
+                    .map(|(v, _)| v)?,
+                key: dense_knn.key,
+                limit: dense_knn.limit,
+            }),
+            chroma_proto::rank::Rank::SparseKnn(sparse_knn) => Ok(Rank::SparseKnn {
+                embedding: sparse_knn
+                    .embedding
+                    .ok_or(QueryConversionError::field("embedding"))?
+                    .into(),
+                key: sparse_knn.key,
+                limit: sparse_knn.limit,
+            }),
+        }
+    }
+}
+
+impl TryFrom<Rank> for chroma_proto::Rank {
+    type Error = QueryConversionError;
+
+    fn try_from(value: Rank) -> Result<Self, Self::Error> {
+        match value {
+            Rank::DenseKnn {
+                embedding,
+                key,
+                limit,
+            } => {
+                let dim = embedding.len();
+                Ok(chroma_proto::Rank {
+                    rank: Some(chroma_proto::rank::Rank::DenseKnn(
+                        chroma_proto::rank::DenseKnn {
+                            embedding: Some(chroma_proto::Vector::try_from((
+                                embedding,
+                                ScalarEncoding::FLOAT32,
+                                dim,
+                            ))?),
+                            key,
+                            limit,
+                        },
+                    )),
+                })
+            }
+            Rank::SparseKnn {
+                embedding,
+                key,
+                limit,
+            } => Ok(chroma_proto::Rank {
+                rank: Some(chroma_proto::rank::Rank::SparseKnn(
+                    chroma_proto::rank::SparseKnn {
+                        embedding: Some(embedding.into()),
+                        key,
+                        limit,
+                    },
+                )),
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum Score {
+    #[serde(rename = "$abs")]
+    Absolute(Box<Score>),
+    #[serde(rename = "$div")]
+    Division { left: Box<Score>, right: Box<Score> },
+    #[serde(rename = "$exp")]
+    Exponentiation(Box<Score>),
+    #[serde(rename = "$log")]
+    Logarithm(Box<Score>),
+    #[serde(rename = "$max")]
+    Maximum(Vec<Score>),
+    #[serde(rename = "$min")]
+    Minimum(Vec<Score>),
+    #[serde(rename = "$mul")]
+    Multiplication(Vec<Score>),
+    #[serde(rename = "$rank")]
+    Rank {
+        #[serde(default)]
+        default: Option<f32>,
+        #[serde(default)]
+        ordinal: bool,
+        source: Box<Rank>,
+    },
+    #[serde(rename = "$sub")]
+    Subtraction { left: Box<Score>, right: Box<Score> },
+    #[serde(rename = "$sum")]
+    Summation(Vec<Score>),
+    #[serde(rename = "$val")]
+    Value(f32),
+}
+
+impl Score {
+    pub fn ranks(&self) -> HashSet<Rank> {
+        match self {
+            Score::Absolute(score) | Score::Exponentiation(score) | Score::Logarithm(score) => {
+                score.ranks()
+            }
+            Score::Division { left, right } | Score::Subtraction { left, right } => {
+                left.ranks().into_iter().chain(right.ranks()).collect()
+            }
+            Score::Maximum(scores)
+            | Score::Minimum(scores)
+            | Score::Multiplication(scores)
+            | Score::Summation(scores) => scores.iter().flat_map(Score::ranks).collect(),
+            Score::Value(_) => HashSet::new(),
+            Score::Rank {
+                default: _,
+                ordinal: _,
+                source,
+            } => HashSet::from_iter([*source.clone()]),
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::Score> for Score {
+    type Error = QueryConversionError;
+
+    fn try_from(proto_score: chroma_proto::Score) -> Result<Self, Self::Error> {
+        match proto_score.score {
+            Some(chroma_proto::score::Score::Absolute(abs)) => {
+                Ok(Score::Absolute(Box::new(Score::try_from(*abs)?)))
+            }
+            Some(chroma_proto::score::Score::Division(div)) => {
+                let left = div.left.ok_or(QueryConversionError::field("left"))?;
+                let right = div.right.ok_or(QueryConversionError::field("right"))?;
+                Ok(Score::Division {
+                    left: Box::new(Score::try_from(*left)?),
+                    right: Box::new(Score::try_from(*right)?),
+                })
+            }
+            Some(chroma_proto::score::Score::Exponentiation(exp)) => {
+                Ok(Score::Exponentiation(Box::new(Score::try_from(*exp)?)))
+            }
+            Some(chroma_proto::score::Score::Logarithm(log)) => {
+                Ok(Score::Logarithm(Box::new(Score::try_from(*log)?)))
+            }
+            Some(chroma_proto::score::Score::Maximum(max)) => {
+                let scores = max
+                    .scores
+                    .into_iter()
+                    .map(Score::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Score::Maximum(scores))
+            }
+            Some(chroma_proto::score::Score::Minimum(min)) => {
+                let scores = min
+                    .scores
+                    .into_iter()
+                    .map(Score::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Score::Minimum(scores))
+            }
+            Some(chroma_proto::score::Score::Multiplication(mul)) => {
+                let scores = mul
+                    .scores
+                    .into_iter()
+                    .map(Score::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Score::Multiplication(scores))
+            }
+            Some(chroma_proto::score::Score::Rank(rank)) => {
+                let source = rank.source.ok_or(QueryConversionError::field("source"))?;
+                Ok(Score::Rank {
+                    default: rank.default,
+                    ordinal: rank.ordinal,
+                    source: Box::new(Rank::try_from(source)?),
+                })
+            }
+            Some(chroma_proto::score::Score::Subtraction(sub)) => {
+                let left = sub.left.ok_or(QueryConversionError::field("left"))?;
+                let right = sub.right.ok_or(QueryConversionError::field("right"))?;
+                Ok(Score::Subtraction {
+                    left: Box::new(Score::try_from(*left)?),
+                    right: Box::new(Score::try_from(*right)?),
+                })
+            }
+            Some(chroma_proto::score::Score::Summation(sum)) => {
+                let scores = sum
+                    .scores
+                    .into_iter()
+                    .map(Score::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Score::Summation(scores))
+            }
+            Some(chroma_proto::score::Score::Value(value)) => Ok(Score::Value(value)),
+            None => Err(QueryConversionError::field("score")),
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::ScoreOperator> for Score {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::ScoreOperator) -> Result<Self, Self::Error> {
+        value
+            .score
+            .ok_or(QueryConversionError::field("score"))?
+            .try_into()
+    }
+}
+
+impl TryFrom<Score> for chroma_proto::ScoreOperator {
+    type Error = QueryConversionError;
+
+    fn try_from(value: Score) -> Result<Self, Self::Error> {
+        Ok(Self {
+            score: Some(value.try_into()?),
+        })
+    }
+}
+
+impl TryFrom<Score> for chroma_proto::Score {
+    type Error = QueryConversionError;
+
+    fn try_from(score: Score) -> Result<Self, Self::Error> {
+        let proto_score = match score {
+            Score::Absolute(score) => chroma_proto::score::Score::Absolute(Box::new(
+                chroma_proto::Score::try_from(*score)?,
+            )),
+            Score::Division { left, right } => {
+                chroma_proto::score::Score::Division(Box::new(chroma_proto::score::Division {
+                    left: Some(Box::new(chroma_proto::Score::try_from(*left)?)),
+                    right: Some(Box::new(chroma_proto::Score::try_from(*right)?)),
+                }))
+            }
+            Score::Exponentiation(score) => chroma_proto::score::Score::Exponentiation(Box::new(
+                chroma_proto::Score::try_from(*score)?,
+            )),
+            Score::Logarithm(score) => chroma_proto::score::Score::Logarithm(Box::new(
+                chroma_proto::Score::try_from(*score)?,
+            )),
+            Score::Maximum(scores) => {
+                let proto_scores = scores
+                    .into_iter()
+                    .map(chroma_proto::Score::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::score::Score::Maximum(chroma_proto::score::ScoreList {
+                    scores: proto_scores,
+                })
+            }
+            Score::Minimum(scores) => {
+                let proto_scores = scores
+                    .into_iter()
+                    .map(chroma_proto::Score::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::score::Score::Minimum(chroma_proto::score::ScoreList {
+                    scores: proto_scores,
+                })
+            }
+            Score::Multiplication(scores) => {
+                let proto_scores = scores
+                    .into_iter()
+                    .map(chroma_proto::Score::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::score::Score::Multiplication(chroma_proto::score::ScoreList {
+                    scores: proto_scores,
+                })
+            }
+            Score::Rank {
+                default,
+                ordinal,
+                source,
+            } => chroma_proto::score::Score::Rank(chroma_proto::score::RankScore {
+                default,
+                ordinal,
+                source: Some(chroma_proto::Rank::try_from(*source)?),
+            }),
+            Score::Subtraction { left, right } => chroma_proto::score::Score::Subtraction(
+                Box::new(chroma_proto::score::Subtraction {
+                    left: Some(Box::new(chroma_proto::Score::try_from(*left)?)),
+                    right: Some(Box::new(chroma_proto::Score::try_from(*right)?)),
+                }),
+            ),
+            Score::Summation(scores) => {
+                let proto_scores = scores
+                    .into_iter()
+                    .map(chroma_proto::Score::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::score::Score::Summation(chroma_proto::score::ScoreList {
+                    scores: proto_scores,
+                })
+            }
+            Score::Value(value) => chroma_proto::score::Score::Value(value),
+        };
+
+        Ok(chroma_proto::Score {
+            score: Some(proto_score),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct Project {
+    #[serde(default)]
+    pub fields: HashSet<String>,
+}
+
+impl TryFrom<chroma_proto::ProjectOperator> for Project {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::ProjectOperator) -> Result<Self, Self::Error> {
+        Ok(Self {
+            fields: value.fields.into_iter().collect(),
+        })
+    }
+}
+
+impl TryFrom<Project> for chroma_proto::ProjectOperator {
+    type Error = QueryConversionError;
+
+    fn try_from(value: Project) -> Result<Self, Self::Error> {
+        Ok(Self {
+            fields: value.fields.into_iter().collect(),
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RetrieveResult {
+    pub results: Vec<String>,
+}
+
+impl From<chroma_proto::RetrieveResult> for RetrieveResult {
+    fn from(value: chroma_proto::RetrieveResult) -> Self {
+        Self {
+            results: value.results,
+        }
+    }
+}
+
+impl From<RetrieveResult> for chroma_proto::RetrieveResult {
+    fn from(value: RetrieveResult) -> Self {
+        Self {
+            results: value.results,
+        }
     }
 }

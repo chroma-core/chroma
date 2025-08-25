@@ -6,6 +6,7 @@ use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::plan::PlanToProtoError;
+use crate::plan::RetrievePayload;
 use crate::validators::{
     validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
 };
@@ -1070,6 +1071,7 @@ impl ChromaError for ListCollectionVersionsError {
 
 pub const CHROMA_KEY: &str = "chroma:";
 pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
+pub const CHROMA_EMBEDDING_KEY: &str = "chroma:embedding";
 pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 ////////////////////////// AddCollectionRecords //////////////////////////
@@ -1830,6 +1832,38 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
     }
 }
 
+#[non_exhaustive]
+#[derive(Clone, Debug, Serialize, ToSchema, Validate)]
+pub struct RetrieveRequest {
+    pub tenant_id: String,
+    pub database_name: String,
+    pub collection_id: CollectionUuid,
+    pub retrievals: Vec<RetrievePayload>,
+}
+
+impl RetrieveRequest {
+    pub fn try_new(
+        tenant_id: String,
+        database_name: String,
+        collection_id: CollectionUuid,
+        retrievals: Vec<RetrievePayload>,
+    ) -> Result<Self, ChromaValidationError> {
+        let request = Self {
+            tenant_id,
+            database_name,
+            collection_id,
+            retrievals,
+        };
+        request.validate().map_err(ChromaValidationError::from)?;
+        Ok(request)
+    }
+}
+
+#[derive(Clone, Deserialize, Serialize, ToSchema, Debug, Default)]
+pub struct RetrieveResponse {
+    pub results: Vec<String>,
+}
+
 #[derive(Error, Debug)]
 pub enum QueryError {
     #[error("Error executing plan: {0}")]
@@ -1879,6 +1913,8 @@ pub enum ExecutorError {
     Internal(Box<dyn ChromaError>),
     #[error("Error sending backfill request to compactor: {0}")]
     BackfillError(Box<dyn ChromaError>),
+    #[error("Not implemented: {0}")]
+    NotImplemented(String),
 }
 
 impl ChromaError for ExecutorError {
@@ -1891,6 +1927,7 @@ impl ChromaError for ExecutorError {
             ExecutorError::CollectionMissingHnswConfiguration => ErrorCodes::Internal,
             ExecutorError::Internal(e) => e.code(),
             ExecutorError::BackfillError(e) => e.code(),
+            ExecutorError::NotImplemented(_) => ErrorCodes::Unimplemented,
         }
     }
 }
