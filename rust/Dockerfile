@@ -74,27 +74,27 @@ CMD [ "run", "/config.yaml" ]
 
 FROM runner AS garbage_collector
 COPY --from=builder /chroma/garbage_collector_service .
-ENTRYPOINT [ "sh", "-c", "ulimit -c 1073741824 && exec ./garbage_collector_service" ]
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./garbage_collector_service" ]
 
 FROM runner AS load_service
 COPY --from=builder /chroma/chroma-load .
 COPY --from=builder /chroma/chroma-load-start .
-ENTRYPOINT [ "sh", "-c", "ulimit -c 1073741824 && exec ./chroma-load" ]
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./chroma-load" ]
 
 FROM runner AS log_service
 COPY --from=builder /chroma/log_service .
-ENTRYPOINT [ "sh", "-c", "ulimit -c 1073741824 && exec ./log_service" ]
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./log_service" ]
 
 FROM runner AS query_service
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
 # NOTE(rescrv): We need the tilt config in the docker file.  This is temporary.
 COPY --from=builder /chroma/rust/worker/tilt_config.yaml .
 COPY --from=builder /chroma/query_service .
-ENTRYPOINT [ "sh", "-c", "ulimit -c 1073741824 && exec ./query_service" ]
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./query_service" ]
 
 FROM runner AS compaction_service
 COPY --from=builder /chroma/rust/worker/chroma_config.yaml .
 # NOTE(rescrv): We need the tilt config in the docker file.  This is temporary.
 COPY --from=builder /chroma/rust/worker/tilt_config.yaml .
 COPY --from=builder /chroma/compaction_service .
-ENTRYPOINT [ "sh", "-c", "ulimit -c 1073741824 && exec ./compaction_service" ]
+ENTRYPOINT [ "sh", "-c", "ulimit -c 0 && exec ./compaction_service" ]
