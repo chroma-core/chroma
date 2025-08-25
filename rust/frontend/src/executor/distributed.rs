@@ -15,8 +15,8 @@ use chroma_system::System;
 use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 use chroma_types::SegmentType;
 use chroma_types::{
-    operator::{CountResult, GetResult, KnnBatchResult, RetrieveResult},
-    plan::{Count, Get, Knn, Retrieve},
+    operator::{CountResult, GetResult, KnnBatchResult, SearchResult},
+    plan::{Count, Get, Knn, Search},
     ExecutorError,
 };
 
@@ -210,7 +210,7 @@ impl DistributedExecutor {
         Ok(res.into_inner().try_into()?)
     }
 
-    pub async fn retrieve(&mut self, plan: Retrieve) -> Result<RetrieveResult, ExecutorError> {
+    pub async fn search(&mut self, plan: Search) -> Result<SearchResult, ExecutorError> {
         // Get the collection ID from the plan
         let collection_id = &plan
             .scan
@@ -225,7 +225,7 @@ impl DistributedExecutor {
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
 
         // Convert plan to proto
-        let request: chroma_types::chroma_proto::RetrievePlan = plan.try_into()?;
+        let request: chroma_types::chroma_proto::SearchPlan = plan.try_into()?;
 
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let config = self.client_selection_config.clone();
@@ -236,7 +236,7 @@ impl DistributedExecutor {
                     attempt_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let is_retry = current_attempt > 0;
                 choose_query_client_weighted(&clients, &config, is_retry)?
-                    .retrieve(Request::new(request.clone()))
+                    .search(Request::new(request.clone()))
                     .await
             })
             .retry(self.backoff)

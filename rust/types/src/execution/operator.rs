@@ -1065,20 +1065,20 @@ impl TryFrom<Project> for chroma_proto::ProjectOperator {
 }
 
 #[derive(Clone, Debug)]
-pub struct RetrieveResult {
+pub struct SearchResult {
     pub results: Vec<String>,
 }
 
-impl From<chroma_proto::RetrieveResult> for RetrieveResult {
-    fn from(value: chroma_proto::RetrieveResult) -> Self {
+impl From<chroma_proto::SearchResult> for SearchResult {
+    fn from(value: chroma_proto::SearchResult) -> Self {
         Self {
             results: value.results,
         }
     }
 }
 
-impl From<RetrieveResult> for chroma_proto::RetrieveResult {
-    fn from(value: RetrieveResult) -> Self {
+impl From<SearchResult> for chroma_proto::SearchResult {
+    fn from(value: SearchResult) -> Self {
         Self {
             results: value.results,
         }

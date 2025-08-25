@@ -154,19 +154,19 @@ message ProjectOperator {
     repeated string fields = 1;
 }
 
-message RetrievePayload {
+message SearchPayload {
     FilterOperator filter = 1;
     ScoreOperator score = 2;
     LimitOperator limit = 3;
     ProjectOperator project = 4;
 }
 
-message RetrievePlan {
+message SearchPlan {
     ScanOperator scan = 1;
-    repeated RetrievePayload payloads = 2;
+    repeated SearchPayload payloads = 2;
 }
 
-message RetrieveResult {
+message SearchResult {
     repeated string results = 1;
 }
 
@@ -174,6 +174,6 @@ service QueryExecutor {
     rpc Count(CountPlan) returns (CountResult) {}
     rpc Get(GetPlan) returns (GetResult) {}
     rpc KNN(KNNPlan) returns (KNNBatchResult) {}
-    rpc Retrieve(RetrievePlan) returns (RetrieveResult) {}
+    rpc Search(SearchPlan) returns (SearchResult) {}
 }
 

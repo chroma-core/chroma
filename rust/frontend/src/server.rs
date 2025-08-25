@@ -10,7 +10,7 @@ use chroma_metering::{
     ExternalCollectionReadContext, MeteredFutureExt, ReadAction, StartRequest, WriteAction,
 };
 use chroma_system::System;
-use chroma_types::plan::RetrievePayload;
+use chroma_types::plan::SearchPayload;
 use chroma_types::{
     AddCollectionRecordsResponse, ChecklistResponse, Collection, CollectionConfiguration,
     CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
@@ -22,9 +22,9 @@ use chroma_types::{
     HeartbeatResponse, IncludeList, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, Metadata, QueryRequest, QueryResponse,
-    RetrieveRequest, RetrieveResponse, UpdateCollectionConfiguration,
-    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateMetadata, UpdateTenantRequest,
-    UpdateTenantResponse, UpsertCollectionRecordsResponse,
+    SearchRequest, SearchResponse, UpdateCollectionConfiguration, UpdateCollectionRecordsResponse,
+    UpdateCollectionResponse, UpdateMetadata, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsResponse,
 };
 use chroma_types::{ForkCollectionResponse, RawWhereFields};
 use mdac::{Rule, Scorecard, ScorecardTicket};
@@ -125,7 +125,7 @@ pub struct Metrics {
     collection_count: Counter<u64>,
     collection_get: Counter<u64>,
     collection_query: Counter<u64>,
-    collection_retrieve: Counter<u64>,
+    collection_search: Counter<u64>,
 }
 
 impl Metrics {
@@ -159,7 +159,7 @@ impl Metrics {
             collection_count: meter.u64_counter("collection_count").build(),
             collection_get: meter.u64_counter("collection_get").build(),
             collection_query: meter.u64_counter("collection_query").build(),
-            collection_retrieve: meter.u64_counter("collection_retrieve").build(),
+            collection_search: meter.u64_counter("collection_search").build(),
         }
     }
 }
@@ -298,8 +298,8 @@ impl FrontendServer {
                 post(collection_query),
             )
             .route(
-                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/retrieve",
-                post(collection_retrieve),
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+                post(collection_search),
             )
             .merge(docs_router)
             .with_state(self)
@@ -2148,17 +2148,17 @@ async fn collection_query(
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
-pub struct RetrieveRequestPayload {
-    retrievals: Vec<RetrievePayload>,
+pub struct SearchRequestPayload {
+    searches: Vec<SearchPayload>,
 }
 
-/// Retrieve records from a collection with hybrid criterias.
+/// Search records from a collection with hybrid criterias.
 #[utoipa::path(
     post,
-    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/retrieve",
-    request_body = RetrieveRequestPayload,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+    request_body = SearchRequestPayload,
     responses(
-        (status = 200, description = "Records retrieved from the collection", body = RetrieveResponse),
+        (status = 200, description = "Records searched from the collection", body = SearchResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
@@ -2166,23 +2166,23 @@ pub struct RetrieveRequestPayload {
     params(
         ("tenant" = String, Path, description = "Tenant ID"),
         ("database" = String, Path, description = "Database name for the collection"),
-        ("collection_id" = String, Path, description = "Collection ID to retrieve records from")
+        ("collection_id" = String, Path, description = "Collection ID to search records from")
     )
 )]
-async fn collection_retrieve(
+async fn collection_search(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-    TracedJson(payload): TracedJson<RetrieveRequestPayload>,
-) -> Result<Json<RetrieveResponse>, ServerError> {
-    server.metrics.collection_retrieve.add(
+    TracedJson(payload): TracedJson<SearchRequestPayload>,
+) -> Result<Json<SearchResponse>, ServerError> {
+    server.metrics.collection_search.add(
         1,
         &[
             KeyValue::new("tenant", tenant.clone()),
             KeyValue::new("collection_id", collection_id.clone()),
         ],
     );
-    // TODO: Maybe add AuthzAction:Retrieve
+    // TODO: Maybe add AuthzAction:Search
     let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
@@ -2203,7 +2203,7 @@ async fn collection_retrieve(
         .map(|val| val.to_str().unwrap_or_default())
         .map(|val| val.to_string());
 
-    // TODO: Add quota enforcement for retrieve
+    // TODO: Add quota enforcement for search
     let _guard = server.scorecard_request(&[
         "op:read",
         format!("tenant:{}", tenant).as_str(),
@@ -2211,7 +2211,7 @@ async fn collection_retrieve(
         format!("requester:{}", requester_identity.tenant).as_str(),
     ])?;
 
-    // TODO: Maybe add ReadAction::Retrieve
+    // TODO: Maybe add ReadAction::Search
     // Create a metering context
     let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
@@ -2238,14 +2238,14 @@ async fn collection_retrieve(
     });
 
     tracing::info!(
-        name: "collection_retrieve",
-        num_queries = payload.retrievals.len(),
+        name: "collection_search",
+        num_queries = payload.searches.len(),
     );
 
-    let request = RetrieveRequest::try_new(tenant, database, collection_id, payload.retrievals)?;
+    let request = SearchRequest::try_new(tenant, database, collection_id, payload.searches)?;
     let res = server
         .frontend
-        .retrieve(request)
+        .search(request)
         .meter(metering_context_container)
         .await?;
     Ok(Json(res))
@@ -2308,7 +2308,7 @@ impl Modify for ChromaTokenSecurityAddon {
         collection_count,
         collection_get,
         collection_query,
-        collection_retrieve,
+        collection_search,
     ),
     // Apply our new security scheme here
     modifiers(&ChromaTokenSecurityAddon)

@@ -18,7 +18,7 @@ use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
-    plan::{Count, Get, Knn, Retrieve},
+    plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
     Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
     CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
@@ -34,7 +34,7 @@ use chroma_types::{
     HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
     Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    RetrieveRequest, RetrieveResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
     UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
     UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
@@ -63,7 +63,7 @@ struct Metrics {
     add_retries_counter: Counter<u64>,
     update_retries_counter: Counter<u64>,
     upsert_retries_counter: Counter<u64>,
-    retrieve_retries_counter: Counter<u64>,
+    search_retries_counter: Counter<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -103,7 +103,7 @@ impl ServiceBasedFrontend {
         let add_retries_counter = meter.u64_counter("add_retries").build();
         let update_retries_counter = meter.u64_counter("update_retries").build();
         let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
-        let retrieve_retries_counter = meter.u64_counter("retrieve_retries").build();
+        let search_retries_counter = meter.u64_counter("search_retries").build();
         let metrics = Arc::new(Metrics {
             fork_retries_counter,
             delete_retries_counter,
@@ -113,7 +113,7 @@ impl ServiceBasedFrontend {
             add_retries_counter,
             update_retries_counter,
             upsert_retries_counter,
-            retrieve_retries_counter,
+            search_retries_counter,
         });
         // factor: 2.0,
         // min_delay_ms: 100,
@@ -1581,10 +1581,10 @@ impl ServiceBasedFrontend {
         res
     }
 
-    pub async fn retryable_retrieve(
+    pub async fn retryable_search(
         &mut self,
-        request: RetrieveRequest,
-    ) -> Result<RetrieveResponse, QueryError> {
+        request: SearchRequest,
+    ) -> Result<SearchResponse, QueryError> {
         // Get collection and segments once for all queries
         let collection_and_segments = self
             .collections_with_segments_provider
@@ -1592,28 +1592,25 @@ impl ServiceBasedFrontend {
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
 
-        // Create a single Retrieve plan with one scan and the payloads from the request
-        let retrieve_plan = Retrieve {
+        // Create a single Search plan with one scan and the payloads from the request
+        let search_plan = Search {
             scan: Scan {
                 collection_and_segments,
             },
-            payloads: request.retrievals,
+            payloads: request.searches,
         };
 
-        // Execute the single retrieve plan using the executor
-        let result = self.executor.retrieve(retrieve_plan).await?;
+        // Execute the single search plan using the executor
+        let result = self.executor.search(search_plan).await?;
 
-        Ok(RetrieveResponse {
+        Ok(SearchResponse {
             results: result.results,
         })
     }
 
-    pub async fn retrieve(
-        &mut self,
-        request: RetrieveRequest,
-    ) -> Result<RetrieveResponse, QueryError> {
+    pub async fn search(&mut self, request: SearchRequest) -> Result<SearchResponse, QueryError> {
         let retries = Arc::new(AtomicUsize::new(0));
-        let retrieve_to_retry = || {
+        let search_to_retry = || {
             let mut self_clone = self.clone();
             let request_clone = request.clone();
             let cache_clone = self
@@ -1621,7 +1618,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_retrieve(request_clone).await;
+                let res = self_clone.retryable_search(request_clone).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1637,7 +1634,7 @@ impl ServiceBasedFrontend {
                 }
             }
         };
-        let res = retrieve_to_retry
+        let res = search_to_retry
             .retry(self.collections_with_segments_provider.get_retry_backoff())
             // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
             .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
@@ -1645,14 +1642,14 @@ impl ServiceBasedFrontend {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
                     tracing::info!(
-                        "Retrying retrieve() request for collection {}",
+                        "Retrying search() request for collection {}",
                         request.collection_id
                     );
                 }
             })
             .await;
         self.metrics
-            .retrieve_retries_counter
+            .search_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
     }
