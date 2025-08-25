@@ -4,8 +4,9 @@ use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, TaskMessage, TaskResult,
 };
-use chroma_types::operator::{
-    Knn, KnnOutput, KnnProjection, KnnProjectionOutput, Merge, RecordMeasure,
+use chroma_types::{
+    operator::{Knn, KnnOutput, KnnProjection, KnnProjectionOutput, Merge, RecordMeasure},
+    CollectionAndSegments,
 };
 use tokio::sync::oneshot::Sender;
 use tracing::Span;
@@ -109,6 +110,10 @@ pub struct KnnOrchestrator {
     context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
     queue: usize,
+
+    // Collection information
+    collection_and_segments: CollectionAndSegments,
+
     // Output from KnnFilterOrchestrator
     knn_filter_output: KnnFilterOutput,
 
@@ -131,6 +136,7 @@ impl KnnOrchestrator {
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
+        collection_and_segments: CollectionAndSegments,
         knn_filter_output: KnnFilterOutput,
         knn: Knn,
         knn_projection: KnnProjection,
@@ -146,6 +152,7 @@ impl KnnOrchestrator {
             context,
             blockfile_provider,
             queue,
+            collection_and_segments,
             knn_filter_output,
             knn,
             batch_distances,
@@ -194,7 +201,7 @@ impl Orchestrator for KnnOrchestrator {
             KnnLogInput {
                 logs: self.knn_filter_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 distance_function: self.knn_filter_output.distance_function.clone(),
             },
@@ -292,7 +299,7 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
             KnnProjectionInput {
                 logs: self.knn_filter_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
                 record_distances: output.distances,
             },
             ctx.receiver(),

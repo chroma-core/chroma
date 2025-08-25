@@ -88,6 +88,7 @@ fn knn(
         test_segments.blockfile_provider.clone(),
         dispatcher_handle.clone(),
         1000,
+        test_segments.into(),
         knn_filter_output.clone(),
         Knn {
             embedding: query,

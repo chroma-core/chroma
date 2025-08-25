@@ -7,7 +7,7 @@ use chroma_system::{
 };
 use chroma_types::{
     operator::{Merge, RecordMeasure},
-    SparseVector,
+    CollectionAndSegments, SparseVector,
 };
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
@@ -75,6 +75,10 @@ pub struct SparseKnnOrchestrator {
     context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
     queue: usize,
+
+    // Collection information
+    collection_and_segments: CollectionAndSegments,
+
     // Output from KnnFilterOrchestrator
     knn_filter_output: KnnFilterOutput,
 
@@ -98,6 +102,7 @@ impl SparseKnnOrchestrator {
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
+        collection_and_segments: CollectionAndSegments,
         knn_filter_output: KnnFilterOutput,
         embedding: SparseVector,
         key: String,
@@ -113,6 +118,7 @@ impl SparseKnnOrchestrator {
             context,
             blockfile_provider,
             queue,
+            collection_and_segments,
             knn_filter_output,
             embedding,
             key,
@@ -167,11 +173,7 @@ impl Orchestrator for SparseKnnOrchestrator {
                 blockfile_provider: self.blockfile_provider.clone(),
                 logs: self.knn_filter_output.logs.clone(),
                 mask: self.knn_filter_output.filter_output.log_offset_ids.clone(),
-                record_segment: self
-                    .knn_filter_output
-                    .collection_and_segments
-                    .record_segment
-                    .clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -192,11 +194,7 @@ impl Orchestrator for SparseKnnOrchestrator {
                         .filter_output
                         .compact_offset_ids
                         .clone(),
-                    metadata_segment: self
-                        .knn_filter_output
-                        .collection_and_segments
-                        .metadata_segment
-                        .clone(),
+                    metadata_segment: self.collection_and_segments.metadata_segment.clone(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),

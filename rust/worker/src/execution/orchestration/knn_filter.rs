@@ -115,7 +115,6 @@ where
 
 #[derive(Clone, Debug)]
 pub struct KnnFilterOutput {
-    pub collection_and_segments: CollectionAndSegments,
     pub logs: FetchLogOutput,
     pub fetch_log_bytes: u64,
     pub filter_output: FilterOutput,
@@ -430,7 +429,6 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
         let fetch_log_bytes = logs.iter().map(|(l, _)| l.size_bytes()).sum();
 
         let output = KnnFilterOutput {
-            collection_and_segments: self.collection_and_segments.clone(),
             logs,
             fetch_log_bytes,
             filter_output: output,
