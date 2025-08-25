@@ -1,7 +1,4 @@
-use std::{
-    cmp::Reverse,
-    collections::{BinaryHeap, HashMap},
-};
+use std::{cmp::Reverse, collections::BinaryHeap};
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
@@ -16,7 +13,7 @@ use chroma_segment::{
 use chroma_system::Operator;
 use chroma_types::{
     operator::{Rank, RecordDistance},
-    MaterializedLogOperation, MetadataValue, Segment,
+    MaterializedLogOperation, MetadataValue, Segment, SparseVector,
 };
 use sprs::CsVec;
 use thiserror::Error;
@@ -64,7 +61,7 @@ impl ChromaError for SparseKnnError {
 
 #[derive(Clone, Debug)]
 pub struct SparseKnn {
-    pub embedding: HashMap<u32, f32>,
+    pub embedding: SparseVector,
     pub key: String,
     pub limit: u32,
 }
@@ -74,17 +71,8 @@ impl Operator<SparseKnnInput, SparseKnnOutput> for SparseKnn {
     type Error = SparseKnnError;
 
     async fn run(&self, input: &SparseKnnInput) -> Result<SparseKnnOutput, SparseKnnError> {
-        let mut query_raw_vector = self
-            .embedding
-            .iter()
-            .map(|(index, val)| (*index as usize, *val))
-            .collect::<Vec<_>>();
-        query_raw_vector.sort_unstable_by_key(|(index, _)| *index);
-        let (query_raw_indexes, query_raw_values) = query_raw_vector
-            .into_iter()
-            .unzip::<usize, f32, Vec<_>, Vec<_>>();
-        let query_sparse_verctor =
-            CsVec::new(u32::MAX as usize, query_raw_indexes, query_raw_values);
+        // Convert SparseVector to sprs::CsVec
+        let query_sparse_verctor: CsVec<f32> = (&self.embedding).into();
         let record_segment_reader = match RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
@@ -118,16 +106,8 @@ impl Operator<SparseKnnInput, SparseKnnOutput> for SparseKnn {
                 else {
                     continue;
                 };
-                let mut log_raw_vector = sparse_vector
-                    .iter()
-                    .map(|(index, val)| (*index as usize, *val))
-                    .collect::<Vec<_>>();
-                log_raw_vector.sort_unstable_by_key(|(index, _)| *index);
-                let (log_raw_indexes, log_raw_values) = log_raw_vector
-                    .into_iter()
-                    .unzip::<usize, f32, Vec<_>, Vec<_>>();
-                let log_sparse_verctor =
-                    CsVec::new(u32::MAX as usize, log_raw_indexes, log_raw_values);
+                // Convert SparseVector to sprs::CsVec
+                let log_sparse_verctor: CsVec<f32> = sparse_vector.into();
                 let score = query_sparse_verctor.dot(&log_sparse_verctor);
                 if (min_heap.len() as u32) < self.limit {
                     min_heap.push(Reverse(RecordDistance {
@@ -170,7 +150,11 @@ impl Operator<SparseKnnInput, SparseKnnOutput> for SparseKnn {
 
         let sorted_compact_records = sparse_reader
             .wand(
-                self.embedding.clone(),
+                self.embedding
+                    .indices
+                    .iter()
+                    .copied()
+                    .zip(self.embedding.values.iter().copied()),
                 self.limit,
                 input.mask.compact_offset_ids.clone(),
             )
