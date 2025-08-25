@@ -12,7 +12,7 @@ use chroma_system::ComponentHandle;
 use chroma_types::{
     operator::{
         CountResult, Filter, GetResult, KnnBatchResult, KnnProjectionOutput, KnnProjectionRecord,
-        Limit, Projection, ProjectionRecord, RecordDistance, SearchResult,
+        Limit, Projection, ProjectionRecord, RecordMeasure, SearchResult,
     },
     plan::{Count, Get, Knn, Search},
     CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SegmentType,
@@ -234,7 +234,7 @@ impl LocalExecutor {
                 .map_err(|err| ExecutorError::Internal(Box::new(err)))?;
 
             let mut records = Vec::new();
-            for RecordDistance { offset_id, measure } in distances {
+            for RecordMeasure { offset_id, measure } in distances {
                 let user_id = hnsw_reader
                     .get_user_id_by_offset_id(offset_id)
                     .await

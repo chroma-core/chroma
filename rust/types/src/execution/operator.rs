@@ -2,7 +2,7 @@ use core::mem::discriminant;
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use std::{
-    cmp::{Ordering, Reverse},
+    cmp::Ordering,
     collections::{BinaryHeap, HashSet},
     hash::{Hash, Hasher},
 };
@@ -276,26 +276,26 @@ impl From<Limit> for chroma_proto::LimitOperator {
 
 /// The `RecordDistance` represents a measure of embedding (identified by `offset_id`) with respect to query embedding
 #[derive(Clone, Debug)]
-pub struct RecordDistance {
+pub struct RecordMeasure {
     pub offset_id: u32,
     pub measure: f32,
 }
 
-impl PartialEq for RecordDistance {
+impl PartialEq for RecordMeasure {
     fn eq(&self, other: &Self) -> bool {
-        self.measure.eq(&other.measure)
+        self.offset_id.eq(&other.offset_id)
     }
 }
 
-impl Eq for RecordDistance {}
+impl Eq for RecordMeasure {}
 
-impl Ord for RecordDistance {
+impl Ord for RecordMeasure {
     fn cmp(&self, other: &Self) -> Ordering {
         self.measure.total_cmp(&other.measure)
     }
 }
 
-impl PartialOrd for RecordDistance {
+impl PartialOrd for RecordMeasure {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -303,56 +303,49 @@ impl PartialOrd for RecordDistance {
 
 #[derive(Debug, Default)]
 pub struct KnnOutput {
-    pub distances: Vec<RecordDistance>,
+    pub distances: Vec<RecordMeasure>,
 }
 
-/// The `KnnMerge` operator selects the records nearest to target from the batch vectors of records
-/// which are all sorted by distance in ascending order. If the same record occurs multiple times
+/// The `Merge` operator selects the top records from the batch vectors of records
+/// which are all sorted in descending order. If the same record occurs multiple times
 /// only one copy will remain in the final result.
 ///
 /// # Parameters
-/// - `fetch`: The total number of records to fetch
+/// - `fetch`: The total number of records to take
 ///
 /// # Usage
 /// It can be used to merge the query results from different operators
 #[derive(Clone, Debug)]
-pub struct KnnMerge {
-    pub fetch: u32,
+pub struct Merge {
+    pub take: u32,
 }
 
-impl KnnMerge {
-    pub fn merge(&self, input: Vec<Vec<RecordDistance>>) -> Vec<RecordDistance> {
+impl Merge {
+    pub fn merge<M: Eq + Ord>(&self, input: Vec<Vec<M>>) -> Vec<M> {
         let mut batch_iters = input.into_iter().map(Vec::into_iter).collect::<Vec<_>>();
 
-        // NOTE: `BinaryHeap<_>` is a max-heap, so we use `Reverse` to convert it into a min-heap
-        let mut heap_dist = batch_iters
+        let mut max_heap = batch_iters
             .iter_mut()
             .enumerate()
-            .filter_map(|(idx, itr)| itr.next().map(|rec| Reverse((rec, idx))))
+            .filter_map(|(idx, itr)| itr.next().map(|rec| (idx, rec)))
             .collect::<BinaryHeap<_>>();
 
-        let mut distances = Vec::<RecordDistance>::with_capacity(self.fetch as usize);
-        while distances.len() < self.fetch as usize {
-            if let Some(Reverse((rec, idx))) = heap_dist.pop() {
-                if distances.last().is_none()
-                    || distances
-                        .last()
-                        .is_some_and(|last_rec| last_rec.offset_id != rec.offset_id)
-                {
-                    distances.push(rec);
-                }
-                if let Some(next_rec) = batch_iters
-                    .get_mut(idx)
-                    .expect("Enumerated index should be valid")
-                    .next()
-                {
-                    heap_dist.push(Reverse((next_rec, idx)));
-                }
-            } else {
+        let mut fusion = Vec::with_capacity(self.take as usize);
+        while let Some((idx, m)) = max_heap.pop() {
+            if self.take <= fusion.len() as u32 {
                 break;
             }
+            if let Some(last_m) = fusion.last() {
+                if last_m == &m {
+                    continue;
+                }
+            }
+            fusion.push(m);
+            if let Some(next_m) = batch_iters[idx].next() {
+                max_heap.push((idx, next_m));
+            }
         }
-        distances
+        fusion
     }
 }
 

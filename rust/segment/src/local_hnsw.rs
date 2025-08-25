@@ -10,7 +10,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{HnswIndex, HnswIndexConfig, Index, IndexConfig, PersistentIndex};
 use chroma_sqlite::{db::SqliteDb, table::MaxSeqId};
 use chroma_types::{
-    operator::RecordDistance, Chunk, Collection, HnswParametersFromSegmentError, LogRecord,
+    operator::RecordMeasure, Chunk, Collection, HnswParametersFromSegmentError, LogRecord,
     Operation, OperationRecord, Segment, SegmentUuid,
 };
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -277,7 +277,7 @@ impl LocalHnswSegmentReader {
         allowed_offset_ids: &[u32],
         embedding: Vec<f32>,
         k: u32,
-    ) -> Result<Vec<RecordDistance>, LocalHnswSegmentReaderError> {
+    ) -> Result<Vec<RecordMeasure>, LocalHnswSegmentReaderError> {
         let guard = self.index.inner.read().await;
         let len_with_deleted = guard.index.len_with_deleted();
         let actual_len = guard.index.len();
@@ -319,7 +319,7 @@ impl LocalHnswSegmentReader {
                                     .distance_function
                                     .distance(curr_embedding.as_slice(), embedding.as_slice());
                                 if max_heap.len() < k as usize {
-                                    max_heap.push(RecordDistance {
+                                    max_heap.push(RecordMeasure {
                                         offset_id: *curr_id as u32,
                                         measure: curr_distance,
                                     });
@@ -329,7 +329,7 @@ impl LocalHnswSegmentReader {
                                     let top = max_heap.peek().unwrap();
                                     if top.measure > curr_distance {
                                         max_heap.pop();
-                                        max_heap.push(RecordDistance {
+                                        max_heap.push(RecordMeasure {
                                             offset_id: *curr_id as u32,
                                             measure: curr_distance,
                                         });
@@ -358,7 +358,7 @@ impl LocalHnswSegmentReader {
             Ok(offset_ids
                 .into_iter()
                 .zip(distances)
-                .map(|(offset_id, measure)| RecordDistance {
+                .map(|(offset_id, measure)| RecordMeasure {
                     offset_id: offset_id as u32,
                     measure,
                 })

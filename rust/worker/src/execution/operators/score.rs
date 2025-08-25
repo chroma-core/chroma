@@ -7,11 +7,11 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::Operator;
-use chroma_types::operator::{Rank, RecordDistance, Score};
+use chroma_types::operator::{Rank, RecordMeasure, Score};
 use thiserror::Error;
 
 struct ScoreProvider<'me> {
-    ranks: &'me HashMap<Rank, Vec<RecordDistance>>,
+    ranks: &'me HashMap<Rank, Vec<RecordMeasure>>,
 }
 
 struct ScoreDomain {
@@ -134,7 +134,7 @@ impl<'me> ScoreProvider<'me> {
                 let support = records
                     .into_iter()
                     .enumerate()
-                    .map(|(index, RecordDistance { offset_id, measure })| {
+                    .map(|(index, RecordMeasure { offset_id, measure })| {
                         (offset_id, if ordinal { index as f32 } else { measure })
                     })
                     .collect();
@@ -157,12 +157,12 @@ impl<'me> ScoreProvider<'me> {
 #[derive(Clone, Debug)]
 pub struct ScoreInput {
     pub blockfile_provider: BlockfileProvider,
-    pub ranks: HashMap<Rank, Vec<RecordDistance>>,
+    pub ranks: HashMap<Rank, Vec<RecordMeasure>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ScoreOutput {
-    pub scores: Vec<RecordDistance>,
+    pub scores: Vec<RecordMeasure>,
 }
 
 #[derive(Error, Debug)]
@@ -187,7 +187,7 @@ impl Operator<ScoreInput, ScoreOutput> for Score {
         let mut scores = score_domain
             .support
             .into_iter()
-            .map(|(offset_id, measure)| RecordDistance { offset_id, measure })
+            .map(|(offset_id, measure)| RecordMeasure { offset_id, measure })
             .collect::<Vec<_>>();
         scores.sort_unstable();
         Ok(ScoreOutput { scores })

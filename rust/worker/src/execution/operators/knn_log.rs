@@ -10,7 +10,7 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
-    operator::{Knn, KnnOutput, RecordDistance},
+    operator::{Knn, KnnOutput, RecordMeasure},
     MaterializedLogOperation, Segment, SignedRoaringBitmap,
 };
 use thiserror::Error;
@@ -97,7 +97,7 @@ impl Operator<KnnLogInput, KnnOutput> for Knn {
                     log.merged_embeddings_ref()
                 };
 
-                let distance = RecordDistance {
+                let distance = RecordMeasure {
                     offset_id: log.get_offset_id(),
                     measure: input
                         .distance_function
