@@ -1,6 +1,5 @@
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
-use chroma_segment::distributed_hnsw::DistributedHNSWSegmentReader;
 use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, TaskMessage, TaskResult,
@@ -109,7 +108,6 @@ pub struct KnnOrchestrator {
     // Orchestrator parameters
     context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
-    hnsw_reader: Option<DistributedHNSWSegmentReader>,
     queue: usize,
     // Output from KnnFilterOrchestrator
     knn_filter_output: KnnFilterOutput,
@@ -133,13 +131,12 @@ impl KnnOrchestrator {
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
-        hnsw_reader: Option<DistributedHNSWSegmentReader>,
         knn_filter_output: KnnFilterOutput,
         knn: Knn,
         knn_projection: KnnProjection,
     ) -> Self {
         let fetch = knn.fetch;
-        let batch_distances = if hnsw_reader.is_none() {
+        let batch_distances = if knn_filter_output.hnsw_reader.is_none() {
             vec![Vec::new()]
         } else {
             Vec::new()
@@ -148,7 +145,6 @@ impl KnnOrchestrator {
         Self {
             context,
             blockfile_provider,
-            hnsw_reader,
             queue,
             knn_filter_output,
             knn,
@@ -207,11 +203,11 @@ impl Orchestrator for KnnOrchestrator {
         );
         tasks.push((knn_log_task, Some(Span::current())));
 
-        if let Some(hnsw_reader) = self.hnsw_reader.as_ref().cloned() {
+        if let Some(hnsw_reader) = self.knn_filter_output.hnsw_reader.as_ref().cloned() {
             let knn_segment_task = wrap(
                 Box::new(self.knn.clone()),
                 KnnHnswInput {
-                    hnsw_reader: Box::new(hnsw_reader),
+                    hnsw_reader,
                     compact_offset_ids: self
                         .knn_filter_output
                         .filter_output
