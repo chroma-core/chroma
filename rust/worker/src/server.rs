@@ -7,10 +7,7 @@ use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_log::Log;
-use chroma_segment::{
-    distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
-    spann_provider::SpannProvider,
-};
+use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
@@ -32,12 +29,8 @@ use crate::{
     execution::{
         operators::fetch_log::FetchLogOperator,
         orchestration::{
-            get::GetOrchestrator,
-            knn::KnnOrchestrator,
-            knn_filter::KnnFilterOrchestrator,
-            search::{SearchOrchestrator, SearchOutput},
-            spann_knn::SpannKnnOrchestrator,
-            CountOrchestrator,
+            get::GetOrchestrator, knn::KnnOrchestrator, knn_filter::KnnFilterOrchestrator,
+            spann_knn::SpannKnnOrchestrator, CountOrchestrator,
         },
     },
 };
@@ -335,6 +328,7 @@ impl WorkerServer {
         let knn_filter_orchestrator = KnnFilterOrchestrator::new(
             self.blockfile_provider.clone(),
             dispatcher.clone(),
+            self.hnsw_index_provider.clone(),
             // TODO: Make this configurable
             1000,
             collection_and_segments.clone(),
@@ -383,23 +377,6 @@ impl WorkerServer {
                 Err(err) => Err(Status::new(err.code().into(), err.to_string())),
             }
         } else {
-            let hnsw_reader = match DistributedHNSWSegmentReader::from_segment(
-                &collection_and_segments.collection,
-                &collection_and_segments.vector_segment,
-                matching_records.dimension as usize,
-                self.hnsw_index_provider.clone(),
-            )
-            .await
-            {
-                Ok(hnsw_reader) => Some(*hnsw_reader),
-                Err(err)
-                    if matches!(*err, DistributedHNSWSegmentFromSegmentError::Uninitialized) =>
-                {
-                    None
-                }
-
-                Err(err) => return Err(Status::new(err.code().into(), err.to_string())),
-            };
             let knn_orchestrator_futures = Vec::from(KnnBatch::try_from(knn)?)
                 .into_iter()
                 .map(|knn| {
@@ -408,7 +385,6 @@ impl WorkerServer {
                         dispatcher.clone(),
                         // TODO: Make this configurable
                         1000,
-                        hnsw_reader.clone(),
                         matching_records.clone(),
                         knn,
                         knn_projection.clone(),
@@ -430,60 +406,6 @@ impl WorkerServer {
                 )),
                 Err(err) => Err(Status::new(err.code().into(), err.to_string())),
             }
-        }
-    }
-
-    async fn orchestrate_search(
-        &self,
-        request: Request<chroma_proto::SearchPlan>,
-    ) -> Result<Response<chroma_proto::SearchResult>, Status> {
-        let dispatcher = self.clone_dispatcher()?;
-        let system = self.system.clone();
-
-        // Convert proto to Search for validation
-        let proto_plan = request.into_inner();
-        let search_plan = Search::try_from(proto_plan.clone())
-            .map_err(|e| Status::invalid_argument(format!("Failed to parse search plan: {}", e)))?;
-
-        let scan = proto_plan
-            .scan
-            .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
-
-        let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
-
-        // Create orchestrators for each payload
-        let orchestrator_futures = search_plan
-            .payloads
-            .into_iter()
-            .map(|payload| {
-                SearchOrchestrator::new(
-                    dispatcher.clone(),
-                    // TODO: Make this configurable
-                    1000,
-                    self.spann_provider.clone(),
-                    system.clone(),
-                    collection_and_segments.clone(),
-                    fetch_log.clone(),
-                    payload,
-                )
-            })
-            .map(|orchestrator| orchestrator.run(system.clone()));
-
-        // Execute all orchestrators concurrently and collect results
-        match stream::iter(orchestrator_futures)
-            .buffered(32)
-            .try_collect::<Vec<SearchOutput>>()
-            .await
-        {
-            Ok(outputs) => {
-                // For now, return debug strings as before
-                // TODO: Convert SearchOutput to proper proto results
-                let results = outputs.into_iter().map(|output| output.debug).collect();
-
-                Ok(Response::new(chroma_proto::SearchResult { results }))
-            }
-            Err(err) => Err(Status::new(err.code().into(), err.to_string())),
         }
     }
 
