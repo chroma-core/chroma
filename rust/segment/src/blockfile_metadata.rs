@@ -2361,7 +2361,7 @@ mod test {
             "tenant/{}/database/{}/collection/{}/segment/{}",
             tenant, database_id, record_segment.collection, metadata_segment.id,
         );
-        assert_eq!(metadata_segment.file_path.len(), 5);
+        assert_eq!(metadata_segment.file_path.len(), 7);
         for (_, file_path) in metadata_segment.file_path.iter() {
             assert_eq!(file_path.len(), 1);
             assert!(file_path
