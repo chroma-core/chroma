@@ -86,6 +86,26 @@ Pending ──► PullLogs/SourceRecord ──► Partition │                 
                                                 └────────────────────────────┘
 ```
 */
+
+#[derive(Debug)]
+struct CompactOrchestratorMetrics {
+    total_logs_applied_flushed: opentelemetry::metrics::Counter<u64>,
+}
+
+impl Default for CompactOrchestratorMetrics {
+    fn default() -> Self {
+        let meter = opentelemetry::global::meter("chroma.compactor");
+        CompactOrchestratorMetrics {
+            total_logs_applied_flushed: meter
+                .u64_counter("total_logs_applied_flushed")
+                .with_description(
+                    "The total number of log records applied and flushed during compaction",
+                )
+                .build(),
+        }
+    }
+}
+
 #[derive(Debug)]
 enum ExecutionState {
     Pending,
@@ -133,8 +153,13 @@ pub struct CompactOrchestrator {
     // Total number of records in the collection after the compaction
     total_records_post_compaction: u64,
 
+    // Total number of materialized logs
+    num_materialized_logs: u64,
+
     // We track a parent span for each segment type so we can group all the spans for a given segment type (makes the resulting trace much easier to read)
     segment_spans: HashMap<SegmentUuid, Span>,
+
+    metrics: CompactOrchestratorMetrics,
 }
 
 #[derive(Error, Debug)]
@@ -283,7 +308,9 @@ impl CompactOrchestrator {
             pulled_log_offset: 0,
             state: ExecutionState::Pending,
             total_records_post_compaction: 0,
+            num_materialized_logs: 0,
             segment_spans: HashMap::new(),
+            metrics: CompactOrchestratorMetrics::default(),
         }
     }
 
@@ -354,6 +381,8 @@ impl CompactOrchestrator {
         materialized_logs: MaterializeLogsResult,
         ctx: &ComponentContext<CompactOrchestrator>,
     ) {
+        self.num_materialized_logs += materialized_logs.len() as u64;
+
         let writers = match self.ok_or_terminate(self.get_segment_writers(), ctx).await {
             Some(writers) => writers,
             None => return,
@@ -476,6 +505,10 @@ impl CompactOrchestrator {
     }
 
     async fn register(&mut self, ctx: &ComponentContext<CompactOrchestrator>) {
+        self.metrics
+            .total_logs_applied_flushed
+            .add(self.num_materialized_logs, &[]);
+
         self.state = ExecutionState::Register;
         let collection_cell =
             self.collection
