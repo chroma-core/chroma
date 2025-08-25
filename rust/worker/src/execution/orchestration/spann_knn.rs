@@ -12,7 +12,7 @@ use chroma_system::{
     OrchestratorContext, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::{Knn, KnnMerge, KnnOutput, KnnProjection, KnnProjectionOutput, RecordDistance},
+    operator::{Knn, KnnOutput, KnnProjection, KnnProjectionOutput, Merge, RecordMeasure},
     Collection,
 };
 use tokio::sync::oneshot::Sender;
@@ -64,10 +64,10 @@ pub struct SpannKnnOrchestrator {
     pl_spans: HashMap<u32, Span>,
 
     // Knn output
-    records: Vec<Vec<RecordDistance>>,
+    records: Vec<Vec<RecordMeasure>>,
 
     // Merge and project
-    merge: KnnMerge,
+    merge: Merge,
     knn_projection: KnnProjection,
 
     // Result channel
@@ -116,7 +116,7 @@ impl SpannKnnOrchestrator {
             bruteforce_log_done: false,
             pl_spans: HashMap::new(),
             records: Vec::new(),
-            merge: KnnMerge { fetch: k as u32 },
+            merge: Merge { take: k as u32 },
             knn_projection,
             result_channel: None,
             spann_reader: None,

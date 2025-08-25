@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
-    operator::{Knn, KnnOutput, RecordDistance},
+    operator::{Knn, KnnOutput, RecordMeasure},
     SignedRoaringBitmap,
 };
 use thiserror::Error;
@@ -65,7 +65,7 @@ impl Operator<KnnHnswInput, KnnOutput> for Knn {
                 .into_iter()
                 .map(|offset_id| offset_id as u32)
                 .zip(distances)
-                .map(|(offset_id, measure)| RecordDistance { offset_id, measure })
+                .map(|(offset_id, measure)| RecordMeasure { offset_id, measure })
                 .collect(),
         })
     }

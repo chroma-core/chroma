@@ -5,7 +5,7 @@ use chroma_system::{
     OrchestratorContext, TaskMessage, TaskResult,
 };
 use chroma_types::operator::{
-    Knn, KnnMerge, KnnOutput, KnnProjection, KnnProjectionOutput, RecordDistance,
+    Knn, KnnOutput, KnnProjection, KnnProjectionOutput, Merge, RecordMeasure,
 };
 use tokio::sync::oneshot::Sender;
 use tracing::Span;
@@ -116,10 +116,10 @@ pub struct KnnOrchestrator {
     knn: Knn,
 
     // Knn output
-    batch_distances: Vec<Vec<RecordDistance>>,
+    batch_distances: Vec<Vec<RecordMeasure>>,
 
     // Merge and project
-    merge: KnnMerge,
+    merge: Merge,
     knn_projection: KnnProjection,
 
     // Result channel
@@ -149,7 +149,7 @@ impl KnnOrchestrator {
             knn_filter_output,
             knn,
             batch_distances,
-            merge: KnnMerge { fetch },
+            merge: Merge { take: fetch },
             knn_projection,
             result_channel: None,
         }
