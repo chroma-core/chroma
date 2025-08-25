@@ -13,7 +13,7 @@ use chroma_system::{
 };
 use chroma_types::{
     operator::{Knn, KnnOutput, KnnProjection, KnnProjectionOutput, Merge, RecordMeasure},
-    Collection,
+    CollectionAndSegments,
 };
 use tokio::sync::oneshot::Sender;
 use tracing::Span;
@@ -41,7 +41,7 @@ pub struct SpannKnnOrchestrator {
     blockfile_provider: BlockfileProvider,
     spann_provider: SpannProvider,
     queue: usize,
-    collection: Collection,
+    collection_and_segments: CollectionAndSegments,
 
     // Output from KnnFilterOrchestrator
     knn_filter_output: KnnFilterOutput,
@@ -81,7 +81,7 @@ impl SpannKnnOrchestrator {
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
-        collection: Collection,
+        collection_and_segments: CollectionAndSegments,
         knn_filter_output: KnnFilterOutput,
         k: usize,
         query_embedding: Vec<f32>,
@@ -100,7 +100,7 @@ impl SpannKnnOrchestrator {
             blockfile_provider,
             spann_provider,
             queue,
-            collection,
+            collection_and_segments,
             knn_filter_output,
             k,
             normalized_query_emb,
@@ -163,7 +163,7 @@ impl Orchestrator for SpannKnnOrchestrator {
             KnnLogInput {
                 logs: self.knn_filter_output.logs.clone(),
                 blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
                 log_offset_ids: self.knn_filter_output.filter_output.log_offset_ids.clone(),
                 distance_function: self.knn_filter_output.distance_function.clone(),
             },
@@ -172,8 +172,8 @@ impl Orchestrator for SpannKnnOrchestrator {
         );
         tasks.push((knn_log_task, Some(Span::current())));
         let reader_res = SpannSegmentReader::from_segment(
-            &self.collection,
-            &self.knn_filter_output.vector_segment,
+            &self.collection_and_segments.collection,
+            &self.collection_and_segments.vector_segment,
             &self.blockfile_provider,
             &self.spann_provider.hnsw_provider,
             self.knn_filter_output.dimension,
@@ -190,6 +190,7 @@ impl Orchestrator for SpannKnnOrchestrator {
                         reader: Some(reader),
                         normalized_query: self.normalized_query_emb.clone(),
                         collection_num_records_post_compaction: self
+                            .collection_and_segments
                             .collection
                             .total_records_post_compaction
                             as usize,
@@ -371,7 +372,7 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for SpannKnnOrchestrator
             KnnProjectionInput {
                 logs: self.knn_filter_output.logs.clone(),
                 blockfile_provider: self.spann_provider.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
                 record_distances: output.distances,
             },
             ctx.receiver(),

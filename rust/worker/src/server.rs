@@ -354,7 +354,7 @@ impl WorkerServer {
                         self.spann_provider.clone(),
                         dispatcher.clone(),
                         1000,
-                        collection_and_segments.collection.clone(),
+                        collection_and_segments.clone(),
                         matching_records.clone(),
                         knn.fetch as usize,
                         knn.embedding,
@@ -385,6 +385,7 @@ impl WorkerServer {
                         dispatcher.clone(),
                         // TODO: Make this configurable
                         1000,
+                        collection_and_segments.clone(),
                         matching_records.clone(),
                         knn,
                         knn_projection.clone(),
