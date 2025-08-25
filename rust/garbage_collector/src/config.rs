@@ -1,4 +1,5 @@
 use chroma_cache::CacheConfig;
+use chroma_config::helpers::deserialize_duration_from_seconds;
 use chroma_log::config::LogConfig;
 use chroma_storage::config::StorageConfig;
 use chroma_system::DispatcherConfig;
@@ -13,14 +14,6 @@ use std::{
 use crate::types::CleanupMode;
 
 const DEFAULT_CONFIG_PATH: &str = "./garbage_collector_config.yaml";
-
-fn deserialize_duration_from_seconds<'de, D>(d: D) -> Result<Duration, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let secs: u64 = serde::Deserialize::deserialize(d)?;
-    Ok(Duration::from_secs(secs))
-}
 
 #[derive(Debug, serde::Deserialize, Clone, Default)]
 pub struct GarbageCollectorConfig {

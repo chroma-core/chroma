@@ -165,6 +165,10 @@ func (w *KubernetesWatcher) ListReadyMembers() (Memberlist, error) {
 		for _, condition := range pod.Status.Conditions {
 			if condition.Type == v1.PodReady {
 				if condition.Status == v1.ConditionTrue {
+					if pod.DeletionTimestamp != nil {
+						// Pod is being deleted, don't include it in the member list
+						continue
+					}
 					memberlist = append(memberlist, Member{pod.Name, pod.Status.PodIP, pod.Spec.NodeName})
 				}
 				break
