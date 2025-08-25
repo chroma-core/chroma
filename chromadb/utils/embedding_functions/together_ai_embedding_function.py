@@ -1,11 +1,12 @@
 from chromadb.api.types import (
+    Embeddable,
     Embeddings,
-    Documents,
     EmbeddingFunction,
     Space,
 )
 from typing import List, Dict, Any, Optional
 import os
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import cast
 import warnings
@@ -13,7 +14,7 @@ import warnings
 ENDPOINT = "https://api.together.xyz/v1/embeddings"
 
 
-class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
+class TogetherAIEmbeddingFunction(EmbeddingFunction[Embeddable]):
     """
     This class is used to get embeddings for a list of texts using the Together AI API.
     """
@@ -68,7 +69,7 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
             }
         )
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Embed a list of texts using the Together AI API.
 
@@ -82,8 +83,7 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
         if not isinstance(input, list):
             raise ValueError("Input must be a list")
 
-        if not all(isinstance(item, str) for item in input):
-            raise ValueError("All items in input must be strings")
+        input = text_only_embeddable_check(input, "Together AI")
 
         response = self._session.post(
             ENDPOINT,
@@ -109,7 +109,7 @@ class TogetherAIEmbeddingFunction(EmbeddingFunction[Documents]):
         return ["cosine", "l2", "ip"]
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
 

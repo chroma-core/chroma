@@ -142,7 +142,7 @@ class OpenCLIPEmbeddingFunction(EmbeddingFunction[Embeddable]):
     @staticmethod
     def build_from_config(
         config: Dict[str, Any]
-    ) -> "EmbeddingFunction[Union[Documents, Images]]":
+    ) -> "EmbeddingFunction[Embeddable]":
         model_name = config.get("model_name")
         checkpoint = config.get("checkpoint")
         device = config.get("device")

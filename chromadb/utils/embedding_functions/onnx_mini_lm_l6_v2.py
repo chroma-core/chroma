@@ -13,7 +13,8 @@ import numpy.typing as npt
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_random
 
-from chromadb.api.types import Documents, Embeddings, EmbeddingFunction, Space
+from chromadb.api.types import Embeddable, Embeddings, EmbeddingFunction, Space
+from chromadb.utils import text_only_embeddable_check
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def _verify_sha256(fname: str, expected_sha256: str) -> bool:
 # implements the same functionality as "all-MiniLM-L6-v2" from sentence-transformers.
 # visit https://github.com/chroma-core/onnx-embedding for the source code to generate
 # and verify the ONNX model.
-class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
+class ONNXMiniLM_L6_V2(EmbeddingFunction[Embeddable]):
     MODEL_NAME = "all-MiniLM-L6-v2"
     DOWNLOAD_PATH = Path.home() / ".cache" / "chroma" / "onnx_models" / MODEL_NAME
     EXTRACTED_FOLDER_NAME = "onnx"
@@ -255,7 +256,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
             sess_options=so,
         )
 
-    def __call__(self, input: Documents) -> Embeddings:
+    def __call__(self, input: Embeddable) -> Embeddings:
         """
         Generate embeddings for the given documents.
 
@@ -265,6 +266,8 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         Returns:
             Embeddings for the documents.
         """
+
+        input = text_only_embeddable_check(input, type(self).__name__)
 
         # Only download the model when it is actually used
         self._download_model_if_not_exists()
@@ -336,7 +339,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
         return 256
 
     @staticmethod
-    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Documents]":
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[Embeddable]":
         preferred_providers = config.get("preferred_providers")
 
         return ONNXMiniLM_L6_V2(preferred_providers=preferred_providers)
