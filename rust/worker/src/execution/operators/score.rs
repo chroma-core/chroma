@@ -184,12 +184,12 @@ impl Operator<ScoreInput, ScoreOutput> for Score {
             ranks: &input.ranks,
         };
         let score_domain = score_provider.eval(self.clone());
-        Ok(ScoreOutput {
-            scores: score_domain
-                .support
-                .into_iter()
-                .map(|(offset_id, measure)| RecordDistance { offset_id, measure })
-                .collect(),
-        })
+        let mut scores = score_domain
+            .support
+            .into_iter()
+            .map(|(offset_id, measure)| RecordDistance { offset_id, measure })
+            .collect::<Vec<_>>();
+        scores.sort_unstable();
+        Ok(ScoreOutput { scores })
     }
 }
