@@ -207,20 +207,27 @@ impl HnswIndexProvider {
 
         let index_config = IndexConfig::new(dimensionality, distance_function);
 
-        let storage_path_str = match new_storage_path.to_str() {
-            Some(storage_path_str) => storage_path_str,
-            None => {
-                return Err(Box::new(HnswIndexProviderForkError::PathToStringError(
-                    new_storage_path,
-                )));
-            }
-        };
+        // let storage_path_str = match new_storage_path.to_str() {
+        //     Some(storage_path_str) => storage_path_str,
+        //     None => {
+        //         return Err(Box::new(HnswIndexProviderForkError::PathToStringError(
+        //             new_storage_path,
+        //         )));
+        //     }
+        // };
 
         // Check if the entry is in the cache, if it is, we assume
         // another thread has loaded the index and we return it.
         match self.get(&new_id, cache_key).await {
             Some(index) => Ok(index.clone()),
-            None => match HnswIndex::load(storage_path_str, &index_config, ef_search, new_id) {
+            None => match HnswIndex::load_from_hnsw_data(
+                self.fetch_hnsw_segment(&new_id, prefix_path)
+                    .await
+                    .map_err(|e| Box::new(HnswIndexProviderForkError::FileError(*e)))?,
+                &index_config,
+                ef_search,
+                new_id,
+            ) {
                 Ok(index) => {
                     let index = HnswIndexRef {
                         inner: Arc::new(RwLock::new(DistributedHnswInner {
@@ -277,10 +284,33 @@ impl HnswIndexProvider {
         prefix_path: &str,
     ) -> Result<(), Box<HnswIndexProviderFileError>> {
         // Fetch the files from storage and put them in the index storage path.
+        let hnsw_data = self.fetch_hnsw_segment(source_id, prefix_path).await?;
+        let getters = [
+            |hnsw_data: &hnswlib::HnswData| Arc::new(Vec::from(hnsw_data.header_buffer())),
+            |hnsw_data: &hnswlib::HnswData| Arc::new(Vec::from(hnsw_data.data_level0_buffer())),
+            |hnsw_data: &hnswlib::HnswData| Arc::new(Vec::from(hnsw_data.length_buffer())),
+            |hnsw_data: &hnswlib::HnswData| Arc::new(Vec::from(hnsw_data.link_list_buffer())),
+        ];
+
+        for (file, getter) in FILES.iter().zip(getters) {
+            let file_path = index_storage_path.join(file);
+            self.copy_bytes_to_local_file(&file_path, getter(&hnsw_data))
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn fetch_hnsw_segment(
+        &self,
+        source_id: &IndexUuid,
+        prefix_path: &str,
+    ) -> Result<hnswlib::HnswData, Box<HnswIndexProviderFileError>> {
+        let mut buffers = Vec::new();
+
         for file in FILES.iter() {
             let s3_fetch_span =
                 tracing::trace_span!(parent: Span::current(), "Read bytes from s3", file = file);
-            let buf = s3_fetch_span
+            let _ = s3_fetch_span
                 .in_scope(|| async {
                     let key = Self::format_key(prefix_path, source_id, file);
                     tracing::info!("Loading hnsw index file: {} into directory", key);
@@ -307,13 +337,24 @@ impl HnswIndexProvider {
                         bytes_read,
                         key,
                     );
-                    Ok(buf)
+                    buffers.push(buf);
+                    Ok(())
                 })
                 .await?;
-            let file_path = index_storage_path.join(file);
-            self.copy_bytes_to_local_file(&file_path, buf).await?;
         }
-        Ok(())
+        match hnswlib::HnswData::new_from_buffers(
+            buffers[0].clone(),
+            buffers[1].clone(),
+            buffers[2].clone(),
+            buffers[3].clone(),
+        ) {
+            Ok(hnsw_data) => Ok(hnsw_data),
+            Err(e) => Err(Box::new(HnswIndexProviderFileError::StorageError(
+                chroma_storage::StorageError::Message {
+                    message: e.to_string(),
+                },
+            ))),
+        }
     }
 
     pub async fn open(
@@ -359,20 +400,27 @@ impl HnswIndexProvider {
 
         let index_config = IndexConfig::new(dimensionality, distance_function);
 
-        let index_storage_path_str = match index_storage_path.to_str() {
-            Some(index_storage_path_str) => index_storage_path_str,
-            None => {
-                return Err(Box::new(HnswIndexProviderOpenError::PathToStringError(
-                    index_storage_path,
-                )));
-            }
-        };
+        // let index_storage_path_str = match index_storage_path.to_str() {
+        //     Some(index_storage_path_str) => index_storage_path_str,
+        //     None => {
+        //         return Err(Box::new(HnswIndexProviderOpenError::PathToStringError(
+        //             index_storage_path,
+        //         )));
+        //     }
+        // };
 
         // Check if the entry is in the cache, if it is, we assume
         // another thread has loaded the index and we return it.
         let index = match self.get(id, cache_key).await {
             Some(index) => Ok(index.clone()),
-            None => match HnswIndex::load(index_storage_path_str, &index_config, ef_search, *id) {
+            None => match HnswIndex::load_from_hnsw_data(
+                self.fetch_hnsw_segment(id, prefix_path)
+                    .await
+                    .map_err(|e| Box::new(HnswIndexProviderOpenError::FileError(*e)))?,
+                &index_config,
+                ef_search,
+                *id,
+            ) {
                 Ok(index) => {
                     let index = HnswIndexRef {
                         inner: Arc::new(RwLock::new(DistributedHnswInner {
