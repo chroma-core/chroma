@@ -5,7 +5,7 @@ use chroma_system::{
     OrchestratorContext, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::{Knn, KnnOutput, KnnProjection, KnnProjectionOutput, Merge, RecordMeasure},
+    operator::{Knn, KnnOutput, Merge, RecordMeasure},
     CollectionAndSegments,
 };
 use tokio::sync::oneshot::Sender;
@@ -15,7 +15,6 @@ use crate::execution::operators::{
     knn_hnsw::{KnnHnswError, KnnHnswInput},
     knn_log::{KnnLogError, KnnLogInput},
     knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOutput},
-    knn_projection::{KnnProjectionError, KnnProjectionInput},
 };
 
 use super::knn_filter::{KnnError, KnnFilterOutput};
@@ -78,17 +77,10 @@ use super::knn_filter::{KnnError, KnnFilterOutput};
 /// │           └──────────┬──────────┘            │                         │           └──────────┬──────────┘            │
 /// │                      │                       │                         │                      │                       │
 /// │                      ▼                       │                         │                      ▼                       │
-/// │         ┌─────────────────────────┐          │                         │         ┌─────────────────────────┐          │
-/// │         │                         │          │                         │         │                         │          │
-/// │         │  KnnProjectionOperator  │          │           ...           │         │  KnnProjectionOperator  │          │
-/// │         │                         │          │                         │         │                         │          │
-/// │         └────────────┬────────────┘          │                         │         └────────────┬────────────┘          │
-/// │                      │                       │                         │                      │                       │
-/// │                      ▼                       │                         │                      ▼                       │
 /// │             ┌──────────────────┐             │                         │             ┌──────────────────┐             │
 /// │             │                  │             │                         │             │                  │             │
 /// │             │  result_channel  │             │           ...           │             │  result_channel  │             │
-/// │             │                  │             │                         │             │                  │             │
+/// │             │ Vec<RecordMeasure>│             │                         │             │ Vec<RecordMeasure>│             │
 /// │             └────────┬─────────┘             │                         │             └────────┬─────────┘             │
 /// │                      │                       │                         │                      │                       │
 /// └────────────────────  │  ─────────────────────┘                         └────────────────────  │  ─────────────────────┘
@@ -123,12 +115,11 @@ pub struct KnnOrchestrator {
     // Knn output
     batch_distances: Vec<Vec<RecordMeasure>>,
 
-    // Merge and project
+    // Merge
     merge: Merge,
-    knn_projection: KnnProjection,
 
     // Result channel
-    result_channel: Option<Sender<Result<KnnProjectionOutput, KnnError>>>,
+    result_channel: Option<Sender<Result<Vec<RecordMeasure>, KnnError>>>,
 }
 
 impl KnnOrchestrator {
@@ -139,7 +130,6 @@ impl KnnOrchestrator {
         collection_and_segments: CollectionAndSegments,
         knn_filter_output: KnnFilterOutput,
         knn: Knn,
-        knn_projection: KnnProjection,
     ) -> Self {
         let fetch = knn.fetch;
         let batch_distances = if knn_filter_output.hnsw_reader.is_none() {
@@ -157,7 +147,6 @@ impl KnnOrchestrator {
             knn,
             batch_distances,
             merge: Merge { take: fetch },
-            knn_projection,
             result_channel: None,
         }
     }
@@ -179,7 +168,7 @@ impl KnnOrchestrator {
 
 #[async_trait]
 impl Orchestrator for KnnOrchestrator {
-    type Output = KnnProjectionOutput;
+    type Output = Vec<RecordMeasure>;
     type Error = KnnError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
@@ -235,11 +224,11 @@ impl Orchestrator for KnnOrchestrator {
         self.queue
     }
 
-    fn set_result_channel(&mut self, sender: Sender<Result<KnnProjectionOutput, KnnError>>) {
+    fn set_result_channel(&mut self, sender: Sender<Result<Vec<RecordMeasure>, KnnError>>) {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Option<Sender<Result<KnnProjectionOutput, KnnError>>> {
+    fn take_result_channel(&mut self) -> Option<Sender<Result<Vec<RecordMeasure>, KnnError>>> {
         self.result_channel.take()
     }
 }
@@ -294,31 +283,6 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for KnnOrchestrator {
             None => return,
         };
 
-        let projection_task = wrap(
-            Box::new(self.knn_projection.clone()),
-            KnnProjectionInput {
-                logs: self.knn_filter_output.logs.clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.collection_and_segments.record_segment.clone(),
-                record_distances: output.distances,
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        self.send(projection_task, ctx, Some(Span::current())).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for KnnOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<KnnProjectionOutput, KnnProjectionError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx)
-            .await;
+        self.terminate_with_result(Ok(output.distances), ctx).await;
     }
 }

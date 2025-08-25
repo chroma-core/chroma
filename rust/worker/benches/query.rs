@@ -8,12 +8,12 @@ use chroma_benchmark::{
 use chroma_config::{registry::Registry, Configurable};
 use chroma_segment::test::TestDistributedSegment;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
-use chroma_types::operator::{Knn, KnnProjection};
+use chroma_types::operator::Knn;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{stream, StreamExt, TryStreamExt};
 use load::{
-    all_projection, always_false_filter_for_modulo_metadata,
-    always_true_filter_for_modulo_metadata, empty_fetch_log, sift1m_segments, trivial_filter,
+    always_false_filter_for_modulo_metadata, always_true_filter_for_modulo_metadata,
+    empty_fetch_log, sift1m_segments, trivial_filter,
 };
 use rand::{seq::SliceRandom, thread_rng};
 use worker::{
@@ -93,10 +93,6 @@ fn knn(
         Knn {
             embedding: query,
             fetch: Sift1MData::k() as u32,
-        },
-        KnnProjection {
-            projection: all_projection(),
-            distance: true,
         },
     )
 }

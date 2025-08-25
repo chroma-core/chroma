@@ -190,6 +190,7 @@ impl Operator<ScoreInput, ScoreOutput> for Score {
             .map(|(offset_id, measure)| RecordMeasure { offset_id, measure })
             .collect::<Vec<_>>();
         scores.sort_unstable();
+        scores.reverse();
         Ok(ScoreOutput { scores })
     }
 }

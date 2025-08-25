@@ -12,7 +12,7 @@ use chroma_system::{
     OrchestratorContext, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::{Knn, KnnOutput, KnnProjection, KnnProjectionOutput, Merge, RecordMeasure},
+    operator::{Knn, KnnOutput, Merge, RecordMeasure},
     CollectionAndSegments,
 };
 use tokio::sync::oneshot::Sender;
@@ -21,7 +21,6 @@ use tracing::Span;
 use crate::execution::operators::{
     knn_log::{KnnLogError, KnnLogInput},
     knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOutput},
-    knn_projection::{KnnProjectionError, KnnProjectionInput},
     spann_bf_pl::{SpannBfPlError, SpannBfPlInput, SpannBfPlOperator, SpannBfPlOutput},
     spann_centers_search::{
         SpannCentersSearchError, SpannCentersSearchInput, SpannCentersSearchOperator,
@@ -66,17 +65,15 @@ pub struct SpannKnnOrchestrator {
     // Knn output
     records: Vec<Vec<RecordMeasure>>,
 
-    // Merge and project
+    // Merge
     merge: Merge,
-    knn_projection: KnnProjection,
 
     // Result channel
-    result_channel: Option<Sender<Result<KnnProjectionOutput, KnnError>>>,
+    result_channel: Option<Sender<Result<Vec<RecordMeasure>, KnnError>>>,
     spann_reader: Option<SpannSegmentReader<'static>>,
 }
 
 impl SpannKnnOrchestrator {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -85,7 +82,6 @@ impl SpannKnnOrchestrator {
         knn_filter_output: KnnFilterOutput,
         k: usize,
         query_embedding: Vec<f32>,
-        knn_projection: KnnProjection,
     ) -> Self {
         let normalized_query_emb =
             if knn_filter_output.distance_function == DistanceFunction::Cosine {
@@ -117,7 +113,6 @@ impl SpannKnnOrchestrator {
             pl_spans: HashMap::new(),
             records: Vec::new(),
             merge: Merge { take: k as u32 },
-            knn_projection,
             result_channel: None,
             spann_reader: None,
         }
@@ -141,7 +136,7 @@ impl SpannKnnOrchestrator {
 
 #[async_trait]
 impl Orchestrator for SpannKnnOrchestrator {
-    type Output = KnnProjectionOutput;
+    type Output = Vec<RecordMeasure>;
     type Error = KnnError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
@@ -223,11 +218,11 @@ impl Orchestrator for SpannKnnOrchestrator {
         self.queue
     }
 
-    fn set_result_channel(&mut self, sender: Sender<Result<KnnProjectionOutput, KnnError>>) {
+    fn set_result_channel(&mut self, sender: Sender<Result<Vec<RecordMeasure>, KnnError>>) {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Option<Sender<Result<KnnProjectionOutput, KnnError>>> {
+    fn take_result_channel(&mut self) -> Option<Sender<Result<Vec<RecordMeasure>, KnnError>>> {
         self.result_channel.take()
     }
 }
@@ -367,31 +362,6 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for SpannKnnOrchestrator
             None => return,
         };
 
-        let projection_task = wrap(
-            Box::new(self.knn_projection.clone()),
-            KnnProjectionInput {
-                logs: self.knn_filter_output.logs.clone(),
-                blockfile_provider: self.spann_provider.blockfile_provider.clone(),
-                record_segment: self.collection_and_segments.record_segment.clone(),
-                record_distances: output.distances,
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        self.send(projection_task, ctx, Some(Span::current())).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<KnnProjectionOutput, KnnProjectionError>> for SpannKnnOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: TaskResult<KnnProjectionOutput, KnnProjectionError>,
-        ctx: &ComponentContext<Self>,
-    ) {
-        self.terminate_with_result(message.into_inner().map_err(|e| e.into()), ctx)
-            .await;
+        self.terminate_with_result(Ok(output.distances), ctx).await;
     }
 }
