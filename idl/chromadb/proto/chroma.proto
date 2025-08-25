@@ -25,6 +25,11 @@ message Vector {
     ScalarEncoding encoding = 3;
 }
 
+message SparseVector {
+    repeated uint32 indices = 1;
+    repeated float values = 2;
+}
+
 enum SegmentScope {
     VECTOR = 0;
     METADATA = 1;
@@ -87,6 +92,7 @@ message UpdateMetadataValue {
         int64 int_value = 2;
         double float_value = 3;
         bool bool_value = 4;
+        SparseVector sparse_vector_value = 5;
     }
 }
 
