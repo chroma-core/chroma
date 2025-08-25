@@ -6,7 +6,7 @@ use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::plan::PlanToProtoError;
-use crate::plan::RetrievePayload;
+use crate::plan::SearchPayload;
 use crate::validators::{
     validate_name, validate_non_empty_collection_update_metadata, validate_non_empty_metadata,
 };
@@ -1842,25 +1842,25 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
 
 #[non_exhaustive]
 #[derive(Clone, Debug, Serialize, ToSchema, Validate)]
-pub struct RetrieveRequest {
+pub struct SearchRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
-    pub retrievals: Vec<RetrievePayload>,
+    pub searches: Vec<SearchPayload>,
 }
 
-impl RetrieveRequest {
+impl SearchRequest {
     pub fn try_new(
         tenant_id: String,
         database_name: String,
         collection_id: CollectionUuid,
-        retrievals: Vec<RetrievePayload>,
+        searches: Vec<SearchPayload>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
-            retrievals,
+            searches,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1868,7 +1868,7 @@ impl RetrieveRequest {
 }
 
 #[derive(Clone, Deserialize, Serialize, ToSchema, Debug, Default)]
-pub struct RetrieveResponse {
+pub struct SearchResponse {
     pub results: Vec<String>,
 }
 

@@ -12,9 +12,9 @@ use chroma_system::ComponentHandle;
 use chroma_types::{
     operator::{
         CountResult, Filter, GetResult, KnnBatchResult, KnnProjectionOutput, KnnProjectionRecord,
-        Projection, ProjectionRecord, RecordDistance, RetrieveResult,
+        Projection, ProjectionRecord, RecordDistance, SearchResult,
     },
-    plan::{Count, Get, Knn, Retrieve},
+    plan::{Count, Get, Knn, Search},
     CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SegmentType,
 };
 use std::{
@@ -306,9 +306,9 @@ impl LocalExecutor {
         })
     }
 
-    pub async fn retrieve(&mut self, _plan: Retrieve) -> Result<RetrieveResult, ExecutorError> {
+    pub async fn search(&mut self, _plan: Search) -> Result<SearchResult, ExecutorError> {
         Err(ExecutorError::NotImplemented(
-            "Retrieve operation is not implemented for local executor".to_string(),
+            "Search operation is not implemented for local executor".to_string(),
         ))
     }
 

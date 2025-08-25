@@ -17,7 +17,7 @@ use chroma_types::{
         query_executor_server::{QueryExecutor, QueryExecutorServer},
     },
     operator::{GetResult, KnnBatch, KnnBatchResult, KnnProjection, Scan},
-    plan::Retrieve,
+    plan::Search,
     CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
@@ -440,38 +440,38 @@ impl QueryExecutor for WorkerServer {
         self.orchestrate_knn(knn).await
     }
 
-    async fn retrieve(
+    async fn search(
         &self,
-        request: Request<chroma_proto::RetrievePlan>,
-    ) -> Result<Response<chroma_proto::RetrieveResult>, Status> {
-        // Convert proto to Retrieve for cleaner debug output
+        request: Request<chroma_proto::SearchPlan>,
+    ) -> Result<Response<chroma_proto::SearchResult>, Status> {
+        // Convert proto to Search for cleaner debug output
         let proto_plan = request.into_inner();
-        let retrieve_plan = match Retrieve::try_from(proto_plan.clone()) {
+        let search_plan = match Search::try_from(proto_plan.clone()) {
             Ok(plan) => plan,
             Err(e) => {
                 return Err(Status::invalid_argument(format!(
-                    "Failed to convert proto to Retrieve: {}",
+                    "Failed to convert proto to Search: {}",
                     e
                 )));
             }
         };
 
-        let num_payloads = retrieve_plan.payloads.len();
+        let num_payloads = search_plan.payloads.len();
         tracing::info!(
-            "Received retrieve request with {} payloads:\n{:#?}",
+            "Received search request with {} payloads:\n{:#?}",
             num_payloads,
-            retrieve_plan
+            search_plan
         );
 
         // Return one debug string per payload
-        let results = retrieve_plan
+        let results = search_plan
             .payloads
             .iter()
             .enumerate()
             .map(|(i, payload)| format!("Debug result for payload {}: {:#?}", i, payload))
             .collect();
 
-        Ok(Response::new(chroma_proto::RetrieveResult { results }))
+        Ok(Response::new(chroma_proto::SearchResult { results }))
     }
 }
 

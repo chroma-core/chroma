@@ -139,7 +139,7 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, Validate)]
-pub struct RetrievePayload {
+pub struct SearchPayload {
     #[serde(default)]
     pub filter: Filter,
     pub score: Score,
@@ -149,7 +149,7 @@ pub struct RetrievePayload {
     pub project: Project,
 }
 
-impl utoipa::PartialSchema for RetrievePayload {
+impl utoipa::PartialSchema for SearchPayload {
     fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
         use utoipa::openapi::schema::*;
         use utoipa::openapi::*;
@@ -157,12 +157,12 @@ impl utoipa::PartialSchema for RetrievePayload {
         RefOr::T(Schema::Object(
             ObjectBuilder::new()
                 .schema_type(SchemaType::Type(Type::Object))
-                .description(Some("Payload for hybrid search retrieval"))
+                .description(Some("Payload for hybrid search"))
                 .property(
                     "filter",
                     ObjectBuilder::new()
                         .schema_type(SchemaType::Type(Type::Object))
-                        .description(Some("Filter criteria for retrieval"))
+                        .description(Some("Filter criteria for search"))
                         .property(
                             "query_ids",
                             ArrayBuilder::new()
@@ -210,12 +210,12 @@ impl utoipa::PartialSchema for RetrievePayload {
     }
 }
 
-impl utoipa::ToSchema for RetrievePayload {}
+impl utoipa::ToSchema for SearchPayload {}
 
-impl TryFrom<chroma_proto::RetrievePayload> for RetrievePayload {
+impl TryFrom<chroma_proto::SearchPayload> for SearchPayload {
     type Error = QueryConversionError;
 
-    fn try_from(value: chroma_proto::RetrievePayload) -> Result<Self, Self::Error> {
+    fn try_from(value: chroma_proto::SearchPayload) -> Result<Self, Self::Error> {
         Ok(Self {
             filter: value
                 .filter
@@ -237,10 +237,10 @@ impl TryFrom<chroma_proto::RetrievePayload> for RetrievePayload {
     }
 }
 
-impl TryFrom<RetrievePayload> for chroma_proto::RetrievePayload {
+impl TryFrom<SearchPayload> for chroma_proto::SearchPayload {
     type Error = QueryConversionError;
 
-    fn try_from(value: RetrievePayload) -> Result<Self, Self::Error> {
+    fn try_from(value: SearchPayload) -> Result<Self, Self::Error> {
         Ok(Self {
             filter: Some(value.filter.try_into()?),
             score: Some(value.score.try_into()?),
@@ -251,15 +251,15 @@ impl TryFrom<RetrievePayload> for chroma_proto::RetrievePayload {
 }
 
 #[derive(Clone, Debug)]
-pub struct Retrieve {
+pub struct Search {
     pub scan: Scan,
-    pub payloads: Vec<RetrievePayload>,
+    pub payloads: Vec<SearchPayload>,
 }
 
-impl TryFrom<chroma_proto::RetrievePlan> for Retrieve {
+impl TryFrom<chroma_proto::SearchPlan> for Search {
     type Error = QueryConversionError;
 
-    fn try_from(value: chroma_proto::RetrievePlan) -> Result<Self, Self::Error> {
+    fn try_from(value: chroma_proto::SearchPlan) -> Result<Self, Self::Error> {
         Ok(Self {
             scan: value
                 .scan
@@ -274,10 +274,10 @@ impl TryFrom<chroma_proto::RetrievePlan> for Retrieve {
     }
 }
 
-impl TryFrom<Retrieve> for chroma_proto::RetrievePlan {
+impl TryFrom<Search> for chroma_proto::SearchPlan {
     type Error = QueryConversionError;
 
-    fn try_from(value: Retrieve) -> Result<Self, Self::Error> {
+    fn try_from(value: Search) -> Result<Self, Self::Error> {
         Ok(Self {
             scan: Some(value.scan.try_into()?),
             payloads: value
