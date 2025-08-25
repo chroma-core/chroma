@@ -90,7 +90,7 @@ export const chromaFetch: FetchAPI = async (
         case 503:
         case 504:
           throw new ChromaConnectionError(
-            `Unable to connect to the chromadb server. Please try again later.`,
+            `Unable to connect to the chromadb server. Please check server status.`,
           );
       }
 
