@@ -1996,6 +1996,7 @@ dependencies = [
  "roaring",
  "serde",
  "serde_json",
+ "sprs",
  "thiserror 1.0.69",
  "tokio",
  "tonic",

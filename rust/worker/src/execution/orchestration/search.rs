@@ -14,7 +14,7 @@ use chroma_system::{
 };
 use chroma_types::{
     operator::{Knn, KnnProjection, Projection, Rank, RecordDistance},
-    plan::RetrievePayload,
+    plan::SearchPayload,
     CollectionAndSegments, HnswParametersFromSegmentError, SegmentType,
 };
 use futures::future::try_join_all;
@@ -44,12 +44,12 @@ use crate::execution::{
 };
 
 #[derive(Debug)]
-pub struct RetrieveOutput {
+pub struct SearchOutput {
     pub debug: String,
 }
 
 #[derive(Debug, Error)]
-pub enum RetrieveError {
+pub enum SearchError {
     #[error("Operation aborted because resources exhausted")]
     Aborted,
     #[error("Error sending message through channel: {0}")]
@@ -82,45 +82,45 @@ pub enum RetrieveError {
     SparseKnn(#[from] SparseKnnError),
 }
 
-impl ChromaError for RetrieveError {
+impl ChromaError for SearchError {
     fn code(&self) -> ErrorCodes {
         match self {
-            RetrieveError::Aborted => ErrorCodes::Aborted,
-            RetrieveError::Channel(err) => err.code(),
-            RetrieveError::FetchLog(err) => err.code(),
-            RetrieveError::Filter(err) => err.code(),
-            RetrieveError::HnswConfig(err) => err.code(),
-            RetrieveError::HnswReader(err) => err.code(),
-            RetrieveError::InvalidVectorSegment => ErrorCodes::InvalidArgument,
-            RetrieveError::Knn(err) => err.code(),
-            RetrieveError::MaterializeLog(err) => err.code(),
-            RetrieveError::NoCollectionDimension => ErrorCodes::InvalidArgument,
-            RetrieveError::Panic(err) => err.code(),
-            RetrieveError::Project(err) => err.code(),
-            RetrieveError::Result(_) => ErrorCodes::Internal,
-            RetrieveError::Score(_) => ErrorCodes::Internal,
-            RetrieveError::SparseKnn(err) => err.code(),
+            SearchError::Aborted => ErrorCodes::Aborted,
+            SearchError::Channel(err) => err.code(),
+            SearchError::FetchLog(err) => err.code(),
+            SearchError::Filter(err) => err.code(),
+            SearchError::HnswConfig(err) => err.code(),
+            SearchError::HnswReader(err) => err.code(),
+            SearchError::InvalidVectorSegment => ErrorCodes::InvalidArgument,
+            SearchError::Knn(err) => err.code(),
+            SearchError::MaterializeLog(err) => err.code(),
+            SearchError::NoCollectionDimension => ErrorCodes::InvalidArgument,
+            SearchError::Panic(err) => err.code(),
+            SearchError::Project(err) => err.code(),
+            SearchError::Result(_) => ErrorCodes::Internal,
+            SearchError::Score(_) => ErrorCodes::Internal,
+            SearchError::SparseKnn(err) => err.code(),
         }
     }
 }
 
-impl<E> From<TaskError<E>> for RetrieveError
+impl<E> From<TaskError<E>> for SearchError
 where
-    E: Into<RetrieveError>,
+    E: Into<SearchError>,
 {
     fn from(value: TaskError<E>) -> Self {
         match value {
             TaskError::Panic(e) => e.into(),
             TaskError::TaskFailed(e) => e.into(),
-            TaskError::Aborted => RetrieveError::Aborted,
+            TaskError::Aborted => SearchError::Aborted,
         }
     }
 }
 
-type RetrieveResult = Result<RetrieveOutput, RetrieveError>;
+type SearchResult = Result<SearchOutput, SearchError>;
 
 #[derive(Debug)]
-pub struct RetrieveOrchestrator {
+pub struct SearchOrchestrator {
     context: OrchestratorContext,
     queue: usize,
     spann_provider: SpannProvider,
@@ -128,7 +128,7 @@ pub struct RetrieveOrchestrator {
 
     collection_and_segments: CollectionAndSegments,
     fetch_log: FetchLogOperator,
-    retrieve: RetrievePayload,
+    search: SearchPayload,
 
     // TODO: Materialize once and share with all operators
     fetched_logs: Option<FetchLogOutput>,
@@ -137,10 +137,10 @@ pub struct RetrieveOrchestrator {
     rank_result: HashMap<Rank, Vec<RecordDistance>>,
     rank_task_count: usize,
 
-    result_channel: Option<Sender<RetrieveResult>>,
+    result_channel: Option<Sender<SearchResult>>,
 }
 
-impl RetrieveOrchestrator {
+impl SearchOrchestrator {
     pub fn new(
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
@@ -148,7 +148,7 @@ impl RetrieveOrchestrator {
         system: System,
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
-        retrieve: RetrievePayload,
+        search: SearchPayload,
     ) -> Self {
         Self {
             context: OrchestratorContext::new(dispatcher),
@@ -157,7 +157,7 @@ impl RetrieveOrchestrator {
             system,
             collection_and_segments,
             fetch_log,
-            retrieve,
+            search,
             fetched_logs: None,
             rank_result: HashMap::new(),
             rank_task_count: 0,
@@ -177,7 +177,7 @@ impl RetrieveOrchestrator {
         if self.rank_result.len() < self.rank_task_count {
             return;
         }
-        let score = Box::new(self.retrieve.score.clone());
+        let score = Box::new(self.search.score.clone());
         let score_input = ScoreInput {
             blockfile_provider: self.blockfile_provider(),
             ranks: self.rank_result.clone(),
@@ -193,9 +193,9 @@ impl RetrieveOrchestrator {
 }
 
 #[async_trait]
-impl Orchestrator for RetrieveOrchestrator {
-    type Output = RetrieveOutput;
-    type Error = RetrieveError;
+impl Orchestrator for SearchOrchestrator {
+    type Output = SearchOutput;
+    type Error = SearchError;
 
     fn context(&self) -> &OrchestratorContext {
         &self.context
@@ -273,17 +273,17 @@ impl Orchestrator for RetrieveOrchestrator {
         self.queue
     }
 
-    fn set_result_channel(&mut self, sender: Sender<RetrieveResult>) {
+    fn set_result_channel(&mut self, sender: Sender<SearchResult>) {
         self.result_channel = Some(sender)
     }
 
-    fn take_result_channel(&mut self) -> Option<Sender<RetrieveResult>> {
+    fn take_result_channel(&mut self) -> Option<Sender<SearchResult>> {
         self.result_channel.take()
     }
 }
 
 #[async_trait]
-impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for RetrieveOrchestrator {
+impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for SearchOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -296,7 +296,7 @@ impl Handler<TaskResult<PrefetchSegmentOutput, PrefetchSegmentError>> for Retrie
 }
 
 #[async_trait]
-impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for RetrieveOrchestrator {
+impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for SearchOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -311,7 +311,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for RetrieveOrchestrator
 
         self.fetched_logs = Some(output.clone());
         let task = wrap(
-            Box::new(self.retrieve.filter.clone()),
+            Box::new(self.search.filter.clone()),
             FilterInput {
                 logs: output,
                 blockfile_provider: self.blockfile_provider().clone(),
@@ -326,7 +326,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for RetrieveOrchestrator
 }
 
 #[async_trait]
-impl Handler<TaskResult<FilterOutput, FilterError>> for RetrieveOrchestrator {
+impl Handler<TaskResult<FilterOutput, FilterError>> for SearchOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -347,7 +347,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for RetrieveOrchestrator {
                 self.collection_and_segments
                     .collection
                     .dimension
-                    .ok_or(RetrieveError::NoCollectionDimension),
+                    .ok_or(SearchError::NoCollectionDimension),
                 ctx,
             )
             .await
@@ -416,7 +416,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for RetrieveOrchestrator {
                 }
             }
             _ => {
-                self.terminate_with_result(Err(RetrieveError::InvalidVectorSegment), ctx)
+                self.terminate_with_result(Err(SearchError::InvalidVectorSegment), ctx)
                     .await;
                 return;
             }
@@ -439,7 +439,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for RetrieveOrchestrator {
             dimension: collection_dimension as usize,
             fetch_log_bytes,
         };
-        let ranks = self.retrieve.score.ranks();
+        let ranks = self.search.score.ranks();
         self.rank_task_count = ranks.len();
 
         let mut dense_ranks = Vec::with_capacity(self.rank_task_count);
@@ -483,11 +483,8 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for RetrieveOrchestrator {
                         )
                         .run(self.system.clone()),
                         _ => {
-                            self.terminate_with_result(
-                                Err(RetrieveError::InvalidVectorSegment),
-                                ctx,
-                            )
-                            .await;
+                            self.terminate_with_result(Err(SearchError::InvalidVectorSegment), ctx)
+                                .await;
                             return;
                         }
                     };
@@ -551,7 +548,7 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for RetrieveOrchestrator {
 }
 
 #[async_trait]
-impl Handler<TaskResult<SparseKnnOutput, SparseKnnError>> for RetrieveOrchestrator {
+impl Handler<TaskResult<SparseKnnOutput, SparseKnnError>> for SearchOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -570,7 +567,7 @@ impl Handler<TaskResult<SparseKnnOutput, SparseKnnError>> for RetrieveOrchestrat
 }
 
 #[async_trait]
-impl Handler<TaskResult<ReverseProjectionOutput, ProjectionError>> for RetrieveOrchestrator {
+impl Handler<TaskResult<ReverseProjectionOutput, ProjectionError>> for SearchOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -589,7 +586,7 @@ impl Handler<TaskResult<ReverseProjectionOutput, ProjectionError>> for RetrieveO
 }
 
 #[async_trait]
-impl Handler<TaskResult<ScoreOutput, ScoreError>> for RetrieveOrchestrator {
+impl Handler<TaskResult<ScoreOutput, ScoreError>> for SearchOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -602,7 +599,7 @@ impl Handler<TaskResult<ScoreOutput, ScoreError>> for RetrieveOrchestrator {
             None => return,
         };
         self.terminate_with_result(
-            Ok(RetrieveOutput {
+            Ok(SearchOutput {
                 debug: format!("{output:#?}"),
             }),
             ctx,
