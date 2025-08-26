@@ -34,14 +34,16 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     IncludeMetadataDocumentsEmbeddings,
+    SearchResult,
 )
 
 # TODO(hammadb): Unify imports across types vs root __init__.py
 from chromadb.types import Database, Tenant, Collection as CollectionModel
+from chromadb.execution.expression.plan import SearchPayload
 import chromadb_rust_bindings
 
 
-from typing import Optional, Sequence
+from typing import Optional, Sequence, List
 from overrides import override
 from uuid import UUID
 import json
@@ -308,6 +310,18 @@ class RustBindingsAPI(ServerAPI):
     ) -> CollectionModel:
         raise NotImplementedError(
             "Collection forking is not implemented for Local Chroma"
+        )
+
+    @override
+    def _search(
+        self,
+        collection_id: UUID,
+        searches: List[SearchPayload],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> SearchResult:
+        raise NotImplementedError(
+            "Search is not implemented for Local Chroma"
         )
 
     @override

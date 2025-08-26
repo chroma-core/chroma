@@ -1,6 +1,6 @@
 import orjson
 import logging
-from typing import Any, Dict, Optional, cast, Tuple
+from typing import Any, Dict, Optional, cast, Tuple, List
 from typing import Sequence
 from uuid import UUID
 import httpx
@@ -17,6 +17,7 @@ from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
+from chromadb.execution.expression.plan import SearchPayload
 
 from chromadb.api.types import (
     Documents,
@@ -30,11 +31,16 @@ from chromadb.api.types import (
     WhereDocument,
     GetResult,
     QueryResult,
+    SearchResult,
+    SearchRecord,
     CollectionMetadata,
     validate_batch,
     convert_np_embeddings_to_list,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
+)
+
+from chromadb.api.types import (
     IncludeMetadataDocumentsEmbeddings,
     optional_embeddings_to_base64_strings,
 )
@@ -351,6 +357,40 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         )
         model = CollectionModel.from_json(resp_json)
         return model
+
+    @trace_method("FastAPI._search", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _search(
+        self,
+        collection_id: UUID,
+        searches: List[SearchPayload],
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> SearchResult:
+        """Performs hybrid search on a collection"""
+        # Convert SearchPayload objects to dictionaries
+        payload = {"searches": [s.to_dict() for s in searches]}
+        
+        resp_json = self._make_request(
+            "post",
+            f"/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+            json=payload,
+        )
+        
+        # Parse response into SearchResult
+        results = []
+        for batch_results in resp_json.get("results", []):
+            batch = []
+            for record in batch_results:
+                batch.append(SearchRecord(
+                    id=record["id"],
+                    document=record.get("document"),
+                    embedding=record.get("embedding"),
+                    metadata=record.get("metadata"),
+                    score=record.get("score"),
+                ))
+            results.append(batch)
+        return results
 
     @trace_method("FastAPI.delete_collection", OpenTelemetryGranularity.OPERATION)
     @override

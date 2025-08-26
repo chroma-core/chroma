@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union, List
 
 from chromadb.api.types import (
     URI,
@@ -16,10 +16,12 @@ from chromadb.api.types import (
     ID,
     OneOrMany,
     WhereDocument,
+    SearchResult,
 )
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.api.collection_configuration import UpdateCollectionConfiguration
+from chromadb.execution.expression.plan import SearchPayload
 
 if TYPE_CHECKING:
     from chromadb.api import AsyncServerAPI  # noqa: F401
@@ -286,6 +288,49 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             model=model,
             embedding_function=self._embedding_function,
             data_loader=self._data_loader,
+        )
+
+    async def search(
+        self,
+        searches: List[SearchPayload],
+    ) -> SearchResult:
+        """Perform hybrid search on the collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+        
+        Args:
+            searches: List of SearchPayload objects, each containing:
+                - filter: Optional filter criteria (user_ids, where)
+                - score: Scoring expression for hybrid search
+                - limit: Optional limit configuration (skip, fetch)
+                - project: Optional projection configuration (fields to return)
+        
+        Returns:
+            SearchResult: List of search results for each search payload.
+                         Each result is a list of SearchRecord objects.
+        
+        Raises:
+            NotImplementedError: For local/segment API implementations
+        
+        Example:
+            from chromadb.execution.expression.operator import (
+                DenseKnn, RankScore, Val, Sum, Filter, Limit, Project
+            )
+            from chromadb.execution.expression.plan import SearchPayload
+            
+            payload = SearchPayload(
+                filter=Filter(where={"category": "science"}),
+                score=RankScore(source=DenseKnn(embedding=[0.1, 0.2, 0.3], limit=100)),
+                limit=Limit(skip=0, fetch=10),
+                project=Project(fields={"$document", "$score", "$metadata"})
+            )
+            
+            results = await collection.search([payload])
+        """
+        return await self._client._search(
+            collection_id=self.id,
+            searches=searches,
+            tenant=self.tenant,
+            database=self.database,
         )
 
     async def update(
