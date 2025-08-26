@@ -62,6 +62,10 @@ type Config struct {
 	HeapServicePort             int    // Default: 50052
 	HeapServiceAssignmentHasher string // Assignment policy hasher: "murmur3" (default), etc.
 
+	// SysDB service memberlist config
+	SysDBServiceMemberlistName string
+	SysDBServicePodLabel       string
+
 	// Config for testing
 	Testing bool
 
@@ -111,6 +115,7 @@ func StartMemberListManagers(leaderCtx context.Context, config Config) error {
 		{"compaction", nil, config.CompactionServiceMemberlistName, config.CompactionServicePodLabel},
 		{"garbage_collection", nil, config.GarbageCollectionServiceMemberlistName, config.GarbageCollectionServicePodLabel},
 		{"log", nil, config.LogServiceMemberlistName, config.LogServicePodLabel},
+		{"sysdb", nil, config.SysDBServiceMemberlistName, config.SysDBServicePodLabel},
 	}
 
 	for i, m := range managers {

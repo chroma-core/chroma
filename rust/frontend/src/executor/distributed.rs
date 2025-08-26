@@ -60,12 +60,19 @@ impl Default for ClientSelectionConfig {
     }
 }
 
-#[async_trait]
-impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedExecutor {
-    async fn try_from_config(
-        (config, system): &(config::DistributedExecutorConfig, System),
+impl DistributedExecutor {
+    async fn initialize_client_assigner<
+        T: Clone
+            + std::fmt::Debug
+            + chroma_memberlist::client_manager::ClientFactory
+            + Send
+            + Sync
+            + 'static,
+    >(
+        config: &config::DistributedExecutorConfig,
+        system: &System,
         registry: &registry::Registry,
-    ) -> Result<Self, Box<dyn ChromaError>> {
+    ) -> Result<ClientAssigner<T>, Box<dyn ChromaError>> {
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment, registry).await?;
         let client_assigner = ClientAssigner::new(assignment_policy, config.replication_factor);
@@ -90,6 +97,18 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         };
         memberlist_provider.subscribe(client_manager_handle.receiver());
         let _memberlist_provider_handle = system.start_component(memberlist_provider);
+        Ok(client_assigner)
+    }
+}
+
+#[async_trait]
+impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedExecutor {
+    async fn try_from_config(
+        (config, system): &(config::DistributedExecutorConfig, System),
+        registry: &registry::Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let client_assigner =
+            DistributedExecutor::initialize_client_assigner(config, system, registry).await?;
 
         let retry_config = &config.retry;
         let backoff = retry_config.into();

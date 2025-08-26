@@ -72,6 +72,10 @@ func init() {
 	Cmd.Flags().IntVar(&conf.HeapServicePort, "heap-service-port", 50052, "Heap service port (colocated with log service)")
 	Cmd.Flags().StringVar(&conf.HeapServiceAssignmentHasher, "heap-service-assignment-hasher", "murmur3", "Heap service assignment policy hasher (murmur3, rendezvous)")
 
+	// SysDB service Memberlist
+	Cmd.Flags().StringVar(&conf.SysDBServiceMemberlistName, "sysdb-memberlist-name", "sysdb-service-memberlist", "SysDB service memberlist name")
+	Cmd.Flags().StringVar(&conf.SysDBServicePodLabel, "sysdb-pod-label", "sysdb", "SysDB service pod label")
+
 	// S3 config
 	Cmd.Flags().BoolVar(&conf.MetaStoreConfig.CreateBucketIfNotExists, "create-bucket-if-not-exists", false, "Create bucket if not exists")
 	Cmd.Flags().StringVar(&conf.MetaStoreConfig.BucketName, "bucket-name", "chroma-storage", "Bucket name")
