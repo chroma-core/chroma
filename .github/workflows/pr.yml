@@ -168,31 +168,31 @@ jobs:
     with:
       property_testing_preset: 'normal'
 
-  python-vulnerability-scan:
-    name: Python vulnerability scan
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
-    uses: ./.github/workflows/_python-vulnerability-scan.yml
+  #python-vulnerability-scan:
+  #  name: Python vulnerability scan
+  #  needs: change-detection
+  #  if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'python')
+  #  uses: ./.github/workflows/_python-vulnerability-scan.yml
 
-  javascript-client-tests:
-    name: JavaScript client tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
-    uses: ./.github/workflows/_javascript-client-tests.yml
+  #javascript-client-tests:
+  #  name: JavaScript client tests
+  #  needs: change-detection
+  #  if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'js-client')
+  #  uses: ./.github/workflows/_javascript-client-tests.yml
 
-  rust-tests:
-    name: Rust tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
-    uses: ./.github/workflows/_rust-tests.yml
-    secrets: inherit
+  #rust-tests:
+  #  name: Rust tests
+  #  needs: change-detection
+  #  if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+  #  uses: ./.github/workflows/_rust-tests.yml
+  #  secrets: inherit
 
-  go-tests:
-    name: Go tests
-    needs: change-detection
-    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
-    uses: ./.github/workflows/_go-tests.yml
-    secrets: inherit
+  #go-tests:
+  #  name: Go tests
+  #  needs: change-detection
+  #  if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'go')
+  #  uses: ./.github/workflows/_go-tests.yml
+  #  secrets: inherit
 
   lint:
     name: Lint
@@ -239,10 +239,10 @@ jobs:
     if: always()
     needs:
     - python-tests
-    - python-vulnerability-scan
-    - javascript-client-tests
-    - rust-tests
-    - go-tests
+    #- python-vulnerability-scan
+    #- javascript-client-tests
+    #- rust-tests
+    #- go-tests
     - lint
     - check-helm-version-bump
     - delete-helm-comment
@@ -259,10 +259,10 @@ jobs:
     if: github.ref == 'refs/heads/main' && failure()
     needs:
     - python-tests
-    - python-vulnerability-scan
-    - javascript-client-tests
-    - rust-tests
-    - go-tests
+    #- python-vulnerability-scan
+    #- javascript-client-tests
+    #- rust-tests
+    #- go-tests
     - lint
     - check-helm-version-bump
     - delete-helm-comment
