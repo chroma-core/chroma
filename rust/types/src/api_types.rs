@@ -17,6 +17,7 @@ use crate::CollectionUuid;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
 use crate::Metadata;
+use crate::MetadataValue;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
 use crate::UpdateMetadata;
@@ -1867,9 +1868,9 @@ impl SearchRequest {
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, ToSchema, Debug, Default)]
+#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
 pub struct SearchResponse {
-    pub results: Vec<String>,
+    pub results: Vec<Vec<Metadata>>,
 }
 
 #[derive(Error, Debug)]

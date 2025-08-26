@@ -1603,8 +1603,20 @@ impl ServiceBasedFrontend {
         // Execute the single search plan using the executor
         let result = self.executor.search(search_plan).await?;
 
+        // TODO: Attach metering context
+        let response_results = result
+            .results
+            .into_iter()
+            .map(|item| {
+                item.records
+                    .into_iter()
+                    .map(|record| record.metadata)
+                    .collect()
+            })
+            .collect();
+
         Ok(SearchResponse {
-            results: result.results,
+            results: response_results,
         })
     }
 

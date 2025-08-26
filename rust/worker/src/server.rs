@@ -463,15 +463,23 @@ impl QueryExecutor for WorkerServer {
             search_plan
         );
 
-        // Return one debug string per payload
+        // Return one debug result per payload (temporary implementation)
         let results = search_plan
             .payloads
             .iter()
-            .enumerate()
-            .map(|(i, payload)| format!("Debug result for payload {}: {:#?}", i, payload))
+            .map(|_| chroma_proto::SearchPayloadResult {
+                records: vec![chroma_proto::SearchRecord {
+                    metadata: Some(chroma_proto::UpdateMetadata {
+                        metadata: std::collections::HashMap::new(),
+                    }),
+                }],
+            })
             .collect();
 
-        Ok(Response::new(chroma_proto::SearchResult { results }))
+        Ok(Response::new(chroma_proto::SearchResult {
+            results,
+            pulled_log_bytes: 0,
+        }))
     }
 }
 

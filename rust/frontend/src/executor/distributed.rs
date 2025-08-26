@@ -243,7 +243,7 @@ impl DistributedExecutor {
             .when(is_retryable_error)
             .await?
         };
-        Ok(res.into_inner().into())
+        Ok(res.into_inner().try_into()?)
     }
 
     pub async fn is_ready(&self) -> bool {

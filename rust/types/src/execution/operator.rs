@@ -1065,22 +1065,92 @@ impl TryFrom<Project> for chroma_proto::ProjectOperator {
 }
 
 #[derive(Clone, Debug)]
-pub struct SearchResult {
-    pub results: Vec<String>,
+pub struct SearchRecord {
+    pub metadata: Metadata,
 }
 
-impl From<chroma_proto::SearchResult> for SearchResult {
-    fn from(value: chroma_proto::SearchResult) -> Self {
+impl TryFrom<chroma_proto::SearchRecord> for SearchRecord {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::SearchRecord) -> Result<Self, Self::Error> {
+        Ok(Self {
+            metadata: value
+                .metadata
+                .ok_or(QueryConversionError::field("metadata"))?
+                .try_into()?,
+        })
+    }
+}
+
+impl TryFrom<SearchRecord> for chroma_proto::SearchRecord {
+    type Error = QueryConversionError;
+
+    fn try_from(value: SearchRecord) -> Result<Self, Self::Error> {
+        Ok(Self {
+            metadata: Some(value.metadata.into()),
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchPayloadResult {
+    pub records: Vec<SearchRecord>,
+}
+
+impl From<chroma_proto::SearchPayloadResult> for SearchPayloadResult {
+    fn from(value: chroma_proto::SearchPayloadResult) -> Self {
         Self {
-            results: value.results,
+            records: value
+                .records
+                .into_iter()
+                .filter_map(|r| r.try_into().ok())
+                .collect(),
         }
     }
 }
 
-impl From<SearchResult> for chroma_proto::SearchResult {
-    fn from(value: SearchResult) -> Self {
-        Self {
-            results: value.results,
-        }
+impl TryFrom<SearchPayloadResult> for chroma_proto::SearchPayloadResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: SearchPayloadResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            records: value
+                .records
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SearchResult {
+    pub results: Vec<SearchPayloadResult>,
+    pub pulled_log_bytes: u64,
+}
+
+impl TryFrom<chroma_proto::SearchResult> for SearchResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::SearchResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            results: value.results.into_iter().map(Into::into).collect(),
+            pulled_log_bytes: value.pulled_log_bytes,
+        })
+    }
+}
+
+impl TryFrom<SearchResult> for chroma_proto::SearchResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: SearchResult) -> Result<Self, Self::Error> {
+        Ok(Self {
+            results: value
+                .results
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<Vec<_>, _>>()?,
+            pulled_log_bytes: value.pulled_log_bytes,
+        })
     }
 }
