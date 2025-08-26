@@ -2,5 +2,13 @@ syntax = "proto3";
 
 package chroma;
 
-// This is a placeholder service. The garbage collector currently only exposes a health service.
-service GarbageCollector {}
+message KickoffGarbageCollectionRequest {
+  string collection_id = 1;
+}
+
+message KickoffGarbageCollectionResponse {
+}
+
+service GarbageCollector {
+  rpc KickoffGarbageCollection(KickoffGarbageCollectionRequest) returns (KickoffGarbageCollectionResponse) {}
+}
