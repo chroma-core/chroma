@@ -8,13 +8,15 @@ arrow = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
+opentelemetry = { workspace = true }
 parquet = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 setsum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time"] }
-tracing.workspace = true
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 
 chroma-storage = { workspace = true }
 chroma-error.workspace = true
