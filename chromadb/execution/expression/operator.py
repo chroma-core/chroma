@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Set, Any
 
-from chromadb.api.types import Embeddings, IDs, Include
+from chromadb.api.types import Embeddings, IDs, Include, SparseVector
 from chromadb.types import (
     Collection,
     RequestVersionContext,
@@ -232,11 +232,12 @@ class DenseKnn(Rank):
 @dataclass
 class SparseKnn(Rank):
     """Sparse KNN ranking"""
-    embedding: Dict[int, float]  # Sparse vector: index -> value
+    embedding: SparseVector  # Sparse vector with indices and values
     key: str  # No default for sparse KNN
     limit: int = 1024
     
     def to_dict(self) -> Dict[str, Any]:
+        # Convert SparseVector to the format expected by Rust API
         result = {"embedding": self.embedding, "key": self.key}
         if self.limit != 1024:
             result["limit"] = self.limit # type: ignore[assignment]
