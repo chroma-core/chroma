@@ -6,6 +6,7 @@ use std::{
     hash::{Hash, Hasher},
 };
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, CollectionAndSegments, CollectionUuid, Metadata,
@@ -1064,9 +1065,13 @@ impl TryFrom<Project> for chroma_proto::ProjectOperator {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
 pub struct SearchRecord {
-    pub metadata: Metadata,
+    pub id: String,
+    pub document: Option<String>,
+    pub embedding: Option<Vec<f32>>,
+    pub metadata: Option<Metadata>,
+    pub score: Option<f32>,
 }
 
 impl TryFrom<chroma_proto::SearchRecord> for SearchRecord {
@@ -1074,10 +1079,14 @@ impl TryFrom<chroma_proto::SearchRecord> for SearchRecord {
 
     fn try_from(value: chroma_proto::SearchRecord) -> Result<Self, Self::Error> {
         Ok(Self {
-            metadata: value
-                .metadata
-                .ok_or(QueryConversionError::field("metadata"))?
-                .try_into()?,
+            id: value.id,
+            document: value.document,
+            embedding: value
+                .embedding
+                .map(|vec| vec.try_into().map(|(v, _)| v))
+                .transpose()?,
+            metadata: value.metadata.map(TryInto::try_into).transpose()?,
+            score: value.score,
         })
     }
 }
@@ -1087,7 +1096,21 @@ impl TryFrom<SearchRecord> for chroma_proto::SearchRecord {
 
     fn try_from(value: SearchRecord) -> Result<Self, Self::Error> {
         Ok(Self {
-            metadata: Some(value.metadata.into()),
+            id: value.id,
+            document: value.document,
+            embedding: value
+                .embedding
+                .map(|embedding| {
+                    let embedding_dimension = embedding.len();
+                    chroma_proto::Vector::try_from((
+                        embedding,
+                        ScalarEncoding::FLOAT32,
+                        embedding_dimension,
+                    ))
+                })
+                .transpose()?,
+            metadata: value.metadata.map(Into::into),
+            score: value.score,
         })
     }
 }
@@ -1127,6 +1150,36 @@ impl TryFrom<SearchPayloadResult> for chroma_proto::SearchPayloadResult {
 pub struct SearchResult {
     pub results: Vec<SearchPayloadResult>,
     pub pulled_log_bytes: u64,
+}
+
+impl SearchResult {
+    pub fn size_bytes(&self) -> u64 {
+        self.results
+            .iter()
+            .flat_map(|result| {
+                result.records.iter().map(|record| {
+                    (record.id.len()
+                        + record
+                            .document
+                            .as_ref()
+                            .map(|doc| doc.len())
+                            .unwrap_or_default()
+                        + record
+                            .embedding
+                            .as_ref()
+                            .map(|emb| size_of_val(&emb[..]))
+                            .unwrap_or_default()
+                        + record
+                            .metadata
+                            .as_ref()
+                            .map(logical_size_of_metadata)
+                            .unwrap_or_default()
+                        + record.score.as_ref().map(size_of_val).unwrap_or_default())
+                        as u64
+                })
+            })
+            .sum()
+    }
 }
 
 impl TryFrom<chroma_proto::SearchResult> for SearchResult {

@@ -469,9 +469,13 @@ impl QueryExecutor for WorkerServer {
             .iter()
             .map(|_| chroma_proto::SearchPayloadResult {
                 records: vec![chroma_proto::SearchRecord {
+                    id: "debug-id".to_string(),
+                    document: Some("debug document".to_string()),
+                    embedding: None, // Not including embedding in debug response
                     metadata: Some(chroma_proto::UpdateMetadata {
                         metadata: std::collections::HashMap::new(),
                     }),
+                    score: Some(1.0),
                 }],
             })
             .collect();
