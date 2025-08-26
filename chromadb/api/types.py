@@ -43,6 +43,8 @@ __all__ = [
     "WhereDocument",
     "UpdateCollectionMetadata",
     "UpdateMetadata",
+    "SearchRecord",
+    "SearchResult",
 ]
 META_KEY_CHROMA_DOCUMENT = "chroma:document"
 T = TypeVar("T")
@@ -482,6 +484,19 @@ class QueryResult(TypedDict):
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
     included: Include
+
+
+class SearchRecord(TypedDict):
+    """Individual record returned from a search operation"""
+    id: str
+    document: Optional[str]
+    embedding: Optional[List[float]]
+    metadata: Optional[Metadata]
+    score: Optional[float]
+
+
+# SearchResult is a list of results for each search payload
+SearchResult = List[List[SearchRecord]]
 
 
 class UpdateRequest(TypedDict):
