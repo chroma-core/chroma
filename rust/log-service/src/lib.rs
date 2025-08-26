@@ -1794,63 +1794,7 @@ impl LogServer {
         &self,
         request: Request<MigrateLogRequest>,
     ) -> Result<Response<MigrateLogResponse>, Status> {
-        let migrate_log = request.into_inner();
-        let collection_id = Uuid::parse_str(&migrate_log.collection_id)
-            .map(CollectionUuid)
-            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-
-        tracing::info!(
-            "Migrating log for collection {} to new log service",
-            collection_id
-        );
-        let prefix = collection_id.storage_prefix_for_log();
-        let key = LogKey { collection_id };
-        let handle = self.open_logs.get_or_create_state(key);
-        let mark_dirty = MarkDirty {
-            collection_id,
-            dirty_log: Arc::clone(&self.dirty_log),
-        };
-        match get_log_from_handle(
-            &handle,
-            &self.config.writer,
-            &self.storage,
-            &prefix,
-            mark_dirty,
-        )
-        .await
-        {
-            Ok(_) => {
-                tracing::info!("{collection_id} already migrated");
-                Ok(Response::new(MigrateLogResponse {}))
-            }
-            Err(wal3::Error::UninitializedLog) => {
-                tracing::error!("UninitializedLog; this should NEVER happen");
-                if let Some(mut proxy) = self.proxy.as_ref().cloned() {
-                    if proxy
-                        .scout_logs(ScoutLogsRequest {
-                            collection_id: collection_id.to_string(),
-                        })
-                        .await?
-                        .into_inner()
-                        .is_sealed
-                    {
-                        tracing::info!("effectuating transfer of {collection_id}");
-                        self.effectuate_log_transfer(collection_id, proxy, 3)
-                            .await?;
-                        Ok(Response::new(MigrateLogResponse {}))
-                    } else {
-                        tracing::info!(
-                            "not effectuating transfer of {collection_id} (log not sealed)"
-                        );
-                        Err(Status::failed_precondition("log not sealed"))
-                    }
-                } else {
-                    tracing::info!("not effectuating transfer of {collection_id} (no proxy)");
-                    Err(Status::failed_precondition("proxy not initialized"))
-                }
-            }
-            Err(err) => Err(Status::unknown(err.to_string())),
-        }
+        Err(Status::failed_precondition("migration removed"))
     }
 
     async fn inspect_log_state(
