@@ -416,7 +416,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         
         resp_json = await self._make_request(
             "post",
-            f"/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
             json=payload,
         )
         

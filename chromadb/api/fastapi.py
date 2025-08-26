@@ -373,7 +373,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         
         resp_json = self._make_request(
             "post",
-            f"/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
             json=payload,
         )
         
