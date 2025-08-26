@@ -167,7 +167,11 @@ message SearchPlan {
 }
 
 message SearchRecord {
-    UpdateMetadata metadata = 1;
+    string id = 1;
+    optional string document = 2;
+    optional Vector embedding = 3;
+    optional UpdateMetadata metadata = 4;
+    optional float score = 5;
 }
 
 message SearchPayloadResult {

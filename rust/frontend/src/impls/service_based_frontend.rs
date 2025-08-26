@@ -43,13 +43,10 @@ use chroma_types::{
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::{collections::HashSet, time::Duration};
-use std::{
-    sync::atomic::{AtomicUsize, Ordering},
-    time::Instant,
-};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::utils::to_records;
 
@@ -1592,6 +1589,28 @@ impl ServiceBasedFrontend {
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
 
+        let latest_collection_logical_size_bytes = collection_and_segments
+            .collection
+            .size_bytes_post_compaction;
+
+        // Aggregate metrics across all search payloads
+        let mut total_metadata_predicate_count = 0u64;
+        let mut total_fts_query_length = 0u64;
+        let mut total_query_embedding_count = 0u64;
+
+        for payload in &request.searches {
+            // Count metadata predicates and FTS query length from where clause
+            if let Some(ref where_clause) = payload.filter.where_clause {
+                total_metadata_predicate_count += where_clause.metadata_predicate_count();
+                total_fts_query_length += where_clause.fts_query_length();
+            }
+
+            // Count embeddings from the score expression
+            // Each rank in the score expression contains one embedding
+            let ranks = payload.score.ranks();
+            total_query_embedding_count += ranks.len() as u64;
+        }
+
         // Create a single Search plan with one scan and the payloads from the request
         let search_plan = Search {
             scan: Scan {
@@ -1603,20 +1622,45 @@ impl ServiceBasedFrontend {
         // Execute the single search plan using the executor
         let result = self.executor.search(search_plan).await?;
 
-        // TODO: Attach metering context
-        let response_results = result
-            .results
-            .into_iter()
-            .map(|item| {
-                item.records
-                    .into_iter()
-                    .map(|record| record.metadata)
-                    .collect()
-            })
-            .collect();
+        // Calculate return bytes (approximate size of the response)
+        let return_bytes = result.size_bytes();
+
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.fts_query_length(total_fts_query_length);
+            context.metadata_predicate_count(total_metadata_predicate_count);
+            context.query_embedding_count(total_query_embedding_count);
+            context.pulled_log_size_bytes(result.pulled_log_bytes);
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.return_bytes(return_bytes);
+            context.finish_request(Instant::now());
+        });
+
+        // TODO: Submit metering event after the response is sent
+        match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                MeterEvent::CollectionRead(collection_read_context)
+                    .submit()
+                    .await;
+            }
+            Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
+                Ok(external_collection_read_context) => {
+                    MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                        .submit()
+                        .await;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                }
+            },
+        }
 
         Ok(SearchResponse {
-            results: response_results,
+            results: result
+                .results
+                .into_iter()
+                .map(|result| result.records)
+                .collect(),
         })
     }
 

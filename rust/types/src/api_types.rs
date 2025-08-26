@@ -5,6 +5,7 @@ use crate::operator::GetResult;
 use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
+use crate::operator::SearchRecord;
 use crate::plan::PlanToProtoError;
 use crate::plan::SearchPayload;
 use crate::validators::{
@@ -17,7 +18,6 @@ use crate::CollectionUuid;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::HnswParametersFromSegmentError;
 use crate::Metadata;
-use crate::MetadataValue;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
 use crate::UpdateMetadata;
@@ -1870,7 +1870,7 @@ impl SearchRequest {
 
 #[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
 pub struct SearchResponse {
-    pub results: Vec<Vec<Metadata>>,
+    pub results: Vec<Vec<SearchRecord>>,
 }
 
 #[derive(Error, Debug)]
