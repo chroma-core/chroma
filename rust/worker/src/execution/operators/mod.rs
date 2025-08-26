@@ -18,6 +18,7 @@ pub mod knn_projection;
 pub mod limit;
 pub mod partition_log;
 pub mod prefetch_segment;
+pub mod select;
 pub mod projection;
 pub mod purge_dirty_log;
 pub mod repair_log_offsets;
