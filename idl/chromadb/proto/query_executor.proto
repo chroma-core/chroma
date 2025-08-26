@@ -166,8 +166,17 @@ message SearchPlan {
     repeated SearchPayload payloads = 2;
 }
 
+message SearchRecord {
+    UpdateMetadata metadata = 1;
+}
+
+message SearchPayloadResult {
+    repeated SearchRecord records = 1;
+}
+
 message SearchResult {
-    repeated string results = 1;
+    repeated SearchPayloadResult results = 1;
+    uint64 pulled_log_bytes = 2;
 }
 
 service QueryExecutor {
