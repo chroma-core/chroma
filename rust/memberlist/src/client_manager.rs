@@ -5,7 +5,7 @@ use chroma_config::assignment::{
 };
 use chroma_error::ChromaError;
 use chroma_system::{Component, ComponentContext, Handler};
-use chroma_tracing::GrpcTraceService;
+use chroma_tracing::GrpcClientTraceService;
 use chroma_types::chroma_proto::{
     log_service_client::LogServiceClient, query_executor_client::QueryExecutorClient,
 };
@@ -95,7 +95,7 @@ where
 }
 
 pub trait ClientFactory {
-    fn new_from_channel(channel: GrpcTraceService<Channel>) -> Self;
+    fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self;
     // TODO: Exposing/Proxy'ing each property manually like this is not ideal, if this bloats
     // we can consider better alternatives
     fn max_decoding_message_size(self, max_size: usize) -> Self;
@@ -220,7 +220,7 @@ where
                 let (channel, channel_change_sender) =
                     Channel::balance_channel::<String>(self.connections_per_node);
                 let channel = ServiceBuilder::new()
-                    .layer(chroma_tracing::GrpcTraceLayer)
+                    .layer(chroma_tracing::GrpcClientTraceLayer)
                     .service(channel);
 
                 let client = T::new_from_channel(channel);
@@ -364,9 +364,9 @@ where
 
 // Impl this trait on grpc client
 impl ClientFactory
-    for QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>
+    for QueryExecutorClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>
 {
-    fn new_from_channel(channel: GrpcTraceService<Channel>) -> Self {
+    fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         QueryExecutorClient::new(channel)
     }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
@@ -375,9 +375,9 @@ impl ClientFactory
 }
 
 impl ClientFactory
-    for LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>
+    for LogServiceClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>
 {
-    fn new_from_channel(channel: GrpcTraceService<Channel>) -> Self {
+    fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         LogServiceClient::new(channel)
     }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
@@ -392,7 +392,7 @@ mod test {
     use chroma_types::chroma_proto::query_executor_client::QueryExecutorClient;
 
     type QueryClient =
-        QueryExecutorClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>;
+        QueryExecutorClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>;
 
     fn test_client_manager() -> (ClientManager<QueryClient>, ClientAssigner<QueryClient>) {
         let client_assigner = ClientAssigner::new(

@@ -611,7 +611,7 @@ impl SysDb {
 // one inflight request at a time, so we need to clone the client for each requester.
 pub struct GrpcSysDb {
     #[allow(clippy::type_complexity)]
-    client: SysDbClient<chroma_tracing::GrpcTraceService<tonic::transport::Channel>>,
+    client: SysDbClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
 }
 
 #[derive(Error, Debug)]
@@ -650,7 +650,7 @@ impl Configurable<GrpcSysDbConfig> for GrpcSysDb {
 
         let channel = Channel::balance_list((0..my_config.num_channels).map(|_| endpoint.clone()));
         let channel = ServiceBuilder::new()
-            .layer(chroma_tracing::GrpcTraceLayer)
+            .layer(chroma_tracing::GrpcClientTraceLayer)
             .service(channel);
         let client = SysDbClient::new(channel);
         Ok(GrpcSysDb { client })

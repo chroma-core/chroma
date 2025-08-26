@@ -1,6 +1,8 @@
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use tracing::Span;
+
 use crate::{Error, FragmentSeqNo, LogPosition, ManifestManager, ThrottleOptions};
 
 /////////////////////////////////////////// ManagerState ///////////////////////////////////////////
@@ -15,6 +17,7 @@ struct ManagerState {
     enqueued: Vec<(
         Vec<Vec<u8>>,
         tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+        Span,
     )>,
     tearing_down: bool,
 }
@@ -61,7 +64,7 @@ impl ManagerState {
 
 impl Drop for ManagerState {
     fn drop(&mut self) {
-        for (_, notify) in std::mem::take(&mut self.enqueued).into_iter() {
+        for (_, notify, _) in std::mem::take(&mut self.enqueued).into_iter() {
             let _ = notify.send(Err(Error::LogContentionRetry));
         }
     }
@@ -96,6 +99,7 @@ impl BatchManager {
         &self,
         messages: Vec<Vec<u8>>,
         tx: tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+        span: Span,
     ) {
         // SAFETY(rescrv): Mutex poisoning.
         let mut state = self.state.lock().unwrap();
@@ -106,7 +110,7 @@ impl BatchManager {
             let _ = tx.send(Err(Error::Backoff));
             self.write_finished.notify_one();
         } else {
-            state.enqueued.push((messages, tx));
+            state.enqueued.push((messages, tx, span));
         }
     }
 
@@ -140,6 +144,7 @@ impl BatchManager {
             Vec<(
                 Vec<Vec<u8>>,
                 tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
+                Span,
             )>,
         )>,
         Error,
@@ -165,7 +170,7 @@ impl BatchManager {
         let mut did_split = false;
         // This loop has two sets of exit conditions that are identical, but switched on
         // `short_read`.
-        for (batch, _) in state.enqueued.iter() {
+        for (batch, _, _) in state.enqueued.iter() {
             let cur_count = batch.len();
             let cur_bytes = batch.iter().map(|r| r.len()).sum::<usize>();
             if split_off > 0 && acc_bytes + cur_bytes >= self.options.batch_size_bytes {
@@ -200,7 +205,7 @@ impl BatchManager {
             state.backoff = state
                 .enqueued
                 .iter()
-                .map(|(recs, _)| recs.iter().map(|r| r.len()).sum::<usize>())
+                .map(|(recs, _, _)| recs.iter().map(|r| r.len()).sum::<usize>())
                 .sum::<usize>()
                 >= self.options.batch_size_bytes;
             self.write_finished.notify_one();
@@ -221,7 +226,7 @@ impl BatchManager {
             state.tearing_down = true;
             std::mem::take(&mut state.enqueued)
         };
-        for (_, tx) in enqueued {
+        for (_, tx, _) in enqueued {
             let _ = tx.send(Err(Error::LogContentionRetry));
         }
     }
@@ -280,11 +285,11 @@ mod tests {
         .await
         .unwrap();
         let (tx, _rx1) = tokio::sync::oneshot::channel();
-        batch_manager.push_work(vec![vec![1]], tx);
+        batch_manager.push_work(vec![vec![1]], tx, tracing::Span::current());
         let (tx, _rx2) = tokio::sync::oneshot::channel();
-        batch_manager.push_work(vec![vec![2, 3]], tx);
+        batch_manager.push_work(vec![vec![2, 3]], tx, tracing::Span::current());
         let (tx, _rx3) = tokio::sync::oneshot::channel();
-        batch_manager.push_work(vec![vec![4, 5, 6]], tx);
+        batch_manager.push_work(vec![vec![4, 5, 6]], tx, tracing::Span::current());
         let (seq_no, log_position, work) =
             batch_manager.take_work(&manifest_manager).unwrap().unwrap();
         assert_eq!(seq_no, FragmentSeqNo(1));

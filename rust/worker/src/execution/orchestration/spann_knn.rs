@@ -11,7 +11,6 @@ use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, TaskMessage, TaskResult,
 };
-use chroma_tracing::link_event;
 use chroma_types::{
     operator::{Knn, KnnMerge, KnnOutput, KnnProjection, KnnProjectionOutput, RecordDistance},
     Collection,
@@ -23,9 +22,6 @@ use crate::execution::operators::{
     knn_log::{KnnLogError, KnnLogInput},
     knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOutput},
     knn_projection::{KnnProjectionError, KnnProjectionInput},
-    prefetch_record::{
-        PrefetchRecordError, PrefetchRecordInput, PrefetchRecordOperator, PrefetchRecordOutput,
-    },
     spann_bf_pl::{SpannBfPlError, SpannBfPlInput, SpannBfPlOperator, SpannBfPlOutput},
     spann_centers_search::{
         SpannCentersSearchError, SpannCentersSearchInput, SpannCentersSearchOperator,
@@ -370,30 +366,6 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for SpannKnnOrchestrator
             None => return,
         };
 
-        // Prefetch records before projection
-        let prefetch_task = wrap(
-            Box::new(PrefetchRecordOperator {}),
-            PrefetchRecordInput {
-                logs: self.knn_filter_output.logs.clone(),
-                blockfile_provider: self.spann_provider.blockfile_provider.clone(),
-                record_segment: self.knn_filter_output.record_segment.clone(),
-                offset_ids: output
-                    .distances
-                    .iter()
-                    .map(|record| record.offset_id)
-                    .collect(),
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        // Prefetch span is detached from the orchestrator.
-        let prefetch_span = link_event!(
-            tracing::Level::INFO,
-            tracing::info_span!(parent: None, "Prefetch_record", num_records = output.distances.len()),
-            "Creating record segment prefetch task"
-        );
-        self.send(prefetch_task, ctx, Some(prefetch_span)).await;
-
         let projection_task = wrap(
             Box::new(self.knn_projection.clone()),
             KnnProjectionInput {
@@ -406,19 +378,6 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for SpannKnnOrchestrator
             self.context.task_cancellation_token.clone(),
         );
         self.send(projection_task, ctx, Some(Span::current())).await;
-    }
-}
-
-#[async_trait]
-impl Handler<TaskResult<PrefetchRecordOutput, PrefetchRecordError>> for SpannKnnOrchestrator {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        _message: TaskResult<PrefetchRecordOutput, PrefetchRecordError>,
-        _ctx: &ComponentContext<Self>,
-    ) {
-        // The output and error from `PrefetchRecordOperator` are ignored
     }
 }
 

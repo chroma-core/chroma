@@ -309,7 +309,7 @@ await collection.upsert({
 });
 
 const results = await collection.query({
-    queryTexts: "This is a query document about florida", // Chroma will embed this for you
+    queryTexts: ["This is a query document about florida"], // Chroma will embed this for you
     nResults: 2, // how many results to return
 });
 

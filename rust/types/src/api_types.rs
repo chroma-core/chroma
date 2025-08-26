@@ -94,6 +94,14 @@ impl ChromaError for GetCollectionWithSegmentsError {
             GetCollectionWithSegmentsError::Internal(err) => err.code(),
         }
     }
+
+    fn should_trace_error(&self) -> bool {
+        if let Self::Grpc(status) = self {
+            status.code() != ErrorCodes::NotFound.into()
+        } else {
+            true
+        }
+    }
 }
 
 #[derive(Debug, Error)]
