@@ -247,7 +247,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
             _phantom: std::marker::PhantomData,
         });
     }
-    let opened = LogWriter::open(
+    let opened = LogWriter::open_or_initialize(
         options.clone(),
         Arc::clone(storage),
         prefix,
@@ -858,6 +858,7 @@ impl LogServer {
 
         let res = log_reader.next_write_timestamp().await;
         if let Err(wal3::Error::UninitializedLog) = res {
+            tracing::error!("UninitializedLog; this should NEVER happen");
             return self
                 .forward_update_collection_log_offset(Request::new(request))
                 .await;
@@ -1322,6 +1323,7 @@ impl LogServer {
         {
             Ok(log) => log,
             Err(wal3::Error::UninitializedLog) => {
+                tracing::error!("UninitializedLog; this should NEVER happen");
                 tracing::info!("forwarding because log uninitialized");
                 return self
                     .forward_push_logs(collection_id, Request::new(push_logs))
@@ -1385,6 +1387,7 @@ impl LogServer {
         let (start_position, limit_position) = match log_reader.manifest().await {
             Ok(Some(manifest)) => (manifest.oldest_timestamp(), manifest.next_write_timestamp()),
             Ok(None) | Err(wal3::Error::UninitializedLog) => {
+                tracing::error!("UninitializedLog; this should NEVER happen");
                 tracing::info!("Log is uninitialized on rust log service. Forwarding ScoutLog request to legacy log service");
                 return self.forward_scout_logs(Request::new(scout_logs)).await;
             }
@@ -1487,6 +1490,7 @@ impl LogServer {
         let fragments = match self.read_fragments(collection_id, &pull_logs).await {
             Ok(fragments) => fragments,
             Err(wal3::Error::UninitializedLog) => {
+                tracing::error!("UninitializedLog; this should NEVER happen");
                 return self.forward_pull_logs(Request::new(pull_logs)).await;
             }
             Err(err) => {
@@ -1575,6 +1579,7 @@ impl LogServer {
         if let Err(err) = log_reader.next_write_timestamp().await {
             match err {
                 wal3::Error::UninitializedLog => {
+                    tracing::error!("UninitializedLog; this should NEVER happen");
                     return self.forward_fork_logs(Request::new(request)).await;
                 }
                 _ => {
@@ -1819,6 +1824,7 @@ impl LogServer {
                 Ok(Response::new(MigrateLogResponse {}))
             }
             Err(wal3::Error::UninitializedLog) => {
+                tracing::error!("UninitializedLog; this should NEVER happen");
                 if let Some(mut proxy) = self.proxy.as_ref().cloned() {
                     if proxy
                         .scout_logs(ScoutLogsRequest {
