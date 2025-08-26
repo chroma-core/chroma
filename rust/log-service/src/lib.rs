@@ -247,7 +247,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
             _phantom: std::marker::PhantomData,
         });
     }
-    let opened = LogWriter::open(
+    let opened = LogWriter::open_or_initialize(
         options.clone(),
         Arc::clone(storage),
         prefix,
@@ -760,79 +760,6 @@ impl LogServer {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, request))]
-    async fn forward_push_logs(
-        &self,
-        collection_id: CollectionUuid,
-        request: Request<PushLogsRequest>,
-    ) -> Result<Response<PushLogsResponse>, Status> {
-        let request = request.into_inner();
-        if let Some(proxy) = self.proxy.as_ref() {
-            let resp = proxy
-                .clone()
-                .push_logs(Request::new(request.clone()))
-                .await?
-                .into_inner();
-            if resp.log_is_sealed {
-                self.effectuate_log_transfer(collection_id, proxy.clone(), 3)
-                    .await?;
-                Box::pin(self.push_logs(Request::new(request))).await
-            } else {
-                Ok(Response::new(resp))
-            }
-        } else {
-            Err(Status::failed_precondition("proxy not initialized"))
-        }
-    }
-
-    #[tracing::instrument(skip(self, request))]
-    async fn forward_scout_logs(
-        &self,
-        request: Request<ScoutLogsRequest>,
-    ) -> Result<Response<ScoutLogsResponse>, Status> {
-        if let Some(proxy) = self.proxy.as_ref() {
-            proxy.clone().scout_logs(request).await
-        } else {
-            Err(Status::failed_precondition("proxy not initialized"))
-        }
-    }
-
-    #[tracing::instrument(skip(self, request))]
-    async fn forward_pull_logs(
-        &self,
-        request: Request<PullLogsRequest>,
-    ) -> Result<Response<PullLogsResponse>, Status> {
-        if let Some(proxy) = self.proxy.as_ref() {
-            proxy.clone().pull_logs(request).await
-        } else {
-            Err(Status::failed_precondition("proxy not initialized"))
-        }
-    }
-
-    #[tracing::instrument(skip(self, request))]
-    async fn forward_update_collection_log_offset(
-        &self,
-        request: Request<UpdateCollectionLogOffsetRequest>,
-    ) -> Result<Response<UpdateCollectionLogOffsetResponse>, Status> {
-        if let Some(proxy) = self.proxy.as_ref() {
-            proxy.clone().update_collection_log_offset(request).await
-        } else {
-            Err(Status::failed_precondition("proxy not initialized"))
-        }
-    }
-
-    #[tracing::instrument(skip(self, request))]
-    async fn forward_fork_logs(
-        &self,
-        request: Request<ForkLogsRequest>,
-    ) -> Result<Response<ForkLogsResponse>, Status> {
-        if let Some(proxy) = self.proxy.as_ref() {
-            proxy.clone().fork_logs(request).await
-        } else {
-            Err(Status::failed_precondition("proxy not initialized"))
-        }
-    }
-
     #[tracing::instrument(skip(self, request), err(Display))]
     async fn _update_collection_log_offset(
         &self,
@@ -858,9 +785,9 @@ impl LogServer {
 
         let res = log_reader.next_write_timestamp().await;
         if let Err(wal3::Error::UninitializedLog) = res {
-            return self
-                .forward_update_collection_log_offset(Request::new(request))
-                .await;
+            return Err(Status::not_found(format!(
+                "collection {collection_id} not found"
+            )));
         }
         res.map_err(|err| Status::unknown(err.to_string()))?;
 
@@ -1322,10 +1249,9 @@ impl LogServer {
         {
             Ok(log) => log,
             Err(wal3::Error::UninitializedLog) => {
-                tracing::info!("forwarding because log uninitialized");
-                return self
-                    .forward_push_logs(collection_id, Request::new(push_logs))
-                    .await;
+                return Err(Status::not_found(format!(
+                    "collection {collection_id} not found"
+                )));
             }
             Err(err) => {
                 return Err(Status::unknown(err.to_string()));
@@ -1385,8 +1311,9 @@ impl LogServer {
         let (start_position, limit_position) = match log_reader.manifest().await {
             Ok(Some(manifest)) => (manifest.oldest_timestamp(), manifest.next_write_timestamp()),
             Ok(None) | Err(wal3::Error::UninitializedLog) => {
-                tracing::info!("Log is uninitialized on rust log service. Forwarding ScoutLog request to legacy log service");
-                return self.forward_scout_logs(Request::new(scout_logs)).await;
+                return Err(Status::not_found(format!(
+                    "collection {collection_id} not found"
+                )));
             }
             Err(err) => {
                 return Err(Status::new(
@@ -1487,7 +1414,9 @@ impl LogServer {
         let fragments = match self.read_fragments(collection_id, &pull_logs).await {
             Ok(fragments) => fragments,
             Err(wal3::Error::UninitializedLog) => {
-                return self.forward_pull_logs(Request::new(pull_logs)).await;
+                return Err(Status::not_found(format!(
+                    "collection {collection_id} not found"
+                )));
             }
             Err(err) => {
                 return Err(Status::new(err.code().into(), err.to_string()));
@@ -1575,7 +1504,9 @@ impl LogServer {
         if let Err(err) = log_reader.next_write_timestamp().await {
             match err {
                 wal3::Error::UninitializedLog => {
-                    return self.forward_fork_logs(Request::new(request)).await;
+                    return Err(Status::not_found(format!(
+                        "collection {source_collection_id} not found"
+                    )));
                 }
                 _ => {
                     return Err(Status::new(
@@ -1787,64 +1718,9 @@ impl LogServer {
 
     async fn migrate_log(
         &self,
-        request: Request<MigrateLogRequest>,
+        _request: Request<MigrateLogRequest>,
     ) -> Result<Response<MigrateLogResponse>, Status> {
-        let migrate_log = request.into_inner();
-        let collection_id = Uuid::parse_str(&migrate_log.collection_id)
-            .map(CollectionUuid)
-            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-
-        tracing::info!(
-            "Migrating log for collection {} to new log service",
-            collection_id
-        );
-        let prefix = collection_id.storage_prefix_for_log();
-        let key = LogKey { collection_id };
-        let handle = self.open_logs.get_or_create_state(key);
-        let mark_dirty = MarkDirty {
-            collection_id,
-            dirty_log: Arc::clone(&self.dirty_log),
-        };
-        match get_log_from_handle(
-            &handle,
-            &self.config.writer,
-            &self.storage,
-            &prefix,
-            mark_dirty,
-        )
-        .await
-        {
-            Ok(_) => {
-                tracing::info!("{collection_id} already migrated");
-                Ok(Response::new(MigrateLogResponse {}))
-            }
-            Err(wal3::Error::UninitializedLog) => {
-                if let Some(mut proxy) = self.proxy.as_ref().cloned() {
-                    if proxy
-                        .scout_logs(ScoutLogsRequest {
-                            collection_id: collection_id.to_string(),
-                        })
-                        .await?
-                        .into_inner()
-                        .is_sealed
-                    {
-                        tracing::info!("effectuating transfer of {collection_id}");
-                        self.effectuate_log_transfer(collection_id, proxy, 3)
-                            .await?;
-                        Ok(Response::new(MigrateLogResponse {}))
-                    } else {
-                        tracing::info!(
-                            "not effectuating transfer of {collection_id} (log not sealed)"
-                        );
-                        Err(Status::failed_precondition("log not sealed"))
-                    }
-                } else {
-                    tracing::info!("not effectuating transfer of {collection_id} (no proxy)");
-                    Err(Status::failed_precondition("proxy not initialized"))
-                }
-            }
-            Err(err) => Err(Status::unknown(err.to_string())),
-        }
+        Err(Status::failed_precondition("migration removed"))
     }
 
     async fn inspect_log_state(
