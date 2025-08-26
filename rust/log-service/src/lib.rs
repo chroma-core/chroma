@@ -1792,7 +1792,7 @@ impl LogServer {
 
     async fn migrate_log(
         &self,
-        request: Request<MigrateLogRequest>,
+        _request: Request<MigrateLogRequest>,
     ) -> Result<Response<MigrateLogResponse>, Status> {
         Err(Status::failed_precondition("migration removed"))
     }
