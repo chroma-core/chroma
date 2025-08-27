@@ -1241,11 +1241,7 @@ impl LogServer {
 
         let fragments = match self.read_fragments(collection_id, &pull_logs).await {
             Ok(fragments) => fragments,
-            Err(wal3::Error::UninitializedLog) => {
-                return Err(Status::not_found(format!(
-                    "collection {collection_id} not found"
-                )));
-            }
+            Err(wal3::Error::UninitializedLog) => vec![],
             Err(err) => {
                 return Err(Status::new(err.code().into(), err.to_string()));
             }
