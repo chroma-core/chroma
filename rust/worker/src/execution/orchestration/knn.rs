@@ -146,7 +146,7 @@ impl KnnOrchestrator {
             knn_filter_output,
             knn,
             batch_distances,
-            merge: Merge { take: fetch },
+            merge: Merge { k: fetch },
             result_channel: None,
         }
     }

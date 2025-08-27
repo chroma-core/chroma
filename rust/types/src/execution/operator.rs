@@ -311,13 +311,13 @@ pub struct KnnOutput {
 /// only one copy will remain in the final result.
 ///
 /// # Parameters
-/// - `fetch`: The total number of records to take
+/// - `k`: The total number of records to take after merge
 ///
 /// # Usage
 /// It can be used to merge the query results from different operators
 #[derive(Clone, Debug)]
 pub struct Merge {
-    pub take: u32,
+    pub k: u32,
 }
 
 impl Merge {
@@ -330,9 +330,9 @@ impl Merge {
             .filter_map(|(idx, itr)| itr.next().map(|rec| (rec, idx)))
             .collect::<BinaryHeap<_>>();
 
-        let mut fusion = Vec::with_capacity(self.take as usize);
+        let mut fusion = Vec::with_capacity(self.k as usize);
         while let Some((m, idx)) = max_heap.pop() {
-            if self.take <= fusion.len() as u32 {
+            if self.k <= fusion.len() as u32 {
                 break;
             }
             if let Some(next_m) = batch_iters[idx].next() {

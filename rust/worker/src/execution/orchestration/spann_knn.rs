@@ -112,7 +112,7 @@ impl SpannKnnOrchestrator {
             bruteforce_log_done: false,
             pl_spans: HashMap::new(),
             records: Vec::new(),
-            merge: Merge { take: k as u32 },
+            merge: Merge { k: k as u32 },
             result_channel: None,
             spann_reader: None,
         }

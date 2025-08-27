@@ -107,7 +107,7 @@ mod tests {
     async fn test_simple_merge() {
         let knn_merge_input = setup_knn_merge_input();
 
-        let knn_merge_operator = Merge { take: 10 };
+        let knn_merge_operator = Merge { k: 10 };
 
         let knn_merge_output = knn_merge_operator
             .run(&knn_merge_input)
