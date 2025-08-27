@@ -1310,7 +1310,8 @@ impl LogServer {
         );
         let (start_position, limit_position) = match log_reader.manifest().await {
             Ok(Some(manifest)) => (manifest.oldest_timestamp(), manifest.next_write_timestamp()),
-            Ok(None) | Err(wal3::Error::UninitializedLog) => {
+            Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
+            Err(wal3::Error::UninitializedLog) => {
                 return Err(Status::not_found(format!(
                     "collection {collection_id} not found"
                 )));
@@ -1501,21 +1502,6 @@ impl LogServer {
             Arc::clone(&storage),
             source_prefix.clone(),
         );
-        if let Err(err) = log_reader.next_write_timestamp().await {
-            match err {
-                wal3::Error::UninitializedLog => {
-                    return Err(Status::not_found(format!(
-                        "collection {source_collection_id} not found"
-                    )));
-                }
-                _ => {
-                    return Err(Status::new(
-                        err.code().into(),
-                        format!("Failed to load log: {}", err),
-                    ));
-                }
-            }
-        }
         let cursors = CursorStore::new(
             CursorStoreOptions::default(),
             Arc::clone(&storage),
