@@ -15,7 +15,7 @@ const main = async () => {
   let server: ServerInfo;
   if (useLocalHost) {
     server = {
-      url: "http://localhost:8080",
+      url: "http://localhost:8000",
       host: "127.0.0.1",
       port: 8000,
       stop: () => true,
