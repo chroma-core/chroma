@@ -368,15 +368,11 @@ impl<'me> MetadataSegmentWriter<'me> {
             ))
         } else {
             let max_writer = blockfile_provider
-                .write::<u32, f32>(
-                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
-                )
+                .write::<u32, f32>(BlockfileWriterOptions::new(prefix_path.clone()))
                 .await
                 .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
             let offset_value_writer = blockfile_provider
-                .write::<u32, f32>(
-                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
-                )
+                .write::<u32, f32>(BlockfileWriterOptions::new(prefix_path.clone()))
                 .await
                 .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
             Some(SparseWriter::new(
