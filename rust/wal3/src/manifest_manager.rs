@@ -4,21 +4,13 @@ use std::time::Instant;
 use chroma_storage::{ETag, Storage};
 
 use crate::gc::Garbage;
-use crate::manifest::{Manifest, Snapshot};
+use crate::manifest::{Manifest, ManifestAndETag, Snapshot};
 use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
     unprefixed_fragment_path, Error, Fragment, FragmentSeqNo, GarbageCollectionOptions,
     LogPosition, SnapshotCache, SnapshotOptions, SnapshotPointerOrFragmentSeqNo, ThrottleOptions,
 };
-
-////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
-
-#[derive(Debug)]
-struct ManifestAndETag {
-    manifest: Manifest,
-    e_tag: ETag,
-}
 
 ////////////////////////////////////////////// Staging /////////////////////////////////////////////
 
@@ -270,9 +262,9 @@ impl ManifestManager {
     }
 
     /// Return the latest stable manifest
-    pub fn latest(&self) -> Manifest {
+    pub fn latest(&self) -> ManifestAndETag {
         let staging = self.staging.lock().unwrap();
-        staging.stable.manifest.clone()
+        staging.stable.clone()
     }
 
     /// Recover from a fault in writing.  It is possible that fragments have been written that are

@@ -925,6 +925,14 @@ impl Manifest {
     }
 }
 
+////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct ManifestAndETag {
+    pub manifest: Manifest,
+    pub e_tag: ETag,
+}
+
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
