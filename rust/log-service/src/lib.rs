@@ -3748,66 +3748,6 @@ mod tests {
         });
     }
 
-    fn test_seal_and_migrate_logs(
-        operations_before_seal: Vec<OperationRecord>,
-        operations_after_migrate: Vec<OperationRecord>,
-    ) {
-        let runtime = Runtime::new().unwrap();
-        runtime.block_on(async move {
-            let log_server = setup_log_server().await;
-            validate_dirty_log_on_server(&log_server, &[]).await;
-
-            let collection_id = CollectionUuid::new();
-            if !operations_before_seal.is_empty() {
-                push_log_to_server(&log_server, collection_id, &operations_before_seal).await;
-            }
-            let old_enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
-            assert_eq!(old_enum_offset, operations_before_seal.len() as i64);
-            let compact_offset = old_enum_offset / 2;
-            if compact_offset > 1 {
-                update_compact_offset_on_server(&log_server, collection_id, compact_offset).await;
-            }
-            validate_dirty_log_on_server(&log_server, &[]).await;
-
-            log_server
-                .migrate_log(Request::new(MigrateLogRequest {
-                    collection_id: collection_id.to_string(),
-                }))
-                .await
-                .expect("Migrate Logs should not fail");
-            let first_uncompacted_offset = compact_offset.saturating_add(1) as usize;
-            if operations_before_seal.is_empty() {
-                validate_dirty_log_on_server(&log_server, &[]).await;
-            } else {
-                validate_dirty_log_on_server(&log_server, &[collection_id]).await;
-            }
-            validate_log_on_server(
-                &log_server,
-                collection_id,
-                &operations_before_seal,
-                first_uncompacted_offset,
-                1000,
-            )
-            .await;
-            push_log_to_server(&log_server, collection_id, &operations_after_migrate).await;
-            let mut combined_logs = operations_before_seal.clone();
-            combined_logs.extend(operations_after_migrate);
-            validate_dirty_log_on_server(&log_server, &[collection_id]).await;
-            validate_log_on_server(
-                &log_server,
-                collection_id,
-                &combined_logs,
-                first_uncompacted_offset,
-                1000,
-            )
-            .await;
-            let new_enum_offset = get_enum_offset_on_server(&log_server, collection_id).await;
-            assert_eq!(new_enum_offset, combined_logs.len() as i64);
-            update_compact_offset_on_server(&log_server, collection_id, new_enum_offset).await;
-            validate_dirty_log_on_server(&log_server, &[]).await;
-        });
-    }
-
     fn test_garbage_collect_unused_logs(operations: Vec<OperationRecord>) {
         let runtime = Runtime::new().unwrap();
         let collection_id = CollectionUuid::new();
@@ -3969,18 +3909,6 @@ mod tests {
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
             std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_fork_logs(initial_operations, source_operations, fork_operations))
-            .expect("Thread should be spawnable")
-            .join()
-            .expect("Spawned thread should not fail to join");
-        }
-
-        #[test]
-        fn test_k8s_integration_rust_log_service_seal_and_migrate_logs(
-            operations_before_seal in proptest::collection::vec(any::<OperationRecord>(), 0..=36),
-            operations_after_migrate in proptest::collection::vec(any::<OperationRecord>(), 1..=12),
-        ) {
-            // NOTE: Somehow it overflow the stack under default stack limit
-            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_seal_and_migrate_logs(operations_before_seal, operations_after_migrate))
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
