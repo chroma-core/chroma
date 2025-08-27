@@ -214,7 +214,7 @@ fn calculate_recall<'a>(
             let knn_input = KnnMergeInput {
                 batch_distances: merge_list,
             };
-            let knn_operator = Merge { take: k as u32 };
+            let knn_operator = Merge { k: k as u32 };
             let knn_output = knn_operator
                 .run(&knn_input)
                 .await
