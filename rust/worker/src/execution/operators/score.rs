@@ -98,7 +98,7 @@ impl ScoreDomain {
     }
 }
 
-impl<'me> ScoreProvider<'me> {
+impl ScoreProvider<'_> {
     fn eval(&self, score: Score) -> ScoreDomain {
         match score {
             Score::Absolute(score) => self.eval(*score).map(f32::abs),
