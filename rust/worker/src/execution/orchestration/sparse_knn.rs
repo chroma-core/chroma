@@ -108,11 +108,6 @@ impl SparseKnnOrchestrator {
         key: String,
         limit: u32,
     ) -> Self {
-        let batch_measures = if knn_filter_output.hnsw_reader.is_none() {
-            vec![Vec::new()]
-        } else {
-            Vec::new()
-        };
         let context = OrchestratorContext::new(dispatcher);
         Self {
             context,
@@ -123,7 +118,7 @@ impl SparseKnnOrchestrator {
             embedding,
             key,
             limit,
-            batch_measures,
+            batch_measures: Vec::with_capacity(2),
             merge: Merge { take: limit },
             result_channel: None,
         }
@@ -161,8 +156,6 @@ impl Orchestrator for SparseKnnOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        let mut tasks = Vec::new();
-
         let sparse_log_knn_task = wrap(
             Box::new(SparseLogKnn {
                 embedding: self.embedding.clone(),
@@ -178,31 +171,30 @@ impl Orchestrator for SparseKnnOrchestrator {
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
         );
-        tasks.push((sparse_log_knn_task, Some(Span::current())));
 
-        if self.knn_filter_output.hnsw_reader.is_some() {
-            let sparse_index_knn_task = wrap(
-                Box::new(SparseIndexKnn {
-                    embedding: self.embedding.clone(),
-                    key: self.key.clone(),
-                    limit: self.limit,
-                }),
-                SparseIndexKnnInput {
-                    blockfile_provider: self.blockfile_provider.clone(),
-                    mask: self
-                        .knn_filter_output
-                        .filter_output
-                        .compact_offset_ids
-                        .clone(),
-                    metadata_segment: self.collection_and_segments.metadata_segment.clone(),
-                },
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            );
-            tasks.push((sparse_index_knn_task, Some(Span::current())));
-        }
+        let sparse_index_knn_task = wrap(
+            Box::new(SparseIndexKnn {
+                embedding: self.embedding.clone(),
+                key: self.key.clone(),
+                limit: self.limit,
+            }),
+            SparseIndexKnnInput {
+                blockfile_provider: self.blockfile_provider.clone(),
+                mask: self
+                    .knn_filter_output
+                    .filter_output
+                    .compact_offset_ids
+                    .clone(),
+                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
 
-        tasks
+        vec![
+            (sparse_log_knn_task, Some(Span::current())),
+            (sparse_index_knn_task, Some(Span::current())),
+        ]
     }
 
     fn queue_size(&self) -> usize {
