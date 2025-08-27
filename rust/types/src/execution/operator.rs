@@ -1,5 +1,6 @@
 use core::mem::discriminant;
 use serde::{de::Error, Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use std::{
     cmp::{Ordering, Reverse},
     collections::{BinaryHeap, HashSet},
@@ -9,8 +10,8 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use crate::{
-    chroma_proto, logical_size_of_metadata, CollectionAndSegments, CollectionUuid, Metadata,
-    RawWhereFields, ScalarEncoding, SparseVector, Where, CHROMA_EMBEDDING_KEY,
+    chroma_proto, logical_size_of_metadata, parse_where, CollectionAndSegments, CollectionUuid,
+    Metadata, ScalarEncoding, SparseVector, Where, CHROMA_EMBEDDING_KEY,
 };
 
 use super::error::QueryConversionError;
@@ -132,10 +133,14 @@ impl Filter {
     fn deserialize_where<'de, D: Deserializer<'de>>(
         deserializer: D,
     ) -> Result<Option<Where>, D::Error> {
-        let raw_fields = RawWhereFields::deserialize(deserializer)?;
-        raw_fields
-            .parse()
-            .map_err(|e| D::Error::custom(e.to_string()))
+        let where_json = Value::deserialize(deserializer)?;
+        if where_json.is_null() {
+            Ok(None)
+        } else {
+            Ok(Some(
+                parse_where(&where_json).map_err(|e| D::Error::custom(e.to_string()))?,
+            ))
+        }
     }
 }
 
