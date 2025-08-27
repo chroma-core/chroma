@@ -12,7 +12,7 @@ use chroma_system::ComponentHandle;
 use chroma_types::{
     operator::{
         CountResult, Filter, GetResult, KnnBatchResult, KnnProjectionOutput, KnnProjectionRecord,
-        Projection, ProjectionRecord, RecordDistance, SearchResult,
+        Limit, Projection, ProjectionRecord, RecordDistance, SearchResult,
     },
     plan::{Count, Get, Knn, Search},
     CollectionAndSegments, CollectionUuid, ExecutorError, HnswSpace, SegmentType,
@@ -161,7 +161,10 @@ impl LocalExecutor {
                 let filter_plan = Get {
                     scan: plan.scan.clone(),
                     filter: filter.clone(),
-                    limit: Default::default(),
+                    limit: Limit {
+                        skip: 0,
+                        fetch: None,
+                    },
                     proj: Default::default(),
                 };
 
@@ -264,7 +267,10 @@ impl LocalExecutor {
                     query_ids: Some(returned_user_ids),
                     where_clause: None,
                 },
-                limit: Default::default(),
+                limit: Limit {
+                    skip: 0,
+                    fetch: None,
+                },
                 proj: Projection {
                     document: plan.proj.projection.document,
                     embedding: false,
