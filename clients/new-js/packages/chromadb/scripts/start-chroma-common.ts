@@ -7,6 +7,13 @@ import { Readable } from "node:stream";
 
 const CHROMADB_PORT = 8000;
 
+export interface ServerInfo {
+  url: string;
+  host: string;
+  port: number;
+  stop: () => boolean;
+}
+
 const buildDockerImage = async (
   dockerfilePath: string,
   imageName: string,
@@ -91,7 +98,9 @@ export const startContainer = async (
   };
 };
 
-export const startChromaServer = async (buildContextDir: string) => {
+export const startChromaServer = async (
+  buildContextDir: string,
+): Promise<ServerInfo> => {
   const host = "127.0.0.1";
   const port = CHROMADB_PORT;
   const url = `http://${host}:${port}`;
