@@ -98,6 +98,7 @@ pub struct SparseKnnOrchestrator {
 }
 
 impl SparseKnnOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
