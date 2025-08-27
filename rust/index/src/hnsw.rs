@@ -5,7 +5,7 @@ use std::path::Path;
 use thiserror::Error;
 use tracing::instrument;
 
-pub const DEFAULT_MAX_ELEMENTS: usize = 10000;
+pub const DEFAULT_MAX_ELEMENTS: usize = 100;
 
 // TODO: Make this config:
 // - Watchable - for dynamic updates
@@ -230,6 +230,7 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
             dimensionality: index_config.dimensionality,
             persist_path: path.into(),
             ef_search,
+            max_elements: DEFAULT_MAX_ELEMENTS,
         })
         .map_err(|e| WrappedHnswInitError::Other(e).boxed())?;
 
