@@ -5,7 +5,10 @@ import {
   UpdateCollectionConfiguration,
 } from "../src";
 import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
-import { EmbeddingFunction, EmbeddingFunctionSpace } from "../src/embedding-function";
+import {
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+} from "../src/embedding-function";
 import { CollectionMetadata } from "../src/types";
 
 class DefaultSpaceCustomEmbeddingFunction implements EmbeddingFunction {
@@ -30,7 +33,7 @@ class DefaultSpaceCustomEmbeddingFunction implements EmbeddingFunction {
   buildFromConfig(config: Record<string, any>): EmbeddingFunction {
     return new DefaultSpaceCustomEmbeddingFunction(
       config.model_name,
-      config.dim
+      config.dim,
     );
   }
 
@@ -63,7 +66,7 @@ class DefaultSpaceCustomEmbeddingFunction implements EmbeddingFunction {
   static buildFromConfig(config: Record<string, any>): EmbeddingFunction {
     return new DefaultSpaceCustomEmbeddingFunction(
       config.model_name,
-      config.dim
+      config.dim,
     );
   }
 }
@@ -288,7 +291,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_cosine",
-        3
+        3,
       ),
     });
 
@@ -311,7 +314,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_l2",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_l2",
-        3
+        3,
       ),
     });
 
@@ -334,7 +337,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_ip",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_ip",
-        3
+        3,
       ),
     });
 
@@ -357,7 +360,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_anything",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_anything",
-        3
+        3,
       ),
     });
 
@@ -380,7 +383,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_with_valid_config",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_anything",
-        3
+        3,
       ),
       configuration: { hnsw: { space: "l2" } },
     });
@@ -405,7 +408,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_with_invalid_config",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_cosine",
-        3
+        3,
       ),
       configuration: { hnsw: { space: "l2" } },
     });
@@ -429,7 +432,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_with_metadata",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_anything",
-        3
+        3,
       ),
       metadata,
     });
@@ -456,7 +459,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_with_invalid_metadata",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_cosine",
-        3
+        3,
       ),
       metadata,
     });
@@ -481,7 +484,7 @@ describe("default space functionality", () => {
       configuration: { hnsw: { space: "ip" } },
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_anything",
-        3
+        3,
       ),
       metadata,
     });
