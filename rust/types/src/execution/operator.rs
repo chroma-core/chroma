@@ -243,27 +243,12 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
 /// # Parameters
 /// - `skip`: The number of records to skip in the beginning
 /// - `fetch`: The number of records to fetch after `skip`
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Limit {
     #[serde(default)]
     pub skip: u32,
-    #[serde(default = "Limit::default_fetch")]
+    #[serde(default)]
     pub fetch: Option<u32>,
-}
-
-impl Limit {
-    fn default_fetch() -> Option<u32> {
-        Some(128)
-    }
-}
-
-impl Default for Limit {
-    fn default() -> Self {
-        Self {
-            skip: 0,
-            fetch: Self::default_fetch(),
-        }
-    }
 }
 
 impl From<chroma_proto::LimitOperator> for Limit {
