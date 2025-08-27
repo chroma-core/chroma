@@ -327,23 +327,21 @@ impl Merge {
         let mut max_heap = batch_iters
             .iter_mut()
             .enumerate()
-            .filter_map(|(idx, itr)| itr.next().map(|rec| (idx, rec)))
+            .filter_map(|(idx, itr)| itr.next().map(|rec| (rec, idx)))
             .collect::<BinaryHeap<_>>();
 
         let mut fusion = Vec::with_capacity(self.take as usize);
-        while let Some((idx, m)) = max_heap.pop() {
+        while let Some((m, idx)) = max_heap.pop() {
             if self.take <= fusion.len() as u32 {
                 break;
             }
-            if let Some(last_m) = fusion.last() {
-                if last_m == &m {
-                    continue;
-                }
+            if let Some(next_m) = batch_iters[idx].next() {
+                max_heap.push((next_m, idx));
+            }
+            if fusion.last().is_some_and(|tail| tail == &m) {
+                continue;
             }
             fusion.push(m);
-            if let Some(next_m) = batch_iters[idx].next() {
-                max_heap.push((idx, next_m));
-            }
         }
         fusion
     }
