@@ -230,7 +230,6 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
             dimensionality: index_config.dimensionality,
             persist_path: path.into(),
             ef_search,
-            max_elements: DEFAULT_MAX_ELEMENTS,
         })
         .map_err(|e| WrappedHnswInitError::Other(e).boxed())?;
 
