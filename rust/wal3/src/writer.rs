@@ -18,7 +18,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use crate::{
     unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
     ExponentialBackoff, Fragment, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition,
-    LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestManager, ThrottleOptions,
+    LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndETag, ManifestManager,
+    ThrottleOptions,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -275,6 +276,15 @@ impl LogWriter {
     }
 
     pub fn manifest(&self) -> Option<Manifest> {
+        // SAFETY(rescrv):  Mutex poisoning.
+        let inner = self.inner.lock().unwrap();
+        inner
+            .writer
+            .as_ref()
+            .map(|writer| writer.manifest_manager.latest().manifest)
+    }
+
+    pub fn manifest_and_etag(&self) -> Option<ManifestAndETag> {
         // SAFETY(rescrv):  Mutex poisoning.
         let inner = self.inner.lock().unwrap();
         inner

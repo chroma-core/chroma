@@ -23,7 +23,9 @@ pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, Witness};
 pub use destroy::destroy;
 pub use gc::{Garbage, GarbageCollector};
-pub use manifest::{unprefixed_snapshot_path, Manifest, Snapshot, SnapshotPointer};
+pub use manifest::{
+    unprefixed_snapshot_path, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
+};
 pub use manifest_manager::ManifestManager;
 pub use reader::{Limits, LogReader};
 pub use snapshot_cache::SnapshotCache;

@@ -46,7 +46,7 @@ use uuid::Uuid;
 use wal3::{
     Cursor, CursorName, CursorStore, CursorStoreOptions, Fragment, GarbageCollectionOptions,
     Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
-    MarkDirty as MarkDirtyTrait, Witness,
+    ManifestAndETag, MarkDirty as MarkDirtyTrait, Witness,
 };
 
 pub mod state_hash_table;
@@ -288,10 +288,10 @@ async fn get_log_from_handle_with_mutex_held<'a>(
     })
 }
 
-////////////////////////////////////// cache_key_for_manifest //////////////////////////////////////
+////////////////////////////////////////// cache_key_for_* /////////////////////////////////////////
 
-fn cache_key_for_manifest(collection_id: CollectionUuid) -> String {
-    format!("{collection_id}::MANIFEST")
+fn cache_key_for_manifest_and_etag(collection_id: CollectionUuid) -> String {
+    format!("{collection_id}::MANIFEST/ETAG")
 }
 
 fn cache_key_for_cursor(collection_id: CollectionUuid, name: &CursorName) -> String {
@@ -1351,11 +1351,11 @@ impl LogServer {
             Err(err) => return Err(Status::new(err.code().into(), err.to_string())),
         };
         if let Some(cache) = self.cache.as_ref() {
-            let cache_key = cache_key_for_manifest(collection_id);
-            if let Some(manifest) = log.manifest() {
-                if let Ok(manifest_bytes) = serde_json::to_vec(&manifest) {
+            let cache_key = cache_key_for_manifest_and_etag(collection_id);
+            if let Some(manifest_and_etag) = log.manifest_and_etag() {
+                if let Ok(manifest_and_etag_bytes) = serde_json::to_vec(&manifest_and_etag) {
                     let cache_value = CachedBytes {
-                        bytes: manifest_bytes,
+                        bytes: manifest_and_etag_bytes,
                     };
                     cache.insert(cache_key, cache_value).await;
                 }
@@ -1426,16 +1426,17 @@ impl LogServer {
         pull_logs: &PullLogsRequest,
     ) -> Option<Vec<Fragment>> {
         if let Some(cache) = self.cache.as_ref() {
-            let cache_key = cache_key_for_manifest(collection_id);
+            let cache_key = cache_key_for_manifest_and_etag(collection_id);
             let cached_bytes = cache.get(&cache_key).await.ok().flatten()?;
-            let manifest: Manifest = serde_json::from_slice(&cached_bytes.bytes).ok()?;
+            let manifest_and_etag: ManifestAndETag =
+                serde_json::from_slice(&cached_bytes.bytes).ok()?;
             let limits = Limits {
                 max_files: Some(pull_logs.batch_size as u64 + 1),
                 max_bytes: None,
                 max_records: Some(pull_logs.batch_size as u64),
             };
             LogReader::scan_from_manifest(
-                &manifest,
+                &manifest_and_etag.manifest,
                 LogPosition::from_offset(pull_logs.start_from_offset as u64),
                 limits,
             )
@@ -2026,7 +2027,7 @@ impl LogServer {
                 let collection_id = Uuid::parse_str(&x)
                     .map(CollectionUuid)
                     .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-                Some(cache_key_for_manifest(collection_id))
+                Some(cache_key_for_manifest_and_etag(collection_id))
             }
             Some(EntryToEvict::Fragment(f)) => {
                 let collection_id = Uuid::parse_str(&f.collection_id)
