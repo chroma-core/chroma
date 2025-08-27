@@ -61,6 +61,10 @@ const main = async () => {
 
     try {
       await rm("./chroma", { recursive: true, force: true });
+      await rm("../../../../chroma_integration_test_tmp_dir/", {
+        recursive: true,
+        force: true,
+      });
       console.log("✅ Cleaned up ./chroma directory");
     } catch (err) {
       console.warn("Warning: Could not delete ./chroma directory:", err);

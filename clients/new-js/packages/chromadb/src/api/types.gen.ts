@@ -1367,5 +1367,5 @@ export type VersionResponses = {
 export type VersionResponse = VersionResponses[keyof VersionResponses];
 
 export type ClientOptions = {
-  baseUrl: "http://127.0.0.1:8000" | (string & {});
+  baseUrl: "http://localhost:8000" | (string & {});
 };

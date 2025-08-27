@@ -101,7 +101,7 @@ export const startContainer = async (
 export const startChromaServer = async (
   buildContextDir: string,
 ): Promise<ServerInfo> => {
-  const host = "127.0.0.1";
+  const host = "localhost";
   const port = CHROMADB_PORT;
   const url = `http://${host}:${port}`;
   const heartbeatUrl = `${url}/api/v2/heartbeat`;
