@@ -591,7 +591,7 @@ impl WorkerServer {
             .try_collect::<HashMap<_, _>>()
             .await?;
 
-        // Run ScoreOrchestrator to evaluate scores and project results
+        // Run ScoreOrchestrator to evaluate scores and select results
         let score_orchestrator = ScoreOrchestrator::new(
             self.blockfile_provider.clone(),
             self.clone_dispatcher()?,
@@ -599,7 +599,7 @@ impl WorkerServer {
             ranks_map,
             search_payload.score,
             search_payload.limit,
-            search_payload.project,
+            search_payload.select,
             collection_and_segments,
             matching_records.logs,
         );
