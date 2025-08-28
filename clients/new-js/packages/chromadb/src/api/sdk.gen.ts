@@ -9,9 +9,6 @@ import type {
   GetUserIdentityData,
   GetUserIdentityResponse2,
   GetUserIdentityError,
-  GetCollectionByCrnData,
-  GetCollectionByCrnResponse,
-  GetCollectionByCrnError,
   HealthcheckData,
   HealthcheckResponse,
   HealthcheckError,
@@ -120,22 +117,6 @@ export class DefaultService {
       ThrowOnError
     >({
       url: "/api/v2/auth/identity",
-      ...options,
-    });
-  }
-
-  /**
-   * Retrieves a collection by Chroma Resource Name.
-   */
-  public static getCollectionByCrn<ThrowOnError extends boolean = true>(
-    options: Options<GetCollectionByCrnData, ThrowOnError>,
-  ) {
-    return (options.client ?? _heyApiClient).get<
-      GetCollectionByCrnResponse,
-      GetCollectionByCrnError,
-      ThrowOnError
-    >({
-      url: "/api/v2/collections/{crn}",
       ...options,
     });
   }
