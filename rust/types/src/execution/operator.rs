@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, parse_where, CollectionAndSegments, CollectionUuid,
-    Metadata, ScalarEncoding, SparseVector, Where, CHROMA_EMBEDDING_KEY,
+    Metadata, ScalarEncoding, SparseVector, Where,
 };
 
 use super::error::QueryConversionError;
@@ -663,67 +663,151 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum Rank {
-    #[serde(rename = "$dense-knn")]
-    DenseKnn {
-        embedding: Vec<f32>,
-        #[serde(default = "Rank::default_key")]
-        key: String,
-        #[serde(default = "Rank::default_limit")]
-        limit: u32,
-    },
-    #[serde(rename = "$sparse-knn")]
-    SparseKnn {
-        embedding: SparseVector,
-        #[serde(default = "Rank::default_key")]
-        key: String,
-        #[serde(default = "Rank::default_limit")]
-        limit: u32,
-    },
+#[serde(untagged)]
+pub enum QueryVector {
+    Dense(Vec<f32>),
+    Sparse(SparseVector),
 }
 
-impl Rank {
-    pub fn default_key() -> String {
-        CHROMA_EMBEDDING_KEY.to_string()
-    }
-    pub fn default_limit() -> u32 {
-        1024
-    }
-}
+impl Eq for QueryVector {}
 
-impl Eq for Rank {}
-
-impl Hash for Rank {
+impl Hash for QueryVector {
     fn hash<H: Hasher>(&self, state: &mut H) {
         discriminant(self).hash(state);
         match self {
-            Rank::DenseKnn {
-                embedding,
-                key,
-                limit,
-            } => {
+            QueryVector::Dense(embedding) => {
                 let bits = embedding
                     .iter()
                     .map(|val| (val + 0.0).to_bits())
                     .collect::<Vec<_>>();
                 bits.hash(state);
-                key.hash(state);
-                limit.hash(state);
             }
-            Rank::SparseKnn {
-                embedding,
-                key,
-                limit,
-            } => {
+            QueryVector::Sparse(embedding) => {
                 let mut sorted_bits = embedding
                     .iter()
                     .map(|(index, val)| (index, (val + 0.0).to_bits()))
                     .collect::<Vec<_>>();
                 sorted_bits.sort_unstable();
                 sorted_bits.hash(state);
-                key.hash(state);
-                limit.hash(state);
             }
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::QueryVector> for QueryVector {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::QueryVector) -> Result<Self, Self::Error> {
+        let vector = value.vector.ok_or(QueryConversionError::field("vector"))?;
+        match vector {
+            chroma_proto::query_vector::Vector::Dense(dense) => {
+                Ok(QueryVector::Dense(dense.try_into().map(|(v, _)| v)?))
+            }
+            chroma_proto::query_vector::Vector::Sparse(sparse) => {
+                Ok(QueryVector::Sparse(sparse.into()))
+            }
+        }
+    }
+}
+
+impl TryFrom<QueryVector> for chroma_proto::QueryVector {
+    type Error = QueryConversionError;
+
+    fn try_from(value: QueryVector) -> Result<Self, Self::Error> {
+        match value {
+            QueryVector::Dense(vec) => {
+                let dim = vec.len();
+                Ok(chroma_proto::QueryVector {
+                    vector: Some(chroma_proto::query_vector::Vector::Dense(
+                        chroma_proto::Vector::try_from((vec, ScalarEncoding::FLOAT32, dim))?,
+                    )),
+                })
+            }
+            QueryVector::Sparse(sparse) => Ok(chroma_proto::QueryVector {
+                vector: Some(chroma_proto::query_vector::Vector::Sparse(sparse.into())),
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct KnnQuery {
+    pub embedding: QueryVector,
+    pub key: String,
+    pub limit: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum Rank {
+    #[serde(rename = "$abs")]
+    Absolute(Box<Rank>),
+    #[serde(rename = "$div")]
+    Division { left: Box<Rank>, right: Box<Rank> },
+    #[serde(rename = "$exp")]
+    Exponentiation(Box<Rank>),
+    #[serde(rename = "$knn")]
+    Knn {
+        embedding: QueryVector,
+        #[serde(default = "Rank::default_knn_key")]
+        key: String,
+        #[serde(default = "Rank::default_knn_limit")]
+        limit: u32,
+        #[serde(default)]
+        default: Option<f32>,
+        #[serde(default)]
+        ordinal: bool,
+    },
+    #[serde(rename = "$log")]
+    Logarithm(Box<Rank>),
+    #[serde(rename = "$max")]
+    Maximum(Vec<Rank>),
+    #[serde(rename = "$min")]
+    Minimum(Vec<Rank>),
+    #[serde(rename = "$mul")]
+    Multiplication(Vec<Rank>),
+    #[serde(rename = "$sub")]
+    Subtraction { left: Box<Rank>, right: Box<Rank> },
+    #[serde(rename = "$sum")]
+    Summation(Vec<Rank>),
+    #[serde(rename = "$val")]
+    Value(f32),
+}
+
+impl Rank {
+    pub fn default_knn_key() -> String {
+        "#embedding".to_string()
+    }
+
+    pub fn default_knn_limit() -> u32 {
+        128
+    }
+
+    pub fn knn_queries(&self) -> HashSet<KnnQuery> {
+        match self {
+            Rank::Absolute(rank) | Rank::Exponentiation(rank) | Rank::Logarithm(rank) => {
+                rank.knn_queries()
+            }
+            Rank::Division { left, right } | Rank::Subtraction { left, right } => left
+                .knn_queries()
+                .into_iter()
+                .chain(right.knn_queries())
+                .collect(),
+            Rank::Maximum(ranks)
+            | Rank::Minimum(ranks)
+            | Rank::Multiplication(ranks)
+            | Rank::Summation(ranks) => ranks.iter().flat_map(Rank::knn_queries).collect(),
+            Rank::Value(_) => HashSet::new(),
+            Rank::Knn {
+                embedding,
+                key,
+                limit,
+                default: _,
+                ordinal: _,
+            } => HashSet::from_iter([KnnQuery {
+                embedding: embedding.clone(),
+                key: key.clone(),
+                limit: *limit,
+            }]),
         }
     }
 }
@@ -731,26 +815,80 @@ impl Hash for Rank {
 impl TryFrom<chroma_proto::Rank> for Rank {
     type Error = QueryConversionError;
 
-    fn try_from(value: chroma_proto::Rank) -> Result<Self, Self::Error> {
-        let rank = value.rank.ok_or(QueryConversionError::field("rank"))?;
-        match rank {
-            chroma_proto::rank::Rank::DenseKnn(dense_knn) => Ok(Rank::DenseKnn {
-                embedding: dense_knn
+    fn try_from(proto_rank: chroma_proto::Rank) -> Result<Self, Self::Error> {
+        match proto_rank.rank {
+            Some(chroma_proto::rank::Rank::Absolute(abs)) => {
+                Ok(Rank::Absolute(Box::new(Rank::try_from(*abs)?)))
+            }
+            Some(chroma_proto::rank::Rank::Division(div)) => {
+                let left = div.left.ok_or(QueryConversionError::field("left"))?;
+                let right = div.right.ok_or(QueryConversionError::field("right"))?;
+                Ok(Rank::Division {
+                    left: Box::new(Rank::try_from(*left)?),
+                    right: Box::new(Rank::try_from(*right)?),
+                })
+            }
+            Some(chroma_proto::rank::Rank::Exponentiation(exp)) => {
+                Ok(Rank::Exponentiation(Box::new(Rank::try_from(*exp)?)))
+            }
+            Some(chroma_proto::rank::Rank::Knn(knn)) => {
+                let embedding = knn
                     .embedding
                     .ok_or(QueryConversionError::field("embedding"))?
-                    .try_into()
-                    .map(|(v, _)| v)?,
-                key: dense_knn.key,
-                limit: dense_knn.limit,
-            }),
-            chroma_proto::rank::Rank::SparseKnn(sparse_knn) => Ok(Rank::SparseKnn {
-                embedding: sparse_knn
-                    .embedding
-                    .ok_or(QueryConversionError::field("embedding"))?
-                    .into(),
-                key: sparse_knn.key,
-                limit: sparse_knn.limit,
-            }),
+                    .try_into()?;
+                Ok(Rank::Knn {
+                    embedding,
+                    key: knn.key,
+                    limit: knn.limit,
+                    default: knn.default,
+                    ordinal: knn.ordinal,
+                })
+            }
+            Some(chroma_proto::rank::Rank::Logarithm(log)) => {
+                Ok(Rank::Logarithm(Box::new(Rank::try_from(*log)?)))
+            }
+            Some(chroma_proto::rank::Rank::Maximum(max)) => {
+                let ranks = max
+                    .ranks
+                    .into_iter()
+                    .map(Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Rank::Maximum(ranks))
+            }
+            Some(chroma_proto::rank::Rank::Minimum(min)) => {
+                let ranks = min
+                    .ranks
+                    .into_iter()
+                    .map(Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Rank::Minimum(ranks))
+            }
+            Some(chroma_proto::rank::Rank::Multiplication(mul)) => {
+                let ranks = mul
+                    .ranks
+                    .into_iter()
+                    .map(Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Rank::Multiplication(ranks))
+            }
+            Some(chroma_proto::rank::Rank::Subtraction(sub)) => {
+                let left = sub.left.ok_or(QueryConversionError::field("left"))?;
+                let right = sub.right.ok_or(QueryConversionError::field("right"))?;
+                Ok(Rank::Subtraction {
+                    left: Box::new(Rank::try_from(*left)?),
+                    right: Box::new(Rank::try_from(*right)?),
+                })
+            }
+            Some(chroma_proto::rank::Rank::Summation(sum)) => {
+                let ranks = sum
+                    .ranks
+                    .into_iter()
+                    .map(Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Rank::Summation(ranks))
+            }
+            Some(chroma_proto::rank::Rank::Value(value)) => Ok(Rank::Value(value)),
+            None => Err(QueryConversionError::field("rank")),
         }
     }
 }
@@ -758,273 +896,83 @@ impl TryFrom<chroma_proto::Rank> for Rank {
 impl TryFrom<Rank> for chroma_proto::Rank {
     type Error = QueryConversionError;
 
-    fn try_from(value: Rank) -> Result<Self, Self::Error> {
-        match value {
-            Rank::DenseKnn {
-                embedding,
-                key,
-                limit,
-            } => {
-                let dim = embedding.len();
-                Ok(chroma_proto::Rank {
-                    rank: Some(chroma_proto::rank::Rank::DenseKnn(
-                        chroma_proto::rank::DenseKnn {
-                            embedding: Some(chroma_proto::Vector::try_from((
-                                embedding,
-                                ScalarEncoding::FLOAT32,
-                                dim,
-                            ))?),
-                            key,
-                            limit,
-                        },
-                    )),
-                })
+    fn try_from(rank: Rank) -> Result<Self, Self::Error> {
+        let proto_rank = match rank {
+            Rank::Absolute(rank) => {
+                chroma_proto::rank::Rank::Absolute(Box::new(chroma_proto::Rank::try_from(*rank)?))
             }
-            Rank::SparseKnn {
-                embedding,
-                key,
-                limit,
-            } => Ok(chroma_proto::Rank {
-                rank: Some(chroma_proto::rank::Rank::SparseKnn(
-                    chroma_proto::rank::SparseKnn {
-                        embedding: Some(embedding.into()),
-                        key,
-                        limit,
-                    },
-                )),
-            }),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum Score {
-    #[serde(rename = "$abs")]
-    Absolute(Box<Score>),
-    #[serde(rename = "$div")]
-    Division { left: Box<Score>, right: Box<Score> },
-    #[serde(rename = "$exp")]
-    Exponentiation(Box<Score>),
-    #[serde(rename = "$log")]
-    Logarithm(Box<Score>),
-    #[serde(rename = "$max")]
-    Maximum(Vec<Score>),
-    #[serde(rename = "$min")]
-    Minimum(Vec<Score>),
-    #[serde(rename = "$mul")]
-    Multiplication(Vec<Score>),
-    #[serde(rename = "$rank")]
-    Rank {
-        #[serde(default)]
-        default: Option<f32>,
-        #[serde(default)]
-        ordinal: bool,
-        source: Box<Rank>,
-    },
-    #[serde(rename = "$sub")]
-    Subtraction { left: Box<Score>, right: Box<Score> },
-    #[serde(rename = "$sum")]
-    Summation(Vec<Score>),
-    #[serde(rename = "$val")]
-    Value(f32),
-}
-
-impl Score {
-    pub fn ranks(&self) -> HashSet<Rank> {
-        match self {
-            Score::Absolute(score) | Score::Exponentiation(score) | Score::Logarithm(score) => {
-                score.ranks()
-            }
-            Score::Division { left, right } | Score::Subtraction { left, right } => {
-                left.ranks().into_iter().chain(right.ranks()).collect()
-            }
-            Score::Maximum(scores)
-            | Score::Minimum(scores)
-            | Score::Multiplication(scores)
-            | Score::Summation(scores) => scores.iter().flat_map(Score::ranks).collect(),
-            Score::Value(_) => HashSet::new(),
-            Score::Rank {
-                default: _,
-                ordinal: _,
-                source,
-            } => HashSet::from_iter([*source.clone()]),
-        }
-    }
-}
-
-impl TryFrom<chroma_proto::Score> for Score {
-    type Error = QueryConversionError;
-
-    fn try_from(proto_score: chroma_proto::Score) -> Result<Self, Self::Error> {
-        match proto_score.score {
-            Some(chroma_proto::score::Score::Absolute(abs)) => {
-                Ok(Score::Absolute(Box::new(Score::try_from(*abs)?)))
-            }
-            Some(chroma_proto::score::Score::Division(div)) => {
-                let left = div.left.ok_or(QueryConversionError::field("left"))?;
-                let right = div.right.ok_or(QueryConversionError::field("right"))?;
-                Ok(Score::Division {
-                    left: Box::new(Score::try_from(*left)?),
-                    right: Box::new(Score::try_from(*right)?),
-                })
-            }
-            Some(chroma_proto::score::Score::Exponentiation(exp)) => {
-                Ok(Score::Exponentiation(Box::new(Score::try_from(*exp)?)))
-            }
-            Some(chroma_proto::score::Score::Logarithm(log)) => {
-                Ok(Score::Logarithm(Box::new(Score::try_from(*log)?)))
-            }
-            Some(chroma_proto::score::Score::Maximum(max)) => {
-                let scores = max
-                    .scores
-                    .into_iter()
-                    .map(Score::try_from)
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Score::Maximum(scores))
-            }
-            Some(chroma_proto::score::Score::Minimum(min)) => {
-                let scores = min
-                    .scores
-                    .into_iter()
-                    .map(Score::try_from)
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Score::Minimum(scores))
-            }
-            Some(chroma_proto::score::Score::Multiplication(mul)) => {
-                let scores = mul
-                    .scores
-                    .into_iter()
-                    .map(Score::try_from)
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Score::Multiplication(scores))
-            }
-            Some(chroma_proto::score::Score::Rank(rank)) => {
-                let source = rank.source.ok_or(QueryConversionError::field("source"))?;
-                Ok(Score::Rank {
-                    default: rank.default,
-                    ordinal: rank.ordinal,
-                    source: Box::new(Rank::try_from(source)?),
-                })
-            }
-            Some(chroma_proto::score::Score::Subtraction(sub)) => {
-                let left = sub.left.ok_or(QueryConversionError::field("left"))?;
-                let right = sub.right.ok_or(QueryConversionError::field("right"))?;
-                Ok(Score::Subtraction {
-                    left: Box::new(Score::try_from(*left)?),
-                    right: Box::new(Score::try_from(*right)?),
-                })
-            }
-            Some(chroma_proto::score::Score::Summation(sum)) => {
-                let scores = sum
-                    .scores
-                    .into_iter()
-                    .map(Score::try_from)
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Score::Summation(scores))
-            }
-            Some(chroma_proto::score::Score::Value(value)) => Ok(Score::Value(value)),
-            None => Err(QueryConversionError::field("score")),
-        }
-    }
-}
-
-impl TryFrom<chroma_proto::ScoreOperator> for Score {
-    type Error = QueryConversionError;
-
-    fn try_from(value: chroma_proto::ScoreOperator) -> Result<Self, Self::Error> {
-        value
-            .score
-            .ok_or(QueryConversionError::field("score"))?
-            .try_into()
-    }
-}
-
-impl TryFrom<Score> for chroma_proto::ScoreOperator {
-    type Error = QueryConversionError;
-
-    fn try_from(value: Score) -> Result<Self, Self::Error> {
-        Ok(Self {
-            score: Some(value.try_into()?),
-        })
-    }
-}
-
-impl TryFrom<Score> for chroma_proto::Score {
-    type Error = QueryConversionError;
-
-    fn try_from(score: Score) -> Result<Self, Self::Error> {
-        let proto_score = match score {
-            Score::Absolute(score) => chroma_proto::score::Score::Absolute(Box::new(
-                chroma_proto::Score::try_from(*score)?,
-            )),
-            Score::Division { left, right } => {
-                chroma_proto::score::Score::Division(Box::new(chroma_proto::score::Division {
-                    left: Some(Box::new(chroma_proto::Score::try_from(*left)?)),
-                    right: Some(Box::new(chroma_proto::Score::try_from(*right)?)),
+            Rank::Division { left, right } => {
+                chroma_proto::rank::Rank::Division(Box::new(chroma_proto::rank::Division {
+                    left: Some(Box::new(chroma_proto::Rank::try_from(*left)?)),
+                    right: Some(Box::new(chroma_proto::Rank::try_from(*right)?)),
                 }))
             }
-            Score::Exponentiation(score) => chroma_proto::score::Score::Exponentiation(Box::new(
-                chroma_proto::Score::try_from(*score)?,
+            Rank::Exponentiation(rank) => chroma_proto::rank::Rank::Exponentiation(Box::new(
+                chroma_proto::Rank::try_from(*rank)?,
             )),
-            Score::Logarithm(score) => chroma_proto::score::Score::Logarithm(Box::new(
-                chroma_proto::Score::try_from(*score)?,
-            )),
-            Score::Maximum(scores) => {
-                let proto_scores = scores
-                    .into_iter()
-                    .map(chroma_proto::Score::try_from)
-                    .collect::<Result<Vec<_>, _>>()?;
-                chroma_proto::score::Score::Maximum(chroma_proto::score::ScoreList {
-                    scores: proto_scores,
-                })
-            }
-            Score::Minimum(scores) => {
-                let proto_scores = scores
-                    .into_iter()
-                    .map(chroma_proto::Score::try_from)
-                    .collect::<Result<Vec<_>, _>>()?;
-                chroma_proto::score::Score::Minimum(chroma_proto::score::ScoreList {
-                    scores: proto_scores,
-                })
-            }
-            Score::Multiplication(scores) => {
-                let proto_scores = scores
-                    .into_iter()
-                    .map(chroma_proto::Score::try_from)
-                    .collect::<Result<Vec<_>, _>>()?;
-                chroma_proto::score::Score::Multiplication(chroma_proto::score::ScoreList {
-                    scores: proto_scores,
-                })
-            }
-            Score::Rank {
+            Rank::Knn {
+                embedding,
+                key,
+                limit,
                 default,
                 ordinal,
-                source,
-            } => chroma_proto::score::Score::Rank(chroma_proto::score::RankScore {
+            } => chroma_proto::rank::Rank::Knn(chroma_proto::rank::Knn {
+                embedding: Some(embedding.try_into()?),
+                key,
+                limit,
                 default,
                 ordinal,
-                source: Some(chroma_proto::Rank::try_from(*source)?),
             }),
-            Score::Subtraction { left, right } => chroma_proto::score::Score::Subtraction(
-                Box::new(chroma_proto::score::Subtraction {
-                    left: Some(Box::new(chroma_proto::Score::try_from(*left)?)),
-                    right: Some(Box::new(chroma_proto::Score::try_from(*right)?)),
-                }),
-            ),
-            Score::Summation(scores) => {
-                let proto_scores = scores
+            Rank::Logarithm(rank) => {
+                chroma_proto::rank::Rank::Logarithm(Box::new(chroma_proto::Rank::try_from(*rank)?))
+            }
+            Rank::Maximum(ranks) => {
+                let proto_ranks = ranks
                     .into_iter()
-                    .map(chroma_proto::Score::try_from)
+                    .map(chroma_proto::Rank::try_from)
                     .collect::<Result<Vec<_>, _>>()?;
-                chroma_proto::score::Score::Summation(chroma_proto::score::ScoreList {
-                    scores: proto_scores,
+                chroma_proto::rank::Rank::Maximum(chroma_proto::rank::RankList {
+                    ranks: proto_ranks,
                 })
             }
-            Score::Value(value) => chroma_proto::score::Score::Value(value),
+            Rank::Minimum(ranks) => {
+                let proto_ranks = ranks
+                    .into_iter()
+                    .map(chroma_proto::Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::rank::Rank::Minimum(chroma_proto::rank::RankList {
+                    ranks: proto_ranks,
+                })
+            }
+            Rank::Multiplication(ranks) => {
+                let proto_ranks = ranks
+                    .into_iter()
+                    .map(chroma_proto::Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::rank::Rank::Multiplication(chroma_proto::rank::RankList {
+                    ranks: proto_ranks,
+                })
+            }
+            Rank::Subtraction { left, right } => {
+                chroma_proto::rank::Rank::Subtraction(Box::new(chroma_proto::rank::Subtraction {
+                    left: Some(Box::new(chroma_proto::Rank::try_from(*left)?)),
+                    right: Some(Box::new(chroma_proto::Rank::try_from(*right)?)),
+                }))
+            }
+            Rank::Summation(ranks) => {
+                let proto_ranks = ranks
+                    .into_iter()
+                    .map(chroma_proto::Rank::try_from)
+                    .collect::<Result<Vec<_>, _>>()?;
+                chroma_proto::rank::Rank::Summation(chroma_proto::rank::RankList {
+                    ranks: proto_ranks,
+                })
+            }
+            Rank::Value(value) => chroma_proto::rank::Rank::Value(value),
         };
 
-        Ok(chroma_proto::Score {
-            score: Some(proto_score),
+        Ok(chroma_proto::Rank {
+            rank: Some(proto_rank),
         })
     }
 }

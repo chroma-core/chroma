@@ -1080,7 +1080,6 @@ impl ChromaError for ListCollectionVersionsError {
 
 pub const CHROMA_KEY: &str = "chroma:";
 pub const CHROMA_DOCUMENT_KEY: &str = "chroma:document";
-pub const CHROMA_EMBEDDING_KEY: &str = "chroma:embedding";
 pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 ////////////////////////// AddCollectionRecords //////////////////////////
