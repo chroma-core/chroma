@@ -20,12 +20,14 @@ use chroma_system::{
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::trace::TraceContextExt;
 use std::{
     fmt::{Debug, Formatter},
     time::{Duration, SystemTime},
 };
 use thiserror::Error;
 use tracing::{span, Instrument, Span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[allow(dead_code)]
 pub(crate) struct GarbageCollector {
@@ -412,27 +414,29 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
         let mut sysdb = self.sysdb_client.clone();
 
         let mut jobs_stream = futures::stream::iter(collections_to_gc)
-        .map(|(cleanup_mode, collection)| {
-            tracing::info!(
-                "Processing collection: {} (tenant: {}, version_file_path: {})",
-                collection.id,
-                collection.tenant,
-                collection.version_file_path
-            );
+            .map(|(cleanup_mode, collection)| {
+                tracing::info!(
+                    "Processing collection: {} (tenant: {}, version_file_path: {})",
+                    collection.id,
+                    collection.tenant,
+                    collection.version_file_path
+                );
 
-            let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job", collection_id = ?collection.id, tenant_id = %collection.tenant, cleanup_mode = ?cleanup_mode);
-            instrumented_span.follows_from(Span::current());
 
-            self.garbage_collect_collection(
-                version_absolute_cutoff_time,
-                collection_soft_delete_absolute_cutoff_time,
-                collection,
-                cleanup_mode,
-                self.config.enable_dangerous_option_to_ignore_min_versions_for_wal3,
-            )
-            .instrument(instrumented_span)
-        })
-        .buffer_unordered(100);
+                let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job", collection_id = ?collection.id, tenant_id = %collection.tenant, cleanup_mode = ?cleanup_mode);
+                Span::current().add_link(instrumented_span.context().span().span_context().clone());
+
+                self.garbage_collect_collection(
+                    version_absolute_cutoff_time,
+                    collection_soft_delete_absolute_cutoff_time,
+                    collection,
+                    cleanup_mode,
+                    self.config
+                        .enable_dangerous_option_to_ignore_min_versions_for_wal3,
+                )
+                .instrument(instrumented_span)
+            })
+            .buffer_unordered(100);
 
         let mut num_completed_jobs = 0;
         let mut num_failed_jobs = 0;
