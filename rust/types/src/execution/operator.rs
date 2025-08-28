@@ -1045,10 +1045,10 @@ impl Serialize for SelectField {
         S: serde::Serializer,
     {
         match self {
-            SelectField::Document => serializer.serialize_str("$document"),
-            SelectField::Embedding => serializer.serialize_str("$embedding"),
-            SelectField::Metadata => serializer.serialize_str("$metadata"),
-            SelectField::Score => serializer.serialize_str("$score"),
+            SelectField::Document => serializer.serialize_str("#document"),
+            SelectField::Embedding => serializer.serialize_str("#embedding"),
+            SelectField::Metadata => serializer.serialize_str("#metadata"),
+            SelectField::Score => serializer.serialize_str("#score"),
             SelectField::MetadataField(field) => serializer.serialize_str(field),
         }
     }
@@ -1061,10 +1061,10 @@ impl<'de> Deserialize<'de> for SelectField {
     {
         let s = String::deserialize(deserializer)?;
         Ok(match s.as_str() {
-            "$document" => SelectField::Document,
-            "$embedding" => SelectField::Embedding,
-            "$metadata" => SelectField::Metadata,
-            "$score" => SelectField::Score,
+            "#document" => SelectField::Document,
+            "#embedding" => SelectField::Embedding,
+            "#metadata" => SelectField::Metadata,
+            "#score" => SelectField::Score,
             // Any other string is treated as a metadata field key
             field => SelectField::MetadataField(field.to_string()),
         })
