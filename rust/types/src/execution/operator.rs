@@ -1118,15 +1118,17 @@ pub struct SearchPayloadResult {
     pub records: Vec<SearchRecord>,
 }
 
-impl From<chroma_proto::SearchPayloadResult> for SearchPayloadResult {
-    fn from(value: chroma_proto::SearchPayloadResult) -> Self {
-        Self {
+impl TryFrom<chroma_proto::SearchPayloadResult> for SearchPayloadResult {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::SearchPayloadResult) -> Result<Self, Self::Error> {
+        Ok(Self {
             records: value
                 .records
                 .into_iter()
-                .filter_map(|r| r.try_into().ok())
-                .collect(),
-        }
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+        })
     }
 }
 
@@ -1185,7 +1187,11 @@ impl TryFrom<chroma_proto::SearchResult> for SearchResult {
 
     fn try_from(value: chroma_proto::SearchResult) -> Result<Self, Self::Error> {
         Ok(Self {
-            results: value.results.into_iter().map(Into::into).collect(),
+            results: value
+                .results
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
             pulled_log_bytes: value.pulled_log_bytes,
         })
     }
