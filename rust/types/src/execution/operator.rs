@@ -1029,19 +1029,69 @@ impl TryFrom<Score> for chroma_proto::Score {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum SelectField {
+    // Predefined fields
+    Document,
+    Embedding,
+    Metadata,
+    Score,
+    MetadataField(String),
+}
+
+impl Serialize for SelectField {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            SelectField::Document => serializer.serialize_str("$document"),
+            SelectField::Embedding => serializer.serialize_str("$embedding"),
+            SelectField::Metadata => serializer.serialize_str("$metadata"),
+            SelectField::Score => serializer.serialize_str("$score"),
+            SelectField::MetadataField(field) => serializer.serialize_str(field),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SelectField {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(match s.as_str() {
+            "$document" => SelectField::Document,
+            "$embedding" => SelectField::Embedding,
+            "$metadata" => SelectField::Metadata,
+            "$score" => SelectField::Score,
+            // Any other string is treated as a metadata field key
+            field => SelectField::MetadataField(field.to_string()),
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Select {
     #[serde(default)]
-    pub fields: HashSet<String>,
+    pub fields: HashSet<SelectField>,
 }
 
 impl TryFrom<chroma_proto::SelectOperator> for Select {
     type Error = QueryConversionError;
 
     fn try_from(value: chroma_proto::SelectOperator) -> Result<Self, Self::Error> {
-        Ok(Self {
-            fields: value.fields.into_iter().collect(),
-        })
+        let fields = value
+            .fields
+            .into_iter()
+            .map(|field| {
+                // Try to deserialize each string as a SelectField
+                serde_json::from_value(serde_json::Value::String(field))
+                    .map_err(|_| QueryConversionError::field("fields"))
+            })
+            .collect::<Result<HashSet<_>, _>>()?;
+
+        Ok(Self { fields })
     }
 }
 
@@ -1049,9 +1099,19 @@ impl TryFrom<Select> for chroma_proto::SelectOperator {
     type Error = QueryConversionError;
 
     fn try_from(value: Select) -> Result<Self, Self::Error> {
-        Ok(Self {
-            fields: value.fields.into_iter().collect(),
-        })
+        let fields = value
+            .fields
+            .into_iter()
+            .map(|field| {
+                // Serialize each SelectField back to string
+                serde_json::to_value(&field)
+                    .ok()
+                    .and_then(|v| v.as_str().map(String::from))
+                    .ok_or(QueryConversionError::field("fields"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(Self { fields })
     }
 }
 
