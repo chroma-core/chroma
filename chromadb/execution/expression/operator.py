@@ -346,6 +346,100 @@ class Rank:
     def to_dict(self) -> Dict[str, Any]:
         """Convert the Score expression to a dictionary for JSON serialization"""
         raise NotImplementedError("Subclasses must implement to_dict()")
+    
+    # Arithmetic operators
+    def __add__(self, other: Union['Rank', float, int]) -> 'Sum':
+        """Addition: rank1 + rank2 or rank + value"""
+        other_rank = Val(other) if isinstance(other, (int, float)) else other
+        # Flatten if already Sum
+        if isinstance(self, Sum):
+            if isinstance(other_rank, Sum):
+                return Sum(self.ranks + other_rank.ranks)
+            return Sum(self.ranks + [other_rank])
+        elif isinstance(other_rank, Sum):
+            return Sum([self] + other_rank.ranks)
+        return Sum([self, other_rank])
+    
+    def __radd__(self, other: Union[float, int]) -> 'Sum':
+        """Right addition: value + rank"""
+        return Val(other) + self
+    
+    def __sub__(self, other: Union['Rank', float, int]) -> 'Sub':
+        """Subtraction: rank1 - rank2 or rank - value"""
+        other_rank = Val(other) if isinstance(other, (int, float)) else other
+        return Sub(self, other_rank)
+    
+    def __rsub__(self, other: Union[float, int]) -> 'Sub':
+        """Right subtraction: value - rank"""
+        return Sub(Val(other), self)
+    
+    def __mul__(self, other: Union['Rank', float, int]) -> 'Mul':
+        """Multiplication: rank1 * rank2 or rank * value"""
+        other_rank = Val(other) if isinstance(other, (int, float)) else other
+        # Flatten if already Mul
+        if isinstance(self, Mul):
+            if isinstance(other_rank, Mul):
+                return Mul(self.ranks + other_rank.ranks)
+            return Mul(self.ranks + [other_rank])
+        elif isinstance(other_rank, Mul):
+            return Mul([self] + other_rank.ranks)
+        return Mul([self, other_rank])
+    
+    def __rmul__(self, other: Union[float, int]) -> 'Mul':
+        """Right multiplication: value * rank"""
+        return Val(other) * self
+    
+    def __truediv__(self, other: Union['Rank', float, int]) -> 'Div':
+        """Division: rank1 / rank2 or rank / value"""
+        other_rank = Val(other) if isinstance(other, (int, float)) else other
+        return Div(self, other_rank)
+    
+    def __rtruediv__(self, other: Union[float, int]) -> 'Div':
+        """Right division: value / rank"""
+        return Div(Val(other), self)
+    
+    def __neg__(self) -> 'Mul':
+        """Negation: -rank (equivalent to -1 * rank)"""
+        return Mul([Val(-1), self])
+    
+    def __abs__(self) -> 'Abs':
+        """Absolute value: abs(rank)"""
+        return Abs(self)
+    
+    # Builder methods for functions
+    def exp(self) -> 'Exp':
+        """Exponential: e^rank"""
+        return Exp(self)
+    
+    def log(self) -> 'Log':
+        """Natural logarithm: ln(rank)"""
+        return Log(self)
+    
+    def max(self, other: Union['Rank', float, int]) -> 'Max':
+        """Maximum of this rank and another: rank.max(rank2)"""
+        other_rank = Val(other) if isinstance(other, (int, float)) else other
+        
+        # Flatten if already Max
+        if isinstance(self, Max):
+            if isinstance(other_rank, Max):
+                return Max(self.ranks + other_rank.ranks)
+            return Max(self.ranks + [other_rank])
+        elif isinstance(other_rank, Max):
+            return Max([self] + other_rank.ranks)
+        return Max([self, other_rank])
+    
+    def min(self, other: Union['Rank', float, int]) -> 'Min':
+        """Minimum of this rank and another: rank.min(rank2)"""
+        other_rank = Val(other) if isinstance(other, (int, float)) else other
+        
+        # Flatten if already Min
+        if isinstance(self, Min):
+            if isinstance(other_rank, Min):
+                return Min(self.ranks + other_rank.ranks)
+            return Min(self.ranks + [other_rank])
+        elif isinstance(other_rank, Min):
+            return Min([self] + other_rank.ranks)
+        return Min([self, other_rank])
 
 
 @dataclass
@@ -464,6 +558,7 @@ class Val(Rank):
     
     def to_dict(self) -> Dict[str, Any]:
         return {"$val": self.value}
+
 
 class SelectField(Enum):
     """Predefined field types for Select"""
