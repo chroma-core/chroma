@@ -1582,6 +1582,7 @@ impl ServiceBasedFrontend {
         &mut self,
         request: SearchRequest,
     ) -> Result<SearchResponse, QueryError> {
+        // TODO: The dispatch logic is mostly the same for count/get/query/search, we should consider unifying them
         // Get collection and segments once for all queries
         let collection_and_segments = self
             .collections_with_segments_provider
@@ -1596,7 +1597,7 @@ impl ServiceBasedFrontend {
         // Aggregate metrics across all search payloads
         let mut total_metadata_predicate_count = 0u64;
         let mut total_fts_query_length = 0u64;
-        let mut total_query_embedding_count = 0u64;
+        let mut total_search_embedding_count = 0u64;
 
         for payload in &request.searches {
             // Count metadata predicates and FTS query length from where clause
@@ -1608,7 +1609,7 @@ impl ServiceBasedFrontend {
             // Count embeddings from the score expression
             // Each rank in the score expression contains one embedding
             let knn_queries = payload.rank.knn_queries();
-            total_query_embedding_count += knn_queries.len() as u64;
+            total_search_embedding_count += knn_queries.len() as u64;
         }
 
         // Create a single Search plan with one scan and the payloads from the request
@@ -1629,7 +1630,7 @@ impl ServiceBasedFrontend {
         chroma_metering::with_current(|context| {
             context.fts_query_length(total_fts_query_length);
             context.metadata_predicate_count(total_metadata_predicate_count);
-            context.query_embedding_count(total_query_embedding_count);
+            context.query_embedding_count(total_search_embedding_count);
             context.pulled_log_size_bytes(result.pulled_log_bytes);
             context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
             context.return_bytes(return_bytes);
@@ -1665,6 +1666,7 @@ impl ServiceBasedFrontend {
     }
 
     pub async fn search(&mut self, request: SearchRequest) -> Result<SearchResponse, QueryError> {
+        // TODO: The retry logic is mostly the same for count/get/query/search, we should consider unifying them
         let retries = Arc::new(AtomicUsize::new(0));
         let search_to_retry = || {
             let mut self_clone = self.clone();
