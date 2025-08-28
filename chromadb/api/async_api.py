@@ -30,7 +30,7 @@ from chromadb.api.types import (
     IncludeMetadataDocumentsDistances,
     SearchResult,
 )
-from chromadb.execution.expression.plan import SearchPayload
+from chromadb.execution.expression.plan import Search
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb.utils.embedding_functions as ef
@@ -647,7 +647,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
     async def _search(
         self,
         collection_id: UUID,
-        searches: List[SearchPayload],
+        searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> SearchResult:
