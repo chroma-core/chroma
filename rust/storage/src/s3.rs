@@ -238,24 +238,28 @@ impl S3Storage {
                     res.e_tag.map(ETag),
                 ))
             }
-            Err(e) => {
-                match e {
-                    SdkError::ServiceError(err) => {
-                        let inner = err.into_err();
-                        match &inner {
-                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
-                                Err(StorageError::NotFound {
-                                    path: key.to_string(),
-                                    source: Arc::new(inner),
-                                })
-                            }
-                            aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
-                                tracing::error!("invalid object state: {}", msg);
-                                Err(StorageError::Generic {
-                                    source: Arc::new(inner),
-                                })
-                            }
-                            _ => {
+            Err(e) => match e {
+                SdkError::ServiceError(err) => {
+                    let inner = err.into_err();
+                    match &inner {
+                        aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
+                            Err(StorageError::NotFound {
+                                path: key.to_string(),
+                                source: Arc::new(inner),
+                            })
+                        }
+                        aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(
+                            msg,
+                        ) => {
+                            tracing::error!("invalid object state: {}", msg);
+                            Err(StorageError::Generic {
+                                source: Arc::new(inner),
+                            })
+                        }
+                        _ => {
+                            if inner.code() == Some("SlowDown") {
+                                Err(StorageError::Backoff)
+                            } else {
                                 tracing::error!("error: {}", inner.to_string());
                                 Err(StorageError::Generic {
                                     source: Arc::new(inner),
@@ -263,11 +267,11 @@ impl S3Storage {
                             }
                         }
                     }
-                    _ => Err(StorageError::Generic {
-                        source: Arc::new(e),
-                    }),
                 }
-            }
+                _ => Err(StorageError::Generic {
+                    source: Arc::new(e),
+                }),
+            },
         }
     }
 
@@ -350,9 +354,13 @@ impl S3Storage {
                                 })
                             }
                             _ => {
-                                Err(StorageError::Generic {
-                                    source: Arc::new(inner),
-                                })
+                                if inner.code() == Some("SlowDown") {
+                                    Err(StorageError::Backoff)
+                                } else {
+                                    Err(StorageError::Generic {
+                                        source: Arc::new(inner),
+                                    })
+                                }
                             }
                         }
                     }
@@ -602,6 +610,8 @@ impl S3Storage {
                     path: key.to_string(),
                     source: Arc::new(err),
                 }
+            } else if err.meta().code() == Some("PreconditionFailed") {
+                StorageError::Backoff
             } else {
                 StorageError::Generic {
                     source: Arc::new(err),
@@ -793,6 +803,7 @@ impl S3Storage {
                             path: key.to_string(),
                             source: Arc::new(inner),
                         }),
+                        Some("SlowDown") => Err(StorageError::Backoff),
                         _ => {
                             tracing::error!(error = %inner, key = %key, "Failed to delete object from S3");
                             Err(StorageError::Generic {
@@ -864,9 +875,15 @@ impl S3Storage {
                 tracing::trace!("Successfully deleted objects from S3");
                 Ok(out)
             }
-            Err(e) => Err(StorageError::Generic {
-                source: Arc::new(e),
-            }),
+            Err(e) => {
+                if e.code() == Some("SlowDown") {
+                    Err(StorageError::Backoff)
+                } else {
+                    Err(StorageError::Generic {
+                        source: Arc::new(e),
+                    })
+                }
+            }
         }
     }
 
