@@ -1152,13 +1152,10 @@ async fn update_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<UpdateCollectionPayload>,
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
-    server.metrics.update_collection.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server
+        .metrics
+        .update_collection
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!(name: "update_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
     server
         .authenticate_and_authorize_collection(
@@ -1286,13 +1283,10 @@ async fn fork_collection(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<ForkCollectionPayload>,
 ) -> Result<Json<ForkCollectionResponse>, ServerError> {
-    server.metrics.fork_collection.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server
+        .metrics
+        .fork_collection
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!(name: "fork_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
     server
         .authenticate_and_authorize(
@@ -1394,13 +1388,10 @@ async fn collection_add(
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<AddCollectionRecordsPayload>,
 ) -> Result<(StatusCode, Json<AddCollectionRecordsResponse>), ServerError> {
-    server.metrics.collection_add.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server
+        .metrics
+        .collection_add
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1506,13 +1497,10 @@ async fn collection_update(
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<UpdateCollectionRecordsPayload>,
 ) -> Result<Json<UpdateCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_update.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server
+        .metrics
+        .collection_update
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1626,13 +1614,10 @@ async fn collection_upsert(
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<UpsertCollectionRecordsPayload>,
 ) -> Result<Json<UpsertCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_upsert.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server
+        .metrics
+        .collection_upsert
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1738,13 +1723,10 @@ async fn collection_delete(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<DeleteCollectionRecordsPayload>,
 ) -> Result<Json<DeleteCollectionRecordsResponse>, ServerError> {
-    server.metrics.collection_delete.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server
+        .metrics
+        .collection_delete
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1827,13 +1809,10 @@ async fn collection_count(
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
-    server.metrics.collection_count.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server
+        .metrics
+        .collection_count
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     tracing::info!(
         name: "collection_count",
         tenant = tenant,
@@ -1927,13 +1906,10 @@ async fn collection_get(
     State(mut server): State<FrontendServer>,
     Json(payload): Json<GetRequestPayload>,
 ) -> Result<Json<GetResponse>, ServerError> {
-    server.metrics.collection_get.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server
+        .metrics
+        .collection_get
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
@@ -2066,13 +2042,10 @@ async fn collection_query(
     State(mut server): State<FrontendServer>,
     TracedJson(payload): TracedJson<QueryRequestPayload>,
 ) -> Result<Json<QueryResponse>, ServerError> {
-    server.metrics.collection_query.add(
-        1,
-        &[
-            KeyValue::new("tenant", tenant.clone()),
-            KeyValue::new("collection_id", collection_id.clone()),
-        ],
-    );
+    server
+        .metrics
+        .collection_query
+        .add(1, &[KeyValue::new("tenant", tenant.clone())]);
     let requester_identity = server
         .authenticate_and_authorize_collection(
             &headers,
