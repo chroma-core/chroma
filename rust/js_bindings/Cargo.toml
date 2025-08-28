@@ -8,8 +8,21 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # Default enable napi4 feature, see https://nodejs.org/api/n-api.html#node-api-version-matrix
-napi = { version = "2.12.2", default-features = false, features = ["napi4"] }
-napi-derive = "2.12.2"
+napi = { workspace = true }
+napi-derive = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+
+chroma-segment = { workspace = true }
+chroma-sqlite = { workspace = true }
+chroma-frontend = { workspace = true }
+chroma-sysdb = { workspace = true }
+chroma-log = { workspace = true }
+chroma-config = { workspace = true }
+chroma-cache = { workspace = true }
+chroma-system = { workspace = true }
+chroma-types = { workspace = true }
+chroma-error = { workspace = true, features = ["validator"] }
 chroma-cli = { workspace = true }
 
 [build-dependencies]

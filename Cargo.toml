@@ -69,6 +69,8 @@ humantime = { version = "2.2.0" }
 petgraph = { version = "0.8.1" }
 base64 = "0.22"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
+napi = { version = "2.12.2", default-features = false, features = ["napi4", "async", "serde-json"] }
+napi-derive = "2.12.2"
 
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
