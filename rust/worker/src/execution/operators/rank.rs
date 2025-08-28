@@ -7,19 +7,19 @@ use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::Operator;
-use chroma_types::operator::{Rank, RecordMeasure, Score};
+use chroma_types::operator::{KnnQuery, Rank, RecordMeasure};
 use thiserror::Error;
 
-struct ScoreProvider<'me> {
-    ranks: &'me HashMap<Rank, Vec<RecordMeasure>>,
+struct RankProvider<'me> {
+    knn_results: &'me HashMap<KnnQuery, Vec<RecordMeasure>>,
 }
 
-struct ScoreDomain {
+struct RankDomain {
     support: HashMap<u32, f32>,
     default: Option<f32>,
 }
 
-impl ScoreDomain {
+impl RankDomain {
     fn flat(default: f32) -> Self {
         Self {
             support: HashMap::new(),
@@ -36,7 +36,7 @@ impl ScoreDomain {
         let left_base = left.support.keys().cloned().collect::<HashSet<_>>();
         let right_base = right.support.keys().cloned().collect::<HashSet<_>>();
         match (left.default, right.default) {
-            (Some(left_default), Some(right_default)) => ScoreDomain {
+            (Some(left_default), Some(right_default)) => RankDomain {
                 support: (&left_base | &right_base)
                     .into_iter()
                     .map(|id| {
@@ -51,7 +51,7 @@ impl ScoreDomain {
                     .collect(),
                 default: Some(op(left_default, right_default)),
             },
-            (Some(left_default), None) => ScoreDomain {
+            (Some(left_default), None) => RankDomain {
                 support: right
                     .support
                     .into_iter()
@@ -67,7 +67,7 @@ impl ScoreDomain {
                     .collect(),
                 default: None,
             },
-            (None, Some(right_default)) => ScoreDomain {
+            (None, Some(right_default)) => RankDomain {
                 support: left
                     .support
                     .into_iter()
@@ -83,7 +83,7 @@ impl ScoreDomain {
                     .collect(),
                 default: None,
             },
-            (None, None) => ScoreDomain {
+            (None, None) => RankDomain {
                 support: (&left_base & &right_base)
                     .into_iter()
                     .filter_map(|id| {
@@ -98,99 +98,111 @@ impl ScoreDomain {
     }
 }
 
-impl ScoreProvider<'_> {
-    fn eval(&self, score: Score) -> ScoreDomain {
-        match score {
-            Score::Absolute(score) => self.eval(*score).map(f32::abs),
-            Score::Division { left, right } => {
-                ScoreDomain::merge(self.eval(*left), self.eval(*right), f32::div)
+impl RankProvider<'_> {
+    fn eval(&self, rank: Rank) -> RankDomain {
+        match rank {
+            Rank::Absolute(rank) => self.eval(*rank).map(f32::abs),
+            Rank::Division { left, right } => {
+                RankDomain::merge(self.eval(*left), self.eval(*right), f32::div)
             }
-            Score::Exponentiation(score) => self.eval(*score).map(f32::exp),
-            Score::Logarithm(score) => self.eval(*score).map(f32::ln),
-            Score::Maximum(scores) => scores
+            Rank::Exponentiation(rank) => self.eval(*rank).map(f32::exp),
+            Rank::Logarithm(rank) => self.eval(*rank).map(f32::ln),
+            Rank::Maximum(ranks) => ranks
                 .into_iter()
-                .map(|score| self.eval(score))
-                .fold(ScoreDomain::flat(f32::MIN), |accumulate_domain, domain| {
-                    ScoreDomain::merge(accumulate_domain, domain, f32::max)
+                .map(|rank| self.eval(rank))
+                .fold(RankDomain::flat(f32::MIN), |accumulate_domain, domain| {
+                    RankDomain::merge(accumulate_domain, domain, f32::max)
                 }),
-            Score::Minimum(scores) => scores
+            Rank::Minimum(ranks) => ranks
                 .into_iter()
-                .map(|score| self.eval(score))
-                .fold(ScoreDomain::flat(f32::MAX), |accumulate_domain, domain| {
-                    ScoreDomain::merge(accumulate_domain, domain, f32::min)
+                .map(|rank| self.eval(rank))
+                .fold(RankDomain::flat(f32::MAX), |accumulate_domain, domain| {
+                    RankDomain::merge(accumulate_domain, domain, f32::min)
                 }),
-            Score::Multiplication(scores) => scores
+            Rank::Multiplication(ranks) => ranks
                 .into_iter()
-                .map(|score| self.eval(score))
-                .fold(ScoreDomain::flat(1.0), |accumulate_domain, domain| {
-                    ScoreDomain::merge(accumulate_domain, domain, f32::mul)
+                .map(|rank| self.eval(rank))
+                .fold(RankDomain::flat(1.0), |accumulate_domain, domain| {
+                    RankDomain::merge(accumulate_domain, domain, f32::mul)
                 }),
-            Score::Rank {
+            Rank::Knn {
+                embedding,
+                key,
+                limit,
                 default,
                 ordinal,
-                source,
             } => {
-                let records = self.ranks.get(&source).cloned().unwrap_or_default();
-                let support = records
-                    .into_iter()
-                    .enumerate()
-                    .map(|(index, RecordMeasure { offset_id, measure })| {
-                        (offset_id, if ordinal { index as f32 } else { measure })
+                let knn_query = KnnQuery {
+                    embedding,
+                    key,
+                    limit,
+                };
+                let support = self
+                    .knn_results
+                    .get(&knn_query)
+                    .map(|records| {
+                        records
+                            .iter()
+                            .enumerate()
+                            .map(|(index, &RecordMeasure { offset_id, measure })| {
+                                (offset_id, if ordinal { index as f32 } else { measure })
+                            })
+                            .collect()
                     })
-                    .collect();
-                ScoreDomain { support, default }
+                    .unwrap_or_default();
+                RankDomain { support, default }
             }
-            Score::Subtraction { left, right } => {
-                ScoreDomain::merge(self.eval(*left), self.eval(*right), f32::sub)
+            Rank::Subtraction { left, right } => {
+                RankDomain::merge(self.eval(*left), self.eval(*right), f32::sub)
             }
-            Score::Summation(scores) => scores
+            Rank::Summation(ranks) => ranks
                 .into_iter()
-                .map(|score| self.eval(score))
-                .fold(ScoreDomain::flat(0.0), |accumulate_domain, domain| {
-                    ScoreDomain::merge(accumulate_domain, domain, f32::add)
+                .map(|rank| self.eval(rank))
+                .fold(RankDomain::flat(0.0), |accumulate_domain, domain| {
+                    RankDomain::merge(accumulate_domain, domain, f32::add)
                 }),
-            Score::Value(val) => ScoreDomain::flat(val),
+            Rank::Value(val) => RankDomain::flat(val),
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct ScoreInput {
+pub struct RankInput {
     pub blockfile_provider: BlockfileProvider,
-    pub ranks: HashMap<Rank, Vec<RecordMeasure>>,
+    pub knn_results: HashMap<KnnQuery, Vec<RecordMeasure>>,
 }
 
 #[derive(Clone, Debug)]
-pub struct ScoreOutput {
-    pub scores: Vec<RecordMeasure>,
+pub struct RankOutput {
+    pub ranks: Vec<RecordMeasure>,
 }
 
 #[derive(Error, Debug)]
-#[error("Score error (unreachable)")]
-pub struct ScoreError;
+#[error("Rank error (unreachable)")]
+pub struct RankError;
 
-impl ChromaError for ScoreError {
+impl ChromaError for RankError {
     fn code(&self) -> ErrorCodes {
         ErrorCodes::Internal
     }
 }
 
 #[async_trait]
-impl Operator<ScoreInput, ScoreOutput> for Score {
-    type Error = ScoreError;
+impl Operator<RankInput, RankOutput> for Rank {
+    type Error = RankError;
 
-    async fn run(&self, input: &ScoreInput) -> Result<ScoreOutput, ScoreError> {
-        let score_provider = ScoreProvider {
-            ranks: &input.ranks,
+    async fn run(&self, input: &RankInput) -> Result<RankOutput, RankError> {
+        let rank_provider = RankProvider {
+            knn_results: &input.knn_results,
         };
-        let score_domain = score_provider.eval(self.clone());
-        let mut scores = score_domain
+        let rank_domain = rank_provider.eval(self.clone());
+        let mut ranks = rank_domain
             .support
             .into_iter()
             .map(|(offset_id, measure)| RecordMeasure { offset_id, measure })
             .collect::<Vec<_>>();
-        scores.sort_unstable();
-        scores.reverse();
-        Ok(ScoreOutput { scores })
+        ranks.sort_unstable();
+        ranks.reverse();
+        Ok(RankOutput { ranks })
     }
 }

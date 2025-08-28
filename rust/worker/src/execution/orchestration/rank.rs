@@ -6,7 +6,7 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::{Limit, Select, Rank, RecordMeasure, Score, SearchPayloadResult},
+    operator::{KnnQuery, Limit, Rank, RecordMeasure, SearchPayloadResult, Select},
     CollectionAndSegments,
 };
 use std::collections::HashMap;
@@ -16,12 +16,12 @@ use tracing::Span;
 
 use crate::execution::operators::{
     fetch_log::FetchLogOutput,
+    rank::{RankError, RankInput, RankOutput},
     select::{SelectError, SelectInput, SelectOutput},
-    score::{ScoreError, ScoreInput, ScoreOutput},
 };
 
 #[derive(Error, Debug)]
-pub enum ScoreOrchestratorError {
+pub enum RankOrchestratorError {
     #[error("Operation aborted because resources exhausted")]
     Aborted,
     #[error("Error sending message through channel: {0}")]
@@ -30,32 +30,32 @@ pub enum ScoreOrchestratorError {
     Panic(#[from] PanicError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
-    #[error("Error running Score operator: {0}")]
-    Score(#[from] ScoreError),
+    #[error("Error running Rank operator: {0}")]
+    Rank(#[from] RankError),
     #[error("Error running Select operator: {0}")]
     Select(#[from] SelectError),
 }
 
-impl ChromaError for ScoreOrchestratorError {
+impl ChromaError for RankOrchestratorError {
     fn code(&self) -> ErrorCodes {
         match self {
-            ScoreOrchestratorError::Aborted => ErrorCodes::ResourceExhausted,
-            ScoreOrchestratorError::Channel(err) => err.code(),
-            ScoreOrchestratorError::Panic(_) => ErrorCodes::Aborted,
-            ScoreOrchestratorError::Result(_) => ErrorCodes::Internal,
-            ScoreOrchestratorError::Score(err) => err.code(),
-            ScoreOrchestratorError::Select(err) => err.code(),
+            RankOrchestratorError::Aborted => ErrorCodes::ResourceExhausted,
+            RankOrchestratorError::Channel(err) => err.code(),
+            RankOrchestratorError::Panic(_) => ErrorCodes::Aborted,
+            RankOrchestratorError::Result(_) => ErrorCodes::Internal,
+            RankOrchestratorError::Rank(err) => err.code(),
+            RankOrchestratorError::Select(err) => err.code(),
         }
     }
 }
 
-impl<E> From<TaskError<E>> for ScoreOrchestratorError
+impl<E> From<TaskError<E>> for RankOrchestratorError
 where
-    E: Into<ScoreOrchestratorError>,
+    E: Into<RankOrchestratorError>,
 {
     fn from(value: TaskError<E>) -> Self {
         match value {
-            TaskError::Aborted => ScoreOrchestratorError::Aborted,
+            TaskError::Aborted => RankOrchestratorError::Aborted,
             TaskError::Panic(e) => e.into(),
             TaskError::TaskFailed(e) => e.into(),
         }
@@ -63,12 +63,12 @@ where
 }
 
 #[derive(Debug)]
-pub struct ScoreOrchestratorOutput {
+pub struct RankOrchestratorOutput {
     pub result: SearchPayloadResult,
     pub pulled_log_bytes: u64,
 }
 
-/// The `ScoreOrchestrator` chains operators to evaluate scores, apply limits, and select fields
+/// The `RankOrchestrator` chains operators to evaluate ranks, apply limits, and select fields
 /// for search results from multiple KNN orchestrators.
 ///
 /// # Pipeline
@@ -77,7 +77,7 @@ pub struct ScoreOrchestratorOutput {
 ///                  │
 ///                  ▼
 ///         ┌──────────────────┐
-///         │  Score Operator  │
+///         │  Rank Operator   │
 ///         └────────┬─────────┘
 ///                  │
 ///                  ▼
@@ -91,18 +91,18 @@ pub struct ScoreOrchestratorOutput {
 ///         └────────┬─────────┘
 ///                  │
 ///                  ▼
-///        ScoreOrchestratorOutput
+///        RankOrchestratorOutput
 /// ```
 #[derive(Debug)]
-pub struct ScoreOrchestrator {
+pub struct RankOrchestrator {
     // Orchestrator parameters
     context: OrchestratorContext,
     blockfile_provider: BlockfileProvider,
     queue: usize,
 
     // Input data
-    ranks: HashMap<Rank, Vec<RecordMeasure>>,
-    score: Score,
+    knn_results: HashMap<KnnQuery, Vec<RecordMeasure>>,
+    rank: Rank,
     limit: Limit,
     select: Select,
 
@@ -111,17 +111,17 @@ pub struct ScoreOrchestrator {
     logs: FetchLogOutput,
 
     // Result channel
-    result_channel: Option<Sender<Result<ScoreOrchestratorOutput, ScoreOrchestratorError>>>,
+    result_channel: Option<Sender<Result<RankOrchestratorOutput, RankOrchestratorError>>>,
 }
 
-impl ScoreOrchestrator {
+impl RankOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
-        ranks: HashMap<Rank, Vec<RecordMeasure>>,
-        score: Score,
+        knn_results: HashMap<KnnQuery, Vec<RecordMeasure>>,
+        rank: Rank,
         limit: Limit,
         select: Select,
         collection_and_segments: CollectionAndSegments,
@@ -132,8 +132,8 @@ impl ScoreOrchestrator {
             context,
             blockfile_provider,
             queue,
-            ranks,
-            score,
+            knn_results,
+            rank,
             limit,
             select,
             collection_and_segments,
@@ -144,9 +144,9 @@ impl ScoreOrchestrator {
 }
 
 #[async_trait]
-impl Orchestrator for ScoreOrchestrator {
-    type Output = ScoreOrchestratorOutput;
-    type Error = ScoreOrchestratorError;
+impl Orchestrator for RankOrchestrator {
+    type Output = RankOrchestratorOutput;
+    type Error = RankOrchestratorError;
 
     fn dispatcher(&self) -> ComponentHandle<Dispatcher> {
         self.context.dispatcher.clone()
@@ -160,17 +160,17 @@ impl Orchestrator for ScoreOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        // Start with Score operator
-        let score_task = wrap(
-            Box::new(self.score.clone()),
-            ScoreInput {
+        // Start with Rank operator
+        let rank_task = wrap(
+            Box::new(self.rank.clone()),
+            RankInput {
                 blockfile_provider: self.blockfile_provider.clone(),
-                ranks: self.ranks.clone(),
+                knn_results: self.knn_results.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
         );
-        vec![(score_task, Some(Span::current()))]
+        vec![(rank_task, Some(Span::current()))]
     }
 
     fn queue_size(&self) -> usize {
@@ -179,25 +179,25 @@ impl Orchestrator for ScoreOrchestrator {
 
     fn set_result_channel(
         &mut self,
-        sender: Sender<Result<ScoreOrchestratorOutput, ScoreOrchestratorError>>,
+        sender: Sender<Result<RankOrchestratorOutput, RankOrchestratorError>>,
     ) {
         self.result_channel = Some(sender);
     }
 
     fn take_result_channel(
         &mut self,
-    ) -> Option<Sender<Result<ScoreOrchestratorOutput, ScoreOrchestratorError>>> {
+    ) -> Option<Sender<Result<RankOrchestratorOutput, RankOrchestratorError>>> {
         self.result_channel.take()
     }
 }
 
 #[async_trait]
-impl Handler<TaskResult<ScoreOutput, ScoreError>> for ScoreOrchestrator {
+impl Handler<TaskResult<RankOutput, RankError>> for RankOrchestrator {
     type Result = ();
 
     async fn handle(
         &mut self,
-        message: TaskResult<ScoreOutput, ScoreError>,
+        message: TaskResult<RankOutput, RankError>,
         ctx: &ComponentContext<Self>,
     ) {
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
@@ -205,15 +205,15 @@ impl Handler<TaskResult<ScoreOutput, ScoreError>> for ScoreOrchestrator {
             None => return,
         };
 
-        // Apply limit directly on the sorted scores
-        let skip = self.limit.skip as usize;
-        let fetch = self.limit.fetch.unwrap_or(u32::MAX) as usize;
+        // Apply limit directly on the sorted ranks
+        let offset = self.limit.offset as usize;
+        let limit = self.limit.limit.unwrap_or(u32::MAX) as usize;
 
         let sliced_records = output
-            .scores
+            .ranks
             .into_iter()
-            .skip(skip)
-            .take(fetch)
+            .skip(offset)
+            .take(limit)
             .collect::<Vec<_>>();
 
         // Create and dispatch Select operator
@@ -234,7 +234,7 @@ impl Handler<TaskResult<ScoreOutput, ScoreError>> for ScoreOrchestrator {
 }
 
 #[async_trait]
-impl Handler<TaskResult<SelectOutput, SelectError>> for ScoreOrchestrator {
+impl Handler<TaskResult<SelectOutput, SelectError>> for RankOrchestrator {
     type Result = ();
 
     async fn handle(
@@ -250,7 +250,7 @@ impl Handler<TaskResult<SelectOutput, SelectError>> for ScoreOrchestrator {
         // Terminate with final result
         let pulled_log_bytes = self.logs.iter().map(|(l, _)| l.size_bytes()).sum();
 
-        let result = ScoreOrchestratorOutput {
+        let result = RankOrchestratorOutput {
             result: output,
             pulled_log_bytes,
         };
