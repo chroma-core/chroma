@@ -5,7 +5,12 @@ use std::path::Path;
 use thiserror::Error;
 use tracing::instrument;
 
-pub const DEFAULT_MAX_ELEMENTS: usize = 10000;
+// Setting it to a small value to prevent
+// bloating of the index which directly impacts query latency by increasing
+// the amount of bytes that need to be fetched from s3. The trade off is that
+// there will be more data movement/allocations during compaction which is
+// acceptable since compaction is a background operation.
+pub const DEFAULT_MAX_ELEMENTS: usize = 100;
 
 // TODO: Make this config:
 // - Watchable - for dynamic updates
