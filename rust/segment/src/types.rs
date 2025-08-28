@@ -910,6 +910,7 @@ pub async fn materialize_logs(
     }
     res.sort_by(|x, y| x.offset_id.cmp(&y.offset_id));
 
+    tracing::info!("Total length of materialized logs: {}", res.len());
     TOTAL_LOGS_POST_MATERIALIZED.add(res.len() as u64, &[]);
 
     Ok(MaterializeLogsResult {

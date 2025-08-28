@@ -198,7 +198,6 @@ type LogClient = LogServiceClient<chroma_tracing::GrpcTraceService<tonic::transp
 
 #[derive(Clone, Debug)]
 struct GrpcLogMetrics {
-    total_logs_pulled: opentelemetry::metrics::Counter<u64>,
     total_logs_pushed: opentelemetry::metrics::Counter<u64>,
 }
 
@@ -206,10 +205,6 @@ impl Default for GrpcLogMetrics {
     fn default() -> Self {
         let meter = opentelemetry::global::meter("chroma.log_client");
         Self {
-            total_logs_pulled: meter
-                .u64_counter("total_logs_pulled")
-                .with_description("The total number of log records pulled")
-                .build(),
             total_logs_pushed: meter
                 .u64_counter("total_logs_pushed")
                 .with_description("The total number of log records pushed")
@@ -451,8 +446,6 @@ impl GrpcLog {
                         }
                     }
                 }
-
-                self.metrics.total_logs_pulled.add(result.len() as u64, &[]);
 
                 Ok(result)
             }
