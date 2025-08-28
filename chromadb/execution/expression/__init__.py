@@ -1,9 +1,34 @@
+"""
+Chromadb execution expression module for search operations.
+"""
+
 from chromadb.execution.expression.operator import (
-    Filter,
+    # Core filter components
+    SearchFilter,
+    
+    # Where expressions
+    Where,
+    And,
+    Or,
+    Eq,
+    Ne,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+    In,
+    Nin,
+    Regex,
+    NotRegex,
+    Contains,
+    NotContains,
+    
+    # Search configuration
     Limit,
     Select,
     SelectField,
-    # Rank expressions for hybrid search
+    
+    # Rank expressions
     Rank,
     Abs,
     Div,
@@ -17,17 +42,40 @@ from chromadb.execution.expression.operator import (
     Sum,
     Val,
 )
+
 from chromadb.execution.expression.plan import (
     Search,
 )
 
 __all__ = [
-    # Core search components
+    # Main search class
     "Search",
-    "Filter",
-    "Limit", 
+    
+    # Filter components
+    "SearchFilter",
+    
+    # Where expressions
+    "Where",
+    "And",
+    "Or",
+    "Eq",
+    "Ne",
+    "Gt",
+    "Gte",
+    "Lt",
+    "Lte",
+    "In",
+    "Nin",
+    "Regex",
+    "NotRegex",
+    "Contains",
+    "NotContains",
+    
+    # Search configuration
+    "Limit",
     "Select",
     "SelectField",
+    
     # Rank expressions
     "Rank",
     "Abs",

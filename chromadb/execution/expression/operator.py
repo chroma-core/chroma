@@ -7,8 +7,6 @@ from chromadb.types import (
     Collection,
     RequestVersionContext,
     Segment,
-    Where,
-    WhereDocument,
 )
 
 
@@ -27,19 +25,172 @@ class Scan:
         )
 
 
+# Where expression types for filtering
+@dataclass
+class Where:
+    """Base class for Where expressions (algebraic data type)"""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the Where expression to a dictionary for JSON serialization"""
+        raise NotImplementedError("Subclasses must implement to_dict()")
+
+
+@dataclass
+class And(Where):
+    """Logical AND of multiple where conditions"""
+    conditions: List[Where]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {"$and": [c.to_dict() for c in self.conditions]}
+
+
+@dataclass
+class Or(Where):
+    """Logical OR of multiple where conditions"""
+    conditions: List[Where]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {"$or": [c.to_dict() for c in self.conditions]}
+
+
+@dataclass
+class Eq(Where):
+    """Equality comparison"""
+    key: str
+    value: Any
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {self.key: {"$eq": self.value}}
+
+
+@dataclass
+class Ne(Where):
+    """Not equal comparison"""
+    key: str
+    value: Any
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {self.key: {"$ne": self.value}}
+
+
+@dataclass
+class Gt(Where):
+    """Greater than comparison"""
+    key: str
+    value: Any
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {self.key: {"$gt": self.value}}
+
+
+@dataclass
+class Gte(Where):
+    """Greater than or equal comparison"""
+    key: str
+    value: Any
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {self.key: {"$gte": self.value}}
+
+
+@dataclass
+class Lt(Where):
+    """Less than comparison"""
+    key: str
+    value: Any
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {self.key: {"$lt": self.value}}
+
+
+@dataclass
+class Lte(Where):
+    """Less than or equal comparison"""
+    key: str
+    value: Any
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {self.key: {"$lte": self.value}}
+
+
+@dataclass
+class In(Where):
+    """In comparison - value is in a list"""
+    key: str
+    values: List[Any]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {self.key: {"$in": self.values}}
+
+
+@dataclass
+class Nin(Where):
+    """Not in comparison - value is not in a list"""
+    key: str
+    values: List[Any]
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {self.key: {"$nin": self.values}}
+
+
+@dataclass
+class Contains(Where):
+    """Contains comparison for document content"""
+    content: str
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {"$contains": self.content}
+
+
+@dataclass
+class NotContains(Where):
+    """Not contains comparison for document content"""
+    content: str
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {"$not_contains": self.content}
+
+
+@dataclass
+class Regex(Where):
+    """Regular expression matching"""
+    key: str
+    pattern: str
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {self.key: {"$regex": self.pattern}}
+
+
+@dataclass
+class NotRegex(Where):
+    """Negative regular expression matching"""
+    key: str
+    pattern: str
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {self.key: {"$not_regex": self.pattern}}
+
+
 @dataclass
 class Filter:
     user_ids: Optional[IDs] = None
-    where: Optional[Where] = None
-    where_document: Optional[WhereDocument] = None
+    where: Optional[Any] = None  # Old Where type from chromadb.types
+    where_document: Optional[Any] = None  # Old WhereDocument type
+    
+
+@dataclass
+class SearchFilter:
+    """Filter configuration for the search endpoint"""
+    query_ids: Optional[IDs] = None
+    where_clause: Optional[Where] = None
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert the Filter to a dictionary for JSON serialization"""
+        """Convert the SearchFilter to a dictionary for JSON serialization"""
         result = {}
-        if self.user_ids is not None:
-            result["query_ids"] = self.user_ids
-        if self.where is not None:
-            result["where_clause"] = self.where # type: ignore[assignment]
+        if self.query_ids is not None:
+            result["query_ids"] = self.query_ids
+        if self.where_clause is not None:
+            result["where_clause"] = self.where_clause.to_dict() # type: ignore[assignment]
         return result
 
 

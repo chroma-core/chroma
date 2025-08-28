@@ -312,13 +312,14 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             NotImplementedError: For local/segment API implementations
         
         Example:
-            from chromadb.execution.expression.operator import (
-                Knn, Val, Sum, Filter, Limit, Select
+            from chromadb.execution.expression import (
+                Search, SearchFilter, WhereEq, Knn, Limit, Select
             )
-            from chromadb.execution.expression.plan import Search
             
             payload = Search(
-                filter=Filter(where={"category": "science"}),
+                filter=SearchFilter(
+                    where_clause=WhereEq(key="category", value="science")
+                ),
                 rank=Knn(embedding=[0.1, 0.2, 0.3], limit=100),
                 limit=Limit(offset=0, limit=10),
                 select=Select(fields={"#document", "#score", "#metadata"})
