@@ -352,8 +352,8 @@ impl TestReferenceSegment {
             result: ProjectionOutput {
                 records: records
                     .into_iter()
-                    .skip(plan.limit.skip as usize)
-                    .take(plan.limit.fetch.unwrap_or(u32::MAX) as usize)
+                    .skip(plan.limit.offset as usize)
+                    .take(plan.limit.limit.unwrap_or(u32::MAX) as usize)
                     .map(|(_, mut rec)| {
                         let Projection {
                             document,

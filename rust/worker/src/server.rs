@@ -712,8 +712,8 @@ mod tests {
             scan: Some(scan_operator.clone()),
             filter: None,
             limit: Some(chroma_proto::LimitOperator {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             }),
             projection: Some(chroma_proto::ProjectionOperator {
                 document: false,
@@ -745,8 +745,8 @@ mod tests {
                 where_document: None,
             }),
             limit: Some(chroma_proto::LimitOperator {
-                skip: 0,
-                fetch: None,
+                offset: 0,
+                limit: None,
             }),
             projection: Some(chroma_proto::ProjectionOperator {
                 document: false,

@@ -251,16 +251,16 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Limit {
     #[serde(default)]
-    pub skip: u32,
+    pub offset: u32,
     #[serde(default)]
-    pub fetch: Option<u32>,
+    pub limit: Option<u32>,
 }
 
 impl From<chroma_proto::LimitOperator> for Limit {
     fn from(value: chroma_proto::LimitOperator) -> Self {
         Self {
-            skip: value.skip,
-            fetch: value.fetch,
+            offset: value.offset,
+            limit: value.limit,
         }
     }
 }
@@ -268,8 +268,8 @@ impl From<chroma_proto::LimitOperator> for Limit {
 impl From<Limit> for chroma_proto::LimitOperator {
     fn from(value: Limit) -> Self {
         Self {
-            skip: value.skip,
-            fetch: value.fetch,
+            offset: value.offset,
+            limit: value.limit,
         }
     }
 }

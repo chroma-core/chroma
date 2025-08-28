@@ -25,8 +25,8 @@ message KNNOperator {
 }
 
 message LimitOperator {
-    uint32 skip = 1;
-    optional uint32 fetch = 2;
+    uint32 offset = 1;
+    optional uint32 limit = 2;
 }
 
 message ProjectionOperator {
