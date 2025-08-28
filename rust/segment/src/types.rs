@@ -564,7 +564,6 @@ pub async fn materialize_logs(
 ) -> Result<MaterializeLogsResult, LogMaterializerError> {
     // Trace the total_len since len() iterates over the entire chunk
     // and we don't want to do that just to trace the length.
-    tracing::info!("Total length of logs in materializer: {}", logs.total_len());
     TOTAL_LOGS_PRE_MATERIALIZED.add(logs.len() as u64, &[]);
 
     // The offset ID that should be used for the next record
@@ -910,7 +909,12 @@ pub async fn materialize_logs(
     }
     res.sort_by(|x, y| x.offset_id.cmp(&y.offset_id));
 
-    tracing::info!("Total length of materialized logs: {}", res.len());
+    tracing::info!(
+        "Log count before materialization: {}, after materialization: {}. Total number of logs in chunk: {}",
+        logs.len(),
+        res.len(),
+        logs.total_len()
+    );
     TOTAL_LOGS_POST_MATERIALIZED.add(res.len() as u64, &[]);
 
     Ok(MaterializeLogsResult {
