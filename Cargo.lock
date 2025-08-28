@@ -3776,7 +3776,7 @@ dependencies = [
 [[package]]
 name = "hnswlib"
 version = "0.8.1"
-source = "git+https://github.com/chroma-core/hnswlib.git#340a6fff21f0ba2db2bc720636eba4d7736b9534"
+source = "git+https://github.com/chroma-core/hnswlib.git#581f689d0620fbc6601a9293142888c81b3751e1"
 dependencies = [
  "cc",
  "thiserror 1.0.69",
