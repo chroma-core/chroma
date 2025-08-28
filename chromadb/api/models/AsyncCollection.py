@@ -300,9 +300,9 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Args:
             searches: List of SearchPayload objects, each containing:
                 - filter: Optional filter criteria (user_ids, where)
-                - score: Scoring expression for hybrid search
-                - limit: Optional limit configuration (skip, fetch)
-                - project: Optional projection configuration (fields to return)
+                - rank: Ranking expression for hybrid search
+                - limit: Optional limit configuration (offset, limit)
+                - select: Optional selection configuration (fields to return)
         
         Returns:
             SearchResult: List of search results for each search payload.
@@ -313,15 +313,15 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         
         Example:
             from chromadb.execution.expression.operator import (
-                DenseKnn, RankScore, Val, Sum, Filter, Limit, Project
+                Knn, Val, Sum, Filter, Limit, Select
             )
             from chromadb.execution.expression.plan import SearchPayload
             
             payload = SearchPayload(
                 filter=Filter(where={"category": "science"}),
-                score=RankScore(source=DenseKnn(embedding=[0.1, 0.2, 0.3], limit=100)),
-                limit=Limit(skip=0, fetch=10),
-                project=Project(fields={"$document", "$score", "$metadata"})
+                rank=Knn(embedding=[0.1, 0.2, 0.3], limit=100),
+                limit=Limit(offset=0, limit=10),
+                select=Select(fields={"#document", "#score", "#metadata"})
             )
             
             results = await collection.search([payload])
