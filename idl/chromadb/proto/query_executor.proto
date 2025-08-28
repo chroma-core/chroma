@@ -150,7 +150,7 @@ message ScoreOperator {
     Score score = 1;
 }
 
-message ProjectOperator {
+message SelectOperator {
     repeated string fields = 1;
 }
 
@@ -158,7 +158,7 @@ message SearchPayload {
     FilterOperator filter = 1;
     ScoreOperator score = 2;
     LimitOperator limit = 3;
-    ProjectOperator project = 4;
+    SelectOperator select = 4;
 }
 
 message SearchPlan {
