@@ -1,7 +1,10 @@
 use base64::{prelude::BASE64_STANDARD, DecodeError, Engine};
 use thiserror::Error;
 
-pub const DIMENSION_PREFIX: &str = "DIMENSION";
+// NOTE: This is a temporary hack to store dimension id in prefix of blockfile.
+// This should be removed once we have generic prefix type.
+
+pub const DIMENSION_PREFIX: &str = "DIM";
 
 #[derive(Debug, Error)]
 pub enum Base64DecodeError {

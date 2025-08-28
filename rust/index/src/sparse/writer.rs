@@ -55,11 +55,13 @@ impl SparseFlusher {
 #[derive(Clone)]
 pub struct SparseWriter<'me> {
     block_size: u32,
+    // NOTE: `delta` hold all writes to the writer until commit
+    // Structure: dimension_id -> offset_id -> delete/upsert value
     #[allow(clippy::type_complexity)]
     delta: Arc<Mutex<HashMap<u32, HashMap<u32, Option<f32>>>>>,
     max_writer: BlockfileWriter,
     offset_value_writer: BlockfileWriter,
-    reader: Option<SparseReader<'me>>,
+    old_reader: Option<SparseReader<'me>>,
 }
 
 impl<'me> SparseWriter<'me> {
@@ -67,14 +69,14 @@ impl<'me> SparseWriter<'me> {
         block_size: u32,
         max_writer: BlockfileWriter,
         offset_value_writer: BlockfileWriter,
-        reader: Option<SparseReader<'me>>,
+        old_reader: Option<SparseReader<'me>>,
     ) -> Self {
         Self {
             block_size,
             delta: Default::default(),
             max_writer,
             offset_value_writer,
-            reader,
+            old_reader,
         }
     }
 
@@ -102,7 +104,7 @@ impl<'me> SparseWriter<'me> {
         let mut delta_guard = self.delta.lock().await;
         for (dimension_id, updates) in delta_guard.drain() {
             let encoded_dimension = encode_u32(dimension_id);
-            let (commited_blocks, mut offset_values) = match self.reader.as_ref() {
+            let (commited_blocks, mut offset_values) = match self.old_reader.as_ref() {
                 Some(reader) => {
                     let blocks = reader.get_blocks(&encoded_dimension).await?.collect();
                     let offset_values = reader
