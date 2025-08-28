@@ -588,8 +588,7 @@ pub fn logical_size_of_metadata(metadata: &Metadata) -> usize {
                     MetadataValue::Float(f) => size_of_val(f),
                     MetadataValue::Str(s) => s.len(),
                     MetadataValue::SparseVector(v) => {
-                        v.indices.iter().map(size_of_val).sum::<usize>()
-                            + v.values.iter().map(size_of_val).sum::<usize>()
+                        size_of_val(&v.indices[..]) + size_of_val(&v.values[..])
                     }
                 }
         })

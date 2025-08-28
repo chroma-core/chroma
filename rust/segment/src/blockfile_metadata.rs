@@ -16,6 +16,7 @@ use chroma_index::metadata::types::{
     MetadataIndexError, MetadataIndexFlusher, MetadataIndexReader, MetadataIndexWriter,
 };
 use chroma_index::sparse::reader::SparseReader;
+use chroma_index::sparse::types::DEFAULT_BLOCK_SIZE;
 use chroma_index::sparse::writer::SparseFlusher;
 use chroma_index::sparse::writer::SparseWriter;
 use chroma_types::DatabaseUuid;
@@ -361,7 +362,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                 .await
                 .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
             Some(SparseWriter::new(
-                128,
+                DEFAULT_BLOCK_SIZE,
                 max_writer,
                 offset_value_writer,
                 Some(SparseReader::new(max_reader, offset_value_reader)),
@@ -376,7 +377,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                 .await
                 .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
             Some(SparseWriter::new(
-                128,
+                DEFAULT_BLOCK_SIZE,
                 max_writer,
                 offset_value_writer,
                 None,
