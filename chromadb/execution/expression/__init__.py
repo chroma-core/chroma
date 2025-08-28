@@ -6,6 +6,10 @@ from chromadb.execution.expression.operator import (
     # Core filter components
     SearchFilter,
     
+    # Field proxy for building Where conditions
+    F,
+    Doc,
+    
     # Where expressions
     Where,
     And,
@@ -53,6 +57,10 @@ __all__ = [
     
     # Filter components
     "SearchFilter",
+    
+    # Field proxy
+    "F",
+    "Doc",
     
     # Where expressions
     "Where",

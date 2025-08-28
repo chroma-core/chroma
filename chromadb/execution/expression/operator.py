@@ -33,6 +33,34 @@ class Where:
     def to_dict(self) -> Dict[str, Any]:
         """Convert the Where expression to a dictionary for JSON serialization"""
         raise NotImplementedError("Subclasses must implement to_dict()")
+    
+    def __and__(self, other: 'Where') -> 'And':
+        """Overload & operator for AND"""
+        # If self is already an And, extend it
+        if isinstance(self, And):
+            # If other is also And, combine all conditions
+            if isinstance(other, And):
+                return And(self.conditions + other.conditions)
+            return And(self.conditions + [other])
+        # If other is And, prepend self to it
+        elif isinstance(other, And):
+            return And([self] + other.conditions)
+        # Create new And with both conditions
+        return And([self, other])
+    
+    def __or__(self, other: 'Where') -> 'Or':
+        """Overload | operator for OR"""
+        # If self is already an Or, extend it
+        if isinstance(self, Or):
+            # If other is also Or, combine all conditions
+            if isinstance(other, Or):
+                return Or(self.conditions + other.conditions)
+            return Or(self.conditions + [other])
+        # If other is Or, prepend self to it
+        elif isinstance(other, Or):
+            return Or([self] + other.conditions)
+        # Create new Or with both conditions
+        return Or([self, other])
 
 
 @dataclass
@@ -136,19 +164,21 @@ class Nin(Where):
 @dataclass
 class Contains(Where):
     """Contains comparison for document content"""
+    key: str
     content: str
     
     def to_dict(self) -> Dict[str, Any]:
-        return {"$contains": self.content}
+        return {self.key: {"$contains": self.content}}
 
 
 @dataclass
 class NotContains(Where):
     """Not contains comparison for document content"""
+    key: str
     content: str
     
     def to_dict(self) -> Dict[str, Any]:
-        return {"$not_contains": self.content}
+        return {self.key: {"$not_contains": self.content}}
 
 
 @dataclass
@@ -169,6 +199,77 @@ class NotRegex(Where):
     
     def to_dict(self) -> Dict[str, Any]:
         return {self.key: {"$not_regex": self.pattern}}
+
+
+# Field proxy for building Where conditions
+class F:
+    """Field proxy for building Where conditions with operator overloading"""
+    
+    def __init__(self, name: str):
+        self.name = name
+    
+    # Comparison operators
+    def __eq__(self, value: Any) -> Eq: # type: ignore[override]
+        """Equality: F('field') == value"""
+        return Eq(self.name, value)
+    
+    def __ne__(self, value: Any) -> Ne: # type: ignore[override]
+        """Not equal: F('field') != value"""
+        return Ne(self.name, value)
+    
+    def __gt__(self, value: Any) -> Gt:
+        """Greater than: F('field') > value"""
+        return Gt(self.name, value)
+    
+    def __ge__(self, value: Any) -> Gte:
+        """Greater than or equal: F('field') >= value"""
+        return Gte(self.name, value)
+    
+    def __lt__(self, value: Any) -> Lt:
+        """Less than: F('field') < value"""
+        return Lt(self.name, value)
+    
+    def __le__(self, value: Any) -> Lte:
+        """Less than or equal: F('field') <= value"""
+        return Lte(self.name, value)
+    
+    # Builder methods for operations without operators
+    def is_in(self, values: List[Any]) -> In:
+        """Check if field value is in list: F('field').is_in(['a', 'b'])"""
+        return In(self.name, values)
+    
+    def not_in(self, values: List[Any]) -> Nin:
+        """Check if field value is not in list: F('field').not_in(['a', 'b'])"""
+        return Nin(self.name, values)
+    
+    def regex(self, pattern: str) -> Regex:
+        """Match field against regex: F('field').regex('^pattern')"""
+        return Regex(self.name, pattern)
+    
+    def not_regex(self, pattern: str) -> NotRegex:
+        """Field should not match regex: F('field').not_regex('^pattern')"""
+        return NotRegex(self.name, pattern)
+    
+    def contains(self, content: str) -> Contains:
+        """Check if field contains text: F('field').contains('text')"""
+        return Contains(self.name, content)
+    
+    def not_contains(self, content: str) -> NotContains:
+        """Check if field doesn't contain text: F('field').not_contains('text')"""
+        return NotContains(self.name, content)
+    
+    # Shorthand operators
+    def __mod__(self, pattern: str) -> Regex:
+        """Modulo operator as regex shorthand: F('field') % '^pattern'"""
+        return Regex(self.name, pattern)
+    
+    def __xor__(self, pattern: str) -> NotRegex:
+        """XOR operator as not_regex shorthand: F('field') ^ '^pattern'"""
+        return NotRegex(self.name, pattern)
+    
+    def __matmul__(self, values: List[Any]) -> In:
+        """@ operator as 'in' shorthand: F('field') @ ['a', 'b']"""
+        return In(self.name, values)
 
 
 @dataclass
@@ -370,6 +471,10 @@ class SelectField(Enum):
     EMBEDDING = "#embedding"
     METADATA = "#metadata"
     SCORE = "#score"
+
+
+# Static variable for document field
+Doc = F(SelectField.DOCUMENT.value)
 
 
 @dataclass
