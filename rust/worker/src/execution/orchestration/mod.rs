@@ -8,5 +8,5 @@ pub mod get;
 pub mod knn;
 pub mod knn_filter;
 pub mod projection;
-pub mod score;
+pub mod rank;
 pub mod sparse_knn;
