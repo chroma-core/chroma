@@ -120,7 +120,7 @@ impl SparseKnnOrchestrator {
             key,
             limit,
             batch_measures: Vec::with_capacity(2),
-            merge: Merge { take: limit },
+            merge: Merge { k: limit },
             result_channel: None,
         }
     }
