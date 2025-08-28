@@ -1030,25 +1030,25 @@ impl TryFrom<Score> for chroma_proto::Score {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct Project {
+pub struct Select {
     #[serde(default)]
     pub fields: HashSet<String>,
 }
 
-impl TryFrom<chroma_proto::ProjectOperator> for Project {
+impl TryFrom<chroma_proto::SelectOperator> for Select {
     type Error = QueryConversionError;
 
-    fn try_from(value: chroma_proto::ProjectOperator) -> Result<Self, Self::Error> {
+    fn try_from(value: chroma_proto::SelectOperator) -> Result<Self, Self::Error> {
         Ok(Self {
             fields: value.fields.into_iter().collect(),
         })
     }
 }
 
-impl TryFrom<Project> for chroma_proto::ProjectOperator {
+impl TryFrom<Select> for chroma_proto::SelectOperator {
     type Error = QueryConversionError;
 
-    fn try_from(value: Project) -> Result<Self, Self::Error> {
+    fn try_from(value: Select) -> Result<Self, Self::Error> {
         Ok(Self {
             fields: value.fields.into_iter().collect(),
         })

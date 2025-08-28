@@ -1,7 +1,7 @@
 use super::{
     error::QueryConversionError,
     operator::{
-        Filter, KnnBatch, KnnProjection, Limit, Project, Projection, Scan, ScanToProtoError, Score,
+        Filter, KnnBatch, KnnProjection, Limit, Select, Projection, Scan, ScanToProtoError, Score,
     },
 };
 use crate::chroma_proto;
@@ -146,7 +146,7 @@ pub struct SearchPayload {
     #[serde(default)]
     pub limit: Limit,
     #[serde(default)]
-    pub project: Project,
+    pub select: Select,
 }
 
 impl utoipa::PartialSchema for SearchPayload {
@@ -191,7 +191,7 @@ impl utoipa::PartialSchema for SearchPayload {
                         .required("skip"),
                 )
                 .property(
-                    "project",
+                    "select",
                     ObjectBuilder::new()
                         .schema_type(SchemaType::Type(Type::Object))
                         .property(
@@ -204,7 +204,7 @@ impl utoipa::PartialSchema for SearchPayload {
                 .required("filter")
                 .required("score")
                 .required("limit")
-                .required("project")
+                .required("select")
                 .build(),
         ))
     }
@@ -229,9 +229,9 @@ impl TryFrom<chroma_proto::SearchPayload> for SearchPayload {
                 .limit
                 .ok_or(QueryConversionError::field("limit"))?
                 .into(),
-            project: value
-                .project
-                .ok_or(QueryConversionError::field("project"))?
+            select: value
+                .select
+                .ok_or(QueryConversionError::field("select"))?
                 .try_into()?,
         })
     }
@@ -245,7 +245,7 @@ impl TryFrom<SearchPayload> for chroma_proto::SearchPayload {
             filter: Some(value.filter.try_into()?),
             score: Some(value.score.try_into()?),
             limit: Some(value.limit.into()),
-            project: Some(value.project.try_into()?),
+            select: Some(value.select.try_into()?),
         })
     }
 }
