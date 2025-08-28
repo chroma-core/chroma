@@ -68,7 +68,7 @@ pub struct ScoreOrchestratorOutput {
     pub pulled_log_bytes: u64,
 }
 
-/// The `ScoreOrchestrator` chains operators to evaluate scores, apply limits, and project fields
+/// The `ScoreOrchestrator` chains operators to evaluate scores, apply limits, and select fields
 /// for search results from multiple KNN orchestrators.
 ///
 /// # Pipeline
