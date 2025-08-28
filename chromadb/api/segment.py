@@ -75,7 +75,7 @@ from functools import wraps
 import time
 import logging
 import re
-from chromadb.execution.expression.plan import SearchPayload
+from chromadb.execution.expression.plan import Search
 
 T = TypeVar("T", bound=Callable[..., Any])
 
@@ -423,7 +423,7 @@ class SegmentAPI(ServerAPI):
     def _search(
         self,
         collection_id: UUID,
-        searches: List[SearchPayload],
+        searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> SearchResult:

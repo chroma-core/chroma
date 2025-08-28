@@ -39,7 +39,7 @@ from chromadb.api.types import (
 
 # TODO(hammadb): Unify imports across types vs root __init__.py
 from chromadb.types import Database, Tenant, Collection as CollectionModel
-from chromadb.execution.expression.plan import SearchPayload
+from chromadb.execution.expression.plan import Search
 import chromadb_rust_bindings
 
 
@@ -316,7 +316,7 @@ class RustBindingsAPI(ServerAPI):
     def _search(
         self,
         collection_id: UUID,
-        searches: List[SearchPayload],
+        searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> SearchResult:

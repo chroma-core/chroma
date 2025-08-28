@@ -26,7 +26,7 @@ from chromadb.telemetry.product import ProductTelemetryClient
 from chromadb.utils.async_to_sync import async_to_sync
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api.types import optional_embeddings_to_base64_strings
-from chromadb.execution.expression.plan import SearchPayload
+from chromadb.execution.expression.plan import Search
 
 from chromadb.api.types import (
     Documents,
@@ -406,12 +406,12 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
     async def _search(
         self,
         collection_id: UUID,
-        searches: List[SearchPayload],
+        searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> SearchResult:
         """Performs hybrid search on a collection"""
-        # Convert SearchPayload objects to dictionaries
+        # Convert Search objects to dictionaries
         payload = {"searches": [s.to_dict() for s in searches]}
         
         resp_json = await self._make_request(

@@ -29,7 +29,7 @@ from chromadb.api.types import (
     SearchResult,
 )
 from chromadb.auth import UserIdentity
-from chromadb.execution.expression.plan import SearchPayload
+from chromadb.execution.expression.plan import Search
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 import chromadb.utils.embedding_functions as ef
@@ -654,7 +654,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     def _search(
         self,
         collection_id: UUID,
-        searches: List[SearchPayload],
+        searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> SearchResult:

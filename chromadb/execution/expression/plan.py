@@ -28,7 +28,7 @@ class KNNPlan:
 
 
 @dataclass
-class SearchPayload:
+class Search:
     """Payload for hybrid search operations"""
     filter: Filter = field(default_factory=Filter)
     rank: Rank = field(default_factory=lambda: Val(value=0.0))
@@ -36,7 +36,7 @@ class SearchPayload:
     select: Select = field(default_factory=Select)
     
     def to_dict(self) -> Dict[str, Any]:
-        """Convert the SearchPayload to a dictionary for JSON serialization"""
+        """Convert the Search to a dictionary for JSON serialization"""
         return {
             "filter": self.filter.to_dict(),
             "rank": self.rank.to_dict(),

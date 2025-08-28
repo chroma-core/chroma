@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Optional, List, Dict, Set, Any, Union
 
 from chromadb.api.types import Embeddings, IDs, Include, SparseVector
@@ -212,15 +213,23 @@ class Val(Rank):
     def to_dict(self) -> Dict[str, Any]:
         return {"$val": self.value}
 
+class SelectField(Enum):
+    """Predefined field types for Select"""
+    DOCUMENT = "#document"
+    EMBEDDING = "#embedding"
+    METADATA = "#metadata"
+    SCORE = "#score"
+
+
 @dataclass
 class Select:
     """Selection configuration for search results
     
     Fields can be:
-    - "#document" - Select document field
-    - "#embedding" - Select embedding field  
-    - "#metadata" - Select all metadata
-    - "#score" - Select score field
+    - SelectField.DOCUMENT - Select document field
+    - SelectField.EMBEDDING - Select embedding field  
+    - SelectField.METADATA - Select all metadata
+    - SelectField.SCORE - Select score field
     - Any other string - Select specific metadata property
     """
     fields: Set[str] = field(default_factory=set)

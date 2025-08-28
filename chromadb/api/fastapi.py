@@ -17,7 +17,7 @@ from chromadb import __version__
 from chromadb.api.base_http_client import BaseHTTPClient
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api import ServerAPI
-from chromadb.execution.expression.plan import SearchPayload
+from chromadb.execution.expression.plan import Search
 
 from chromadb.api.types import (
     Documents,
@@ -363,12 +363,12 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     def _search(
         self,
         collection_id: UUID,
-        searches: List[SearchPayload],
+        searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> SearchResult:
         """Performs hybrid search on a collection"""
-        # Convert SearchPayload objects to dictionaries
+        # Convert Search objects to dictionaries
         payload = {"searches": [s.to_dict() for s in searches]}
         
         resp_json = self._make_request(

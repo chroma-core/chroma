@@ -20,7 +20,7 @@ from chromadb.api.types import (
     SearchResult,
 )
 from chromadb.api.collection_configuration import UpdateCollectionConfiguration
-from chromadb.execution.expression.plan import SearchPayload
+from chromadb.execution.expression.plan import Search
 
 import logging
 
@@ -296,13 +296,13 @@ class Collection(CollectionCommon["ServerAPI"]):
 
     def search(
         self,
-        searches: List[SearchPayload],
+        searches: List[Search],
     ) -> SearchResult:
         """Perform hybrid search on the collection.
         This is an experimental API that only works for Hosted Chroma for now.
         
         Args:
-            searches: List of SearchPayload objects, each containing:
+            searches: List of Search objects, each containing:
                 - filter: Optional filter criteria (user_ids, where)
                 - rank: Ranking expression for hybrid search
                 - limit: Optional limit configuration (offset, limit)
@@ -319,9 +319,9 @@ class Collection(CollectionCommon["ServerAPI"]):
             from chromadb.execution.expression.operator import (
                 Knn, Val, Sum, Filter, Limit, Select
             )
-            from chromadb.execution.expression.plan import SearchPayload
+            from chromadb.execution.expression.plan import Search
             
-            payload = SearchPayload(
+            payload = Search(
                 filter=Filter(where={"category": "science"}),
                 rank=Knn(embedding=[0.1, 0.2, 0.3], limit=100),
                 limit=Limit(offset=0, limit=10),
