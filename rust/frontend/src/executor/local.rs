@@ -162,8 +162,8 @@ impl LocalExecutor {
                     scan: plan.scan.clone(),
                     filter: filter.clone(),
                     limit: Limit {
-                        skip: 0,
-                        fetch: None,
+                        offset: 0,
+                        limit: None,
                     },
                     proj: Default::default(),
                 };
@@ -268,8 +268,8 @@ impl LocalExecutor {
                     where_clause: None,
                 },
                 limit: Limit {
-                    skip: 0,
-                    fetch: None,
+                    offset: 0,
+                    limit: None,
                 },
                 proj: Projection {
                     document: plan.proj.projection.document,

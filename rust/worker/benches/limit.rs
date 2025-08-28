@@ -32,8 +32,8 @@ fn bench_limit(criterion: &mut Criterion) {
 
         for offset in [0, record_count / 2, record_count - FETCH] {
             let limit_operator = Limit {
-                skip: offset as u32,
-                fetch: Some(FETCH as u32),
+                offset: offset as u32,
+                limit: Some(FETCH as u32),
             };
 
             let routine = |(op, input): (Limit, LimitInput)| async move {

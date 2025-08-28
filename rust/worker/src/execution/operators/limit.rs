@@ -94,16 +94,16 @@ impl SeekScanner<'_> {
         Ok(log_rank + record_rank - mask_rank)
     }
 
-    // Seek the starting offset given the number of elements to skip
-    // There should be exactly skip elements before the starting offset in the maginary segment
+    // Seek the starting offset given the number of elements to offset
+    // There should be exactly offset elements before the starting offset in the maginary segment
     // The implementation is a binary search based on [`std::slice::binary_search_by`]
     //
     // [`std::slice::binary_search_by`]: https://github.com/rust-lang/rust/blob/705cfe0e966399e061d64dd3661bfbc57553ed87/library/core/src/slice/mod.rs#L2731-L2827
     // Retrieval timestamp: Nov 1, 2024
     // Source commit hash: a0215d8e46aab41219dea0bb1cbaaf97dafe2f89
     // Source license: Apache-2.0 or MIT
-    async fn seek_starting_offset(&self, skip: u64) -> Result<u32, LimitError> {
-        if skip == 0 {
+    async fn seek_starting_offset(&self, offset: u64) -> Result<u32, LimitError> {
+        if offset == 0 {
             return Ok(0);
         }
 
@@ -120,20 +120,24 @@ impl SeekScanner<'_> {
             let half = size / 2;
             let mid = base + half;
 
-            let cmp = self.joint_rank(mid).await?.cmp(&skip);
+            let cmp = self.joint_rank(mid).await?.cmp(&offset);
             base = if cmp == Ordering::Greater { base } else { mid };
             size -= half;
         }
 
         // The above loop tests all midpoints. However, it does not test the very last element.
-        // We want the greatest offset such that self.join_rank(offset) <= skip, so we need to test the last element as well.
-        let cmp = self.joint_rank(base).await?.cmp(&skip);
+        // We want the greatest offset such that self.join_rank(offset) <= offset, so we need to test the last element as well.
+        let cmp = self.joint_rank(base).await?.cmp(&offset);
         Ok(base + (cmp == Ordering::Less) as u32)
     }
 
     // Seek the start in the log and record segment, then scan for the specified number of offset ids
-    async fn seek_and_scan(&self, skip: u64, mut fetch: u64) -> Result<RoaringBitmap, LimitError> {
-        let starting_offset = self.seek_starting_offset(skip).await?;
+    async fn seek_and_scan(
+        &self,
+        offset: u64,
+        mut limit: u64,
+    ) -> Result<RoaringBitmap, LimitError> {
+        let starting_offset = self.seek_starting_offset(offset).await?;
         let mut log_index = self.log_offset_ids.rank(starting_offset)
             - self.log_offset_ids.contains(starting_offset) as u64;
         let mut log_offset_id = self.log_offset_ids.select(u32::try_from(log_index)?);
@@ -141,7 +145,7 @@ impl SeekScanner<'_> {
         let mut record_offset_id = record_offset_stream.next().await.transpose()?;
         let mut merged_result = Vec::new();
 
-        while fetch > 0 {
+        while limit > 0 {
             match (log_offset_id, record_offset_id) {
                 (_, Some(oid)) if self.mask.contains(oid) => {
                     record_offset_id = record_offset_stream.next().await.transpose()?;
@@ -168,7 +172,7 @@ impl SeekScanner<'_> {
                 }
                 _ => break,
             };
-            fetch -= 1;
+            limit -= 1;
         }
 
         Ok(RoaringBitmap::from_sorted_iter(merged_result)
@@ -226,11 +230,11 @@ impl Operator<LimitInput, LimitOutput> for Limit {
         let materialized_offset_ids = match &input.compact_offset_ids {
             SignedRoaringBitmap::Include(rbm) => {
                 let mut merged_offset_ids = materialized_log_offset_ids | rbm;
-                merged_offset_ids.remove_smallest(self.skip as u64);
-                if let Some(fetch_count) = self.fetch {
-                    let truncated_fetch_count = merged_offset_ids.len().min(fetch_count as u64);
+                merged_offset_ids.remove_smallest(self.offset as u64);
+                if let Some(limit_count) = self.limit {
+                    let truncated_limit_count = merged_offset_ids.len().min(limit_count as u64);
                     merged_offset_ids
-                        .remove_biggest(merged_offset_ids.len() - truncated_fetch_count);
+                        .remove_biggest(merged_offset_ids.len() - truncated_limit_count);
                 }
                 merged_offset_ids
             }
@@ -239,9 +243,9 @@ impl Operator<LimitInput, LimitOutput> for Limit {
                     let record_count = reader.count().await?;
                     let log_count = materialized_log_offset_ids.len();
                     let filter_match_count = log_count + record_count as u64 - rbm.len();
-                    let truncated_skip = (self.skip as u64).min(filter_match_count);
-                    let truncated_fetch = (self.fetch.unwrap_or(u32::MAX) as u64)
-                        .min(filter_match_count - truncated_skip);
+                    let truncated_offset = (self.offset as u64).min(filter_match_count);
+                    let truncated_limit = (self.limit.unwrap_or(u32::MAX) as u64)
+                        .min(filter_match_count - truncated_offset);
 
                     let seek_scanner = SeekScanner {
                         log_offset_ids: &materialized_log_offset_ids,
@@ -249,14 +253,14 @@ impl Operator<LimitInput, LimitOutput> for Limit {
                         mask: rbm,
                     };
                     seek_scanner
-                        .seek_and_scan(truncated_skip, truncated_fetch)
+                        .seek_and_scan(truncated_offset, truncated_limit)
                         .await?
                 } else {
-                    materialized_log_offset_ids.remove_smallest(self.skip as u64);
-                    if let Some(take_count) = self.fetch {
+                    materialized_log_offset_ids.remove_smallest(self.offset as u64);
+                    if let Some(limit_count) = self.limit {
                         materialized_log_offset_ids
                             .into_iter()
-                            .take(take_count as usize)
+                            .take(limit_count as usize)
                             .collect()
                     } else {
                         materialized_log_offset_ids
@@ -317,8 +321,8 @@ mod tests {
         .await;
 
         let limit_operator = Limit {
-            skip: 0,
-            fetch: None,
+            offset: 0,
+            limit: None,
         };
 
         let limit_output = limit_operator
@@ -330,7 +334,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_overskip() {
+    async fn test_overoffset() {
         let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::full(),
             SignedRoaringBitmap::Exclude((31..=60).collect()),
@@ -338,8 +342,8 @@ mod tests {
         .await;
 
         let limit_operator = Limit {
-            skip: 100,
-            fetch: None,
+            offset: 100,
+            limit: None,
         };
 
         let limit_output = limit_operator
@@ -351,7 +355,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_overfetch() {
+    async fn test_overlimit() {
         let (_test_segment, limit_input) = setup_limit_input(
             SignedRoaringBitmap::full(),
             SignedRoaringBitmap::Exclude((31..=60).collect()),
@@ -359,8 +363,8 @@ mod tests {
         .await;
 
         let limit_operator = Limit {
-            skip: 0,
-            fetch: Some(1000),
+            offset: 0,
+            limit: Some(1000),
         };
 
         let limit_output = limit_operator
@@ -380,8 +384,8 @@ mod tests {
         .await;
 
         let limit_operator = Limit {
-            skip: 60,
-            fetch: Some(30),
+            offset: 60,
+            limit: Some(30),
         };
 
         let limit_output = limit_operator
@@ -401,8 +405,8 @@ mod tests {
         .await;
 
         let limit_operator = Limit {
-            skip: 30,
-            fetch: Some(20),
+            offset: 30,
+            limit: Some(20),
         };
 
         let limit_output = limit_operator
@@ -425,8 +429,8 @@ mod tests {
             setup_limit_input(SignedRoaringBitmap::empty(), SignedRoaringBitmap::full()).await;
 
         let limit_operator = Limit {
-            skip: 99,
-            fetch: Some(1),
+            offset: 99,
+            limit: Some(1),
         };
 
         let limit_output = limit_operator
