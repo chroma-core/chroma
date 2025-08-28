@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
@@ -48,6 +50,7 @@ pub struct WorkerServer {
     jemalloc_pprof_server_port: Option<u16>,
     // config
     fetch_log_batch_size: u32,
+    shutdown_grace_period: Duration,
 }
 
 #[async_trait]
@@ -90,6 +93,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             port: config.my_port,
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
+            shutdown_grace_period: config.grpc_shutdown_grace_period,
         })
     }
 }
@@ -120,6 +124,7 @@ impl WorkerServer {
             chroma_types::chroma_proto::debug_server::DebugServer::new(worker.clone()),
         );
 
+        let shutdown_grace_period = worker.shutdown_grace_period;
         let server = server.serve_with_shutdown(addr, async {
             let mut sigterm = match signal(SignalKind::terminate()) {
                 Ok(sigterm) => sigterm,
@@ -129,7 +134,10 @@ impl WorkerServer {
                 }
             };
             sigterm.recv().await;
-            tracing::info!("Received SIGTERM, shutting down");
+            tracing::info!("Received SIGTERM, waiting for grace period...");
+            // Note: gRPC calls can still be successfully made during this period. We rely on the memberlist updating to stop clients from sending new requests. Ideally there would be a Tower layer that rejected new requests during this period with UNAVAILABLE or similar.
+            tokio::time::sleep(shutdown_grace_period).await;
+            tracing::info!("Grace period ended, shutting down server...");
         });
 
         tokio::spawn(async move {
@@ -485,6 +493,7 @@ mod tests {
             port,
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
+            shutdown_grace_period: Duration::from_secs(1),
         };
 
         let dispatcher = Dispatcher::new(DispatcherConfig {

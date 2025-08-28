@@ -198,10 +198,28 @@ type LogClient =
     LogServiceClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>;
 
 #[derive(Clone, Debug)]
+struct GrpcLogMetrics {
+    total_logs_pushed: opentelemetry::metrics::Counter<u64>,
+}
+
+impl Default for GrpcLogMetrics {
+    fn default() -> Self {
+        let meter = opentelemetry::global::meter("chroma.log_client");
+        Self {
+            total_logs_pushed: meter
+                .u64_counter("total_logs_pushed")
+                .with_description("The total number of log records pushed")
+                .build(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct GrpcLog {
     config: GrpcLogConfig,
     client: LogClient,
     alt_client_assigner: Option<ClientAssigner<LogClient>>,
+    metrics: GrpcLogMetrics,
 }
 
 impl GrpcLog {
@@ -215,6 +233,7 @@ impl GrpcLog {
             config,
             client,
             alt_client_assigner,
+            metrics: GrpcLogMetrics::default(),
         }
     }
 }
@@ -428,6 +447,7 @@ impl GrpcLog {
                         }
                     }
                 }
+
                 Ok(result)
             }
             Err(e) => {
@@ -449,6 +469,7 @@ impl GrpcLog {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
     ) -> Result<(), GrpcPushLogsError> {
+        let num_records = records.len();
         let request = chroma_proto::PushLogsRequest {
             collection_id: collection_id.0.to_string(),
 
@@ -480,6 +501,8 @@ impl GrpcLog {
         if resp.log_is_sealed {
             Err(GrpcPushLogsError::Sealed)
         } else {
+            self.metrics.total_logs_pushed.add(num_records as u64, &[]);
+
             Ok(())
         }
     }

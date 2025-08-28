@@ -9,9 +9,11 @@ use chroma_types::{
     operator::{Filter, GetResult, Limit, Projection, ProjectionOutput},
     CollectionAndSegments,
 };
+use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
@@ -200,6 +202,7 @@ impl Orchestrator for GetOrchestrator {
         );
         // Prefetch task is detached from the orchestrator
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
 
         // Prefetch metadata segment.
@@ -213,7 +216,8 @@ impl Orchestrator for GetOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
-        tasks.push((prefetch_metadata_task, Some(prefetch_span)));
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
+        tasks.push((prefetch_metadata_task, Some(prefetch_span.clone())));
 
         // Fetch log task.
         let fetch_log_task = wrap(

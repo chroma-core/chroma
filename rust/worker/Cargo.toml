@@ -44,6 +44,7 @@ num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
 tantivy = { workspace = true }
 clap = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 
 chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }

@@ -536,6 +536,24 @@ impl<'log_data> Iterator for MaterializeLogsResultIter<'log_data> {
     }
 }
 
+static TOTAL_LOGS_PRE_MATERIALIZED: std::sync::LazyLock<opentelemetry::metrics::Counter<u64>> =
+    std::sync::LazyLock::new(|| {
+        let meter = opentelemetry::global::meter("chroma");
+        meter
+            .u64_counter("total_logs_pre_materialization")
+            .with_description("The total number of log records provided to materialize_logs()")
+            .build()
+    });
+
+static TOTAL_LOGS_POST_MATERIALIZED: std::sync::LazyLock<opentelemetry::metrics::Counter<u64>> =
+    std::sync::LazyLock::new(|| {
+        let meter = opentelemetry::global::meter("chroma");
+        meter
+            .u64_counter("total_logs_post_materialized")
+            .with_description("The total number of log records materialized by materialize_logs()")
+            .build()
+    });
+
 /// Materializes a chunk of log records.
 /// - `record_segment_reader` can be `None` if the record segment is uninitialized.
 /// - `next_offset_id` must be provided if the log was partitioned and `materialize_logs()` is called for each partition: if it is not provided, generated offset IDs will conflict between partitions. When it is not provided, it is initialized from the max offset ID in the record segment.
@@ -546,7 +564,8 @@ pub async fn materialize_logs(
 ) -> Result<MaterializeLogsResult, LogMaterializerError> {
     // Trace the total_len since len() iterates over the entire chunk
     // and we don't want to do that just to trace the length.
-    tracing::info!("Total length of logs in materializer: {}", logs.total_len());
+    TOTAL_LOGS_PRE_MATERIALIZED.add(logs.len() as u64, &[]);
+
     // The offset ID that should be used for the next record
     let next_offset_id = match next_offset_id.as_ref() {
         Some(next_offset_id) => next_offset_id.clone(),
@@ -889,6 +908,15 @@ pub async fn materialize_logs(
         res.push(value);
     }
     res.sort_by(|x, y| x.offset_id.cmp(&y.offset_id));
+
+    tracing::info!(
+        "Log count before materialization: {}, after materialization: {}. Total number of logs in chunk: {}",
+        logs.len(),
+        res.len(),
+        logs.total_len()
+    );
+    TOTAL_LOGS_POST_MATERIALIZED.add(res.len() as u64, &[]);
+
     Ok(MaterializeLogsResult {
         logs,
         materialized: Chunk::new(res.into()),
