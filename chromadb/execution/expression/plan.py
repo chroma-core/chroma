@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any
 
 from chromadb.execution.expression.operator import (
-    KNN, Filter, Limit, Projection, Scan, Rank, Select, Val
+    KNN, Filter, Limit, Projection, Scan, Rank, Select, Val, SearchFilter
 )
 
 
@@ -30,7 +30,7 @@ class KNNPlan:
 @dataclass
 class Search:
     """Payload for hybrid search operations"""
-    filter: Filter = field(default_factory=Filter)
+    filter: SearchFilter = field(default_factory=SearchFilter)
     rank: Rank = field(default_factory=lambda: Val(value=0.0))
     limit: Limit = field(default_factory=Limit)
     select: Select = field(default_factory=Select)
