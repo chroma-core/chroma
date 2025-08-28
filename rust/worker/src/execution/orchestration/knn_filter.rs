@@ -11,13 +11,14 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_tracing::link_event;
 use chroma_types::{
     operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, Segment, SegmentType,
 };
+use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
-use tracing::{Level, Span};
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::execution::operators::{
     fetch_log::{FetchLogError, FetchLogOperator, FetchLogOutput},
@@ -236,12 +237,9 @@ impl Orchestrator for KnnFilterOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         // Prefetch task is detached from the orchestrator
-        let spann_prefetch_span = link_event!(
-            Level::INFO,
-            tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.collection_and_segments.vector_segment.id),
-            "Creating spann segment prefetch task"
-        );
-        tasks.push((prefetch_task, Some(spann_prefetch_span)));
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.collection_and_segments.vector_segment.id);
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
+        tasks.push((prefetch_task, Some(prefetch_span)));
 
         // prefetch record segment
         let prefetch_record_segment_task = wrap(
@@ -254,12 +252,9 @@ impl Orchestrator for KnnFilterOrchestrator {
             self.context.task_cancellation_token.clone(),
         );
         // Prefetch task is detached from the orchestrator
-        let record_prefetch_span = link_event!(
-            Level::INFO,
-            tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id),
-            "Creating record segment prefetch task"
-        );
-        tasks.push((prefetch_record_segment_task, Some(record_prefetch_span)));
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
+        tasks.push((prefetch_record_segment_task, Some(prefetch_span)));
 
         // Prefetch metadata segment.
         let prefetch_metadata_task = wrap(
@@ -271,12 +266,9 @@ impl Orchestrator for KnnFilterOrchestrator {
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
         );
-        let metadata_prefetch_span = link_event!(
-            Level::INFO,
-            tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id),
-            "Creating metadata segment prefetch task"
-        );
-        tasks.push((prefetch_metadata_task, Some(metadata_prefetch_span)));
+        let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
+        Span::current().add_link(prefetch_span.context().span().span_context().clone());
+        tasks.push((prefetch_metadata_task, Some(prefetch_span)));
 
         // Fetch log task.
         let fetch_log_task = wrap(

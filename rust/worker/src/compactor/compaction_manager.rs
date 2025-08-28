@@ -31,11 +31,11 @@ use chroma_system::Dispatcher;
 use chroma_system::Orchestrator;
 use chroma_system::TaskResult;
 use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
-use chroma_tracing::link_event;
 use chroma_types::CollectionUuid;
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::StreamExt;
+use opentelemetry::trace::TraceContextExt;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -52,6 +52,7 @@ use tracing::instrument;
 use tracing::span;
 use tracing::Span;
 use tracing::{Instrument, Level};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 type CompactionOutput = Result<CompactionResponse, Box<dyn ChromaError>>;
@@ -179,17 +180,13 @@ impl CompactionManager {
         self.scheduler.schedule().await;
         let jobs_iter = self.scheduler.get_jobs();
         for job in jobs_iter {
-            let instrumented_span = link_event!(
-                Level::INFO,
-                span!(
-                    parent: None,
-                    tracing::Level::INFO,
-                    "Compacting job",
-                    collection_id = ?job.collection_id
-                ),
-                "Starting compaction for collection {}",
-                job.collection_id
+            let instrumented_span = span!(
+                parent: None,
+                tracing::Level::INFO,
+                "Compacting job",
+                collection_id = ?job.collection_id
             );
+            Span::current().add_link(instrumented_span.context().span().span_context().clone());
 
             let future = self
                 .context

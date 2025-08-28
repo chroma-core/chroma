@@ -28,13 +28,14 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_tracing::link_event;
 use chroma_types::{
     Chunk, Collection, CollectionUuid, LogRecord, SegmentFlushInfo, SegmentType, SegmentUuid,
 };
+use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
-use tracing::{Level, Span};
+use tracing::Span;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::execution::operators::{
     apply_log_to_segment_writer::{
@@ -855,12 +856,12 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
             );
+
             // Prefetch task is detached from the orchestrator
-            let prefetch_span = link_event!(
-                Level::INFO,
-                tracing::info_span!(parent: None, "Prefetch segment", segment_id = %segment_id),
-                "Spawning prefetch task"
-            );
+            let prefetch_span =
+                tracing::info_span!(parent: None, "Prefetch segment", segment_id = %segment_id);
+            Span::current().add_link(prefetch_span.context().span().span_context().clone());
+
             self.send(prefetch_task, ctx, Some(prefetch_span)).await;
         }
 

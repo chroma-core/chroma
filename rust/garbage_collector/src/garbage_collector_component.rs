@@ -17,16 +17,17 @@ use chroma_system::{
     wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
     TaskResult,
 };
-use chroma_tracing::link_event;
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
+use opentelemetry::trace::TraceContextExt;
 use std::{
     fmt::{Debug, Formatter},
     time::{Duration, SystemTime},
 };
 use thiserror::Error;
 use tracing::{span, Instrument, Span};
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 #[allow(dead_code)]
 pub(crate) struct GarbageCollector {
@@ -414,22 +415,16 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
 
         let mut jobs_stream = futures::stream::iter(collections_to_gc)
             .map(|(cleanup_mode, collection)| {
-                let instrumented_span = link_event!(
-                    tracing::Level::INFO,
-                    span!(
-                        parent: None,
-                        tracing::Level::INFO,
-                        "Garbage collection job",
-                        collection_id = ?collection.id,
-                        tenant_id = %collection.tenant,
-                        cleanup_mode = ?cleanup_mode
-                    ),
-
-                    collection_id = ?collection.id,
-                    tenant_id = %collection.tenant,
-                    version_file_path = %collection.version_file_path,
-                    "Spawning garbage collection job"
+                tracing::info!(
+                    "Processing collection: {} (tenant: {}, version_file_path: {})",
+                    collection.id,
+                    collection.tenant,
+                    collection.version_file_path
                 );
+
+
+                let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job", collection_id = ?collection.id, tenant_id = %collection.tenant, cleanup_mode = ?cleanup_mode);
+                Span::current().add_link(instrumented_span.context().span().span_context().clone());
 
                 self.garbage_collect_collection(
                     version_absolute_cutoff_time,
