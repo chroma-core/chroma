@@ -1,6 +1,8 @@
 use base64::{prelude::BASE64_STANDARD, DecodeError, Engine};
 use thiserror::Error;
 
+pub const DEFAULT_BLOCK_SIZE: u32 = 128;
+
 // NOTE: This is a temporary hack to store dimension id in prefix of blockfile.
 // This should be removed once we have generic prefix type.
 
