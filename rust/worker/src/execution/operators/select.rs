@@ -7,7 +7,7 @@ use chroma_segment::{
 };
 use chroma_system::Operator;
 use chroma_types::{
-    operator::{Select, SelectField, RecordMeasure, SearchPayloadResult, SearchRecord},
+    operator::{RecordMeasure, SearchPayloadResult, SearchRecord, Select, SelectField},
     Segment,
 };
 use futures::{stream, StreamExt, TryStreamExt};
@@ -61,10 +61,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
     type Error = SelectError;
 
     async fn run(&self, input: &SelectInput) -> Result<SelectOutput, SelectError> {
-        tracing::trace!(
-            "Running select operator on {} records",
-            input.records.len()
-        );
+        tracing::trace!("Running select operator on {} records", input.records.len());
 
         if input.records.is_empty() {
             return Ok(SearchPayloadResult {
@@ -130,47 +127,46 @@ impl Operator<SelectInput, SelectOutput> for Select {
             .records
             .iter()
             .map(|record| async {
-                let (id, document, embedding, mut full_metadata) =
-                    match offset_id_to_log_record.get(&record.offset_id) {
-                        // The offset id is in the log
-                        Some(log) => {
-                            let log = log
-                                .hydrate(record_segment_reader.as_ref())
-                                .await
-                                .map_err(SelectError::LogMaterializer)?;
+                let (id, document, embedding, mut full_metadata) = match offset_id_to_log_record
+                    .get(&record.offset_id)
+                {
+                    // The offset id is in the log
+                    Some(log) => {
+                        let log = log
+                            .hydrate(record_segment_reader.as_ref())
+                            .await
+                            .map_err(SelectError::LogMaterializer)?;
+
+                        (
+                            log.get_user_id().to_string(),
+                            select_document
+                                .then(|| log.merged_document_ref().map(str::to_string))
+                                .flatten(),
+                            select_embedding.then(|| log.merged_embeddings_ref().to_vec()),
+                            log.merged_metadata(),
+                        )
+                    }
+                    // The offset id is in the record segment
+                    None => {
+                        if let Some(reader) = &record_segment_reader {
+                            let record = reader
+                                .get_data_for_offset_id(record.offset_id)
+                                .await?
+                                .ok_or(SelectError::RecordSegmentPhantomRecord(record.offset_id))?;
 
                             (
-                                log.get_user_id().to_string(),
+                                record.id.to_string(),
                                 select_document
-                                    .then(|| log.merged_document_ref().map(str::to_string))
+                                    .then(|| record.document.map(|s| s.to_string()))
                                     .flatten(),
-                                select_embedding.then(|| log.merged_embeddings_ref().to_vec()),
-                                log.merged_metadata(),
+                                select_embedding.then(|| record.embedding.to_vec()),
+                                record.metadata.unwrap_or_default(),
                             )
+                        } else {
+                            return Err(SelectError::RecordSegmentUninitialized);
                         }
-                        // The offset id is in the record segment
-                        None => {
-                            if let Some(reader) = &record_segment_reader {
-                                let record = reader
-                                    .get_data_for_offset_id(record.offset_id)
-                                    .await?
-                                    .ok_or(SelectError::RecordSegmentPhantomRecord(
-                                        record.offset_id,
-                                    ))?;
-
-                                (
-                                    record.id.to_string(),
-                                    select_document
-                                        .then(|| record.document.map(|s| s.to_string()))
-                                        .flatten(),
-                                    select_embedding.then(|| record.embedding.to_vec()),
-                                    record.metadata.unwrap_or_default(),
-                                )
-                            } else {
-                                return Err(SelectError::RecordSegmentUninitialized);
-                            }
-                        }
-                    };
+                    }
+                };
 
                 if !select_all_metadata {
                     full_metadata.retain(|key, _| metadata_fields_to_select.contains(key));
