@@ -28,7 +28,26 @@ class Scan:
 # Where expression types for filtering
 @dataclass
 class Where:
-    """Base class for Where expressions (algebraic data type)"""
+    """Base class for Where expressions (algebraic data type).
+    
+    Supports logical operators for combining conditions:
+        - AND: where1 & where2
+        - OR: where1 | where2
+    
+    Examples:
+        # Simple conditions
+        where1 = F("status") == "active"
+        where2 = F("score") > 0.5
+        
+        # Combining with AND
+        combined_and = where1 & where2
+        
+        # Combining with OR
+        combined_or = where1 | where2
+        
+        # Complex expressions
+        complex_where = (F("status") == "active") & ((F("score") > 0.5) | (F("priority") == "high"))
+    """
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert the Where expression to a dictionary for JSON serialization"""
@@ -203,7 +222,28 @@ class NotRegex(Where):
 
 # Field proxy for building Where conditions
 class F:
-    """Field proxy for building Where conditions with operator overloading"""
+    """Field proxy for building Where conditions with operator overloading.
+    
+    Examples:
+        # Equality
+        F("status") == "active"
+        
+        # Comparison
+        F("score") > 0.5
+        F("age") >= 18
+        
+        # Membership
+        F("category").is_in(["science", "tech"])
+        F("category") @ ["science", "tech"]  # shorthand
+        
+        # Pattern matching
+        F("email").regex(r".*@example\.com")
+        F("email") % r".*@example\.com"  # shorthand
+        
+        # Combining conditions
+        (F("status") == "active") & (F("score") > 0.5)
+        (F("category") == "science") | (F("category") == "tech")
+    """
     
     def __init__(self, name: str):
         self.name = name
@@ -281,7 +321,25 @@ class Filter:
 
 @dataclass
 class SearchFilter:
-    """Filter configuration for the search endpoint"""
+    """Filter configuration for the search endpoint.
+    
+    Attributes:
+        query_ids: Optional list of IDs to filter by
+        where_clause: Optional Where expression for metadata filtering
+    
+    Examples:
+        # Filter by IDs
+        SearchFilter(query_ids=["id1", "id2"])
+        
+        # Filter by metadata
+        SearchFilter(where_clause=F("status") == "active")
+        
+        # Combined filtering
+        SearchFilter(
+            query_ids=["id1", "id2"],
+            where_clause=(F("status") == "active") & (F("score") > 0.5)
+        )
+    """
     query_ids: Optional[IDs] = None
     where_clause: Optional[Where] = None
     
@@ -341,7 +399,32 @@ class Projection:
 # Rank expression types for hybrid search
 @dataclass
 class Rank:
-    """Base class for Rank expressions (algebraic data type)"""
+    """Base class for Rank expressions (algebraic data type).
+    
+    Supports arithmetic operations for combining rank expressions:
+        - Addition: rank1 + rank2, rank + 0.5
+        - Subtraction: rank1 - rank2, rank - 0.5
+        - Multiplication: rank1 * rank2, rank * 0.8
+        - Division: rank1 / rank2, rank / 2.0
+        - Negation: -rank
+        - Absolute value: abs(rank)
+    
+    Supports mathematical functions:
+        - Exponential: rank.exp()
+        - Logarithm: rank.log()
+        - Maximum: rank.max(other)
+        - Minimum: rank.min(other)
+    
+    Examples:
+        # Weighted combination
+        Knn(embedding=[0.1, 0.2]) * 0.8 + Val(0.5) * 0.2
+        
+        # Normalization
+        Knn(embedding=[0.1, 0.2]) / Val(10.0)
+        
+        # Clamping
+        Knn(embedding=[0.1, 0.2]).min(1.0).max(0.0)
+    """
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert the Score expression to a dictionary for JSON serialization"""
@@ -569,12 +652,13 @@ class SelectField(Enum):
 
 
 # Static variable for document field
+# Usage: Doc.contains("search text") for document content filtering
 Doc = F(SelectField.DOCUMENT.value)
 
 
 @dataclass
 class Select:
-    """Selection configuration for search results
+    """Selection configuration for search results.
     
     Fields can be:
     - SelectField.DOCUMENT - Select document field
@@ -582,6 +666,16 @@ class Select:
     - SelectField.METADATA - Select all metadata
     - SelectField.SCORE - Select score field
     - Any other string - Select specific metadata property
+    
+    Examples:
+        # Select predefined fields
+        Select(fields={SelectField.DOCUMENT, SelectField.SCORE})
+        
+        # Select specific metadata properties
+        Select(fields={"title", "author", "date"})
+        
+        # Mixed selection
+        Select(fields={SelectField.DOCUMENT, "title", "author"})
     """
     fields: Set[Union[SelectField, str]] = field(default_factory=set)
     

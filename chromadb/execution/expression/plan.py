@@ -30,7 +30,31 @@ class KNNPlan:
 
 @dataclass
 class Search:
-    """Payload for hybrid search operations"""
+    """Payload for hybrid search operations.
+    
+    Can be constructed directly or using builder pattern:
+    
+    Direct construction:
+        Search(
+            filter=SearchFilter(where_clause=Eq("status", "active")),
+            rank=Knn(embedding=[0.1, 0.2]),
+            limit=Limit(limit=10),
+            select=Select(fields={SelectField.DOCUMENT})
+        )
+    
+    Builder pattern:
+        (Search()
+            .where(F("status") == "active")
+            .rank_by(Knn(embedding=[0.1, 0.2]))
+            .limit_by(10)
+            .select_fields(SelectField.DOCUMENT))
+    
+    Empty Search() is valid and will use defaults:
+        - filter: Empty SearchFilter (no filtering)
+        - rank: Val(0.0) (constant score of 0)
+        - limit: No limit
+        - select: Empty selection
+    """
     filter: SearchFilter = field(default_factory=SearchFilter)
     rank: Rank = field(default_factory=lambda: Val(value=0.0))
     limit: Limit = field(default_factory=Limit)

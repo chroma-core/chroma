@@ -299,10 +299,10 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         
         Args:
             searches: List of Search objects, each containing:
-                - filter: Optional filter criteria (user_ids, where)
-                - rank: Ranking expression for hybrid search
-                - limit: Optional limit configuration (offset, limit)
-                - select: Optional selection configuration (fields to return)
+                - filter: SearchFilter with query_ids and where_clause
+                - rank: Ranking expression for hybrid search (defaults to Val(0.0))
+                - limit: Limit configuration for pagination (defaults to no limit)
+                - select: Select configuration for fields to return (defaults to empty)
         
         Returns:
             SearchResult: List of search results for each search payload.
@@ -311,21 +311,33 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         Raises:
             NotImplementedError: For local/segment API implementations
         
-        Example:
+        Examples:
+            # Using builder pattern
             from chromadb.execution.expression import (
-                Search, SearchFilter, WhereEq, Knn, Limit, Select
+                Search, F, Knn, Val, SelectField
             )
             
-            payload = Search(
+            search = (Search()
+                .where((F("category") == "science") & (F("score") > 0.5))
+                .rank_by(Knn(embedding=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
+                .limit_by(10, offset=0)
+                .select_fields(SelectField.DOCUMENT, SelectField.SCORE, "title"))
+            
+            # Direct construction
+            from chromadb.execution.expression import (
+                Search, SearchFilter, Eq, And, Gt, Knn, Limit, Select, SelectField
+            )
+            
+            search = Search(
                 filter=SearchFilter(
-                    where_clause=WhereEq(key="category", value="science")
+                    where_clause=And([Eq("category", "science"), Gt("score", 0.5)])
                 ),
-                rank=Knn(embedding=[0.1, 0.2, 0.3], limit=100),
+                rank=Knn(embedding=[0.1, 0.2, 0.3]),
                 limit=Limit(offset=0, limit=10),
-                select=Select(fields={"#document", "#score", "#metadata"})
+                select=Select(fields={SelectField.DOCUMENT, SelectField.SCORE})
             )
             
-            results = await collection.search([payload])
+            results = await collection.search([search])
         """
         return await self._client._search(
             collection_id=self.id,
