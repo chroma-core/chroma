@@ -1,8 +1,9 @@
-from dataclasses import dataclass, field
-from typing import List, Dict, Any
+from dataclasses import dataclass, field, replace
+from typing import List, Dict, Any, Union, Set
 
 from chromadb.execution.expression.operator import (
-    KNN, Filter, Limit, Projection, Scan, Rank, Select, Val, SearchFilter
+    KNN, Filter, Limit, Projection, Scan, Rank, Select, Val, SearchFilter,
+    SelectField, Where
 )
 
 
@@ -43,3 +44,62 @@ class Search:
             "limit": self.limit.to_dict(),
             "select": self.select.to_dict()
         }
+    
+    # Builder methods for chaining
+    def select_all(self) -> 'Search':
+        """Select all predefined fields (document, embedding, metadata, score)"""
+        new_select = Select(fields={
+            SelectField.DOCUMENT,
+            SelectField.EMBEDDING,
+            SelectField.METADATA,
+            SelectField.SCORE
+        })
+        return replace(self, select=new_select)
+    
+    def select_fields(self, *fields: Union[SelectField, str]) -> 'Search':
+        """Select specific fields
+        
+        Args:
+            *fields: Variable number of SelectField enums or string field names
+            
+        Example:
+            search.select_fields(SelectField.DOCUMENT, SelectField.SCORE, "title", "author")
+        """
+        new_select = Select(fields=set(fields))
+        return replace(self, select=new_select)
+    
+    def where(self, where_clause: Where) -> 'Search':
+        """Set the where clause for filtering
+        
+        Args:
+            where_clause: A Where expression for filtering
+            
+        Example:
+            search.where((F("status") == "active") & (F("score") > 0.5))
+        """
+        new_filter = replace(self.filter, where_clause=where_clause)
+        return replace(self, filter=new_filter)
+    
+    def rank_by(self, rank_expr: Rank) -> 'Search':
+        """Set the ranking expression
+        
+        Args:
+            rank_expr: A Rank expression for scoring
+            
+        Example:
+            search.rank_by(Knn(embedding=[0.1, 0.2]) * 0.8 + Val(0.5) * 0.2)
+        """
+        return replace(self, rank=rank_expr)
+    
+    def limit_by(self, limit: int, offset: int = 0) -> 'Search':
+        """Set the limit and offset for pagination
+        
+        Args:
+            limit: Maximum number of results to return
+            offset: Number of results to skip (default: 0)
+            
+        Example:
+            search.limit_by(20, offset=10)
+        """
+        new_limit = Limit(offset=offset, limit=limit)
+        return replace(self, limit=new_limit)

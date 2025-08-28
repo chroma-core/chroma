@@ -583,8 +583,13 @@ class Select:
     - SelectField.SCORE - Select score field
     - Any other string - Select specific metadata property
     """
-    fields: Set[str] = field(default_factory=set)
+    fields: Set[Union[SelectField, str]] = field(default_factory=set)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert the Select to a dictionary for JSON serialization"""
-        return {"fields": list(self.fields)}
+        # Convert SelectField enums to their string values
+        field_strings = {
+            f.value if isinstance(f, SelectField) else f 
+            for f in self.fields
+        }
+        return {"fields": list(field_strings)}
