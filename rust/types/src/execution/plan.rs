@@ -1,12 +1,19 @@
 use super::{
     error::QueryConversionError,
     operator::{
-        Filter, KnnBatch, KnnProjection, Limit, Select, Projection, Scan, ScanToProtoError, Score,
+        Filter, KnnBatch, KnnProjection, Limit, Projection, Rank, Scan, ScanToProtoError, Select,
     },
 };
 use crate::chroma_proto;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use utoipa::{
+    openapi::{
+        schema::{Schema, SchemaType},
+        ArrayBuilder, Object, ObjectBuilder, RefOr, Type,
+    },
+    PartialSchema,
+};
 use validator::Validate;
 
 #[derive(Error, Debug)]
@@ -142,18 +149,15 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
 pub struct SearchPayload {
     #[serde(default)]
     pub filter: Filter,
-    pub score: Score,
+    pub rank: Rank,
     #[serde(default)]
     pub limit: Limit,
     #[serde(default)]
     pub select: Select,
 }
 
-impl utoipa::PartialSchema for SearchPayload {
-    fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
-        use utoipa::openapi::schema::*;
-        use utoipa::openapi::*;
-
+impl PartialSchema for SearchPayload {
+    fn schema() -> RefOr<Schema> {
         RefOr::T(Schema::Object(
             ObjectBuilder::new()
                 .schema_type(SchemaType::Type(Type::Object))
@@ -174,10 +178,10 @@ impl utoipa::PartialSchema for SearchPayload {
                         ),
                 )
                 .property(
-                    "score",
+                    "rank",
                     ObjectBuilder::new()
                         .schema_type(SchemaType::Type(Type::Object))
-                        .description(Some("Scoring expression for hybrid search"))
+                        .description(Some("Ranking expression for hybrid search"))
                         .additional_properties(Some(Schema::Object(Object::with_type(
                             SchemaType::Type(Type::Object),
                         )))),
@@ -202,7 +206,7 @@ impl utoipa::PartialSchema for SearchPayload {
                         .required("fields"),
                 )
                 .required("filter")
-                .required("score")
+                .required("rank")
                 .required("limit")
                 .required("select")
                 .build(),
@@ -221,9 +225,9 @@ impl TryFrom<chroma_proto::SearchPayload> for SearchPayload {
                 .filter
                 .ok_or(QueryConversionError::field("filter"))?
                 .try_into()?,
-            score: value
-                .score
-                .ok_or(QueryConversionError::field("score"))?
+            rank: value
+                .rank
+                .ok_or(QueryConversionError::field("rank"))?
                 .try_into()?,
             limit: value
                 .limit
@@ -243,7 +247,7 @@ impl TryFrom<SearchPayload> for chroma_proto::SearchPayload {
     fn try_from(value: SearchPayload) -> Result<Self, Self::Error> {
         Ok(Self {
             filter: Some(value.filter.try_into()?),
-            score: Some(value.score.try_into()?),
+            rank: Some(value.rank.try_into()?),
             limit: Some(value.limit.into()),
             select: Some(value.select.try_into()?),
         })
