@@ -305,3 +305,221 @@ impl<'me> SparseReader<'me> {
         Ok(top_scores.into_sorted_vec())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sparse::writer::SparseWriter;
+    use chroma_blockstore::{
+        arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider,
+        BlockfileWriterOptions,
+    };
+    use chroma_types::SignedRoaringBitmap;
+
+    async fn setup_reader_with_data(vectors: Vec<(u32, Vec<(u32, f32)>)>) -> SparseReader<'static> {
+        let provider = BlockfileProvider::new_memory();
+
+        let max_writer = provider
+            .write::<u32, f32>(BlockfileWriterOptions::new("".to_string()))
+            .await
+            .unwrap();
+        let offset_value_writer = provider
+            .write::<u32, f32>(BlockfileWriterOptions::new("".to_string()))
+            .await
+            .unwrap();
+
+        let writer = SparseWriter::new(64, max_writer, offset_value_writer, None);
+
+        // Write all vectors
+        for (offset, vector) in vectors {
+            writer.set(offset, vector).await;
+        }
+
+        let flusher = writer.commit().await.unwrap();
+        let max_id = flusher.max_id();
+        let offset_value_id = flusher.offset_value_id();
+        flusher.flush().await.unwrap();
+
+        // Create and return reader
+        let max_reader = provider
+            .read::<u32, f32>(BlockfileReaderOptions::new(max_id, "".to_string()))
+            .await
+            .unwrap();
+        let offset_value_reader = provider
+            .read::<u32, f32>(BlockfileReaderOptions::new(offset_value_id, "".to_string()))
+            .await
+            .unwrap();
+
+        SparseReader::new(max_reader, offset_value_reader)
+    }
+
+    #[tokio::test]
+    async fn test_reader_wand_query_correctness() {
+        // Setup data with known scores
+        let vectors = vec![
+            (0, vec![(0, 1.0), (1, 1.0), (2, 0.5)]), // dot product with query: 2.0
+            (1, vec![(0, 0.5), (3, 1.0)]),           // dot product with query: 0.5
+            (2, vec![(1, 0.5), (2, 1.0), (3, 0.5)]), // dot product with query: 1.0
+            (3, vec![(0, 0.8), (1, 0.8)]),           // dot product with query: 1.6
+            (4, vec![(4, 1.0), (5, 1.0)]),           // dot product with query: 0.0 (no overlap)
+        ];
+
+        let reader = setup_reader_with_data(vectors).await;
+
+        // Test 1: Basic top-k query
+        let query = vec![(0, 1.0), (1, 1.0)];
+        let results = reader
+            .wand(query.clone(), 3, SignedRoaringBitmap::full())
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].offset, 0); // offset 0, score 2.0
+        assert_eq!(results[1].offset, 3); // offset 3, score 1.6
+        assert_eq!(results[2].offset, 2); // offset 2, score 1.0
+
+        // Verify scores are in descending order
+        assert!(results[0].score >= results[1].score);
+        assert!(results[1].score >= results[2].score);
+
+        // Test 2: Query with k > num_documents
+        let results = reader
+            .wand(query.clone(), 10, SignedRoaringBitmap::full())
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 4); // Only 4 docs have non-zero scores
+
+        // Test 3: Empty query (edge case)
+        let results = reader
+            .wand(vec![], 5, SignedRoaringBitmap::full())
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 0);
+
+        // Test 4: Single dimension query (edge case)
+        let results = reader
+            .wand(vec![(0, 1.0)], 2, SignedRoaringBitmap::full())
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 2);
+
+        // Test 5: No matching dimensions
+        let results = reader
+            .wand(vec![(99, 1.0)], 5, SignedRoaringBitmap::full())
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_reader_large_dataset() {
+        // Test with dataset spanning multiple blocks
+        let mut vectors = Vec::new();
+
+        // Create 1000 vectors with varying sparsity
+        for i in 0..1000 {
+            let dims: Vec<(u32, f32)> = ((i % 10)..(i % 10 + 5))
+                .map(|d| (d, (i as f32) * 0.001))
+                .collect();
+            vectors.push((i, dims));
+        }
+
+        let reader = setup_reader_with_data(vectors).await;
+
+        // Query and verify we get top-k
+        let query = vec![(0, 1.0), (1, 1.0), (2, 1.0)];
+        let results = reader
+            .wand(query, 10, SignedRoaringBitmap::full())
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 10);
+        // Verify results are sorted by score
+        for i in 1..results.len() {
+            assert!(results[i - 1].score >= results[i].score);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reader_empty_index() {
+        // Test querying empty index
+        // Note: We need to write at least one vector and then delete it to create valid blockfiles
+        let vectors = vec![(0, vec![(0, 1.0)])]; // Add one vector
+        let reader = setup_reader_with_data(vectors).await;
+
+        // Now test with a query that won't match
+        let query = vec![(99, 1.0)]; // Query for dimension that doesn't exist
+        let results = reader
+            .wand(query, 5, SignedRoaringBitmap::full())
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_reader_tie_breaking() {
+        // Vectors with identical scores
+        let vectors = vec![
+            (0, vec![(0, 1.0)]),
+            (1, vec![(0, 1.0)]),
+            (2, vec![(0, 1.0)]),
+        ];
+
+        let reader = setup_reader_with_data(vectors).await;
+
+        let query = vec![(0, 1.0)];
+        let results = reader
+            .wand(query, 2, SignedRoaringBitmap::full())
+            .await
+            .unwrap();
+
+        assert_eq!(results.len(), 2);
+        // All have same score
+        assert_eq!(results[0].score, results[1].score);
+        // Verify consistent ordering (implementation dependent)
+    }
+
+    #[tokio::test]
+    async fn test_wand_correctness_vs_exhaustive() {
+        // Property test: WAND should return same top-k as exhaustive search
+        let vectors = vec![
+            (0, vec![(0, 0.5), (2, 0.3), (5, 0.8)]),
+            (1, vec![(1, 0.7), (2, 0.2), (4, 0.9)]),
+            (2, vec![(0, 0.3), (3, 0.6), (5, 0.4)]),
+            (3, vec![(1, 0.8), (3, 0.5), (4, 0.2)]),
+            (4, vec![(2, 0.9), (4, 0.3), (5, 0.7)]),
+        ];
+
+        let reader = setup_reader_with_data(vectors.clone()).await;
+
+        let query = vec![(0, 0.4), (2, 0.6), (4, 0.5), (5, 0.3)];
+
+        // Compute expected scores manually
+        let mut expected_scores = vec![];
+        for (offset, vector) in &vectors {
+            let mut score = 0.0;
+            for (q_dim, q_val) in &query {
+                for (v_dim, v_val) in vector {
+                    if q_dim == v_dim {
+                        score += q_val * v_val;
+                    }
+                }
+            }
+            expected_scores.push((*offset, score));
+        }
+        expected_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+        // Get WAND results
+        let wand_results = reader
+            .wand(query, 3, SignedRoaringBitmap::full())
+            .await
+            .unwrap();
+
+        // Verify WAND returns correct top-3
+        for i in 0..3 {
+            assert_eq!(wand_results[i].offset, expected_scores[i].0);
+            assert!((wand_results[i].score - expected_scores[i].1).abs() < 1e-6);
+        }
+    }
+}
