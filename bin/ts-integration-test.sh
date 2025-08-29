@@ -33,7 +33,7 @@ wait_for_server() {
 # Start the Chroma server in the background
 echo "Building and starting Chroma server..."
 cargo build --bin chroma
-cargo run --bin chroma run &
+cargo run --bin chroma run ./bin/ts-integration-test-fe-config.yml &
 SERVER_PID=$!
 
 # Wait for the server to be ready
@@ -58,9 +58,9 @@ if ! git diff --quiet --exit-code src/api/; then
 fi
 echo "No changes detected in generated client."
 
-# Cleanup: kill the server process
-kill $SERVER_PID
-
 # Run tests
 echo "Running tests..."
-pnpm test
+EXTERNAL_CHROMA_SERVER=http://localhost:8000 pnpm test
+
+# Cleanup: kill the server process
+kill $SERVER_PID

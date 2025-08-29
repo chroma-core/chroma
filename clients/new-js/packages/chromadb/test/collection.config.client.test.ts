@@ -5,15 +5,12 @@ import {
   UpdateCollectionConfiguration,
 } from "../src";
 import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
-import {
-  EmbeddingFunction,
-  EmbeddingFunctionSpace,
-} from "../src/embedding-function";
-import { CollectionMetadata } from "../src/types";
+import { EmbeddingFunction, EmbeddingFunctionSpace } from "../src";
+import { CollectionMetadata } from "../src";
 
 class DefaultSpaceCustomEmbeddingFunction implements EmbeddingFunction {
-  private _dim: number;
-  private _modelName: string;
+  private readonly _dim: number;
+  private readonly _modelName: string;
 
   constructor(modelName: string, dim: number = 3) {
     this._dim = dim;
@@ -75,7 +72,8 @@ describe("collection operations", () => {
   // connects to the unauthenticated chroma instance started in
   // the global jest setup file.
   const client = new ChromaClient({
-    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    host: process.env.DEFAULT_CHROMA_INSTANCE_HOST,
+    port: +process.env.DEFAULT_CHROMA_INSTANCE_PORT!,
   });
 
   beforeEach(async () => {
@@ -279,7 +277,8 @@ describe("collection operations", () => {
 
 describe("default space functionality", () => {
   const client = new ChromaClient({
-    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    host: process.env.DEFAULT_CHROMA_INSTANCE_HOST,
+    port: +process.env.DEFAULT_CHROMA_INSTANCE_PORT!,
   });
 
   beforeEach(async () => {

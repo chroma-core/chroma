@@ -19,7 +19,8 @@ describe("query records", () => {
   // connects to the unauthenticated chroma instance started in
   // the global jest setup file.
   const client = new ChromaClient({
-    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    host: process.env.DEFAULT_CHROMA_INSTANCE_HOST,
+    port: +process.env.DEFAULT_CHROMA_INSTANCE_PORT!,
   });
 
   beforeEach(async () => {
@@ -265,7 +266,8 @@ describe("query records", () => {
 
 describe("id filtering", () => {
   const client = new ChromaClient({
-    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+    host: process.env.DEFAULT_CHROMA_INSTANCE_HOST,
+    port: +process.env.DEFAULT_CHROMA_INSTANCE_PORT!,
   });
 
   beforeEach(async () => {
