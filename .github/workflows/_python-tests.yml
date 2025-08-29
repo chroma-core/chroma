@@ -140,7 +140,6 @@ jobs:
           - "chromadb/test/property/test_collections_with_database_tenant_overwrite.py"
           - "chromadb/test/distributed/test_sanity.py"
           - "chromadb/test/distributed/test_log_backpressure.py"
-          - "chromadb/test/distributed/test_log_failover.py"
           - "chromadb/test/distributed/test_repair_collection_log_offset.py"
         include:
           - test-glob: "chromadb/test/property/test_add.py"

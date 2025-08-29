@@ -562,11 +562,6 @@ impl ServiceBasedFrontend {
             .collections_with_segments_cache
             .remove(&collection_id)
             .await;
-        if self.tenant_is_on_new_log_by_default(&tenant_id) {
-            if let Err(err) = self.log_client.seal_log(&tenant_id, collection_id).await {
-                tracing::error!("could not seal collection right away: {err}");
-            }
-        }
         Ok(collection)
     }
 
