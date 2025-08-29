@@ -4,7 +4,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use chroma_blockstore::provider::BlockfileProvider;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::Operator;
 use chroma_types::operator::{KnnQuery, Rank, RecordMeasure};
@@ -14,6 +13,10 @@ struct RankProvider<'me> {
     knn_results: &'me HashMap<KnnQuery, Vec<RecordMeasure>>,
 }
 
+// NOTE: `RankDomain` represents evaluated scores for records
+// - `support`: scores of specific records
+// - `default`: scores of records not specified in `support`
+//    where `None` suggests no other record is considered for evaluation
 struct RankDomain {
     support: HashMap<u32, f32>,
     default: Option<f32>,
@@ -168,7 +171,6 @@ impl RankProvider<'_> {
 
 #[derive(Clone, Debug)]
 pub struct RankInput {
-    pub blockfile_provider: BlockfileProvider,
     pub knn_results: HashMap<KnnQuery, Vec<RecordMeasure>>,
 }
 
@@ -246,10 +248,7 @@ mod tests {
             default: None,
             ordinal: false,
         };
-        let input = RankInput {
-            knn_results,
-            blockfile_provider: BlockfileProvider::new_memory(),
-        };
+        let input = RankInput { knn_results };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
         assert_eq!(output.ranks.len(), 3);
@@ -321,7 +320,6 @@ mod tests {
         ]);
         let input = RankInput {
             knn_results: knn_results.clone(),
-            blockfile_provider: BlockfileProvider::new_memory(),
         };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
@@ -340,10 +338,7 @@ mod tests {
             },
             Rank::Value(0.5),
         ]);
-        let input = RankInput {
-            knn_results,
-            blockfile_provider: BlockfileProvider::new_memory(),
-        };
+        let input = RankInput { knn_results };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
         assert_eq!(output.ranks[0].offset_id, 1);
@@ -386,7 +381,6 @@ mod tests {
         ]);
         let input = RankInput {
             knn_results: knn_results.clone(),
-            blockfile_provider: BlockfileProvider::new_memory(),
         };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
@@ -406,10 +400,7 @@ mod tests {
             },
             Rank::Value(0.5),
         ]);
-        let input = RankInput {
-            knn_results,
-            blockfile_provider: BlockfileProvider::new_memory(),
-        };
+        let input = RankInput { knn_results };
 
         let output = rank.run(&input).await.expect("Rank should succeed");
         assert_eq!(output.ranks[0].offset_id, 1);
