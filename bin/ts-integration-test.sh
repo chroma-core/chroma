@@ -46,7 +46,7 @@ pnpm build
 
 # Generate API
 echo "Generating JS client..."
-cd clients/new-js/packages/chromadb
+cd packages/chromadb
 pnpm genapi -- --use-localhost
 
 # run git diff and check if packages/chromadb/src/api/ has changed
