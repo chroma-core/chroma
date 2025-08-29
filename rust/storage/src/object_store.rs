@@ -153,6 +153,10 @@ impl ObjectStore {
         Err(StorageError::NotImplemented)
     }
 
+    pub async fn confirm_same(&self, _: &str, _: &ETag) -> Result<bool, StorageError> {
+        Err(StorageError::NotImplemented)
+    }
+
     pub async fn get_parallel(&self, key: &str) -> Result<Arc<Vec<u8>>, StorageError> {
         let meta = self.object_store.head(&Path::from(key)).await?;
         let file_size = meta.size;

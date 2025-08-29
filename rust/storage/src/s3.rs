@@ -212,6 +212,31 @@ impl S3Storage {
     }
 
     #[allow(clippy::type_complexity)]
+    pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
+        let res = self
+            .client
+            .head_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .await;
+        match res {
+            Ok(res) => Ok(res.e_tag() == Some(&e_tag.0)),
+            Err(e) => match e {
+                SdkError::ServiceError(err) => {
+                    let inner = err.into_err();
+                    Err(StorageError::Generic {
+                        source: Arc::new(inner),
+                    })
+                }
+                _ => Err(StorageError::Generic {
+                    source: Arc::new(e),
+                }),
+            },
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
     async fn get_stream_and_e_tag(
         &self,
         key: &str,

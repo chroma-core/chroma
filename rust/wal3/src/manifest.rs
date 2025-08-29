@@ -723,6 +723,17 @@ impl Manifest {
         Ok(())
     }
 
+    /// Validate the e_tag against the manifest on object storage.
+    pub async fn head(
+        _: &ThrottleOptions,
+        storage: &Storage,
+        prefix: &str,
+        e_tag: &ETag,
+    ) -> Result<bool, Error> {
+        let path = manifest_path(prefix);
+        Ok(storage.confirm_same(&path, e_tag).await.map_err(Arc::new)?)
+    }
+
     /// Load the latest manifest from object storage.
     pub async fn load(
         options: &ThrottleOptions,
