@@ -18,7 +18,7 @@ use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
-    plan::{Count, Get, Knn},
+    plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
     Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
     CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
@@ -34,21 +34,19 @@ use chroma_types::{
     HeartbeatError, HeartbeatResponse, Include, KnnIndex, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
     Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Segment, SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError,
-    UpdateCollectionRecordsError, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest,
-    UpdateTenantResponse, UpsertCollectionRecordsError, UpsertCollectionRecordsRequest,
-    UpsertCollectionRecordsResponse, VectorIndexConfiguration, Where,
+    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
+    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
+    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
+    Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::{collections::HashSet, time::Duration};
-use std::{
-    sync::atomic::{AtomicUsize, Ordering},
-    time::Instant,
-};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use super::utils::to_records;
 
@@ -62,6 +60,7 @@ struct Metrics {
     add_retries_counter: Counter<u64>,
     update_retries_counter: Counter<u64>,
     upsert_retries_counter: Counter<u64>,
+    search_retries_counter: Counter<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -101,6 +100,7 @@ impl ServiceBasedFrontend {
         let add_retries_counter = meter.u64_counter("add_retries").build();
         let update_retries_counter = meter.u64_counter("update_retries").build();
         let upsert_retries_counter = meter.u64_counter("upsert_retries").build();
+        let search_retries_counter = meter.u64_counter("search_retries").build();
         let metrics = Arc::new(Metrics {
             fork_retries_counter,
             delete_retries_counter,
@@ -110,6 +110,7 @@ impl ServiceBasedFrontend {
             add_retries_counter,
             update_retries_counter,
             upsert_retries_counter,
+            search_retries_counter,
         });
         // factor: 2.0,
         // min_delay_ms: 100,
@@ -1573,6 +1574,140 @@ impl ServiceBasedFrontend {
             .await;
         self.metrics
             .query_retries_counter
+            .add(retries.load(Ordering::Relaxed) as u64, &[]);
+        res
+    }
+
+    pub async fn retryable_search(
+        &mut self,
+        request: SearchRequest,
+    ) -> Result<SearchResponse, QueryError> {
+        // TODO: The dispatch logic is mostly the same for count/get/query/search, we should consider unifying them
+        // Get collection and segments once for all queries
+        let collection_and_segments = self
+            .collections_with_segments_provider
+            .get_collection_with_segments(request.collection_id)
+            .await
+            .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
+
+        let latest_collection_logical_size_bytes = collection_and_segments
+            .collection
+            .size_bytes_post_compaction;
+
+        // Aggregate metrics across all search payloads
+        let mut total_metadata_predicate_count = 0u64;
+        let mut total_fts_query_length = 0u64;
+        let mut total_search_embedding_count = 0u64;
+
+        for payload in &request.searches {
+            // Count metadata predicates and FTS query length from where clause
+            if let Some(ref where_clause) = payload.filter.where_clause {
+                total_metadata_predicate_count += where_clause.metadata_predicate_count();
+                total_fts_query_length += where_clause.fts_query_length();
+            }
+
+            // Count embeddings from the score expression
+            // Each rank in the score expression contains one embedding
+            let knn_queries = payload.rank.knn_queries();
+            total_search_embedding_count += knn_queries.len() as u64;
+        }
+
+        // Create a single Search plan with one scan and the payloads from the request
+        let search_plan = Search {
+            scan: Scan {
+                collection_and_segments,
+            },
+            payloads: request.searches,
+        };
+
+        // Execute the single search plan using the executor
+        let result = self.executor.search(search_plan).await?;
+
+        // Calculate return bytes (approximate size of the response)
+        let return_bytes = result.size_bytes();
+
+        // Attach metadata to the metering context
+        chroma_metering::with_current(|context| {
+            context.fts_query_length(total_fts_query_length);
+            context.metadata_predicate_count(total_metadata_predicate_count);
+            context.query_embedding_count(total_search_embedding_count);
+            context.pulled_log_size_bytes(result.pulled_log_bytes);
+            context.latest_collection_logical_size_bytes(latest_collection_logical_size_bytes);
+            context.return_bytes(return_bytes);
+            context.finish_request(Instant::now());
+        });
+
+        // TODO: Submit metering event after the response is sent
+        match chroma_metering::close::<CollectionReadContext>() {
+            Ok(collection_read_context) => {
+                MeterEvent::CollectionRead(collection_read_context)
+                    .submit()
+                    .await;
+            }
+            Err(_) => match chroma_metering::close::<ExternalCollectionReadContext>() {
+                Ok(external_collection_read_context) => {
+                    MeterEvent::ExternalCollectionRead(external_collection_read_context)
+                        .submit()
+                        .await;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to submit metering event to receiver: {:?}", e)
+                }
+            },
+        }
+
+        Ok(SearchResponse {
+            results: result
+                .results
+                .into_iter()
+                .map(|result| result.records)
+                .collect(),
+        })
+    }
+
+    pub async fn search(&mut self, request: SearchRequest) -> Result<SearchResponse, QueryError> {
+        // TODO: The retry logic is mostly the same for count/get/query/search, we should consider unifying them
+        let retries = Arc::new(AtomicUsize::new(0));
+        let search_to_retry = || {
+            let mut self_clone = self.clone();
+            let request_clone = request.clone();
+            let cache_clone = self
+                .collections_with_segments_provider
+                .collections_with_segments_cache
+                .clone();
+            async move {
+                let res = self_clone.retryable_search(request_clone).await;
+                match res {
+                    Ok(res) => Ok(res),
+                    Err(e) => {
+                        if e.code() == ErrorCodes::NotFound {
+                            tracing::info!(
+                                "Invalidating cache for collection {}",
+                                request.collection_id
+                            );
+                            cache_clone.remove(&request.collection_id).await;
+                        }
+                        Err(e)
+                    }
+                }
+            }
+        };
+        let res = search_to_retry
+            .retry(self.collections_with_segments_provider.get_retry_backoff())
+            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+            .notify(|_, _| {
+                let retried = retries.fetch_add(1, Ordering::Relaxed);
+                if retried > 0 {
+                    tracing::info!(
+                        "Retrying search() request for collection {}",
+                        request.collection_id
+                    );
+                }
+            })
+            .await;
+        self.metrics
+            .search_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
         res
     }

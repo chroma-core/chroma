@@ -17,6 +17,7 @@ use chroma_types::{
         query_executor_server::{QueryExecutor, QueryExecutorServer},
     },
     operator::{GetResult, KnnBatch, KnnBatchResult, KnnProjection, Scan},
+    plan::Search,
     CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
@@ -437,6 +438,52 @@ impl QueryExecutor for WorkerServer {
         knn: Request<chroma_proto::KnnPlan>,
     ) -> Result<Response<chroma_proto::KnnBatchResult>, Status> {
         self.orchestrate_knn(knn).await
+    }
+
+    async fn search(
+        &self,
+        request: Request<chroma_proto::SearchPlan>,
+    ) -> Result<Response<chroma_proto::SearchResult>, Status> {
+        // Convert proto to Search for cleaner debug output
+        let proto_plan = request.into_inner();
+        let search_plan = match Search::try_from(proto_plan.clone()) {
+            Ok(plan) => plan,
+            Err(e) => {
+                return Err(Status::invalid_argument(format!(
+                    "Failed to convert proto to Search: {}",
+                    e
+                )));
+            }
+        };
+
+        let num_payloads = search_plan.payloads.len();
+        tracing::info!(
+            "Received search request with {} payloads:\n{:#?}",
+            num_payloads,
+            search_plan
+        );
+
+        // Return one debug result per payload (temporary implementation)
+        let results = search_plan
+            .payloads
+            .iter()
+            .map(|_| chroma_proto::SearchPayloadResult {
+                records: vec![chroma_proto::SearchRecord {
+                    id: "debug-id".to_string(),
+                    document: Some("debug document".to_string()),
+                    embedding: None, // Not including embedding in debug response
+                    metadata: Some(chroma_proto::UpdateMetadata {
+                        metadata: std::collections::HashMap::new(),
+                    }),
+                    score: Some(1.0),
+                }],
+            })
+            .collect();
+
+        Ok(Response::new(chroma_proto::SearchResult {
+            results,
+            pulled_log_bytes: 0,
+        }))
     }
 }
 

@@ -89,9 +89,88 @@ message KNNBatchResult {
     uint64 pulled_log_bytes = 2;
 }
 
+message QueryVector {
+    oneof vector {
+        Vector dense = 1;
+        SparseVector sparse = 2;
+    }
+}
+
+message Rank {
+    message Division {
+        Rank left = 1;
+        Rank right = 2;
+    }
+
+    message Knn {
+        QueryVector embedding = 1;
+        string key = 2;
+        uint32 limit = 3;
+        optional float default = 4;
+        bool ordinal = 5;
+    }
+    
+    message Subtraction {
+        Rank left = 1;
+        Rank right = 2;
+    }
+
+    message RankList {
+        repeated Rank ranks = 1;
+    }
+
+    oneof rank {
+        Rank absolute = 1;
+        Division division = 2;
+        Rank exponentiation = 3;
+        Knn knn = 4;
+        Rank logarithm = 5;
+        RankList maximum = 6;
+        RankList minimum = 7;
+        RankList multiplication = 8;
+        Subtraction subtraction = 9;
+        RankList summation = 10;
+        float value = 11;
+    }
+}
+
+message SelectOperator {
+    repeated string fields = 1;
+}
+
+message SearchPayload {
+    FilterOperator filter = 1;
+    Rank rank = 2;
+    LimitOperator limit = 3;
+    SelectOperator select = 4;
+}
+
+message SearchPlan {
+    ScanOperator scan = 1;
+    repeated SearchPayload payloads = 2;
+}
+
+message SearchRecord {
+    string id = 1;
+    optional string document = 2;
+    optional Vector embedding = 3;
+    optional UpdateMetadata metadata = 4;
+    optional float score = 5;
+}
+
+message SearchPayloadResult {
+    repeated SearchRecord records = 1;
+}
+
+message SearchResult {
+    repeated SearchPayloadResult results = 1;
+    uint64 pulled_log_bytes = 2;
+}
+
 service QueryExecutor {
     rpc Count(CountPlan) returns (CountResult) {}
     rpc Get(GetPlan) returns (GetResult) {}
     rpc KNN(KNNPlan) returns (KNNBatchResult) {}
+    rpc Search(SearchPlan) returns (SearchResult) {}
 }
 
