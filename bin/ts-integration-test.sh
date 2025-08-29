@@ -58,12 +58,9 @@ if ! git diff --quiet --exit-code src/api/; then
 fi
 echo "No changes detected in generated client."
 
-# Run tests
-export DEFAULT_CHROMA_INSTANCE_URL="http://localhost:8000"
-export DEFAULT_CHROMA_INSTANCE_HOST="127.0.0.1"
-
-echo "Running tests..."
-pnpm -r test
-
 # Cleanup: kill the server process
 kill $SERVER_PID
+
+# Run tests
+echo "Running tests..."
+pnpm test
