@@ -18,7 +18,9 @@ export namespace Api {
     embeddings: Api.EmbeddingsPayload;
     ids: string[];
     metadatas?:
-      | ({ [name: string]: boolean | number | number | string } | null)[]
+      | ({
+          [name: string]: boolean | number | number | string | Api.SparseVector;
+        } | null)[]
       | null;
     uris?: (string | null)[] | null;
   }
@@ -54,7 +56,9 @@ export namespace Api {
      * @memberof Collection
      */
     log_position: number;
-    metadata?: { [name: string]: boolean | number | number | string } | null;
+    metadata?: {
+      [name: string]: boolean | number | number | string | Api.SparseVector;
+    } | null;
     name: string;
     tenant: string;
     /**
@@ -73,7 +77,9 @@ export namespace Api {
   export interface CreateCollectionPayload {
     configuration?: Api.CollectionConfiguration | null;
     get_or_create?: boolean;
-    metadata?: { [name: string]: boolean | number | number | string } | null;
+    metadata?: {
+      [name: string]: boolean | number | number | string | Api.SparseVector;
+    } | null;
     name: string;
   }
 
@@ -180,7 +186,9 @@ export namespace Api {
     ids: string[];
     include: Api.Include[];
     metadatas?:
-      | ({ [name: string]: boolean | number | number | string } | null)[]
+      | ({
+          [name: string]: boolean | number | number | string | Api.SparseVector;
+        } | null)[]
       | null;
     uris?: (string | null)[] | null;
   }
@@ -271,7 +279,9 @@ export namespace Api {
     ids: string[][];
     include: Api.Include[];
     metadatas?:
-      | ({ [name: string]: boolean | number | number | string } | null)[][]
+      | ({
+          [name: string]: boolean | number | number | string | Api.SparseVector;
+        } | null)[][]
       | null;
     uris?: (string | null)[][] | null;
   }
@@ -333,6 +343,24 @@ export namespace Api {
     write_nprobe?: number | null;
   }
 
+  /**
+   * <p>Represents a sparse vector using parallel arrays for indices and values.</p>
+   */
+  export interface SparseVector {
+    /**
+     * @description <p>Dimension indices</p>
+     * @type {number[]}
+     * @memberof SparseVector
+     */
+    indices: number[];
+    /**
+     * @description <p>Values corresponding to each index</p>
+     * @type {number[]}
+     * @memberof SparseVector
+     */
+    values: number[];
+  }
+
   export interface UpdateCollectionConfiguration {
     embedding_function?: Api.EmbeddingFunctionConfiguration | null;
     hnsw?: Api.UpdateHnswConfiguration | null;
@@ -342,7 +370,7 @@ export namespace Api {
   export interface UpdateCollectionPayload {
     new_configuration?: Api.UpdateCollectionConfiguration | null;
     new_metadata?: {
-      [name: string]: boolean | number | number | string;
+      [name: string]: boolean | number | number | string | Api.SparseVector;
     } | null;
     new_name?: string | null;
   }
@@ -352,7 +380,9 @@ export namespace Api {
     embeddings?: Api.UpdateEmbeddingsPayload | null;
     ids: string[];
     metadatas?:
-      | ({ [name: string]: boolean | number | number | string } | null)[]
+      | ({
+          [name: string]: boolean | number | number | string | Api.SparseVector;
+        } | null)[]
       | null;
     uris?: (string | null)[] | null;
   }
@@ -427,7 +457,9 @@ export namespace Api {
     embeddings: Api.EmbeddingsPayload;
     ids: string[];
     metadatas?:
-      | ({ [name: string]: boolean | number | number | string } | null)[]
+      | ({
+          [name: string]: boolean | number | number | string | Api.SparseVector;
+        } | null)[]
       | null;
     uris?: (string | null)[] | null;
   }
@@ -453,7 +485,9 @@ export namespace Api {
      * @memberof Vec2
      */
     log_position: number;
-    metadata?: { [name: string]: boolean | number | number | string } | null;
+    metadata?: {
+      [name: string]: boolean | number | number | string | Api.SparseVector;
+    } | null;
     name: string;
     tenant: string;
     /**

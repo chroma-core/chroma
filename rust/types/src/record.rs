@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, mem::size_of_val};
 
 use super::{
     ConversionError, Operation, OperationConversionError, ScalarEncoding,
@@ -42,6 +42,9 @@ impl OperationRecord {
                             UpdateMetadataValue::Int(i) => size_of_val(i),
                             UpdateMetadataValue::Float(f) => size_of_val(f),
                             UpdateMetadataValue::Str(s) => s.len(),
+                            UpdateMetadataValue::SparseVector(v) => {
+                                size_of_val(&v.indices[..]) + size_of_val(&v.values[..])
+                            }
                             UpdateMetadataValue::None => 0,
                         }
                 })
