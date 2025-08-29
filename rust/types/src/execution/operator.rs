@@ -1432,15 +1432,15 @@ mod tests {
     #[test]
     fn test_limit_json_serialization() {
         let limit = Limit {
-            skip: 10,
-            fetch: Some(20),
+            offset: 10,
+            limit: Some(20),
         };
 
         let json = serde_json::to_string(&limit).unwrap();
         let deserialized: Limit = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(deserialized.skip, limit.skip);
-        assert_eq!(deserialized.fetch, limit.fetch);
+        assert_eq!(deserialized.offset, limit.offset);
+        assert_eq!(deserialized.limit, limit.limit);
     }
 
     #[test]
@@ -1508,5 +1508,276 @@ mod tests {
         assert!(deserialized
             .fields
             .contains(&SelectField::MetadataField("author".to_string())));
+    }
+
+    #[test]
+    fn test_merge_basic_integers() {
+        use std::cmp::Reverse;
+
+        let merge = Merge { k: 5 };
+
+        // Input: sorted vectors of Reverse(u32) - ascending order of inner values
+        let input = vec![
+            vec![Reverse(1), Reverse(4), Reverse(7), Reverse(10)],
+            vec![Reverse(2), Reverse(5), Reverse(8)],
+            vec![Reverse(3), Reverse(6), Reverse(9), Reverse(11), Reverse(12)],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-5 smallest values (largest Reverse values)
+        assert_eq!(result.len(), 5);
+        assert_eq!(
+            result,
+            vec![
+                Reverse(1),
+                Reverse(2),
+                Reverse(3),
+                Reverse(4),
+                Reverse(5)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_with_duplicates() {
+        use std::cmp::Reverse;
+
+        let merge = Merge { k: 10 };
+
+        // Input with duplicates both within and across vectors
+        let input = vec![
+            vec![Reverse(1), Reverse(3), Reverse(3), Reverse(5), Reverse(7)],
+            vec![Reverse(2), Reverse(3), Reverse(6), Reverse(8)],
+            vec![Reverse(1), Reverse(4), Reverse(5), Reverse(9)],
+        ];
+
+        let result = merge.merge(input);
+
+        // Duplicates should be removed
+        assert_eq!(
+            result,
+            vec![
+                Reverse(1),
+                Reverse(2),
+                Reverse(3),
+                Reverse(4),
+                Reverse(5),
+                Reverse(6),
+                Reverse(7),
+                Reverse(8),
+                Reverse(9)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_empty_vectors() {
+        use std::cmp::Reverse;
+
+        let merge = Merge { k: 5 };
+
+        // All empty
+        let input: Vec<Vec<Reverse<u32>>> = vec![vec![], vec![], vec![]];
+        let result = merge.merge(input);
+        assert_eq!(result.len(), 0);
+
+        // Some empty, some with data
+        let input = vec![
+            vec![],
+            vec![Reverse(1), Reverse(3), Reverse(5)],
+            vec![],
+            vec![Reverse(2), Reverse(4)],
+        ];
+        let result = merge.merge(input);
+        assert_eq!(
+            result,
+            vec![
+                Reverse(1),
+                Reverse(2),
+                Reverse(3),
+                Reverse(4),
+                Reverse(5)
+            ]
+        );
+
+        // Single non-empty vector
+        let input = vec![
+            vec![],
+            vec![Reverse(1), Reverse(2), Reverse(3)],
+            vec![],
+        ];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![Reverse(1), Reverse(2), Reverse(3)]);
+    }
+
+    #[test]
+    fn test_merge_k_boundary_conditions() {
+        use std::cmp::Reverse;
+
+        // k = 0
+        let merge = Merge { k: 0 };
+        let input = vec![
+            vec![Reverse(1), Reverse(3)],
+            vec![Reverse(2), Reverse(4)],
+        ];
+        let result = merge.merge(input);
+        assert_eq!(result.len(), 0);
+
+        // k = 1
+        let merge = Merge { k: 1 };
+        let input = vec![
+            vec![Reverse(5), Reverse(10)],
+            vec![Reverse(3), Reverse(8)],
+            vec![Reverse(1), Reverse(7)],
+        ];
+        let result = merge.merge(input);
+        assert_eq!(result, vec![Reverse(1)]);
+
+        // k larger than total unique elements
+        let merge = Merge { k: 100 };
+        let input = vec![
+            vec![Reverse(1), Reverse(3)],
+            vec![Reverse(2), Reverse(4)],
+        ];
+        let result = merge.merge(input);
+        assert_eq!(
+            result,
+            vec![Reverse(1), Reverse(2), Reverse(3), Reverse(4)]
+        );
+    }
+
+    #[test]
+    fn test_merge_with_strings() {
+        let merge = Merge { k: 4 };
+
+        // Strings must be sorted in descending order (largest first) for the max heap merge
+        let input = vec![
+            vec!["zebra".to_string(), "dog".to_string(), "apple".to_string()],
+            vec!["elephant".to_string(), "banana".to_string()],
+            vec!["fish".to_string(), "cat".to_string()],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should get top-4 lexicographically largest strings
+        assert_eq!(
+            result,
+            vec![
+                "zebra".to_string(),
+                "fish".to_string(),
+                "elephant".to_string(),
+                "dog".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_with_custom_struct() {
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        struct Score {
+            value: i32,
+            id: String,
+        }
+
+        let merge = Merge { k: 3 };
+
+        // Custom structs sorted by value (descending), then by id
+        let input = vec![
+            vec![
+                Score { value: 100, id: "a".to_string() },
+                Score { value: 80, id: "b".to_string() },
+                Score { value: 60, id: "c".to_string() },
+            ],
+            vec![
+                Score { value: 90, id: "d".to_string() },
+                Score { value: 70, id: "e".to_string() },
+            ],
+            vec![
+                Score { value: 95, id: "f".to_string() },
+                Score { value: 85, id: "g".to_string() },
+            ],
+        ];
+
+        let result = merge.merge(input);
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0], Score { value: 100, id: "a".to_string() });
+        assert_eq!(result[1], Score { value: 95, id: "f".to_string() });
+        assert_eq!(result[2], Score { value: 90, id: "d".to_string() });
+    }
+
+    #[test]
+    fn test_merge_preserves_order() {
+        use std::cmp::Reverse;
+
+        let merge = Merge { k: 10 };
+
+        // For Reverse, smaller inner values are "larger" in ordering
+        // So vectors should be sorted with smallest inner values first
+        let input = vec![
+            vec![Reverse(2), Reverse(6), Reverse(10), Reverse(14)],
+            vec![Reverse(4), Reverse(8), Reverse(12), Reverse(16)],
+            vec![Reverse(1), Reverse(3), Reverse(5), Reverse(7), Reverse(9)],
+        ];
+
+        let result = merge.merge(input);
+
+        // Verify output maintains order - should be sorted by Reverse ordering
+        // which means ascending inner values
+        for i in 1..result.len() {
+            assert!(result[i - 1] >= result[i], "Output should be in descending Reverse order");
+            assert!(result[i - 1].0 <= result[i].0, "Inner values should be in ascending order");
+        }
+
+        // Check we got the right elements
+        assert_eq!(
+            result,
+            vec![
+                Reverse(1),
+                Reverse(2),
+                Reverse(3),
+                Reverse(4),
+                Reverse(5),
+                Reverse(6),
+                Reverse(7),
+                Reverse(8),
+                Reverse(9),
+                Reverse(10)
+            ]
+        );
+    }
+
+    #[test]
+    fn test_merge_single_vector() {
+        use std::cmp::Reverse;
+
+        let merge = Merge { k: 3 };
+
+        // Single vector input
+        let input = vec![vec![Reverse(1), Reverse(2), Reverse(3), Reverse(4), Reverse(5)]];
+
+        let result = merge.merge(input);
+
+        assert_eq!(result, vec![Reverse(1), Reverse(2), Reverse(3)]);
+    }
+
+    #[test]
+    fn test_merge_all_same_values() {
+        use std::cmp::Reverse;
+
+        let merge = Merge { k: 5 };
+
+        // All vectors contain the same value
+        let input = vec![
+            vec![Reverse(42), Reverse(42), Reverse(42)],
+            vec![Reverse(42), Reverse(42)],
+            vec![Reverse(42), Reverse(42), Reverse(42), Reverse(42)],
+        ];
+
+        let result = merge.merge(input);
+
+        // Should deduplicate to single value
+        assert_eq!(result, vec![Reverse(42)]);
     }
 }
