@@ -7,7 +7,8 @@ from chromadb.execution.expression.operator import (
     SearchFilter,
     
     # Field proxy for building Where conditions
-    F,
+    Key,
+    K,
     Doc,
     
     # Where expressions
@@ -59,7 +60,8 @@ __all__ = [
     "SearchFilter",
     
     # Field proxy
-    "F",
+    "Key",
+    "K",
     "Doc",
     
     # Where expressions

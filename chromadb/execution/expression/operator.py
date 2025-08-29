@@ -36,8 +36,8 @@ class Where:
     
     Examples:
         # Simple conditions
-        where1 = F("status") == "active"
-        where2 = F("score") > 0.5
+        where1 = Key("status") == "active"
+        where2 = Key("score") > 0.5
         
         # Combining with AND
         combined_and = where1 & where2
@@ -46,7 +46,7 @@ class Where:
         combined_or = where1 | where2
         
         # Complex expressions
-        complex_where = (F("status") == "active") & ((F("score") > 0.5) | (F("priority") == "high"))
+        complex_where = (Key("status") == "active") & ((Key("score") > 0.5) | (Key("priority") == "high"))
     """
     
     def to_dict(self) -> Dict[str, Any]:
@@ -221,28 +221,26 @@ class NotRegex(Where):
 
 
 # Field proxy for building Where conditions
-class F:
+class Key:
     """Field proxy for building Where conditions with operator overloading.
     
     Examples:
         # Equality
-        F("status") == "active"
+        Key("status") == "active"
         
         # Comparison
-        F("score") > 0.5
-        F("age") >= 18
+        Key("score") > 0.5
+        Key("age") >= 18
         
         # Membership
-        F("category").is_in(["science", "tech"])
-        F("category") @ ["science", "tech"]  # shorthand
+        Key("category").is_in(["science", "tech"])
         
         # Pattern matching
-        F("email").regex(r".*@example\.com")
-        F("email") % r".*@example\.com"  # shorthand
+        Key("email").regex(r".*@example\.com")
         
         # Combining conditions
-        (F("status") == "active") & (F("score") > 0.5)
-        (F("category") == "science") | (F("category") == "tech")
+        (Key("status") == "active") & (Key("score") > 0.5)
+        (Key("category") == "science") | (Key("category") == "tech")
     """
     
     def __init__(self, name: str):
@@ -250,66 +248,57 @@ class F:
     
     # Comparison operators
     def __eq__(self, value: Any) -> Eq: # type: ignore[override]
-        """Equality: F('field') == value"""
+        """Equality: Key('field') == value"""
         return Eq(self.name, value)
     
     def __ne__(self, value: Any) -> Ne: # type: ignore[override]
-        """Not equal: F('field') != value"""
+        """Not equal: Key('field') != value"""
         return Ne(self.name, value)
     
     def __gt__(self, value: Any) -> Gt:
-        """Greater than: F('field') > value"""
+        """Greater than: Key('field') > value"""
         return Gt(self.name, value)
     
     def __ge__(self, value: Any) -> Gte:
-        """Greater than or equal: F('field') >= value"""
+        """Greater than or equal: Key('field') >= value"""
         return Gte(self.name, value)
     
     def __lt__(self, value: Any) -> Lt:
-        """Less than: F('field') < value"""
+        """Less than: Key('field') < value"""
         return Lt(self.name, value)
     
     def __le__(self, value: Any) -> Lte:
-        """Less than or equal: F('field') <= value"""
+        """Less than or equal: Key('field') <= value"""
         return Lte(self.name, value)
     
     # Builder methods for operations without operators
     def is_in(self, values: List[Any]) -> In:
-        """Check if field value is in list: F('field').is_in(['a', 'b'])"""
+        """Check if field value is in list: Key('field').is_in(['a', 'b'])"""
         return In(self.name, values)
     
     def not_in(self, values: List[Any]) -> Nin:
-        """Check if field value is not in list: F('field').not_in(['a', 'b'])"""
+        """Check if field value is not in list: Key('field').not_in(['a', 'b'])"""
         return Nin(self.name, values)
     
     def regex(self, pattern: str) -> Regex:
-        """Match field against regex: F('field').regex('^pattern')"""
+        """Match field against regex: Key('field').regex('^pattern')"""
         return Regex(self.name, pattern)
     
     def not_regex(self, pattern: str) -> NotRegex:
-        """Field should not match regex: F('field').not_regex('^pattern')"""
+        """Field should not match regex: Key('field').not_regex('^pattern')"""
         return NotRegex(self.name, pattern)
     
     def contains(self, content: str) -> Contains:
-        """Check if field contains text: F('field').contains('text')"""
+        """Check if field contains text: Key('field').contains('text')"""
         return Contains(self.name, content)
     
     def not_contains(self, content: str) -> NotContains:
-        """Check if field doesn't contain text: F('field').not_contains('text')"""
+        """Check if field doesn't contain text: Key('field').not_contains('text')"""
         return NotContains(self.name, content)
-    
-    # Shorthand operators
-    def __mod__(self, pattern: str) -> Regex:
-        """Modulo operator as regex shorthand: F('field') % '^pattern'"""
-        return Regex(self.name, pattern)
-    
-    def __xor__(self, pattern: str) -> NotRegex:
-        """XOR operator as not_regex shorthand: F('field') ^ '^pattern'"""
-        return NotRegex(self.name, pattern)
-    
-    def __matmul__(self, values: List[Any]) -> In:
-        """@ operator as 'in' shorthand: F('field') @ ['a', 'b']"""
-        return In(self.name, values)
+
+
+# Alias for Key
+K = Key
 
 
 @dataclass
@@ -332,12 +321,12 @@ class SearchFilter:
         SearchFilter(query_ids=["id1", "id2"])
         
         # Filter by metadata
-        SearchFilter(where_clause=F("status") == "active")
+        SearchFilter(where_clause=Key("status") == "active")
         
         # Combined filtering
         SearchFilter(
             query_ids=["id1", "id2"],
-            where_clause=(F("status") == "active") & (F("score") > 0.5)
+            where_clause=(Key("status") == "active") & (Key("score") > 0.5)
         )
     """
     query_ids: Optional[IDs] = None
@@ -653,7 +642,7 @@ class SelectField(Enum):
 
 # Static variable for document field
 # Usage: Doc.contains("search text") for document content filtering
-Doc = F(SelectField.DOCUMENT.value)
+Doc = Key(SelectField.DOCUMENT.value)
 
 
 @dataclass

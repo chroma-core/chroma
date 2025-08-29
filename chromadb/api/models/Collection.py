@@ -318,14 +318,14 @@ class Collection(CollectionCommon["ServerAPI"]):
         Examples:
             # Using builder pattern
             from chromadb.execution.expression import (
-                Search, F, Knn, Val, SelectField
+                Search, Key, K, Knn, Val, SelectField
             )
             
             search = (Search()
-                .where((F("category") == "science") & (F("score") > 0.5))
-                .rank_by(Knn(embedding=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
-                .limit_by(10, offset=0)
-                .select_fields(SelectField.DOCUMENT, SelectField.SCORE, "title"))
+                .where((Key("category") == "science") & (Key("score") > 0.5))
+                .rank(Knn(embedding=[0.1, 0.2, 0.3]) * 0.8 + Val(0.5) * 0.2)
+                .limit(10, offset=0)
+                .select(SelectField.DOCUMENT, SelectField.SCORE, "title"))
             
             # Direct construction
             from chromadb.execution.expression import (
